@@ -46,14 +46,14 @@ pub const Compiler = struct {
     vm: *cy.VM,
 
     // For BC codegen.
-    debug_tables: std.ArrayListUnmanaged(cy.DebugTableEntry),
+    debug_tables: std.ArrayList(cy.DebugTableEntry),
 
     jitBuf: jitgen.CodeBuffer,
 
     // Compile-time heap.
     heap: cy.Heap,
 
-    reports: std.ArrayListUnmanaged(Report),
+    reports: std.ArrayList(Report),
     
     /// Sema model resulting from the sema pass.
     sema: sema.Sema,
@@ -67,7 +67,7 @@ pub const Compiler = struct {
     dl_resolver: C.DlResolverFn,
 
     /// Compilation units for iteration.
-    chunks: std.ArrayListUnmanaged(*cy.Chunk),
+    chunks: std.ArrayList(*cy.Chunk),
 
     /// Unowned reference to the builtins chunk.
     builtins_chunk: *cy.Chunk,
@@ -106,8 +106,8 @@ pub const Compiler = struct {
     chunk_start: u32,
     type_start: u32,
 
-    c_includes: std.ArrayListUnmanaged([]const u8),
-    c_flags: std.ArrayListUnmanaged([]const u8),
+    c_includes: std.ArrayList([]const u8),
+    c_flags: std.ArrayList([]const u8),
 
     build_flags: std.StringHashMapUnmanaged(void),
     build_options: std.StringHashMapUnmanaged([]const u8),
@@ -128,9 +128,9 @@ pub const Compiler = struct {
             .dl_resolver = default_dl_resolver,
             .chunks = .empty,
             .builtins_chunk = undefined,
-            .chunk_map = .{},
-            .genSymMap = .{},
-            .gen_vtables = .{},
+            .chunk_map = .empty,
+            .genSymMap = .empty,
+            .gen_vtables = .empty,
             .config = C.defaultCompileConfig(), 
             .hasApiError = false,
             .apiError = "",
@@ -141,13 +141,13 @@ pub const Compiler = struct {
             .cont = false,
             .chunk_start = 0,
             .type_start = 0,
-            .find_type_cache = .{},
+            .find_type_cache = .empty,
             .c_includes = .empty,
             .c_flags = .empty,
             .compiling = false,
             .debug_tables = .empty,
-            .build_flags = .{},
-            .build_options = .{},
+            .build_flags = .empty,
+            .build_options = .empty,
         };
         self.heap.sema = &self.sema;
 
@@ -1110,8 +1110,8 @@ pub fn ensureModule2(self: *Compiler, r_uri: []const u8, src: ?[]const u8) !*cy.
     const chunk = try self.alloc.create(cy.Chunk);
     try chunk.init(self, chunk_id, r_uri_dupe, src);
 
-    var name = std.fs.path.basename(r_uri_dupe);
-    if (std.mem.lastIndexOfScalar(u8, name, '.')) |idx| {
+    var name = std.Io.Dir.path.basename(r_uri_dupe);
+    if (std.mem.findScalarLast(u8, name, '.')) |idx| {
         name = name[0..idx];
     }
 
@@ -1380,14 +1380,14 @@ const Load = struct {
 };
 
 // Same as std.mem.replace except writes to an ArrayList. Final result is also known to be at most the size of the original.
-pub fn replaceIntoShorterList(comptime T: type, input: []const T, needle: []const T, replacement: []const T, output: *std.ArrayListUnmanaged(T), alloc: std.mem.Allocator) !usize {
+pub fn replaceIntoShorterList(comptime T: type, input: []const T, needle: []const T, replacement: []const T, output: *std.ArrayList(T), alloc: std.mem.Allocator) !usize {
     // Known upper bound.
     try output.resize(alloc, input.len);
     var i: usize = 0;
     var slide: usize = 0;
     var replacements: usize = 0;
     while (slide < input.len) {
-        if (std.mem.indexOf(T, input[slide..], needle) == @as(usize, 0)) {
+        if (std.mem.find(T, input[slide..], needle) == @as(usize, 0)) {
             std.mem.copy(u8, output.items[i..i+replacement.len], replacement);
             i += replacement.len;
             slide += needle.len;

@@ -2,7 +2,7 @@ const std = @import("std");
 const DynLib = @import("dynlib.zig").DynLib;
 const builtin = @import("builtin");
 const build_config = @import("build_config");
-const aarch64 = builtin.cpu.arch == .aarch64;
+const aarch64 = builtin.target.cpu.arch == .aarch64;
 const stdx = @import("stdx");
 const fatal = cy.fatal;
 const zt = stdx.testing;
@@ -151,17 +151,17 @@ pub const VM = struct {
             .next_thread_id = 1,
             .main_thread = undefined,
             .funcSyms = .empty,
-            .host_funcs = .{},
+            .host_funcs = .empty,
             .types = .empty,
             .funcSymDetails = .empty,
-            .inlineSaves = .{},
+            .inlineSaves = .empty,
             .u8Buf = .empty,
             .debug_tables = &.{},
             // Initialize to NullId to indicate vm is still in initing.
             .deinited = false,
             .config = undefined,
             .userData = null,
-            .data = .{},
+            .data = .empty,
             .print = default_print,
             .print_err = default_print_err,
             .log_fn = default_log,
@@ -173,7 +173,7 @@ pub const VM = struct {
             .task_nodes = .empty,
             .vtables = .empty,
             .env_local_saves = .empty,
-            .env_local_saves_map = .{},
+            .env_local_saves_map = .empty,
             .dyn_libs = .empty,
             .tcc_state = null,
         };
@@ -290,7 +290,7 @@ pub const VM = struct {
 
         var iter = self.inlineSaves.valueIterator();
         while (iter.next()) |it| {
-            switch (@as(cy.bindings.QuickenType, @enumFromInt(it.*[0]))) {
+            switch (@as(cy.bindings.QuickenType, @fromBackingInt(@intCast(it.*[0])))) {
                 // .binOp => {
                 //     self.alloc.free(it.*[0..vmc.CALL_OBJ_SYM_INST_LEN + 1]);
                 // },
@@ -588,7 +588,7 @@ pub const VM = struct {
         self.compiler.apiError = try self.alloc.dupe(u8, str);
     }
 
-    pub fn clearTempString(vm: *VM) stdx.ListWriter(std.ArrayListAlignedUnmanaged(u8, .@"8")) {
+    pub fn clearTempString(vm: *VM) stdx.ListWriter(std.array_list.Aligned(u8, .@"8")) {
         vm.u8Buf.clearRetainingCapacity();
         return stdx.listWriter(&vm.u8Buf, vm.alloc);
     }
@@ -692,7 +692,7 @@ pub const VM = struct {
 
     pub fn log_tracev(self: *cy.VM, comptime format: []const u8, args: anytype) void {
         if (cy.Trace and C.verbose()) {
-            const msg = std.fmt.allocPrint(self.alloc, format, args) catch @panic("error");
+            const msg = self.alloc.print(format, args) catch @panic("error");
             defer self.alloc.free(msg);
             self.log(msg);
         }
@@ -729,7 +729,7 @@ pub const SymbolId = u64;
 const Root = @This();
 
 /// Generate assembly labels to find sections easier.
-const GenLabels = builtin.mode != .debug and !builtin.cpu.arch.isWasm() and false;
+const GenLabels = builtin.mode != .debug and !builtin.target.cpu.arch.isWasm() and false;
 
 const DebugTraceStopAtNumOps: ?u32 = null;
 
@@ -792,12 +792,12 @@ pub fn dumpValue(vm: *const VM, val: Value) void {
 }
 
 fn z_write_ptr(buf: C.Bytes, ptr: ?*anyopaque) callconv(.c) usize {
-    const res = std.fmt.bufPrint(C.from_bytes(buf), "{*}", .{ptr}) catch @panic("error");
+    const res = std.mem.print(C.from_bytes(buf), "{*}", .{ptr}) catch @panic("error");
     return res.len;
 }
 
 fn z_write_u64(buf: C.Bytes, x: u64) callconv(.c) usize {
-    const res = std.fmt.bufPrint(C.from_bytes(buf), "{}", .{x}) catch @panic("error");
+    const res = std.mem.print(C.from_bytes(buf), "{}", .{x}) catch @panic("error");
     return res.len;
 }
 
@@ -806,7 +806,7 @@ fn zFatal() callconv(.c) void {
 }
 
 fn zOpCodeName(code: vmc.OpCode) callconv(.c) [*:0]const u8 {
-    const ecode: cy.OpCode = @enumFromInt(code);
+    const ecode: cy.OpCode = @fromBackingInt(@intCast(code));
     return @tagName(ecode);
 }
 
@@ -1115,7 +1115,7 @@ fn zCheckRetainDanglingPointer(t: *cy.Thread, obj: *cy.HeapObject) callconv(.c) 
 }
 
 fn z_panic_unexpected_choice(t: *cy.Thread, exp: i64, act: i64) callconv(.c) void {
-    const msg = std.fmt.allocPrint(t.alloc, "Expected active choice tag `{}`, found `{}`.", .{exp, act}) catch |err| {
+    const msg = t.alloc.print("Expected active choice tag `{}`, found `{}`.", .{exp, act}) catch |err| {
         if (err == error.OutOfMemory) {
             t.c.panic_type = vmc.PANIC_INFLIGHT_OOM;
             return;
@@ -1209,7 +1209,7 @@ fn zEnsureListCap(vm: *VM, list: *std.ArrayList(Value), cap: usize) callconv(.c)
 }
 
 /// pc -> number of retains.
-pub var traceObjRetains: std.AutoHashMapUnmanaged(u32, u32) = .{};
+pub var traceObjRetains: std.AutoHashMapUnmanaged(u32, u32) = .empty;
 
 fn spawn(args: struct {
     argv: []const []const u8,

@@ -29,10 +29,10 @@ pub const Register = enum(u8) {
     r15,
 
     pub fn enc(self: Register) u4 {
-        return switch (@intFromEnum(self)) {
-            @intFromEnum(Register.rax)...@intFromEnum(Register.r15) => {
-                const base = @intFromEnum(Register.rax);
-                return @truncate(@intFromEnum(self) - base);
+        return switch (@backingInt(self)) {
+            @backingInt(Register.rax)...@backingInt(Register.r15) => {
+                const base = @backingInt(Register.rax);
+                return @truncate(@backingInt(self) - base);
             },
             else => unreachable,
         };
@@ -43,15 +43,15 @@ pub const Register = enum(u8) {
     }
 
     pub fn bitSize(self: Register) u8 {
-        return switch (@intFromEnum(self)) {
-            @intFromEnum(Register.rax)...@intFromEnum(Register.r15) => 64,
+        return switch (@backingInt(self)) {
+            @backingInt(Register.rax)...@backingInt(Register.r15) => 64,
             else => unreachable,
         };
     }
 
     pub fn isExtended(self: Register) bool {
-        return switch (@intFromEnum(self)) {
-            @intFromEnum(Register.r8)...@intFromEnum(Register.r15) => true,
+        return switch (@backingInt(self)) {
+            @backingInt(Register.r8)...@backingInt(Register.r15) => true,
             else => false,
         };
     }

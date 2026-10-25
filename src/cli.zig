@@ -12,8 +12,8 @@ const http = @import("http.zig");
 const NullId = std.math.maxInt(u32);
 const vmc = @import("vmc");
 const malloc = build_config.malloc;
-const is_wasm = builtin.cpu.arch.isWasm();
-const is_wasm_freestanding = is_wasm and builtin.os.tag == .freestanding;
+const is_wasm = builtin.target.cpu.arch.isWasm();
+const is_wasm_freestanding = is_wasm and builtin.target.os.tag == .freestanding;
 const mi = @import("mimalloc");
 
 pub const Src = @embedFile("std/cli.cy");
@@ -45,10 +45,10 @@ pub const App = struct {
     mod_root: []const u8,
 
     // Short name to abs path.
-    mod_uris: std.StringHashMapUnmanaged([]const u8) = .{},
+    mod_uris: std.StringHashMapUnmanaged([]const u8) = .empty,
 
     // Abs path to bind function.
-    mod_bindings: std.StringHashMapUnmanaged(C.ModuleBindFn) = .{},
+    mod_bindings: std.StringHashMapUnmanaged(C.ModuleBindFn) = .empty,
 
     pub fn deinit(self: *App) void {
         var iter = self.mod_bindings.keyIterator();
@@ -98,7 +98,7 @@ pub fn init_cli(vm: *C.VM, alloc: std.mem.Allocator) !void {
         .{ .name = "test", .uri = "src/std/test.cy", .bind_fn = C.mod_bind_test },
     };
     for (mods) |mod| {
-        const abs_path = try std.fmt.allocPrint(alloc, "{s}/{s}", .{ app.mod_root, mod.uri });
+        const abs_path = try alloc.print("{s}/{s}", .{ app.mod_root, mod.uri });
         try app.mod_uris.putNoClobber(alloc, mod.name, abs_path);
         try app.mod_bindings.putNoClobber(alloc, abs_path, mod.bind_fn);
     }
@@ -192,7 +192,7 @@ pub fn loader(vm_: ?*C.VM, mod_: ?*C.Sym, spec_: C.Bytes, res: [*c]C.LoaderResul
             if (e == error.HandledError) {
                 return false;
             } else {
-                const msg = std.fmt.allocPrint(app.alloc, "Can not load `{s}`. {}", .{ spec, e }) catch return false;
+                const msg = app.alloc.print("Can not load `{s}`. {}", .{ spec, e }) catch return false;
                 defer app.alloc.free(msg);
                 C.reportApiError(@ptrCast(vm), C.to_bytes(msg));
                 return false;
@@ -200,7 +200,7 @@ pub fn loader(vm_: ?*C.VM, mod_: ?*C.Sym, spec_: C.Bytes, res: [*c]C.LoaderResul
         };
     } else {
         src = std.Io.Dir.cwd().readFileAlloc(stdx.io(), spec, app.alloc, .limited(1e9)) catch |e| {
-            const msg = std.fmt.allocPrint(app.alloc, "Can not load `{s}`. {}", .{ spec, e }) catch return false;
+            const msg = app.alloc.print("Can not load `{s}`. {}", .{ spec, e }) catch return false;
             defer app.alloc.free(msg);
             C.reportApiError(@ptrCast(vm), C.to_bytes(msg));
             return false;
@@ -235,7 +235,7 @@ fn resolver(vm_: ?*C.VM, params: C.ResolverParams, res_uri_len: ?*usize) callcon
     var cur_uri: []const u8 = "";
     if (app.mod_uris.get(uri)) |abs_path| {
         const out = params.buf[0..params.bufLen];
-        const res = std.fmt.bufPrint(out, "{s}", .{abs_path}) catch @panic("error");
+        const res = std.mem.print(out, "{s}", .{abs_path}) catch @panic("error");
         res_uri_len.?.* = res.len;
         return true;
     } else {
@@ -248,7 +248,7 @@ fn resolver(vm_: ?*C.VM, params: C.ResolverParams, res_uri_len: ?*usize) callcon
         if (e == error.HandledError) {
             return false;
         } else {
-            const msg = std.fmt.allocPrint(app.alloc, "Resolve module `{s}`, error: `{}`", .{ uri, e }) catch return false;
+            const msg = app.alloc.print("Resolve module `{s}`, error: `{}`", .{ uri, e }) catch return false;
             defer app.alloc.free(msg);
             C.reportApiError(@ptrCast(vm), C.to_bytes(msg));
             return false;
@@ -283,7 +283,7 @@ fn zResolve(vm: *C.VM, alloc: std.mem.Allocator, chunkId: u32, buf: []u8, cur_ur
     if (cur_uri.len > 0) b: {
         // Create path from the current script.
         // There should always be a parent directory since `curUri` should be absolute when dealing with file modules.
-        const dir = std.fs.path.dirname(cur_uri) orelse {
+        const dir = std.Io.Dir.path.dirname(cur_uri) orelse {
             // Likely from an in-memory chunk uri such as `main` or `input` (repl).
             try w.writeAll(spec);
             break :b;
@@ -297,8 +297,8 @@ fn zResolve(vm: *C.VM, alloc: std.mem.Allocator, chunkId: u32, buf: []u8, cur_ur
     // Get canonical path.
     const absPath = realpath(std.Io.Dir.cwd(), path, buf) catch |e| {
         if (e == error.FileNotFound) {
-            const msg = try std.fmt.allocPrint(alloc, "Import path does not exist: `{s}`", .{path});
-            if (builtin.os.tag == .windows) {
+            const msg = try alloc.print("Import path does not exist: `{s}`", .{path});
+            if (builtin.target.os.tag == .windows) {
                 _ = std.mem.replaceScalar(u8, msg, '/', '\\');
             }
             defer alloc.free(msg);
@@ -312,7 +312,7 @@ fn zResolve(vm: *C.VM, alloc: std.mem.Allocator, chunkId: u32, buf: []u8, cur_ur
 }
 
 fn realpath(cwd: std.Io.Dir, path: []const u8, out: []u8) ![]u8 {
-    if (is_wasm and builtin.os.tag == .wasi) {
+    if (is_wasm and builtin.target.os.tag == .wasi) {
         return wasi_realpath(cwd, path, out);
     } else {
         const len = try cwd.realPathFile(stdx.io(), path, out);
@@ -385,7 +385,7 @@ fn loadUrl(vm: *C.VM, alloc: std.mem.Allocator, url: []const u8) ![]const u8 {
     const uri = try std.Uri.parse(url);
     const res = client.fetch(alloc, .GET, uri, .{}) catch |e| {
         if (e == error.UnknownHostName) {
-            const msg = try std.fmt.allocPrint(alloc, "Can not connect to `{s}`.", .{uri.host.?.percent_encoded});
+            const msg = try alloc.print("Can not connect to `{s}`.", .{uri.host.?.percent_encoded});
             defer alloc.free(msg);
             C.reportApiError(@ptrCast(vm), C.to_bytes(msg));
             return error.HandledError;
@@ -397,7 +397,7 @@ fn loadUrl(vm: *C.VM, alloc: std.mem.Allocator, url: []const u8) ![]const u8 {
 
     if (res.status != .ok) {
         // Stop immediately.
-        const e = try std.fmt.allocPrint(alloc, "Can not load `{s}`. Response code: {}", .{ url, res.status });
+        const e = try alloc.print("Can not load `{s}`. Response code: {}", .{ url, res.status });
         defer alloc.free(e);
         C.reportApiError(@ptrCast(vm), C.to_bytes(e));
         return error.HandledError;
@@ -410,7 +410,7 @@ fn loadUrl(vm: *C.VM, alloc: std.mem.Allocator, url: []const u8) ![]const u8 {
     return res.body;
 }
 
-pub const use_ln = builtin.os.tag != .windows and builtin.os.tag != .wasi;
+pub const use_ln = builtin.target.os.tag != .windows and builtin.target.os.tag != .wasi;
 const ln = @import("linenoise");
 
 pub fn replReadLine(t: *C.Thread) anyerror!C.Ret {
@@ -494,8 +494,8 @@ test "Stack traces." {
             defer C.vm_freeb(vm, report);
 
             const root = build_config.mod_root.?;
-            const sep = if (builtin.os.tag == .windows) "\\" else "/";
-            const exp = try std.fmt.allocPrint(zt.alloc,
+            const sep = if (builtin.target.os.tag == .windows) "\\" else "/";
+            const exp = try zt.alloc.print(
                 \\panic: boom
                 \\
                 \\{s}{s}src{s}test{s}modules{s}test_mods{s}init_panic_error.cy:1:18 @init:
@@ -626,7 +626,7 @@ pub fn zErrFunc(comptime f: fn (t: *C.Thread) anyerror!C.Ret) C.BindFunc {
     };
 }
 
-pub const isFreestanding = builtin.os.tag == .freestanding;
+pub const isFreestanding = builtin.target.os.tag == .freestanding;
 
 pub fn prepPanicZError(t: *C.Thread, err: anyerror, optTrace: ?*std.lang.StackTrace) C.Ret {
     if (!isFreestanding and C.verbose()) {

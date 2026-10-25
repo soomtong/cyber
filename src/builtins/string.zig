@@ -497,7 +497,7 @@ fn astringReplace(t: *cy.Thread, str: []const u8, needlev: cy.heap.Str, replacev
     const needle = needlev.slice();
     const replacement = replacev.slice();
 
-    var buf: std.ArrayListAligned(u8, .@"4") = .empty;
+    var buf: std.array_list.Aligned(u8, .@"4") = .empty;
     defer buf.deinit(t.alloc);
     const newLen = try string.prepReplacement(str, needle, replacement, stdx.listWriter(&buf, t.alloc));
     const numIdxes = buf.items.len / 4;
@@ -524,7 +524,7 @@ fn ustringReplace(t: *cy.Thread, str: []const u8, needlev: cy.heap.Str, replacev
     const needle = needlev.slice();
     const replacement = replacev.slice();
 
-    var buf: std.ArrayListAligned(u8, .@"4") = .empty;
+    var buf: std.array_list.Aligned(u8, .@"4") = .empty;
     defer buf.deinit(t.alloc);
     const newLen = try string.prepReplacement(str, needle, replacement, stdx.listWriter(&buf, t.alloc));
     const numIdxes = buf.items.len / 4;

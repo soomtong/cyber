@@ -1317,7 +1317,7 @@ fn EvalStr_init(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     defer c.heap.destructValue2(type_, value);
     switch (type_.id()) {
         bt.I64 => {
-            const res = try std.fmt.allocPrint(c.alloc, "{}", .{value.asInt()});
+            const res = try c.alloc.print("{}", .{value.asInt()});
             defer c.alloc.free(res);
             return cy.TypeValue.init(ctx.func.sig.ret, try c.heap.init_eval_str(res));
         },
@@ -1608,7 +1608,7 @@ pub fn memmove(t: *cy.Thread) !C.Ret {
     const dst = t.param([*]u8);
     const src = t.param([*]u8);
     const len: usize = @intCast(t.param(u64));
-    std.mem.copyForwards(u8, dst[0..len], src[0..len]);
+    @memmove(dst[0..len], src[0..len]);
     return C.RetOk;
 }
 
@@ -1678,7 +1678,7 @@ fn arrayInsert(t: *cy.Thread) anyerror!Value {
 }
 
 fn String_decode(t: *cy.Thread) callconv(.c) Value {
-    t.setSymbol(1, @intFromEnum(Symbol.utf8));
+    t.setSymbol(1, @backingInt(Symbol.utf8));
     return String_decode2(t);
 }
 
@@ -1837,7 +1837,7 @@ fn str_fmt_bytes(t: *cy.Thread) anyerror!C.Ret {
     const str = obj.string.slice();
     const kind = std.enums.fromInt(NumberFormat, t.param(i64)) orelse return error.InvalidEnumTag;
     if (kind == .asc) {
-        var buf: std.ArrayListUnmanaged(u8) = .empty;
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(t.alloc);
 
         for (str) |byte| {
@@ -1965,7 +1965,7 @@ fn Generator_status(t: *cy.Thread) callconv(.c) C.Ret {
     const ret = t.ret(i64);
     const gen = t.param(*vmc.Generator);
     const status = getGeneratorStatus(t, gen);
-    ret.* = @intFromEnum(status);
+    ret.* = @backingInt(status);
     return C.RetOk;
 }
 

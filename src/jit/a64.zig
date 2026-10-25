@@ -11,15 +11,15 @@ pub const Register = enum(u8) {
     x24, x25, x26, x27, x28, x29, x30, xzr,
 
     pub fn enc(self: Register) u5 {
-        return switch (@intFromEnum(self)) {
-            @intFromEnum(Register.x0)...@intFromEnum(Register.xzr) => @as(u5, @intCast(@intFromEnum(self) - @intFromEnum(Register.x0))),
+        return switch (@backingInt(self)) {
+            @backingInt(Register.x0)...@backingInt(Register.xzr) => @as(u5, @intCast(@backingInt(self) - @backingInt(Register.x0))),
             else => unreachable,
         };
     }
 
     pub fn bitSize(self: Register) u8 {
-        return switch (@intFromEnum(self)) {
-            @intFromEnum(Register.x0)...@intFromEnum(Register.xzr) => 64,
+        return switch (@backingInt(self)) {
+            @backingInt(Register.x0)...@backingInt(Register.xzr) => 64,
             else => unreachable,
         };
     }
@@ -268,7 +268,7 @@ pub const BrCond = packed struct {
     }
 
     pub fn init(cond: Cond, imm: i19) BrCond {
-        return .{ .cond = @intFromEnum(cond), .imm19 = @bitCast(imm) };
+        return .{ .cond = @backingInt(cond), .imm19 = @bitCast(imm) };
     }
 };
 

@@ -173,20 +173,20 @@ pub const Token = extern struct {
 
     pub fn init(ttype: TokenType, start_pos: u32, end_pos: u32) Token {
         return .{
-            .head = (start_pos << 8) | @intFromEnum(ttype),
+            .head = (start_pos << 8) | @backingInt(ttype),
             .data = .{ .end = end_pos },
         };
     }
 
     pub fn initIndent(start_pos: u32, indent: u32) Token {
         return .{
-            .head = (start_pos << 8) | @intFromEnum(TokenType.indent),
+            .head = (start_pos << 8) | @backingInt(TokenType.indent),
             .data = .{ .indent = indent },
         };
     }
 
     pub inline fn tag(self: Token) TokenType {
-        return @enumFromInt(self.head & 0xff);
+        return @fromBackingInt(@intCast(self.head & 0xff));
     }
 
     pub inline fn pos(self: Token) u32 {
@@ -227,12 +227,12 @@ pub const TokenizeStateTag = enum {
 pub const Tokenizer = struct {
     alloc: std.mem.Allocator,
     src: []const u8,
-    tokens: std.ArrayListUnmanaged(Token),
+    tokens: std.ArrayList(Token),
     nextPos: u32,
 
     /// Whether to parse and accumulate comment tokens in `comments`.
     parseComments: bool,
-    comments: std.ArrayListUnmanaged(cy.IndexSlice(u32)),
+    comments: std.ArrayList(cy.IndexSlice(u32)),
 
     /// For syntax highlighting, skip errors.
     ignoreErrors: bool,
@@ -261,7 +261,7 @@ pub const Tokenizer = struct {
         self.comments.deinit(self.alloc);
     }
 
-    pub fn consumeComments(self: *Tokenizer) std.ArrayListUnmanaged(cy.IndexSlice(u32)) {
+    pub fn consumeComments(self: *Tokenizer) std.ArrayList(cy.IndexSlice(u32)) {
         defer self.comments = .empty;
         return self.comments;
     }

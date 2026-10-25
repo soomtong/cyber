@@ -221,7 +221,7 @@ pub const Proc = struct {
     numParams: u8,
 
     /// Captured vars. 
-    captures: std.ArrayListUnmanaged(CaptureInfo),
+    captures: std.ArrayList(CaptureInfo),
 
     /// Maps a name to a var.
     /// This is updated as blocks declare their own locals and restored
@@ -263,8 +263,8 @@ pub const Proc = struct {
 
     pub fn init(node: *ast.Node, func: ?*cy.Func, block_start: usize, isStaticFuncBlock: bool, varStart: u32, active_field_start: u32) Proc {
         return .{
-            .var_cache_entries = .{},
-            .var_active_struct_fields = .{},
+            .var_cache_entries = .empty,
+            .var_active_struct_fields = .empty,
             .numParams = 0,
             .block_depth = 0,
             .func = func,
@@ -2232,7 +2232,7 @@ pub fn resolveGenericFunc(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig, params
         .resolved = true,
         .callable = true,
         .decl = @ptrCast(decl),
-        .instance_cache = .{},
+        .instance_cache = .empty,
         .instances = .empty,
         .mod = undefined,
     };
@@ -2503,7 +2503,7 @@ pub const ResolveContext = struct {
     /// TODO: Avoid hash map if 2 or fewer ct params.
     ct_params: std.StringHashMapUnmanaged(CtParam),
 
-    ct_locals: std.ArrayListUnmanaged([]const u8),
+    ct_locals: std.ArrayList([]const u8),
 
     is_inline_eval: bool = false,
 
@@ -2621,7 +2621,7 @@ pub fn pushSymResolveContext(c: *cy.Chunk, sym: *cy.Sym, caller: ?*ast.Node) !vo
     const new = ResolveContext{
         .type = .sym,
         .has_ct_params = false,
-        .ct_params = .{},
+        .ct_params = .empty,
         .ct_locals = .empty,
         .chunk = c.compiler.chunks.items[sym.declNode().src()],
         .caller = caller,
@@ -2634,7 +2634,7 @@ pub fn pushFuncResolveContext(c: *cy.Chunk, func: *cy.Func, caller: ?*ast.Node) 
     const new = ResolveContext{
         .type = .func,
         .has_ct_params = false,
-        .ct_params = .{},
+        .ct_params = .empty,
         .ct_locals = .empty,
         .chunk = c.compiler.chunks.items[func.src()],
         .caller = caller,
@@ -2647,7 +2647,7 @@ pub fn pushChunkResolveContext(c: *cy.Chunk, caller: ?*ast.Node) !void {
     const new = ResolveContext{
         .type = .chunk,
         .has_ct_params = false,
-        .ct_params = .{},
+        .ct_params = .empty,
         .ct_locals = .empty,
         .chunk = c,
         .caller = caller,
@@ -5244,7 +5244,7 @@ fn semaSwitchChoicePrologue(c: *cy.Chunk, info: *SwitchInfo, control: ExprResult
 
 fn semaSwitchBody(c: *cy.Chunk, info: *SwitchInfo, block: *ast.SwitchBlock, control: ExprResult) !void {
     // TODO: Cases should be appended without a builder.
-    var cases_buf: std.ArrayListUnmanaged(*ir.Expr) = .empty;
+    var cases_buf: std.ArrayList(*ir.Expr) = .empty;
     defer cases_buf.deinit(c.alloc);
 
     // TODO: Check for exhaustive by looking at all case conds.
@@ -5406,7 +5406,7 @@ fn semaSwitchElseCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt) !*ir
 fn semaSwitchCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt, control: ExprResult) !*ir.Expr {
     const hasCapture = case.data.case.capture != null;
 
-    var conds_buf: std.ArrayListUnmanaged(*ir.Expr) = .empty;
+    var conds_buf: std.ArrayList(*ir.Expr) = .empty;
     defer conds_buf.deinit(c.alloc);
 
     var case_capture_type: ?*cy.Type = null;
@@ -5557,7 +5557,7 @@ fn semaCaseCondEnd(c: *cy.Chunk, var_start: usize, cond_local: u32, control_n: *
     });
 }
 
-fn semaCaseCond(c: *cy.Chunk, info: *SwitchInfo, conds_buf: *std.ArrayListUnmanaged(*ir.Expr), expr_n: *ast.Node, expr: ExprResult, cond: *ast.Node) !void {
+fn semaCaseCond(c: *cy.Chunk, info: *SwitchInfo, conds_buf: *std.ArrayList(*ir.Expr), expr_n: *ast.Node, expr: ExprResult, cond: *ast.Node) !void {
     if (false) {
     // if (info.control_t.id() == bt.MetaType) {
         // try c.ir.pushStmtBlock(c.alloc);
@@ -9168,16 +9168,16 @@ pub const Sema = struct {
     compiler: *cy.Compiler,
 
     /// This is used to perform a Type lookup by ID and to destroy the types.
-    types: std.ArrayListUnmanaged(*cy.Type),
+    types: std.ArrayList(*cy.Type),
 
     /// Distinct partial layouts.
     partial_struct_layouts: std.HashMapUnmanaged([]bool, *PartialStructLayout, PartialStructLayoutContext, 80),
 
     /// Resolved signatures for functions.
-    func_sigs: std.ArrayListUnmanaged(*FuncSig),
+    func_sigs: std.ArrayList(*FuncSig),
     func_sig_map: std.HashMapUnmanaged(FuncSigKey, FuncSigId, FuncSigKeyContext, 80),
 
-    symbols: std.ArrayListUnmanaged([]const u8),
+    symbols: std.ArrayList([]const u8),
     symbols_map: std.StringHashMapUnmanaged(u64),
 
     object_t: *cy.Type = &cy.types.NullType,
@@ -9300,12 +9300,12 @@ pub const Sema = struct {
             .result_tmpl = undefined,
             .ref_child_tmpl = undefined,
             .func_sigs = .empty,
-            .func_sig_map = .{},
+            .func_sig_map = .empty,
             .types = .empty,
-            .partial_struct_layouts = .{},
+            .partial_struct_layouts = .empty,
             .symbols = .empty,
-            .symbols_map = .{},
-            .vm_c_variadic_funcs = .{},
+            .symbols_map = .empty,
+            .vm_c_variadic_funcs = .empty,
         };
 
         // Reserve the null type.
@@ -9429,7 +9429,7 @@ pub const Sema = struct {
     }
 
     /// Format: (Type, ...) RetType
-    pub fn getFuncSigTempStr(s: *Sema, buf: *std.ArrayListUnmanaged(u8), funcSigId: FuncSigId) ![]const u8 {
+    pub fn getFuncSigTempStr(s: *Sema, buf: *std.ArrayList(u8), funcSigId: FuncSigId) ![]const u8 {
         buf.clearRetainingCapacity();
         const w = stdx.listWriter(&buf, s.alloc);
         try writeFuncSigStr(s, w, funcSigId);
@@ -9454,7 +9454,7 @@ pub const Sema = struct {
     }
 
     pub fn allocFuncSigTypesStr(s: *Sema, params: []const *cy.Type, ret: TypeId, from: ?*cy.Chunk) ![]const u8 {
-        var buf: std.ArrayListUnmanaged(u8) = .empty;
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(s.alloc);
 
         const w = stdx.listWriter(&buf, s.alloc);
@@ -9576,7 +9576,7 @@ pub fn sema_unescape_str(c: *cy.Chunk, buf: []u8, literal: []const u8, always_co
 
 /// `buf` is assumed to be big enough.
 pub fn unescapeString(buf: []u8, literal: []const u8, always_copy: bool) ![]const u8 {
-    var i = std.mem.indexOfScalar(u8, literal, '\\') orelse {
+    var i = std.mem.findScalar(u8, literal, '\\') orelse {
         if (always_copy) {
             @memcpy(buf[0..literal.len], literal);
             return buf[0..literal.len];
@@ -9592,7 +9592,7 @@ pub fn unescapeString(buf: []u8, literal: []const u8, always_copy: bool) ![]cons
     var rest = literal[i+1+res.advance..];
 
     while (true) {
-        i = std.mem.indexOfScalar(u8, rest, '\\') orelse break;
+        i = std.mem.findScalar(u8, rest, '\\') orelse break;
         @memcpy(buf[len..len+i], rest[0..i]);
         len += i;
         res = try unescapeSeq(rest[i+1..]);

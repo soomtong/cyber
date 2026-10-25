@@ -46,7 +46,7 @@ pub const Instance = struct {
     pub fn initFuncParams(self: *Instance, alloc: std.mem.Allocator, params: []const cy.Value, template_params: []const cy.sym.FuncTemplateParam) !void {
         self.params = params;
         if (self.params.len > 2) {
-            self.map = .{ .map = .{} };
+            self.map = .{ .map = .empty };
             for (0..params.len) |i| {
                 try self.map.map.put(alloc, template_params[i].name, i);
             }
@@ -62,7 +62,7 @@ pub const Instance = struct {
     pub fn initParams(self: *Instance, alloc: std.mem.Allocator, params: []const cy.Value, template_params: []const cy.sym.TemplateParam) !void {
         self.params = params;
         if (self.params.len > 2) {
-            self.map = .{ .map = .{} };
+            self.map = .{ .map = .empty };
             for (0..self.params.len) |i| {
                 try self.map.map.put(alloc, template_params[i].name, i);
             }

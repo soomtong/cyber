@@ -33,14 +33,14 @@ pub const ByteCodeBuffer = struct {
     alloc: std.mem.Allocator,
 
     /// TODO: Rename to `insts`.
-    ops: std.ArrayListUnmanaged(Inst),
-    consts: std.ArrayListUnmanaged(cy.Value),
+    ops: std.ArrayList(Inst),
+    consts: std.ArrayList(cy.Value),
 
     /// TODO: Rename to `ops`.
-    opcodes: std.ArrayListUnmanaged(OpCode),
+    opcodes: std.ArrayList(OpCode),
 
     /// Whether a const is boxed.
-    consts_boxed: std.ArrayListUnmanaged(bool),
+    consts_boxed: std.ArrayList(bool),
 
     /// Const map for deduping.
     constMap: std.AutoHashMapUnmanaged(u64, u32),
@@ -52,18 +52,18 @@ pub const ByteCodeBuffer = struct {
 
     /// Maps bytecode insts back to source code.
     /// Contains entries ordered by `pc`. 
-    debugTable: std.ArrayListUnmanaged(DebugSym),
+    debugTable: std.ArrayList(DebugSym),
 
     /// Ordered pc to each func's `CHK_STK` inst. Used to recover return reg size during unwind.
-    func_table: std.ArrayListUnmanaged(usize),
+    func_table: std.ArrayList(usize),
 
     /// Maps pc to a bitset with active pointer locals.
-    ptr_table: std.ArrayListUnmanaged(PcPtrLayout),
+    ptr_table: std.ArrayList(PcPtrLayout),
 
-    ptr_layouts: std.ArrayListUnmanaged([]bool),
+    ptr_layouts: std.ArrayList([]bool),
     ptr_layout_map: std.HashMapUnmanaged([]const bool, usize, PtrLayoutContext, 80),
 
-    ptr_layout_builder: std.ArrayListUnmanaged(bool),
+    ptr_layout_builder: std.ArrayList(bool),
 
     markers: std.AutoHashMapUnmanaged(u32, *cy.Func),
 
@@ -86,15 +86,15 @@ pub const ByteCodeBuffer = struct {
             .vm = vm,
             .consts = .empty,
             .consts_boxed = .empty,
-            .constMap = .{},
+            .constMap = .empty,
             .debugTable = .empty,
             .func_table = .empty,
-            .const_string_map = .{},
+            .const_string_map = .empty,
             .ptr_table = .empty,
             .ptr_layouts = .empty,
-            .ptr_layout_map = .{},
+            .ptr_layout_map = .empty,
             .ptr_layout_builder = .empty,
-            .markers = .{},
+            .markers = .empty,
             .labels = .empty,
         };
         return new;
@@ -776,7 +776,7 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
 }
 
 pub const StringIndexContext = struct {
-    buf: *std.ArrayListUnmanaged(u8),
+    buf: *std.ArrayList(u8),
 
     pub fn hash(self: StringIndexContext, s: cy.IndexSlice(u32)) u64 {
         return std.hash.Wyhash.hash(0, self.buf.items[s.start..s.end]);
@@ -788,7 +788,7 @@ pub const StringIndexContext = struct {
 };
 
 pub const StringIndexInsertContext = struct {
-    buf: *std.ArrayListUnmanaged(u8),
+    buf: *std.ArrayList(u8),
 
     pub fn hash(self: StringIndexInsertContext, s: []const u8) u64 {
         _ = self;
@@ -805,19 +805,19 @@ pub const Inst = packed struct {
 
     pub inline fn initOpCode(code_: OpCode) Inst {
         return .{
-            .val = @intFromEnum(code_),
+            .val = @backingInt(code_),
         };
     }
 
     pub inline fn initOpCode2(code_: OpCode, tmp_dst: bool) Inst {
         return .{
-            .val = @intFromEnum(code_) | @as(u16, if (tmp_dst) 0x100 else 0),
+            .val = @backingInt(code_) | @as(u16, if (tmp_dst) 0x100 else 0),
         };
     }
 
     pub inline fn opcode(self: *const Inst) OpCode {
         const code: u8 = @truncate(self.val);
-        return @enumFromInt(code);
+        return @fromBackingInt(@intCast(code));
     }
 
     pub inline fn temp_dst(self: *const Inst) bool {

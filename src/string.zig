@@ -261,7 +261,7 @@ fn indexOfCharSimdRemain(comptime VecSize: usize, buf: []const u8, needle: u8) ?
 }
 
 fn indexOfCharSimdFixed4(comptime VecSize: usize, buf: []const u8, needle: u8) ?usize {
-    if (VecSize == 32 and hasAvx2 and builtin.cpu.arch == .x86_64) {
+    if (VecSize == 32 and hasAvx2 and builtin.target.cpu.arch == .x86_64) {
         // const MaskInt = @Int(.unsigned, VecSize);
         const vneedle: @Vector(VecSize, u8) = @splat(needle);
         var i: usize = 0;
@@ -337,11 +337,11 @@ fn indexOfCharSimdFixed(comptime VecSize: usize, buf: []const u8, needle: u8) ?u
     return null;
 }
 
-const hasAvx2 = std.Target.x86.featureSetHasAny(builtin.cpu.features, .{ .avx2 });
+const hasAvx2 = std.Target.x86.featureSetHasAny(builtin.target.cpu.features, .{ .avx2 });
 const NullId = std.math.maxInt(u32);
 
 fn indexOfScalar(str: []const u8, needle: []const u8) ?usize {
-    return std.mem.indexOf(u8, str, needle);
+    return std.mem.find(u8, str, needle);
 }
 
 /// `needle` can be any UTF-8 string.

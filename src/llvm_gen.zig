@@ -981,7 +981,7 @@ fn genSymbol(self: *cy.Chunk, csymId: sema.CompactSymbolId) !Value {
     //         .builtinType => {
     //             const typeId = rSym.inner.builtinType.typeId;
     //             const dst = try self.rega.selectFromNonLocalVar(req, true);
-    //             try self.buf.pushOp1(.sym, @intFromEnum(cy.heap.MetaTypeKind.object));
+    //             try self.buf.pushOp1(.sym, @backingInt(cy.heap.MetaTypeKind.object));
     //             try self.buf.pushOperandsRaw(std.mem.asBytes(&typeId));
     //             try self.buf.pushOperand(dst);
     //             return self.initGenValue(dst, bt.MetaType, true);
@@ -989,7 +989,7 @@ fn genSymbol(self: *cy.Chunk, csymId: sema.CompactSymbolId) !Value {
     //         .object => {
     //             const typeId = rSym.inner.object.typeId;
     //             const dst = try self.rega.selectFromNonLocalVar(req, true);
-    //             try self.buf.pushOp1(.sym, @intFromEnum(cy.heap.MetaTypeKind.object));
+    //             try self.buf.pushOp1(.sym, @backingInt(cy.heap.MetaTypeKind.object));
     //             try self.buf.pushOperandsRaw(std.mem.asBytes(&typeId));
     //             try self.buf.pushOperand(dst);
     //             return self.initGenValue(dst, bt.MetaType, true);

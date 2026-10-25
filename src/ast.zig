@@ -1794,16 +1794,16 @@ pub const Ast = struct {
     src_id: u32,
 
     /// Generated source literals from templates or CTE.
-    srcGen: std.ArrayListUnmanaged(u8),
+    srcGen: std.ArrayList(u8),
 
     /// Heap generated strings, stable pointers unlike `srcGen`.
     /// Used for:
     /// - Unnamed struct identifiers.
     /// - Unescaped strings.
-    strs: std.ArrayListUnmanaged([]const u8),
+    strs: std.ArrayList([]const u8),
 
     /// Optionally parsed by tokenizer.
-    comments: std.ArrayListUnmanaged(cy.IndexSlice(u32)),
+    comments: std.ArrayList(cy.IndexSlice(u32)),
 
     pub fn init(self: *Ast, alloc: std.mem.Allocator, src: []const u8, src_id: u32) !void {
         self.* = .{
@@ -2015,7 +2015,7 @@ pub const Encoder = struct {
 // pub const Visitor = struct {
 //     alloc: std.mem.Allocator,
 //     ast: AstView,
-//     stack: std.ArrayListUnmanaged(VisitNode),
+//     stack: std.ArrayList(VisitNode),
 
 //     pub fn deinit(self: *Visitor) void {
 //         self.stack.deinit(self.alloc);

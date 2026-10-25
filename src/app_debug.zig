@@ -2,16 +2,16 @@ const std = @import("std");
 const builtin = @import("builtin");
 const C = @import("capi.zig");
 const vmc = @import("vmc");
-const is_wasm = builtin.cpu.arch.isWasm();
+const is_wasm = builtin.target.cpu.arch.isWasm();
 
 /// NOTE: Dupe Zig segfault handler to wrap a custom user handler.
 var windows_segfault_handle: ?std.os.windows.HANDLE = null;
 
 /// Signal number type of a `SigactionFn`.
-pub const Sig = if (builtin.os.tag == .windows) i32 else std.posix.SIG;
+pub const Sig = if (builtin.target.os.tag == .windows) i32 else std.posix.SIG;
 
 /// Attaches a global SIGSEGV handler which calls `@panic("segmentation fault");`
-const SigactionFn = if (builtin.os.tag == .windows) *const fn (Sig, *const void, ?*anyopaque) callconv(.c) void else std.posix.Sigaction.sigaction_fn;
+const SigactionFn = if (builtin.target.os.tag == .windows) *const fn (Sig, *const void, ?*anyopaque) callconv(.c) void else std.posix.Sigaction.sigaction_fn;
 
 pub fn attachSegfaultHandler(handler: SigactionFn) void {
     if (is_wasm) {
@@ -21,7 +21,7 @@ pub fn attachSegfaultHandler(handler: SigactionFn) void {
     if (!std.debug.have_segfault_handling_support) {
         @compileError("segfault handler not supported for this target");
     }
-    if (builtin.os.tag == .windows) {
+    if (builtin.target.os.tag == .windows) {
         windows_segfault_handle = std.os.windows.ntdll.RtlAddVectoredExceptionHandler(0, handleSegfaultWindows);
         return;
     }
@@ -34,7 +34,7 @@ pub fn attachSegfaultHandler(handler: SigactionFn) void {
 }
 
 fn resetSegfaultHandler() void {
-    if (builtin.os.tag == .windows) {
+    if (builtin.target.os.tag == .windows) {
         if (windows_segfault_handle) |handle| {
             std.debug.assert(std.os.windows.ntdll.RtlRemoveVectoredExceptionHandler(handle) != 0);
             windows_segfault_handle = null;
@@ -84,7 +84,7 @@ pub fn defaultPanic(
         else => {},
     }
 
-    switch (builtin.os.tag) {
+    switch (builtin.target.os.tag) {
         .freestanding, .other => {
             @trap();
         },
@@ -260,8 +260,8 @@ fn handleSegfaultWindows(info: *std.os.windows.EXCEPTION_POINTERS) callconv(.win
     handleSegfault(addr, name, &std.debug.cpu_context.fromWindowsContext(info.ContextRecord), null);
 }
 
-const native_arch = builtin.cpu.arch;
-const native_os = builtin.os.tag;
+const native_arch = builtin.target.cpu.arch;
+const native_os = builtin.target.os.tag;
 
 /// Modified from `std.debug.defaultHandleSegfault` to wrap a custom `handler`.
 fn handleSegfault(addr: ?usize, name: []const u8, opt_ctx: ?std.debug.CpuContextPtr, handler: ?*const fn() callconv(.c) void) noreturn {

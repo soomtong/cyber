@@ -57,14 +57,14 @@ fn getDynLib(vm: *cy.VM, c: *cy.Chunk) !*dynlib.DynLib {
             return err;
         };
     } else {
-        if (builtin.os.tag == .macos) {
+        if (builtin.target.os.tag == .macos) {
             const exe = try std.process.executablePathAlloc(stdx.io(), vm.alloc);
             defer vm.alloc.free(exe);
             lib.* = os.dlopen(exe) catch |err| {
                 std.debug.print("Cannot dlopen {s}.\n", .{exe});
                 return err;
             };
-        } else if (builtin.os.tag == .windows) {
+        } else if (builtin.target.os.tag == .windows) {
             // Windows: GetModuleHandleW(null) returns handle to current executable
             // This is equivalent to dlopen(NULL) on Unix systems
             lib.* = dynlib.DynLib.openSelf() catch |err| {
@@ -125,7 +125,7 @@ fn genFunc(c: *cy.cgen.Chunk, lib: *dynlib.DynLib, state: *tcc.TCCState, w: anyt
 
 fn bindExternFuncPtrDispatch(c: *cy.cgen.Compiler, state: *tcc.TCCState, func_ptr: *cy.types.FuncPtr) !void {
     var buf: [32]u8 = undefined;
-    const cname = try std.fmt.bufPrintSentinel(&buf, "cb_func_ptr{}", .{func_ptr.sig.id}, 0);
+    const cname = try std.mem.printSentinel(&buf, "cb_func_ptr{}", .{func_ptr.sig.id}, 0);
     const ptr = tcc.tcc_get_symbol(state, cname.ptr) orelse {
         cy.panic("Failed to get symbol.");
     };
@@ -149,7 +149,7 @@ fn bindFunc(c: *cy.cgen.Compiler, state: *tcc.TCCState, func: *cy.Func) !void {
         try c.base.vm.host_funcs.put(c.alloc, @ptrCast(@alignCast(func_ptr)), entry.id);
 
         if (!func.data.extern_.has_impl) {
-            const vm_func_name = try std.fmt.allocPrintSentinel(c.alloc, "CB_{s}", .{func.data.extern_.externName()}, 0);
+            const vm_func_name = try c.alloc.printSentinel("CB_{s}", .{func.data.extern_.externName()}, 0);
             defer c.alloc.free(vm_func_name);
             const vm_func_ptr = tcc.tcc_get_symbol(state, vm_func_name.ptr) orelse {
                 cy.panic("Failed to get symbol.");
@@ -162,7 +162,7 @@ fn bindFunc(c: *cy.cgen.Compiler, state: *tcc.TCCState, func: *cy.Func) !void {
         }
     } else if (func.type == .vm_extern_variant) {
         const csym = c.syms.get(func).?;
-        const vm_func_name = try std.fmt.allocPrintSentinel(c.alloc, "{s}", .{csym.name()}, 0);
+        const vm_func_name = try c.alloc.printSentinel("{s}", .{csym.name()}, 0);
         defer c.alloc.free(vm_func_name);
 
         const func_ptr = tcc.tcc_get_symbol(state, vm_func_name.ptr) orelse {
@@ -188,7 +188,7 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
         .base = t.c.vm.compiler,
         .alloc = t.alloc,
         .syms = .empty,
-        .c_names = .{},
+        .c_names = .empty,
         .vtables = .empty,
         .next_vtable_id = 0,
     };
@@ -227,7 +227,7 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
     }
 
     // Generate c code.
-    var csrc: std.ArrayListUnmanaged(u8) = .empty;
+    var csrc: std.ArrayList(u8) = .empty;
     defer csrc.deinit(t.alloc);
     const w = stdx.listWriter(&csrc, t.alloc);
 
@@ -326,7 +326,7 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
     }
 
     // const __floatundisf = @extern(*anyopaque, .{ .name = "__floatundisf", .linkage = .Strong });
-    if (builtin.cpu.arch != .aarch64) {
+    if (builtin.target.cpu.arch != .aarch64) {
         _ = tcc.tcc_add_symbol(state, "__fixunsdfdi", __fixunsdfdi);
         _ = tcc.tcc_add_symbol(state, "__floatundidf", __floatundidf);
     }
@@ -339,7 +339,7 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
     _ = tcc.tcc_add_symbol(state, "host_call_func", cy.cgen.host_call_func);
     _ = tcc.tcc_add_symbol(state, "host_ensure_thread", cy.cgen.host_ensure_thread);
     // _ = tcc.tcc_add_symbol(state, "printValue", cPrintValue);
-    if (builtin.cpu.arch == .aarch64) {
+    if (builtin.target.cpu.arch == .aarch64) {
         _ = tcc.tcc_add_symbol(state, "memmove", cy.cgen.memmove);
     }
 

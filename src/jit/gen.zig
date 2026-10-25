@@ -3,7 +3,7 @@ const std = @import("std");
 const win32 = @import("../win32.zig");
 const cy = @import("../cyber.zig");
 const bc = @import("../bc_gen.zig");
-pub const stencils = switch (builtin.cpu.arch) {
+pub const stencils = switch (builtin.target.cpu.arch) {
     .aarch64 => @import("a64_stencils.zig"),
     .x86_64 => @import("x64_stencils.zig"),
     else => void,
@@ -20,14 +20,14 @@ const a64 = @import("a64_assembler.zig");
 const A64 = @import("a64.zig");
 const x64 = @import("x64_assembler.zig");
 const X64 = @import("x64.zig");
-const is_wasm = builtin.cpu.arch.isWasm();
+const is_wasm = builtin.target.cpu.arch.isWasm();
 
 const Cstr = bc.Cstr;
 const GenValue = bc.GenValue;
 const SlotId = bc.SlotId;
 const regValue = bc.regValue;
 
-const CallHoleLen = switch (builtin.cpu.arch) {
+const CallHoleLen = switch (builtin.target.cpu.arch) {
     .aarch64 => 4,
     .x86_64 => 5,
     else => 0,
@@ -98,7 +98,7 @@ pub const CodeBuffer = struct {
     gpa: std.mem.Allocator,
 
     executable: bool,
-    buf: std.ArrayListAligned(u8, std.mem.Alignment.fromByteUnits(std.heap.page_size_min)),
+    buf: std.array_list.Aligned(u8, std.mem.Alignment.fromByteUnits(std.heap.page_size_min)),
 
     /// Forced abstraction by Windows needing a buffer allocated with VirtualAlloc.
     final_buf: []align(std.heap.page_size_min) u8,
@@ -107,7 +107,7 @@ pub const CodeBuffer = struct {
     mainPc: u32,
 
     /// Relocation entries.
-    relocs: std.ArrayListUnmanaged(Reloc),
+    relocs: std.ArrayList(Reloc),
 
     funcs: std.AutoHashMapUnmanaged(*cy.Func, JitFunc),
 
@@ -159,7 +159,7 @@ pub const CodeBuffer = struct {
         if (!self.executable) {
             return;
         }
-        if (builtin.os.tag == .windows) {
+        if (builtin.target.os.tag == .windows) {
             try std.process.protectMemory(self.final_buf, .{ .read = true, .write = true });
             _ = win32.VirtualFree(self.final_buf.ptr, 0, win32.MEM_RELEASE);
         } else {
@@ -175,7 +175,7 @@ pub const CodeBuffer = struct {
 
         // Mark code executable.
         try std.process.protectMemory(self.final_buf, .{ .read = true, .execute = true });
-        if (builtin.os.tag == .windows) {
+        if (builtin.target.os.tag == .windows) {
             // const flush_res = FlushInstructionCache(std.os.windows.GetCurrentProcess(), self.exe_buf.ptr, self.exe_buf.len);
             // var info: std.os.windows.MEMORY_BASIC_INFORMATION = undefined;
             // const res = try std.os.windows.VirtualQuery(self.exe_buf.ptr, &info, @sizeOf(std.os.windows.MEMORY_BASIC_INFORMATION));
@@ -367,7 +367,7 @@ fn exprStmt(c: *cy.Chunk, idx: usize, nodeId: *ast.Node) !void {
             try bc.popTempAndUnwind(c, exprv);
         } else {
             // Return from block expression.
-            const b = c.blocks.getLast();
+            const b = c.blocks.last().?;
             _ = try genExpr(c, expr, b.blockExprCstr);
         }
     } else {
@@ -619,9 +619,9 @@ fn gen_func(c: *cy.Chunk, func: *cy.Func) !void {
     // Emit VM/JIT -> JIT prologue.     
 
     // Persist return addr reg into stack.
-    if (builtin.cpu.arch == .aarch64) {
+    if (builtin.target.cpu.arch == .aarch64) {
         try buf.push_u32(A64.LoadStore.strImmOff(a64.FpReg, @intCast(ret_size+1), .x30).bitCast());
-    } else if (builtin.cpu.arch == .x86_64) {
+    } else if (builtin.target.cpu.arch == .x86_64) {
         // try c.x64Enc.int3();
         // TODO: Currently still pass return address from [rsp] but the i2c allows a dedicated register.
         try x64.push_load(buf, .rax, .sibBase(.initReg(.rsp), 0));
@@ -637,7 +637,7 @@ fn gen_func(c: *cy.Chunk, func: *cy.Func) !void {
         }
 
         // var msg_buf: [1024]u8 = undefined;
-        // const msg = try std.fmt.bufPrint(&msg_buf, "{}", .{pc[0].opcode()});
+        // const msg = try std.mem.print(&msg_buf, "{}", .{pc[0].opcode()});
         // const heap_msg = try c.buf.getOrPushConstString(msg);
         // try as.gen_nop(buf); // Indicates skipped bytecode generation if this is first inst at breakpoint.
         // try as.gen_log(c.jit, heap_msg.slice);
@@ -805,7 +805,7 @@ fn gen_func(c: *cy.Chunk, func: *cy.Func) !void {
             },
             .chk_stk => {
                 try as.gen_imm(buf, .arg0, frame_size);
-                if (builtin.cpu.arch == .aarch64) {
+                if (builtin.target.cpu.arch == .aarch64) {
                     try buf.push(&stencils.chk_stk);
                 } else {
                     const start = buf.pos();
@@ -842,9 +842,9 @@ fn mainBlock(c: *cy.Chunk, idx: usize, nodeId: *ast.Node) !void {
     c.jit.mainPc = @intCast(c.jitGetPos());
 
     // Spill return addr to slot 0.
-    if (builtin.cpu.arch == .aarch64) {
+    if (builtin.target.cpu.arch == .aarch64) {
         try c.jitPushU32(A64.LoadStore.strImmOff(a64.FpReg, 0, .x30).bitCast());
-    } else if (builtin.cpu.arch == .x86_64) {
+    } else if (builtin.target.cpu.arch == .x86_64) {
         // try c.x64Enc.int3();
         try c.x64Enc.movMem(.rax, x64.MemSibBase(x64.BaseReg(.rsp), 0));
         try c.x64Enc.movToMem(x64.MemSibBase(x64.BaseReg(x64.FpReg), 0), .rax);
@@ -938,9 +938,9 @@ fn funcBlock(c: *cy.Chunk, idx: usize, nodeId: *ast.Node) !void {
 
     // A64 relies on bl to obtain the return addr in x30.
     // Ideally, the return addr shouldn't be spilled until the first function call.
-    if (builtin.cpu.arch == .aarch64) {
+    if (builtin.target.cpu.arch == .aarch64) {
         try c.jitPushU32(A64.LoadStore.strImmOff(a64.FpReg, 2, .x30).bitCast());
-    } else if (builtin.cpu.arch == .x86_64) {
+    } else if (builtin.target.cpu.arch == .x86_64) {
         // Save rax to ret addr slot.
         try as.genStoreSlot(c, 2, .temp);
     }
@@ -972,7 +972,7 @@ fn funcBlock(c: *cy.Chunk, idx: usize, nodeId: *ast.Node) !void {
 }
 
 pub fn relocate(buf: *CodeBuffer) !void {
-    if (builtin.os.tag == .windows) {
+    if (builtin.target.os.tag == .windows) {
         const code_ptr = win32.VirtualAlloc(null, buf.buf.capacity, win32.MEM_COMMIT | win32.MEM_RESERVE, win32.PAGE_READWRITE) orelse return error.OutOfMemory;
         const code_buf = @as([*]align(std.heap.page_size_min) u8, @ptrCast(@alignCast(code_ptr)))[0..buf.buf.capacity];
         @memcpy(code_buf[0..buf.buf.items.len], buf.buf.items);
@@ -984,7 +984,7 @@ pub fn relocate(buf: *CodeBuffer) !void {
     // From this point on, only reference final_buf for relocations.
 
     // Ensure enough scratch capacity for patching imm64.
-    if (builtin.cpu.arch == .aarch64) {
+    if (builtin.target.cpu.arch == .aarch64) {
         _ = try buf.ensureUnusedCap(4 * 4);
     }
 

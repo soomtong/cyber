@@ -9,7 +9,7 @@ const log = std.log.scoped(.main);
 const cli = @import("cli.zig");
 const os_mod = @import("std/os.zig");
 const fmt = @import("fmt.zig");
-const is_wasi = builtin.os.tag == .wasi;
+const is_wasi = builtin.target.os.tag == .wasi;
 
 test {
     std.testing.refAllDecls(cli);
@@ -31,12 +31,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
         app_debug.attachSegfaultHandler(sig_handler);
     }
 
-    if (builtin.os.tag == .windows) {
+    if (builtin.target.os.tag == .windows) {
         prevWinConsoleOutputCP = win32.GetConsoleOutputCP();
         _ = win32.SetConsoleOutputCP(CP_UTF8);
     }
     defer {
-        if (builtin.os.tag == .windows) {
+        if (builtin.target.os.tag == .windows) {
             _ = win32.SetConsoleOutputCP(prevWinConsoleOutputCP);
         }
     }
@@ -133,7 +133,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 }
 
 fn exit(code: u8) noreturn {
-    if (builtin.os.tag == .windows) {
+    if (builtin.target.os.tag == .windows) {
         _ = win32.SetConsoleOutputCP(prevWinConsoleOutputCP);
     }
     std.process.exit(code);

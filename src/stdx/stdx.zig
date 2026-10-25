@@ -32,7 +32,7 @@ pub fn ListWriter(comptime List: type) type {
         pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) Error!void {
             const len = std.fmt.count(fmt, args);
             try self.list.ensureUnusedCapacity(self.alloc, len);
-            _ = std.fmt.bufPrint(self.list.unusedCapacitySlice(), fmt, args) catch unreachable;
+            _ = std.mem.print(self.list.unusedCapacitySlice(), fmt, args) catch unreachable;
             self.list.items.len += len;
         }
 
@@ -64,7 +64,7 @@ pub fn listWriter(list: anytype, alloc: std.mem.Allocator) ListWriter(@TypeOf(li
 pub fn getEnvVarOwned(alloc: std.mem.Allocator, key: []const u8) error{ OutOfMemory, EnvironmentVariableNotFound, InvalidWtf8 }![]u8 {
     if (!builtin.link_libc) return error.EnvironmentVariableNotFound;
     var buf: [256]u8 = undefined;
-    const key_z = std.fmt.bufPrintSentinel(&buf, "{s}", .{key}, 0) catch return error.EnvironmentVariableNotFound;
+    const key_z = std.mem.printSentinel(&buf, "{s}", .{key}, 0) catch return error.EnvironmentVariableNotFound;
     const val = std.c.getenv(key_z.ptr) orelse return error.EnvironmentVariableNotFound;
     return alloc.dupe(u8, std.mem.span(val));
 }

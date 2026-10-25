@@ -20,9 +20,9 @@ fn getCyberPath(alloc: std.mem.Allocator) ![]const u8 {
     if (CyberPath.len == 0) {
         const homePath = (try platform.getPath(alloc, .home)) orelse return error.MissingHomeDir;
         defer alloc.free(homePath);
-        std.mem.copyForwards(u8, &S.buf, homePath);
-        S.buf[homePath.len] = std.fs.path.sep;
-        std.mem.copyForwards(u8, S.buf[homePath.len+1..homePath.len+1+CyberDir.len], CyberDir);
+        @memmove(S.buf[0..homePath.len], homePath);
+        S.buf[homePath.len] = std.Io.Dir.path.sep;
+        @memmove(S.buf[homePath.len+1..homePath.len+1+CyberDir.len], CyberDir);
         CyberPath = S.buf[0..homePath.len+1+CyberDir.len];
 
         // Also ensure sub directories exist.
@@ -54,11 +54,11 @@ pub fn saveNewSpecFile(alloc: std.mem.Allocator, specGroup: SpecHashGroup, spec:
     const io = stdx.io();
     const now: u64 = @intCast(std.Io.Timestamp.now(io, .real).toSeconds());
 
-    const filePath = try std.fs.path.join(alloc, &.{cyberPath, cacheSpec});
+    const filePath = try std.Io.Dir.path.join(alloc, &.{cyberPath, cacheSpec});
     defer alloc.free(filePath);
 
     // Ensure path exists.
-    try std.Io.Dir.cwd().createDirPath(io, std.fs.path.dirname(filePath).?);
+    try std.Io.Dir.cwd().createDirPath(io, std.Io.Dir.path.dirname(filePath).?);
 
     const file = try std.Io.Dir.cwd().createFile(io, filePath, .{ .truncate = true, .exclusive = false });
     defer file.close(io);
@@ -69,7 +69,7 @@ pub fn saveNewSpecFile(alloc: std.mem.Allocator, specGroup: SpecHashGroup, spec:
         .cacheDate = now,
     };
 
-    const path = try std.fs.path.join(alloc, &.{cyberPath, EntriesDir, &specGroup.hash});
+    const path = try std.Io.Dir.path.join(alloc, &.{cyberPath, EntriesDir, &specGroup.hash});
     defer alloc.free(path);
 
     // Save spec entries.
@@ -106,7 +106,7 @@ pub fn getSpecHashGroup(alloc: std.mem.Allocator, spec: []const u8) !SpecHashGro
     const cacheSpec = try toCacheSpec(spec);
     const hash = computeSpecHashStr(cacheSpec);
     const cyberPath = try getCyberPath(alloc);
-    const path = try std.fs.path.join(alloc, &.{cyberPath, EntriesDir, &hash});
+    const path = try std.Io.Dir.path.join(alloc, &.{cyberPath, EntriesDir, &hash});
     defer alloc.free(path);
     const entries = readEntryFile(alloc, path) catch |err| {
         switch (err) {
@@ -131,7 +131,7 @@ fn readEntryFile(alloc: std.mem.Allocator, path: []const u8) ![]SpecEntry {
     const content = try std.Io.Dir.cwd().readFileAlloc(stdx.io(), path, alloc, .limited(1e9));
     defer alloc.free(content);
 
-    var entries: std.ArrayListUnmanaged(SpecEntry) = .empty;
+    var entries: std.ArrayList(SpecEntry) = .empty;
     defer entries.deinit(alloc);
 
     var iter = std.mem.tokenizeAny(u8, content, "\r\n");
@@ -145,7 +145,7 @@ fn readEntryFile(alloc: std.mem.Allocator, path: []const u8) ![]SpecEntry {
                 .cacheDate = 0,
             };
             while (bodyIter.next()) |field| {
-                const idx = std.mem.indexOfScalar(u8, field, '=') orelse return error.InvalidEntryFile;
+                const idx = std.mem.findScalar(u8, field, '=') orelse return error.InvalidEntryFile;
                 if (std.mem.eql(u8, field[0..idx], "cacheDate")) {
                     if (entry.cacheDate > 0) {
                         return error.InvalidEntryFile;
@@ -164,12 +164,12 @@ fn readEntryFile(alloc: std.mem.Allocator, path: []const u8) ![]SpecEntry {
 
 pub fn allocSpecFilePath(alloc: std.mem.Allocator, entry: SpecEntry) ![]const u8 {
     const cyberPath = try getCyberPath(alloc);
-    return try std.fs.path.join(alloc, &.{cyberPath, entry.spec});
+    return try std.Io.Dir.path.join(alloc, &.{cyberPath, entry.spec});
 }
 
 pub fn allocSpecFileContents(alloc: std.mem.Allocator, entry: SpecEntry) ![]const u8 {
     const cyberPath = try getCyberPath(alloc);
-    const path = try std.fs.path.join(alloc, &.{cyberPath, entry.spec});
+    const path = try std.Io.Dir.path.join(alloc, &.{cyberPath, entry.spec});
     defer alloc.free(path);
     return std.Io.Dir.cwd().readFileAlloc(stdx.io(), path, alloc, .limited(1e9));
 }

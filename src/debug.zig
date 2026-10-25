@@ -124,7 +124,7 @@ pub fn write_object_alloc_trace(t: *cy.Thread, w: *std.Io.Writer, obj: *cy.HeapO
         type_name = t.heap.getType(typeId).name();
     }
     const valStr = try t.heap.bufPrintValueShortStr(&buf, typeId, cy.Value.initPtr(obj), true);
-    const msg = try std.fmt.bufPrint(buf[valStr.len..], "{*}, type: {s}, rc: {} at t{}@{x} ev={}\nval={s}", .{
+    const msg = try std.mem.print(buf[valStr.len..], "{*}, type: {s}, rc: {} at t{}@{x} ev={}\nval={s}", .{
         obj, type_name, obj.rc(), t.c.id, trace.alloc_ctx, trace.alloc_event, valStr,
     });
     const addr: usize = @intCast(trace.alloc_ctx);
@@ -136,7 +136,7 @@ pub fn write_object_trace(t: *cy.Thread, w: *std.Io.Writer, obj: *cy.HeapObject)
         if (trace.alloc_ctx != 0) {
             const addr: usize = @intCast(trace.alloc_ctx);
             const alloc_pc: *cy.Inst = @ptrFromInt(addr);
-            const msg = try std.fmt.allocPrint(t.alloc, "{*} at pc: {*}({s}), ev={}", .{
+            const msg = try t.alloc.print("{*} at pc: {*}({s}), ev={}", .{
                 obj, alloc_pc, @tagName(alloc_pc.*.opcode()), trace.alloc_event,
             });
             defer t.alloc.free(msg);
@@ -149,7 +149,7 @@ pub fn write_object_trace(t: *cy.Thread, w: *std.Io.Writer, obj: *cy.HeapObject)
             if (free_pc != 0) {
                 const addr: usize = @intCast(free_pc);
                 const free_pc_: *cy.Inst = @ptrFromInt(addr);
-                const msg = try std.fmt.allocPrint(t.alloc, "{}({s}) at pc: {}({s}), ev={}", .{
+                const msg = try t.alloc.print("{}({s}) at pc: {}({s}), ev={}", .{
                     trace.free_type.?, t.heap.getType(trace.free_type.?).name(),
                     free_pc, @tagName(free_pc_.*.opcode()), trace.free_event,
                 });
@@ -325,7 +325,7 @@ pub fn writeUserErrorTrace2(c: *const cy.Compiler, w: *std.Io.Writer, chunk_id: 
             const start_pos = node.pos();
             chunk.ast.computeLinePos(start_pos, &line, &col, &line_pos);
 
-            const line_end = std.mem.indexOfScalarPos(u8, chunk.src, line_pos, '\n') orelse chunk.src.len;
+            const line_end = std.mem.findScalarPos(u8, chunk.src, line_pos, '\n') orelse chunk.src.len;
             var end_pos = node.end();
             if (end_pos > line_end) {
                 end_pos = @intCast(line_end);
@@ -367,7 +367,7 @@ pub fn write_user_error_trace2(w: *std.Io.Writer, ast_view: ast.AstView, src_uri
         var line_pos: u32 = undefined;
         ast_view.computeLinePos(pos, &line, &col, &line_pos);
 
-        const line_end = std.mem.indexOfScalarPos(u8, ast_view.src, line_pos, '\n') orelse ast_view.src.len;
+        const line_end = std.mem.findScalarPos(u8, ast_view.src, line_pos, '\n') orelse ast_view.src.len;
 
         try fmt.format(w,
             \\{}:{}:{}:
@@ -399,7 +399,7 @@ pub fn writeUserErrorTrace(c: *const cy.Compiler, w: *std.Io.Writer, chunk_id: u
 }
 
 pub fn allocPanicMsg(t: *cy.Thread) ![]const u8 {
-    switch (@as(cy.thread.PanicType, @enumFromInt(t.c.panic_type))) {
+    switch (@as(cy.thread.PanicType, @fromBackingInt(@intCast(t.c.panic_type)))) {
         .err => {
             var w = std.Io.Writer.fixed(@as([]u8, @ptrCast(&cy.tempBuf)));
             _ = try t.heap.writeValue(&w, bt.Error, .{ .val = t.c.panic_payload }, false);
@@ -461,7 +461,7 @@ pub fn writeStackFrames(vm: *const cy.VM, w: *std.Io.Writer, frames: []const C.S
         if (frame.chunk != cy.NullId) {
             const chunk = vm.compiler.chunks.items[frame.chunk];
             if (frame.line_pos != cy.NullId) {
-                const lineEnd = std.mem.indexOfScalarPos(u8, chunk.src, frame.line_pos, '\n') orelse chunk.src.len;
+                const lineEnd = std.mem.findScalarPos(u8, chunk.src, frame.line_pos, '\n') orelse chunk.src.len;
                 try fmt.format(w,
                     \\{}:{}:{} {}:
                     \\{}
@@ -559,7 +559,7 @@ fn getStackFrame(vm: *cy.VM, sym: cy.DebugSym) !C.StackFrame {
         if (func.func) |sema_func| {
             if (sema_func.type != .userLambda and sema_func.parent.parent.?.type != .chunk) {
                 const parent = sema_func.parent.parent.?;
-                name = try std.fmt.allocPrint(vm.alloc, "{s}.{s}", .{parent.name(), sema_func.name()});
+                name = try vm.alloc.print("{s}.{s}", .{parent.name(), sema_func.name()});
             } else {
                 var buf: [256]u8 = undefined;
                 var w = std.Io.Writer.fixed(&buf);
@@ -671,7 +671,7 @@ pub fn dumpBytecode(vm: *cy.VM, opts: DumpBytecodeOptions) !void {
         var instIdx: u32 = 0;
 
         // Build func pc map.
-        var funcs: std.AutoHashMapUnmanaged(*anyopaque, *cy.Func) = .{};
+        var funcs: std.AutoHashMapUnmanaged(*anyopaque, *cy.Func) = .empty;
         defer funcs.deinit(vm.alloc);
         var iter = c.buf.markers.iterator();
         while (iter.next()) |e| {
@@ -798,7 +798,7 @@ pub fn write_value_desc(vm: *cy.VM, w: *std.Io.Writer, val_t: cy.TypeId, val: *c
     }
 }
 
-const EnableTimerTrace = builtin.os.tag != .freestanding and builtin.mode == .debug;
+const EnableTimerTrace = builtin.target.os.tag != .freestanding and builtin.mode == .debug;
 
 const TimerTrace = struct {
     timer: if (EnableTimerTrace) stdx.time.Timer else void,

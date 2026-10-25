@@ -395,7 +395,7 @@ pub fn throw(vm: *cy.VM, endFp: u32, ctx: PcFpOff, err: Value) !PcFpOff {
 }
 
 pub fn freeFiberPanic(vm: *const cy.VM, fiber: *vmc.Fiber) void {
-    const panicT: PanicType = @enumFromInt(fiber.panicType);
+    const panicT: PanicType = @fromBackingInt(@intCast(fiber.panicType));
     if (panicT == .msg) {
         const ptr: usize = @intCast(fiber.panicPayload & ((1 << 48) - 1));
         const len: usize = @intCast(fiber.panicPayload >> 48);

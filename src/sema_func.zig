@@ -1142,7 +1142,7 @@ fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template
 
     if (param_t.is_generic()) {
         var buf: [2]u8 = undefined;
-        const anonymous_name = try std.fmt.bufPrint(&buf, "{}", .{param_idx});
+        const anonymous_name = try std.mem.print(&buf, "{}", .{param_idx});
         const idx = template.indexOfParam(anonymous_name).?;
         try template_ctx.initCtParam2(c.alloc, template.params[idx].name, c.sema.type_t, Value.initPtr(res.type));
         if (!try sema_type.implements(c, res.type, param.get_type().cast(.generic_trait), arg.node)) {

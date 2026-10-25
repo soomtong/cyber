@@ -409,7 +409,7 @@ pub fn printStdoutOrErr(fmt: []const u8, vals: []const FmtValue) !void {
     defer printMutex.unlock(stdx.io());
     const w = std.io.getStdOut().writer();
     if (builtin.is_test) {
-        if (@intFromEnum(std.log.Level.debug) <= @intFromEnum(std.testing.log_level)) {
+        if (@backingInt(std.log.Level.debug) <= @backingInt(std.testing.log_level)) {
             try format(w, fmt, vals);
         }
     } else {

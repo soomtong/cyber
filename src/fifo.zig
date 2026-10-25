@@ -88,7 +88,7 @@ pub fn LinearFifo(
 
         pub fn realign(self: *Self) void {
             if (self.buf.len - self.head >= self.count) {
-                mem.copyForwards(T, self.buf[0..self.count], self.buf[self.head..][0..self.count]);
+                @memmove(self.buf[0..self.count], self.buf[self.head..][0..self.count]);
                 self.head = 0;
             } else {
                 var tmp: [4096 / 2 / @sizeOf(T)]T = undefined;
@@ -97,7 +97,7 @@ pub fn LinearFifo(
                     const n = @min(self.head, tmp.len);
                     const m = self.buf.len - n;
                     @memcpy(tmp[0..n], self.buf[0..n]);
-                    mem.copyForwards(T, self.buf[0..m], self.buf[n..][0..m]);
+                    @memmove(self.buf[0..m], self.buf[n..][0..m]);
                     @memcpy(self.buf[m..][0..n], tmp[0..n]);
                     self.head -= n;
                 }

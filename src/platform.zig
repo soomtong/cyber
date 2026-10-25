@@ -48,7 +48,7 @@ pub fn open(allocator: std.mem.Allocator, folder: KnownFolder, args: std.Io.Dir.
 /// Returns the path to the folder or, if the folder does not exist, `null`.
 pub fn getPath(allocator: std.mem.Allocator, folder: KnownFolder) Error!?[]const u8 {
     if (folder == .executable_dir) {
-        if (builtin.os.tag == .wasi) return null;
+        if (builtin.target.os.tag == .wasi) return null;
         return std.process.executableDirPathAlloc(stdx.io(), allocator) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => null,
@@ -59,7 +59,7 @@ pub fn getPath(allocator: std.mem.Allocator, folder: KnownFolder) Error!?[]const
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    switch (builtin.os.tag) {
+    switch (builtin.target.os.tag) {
         .windows => {
             const funcs = struct {
                 extern "shell32" fn SHGetKnownFolderPath(
@@ -103,7 +103,7 @@ pub fn getPath(allocator: std.mem.Allocator, folder: KnownFolder) Error!?[]const
                             error.InvalidWtf8 => return null,
                             error.OutOfMemory => |e| return e,
                         };
-                        return try std.fs.path.join(allocator, &[_][]const u8{ root_path, sub_dir });
+                        return try std.Io.Dir.path.join(allocator, &[_][]const u8{ root_path, sub_dir });
                     } else {
                         return stdx.getEnvVarOwned(allocator, env_path.env_var) catch |err| switch (err) {
                             error.EnvironmentVariableNotFound => return null,
@@ -127,7 +127,7 @@ pub fn getPath(allocator: std.mem.Allocator, folder: KnownFolder) Error!?[]const
                     const home_dir = stdx.getEnvVarOwned(arena.allocator(), "HOME") catch return null;
 
                     if (s) |suffix| {
-                        return try std.fs.path.join(allocator, &[_][]const u8{ home_dir, suffix });
+                        return try std.Io.Dir.path.join(allocator, &[_][]const u8{ home_dir, suffix });
                     } else {
                         return try allocator.dupe(u8, home_dir);
                     }

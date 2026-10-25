@@ -104,7 +104,7 @@ pub fn bindCore(self: *cy.VM) !void {
 
 fn ensureSymbol(vm: *cy.VM, name: []const u8, sym: Symbol) !void {
     const id = try vm.sema.ensureSymbol(name);
-    std.debug.assert(id == @intFromEnum(sym));
+    std.debug.assert(id == @backingInt(sym));
 }
 
 // Keep as reference in case resume should be a function call.

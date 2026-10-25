@@ -560,7 +560,7 @@ fn is32Bit(target_: std.Target) bool {
 }
 
 inline fn thisDir() []const u8 {
-    return comptime std.fs.path.dirname(@src().file) orelse ".";
+    return comptime std.Io.Dir.path.dirname(@src().file) orelse ".";
 }
 
 /// Prints `str` to stdout. Zig 0.17 has no custom build steps, so a small host program does the printing.

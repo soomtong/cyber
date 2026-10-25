@@ -232,7 +232,7 @@ pub fn _parser_comments(t: *cy.Thread) anyerror!C.Ret {
 
     const buffer_t: cy.TypeId = @intCast(t.param(i64));
 
-    var args: std.ArrayListUnmanaged(Comment) = .empty;
+    var args: std.ArrayList(Comment) = .empty;
     defer args.deinit(t.alloc);
 
     for (parser.ast.comments.items) |comment| {
@@ -278,7 +278,7 @@ pub fn parse(t: *cy.Thread) anyerror!C.Ret {
 
 const ParseCyberState = struct {
     comments: []const cy.IndexSlice(u32),
-    sb: std.ArrayListUnmanaged(u8),
+    sb: std.ArrayList(u8),
     commentIdx: u32,
     pos: u32,
     node: *ast.Node,
@@ -286,7 +286,7 @@ const ParseCyberState = struct {
 
 fn genTypeSpecString(vm: *cy.VM, view: ast.AstView, opt_expr: ?*ast.Node) !cy.Value {
     if (opt_expr) |expr| {
-        var sb: std.ArrayListUnmanaged(u8) = .empty;
+        var sb: std.ArrayList(u8) = .empty;
         defer sb.deinit(vm.alloc);
 
         var enc = ast.Encoder{ .ast = view };

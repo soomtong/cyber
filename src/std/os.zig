@@ -11,7 +11,7 @@ const Symbol = bindings.Symbol;
 // const ffi = @import("os_ffi.zig");
 const http = @import("../http.zig");
 const cache = @import("../cache.zig");
-const is_wasm = builtin.cpu.arch.isWasm();
+const is_wasm = builtin.target.cpu.arch.isWasm();
 
 const log = std.log.scoped(.os);
 
@@ -97,7 +97,7 @@ fn _args(t: *C.Thread) !C.Ret {
 
     const alloc = C.thread_allocator(t);
 
-    var args: std.ArrayListUnmanaged(C.str) = .empty;
+    var args: std.ArrayList(C.str) = .empty;
     defer {
         for (args.items) |*arg| {
             C.str_deinit(t, arg);
@@ -193,7 +193,7 @@ pub fn exec(t: *C.Thread) anyerror!C.Ret {
     const ret = C.thread_ret(t, ExecResult);
     const args_slice = C.thread_slice(t);
     const args = C.slice_items(args_slice, C.str);
-    var buf: std.ArrayListUnmanaged([]const u8) = .empty;
+    var buf: std.ArrayList([]const u8) = .empty;
     defer {
         buf.deinit(alloc);
     }
@@ -246,7 +246,7 @@ pub fn fetchUrl(t: *C.Thread) anyerror!C.Ret {
 extern fn hostFetchUrl(url: [*]const u8, urlLen: usize) void;
 
 pub fn dlopen(path: []const u8) !dynlib.DynLib {
-    if (builtin.os.tag == .linux and builtin.link_libc) {
+    if (builtin.target.os.tag == .linux and builtin.link_libc) {
         const path_c = try std.posix.toPosixPath(path);
         // Place the lookup scope of the symbols in this library ahead of the global scope.
         const RTLD_DEEPBIND = 0x00008;

@@ -4,7 +4,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const win32 = @import("win32.zig");
 
-pub const DynLib = if (builtin.os.tag == .windows) WindowsDynLib else std.DynLib;
+pub const DynLib = if (builtin.target.os.tag == .windows) WindowsDynLib else std.DynLib;
 
 pub const WindowsDynLib = struct {
     handle: std.os.windows.HMODULE,

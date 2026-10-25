@@ -81,8 +81,8 @@ pub fn genAll(c: *cy.Compiler) !void {
     }
 
     // Register intrinsics.
-    c.sema.str_t.dtor.?.info.gen_intrinsic = @intFromEnum(Intrinsic.dtor_str);
-    (try sema.getEqFunc(c.main_chunk, c.sema.str_t, null)).info.gen_intrinsic = @intFromEnum(Intrinsic.cmp_str);
+    c.sema.str_t.dtor.?.info.gen_intrinsic = @backingInt(Intrinsic.dtor_str);
+    (try sema.getEqFunc(c.main_chunk, c.sema.str_t, null)).info.gen_intrinsic = @backingInt(Intrinsic.cmp_str);
 
     for (c.newChunks()) |chunk| {
         log.tracev("prep chunk", .{});
@@ -754,7 +754,7 @@ fn gen_addr_global(c: *Chunk, global: *cy.Sym, cstr: Cstr, node: *ast.Node) !Gen
     const dst = try selectReg(c, c.sema.ptr_void_t, cstr, node);
     if (cy.Trace) {
         var buf: [128]u8 = undefined;
-        const label = try std.fmt.bufPrint(&buf, "&global {s}", .{global.name()});
+        const label = try std.mem.print(&buf, "&global {s}", .{global.name()});
         try genNopLabel2(c, label, node);
     }
     const pc = c.buf.len();
@@ -1374,7 +1374,7 @@ fn gen_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenValue {
     log.tracev("call {s}", .{expr.func.name()});
 
     if (expr.func.info.gen_intrinsic > 0) {
-        return genCallIntrinsic(c, expr, cstr, @enumFromInt(expr.func.info.gen_intrinsic), node);
+        return genCallIntrinsic(c, expr, cstr, @fromBackingInt(@intCast(expr.func.info.gen_intrinsic)), node);
     }
 
     const ret_t = expr.base.type;
@@ -1889,7 +1889,7 @@ fn reserve_reg(c: *Chunk, local_t: *cy.Type) !Reg {
         c.cur_proc.num_ptr_locals += 1;
         // Dump where ptr regs are reserved on the stack.
         // if (cy.Trace) {
-        //     const buf = try std.fmt.allocPrint(c.alloc, "ptr reg {}", .{reg});
+        //     const buf = try c.alloc.print("ptr reg {}", .{reg});
         //     defer c.alloc.free(buf);
         //     try genNopLabel2(c, buf, c.ast.null_node);
         // }

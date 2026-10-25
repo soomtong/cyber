@@ -102,5 +102,5 @@ pub fn buildAndLink(b: *std.Build, mod: *std.Build.Module, opts: BuildOptions) !
 }
 
 inline fn thisDir() []const u8 {
-    return comptime std.fs.path.dirname(@src().file) orelse @panic("error");
+    return comptime std.Io.Dir.path.dirname(@src().file) orelse @panic("error");
 }

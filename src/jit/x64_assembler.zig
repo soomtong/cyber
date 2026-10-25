@@ -446,7 +446,7 @@ fn push_call_host_windows3(buf: *CodeBuffer, ptr: *const anyopaque, a: Value, b:
 }
 
 pub fn gen_log(buf: *gen.CodeBuffer, msg: []const u8) !void {
-    if (builtin.os.tag == .windows) {
+    if (builtin.target.os.tag == .windows) {
         try push_call_host_windows3(buf, cy.vm.z_log, .{.reg=toReg(.thread)}, .{.constant=@intFromPtr(msg.ptr)}, .{.constant=@intCast(msg.len)});
     } else {
         @panic("TODO");

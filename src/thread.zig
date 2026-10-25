@@ -128,7 +128,7 @@ pub fn freeHeapPages(t: *cy.Thread) !FreeHeapResult {
                     if (t.heap.checkDoubleFree(obj)) {
                         var buf: [128]u8 = undefined;
                         const pc: [*]cy.Inst = @ptrFromInt(@as(usize, @intCast(t.heap.c.ctx)));
-                        const msg = std.fmt.bufPrint(&buf, "{*} at pc: {}({s})", .{
+                        const msg = std.mem.print(&buf, "{*} at pc: {}({s})", .{
                             obj, t.heap.c.ctx, @tagName(pc[0].opcode()),
                         }) catch @panic("error");
 
@@ -276,7 +276,7 @@ pub const Thread = struct {
 
             // var iter = cy.vm.traceObjRetains.iterator();
             // while (iter.next()) |e| {
-            //     const msg = std.fmt.bufPrint(&cy.tempBuf, "pc={} retains={}", .{e.key_ptr.*, e.value_ptr.*}) catch cy.fatal();
+            //     const msg = std.mem.print(&cy.tempBuf, "pc={} retains={}", .{e.key_ptr.*, e.value_ptr.*}) catch cy.fatal();
             //     cy.debug.printTraceAtPc(vm, e.key_ptr.*, "retain", msg) catch cy.fatal();
             // }
 
@@ -748,7 +748,7 @@ pub const Thread = struct {
     }
 
     pub fn free_panic(self: *const Thread) void {
-        const panicT: PanicType = @enumFromInt(self.c.panic_type);
+        const panicT: PanicType = @fromBackingInt(@intCast(self.c.panic_type));
         if (panicT == .msg) {
             const ptr: usize = @intCast(self.c.panic_payload & ((1 << 48) - 1));
             const len: usize = @intCast(self.c.panic_payload >> 48);
@@ -1001,7 +1001,7 @@ pub const Thread = struct {
     }
 
     pub fn log(self: *cy.Thread, comptime format: []const u8, args: anytype) void {
-        const msg = std.fmt.allocPrint(self.alloc, format, args) catch @panic("error");
+        const msg = self.alloc.print(format, args) catch @panic("error");
         defer self.alloc.free(msg);
         self.c.vm.log(msg);
     }
@@ -1217,7 +1217,7 @@ pub fn print_thread_inst(t: *cy.Thread, pc: [*]const cy.Inst) !void {
 
 pub fn write_thread_inst(t: *cy.Thread, w: *std.Io.Writer, pc: [*]const cy.Inst) !void {
     var buf: [16]u8 = undefined;
-    const prefix = try std.fmt.bufPrint(&buf, "t{}", .{t.c.id});
+    const prefix = try std.mem.print(&buf, "t{}", .{t.c.id});
     try cy.bytecode.write_inst(t.c.vm, w, pc[0].opcode(), null, null, pc, .{
         .prefix = prefix,
         .extra = null,

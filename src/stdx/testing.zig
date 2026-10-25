@@ -47,7 +47,7 @@ pub fn eqApproxDec(exp: anytype, act: @TypeOf(exp), tolerance: @TypeOf(exp)) !vo
 
 pub fn eqUnionEnum(act: anytype, exp: @EnumLiteral()) !void {
     if (@typeInfo(@TypeOf(act)) == .Union) {
-        try eq(@intFromEnum(act), @intFromEnum(@as(@typeInfo(@TypeOf(act)).Union.tag_type.?, exp)));
+        try eq(@backingInt(act), @backingInt(@as(@typeInfo(@TypeOf(act)).Union.tag_type.?, exp)));
     } else {
         unreachable;
     }

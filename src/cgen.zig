@@ -168,10 +168,10 @@ pub const Compiler = struct {
         var new_name: []const u8 = undefined;
         const res = try c.c_names.getOrPut(c.alloc, sym_name);
         if (res.found_existing) {
-            new_name = try std.fmt.allocPrint(c.alloc, "{s}_{}", .{ name_n, res.value_ptr.* });
+            new_name = try c.alloc.print("{s}_{}", .{ name_n, res.value_ptr.* });
             res.value_ptr.* += 1;
         } else {
-            new_name = try std.fmt.allocPrint(c.alloc, "{s}_0", .{name_n});
+            new_name = try c.alloc.print("{s}_0", .{name_n});
             res.value_ptr.* = 1;
         }
         dst.* = .{
@@ -199,13 +199,13 @@ pub const Compiler = struct {
 
 fn normalizeSymName(buf: []u8, name: []const u8) ![]const u8 {
     const ReplaceChars = "&|%^*/+-<>=~";
-    if (std.mem.indexOfAny(u8, name, ReplaceChars)) |idx| {
+    if (std.mem.findAny(u8, name, ReplaceChars)) |idx| {
         // Normalize to C name.
         var w: std.Io.Writer = .fixed(buf);
         try w.print("{s}{s}", .{ name[0..idx], normalizeChar(name[idx]) });
 
         var rest = name[idx + 1 ..];
-        while (std.mem.indexOfAny(u8, rest, ReplaceChars)) |idx2| {
+        while (std.mem.findAny(u8, rest, ReplaceChars)) |idx2| {
             try w.print("{s}{s}", .{ rest[0..idx2], normalizeChar(rest[idx2]) });
             rest = rest[idx2 + 1 ..];
         }
@@ -257,10 +257,10 @@ pub const Chunk = struct {
     alloc: std.mem.Allocator,
     ir: *cy.ir.Buffer,
     encoder: cy.ast.Encoder,
-    out: std.ArrayListUnmanaged(u8),
-    outw: stdx.ListWriter(std.ArrayListUnmanaged(u8)),
-    buf: std.ArrayListUnmanaged(u8),
-    bufw: stdx.ListWriter(std.ArrayListUnmanaged(u8)),
+    out: std.ArrayList(u8),
+    outw: stdx.ListWriter(std.ArrayList(u8)),
+    buf: std.ArrayList(u8),
+    bufw: stdx.ListWriter(std.ArrayList(u8)),
     proc: Proc,
 
     /// Alias for `compiler.syms`. Assumes all needed syms are registered by compiler.
@@ -437,8 +437,8 @@ const ProcType = enum {
 const Proc = struct {
     type: ProcType = .main,
 
-    var_names: std.StringHashMapUnmanaged(u32) = .{},
-    locals: std.ArrayListUnmanaged(Local) = .empty,
+    var_names: std.StringHashMapUnmanaged(u32) = .empty,
+    locals: std.ArrayList(Local) = .empty,
 
     resetVerboseOnEnd: bool = false,
 
@@ -518,7 +518,7 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
         .base = self,
         .alloc = self.alloc,
         .syms = .empty,
-        .c_names = .{},
+        .c_names = .empty,
         .vtables = .empty,
         .next_vtable_id = 0,
     };
@@ -534,7 +534,7 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
                     // e.g. "/a/b/c/d.cy" is reduced to "d"
                     var name = chunk.sym.head.name();
                     if (name[0] == '/') {
-                        name = std.fs.path.stem(name);
+                        name = std.Io.Dir.path.stem(name);
                     }
                     try compiler.createSym(sym, name);
                 },
@@ -647,7 +647,7 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
     }
 
     // Generate head at the end since it relies on chunk passes.
-    var head: std.ArrayListUnmanaged(u8) = .empty;
+    var head: std.ArrayList(u8) = .empty;
     const headw = stdx.listWriter(&head, self.alloc);
     try genHeader(&compiler, headw, chunks);
     defer head.deinit(self.alloc);
@@ -673,8 +673,8 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
         }
     };
 
-    const outName = std.fs.path.basename(self.chunks.items[0].srcUri);
-    const outPath = try std.fmt.allocPrintSentinel(self.alloc, "out/{s}.c", .{outName}, 0);
+    const outName = std.Io.Dir.path.basename(self.chunks.items[0].srcUri);
+    const outPath = try self.alloc.printSentinel("out/{s}.c", .{outName}, 0);
     defer self.alloc.free(outPath);
 
     const outFile = try std.Io.Dir.cwd().createFile(io, outPath, .{ .truncate = true });
@@ -691,11 +691,11 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
     try genFooter(&compiler, w, chunks);
 
     var exePath: [:0]const u8 = undefined;
-    const stemName = std.fs.path.stem(outName);
-    if (builtin.os.tag == .windows) {
-        exePath = try std.fmt.allocPrintSentinel(self.alloc, "out/{s}.exe", .{stemName}, 0);
+    const stemName = std.Io.Dir.path.stem(outName);
+    if (builtin.target.os.tag == .windows) {
+        exePath = try self.alloc.printSentinel("out/{s}.exe", .{stemName}, 0);
     } else {
-        exePath = try std.fmt.allocPrintSentinel(self.alloc, "out/{s}", .{stemName}, 0);
+        exePath = try self.alloc.printSentinel("out/{s}", .{stemName}, 0);
     }
     errdefer self.alloc.free(exePath);
 
@@ -719,7 +719,7 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
         //     return error.TCCError;
         // }
 
-        if (builtin.os.tag == .macos) {
+        if (builtin.target.os.tag == .macos) {
             if (tcc.tcc_add_include_path(state, "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include") == -1) {
                 return error.TCCError;
             }
@@ -756,7 +756,7 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
             return error.TCCError;
         }
     } else {
-        var args: std.ArrayListUnmanaged([]const u8) = .empty;
+        var args: std.ArrayList([]const u8) = .empty;
         defer args.deinit(self.alloc);
 
         try args.appendSlice(self.alloc, &.{"cc", "-o", exePath, outPath});
@@ -993,7 +993,7 @@ fn genHeader(self: *Compiler, w: anytype, chunks: []Chunk) !void {
                 } else {
                     try w.writeAll(", NULL");
                 }
-                try w.print(", {} }}, // id={}\n", .{@intFromEnum(type_.kind()), type_.id()});
+                try w.print(", {} }}, // id={}\n", .{@backingInt(type_.kind()), type_.id()});
                 continue;
             }
         }
@@ -1742,10 +1742,10 @@ fn allocLocalName(c: *Chunk, name: []const u8) ![]const u8 {
     const res = try c.proc.var_names.getOrPut(c.alloc, name);
     if (res.found_existing) {
         res.value_ptr.* += 1;
-        return std.fmt.allocPrint(c.alloc, "v_{s}_{}", .{name, res.value_ptr.*});
+        return c.alloc.print("v_{s}_{}", .{name, res.value_ptr.*});
     } else {
         res.value_ptr.* = 1;
-        return std.fmt.allocPrint(c.alloc, "v_{s}_0", .{name});
+        return c.alloc.print("v_{s}_0", .{name});
     }
 }
 
@@ -2281,7 +2281,7 @@ pub fn genVmToExternFunc(c: *Chunk, w: anytype, func: *cy.Func, call_func: *cy.F
         switch (param.get_type().kind()) {
             // .struct_t => |struct_t| {
             //     try w.print("  ", .{});
-            //     const arg_name = try std.fmt.bufPrint(&buf, "arg_{}", .{i});
+            //     const arg_name = try std.mem.print(&buf, "arg_{}", .{i});
             //     try writeNamedCType(w, param, arg_name);
             //     try w.print(";\n", .{});
             //     try w.print("  Value* src_{} = (Value*)(cy_get_value(vm, {}) & ~PointerMask) + 1;\n", .{i, i});
@@ -2292,7 +2292,7 @@ pub fn genVmToExternFunc(c: *Chunk, w: anytype, func: *cy.Func, call_func: *cy.F
             //     const elemName = try fmtBaseTypeName(&cy.tempBuf, elem);
 
             //     try w.print("  ", .{});
-            //     const arg_name = try std.fmt.bufPrint(&buf, "arg_{}", .{i});
+            //     const arg_name = try std.mem.print(&buf, "arg_{}", .{i});
             //     try writeNamedCType(w, param, arg_name);
             //     try w.print(";\n", .{});
 
@@ -2304,7 +2304,7 @@ pub fn genVmToExternFunc(c: *Chunk, w: anytype, func: *cy.Func, call_func: *cy.F
             //     try w.print("  ", .{});
             //     try writeCType(w, param);
             //     try w.print(" arg_{} = ", .{i});
-            //     const param_val = try std.fmt.bufPrint(&buf, "param_{}", .{i});
+            //     const param_val = try std.mem.print(&buf, "param_{}", .{i});
             //     try writeToCValue(w, param_val, param, false);
             //     try w.print(";\n", .{});
             // },
@@ -3075,13 +3075,13 @@ pub fn cStringLit(self: *Chunk, raw: []const u8) ![]const u8 {
 
     // Escape to C literal.
     const ReplaceChars = "\\\"";
-    if (std.mem.indexOfAny(u8, raw, ReplaceChars)) |idx| {
+    if (std.mem.findAny(u8, raw, ReplaceChars)) |idx| {
         var w: std.Io.Writer = .fixed(self.base.tempBufU8.items[0..]);
         try w.writeAll(raw[0..idx]);
         try writeEscapedChar(&w, raw[idx]);
 
         var rest = raw[idx + 1 ..];
-        while (std.mem.indexOfAny(u8, rest, ReplaceChars)) |idx2| {
+        while (std.mem.findAny(u8, rest, ReplaceChars)) |idx2| {
             try w.writeAll(rest[0..idx2]);
             try writeEscapedChar(&w, rest[idx2]);
             rest = rest[idx2+1..];

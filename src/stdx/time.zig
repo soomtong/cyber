@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const stdx = @import("stdx.zig");
 
 const time_wasm = @import("time_wasm.zig");
-const IsWasm = builtin.target.cpu.arch.isWasm() and builtin.os.tag != .wasi;
+const IsWasm = builtin.target.cpu.arch.isWasm() and builtin.target.os.tag != .wasi;
 
 pub const Timer = if (IsWasm) time_wasm.Timer else NativeTimer;
 

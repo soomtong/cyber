@@ -20,7 +20,7 @@ export fn clInitWeb(vm: *cy.VM) void {
     const ctx = vm.alloc.create(WebContext) catch @panic("error");
     ctx.* = .{
         .next_id = 1,
-        .futures = .{},
+        .futures = .empty,
     };
     vm.data.put(vm.alloc, "web", ctx) catch @panic("error");
 }

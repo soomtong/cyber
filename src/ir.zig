@@ -805,12 +805,12 @@ pub const Buffer = struct {
     alloc: std.mem.Allocator,
 
     /// Used to store strings.
-    buf: std.ArrayListUnmanaged(u8),
+    buf: std.ArrayList(u8),
 
-    stmtBlockStack: std.ArrayListUnmanaged(StmtBlock),
+    stmtBlockStack: std.ArrayList(StmtBlock),
 
     /// Main and func blocks.
-    func_blocks: std.ArrayListUnmanaged(*Stmt),
+    func_blocks: std.ArrayList(*Stmt),
 
     pub fn init(self: *Buffer, alloc: std.mem.Allocator) void {
         self.* = .{

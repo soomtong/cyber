@@ -56,7 +56,7 @@ pub fn scoped(comptime Scope: @EnumLiteral()) type {
         inline fn fmt(comptime prefix: []const u8, comptime format: []const u8, args: anytype) []const u8 {
             const len: usize = @intCast(std.fmt.count(prefix ++ format, args));
             if (len <= small_buf.len) {
-                return std.fmt.bufPrint(&small_buf, prefix ++ format, args) catch @panic("error");
+                return std.mem.print(&small_buf, prefix ++ format, args) catch @panic("error");
             } else {
                 // TODO: Instead of building buffer, write to wasm.
                 @panic("log too big");

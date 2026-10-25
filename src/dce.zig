@@ -20,7 +20,7 @@ pub fn performDCE(c: *cy.Compiler) !void {
     // Visit from main and re-enable used functions.
     const Context = struct {
         alloc: std.mem.Allocator,
-        stack: std.ArrayListUnmanaged(*ir.Stmt),
+        stack: std.ArrayList(*ir.Stmt),
     };
     const S = struct {
         fn visitStmt(ctx: *ir.VisitContext, stmt: *ir.Stmt) !bool {

@@ -17,7 +17,7 @@ const VMrunner = setup.VMrunner;
 const Config = setup.Config;
 const eqUserError = setup.eqUserError;
 const EvalResult = setup.EvalResult;
-const is_wasm = builtin.cpu.arch.isWasm();
+const is_wasm = builtin.target.cpu.arch.isWasm();
 
 const Case = struct {
     config: Config,
@@ -25,7 +25,7 @@ const Case = struct {
 };
 
 const Runner = struct {
-    cases: std.ArrayListUnmanaged(Case),
+    cases: std.ArrayList(Case),
 
     fn case(s: *Runner, path: []const u8) void {
         s.case2(.{ .uri = path });
@@ -262,10 +262,10 @@ if (!aot) {
     run.case("modules/test_eq_panic.cy");
     run.case("modules/test.cy");
     if (!is_wasm) {
-        if (builtin.os.tag != .windows) {
+        if (builtin.target.os.tag != .windows) {
             run.case("modules/libc.cy");
         }
-        if (builtin.abi != .msvc) {
+        if (builtin.target.abi != .msvc) {
             run.case("modules/os.cy");
         }
         // run.case("modules/io.cy");
@@ -427,7 +427,7 @@ test "Tests." {
     defer std.debug.print("Tests passed: {}/{}, skipped: {}\n", .{numPassed, run.cases.items.len, skipped});
     for (run.cases.items) |run_case| {
         if (caseFilter) |filter| {
-            if (std.mem.indexOf(u8, run_case.config.uri, filter) == null) {
+            if (std.mem.find(u8, run_case.config.uri, filter) == null) {
                 continue;
             }
         }
@@ -494,7 +494,7 @@ fn compileCase(path: []const u8) !void {
 }
 
 test "FFI." {
-    if (is_wasm or builtin.abi == .msvc) {
+    if (is_wasm or builtin.target.abi == .msvc) {
         return;
     }
 
@@ -579,7 +579,7 @@ fn seekCommentEnd(str: []const u8, start: usize) usize {
     while (true) {
         if (str[idx..].len >= 3 and str[idx] == '\n' and str[idx+1] == '-' and str[idx+2] == '-') {
             idx += 1;
-            if (std.mem.indexOfScalarPos(u8, str, idx, '\n')) |nl| {
+            if (std.mem.findScalarPos(u8, str, idx, '\n')) |nl| {
                 idx = nl;
             } else {
                 idx = str.len;
@@ -595,7 +595,7 @@ fn case2(config: Config) !void {
     var contents: []const u8 = undefined;
     var final_path: []const u8 = undefined;
     if (config.chdir) |chdir| {
-        const path = try std.fmt.allocPrint(t.alloc, "{s}/{s}", .{chdir, config.uri});
+        const path = try t.alloc.print("{s}/{s}", .{chdir, config.uri});
         defer t.alloc.free(path);
         contents = try std.Io.Dir.cwd().readFileAlloc(stdx.io(), path, t.alloc, .limited(1e9));
         final_path = try t.alloc.dupe(u8, config.uri);
@@ -606,12 +606,12 @@ fn case2(config: Config) !void {
     defer t.alloc.free(final_path);
     defer t.alloc.free(contents);
 
-    var idx = std.mem.indexOf(u8, contents, "cytest:") orelse {
+    var idx = std.mem.find(u8, contents, "cytest:") orelse {
         return error.MissingTestDefinition;
     };
 
     var rest = contents[idx+7..];
-    idx = std.mem.indexOfScalar(u8, rest, '\n') orelse rest.len;
+    idx = std.mem.findScalar(u8, rest, '\n') orelse rest.len;
     const test_t = std.mem.trim(u8, rest[0..idx], " ");
 
     if (std.mem.eql(u8, test_t, "error")) {
@@ -648,7 +648,7 @@ fn case2(config: Config) !void {
         const backend = setup.fromTestBackend(test_config.test_backend);
         const aot = isAot(backend);
 
-        const trace_idx = std.mem.indexOf(u8, buf[0..len], "[trace]") orelse {
+        const trace_idx = std.mem.find(u8, buf[0..len], "[trace]") orelse {
             return error.MissingExpectedTrace;
         };
         if (!aot) {

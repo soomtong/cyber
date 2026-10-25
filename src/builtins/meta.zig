@@ -17,8 +17,8 @@ const ast = cy.ast;
 const cte = cy.cte;
 const Value = cy.Value;
 const TypeValue = cy.TypeValue;
-const is_wasm = builtin.cpu.arch.isWasm();
-const is_wasm_freestanding = is_wasm and builtin.os.tag == .freestanding;
+const is_wasm = builtin.target.cpu.arch.isWasm();
+const is_wasm_freestanding = is_wasm and builtin.target.os.tag == .freestanding;
 
 const Src = @embedFile("meta.cy");
 
@@ -566,7 +566,7 @@ pub fn load_(c: *cy.Chunk, cx: *cy.ConstEvalContext) !cy.TypeValue {
     const path = cx.args[0].asString();
     defer c.heap.release(cx.args[0]);
 
-    const root_path = std.fs.path.dirname(c.compiler.main_chunk.srcUri) orelse {
+    const root_path = std.Io.Dir.path.dirname(c.compiler.main_chunk.srcUri) orelse {
         return c.reportError("Cannot determine root path.", cx.node);
     };
     const io = stdx.io();
@@ -623,7 +623,7 @@ pub fn PartialStructLayout_field_layout(c: *cy.Chunk, ctx: *cy.ConstEvalContext)
     const state_len: usize = @intCast(ctx.args[2].asInt());
     const option_t = try sema.getOptionType(c, c.sema.getType(bt.PartialStructLayout));
     const actives = layout.fields[state_offset..state_offset + state_len];
-    if (std.mem.indexOfScalar(bool, actives, false) == null) {
+    if (std.mem.findScalar(bool, actives, false) == null) {
         // No inactives.
         const res = try c.heap.newNone(option_t.cast(.option));
         return TypeValue.init(option_t, res);
@@ -657,18 +657,18 @@ pub const SystemKind = enum {
 
 pub fn system(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     _ = c;
-    const kind = @field(SystemKind, @tagName(builtin.os.tag));
-    return cy.TypeValue.init(ctx.func.sig.ret, cy.Value.initInt(@intFromEnum(kind)));
+    const kind = @field(SystemKind, @tagName(builtin.target.os.tag));
+    return cy.TypeValue.init(ctx.func.sig.ret, cy.Value.initInt(@backingInt(kind)));
 }
 
 pub fn cpu(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
-    const str = try c.heap.init_eval_str(@tagName(builtin.cpu.arch));
+    const str = try c.heap.init_eval_str(@tagName(builtin.target.cpu.arch));
     return cy.TypeValue.init(ctx.func.sig.ret, str);
 }
 
 pub fn endian_(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     _ = c;
-    if (builtin.cpu.arch.endian() == .little) {
+    if (builtin.target.cpu.arch.endian() == .little) {
         return cy.TypeValue.init(ctx.func.sig.ret, cy.Value.initInt(0));
     } else {
         return cy.TypeValue.init(ctx.func.sig.ret, cy.Value.initInt(1));

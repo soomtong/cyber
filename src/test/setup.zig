@@ -2,7 +2,7 @@ const std = @import("std");
 const stdx = @import("stdx");
 const t = stdx.testing;
 const builtin = @import("builtin");
-const is_wasm = builtin.cpu.arch.isWasm();
+const is_wasm = builtin.target.cpu.arch.isWasm();
 const test_config = @import("test_config");
 const app_debug = @import("../app_debug.zig");
 const cli = @import("../cli.zig");
@@ -276,7 +276,7 @@ pub const VMrunner = struct {
         if (!is_wasm) {
             run.main_path = c.vm_resolve(vm, config.uri);
         } else {
-            run.main_path = try std.fmt.allocPrint(t.alloc, "/{s}", .{config.uri});
+            run.main_path = try t.alloc.print("/{s}", .{config.uri});
         }
         defer {
             c.vm_freeb(vm, run.main_path);
@@ -451,8 +451,8 @@ pub fn evalPass(config: Config, src: ?[]const u8) !void {
 fn expand_tmpl_macros(main_path: []const u8, tmpl: []const u8) ![]const u8 {
     var cur = try t.alloc.dupe(u8, tmpl);
     while (true) {
-        if (std.mem.indexOf(u8, cur, "@AbsPath(")) |idx| {
-            if (std.mem.indexOfScalarPos(u8, cur, idx, ')')) |endIdx| {
+        if (std.mem.find(u8, cur, "@AbsPath(")) |idx| {
+            if (std.mem.findScalarPos(u8, cur, idx, ')')) |endIdx| {
                 var buf: [1024]u8 = undefined;
                 var w = std.Io.Writer.fixed(&buf);
 
@@ -460,11 +460,11 @@ fn expand_tmpl_macros(main_path: []const u8, tmpl: []const u8) ![]const u8 {
                 const basePath = try std.Io.Dir.cwd().realPathFileAlloc(stdx.io(), ".", t.alloc);
                 defer t.alloc.free(basePath);
                 _ = try w.writeAll(basePath);
-                try w.writeByte(std.fs.path.sep);
+                try w.writeByte(std.Io.Dir.path.sep);
 
                 const relPathStart = w.buffered().len;
                 _ = try w.writeAll(cur[idx+9..endIdx]);
-                if (builtin.os.tag == .windows) {
+                if (builtin.target.os.tag == .windows) {
                     _ = std.mem.replaceScalar(u8, w.buffered()[relPathStart..], '/', '\\');
                 }
 
@@ -474,7 +474,7 @@ fn expand_tmpl_macros(main_path: []const u8, tmpl: []const u8) ![]const u8 {
                 continue;
             }
         }
-        if (std.mem.indexOf(u8, cur, "@MainPath()")) |idx| {
+        if (std.mem.find(u8, cur, "@MainPath()")) |idx| {
             var buf: [1024]u8 = undefined;
             var w = std.Io.Writer.fixed(&buf);
 

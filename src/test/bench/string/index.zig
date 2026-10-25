@@ -14,7 +14,7 @@ pub fn main() !void {
     var idx: usize = 0;
     i = 0;
     while (i < 50) : (i += 1) {
-        idx = std.mem.indexOf(u8, str, "waldo") orelse @panic("error");
+        idx = std.mem.find(u8, str, "waldo") orelse @panic("error");
     }
     std.debug.print("idx: {} ms: {}\n", .{idx, std.time.milliTimestamp() - start});
 }

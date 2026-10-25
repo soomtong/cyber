@@ -11,7 +11,7 @@ const zt = stdx.testing;
 const log = cy.log.scoped(.lib);
 const bt = cy.types.BuiltinTypes;
 const C = @import("capi.zig");
-const is_wasm = builtin.cpu.arch.isWasm();
+const is_wasm = builtin.target.cpu.arch.isWasm();
 const vmc = cy.vmc;
 
 export var clVerbose = false;
@@ -1025,8 +1025,8 @@ test "meta constants" {
         \\  return meta.system()
     , &eval_res);
     try zt.eq(C.Success, res);
-    const exp_system = @field(meta_mod.SystemKind, @tagName(builtin.os.tag));
-    try zt.eq(@intFromEnum(exp_system), @as(*i64, @ptrCast(eval_res.res)).*);
+    const exp_system = @field(meta_mod.SystemKind, @tagName(builtin.target.os.tag));
+    try zt.eq(@backingInt(exp_system), @as(*i64, @ptrCast(eval_res.res)).*);
 
     res = C.vm_eval(vm, 
         \\use meta
@@ -1034,7 +1034,7 @@ test "meta constants" {
         \\  return meta.cpu()
     , &eval_res);
     try zt.eq(C.Success, res);
-    const exp_cpu = @tagName(builtin.cpu.arch);
+    const exp_cpu = @tagName(builtin.target.cpu.arch);
     try zt.eqStr(exp_cpu, C.str_bytes(@as(*C.str, @ptrCast(eval_res.res)).*));
 
     res = C.vm_eval(vm, 
@@ -1043,8 +1043,8 @@ test "meta constants" {
         \\  return meta.endian()
     , &eval_res);
     try zt.eq(C.Success, res);
-    const exp_endian = @field(Endian, @tagName(builtin.cpu.arch.endian()));
-    try zt.eq(@intFromEnum(exp_endian), @as(*i64, @ptrCast(eval_res.res)).*);
+    const exp_endian = @field(Endian, @tagName(builtin.target.cpu.arch.endian()));
+    try zt.eq(@backingInt(exp_endian), @as(*i64, @ptrCast(eval_res.res)).*);
 }
 
 // pub fn panic(msg: []const u8, trace: ?*std.lang.StackTrace, ret_addr: ?usize) noreturn {

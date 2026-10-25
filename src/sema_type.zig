@@ -1231,13 +1231,13 @@ pub fn resolveAnyParamType(c: *cy.Chunk, param_idx: usize, resolve_new_type: boo
             // Push a canonical name based on the param index.
             try c.func_template_param_stack.append(c.alloc, .{
                 .anonymous = true,
-                .name = try std.fmt.allocPrint(c.alloc, "{}", .{param_idx}),
+                .name = try c.alloc.print("{}", .{param_idx}),
                 .type_idx = undefined,
             });
         } else {
             // Lookup anonymous parameter.
             var buf: [2]u8 = undefined;
-            const anonymous_name = try std.fmt.bufPrint(&buf, "{}", .{param_idx});
+            const anonymous_name = try std.mem.print(&buf, "{}", .{param_idx});
             return sema.getResolveContext(c).data.func.instance.?.getParam(anonymous_name).?.value.asPtr(*cy.Type);
         }
     }

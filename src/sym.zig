@@ -605,7 +605,7 @@ pub const VariantFunc = extern struct {
     decl: VariantFuncDecl,
     rest_: ZArrayList(VariantFuncDecl),
 
-    pub fn rest(self: *VariantFunc) *std.ArrayListUnmanaged(VariantFuncDecl) {
+    pub fn rest(self: *VariantFunc) *std.ArrayList(VariantFuncDecl) {
         return self.rest_.list();
     }
 
@@ -645,7 +645,7 @@ pub const Template = struct {
 
     /// Template args to variant. Keys are not owned.
     instance_cache: std.HashMapUnmanaged(cy.template.VariantKey, *cy.Instance, cy.template.VariantKeyContext, 80),
-    instances: std.ArrayListUnmanaged(*cy.Instance),
+    instances: std.ArrayList(*cy.Instance),
 
     mod: vmc.Module,
 
@@ -767,7 +767,7 @@ pub const TypeSym = struct {
     decl: ?*ast.Node,
     type: *cy.Type,
     mod: vmc.Module,
-    impls_: std.ArrayListUnmanaged(*ast.ImplDecl),
+    impls_: std.ArrayList(*ast.ImplDecl),
     instance: ?*cy.Instance,
 
     pub fn deinit(self: *TypeSym, alloc: std.mem.Allocator) void {
@@ -778,7 +778,7 @@ pub const TypeSym = struct {
         return @ptrCast(&self.mod);
     }
 
-    pub fn impls(self: *TypeSym) *std.ArrayListUnmanaged(*ast.ImplDecl) {
+    pub fn impls(self: *TypeSym) *std.ArrayList(*ast.ImplDecl) {
         return &self.impls_;
     }
 
@@ -791,10 +791,10 @@ pub const TypeSym = struct {
     }
 };
 
-/// Storage for a `std.ArrayListUnmanaged(T)` inside an extern struct. The std type has no defined
+/// Storage for a `std.ArrayList(T)` inside an extern struct. The std type has no defined
 /// layout (Zig 0.17 adds a pointer-stability lock in safe modes), so only its size and alignment are mirrored.
 fn ZArrayList(comptime T: type) type {
-    const List = std.ArrayListUnmanaged(T);
+    const List = std.ArrayList(T);
     return extern struct {
         bytes: [@sizeOf(List)]u8 align(@alignOf(List)),
 
@@ -1083,7 +1083,7 @@ pub const FuncTemplate = struct {
 
     /// Template args to variant. Keys are not owned.
     instance_cache: std.HashMapUnmanaged(cy.template.VariantKey, *cy.Instance, cy.template.VariantKeyContext, 80),
-    instances: std.ArrayListUnmanaged(*cy.Instance),
+    instances: std.ArrayList(*cy.Instance),
 
     mod: vmc.Module,
 
@@ -1292,7 +1292,7 @@ pub fn createFuncTemplate(c: *cy.Chunk, parent: *Sym, name: []const u8, callable
         .resolved = false,
         .callable = callable,
         .decl = @ptrCast(decl),
-        .instance_cache = .{},
+        .instance_cache = .empty,
         .instances = .empty,
         .mod = undefined,
     });
@@ -1308,7 +1308,7 @@ pub fn createTemplate(c: *cy.Chunk, parent: *Sym, name: []const u8,
         .kind = kind,
         .decl = decl,
         .params = &.{},
-        .instance_cache = .{},
+        .instance_cache = .empty,
         .instances = .empty,
         .mod = undefined,
     });

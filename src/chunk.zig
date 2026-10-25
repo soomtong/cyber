@@ -60,8 +60,8 @@ pub const Chunk = struct {
     parser: cy.Parser,
 
     /// Used for temp string building.
-    tempBufU8: std.ArrayListUnmanaged(u8),
-    u16_stack: std.ArrayListUnmanaged(u16),
+    tempBufU8: std.ArrayList(u8),
+    u16_stack: std.ArrayList(u16),
 
     /// Since nodes are currently processed recursively,
     /// set the current node so that error reporting has a better
@@ -74,23 +74,23 @@ pub const Chunk = struct {
     ///
     /// Sema pass.
     ///
-    semaProcs: std.ArrayListUnmanaged(sema.Proc),
-    semaBlocks: std.ArrayListUnmanaged(sema.Block),
+    semaProcs: std.ArrayList(sema.Proc),
+    semaBlocks: std.ArrayList(sema.Block),
 
     /// Generic stacks.
-    listDataStack: std.ArrayListUnmanaged(ListData),
+    listDataStack: std.ArrayList(ListData),
 
     /// Stack for building func signatures. (e.g. for nested func calls)
-    typeStack: std.ArrayListUnmanaged(*types.Type),
+    typeStack: std.ArrayList(*types.Type),
 
-    valueStack: std.ArrayListUnmanaged(cy.Value),
-    func_template_param_stack: std.ArrayListUnmanaged(cy.sym.FuncTemplateParam),
+    valueStack: std.ArrayList(cy.Value),
+    func_template_param_stack: std.ArrayList(cy.sym.FuncTemplateParam),
 
-    expr_stack: std.ArrayListUnmanaged(sema.ExprResult),
+    expr_stack: std.ArrayList(sema.ExprResult),
 
-    func_param_stack: std.ArrayListUnmanaged(sema.FuncParam),
+    func_param_stack: std.ArrayList(sema.FuncParam),
 
-    active_field_stack: std.ArrayListUnmanaged(bool),
+    active_field_stack: std.ArrayList(bool),
 
     ir: cy.ir.Buffer,
 
@@ -98,21 +98,21 @@ pub const Chunk = struct {
     /// which includes function prelude regs and params for simplicity.
 
     /// Local vars.
-    varStack: std.ArrayListUnmanaged(sema.Local),
-    varShadowStack: std.ArrayListUnmanaged(cy.sema.VarShadow),
+    varStack: std.ArrayList(sema.Local),
+    varShadowStack: std.ArrayList(cy.sema.VarShadow),
 
     /// Main sema block id.
     mainSemaProcId: sema.ProcId,
 
     /// Builtins is always a fallback module for symbol lookups.
-    fallback_modules: std.ArrayListUnmanaged(*cy.Sym),
+    fallback_modules: std.ArrayList(*cy.Sym),
 
     /// Syms owned by this chunk. Does not include field syms.
-    syms: std.ArrayListUnmanaged(*cy.Sym),
+    syms: std.ArrayList(*cy.Sym),
 
     /// Functions owned by this chunk.
     /// Includes lambdas which are not linked from a named sym.
-    funcs: std.ArrayListUnmanaged(*cy.Func),
+    funcs: std.ArrayList(*cy.Func),
 
     host_funcs: std.StringHashMapUnmanaged(C.BindFunc),
     fallback_bind_func: ?C.BindFunc = null,
@@ -126,7 +126,7 @@ pub const Chunk = struct {
     on_load: C.ModuleOnLoadFn = null,
 
     /// Reference the current resolve context.
-    resolve_stack: std.ArrayListUnmanaged(sema.ResolveContext),
+    resolve_stack: std.ArrayList(sema.ResolveContext),
 
     has_pending_ct_stmts: bool,
     resolving_ct_stmts: bool,
@@ -134,10 +134,10 @@ pub const Chunk = struct {
     ///
     /// Codegen pass
     ///
-    proc_stack: std.ArrayListUnmanaged(bc.Proc), // TODO: This isn't needed anymore. `cur_proc` should be enough.
-    funcs_debug: std.ArrayListUnmanaged(FuncDebugInfo),
-    blocks: std.ArrayListUnmanaged(bc.Block),
-    blockJumpStack: std.ArrayListUnmanaged(BlockJump),
+    proc_stack: std.ArrayList(bc.Proc), // TODO: This isn't needed anymore. `cur_proc` should be enough.
+    funcs_debug: std.ArrayList(FuncDebugInfo),
+    blocks: std.ArrayList(bc.Block),
+    blockJumpStack: std.ArrayList(BlockJump),
 
     /// Maps ir local to bc reg.
     bc_local_map: std.ArrayList(bc.Reg),
@@ -176,8 +176,8 @@ pub const Chunk = struct {
     reserved_syms: bool = false,
 
     /// LLVM
-    tempTypeRefs: if (cy.hasJIT) std.ArrayListUnmanaged(llvm.TypeRef) else void,
-    tempValueRefs: if (cy.hasJIT) std.ArrayListUnmanaged(llvm.ValueRef) else void,
+    tempTypeRefs: if (cy.hasJIT) std.ArrayList(llvm.TypeRef) else void,
+    tempValueRefs: if (cy.hasJIT) std.ArrayList(llvm.ValueRef) else void,
     // mod: if (cy.hasJIT) llvm.ModuleRef else void,
     builder: if (cy.hasJIT) llvm.BuilderRef else void,
     ctx: if (cy.hasJIT) llvm.ContextRef else void,
@@ -238,9 +238,9 @@ pub const Chunk = struct {
             .indent = 0,
             .syms = .empty,
             .funcs = .empty,
-            .host_funcs = .{},
-            .host_types = .{},
-            .host_globals = .{},
+            .host_funcs = .empty,
+            .host_types = .empty,
+            .host_globals = .empty,
             .resolve_stack = .empty,
             .user_data = null,
             .has_bind_lib = false,
@@ -683,7 +683,7 @@ pub const Chunk = struct {
         // Behind a comptime flag since it's doing allocation.
         if (cy.Trace) {
             const idx = self.buf.instDescExtras.items.len;
-            const text = try std.fmt.allocPrint(self.alloc, format, vals);
+            const text = try self.alloc.print(format, vals);
             try self.buf.instDescExtras.append(self.alloc, .{
                 .text = text,
             });

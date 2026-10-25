@@ -30,8 +30,8 @@ pub const Module = struct {
 
     pub fn init() Module {
         return .{
-            .symMap = .{},
-            .overloadedFuncMap = .{},
+            .symMap = .empty,
+            .overloadedFuncMap = .empty,
         };
     }
 

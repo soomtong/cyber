@@ -68,10 +68,10 @@ pub const Heap = struct {
             .alloc = alloc,
             .sema = sema,
             .heapPages = .empty,
-            .buffers = .{},
+            .buffers = .empty,
             .heapFreeHead = null,
             .heapFreeTail = if (cy.Trace) null else undefined,
-            .objectTraceMap = .{},
+            .objectTraceMap = .empty,
             .countFrees = false,
             .numFreed = 0,
             .c = .{
@@ -1754,13 +1754,13 @@ test "heap internals." {
         try t.eq(40, @sizeOf(MapValue));
         try t.eq(16, @sizeOf(MapIterator));
     } else {
-        if (builtin.os.tag != .windows) {
+        if (builtin.target.os.tag != .windows) {
             try t.eq(48, @sizeOf(MapValue));
             try t.eq(16, @sizeOf(MapIterator));
         }
     }
 
-    if (builtin.os.tag != .windows) { 
+    if (builtin.target.os.tag != .windows) { 
         try t.eq(@sizeOf(Func), 24);
         if (cy.is32Bit) {
             try t.eq(@sizeOf(Str), 16);

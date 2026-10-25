@@ -60,8 +60,8 @@ pub const Parser = struct {
     ast: ast.Ast,
     tokens: []const Token,
 
-    node_stack: std.ArrayListUnmanaged(*ast.Node),
-    blockStack: std.ArrayListUnmanaged(Block),
+    node_stack: std.ArrayList(*ast.Node),
+    blockStack: std.ArrayList(Block),
     cur_indent: u32,
 
     has_top_ct_stmt: bool,
@@ -103,7 +103,7 @@ pub const Parser = struct {
             .blockStack = .empty,
             .cur_indent = 0,
             .name = "",
-            .deps = .{},
+            .deps = .empty,
             .user = undefined,
             .reportFn = defaultReportFn,
             .tokenizerReportFn = cy.tokenizer.defaultReportFn,
@@ -330,7 +330,7 @@ pub const Parser = struct {
 
     fn pushBlock(self: *Parser) !void {
         try self.blockStack.append(self.alloc, .{
-            .vars = .{},
+            .vars = .empty,
         });
     }
 
@@ -4615,7 +4615,7 @@ pub const Result = struct {
 
     pub fn init(alloc: std.mem.Allocator, view: ResultView) !Result {
         const arr = try view.nodes.clone(alloc);
-        const nodes = try alloc.create(std.ArrayListUnmanaged(ast.Node));
+        const nodes = try alloc.create(std.ArrayList(ast.Node));
         nodes.* = arr;
 
         const new_src = try alloc.dupe(u8, view.src);

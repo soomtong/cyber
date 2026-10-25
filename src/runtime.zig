@@ -262,7 +262,7 @@ pub fn getTypeName(c: Context, type_h: TypeHandle) []const u8 {
 
 pub fn prepThrowError(c: Context, tag: cy.bindings.Symbol) CompatError {
     if (build_options.rt == .vm) {
-        const id: u8 = @intFromEnum(tag);
+        const id: u8 = @backingInt(tag);
         c.c.curFiber.panicPayload = cy.Value.initErrorSymbol(id).val;
         c.c.curFiber.panicType = vmc.PANIC_NATIVE_THROW;
         return cy.Value.Interrupt;

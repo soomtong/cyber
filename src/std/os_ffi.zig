@@ -52,17 +52,17 @@ const CStructInfo = struct {
 
 pub const FFI = struct {
     /// Ordered to handle C decl rules.
-    cstructs: std.ArrayListUnmanaged(CStructInfo),
+    cstructs: std.ArrayList(CStructInfo),
 
     typeToCStruct: std.AutoHashMapUnmanaged(*cy.Type, u32),
 
     /// Elem type name to CType. Entry indicates that `writeToArray`/`writeFromArray` should be generated.
     carrayMap: std.StringHashMapUnmanaged(CType),
 
-    cfuncs: std.ArrayListUnmanaged(CFuncData),
+    cfuncs: std.ArrayList(CFuncData),
 
     /// Managed ExternFunc or Objects.
-    managed: std.ArrayListUnmanaged(Value),
+    managed: std.ArrayList(Value),
 
     fn toCType(self: *FFI, vm: *cy.VM, spec: Value) !CType {
         return self.toElemCType(vm, spec);
@@ -98,8 +98,8 @@ pub fn allocFFI(vm: *cy.VM, ffi_t: *cy.Type) !Value {
     const ffi: *FFI = @ptrCast(try vm.heap.allocHostObject(ffi_t.id(), @sizeOf(FFI)));
     ffi.* = .{
         .cstructs = .empty,
-        .typeToCStruct = .{},
-        .carrayMap = .{},
+        .typeToCStruct = .empty,
+        .carrayMap = .empty,
         .cfuncs = .empty,
         .managed = .empty,
     };
@@ -150,7 +150,7 @@ pub const CGen = struct {
             try w.print("typedef struct Struct{} {{\n", .{cstruct.type.id()});
             for (cstruct.fields, 0..) |field, i| {
                 try w.writeAll("  ");
-                const name = try std.fmt.bufPrint(&cy.tempBuf, "f{}", .{i});
+                const name = try std.mem.print(&cy.tempBuf, "f{}", .{i});
                 try writeNamedCType(w, field, name);
                 try w.writeAll(";\n");
             }
@@ -205,7 +205,7 @@ pub const CGen = struct {
                     .sym => |sym| {
                         _ = sym;
                         try w.print("  res.f{} = ", .{i});
-                        const val = try std.fmt.bufPrint(&cy.tempBuf, "src[{}]", .{i});
+                        const val = try std.mem.print(&cy.tempBuf, "src[{}]", .{i});
                         _ = val;
                         // try writeToCValue(w, val, field, false);
                         try w.print(";\n", .{});
@@ -221,7 +221,7 @@ pub const CGen = struct {
             var buf: [8]u8 = undefined;
             offset = 0;
             for (cstruct.fields, 0..) |field, i| {
-                const from_field = try std.fmt.bufPrint(&buf, "val.f{}", .{i});
+                const from_field = try std.mem.print(&buf, "val.f{}", .{i});
                 switch (field) {
                     .struct_t => |struct_t| {
                         try w.print("  writeFromStruct{}(vm, dst + {}, {s});\n", .{struct_t.id(), offset, from_field});
@@ -319,7 +319,7 @@ pub const CGen = struct {
 fn fmtBaseTypeName(buf: []u8, ctype: CType) ![]const u8 {
     switch (ctype) {
         .struct_t => |struct_t| {
-            return std.fmt.bufPrint(buf, "Struct{}", .{struct_t.id()});
+            return std.mem.print(buf, "Struct{}", .{struct_t.id()});
         },
         .arr => return error.Unexpected,
         .sym => |sym| {
@@ -583,7 +583,7 @@ pub fn ffiBindLib(t: *cy.Thread, config: BindLibConfig, _: *DynLib) !c.Ret {
 
     const path = t.getPtr(*cy.heap.Object, 1);
     if (path.getValue(0).asInt() == 0) {
-        if (builtin.os.tag == .macos) {
+        if (builtin.target.os.tag == .macos) {
             const exe = try std.process.executablePathAlloc(stdx.io(), t.alloc);
             defer t.alloc.free(exe);
             lib.* = try dlopen(exe);
@@ -603,7 +603,7 @@ pub fn ffiBindLib(t: *cy.Thread, config: BindLibConfig, _: *DynLib) !c.Ret {
     }
 
     // Generate c code.
-    var csrc: std.ArrayListUnmanaged(u8) = .empty;
+    var csrc: std.ArrayList(u8) = .empty;
     defer csrc.deinit(t.alloc);
     const w = stdx.listWriter(&csrc, t.alloc);
 
@@ -659,7 +659,7 @@ pub fn ffiBindLib(t: *cy.Thread, config: BindLibConfig, _: *DynLib) !c.Ret {
     }
 
     // const __floatundisf = @extern(*anyopaque, .{ .name = "__floatundisf", .linkage = .Strong });
-    if (builtin.cpu.arch != .aarch64) {
+    if (builtin.target.cpu.arch != .aarch64) {
         _ = tcc.tcc_add_symbol(state, "__fixunsdfdi", __fixunsdfdi);
         _ = tcc.tcc_add_symbol(state, "__floatundidf", __floatundidf);
     }
@@ -729,7 +729,7 @@ pub fn ffiBindCallback(vm: *cy.VM) anyerror!Value {
     _ = params;
     // const ret = try ffi.toCType(vm, vm.getValue(3));
 
-    var csrc: std.ArrayListUnmanaged(u8) = .empty;
+    var csrc: std.ArrayList(u8) = .empty;
     defer csrc.deinit(vm.alloc);
     const w = stdx.listWriter(&csrc, vm.alloc);
     _ = w;
@@ -754,7 +754,7 @@ pub fn ffiBindCallback(vm: *cy.VM) anyerror!Value {
     }
 
     // const __floatundisf = @extern(*anyopaque, .{ .name = "__floatundisf", .linkage = .Strong });
-    if (builtin.cpu.arch != .aarch64) {
+    if (builtin.target.cpu.arch != .aarch64) {
         _ = tcc.tcc_add_symbol(state, "__fixunsdfdi", __fixunsdfdi);
         _ = tcc.tcc_add_symbol(state, "__floatundidf", __floatundidf);
     }

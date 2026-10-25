@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("stdx");
 const cy = @import("../cyber.zig");
 const C = @import("../capi.zig");
 const bt = cy.types.BuiltinTypes;
@@ -231,7 +232,7 @@ pub fn _parser_comments(t: *cy.Thread) anyerror!C.Ret {
 
     const buffer_t: cy.TypeId = @intCast(t.param(i64));
 
-    var args: std.ArrayListUnmanaged(Comment) = .{};
+    var args: std.ArrayListUnmanaged(Comment) = .empty;
     defer args.deinit(t.alloc);
 
     for (parser.ast.comments.items) |comment| {
@@ -285,11 +286,11 @@ const ParseCyberState = struct {
 
 fn genTypeSpecString(vm: *cy.VM, view: ast.AstView, opt_expr: ?*ast.Node) !cy.Value {
     if (opt_expr) |expr| {
-        var sb: std.ArrayListUnmanaged(u8) = .{};
+        var sb: std.ArrayListUnmanaged(u8) = .empty;
         defer sb.deinit(vm.alloc);
 
         var enc = ast.Encoder{ .ast = view };
-        try enc.write(sb.writer(vm.alloc), expr);
+        try enc.write(stdx.listWriter(&sb, vm.alloc), expr);
 
         return try vm.retainOrAllocAstring(sb.items);
     } else {

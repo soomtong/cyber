@@ -634,7 +634,8 @@ pub fn genFuncBlock(c: *Chunk, stmt: *ir.FuncBlock, node: *ast.Node) !void {
     try c.buf.markers.put(c.alloc, @intCast(pc), func);
 
     if (func.info.jit) {
-        try c.pushCode(.enter_jit, &.{0, 0, 0}, node);
+        // Pushed before the function's proc, so there is no `cur_proc` to take a debug sym from.
+        try c.buf.pushOpSlice(.enter_jit, &.{0, 0, 0});
         try c.compiler.jitBuf.relocs.append(c.alloc, .{ .type = .jit_entry, .data = .{ .jit_entry = .{
             .chunk = c,
             .bc_pc = @intCast(pc + 1),

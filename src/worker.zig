@@ -2,6 +2,7 @@ const std = @import("std");
 const cy = @import("cyber.zig");
 const log = cy.log.scoped(.worker);
 const build_config = @import("build_config");
+const stdx = @import("stdx");
 
 const TaskKind = enum(u8) {
     thread,
@@ -27,8 +28,8 @@ pub const Pool = struct {
     vm: *cy.VM,
     alloc: std.mem.Allocator,
 
-    mutex: std.Thread.Mutex = .{},
-    cond: std.Thread.Condition = .{},
+    mutex: std.Io.Mutex = .init,
+    cond: std.Io.Condition = .init,
 
     // Protected by `mutex`.
     workers: []Worker,
@@ -73,8 +74,8 @@ pub const Pool = struct {
             @panic("unsupported");
         }
         {
-            self.mutex.lock();
-            defer self.mutex.unlock();
+            self.mutex.lockUncancelable(stdx.io());
+            defer self.mutex.unlock(stdx.io());
 
             try self.request_idle_worker();       
 
@@ -98,7 +99,7 @@ pub const Pool = struct {
             self.last_task_node = &task.node;
         }
 
-        self.cond.signal();
+        self.cond.signal(stdx.io());
         log.tracev("signal new thread task", .{});
     }
 };
@@ -108,12 +109,12 @@ pub const Worker = struct {
     os_thread: std.Thread,
 
     pub fn run(self: *Worker, pool: *Pool) void {
-        pool.mutex.lock();
-        defer pool.mutex.unlock();
+        pool.mutex.lockUncancelable(stdx.io());
+        defer pool.mutex.unlock(stdx.io());
         while (true) {
             const node = pool.task_queue.popFirst() orelse {
                 log.tracev("w{}: cond wait", .{self.id});
-                pool.cond.wait(&pool.mutex);
+                pool.cond.waitUncancelable(stdx.io(), &pool.mutex);
                 log.tracev("w{}: woke up", .{self.id});
                 continue;
             };
@@ -122,9 +123,9 @@ pub const Worker = struct {
                 pool.last_task_node = null;
             }
             pool.active_workers += 1;
-            pool.mutex.unlock();
+            pool.mutex.unlock(stdx.io());
             defer {
-                pool.mutex.lock();
+                pool.mutex.lockUncancelable(stdx.io());
                 pool.active_workers -= 1;
             }
 

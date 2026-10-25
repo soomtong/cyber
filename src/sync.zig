@@ -9,7 +9,7 @@ const std = @import("std");
 /// 3, invalidated: Transition from `pending` by owner when the future is deinitialized.
 pub const FutureSyncState = u8;
 
-pub const SeqLock = packed struct {
+pub const SeqLock = packed struct(u8) {
     value: u8 = 0,
 
     pub fn read_start(self: *SeqLock) ?u8 {
@@ -43,7 +43,7 @@ pub const SeqLock = packed struct {
     }
 };
 
-pub const RWLock = packed struct {
+pub const RWLock = packed struct(u8) {
     readers: u7 = 0,
     writing: u1 = 0,
 

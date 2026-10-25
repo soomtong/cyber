@@ -1,4 +1,5 @@
 const std = @import("std");
+const DynLib = @import("dynlib.zig").DynLib;
 const builtin = @import("builtin");
 const build_config = @import("build_config");
 const aarch64 = builtin.cpu.arch == .aarch64;
@@ -55,7 +56,7 @@ pub const VM = struct {
 
     // Protects `shared_states`.
     // TODO: Make lock-free.
-    shared_state_mutex: std.Thread.Mutex = .{},
+    shared_state_mutex: std.Io.Mutex = .init,
 
     /// Functions are relocated at compile-time except extern functions which are generated at runtime.
     funcSyms: std.ArrayList(FuncSymbol),
@@ -75,7 +76,7 @@ pub const VM = struct {
     env_local_saves: std.ArrayList(LocalSave),
     env_local_saves_map: std.StringHashMapUnmanaged(usize),
 
-    dyn_libs: if (cy.hasFFI) std.ArrayList(*std.DynLib) else std.ArrayList(*anyopaque),
+    dyn_libs: if (cy.hasFFI) std.ArrayList(*DynLib) else std.ArrayList(*anyopaque),
 
     next_thread_id: usize,
 
@@ -138,8 +139,8 @@ pub const VM = struct {
             .compiler = undefined,
             .sema = undefined,
             .worker_pool = try worker.Pool.init(self, num_cpus-1),
-            .globals = .{},
-            .shared_states = .{},
+            .globals = .empty,
+            .shared_states = .empty,
             .c = .{
                 .consts_ptr = undefined,
                 .consts_len = 0,
@@ -149,12 +150,12 @@ pub const VM = struct {
             },
             .next_thread_id = 1,
             .main_thread = undefined,
-            .funcSyms = .{},
+            .funcSyms = .empty,
             .host_funcs = .{},
-            .types = .{},
-            .funcSymDetails = .{},
+            .types = .empty,
+            .funcSymDetails = .empty,
             .inlineSaves = .{},
-            .u8Buf = .{},
+            .u8Buf = .empty,
             .debug_tables = &.{},
             // Initialize to NullId to indicate vm is still in initing.
             .deinited = false,
@@ -169,11 +170,11 @@ pub const VM = struct {
             .last_res = C.Success,
             .num_evals = 0,
             .num_cont_evals = 0,
-            .task_nodes = .{},
-            .vtables = .{},
-            .env_local_saves = .{},
+            .task_nodes = .empty,
+            .vtables = .empty,
+            .env_local_saves = .empty,
             .env_local_saves_map = .{},
-            .dyn_libs = .{},
+            .dyn_libs = .empty,
             .tcc_state = null,
         };
         self.compiler = try self.alloc.create(cy.Compiler);
@@ -442,21 +443,19 @@ pub const VM = struct {
 
             if (self.config.spawn_exe) {
                 const term = try spawn(.{
-                    .allocator = self.alloc,
                     .argv = &.{res.aot.exePath},
                 });
-                if (term != .Exited or term.Exited != 0) {
+                if (term != .exited or term.exited != 0) {
                     self.alloc.free(self.last_exe_error);
                     self.last_exe_error = "";
                     return error.Panic;
                 }
             } else {
-                const exeRes = try std.process.Child.run(.{
-                    .allocator = self.alloc,
+                const exeRes = try std.process.run(self.alloc, stdx.io(), .{
                     .argv = &.{res.aot.exePath},
                 });
                 self.alloc.free(exeRes.stdout);
-                if (exeRes.term != .Exited or exeRes.term.Exited != 0) {
+                if (exeRes.term != .exited or exeRes.term.exited != 0) {
                     self.alloc.free(self.last_exe_error);
                     self.last_exe_error = exeRes.stderr;
                     return error.Panic;
@@ -470,8 +469,8 @@ pub const VM = struct {
     }
 
     pub fn dumpInfo(self: *VM) !void {
-        const w = std.debug.lockStderrWriter(&cy.debug.print_buf);
-        defer std.debug.unlockStderrWriter();
+        const w = std.debug.lockStderr(&cy.debug.print_buf).terminal().writer;
+        defer std.debug.unlockStderr();
 
         try w.print("main stack size: {}\n", .{self.main_thread.c.stack_len});
         try w.print("main stack fp: {}\n", .{cy.thread.getStackOffset(self.main_thread.c.stack_ptr, self.main_thread.c.fp)});
@@ -588,9 +587,9 @@ pub const VM = struct {
         self.compiler.apiError = try self.alloc.dupe(u8, str);
     }
 
-    pub fn clearTempString(vm: *VM) std.ArrayListAlignedUnmanaged(u8, .@"8").Writer {
+    pub fn clearTempString(vm: *VM) stdx.ListWriter(std.ArrayListAlignedUnmanaged(u8, .@"8")) {
         vm.u8Buf.clearRetainingCapacity();
-        return vm.u8Buf.writer(vm.alloc);
+        return stdx.listWriter(&vm.u8Buf, vm.alloc);
     }
 
     pub fn getTempString(vm: *VM) []const u8 {
@@ -1212,25 +1211,16 @@ fn zEnsureListCap(vm: *VM, list: *std.ArrayList(Value), cap: usize) callconv(.c)
 pub var traceObjRetains: std.AutoHashMapUnmanaged(u32, u32) = .{};
 
 fn spawn(args: struct {
-    allocator: std.mem.Allocator,
     argv: []const []const u8,
-    cwd: ?[]const u8 = null,
-    cwd_dir: ?std.fs.Dir = null,
-    env_map: ?*const std.process.EnvMap = null,
-    max_output_bytes: usize = 50 * 1024,
-    expand_arg0: std.posix.Arg0Expand = .no_expand,
 }) !std.process.Child.Term {
-    var child = std.process.Child.init(args.argv, args.allocator);
-    child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
-    child.cwd = args.cwd;
-    child.cwd_dir = args.cwd_dir;
-    child.env_map = args.env_map;
-    child.expand_arg0 = args.expand_arg0;
-
-    try child.spawn();
-    return try child.wait();
+    const io = stdx.io();
+    var child = try std.process.spawn(io, .{
+        .argv = args.argv,
+        .stdin = .ignore,
+        .stdout = .inherit,
+        .stderr = .inherit,
+    });
+    return try child.wait(io);
 }
 
 pub fn getFuncPtrType(vm: *cy.VM, sig: cy.sema.FuncSigId) !*cy.Type {

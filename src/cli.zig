@@ -1,5 +1,6 @@
 const std = @import("std");
-const zt = @import("stdx").testing;
+const stdx = @import("stdx");
+const zt = stdx.testing;
 const builtin = @import("builtin");
 const build_config = @import("build_config");
 const os_mod = @import("std/os.zig");
@@ -66,7 +67,7 @@ pub fn init_cli(vm: *C.VM, alloc: std.mem.Allocator) !void {
     if (build_config.mod_root) |mod_root_| {
         mod_root = try alloc.dupe(u8, mod_root_);
     } else {
-        mod_root = try std.fs.selfExeDirPathAlloc(alloc);
+        mod_root = try std.process.executableDirPathAlloc(stdx.io(), alloc);
     }
 
     const app = try alloc.create(App);
@@ -153,7 +154,7 @@ fn err_(_: ?*C.Thread, str: C.Bytes) callconv(.c) void {
     if (C.silent()) {
         return;
     }
-    std.fs.File.stderr().writeAll(C.from_bytes(str)) catch @panic("error");
+    std.Io.File.stderr().writeStreamingAll(stdx.io(), C.from_bytes(str)) catch @panic("error");
 }
 
 // Not thread-safe.
@@ -161,12 +162,12 @@ fn print(_: ?*C.Thread, str: C.Bytes) callconv(.c) void {
     // Temporarily redirect to error for tests to avoid hanging the Zig runner.
     if (builtin.is_test) {
         const slice = C.from_bytes(str);
-        std.fs.File.stderr().writeAll(slice) catch @panic("error");
+        std.Io.File.stderr().writeStreamingAll(stdx.io(), slice) catch @panic("error");
         return;
     }
 
     const slice = C.from_bytes(str);
-    std.fs.File.stdout().writeAll(slice) catch @panic("error");
+    std.Io.File.stdout().writeStreamingAll(stdx.io(), slice) catch @panic("error");
 }
 
 pub fn loader(vm_: ?*C.VM, mod_: ?*C.Sym, spec_: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
@@ -198,7 +199,7 @@ pub fn loader(vm_: ?*C.VM, mod_: ?*C.Sym, spec_: C.Bytes, res: [*c]C.LoaderResul
             }
         };
     } else {
-        src = std.fs.cwd().readFileAlloc(app.alloc, spec, 1e9) catch |e| {
+        src = std.Io.Dir.cwd().readFileAlloc(stdx.io(), spec, app.alloc, .limited(1e9)) catch |e| {
             const msg = std.fmt.allocPrint(app.alloc, "Can not load `{s}`. {}", .{ spec, e }) catch return false;
             defer app.alloc.free(msg);
             C.reportApiError(@ptrCast(vm), C.to_bytes(msg));
@@ -264,38 +265,37 @@ fn zResolve(vm: *C.VM, alloc: std.mem.Allocator, chunkId: u32, buf: []u8, cur_ur
         const uri = try std.Uri.parse(spec);
         if (std.mem.endsWith(u8, uri.host.?.percent_encoded, "github.com")) {
             if (std.mem.count(u8, uri.path.percent_encoded, "/") == 2 and uri.path.percent_encoded[uri.path.percent_encoded.len - 1] != '/') {
-                var fbuf = std.io.fixedBufferStream(buf);
-                const w = fbuf.writer();
+                var w: std.Io.Writer = .fixed(buf);
 
                 try w.writeAll(uri.scheme);
                 try w.writeAll("://raw.githubusercontent.com");
                 try w.writeAll(uri.path.percent_encoded);
                 try w.writeAll("/master/mod.cy");
-                std.debug.print("{s}\n", .{fbuf.getWritten()});
-                return fbuf.getWritten();
+                std.debug.print("{s}\n", .{w.buffered()});
+                return w.buffered();
             }
         }
         return spec;
     }
 
     var pathBuf: [4096]u8 = undefined;
-    var fbuf = std.io.fixedBufferStream(&pathBuf);
+    var w: std.Io.Writer = .fixed(&pathBuf);
     if (cur_uri.len > 0) b: {
         // Create path from the current script.
         // There should always be a parent directory since `curUri` should be absolute when dealing with file modules.
         const dir = std.fs.path.dirname(cur_uri) orelse {
             // Likely from an in-memory chunk uri such as `main` or `input` (repl).
-            _ = try fbuf.write(spec);
+            try w.writeAll(spec);
             break :b;
         };
-        try fbuf.writer().print("{s}/{s}", .{ dir, spec });
+        try w.print("{s}/{s}", .{ dir, spec });
     } else {
-        _ = try fbuf.write(spec);
+        try w.writeAll(spec);
     }
-    const path = fbuf.getWritten();
+    const path = w.buffered();
 
     // Get canonical path.
-    const absPath = realpath(std.fs.cwd(), path, buf) catch |e| {
+    const absPath = realpath(std.Io.Dir.cwd(), path, buf) catch |e| {
         if (e == error.FileNotFound) {
             const msg = try std.fmt.allocPrint(alloc, "Import path does not exist: `{s}`", .{path});
             if (builtin.os.tag == .windows) {
@@ -311,21 +311,22 @@ fn zResolve(vm: *C.VM, alloc: std.mem.Allocator, chunkId: u32, buf: []u8, cur_ur
     return absPath;
 }
 
-fn realpath(cwd: std.fs.Dir, path: []const u8, out: []u8) ![]u8 {
+fn realpath(cwd: std.Io.Dir, path: []const u8, out: []u8) ![]u8 {
     if (is_wasm and builtin.os.tag == .wasi) {
         return wasi_realpath(cwd, path, out);
     } else {
-        return cwd.realpath(path, out);
+        const len = try cwd.realPathFile(stdx.io(), path, out);
+        return out[0..len];
     }
 }
 
 // TODO: Emulate realpath.
-fn wasi_realpath(cwd: std.fs.Dir, path: []const u8, out: []u8) ![]u8 {
+fn wasi_realpath(cwd: std.Io.Dir, path: []const u8, out: []u8) ![]u8 {
     var w = std.Io.Writer.fixed(out);
     if (path.len == 0 or path[0] != '/') {
         var prestat: std.os.wasi.prestat_t = undefined;
 
-        if (std.os.wasi.fd_prestat_get(cwd.fd, &prestat) != .SUCCESS) {
+        if (std.os.wasi.fd_prestat_get(cwd.handle, &prestat) != .SUCCESS) {
             return error.MissingCwd;
         }
 
@@ -333,7 +334,7 @@ fn wasi_realpath(cwd: std.fs.Dir, path: []const u8, out: []u8) ![]u8 {
         const len = prestat.u.dir.pr_name_len;
         if (len > buf.len) return error.NameTooLong;
 
-        if (std.os.wasi.fd_prestat_dir_name(cwd.fd, @ptrCast(&buf[0]), len) != .SUCCESS) {
+        if (std.os.wasi.fd_prestat_dir_name(cwd.handle, @ptrCast(&buf[0]), len) != .SUCCESS) {
             return error.MissingCwd;
         }
         try w.writeAll(buf[0..len]);
@@ -458,8 +459,9 @@ pub const FallbackReadLine = struct {
 
     pub fn read(ptr: *anyopaque, prefix: [:0]const u8) anyerror![]const u8 {
         const self: *@This() = @ptrCast(@alignCast(ptr));
-        try std.fs.File.stdout().writeAll(prefix);
-        return std.fs.File.stdin().readToEndAllocOptions(self.alloc, 10e8, null, .of(u8), '\n');
+        try std.Io.File.stdout().writeStreamingAll(stdx.io(), prefix);
+        var r = std.Io.File.stdin().reader(stdx.io(), &.{});
+        return r.interface.allocRemaining(self.alloc, .limited(10e8));
     }
 
     pub fn free(ptr: *anyopaque, line: []const u8) void {
@@ -630,13 +632,13 @@ pub fn prepPanicZError(t: *C.Thread, err: anyerror, optTrace: ?*std.builtin.Stac
     if (!isFreestanding and C.verbose()) {
         std.debug.print("{}", .{err});
         if (optTrace) |trace_| {
-            std.debug.dumpStackTrace(trace_.*);
+            std.debug.dumpErrorReturnTrace(trace_);
         }
     }
     return C.thread_ret_panic(t, @errorName(err));
 }
 
-var gpa: std.heap.GeneralPurposeAllocator(.{
+var gpa: std.heap.DebugAllocator(.{
     .enable_memory_limit = false,
     .stack_trace_frames = if (builtin.mode == .Debug) 12 else 0,
 }) = .{};

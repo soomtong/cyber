@@ -816,9 +816,9 @@ pub const Buffer = struct {
         self.* = .{
             .arena = .{ .child_allocator = alloc, .state = .{} },
             .alloc = undefined,
-            .stmtBlockStack = .{},
-            .func_blocks = .{},
-            .buf = .{},
+            .stmtBlockStack = .empty,
+            .func_blocks = .empty,
+            .buf = .empty,
         };
         self.alloc = self.arena.allocator();
     }

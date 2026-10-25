@@ -13,7 +13,7 @@ const DebugLog = builtin.mode == .Debug and true;
 /// This allows small logs to still work without an allocator.
 var small_buf: [1024]u8 = undefined;
 
-pub fn scoped(comptime Scope: @Type(.EnumLiteral)) type {
+pub fn scoped(comptime Scope: @EnumLiteral()) type {
     return struct {
         pub fn debug(
             comptime format: []const u8,

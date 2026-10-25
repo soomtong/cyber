@@ -1,5 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
+const win32 = @import("../win32.zig");
 const cy = @import("../cyber.zig");
 const bc = @import("../bc_gen.zig");
 pub const stencils = switch (builtin.cpu.arch) {
@@ -117,14 +118,14 @@ pub const CodeBuffer = struct {
     pub fn init(gpa: std.mem.Allocator) CodeBuffer {
         return .{
             .gpa = gpa,
-            .buf = .{},
+            .buf = .empty,
             .final_buf = &.{},
             .mainPc = 0,
-            .relocs = .{},
-            .funcs = .{},
-            .labels = .{},
+            .relocs = .empty,
+            .funcs = .empty,
+            .labels = .empty,
             .executable = false,
-            .const_slots = .{},
+            .const_slots = .empty,
         };
     }
 
@@ -159,10 +160,10 @@ pub const CodeBuffer = struct {
             return;
         }
         if (builtin.os.tag == .windows) {
-            try std.posix.mprotect(self.final_buf, std.c.PROT.READ | std.c.PROT.WRITE);
-            std.os.windows.VirtualFree(self.final_buf.ptr, 0, std.os.windows.MEM_RELEASE);
+            try std.process.protectMemory(self.final_buf, .{ .read = true, .write = true });
+            _ = win32.VirtualFree(self.final_buf.ptr, 0, win32.MEM_RELEASE);
         } else {
-            try std.posix.mprotect(self.buf.items.ptr[0..self.buf.capacity], std.c.PROT.WRITE);
+            try std.process.protectMemory(self.buf.items.ptr[0..self.buf.capacity], .{ .write = true });
         }
         self.executable = false;
     }
@@ -173,7 +174,7 @@ pub const CodeBuffer = struct {
         }
 
         // Mark code executable.
-        try std.posix.mprotect(self.final_buf, std.c.PROT.READ | std.c.PROT.EXEC);
+        try std.process.protectMemory(self.final_buf, .{ .read = true, .execute = true });
         if (builtin.os.tag == .windows) {
             // const flush_res = FlushInstructionCache(std.os.windows.GetCurrentProcess(), self.exe_buf.ptr, self.exe_buf.len);
             // var info: std.os.windows.MEMORY_BASIC_INFORMATION = undefined;
@@ -972,7 +973,7 @@ fn funcBlock(c: *cy.Chunk, idx: usize, nodeId: *ast.Node) !void {
 
 pub fn relocate(buf: *CodeBuffer) !void {
     if (builtin.os.tag == .windows) {
-        const code_ptr = try std.os.windows.VirtualAlloc(null, buf.buf.capacity, std.os.windows.MEM_COMMIT | std.os.windows.MEM_RESERVE, std.os.windows.PAGE_READWRITE);
+        const code_ptr = win32.VirtualAlloc(null, buf.buf.capacity, win32.MEM_COMMIT | win32.MEM_RESERVE, win32.PAGE_READWRITE) orelse return error.OutOfMemory;
         const code_buf = @as([*]align(std.heap.page_size_min) u8, @ptrCast(@alignCast(code_ptr)))[0..buf.buf.capacity];
         @memcpy(code_buf[0..buf.buf.items.len], buf.buf.items);
         buf.final_buf = code_buf;

@@ -23,21 +23,21 @@ pub fn buildAndLink(b: *std.Build, mod: *std.Build.Module, opts: BuildOptions) !
         .name = "mimalloc",
         .root_module = root,
     });
-    lib.addIncludePath(b.path("lib/mimalloc/vendor/include"));
-    lib.linkLibC();
+    lib.root_module.addIncludePath(b.path("lib/mimalloc/vendor/include"));
+    lib.root_module.link_libc = true;
     // lib.disable_sanitize_c = true;
 
     var c_flags = try std.ArrayList([]const u8).initCapacity(b.allocator, 0);
     // c_flags.append("-D_GNU_SOURCE=1") catch @panic("error");
     if (opts.target.result.os.tag == .windows) {} else if (opts.target.result.os.tag == .macos) {
         if (opts.target.result.cpu.arch == .aarch64) {
-            lib.addSystemIncludePath(.{ .cwd_relative = "/Applications/Xcode_15.0.1.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include" });
+            lib.root_module.addSystemIncludePath(.{ .cwd_relative = "/Applications/Xcode_15.0.1.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include" });
         } else {
             // Github macos-12 runner (https://github.com/actions/runner-images/blob/main/images/macos/macos-12-Readme.md).
-            lib.addSystemIncludePath(.{ .cwd_relative = "/Applications/Xcode_14.0.1.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include" });
+            lib.root_module.addSystemIncludePath(.{ .cwd_relative = "/Applications/Xcode_14.0.1.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include" });
         }
-        lib.addSystemIncludePath(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX12.1.sdk/usr/include" });
-        lib.addSystemIncludePath(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX12.3.sdk/usr/include" });
+        lib.root_module.addSystemIncludePath(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX12.1.sdk/usr/include" });
+        lib.root_module.addSystemIncludePath(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX12.3.sdk/usr/include" });
     }
     if (opts.optimize == .Debug) {
         // For debugging:
@@ -79,13 +79,13 @@ pub fn buildAndLink(b: *std.Build, mod: *std.Build.Module, opts: BuildOptions) !
         "lib/mimalloc/vendor/src/libc.c",
     });
     for (sources.items) |src| {
-        lib.addCSourceFile(.{
+        lib.root_module.addCSourceFile(.{
             .file = b.path(src),
             .flags = c_flags.items,
         });
     }
     if (opts.target.result.os.tag != .windows) {
-        lib.addCSourceFile(.{
+        lib.root_module.addCSourceFile(.{
             .file = b.path("lib/mimalloc/vendor/src/alloc-posix.c"),
             .flags = c_flags.items,
         });

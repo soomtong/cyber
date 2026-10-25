@@ -232,7 +232,7 @@ pub const Thread = struct {
 
             .unwinding = false,
 
-            .compact_trace = .{},
+            .compact_trace = .empty,
             .stack_trace = .{},
         };
 
@@ -609,7 +609,7 @@ pub const Thread = struct {
                 cur_fp[ret_ + 1] = buildHostCallInfo(false);
                 cur_fp[ret_ + 2] = Value{ .retPcPtr = cur_pc };
                 cur_fp[ret_ + 3] = Value{ .retFramePtr = cur_fp };
-                const res: Value = @bitCast(func.data.host.ptr.?(@ptrCast(self)));
+                const res = Value{ .val = @bitCast(func.data.host.ptr.?(@ptrCast(self))) };
                 if (res.isInterrupt()) {
                     return error.Panic;
                 }
@@ -993,7 +993,7 @@ pub const Thread = struct {
 
         while (i < vmc.NumCodes) : (i += 1) {
             if (self.c.trace.opCounts[i].count > 0) {
-                const op = std.meta.intToEnum(cy.OpCode, self.c.trace.opCounts[i].code) catch continue;
+                const op = std.enums.fromInt(cy.OpCode, self.c.trace.opCounts[i].code) orelse continue;
                 try w.print("\t{s} {}\n", .{@tagName(op), self.c.trace.opCounts[i].count});
             }
         }
@@ -1103,7 +1103,7 @@ pub inline fn buildHostCallInfo(comptime cont: bool) Value {
     }};
 }
 
-pub const CallInfo = packed struct {
+pub const CallInfo = packed struct(u64) {
     /// Whether a ret op should return from the VM loop.
     ret_flag: bool,
 

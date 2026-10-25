@@ -1813,9 +1813,9 @@ pub const Ast = struct {
             .null_node = undefined,
             .src = src,
             .src_id = src_id,
-            .srcGen = .{},
-            .strs = .{},
-            .comments = .{},
+            .srcGen = .empty,
+            .strs = .empty,
+            .comments = .empty,
         };
         self.node_alloc = self.node_alloc_handle.allocator();
         try self.clearNodes();

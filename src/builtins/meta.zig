@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("stdx");
 const builtin = @import("builtin");
 const build_config = @import("build_config");
 const cy = @import("../cyber.zig");
@@ -568,10 +569,11 @@ pub fn load_(c: *cy.Chunk, cx: *cy.ConstEvalContext) !cy.TypeValue {
     const root_path = std.fs.path.dirname(c.compiler.main_chunk.srcUri) orelse {
         return c.reportError("Cannot determine root path.", cx.node);
     };
-    var dir = try std.fs.openDirAbsolute(root_path, .{});
-    defer dir.close();
+    const io = stdx.io();
+    var dir = try std.Io.Dir.openDirAbsolute(io, root_path, .{});
+    defer dir.close(io);
 
-    const data = try dir.readFileAlloc(c.alloc, path, 1e9);
+    const data = try dir.readFileAlloc(io, path, c.alloc, .limited(1e9));
     defer c.alloc.free(data);
 
     const str = try c.heap.init_eval_str(data);
@@ -655,7 +657,7 @@ pub const SystemKind = enum {
 
 pub fn system(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     _ = c;
-    const kind = std.enums.nameCast(SystemKind, builtin.os.tag);
+    const kind = @field(SystemKind, @tagName(builtin.os.tag));
     return cy.TypeValue.init(ctx.func.sig.ret, cy.Value.initInt(@intFromEnum(kind)));
 }
 

@@ -12,7 +12,7 @@
 #define TRACE_DUMP_OPS 0
 #define TRACE_DUMP_NOP 0
 
-__thread ZThread* cur_thread = NULL;
+_Thread_local ZThread* cur_thread = NULL;
 
 // Dump assembly.
 // zig cc -c src/vm.c -S -O2 -DDEBUG=0 -DCGOTO=1 -DTRACE=0

@@ -72,7 +72,7 @@ pub fn build(b: *std.Build) !void {
     if (target.os.tag == .wasi) {
         abs_root_path = "";
     } else {
-        abs_root_path = try std.fs.cwd().realpathAlloc(b.allocator, ".");
+        abs_root_path = try std.Io.Dir.cwd().realPathFileAlloc(b.graph.io, ".", b.allocator);
     }
 
     var opts = getDefaultOptions();
@@ -108,16 +108,16 @@ pub fn build(b: *std.Build) !void {
             .root_module = cli_mod,
         });
         exe.root_module.strip = strip;
-        exe.addIncludePath(b.path("src"));
+        exe.root_module.addIncludePath(b.path("src"));
 
         // Allow dynamic libraries to be loaded by filename in the cwd.
         if (target.os.tag == .linux) {
-            exe.addRPath(.{ .cwd_relative = ":$ORIGIN" });
+            exe.root_module.addRPath(.{ .cwd_relative = ":$ORIGIN" });
             if (target.cpu.arch == .x86_64) {
-                exe.addRPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
+                exe.root_module.addRPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
             }
         } else if (target.os.tag == .macos) {
-            exe.addRPath(.{ .cwd_relative = "@loader_path" });
+            exe.root_module.addRPath(.{ .cwd_relative = "@loader_path" });
         }
 
         // Allow exported symbols in exe to be visible to dlopen.
@@ -288,8 +288,8 @@ fn run_lib_standalone_test(b: *std.Build, path: []const u8, lib_bin: std.Build.L
         .name = "lib_standalone_test",
         .root_module = main_mod,
     });
-    main.addObjectFile(lib_bin);
-    main.linkLibC();
+    main.root_module.addObjectFile(lib_bin);
+    main.root_module.link_libc = true;
 
     var run = b.addRunArtifact(main);
     run.has_side_effects = no_cache;
@@ -430,20 +430,8 @@ fn create_cli_config(b: *std.Build, opts: CliConfig) !*std.Build.Module {
 }
 
 fn create_lib_config(b: *std.Build, opts: Options) !*std.Build.Module {
-    const buildTag = std.process.getEnvVarOwned(b.allocator, "BUILD") catch |err| b: {
-        if (err == error.EnvironmentVariableNotFound) {
-            break :b "0";
-        } else {
-            return err;
-        }
-    };
-    const commitTag = std.process.getEnvVarOwned(b.allocator, "COMMIT") catch |err| b: {
-        if (err == error.EnvironmentVariableNotFound) {
-            break :b "local";
-        } else {
-            return err;
-        }
-    };
+    const buildTag = b.graph.environ_map.get("BUILD") orelse "0";
+    const commitTag = b.graph.environ_map.get("COMMIT") orelse "local";
     const options = b.addOptions();
     options.addOption(bool, "dev", dev);
     if (dev) {
@@ -505,7 +493,7 @@ fn addBehaviorTest(b: *std.Build, lib: *std.Build.Step.Compile, vmc: *std.Build.
     step.rdynamic = true;
 
     try link_cli_deps(b, root, vmc, config);
-    step.linkLibrary(lib);
+    step.root_module.linkLibrary(lib);
 
     const test_config = try create_test_config(b, .{
         .test_backend = test_backend,
@@ -543,7 +531,7 @@ fn addTraceTest(b: *std.Build, lib_config_: Options, cli_config_: CliConfig) !*s
             .mode = .simple,
         },
     });
-    step.addIncludePath(b.path("src"));
+    step.root_module.addIncludePath(b.path("src"));
 
     const test_config = try create_test_config(b, .{
         .test_backend = test_backend,
@@ -584,7 +572,7 @@ pub const PrintStep = struct {
 
     fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
         const self: *PrintStep = @fieldParentPtr("step", step);
-        std.fs.File.stdout().writeAll(self.str) catch unreachable;
+        std.Io.File.stdout().writeStreamingAll(step.owner.graph.io, self.str) catch unreachable;
     }
 };
 
@@ -597,7 +585,7 @@ pub fn buildCVM(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
         .name = "vm",
         .root_module = module,
     });
-    lib.linkLibC();
+    lib.root_module.link_libc = true;
     lib.root_module.strip = strip;
 
     var cflags = try std.ArrayList([]const u8).initCapacity(b.allocator, 0);
@@ -633,10 +621,10 @@ pub fn buildCVM(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     // Note that changing this alone doesn't clear the build cache.
     lib.root_module.sanitize_c = .off;
 
-    lib.addIncludePath(b.path("src"));
-    lib.addCSourceFile(.{ .file = b.path("src/vm.c"), .flags = cflags.items });
+    lib.root_module.addIncludePath(b.path("src"));
+    lib.root_module.addCSourceFile(.{ .file = b.path("src/vm.c"), .flags = cflags.items });
     for (isystem) |path| {
-        lib.addSystemIncludePath(.{ .cwd_relative = path });
+        lib.root_module.addSystemIncludePath(.{ .cwd_relative = path });
     }
     return lib;
 }
@@ -722,13 +710,13 @@ fn buildLib(b: *std.Build, lib_mod: *std.Build.Module, opts: Options) !*std.Buil
 
     if (opts.cli) {
         if (target.os.tag == .windows) {
-            lib.linkSystemLibrary("ole32");
-            lib.linkSystemLibrary("crypt32");
-            lib.linkSystemLibrary("ws2_32");
+            lib.root_module.linkSystemLibrary("ole32", .{});
+            lib.root_module.linkSystemLibrary("crypt32", .{});
+            lib.root_module.linkSystemLibrary("ws2_32", .{});
 
             if (target.abi == .msvc) {
-                lib.linkSystemLibrary("advapi32");
-                lib.linkSystemLibrary("shell32");
+                lib.root_module.linkSystemLibrary("advapi32", .{});
+                lib.root_module.linkSystemLibrary("shell32", .{});
             }
         }
     }
@@ -738,7 +726,7 @@ fn buildLib(b: *std.Build, lib_mod: *std.Build.Module, opts: Options) !*std.Buil
     lib.rdynamic = true;
 
     for (isystem) |path| {
-        lib.addSystemIncludePath(.{ .cwd_relative = path });
+        lib.root_module.addSystemIncludePath(.{ .cwd_relative = path });
     }
 
     return lib;
@@ -780,7 +768,7 @@ pub fn buildAndLinkLinenoise(b: *std.Build, mod: *std.Build.Module) !void {
         .name = "linenoise",
         .root_module = root,
     });
-    lib.linkLibC();
+    lib.root_module.link_libc = true;
     // lib.disable_sanitize_c = true;
 
     const c_flags = try std.ArrayList([]const u8).initCapacity(b.allocator, 0);
@@ -790,7 +778,7 @@ pub fn buildAndLinkLinenoise(b: *std.Build, mod: *std.Build.Module) !void {
         "lib/linenoise/linenoise.c",
     }) catch @panic("error");
     for (sources.items) |src| {
-        lib.addCSourceFile(.{
+        lib.root_module.addCSourceFile(.{
             .file = b.path(src),
             .flags = c_flags.items,
         });

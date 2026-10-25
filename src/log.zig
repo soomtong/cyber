@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("stdx");
 const cy = @import("cyber.zig");
 pub const wasm = @import("log_wasm.zig");
 const builtin = @import("builtin");
@@ -6,15 +7,15 @@ const builtin = @import("builtin");
 const UseStd = !builtin.target.isWasm() or builtin.os.tag == .wasi;
 const UseTimer = builtin.mode == .Debug and false;
 
-var timer: ?std.time.Timer = null;
+var timer: ?stdx.time.Timer = null;
 
 fn initTimerOnce() void {
     if (timer == null) {
-        timer = std.time.Timer.start() catch unreachable;
+        timer = stdx.time.Timer.start() catch unreachable;
     }
 }
 
-pub fn scoped(comptime Scope: @Type(.enum_literal)) type {
+pub fn scoped(comptime Scope: @EnumLiteral()) type {
     return struct {
         pub fn trace(comptime format: []const u8, args: anytype) void {
             if (!cy.Trace) {

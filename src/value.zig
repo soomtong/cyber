@@ -42,7 +42,7 @@ pub const TypeValue = extern struct {
 /// Otherwise, the sign bit represents either a pointer value or a special value (true, false, none, etc).
 /// Pointer values can be at most 50 bits since the sign bit (1), quiet nan (12),
 /// and one more bit (so that QNANs can also be a number value) take up 13 bits.
-pub const Value = packed union {
+pub const Value = extern union {
     val: u64,
     ptr: ?*anyopaque,
     u32: u32,

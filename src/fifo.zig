@@ -320,7 +320,7 @@ pub fn LinearFifo(
         }
 
         /// Same as `write` except it returns the number of bytes written, which is always the same
-        /// as `bytes.len`. The purpose of this function existing is to match `std.io.Writer` API.
+        /// as `bytes.len`. The purpose of this function existing is to match `std.Io.Writer` API.
         fn appendWrite(self: *Self, bytes: []const u8) error{OutOfMemory}!usize {
             try self.write(bytes);
             return bytes.len;

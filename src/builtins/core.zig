@@ -292,7 +292,7 @@ pub fn zErrConstEvalFunc2(comptime f: fn(*cy.Chunk, *cy.ConstEvalContext) anyerr
         pub fn genFunc(c: *cy.Chunk, ctx: *cy.ConstEvalContext) callconv(.c) cy.TypeValue {
             return @call(.always_inline, f, .{c, ctx}) catch |err| {
                 if (cy.compiler.dumpCompileErrorStackTrace and !C.silent()) {
-                    std.debug.dumpStackTrace(@errorReturnTrace().?.*);
+                    std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);
                 }
                 if (err != error.CompileError) {
                     _ = c.addReportFmt("error.{}", &.{v(err)}, ctx.node) catch @panic("");
@@ -333,7 +333,7 @@ pub fn zErrBuiltinFunc2(comptime f: fn(*cy.Chunk, *cy.BuiltinContext, *sema.Expr
         pub fn genFunc(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) callconv(.c) bool {
             @call(.always_inline, f, .{c, ctx, out}) catch |err| {
                 if (cy.compiler.dumpCompileErrorStackTrace and !C.silent()) {
-                    std.debug.dumpStackTrace(@errorReturnTrace().?.*);
+                    std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);
                     std.debug.print("evalFunc: {}\n", .{err});
                 }
                 if (err != error.CompileError) {
@@ -352,7 +352,7 @@ pub fn zErrBuiltinEvalFunc(comptime f: fn(*cy.Chunk, *cy.BuiltinContext) anyerro
         pub fn genFunc(c: *cy.Chunk, ctx: *cy.BuiltinContext) callconv(.c) cy.TypeValue {
             return @call(.always_inline, f, .{c, ctx}) catch |err| {
                 if (cy.compiler.dumpCompileErrorStackTrace and !C.silent()) {
-                    std.debug.dumpStackTrace(@errorReturnTrace().?.*);
+                    std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);
                 }
                 if (err != error.CompileError) {
                     _ = c.addReportFmt("error.{}", &.{v(err)}, ctx.node) catch @panic("");
@@ -418,7 +418,7 @@ pub fn prepPanicZError(t: *cy.Thread, err: anyerror, optTrace: ?*std.builtin.Sta
     if (!cy.isFreestanding and C.verbose()) {
         logger.tracev("{}", .{err});
         if (optTrace) |trace| {
-            std.debug.dumpStackTrace(trace.*);
+            std.debug.dumpErrorReturnTrace(trace);
         }
     }
     return t.ret_panic(@errorName(err));
@@ -1473,8 +1473,8 @@ pub fn call(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !void 
 }
 
 pub fn new_shared_state(t: *cy.Thread) !C.Ret {
-    t.c.vm.shared_state_mutex.lock();
-    defer t.c.vm.shared_state_mutex.unlock();
+    t.c.vm.shared_state_mutex.lockUncancelable(stdx.io());
+    defer t.c.vm.shared_state_mutex.unlock(stdx.io());
 
     const ret = t.ret(*u8);
     const state = try t.alloc.create(u8);
@@ -1835,9 +1835,9 @@ fn str_fmt_bytes(t: *cy.Thread) anyerror!C.Ret {
     const ret = t.ret(cy.heap.Str);
     const obj = t.param(*cy.HeapObject);
     const str = obj.string.slice();
-    const kind = try std.meta.intToEnum(NumberFormat, t.param(i64));
+    const kind = std.enums.fromInt(NumberFormat, t.param(i64)) orelse return error.InvalidEnumTag;
     if (kind == .asc) {
-        var buf: std.ArrayListUnmanaged(u8) = .{};
+        var buf: std.ArrayListUnmanaged(u8) = .empty;
         defer buf.deinit(t.alloc);
 
         for (str) |byte| {
@@ -1871,13 +1871,12 @@ fn str_fmt_bytes(t: *cy.Thread) anyerror!C.Ret {
             else => return error.InvalidArgument,
         }
 
-        var buf: std.ArrayListUnmanaged(u8) = .{};
-        defer buf.deinit(t.alloc);
-        var adapter = buf.writer(t.alloc).adaptToNewApi(&.{});
+        var aw: std.Io.Writer.Allocating = .init(t.alloc);
+        defer aw.deinit();
         for (str) |byte| {
-            try adapter.new_interface.printInt(byte, base, .lower, .{ .width = width, .fill = '0' });
+            try aw.writer.printInt(byte, base, .lower, .{ .width = width, .fill = '0' });
         }
-        ret.* = try t.heap.init_astr(buf.items);
+        ret.* = try t.heap.init_astr(aw.written());
         return C.RetOk;
     }
 }
@@ -2073,7 +2072,7 @@ pub const NumberFormat = enum {
 fn raw_fmt(t: *cy.Thread) anyerror!C.Ret {
     const ret = t.ret(cy.heap.Str);
     const val = t.param(u64);
-    const format = try std.meta.intToEnum(NumberFormat, t.param(i64));
+    const format = std.enums.fromInt(NumberFormat, t.param(i64)) orelse return error.InvalidEnumTag;
     const config = t.param(cy.heap.NumberFormatConfig);
     ret.* = try rawFmtExt(t, val, format, config);
     return C.RetOk;
@@ -2081,7 +2080,7 @@ fn raw_fmt(t: *cy.Thread) anyerror!C.Ret {
 
 pub fn int_fmt_eval(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     const val = ctx.args[0].asInt();
-    const format = try std.meta.intToEnum(NumberFormat, ctx.args[1].asInt());
+    const format = std.enums.fromInt(NumberFormat, ctx.args[1].asInt()) orelse return error.InvalidEnumTag;
     const res = try intFmtExt(c.heap, val, format, .{});
     const box = try c.heap.lift(bt.Str, res);
     return TypeValue.init(c.sema.str_t, box);
@@ -2090,14 +2089,14 @@ pub fn int_fmt_eval(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
 fn int_fmt(t: *cy.Thread) anyerror!C.Ret {
     const ret = t.ret(cy.heap.Str);
     const val = t.param(i64);
-    const format = try std.meta.intToEnum(NumberFormat, t.param(i64));
+    const format = std.enums.fromInt(NumberFormat, t.param(i64)) orelse return error.InvalidEnumTag;
     ret.* = try intFmtExt(&t.heap, val, format, .{});
     return C.RetOk;
 }
 
 fn int_fmt2(t: *cy.Thread) anyerror!Value {
     const val = t.getInt(0);
-    const format = try std.meta.intToEnum(NumberFormat, t.getInt(1));
+    const format = std.enums.fromInt(NumberFormat, t.getInt(1)) orelse return error.InvalidEnumTag;
 
     const config = t.getPtr(*cy.heap.NumberFormatConfig, 2);
     return intFmtExt(t, val, format, config);

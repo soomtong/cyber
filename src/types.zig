@@ -50,7 +50,7 @@ pub const TypeKind = enum(u8) {
     dyn_trait = vmc.TYPE_KIND_DYN_TRAIT,
 };
 
-pub const TypeInfo = packed struct {
+pub const TypeInfo = packed struct(u16) {
     /// Type can only be used at compile-time.
     ct: bool = false,
 

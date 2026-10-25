@@ -10,6 +10,7 @@ const build_config = @import("build_config");
 const stdx = @import("stdx");
 const t = stdx.testing;
 const std = @import("std");
+const DynLib = @import("dynlib.zig").DynLib;
 const builtin = @import("builtin");
 const tcc = @import("tcc");
 const log = cy.log.scoped(.heap);
@@ -66,7 +67,7 @@ pub const Heap = struct {
         var new = Heap{
             .alloc = alloc,
             .sema = sema,
-            .heapPages = .{},
+            .heapPages = .empty,
             .buffers = .{},
             .heapFreeHead = null,
             .heapFreeTail = if (cy.Trace) null else undefined,
@@ -327,7 +328,7 @@ pub const Heap = struct {
             }
             const field = fields[sym.cast(.field).idx];
 
-            const val = @as(Value, @bitCast(finit.value));
+            const val = Value{ .val = @bitCast(finit.value) };
             self.moveValueTo(field.type, dst + field.offset, val);
         }
         return Value.initPtr(new);
@@ -949,7 +950,7 @@ pub const FuncSym = extern struct {
 
 const TccState = extern struct {
     state: *tcc.TCCState align(8),
-    lib: *std.DynLib,
+    lib: *DynLib,
     hasDynLib: bool,
 };
 
@@ -1597,7 +1598,7 @@ pub fn allocHostFuncUnion(self: *Heap, union_t: cy.TypeId, func: cy.ZHostFn) !Va
     return Value.initPtr(obj);
 }
 
-pub fn allocTccState(self: *Heap, state: *tcc.TCCState, optLib: ?*std.DynLib) !Value {
+pub fn allocTccState(self: *Heap, state: *tcc.TCCState, optLib: ?*DynLib) !Value {
     const obj = try allocPoolObject(self, bt.TccState);
     obj.tccState = .{
         .state = state,

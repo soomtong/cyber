@@ -1,4 +1,6 @@
 const std = @import("std");
+const dynlib = @import("../dynlib.zig");
+const stdx = @import("stdx");
 const builtin = @import("builtin");
 const cy = @import("../cyber.zig");
 const sema = cy.sema;
@@ -41,8 +43,8 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
 };
 
 /// Call `dlopen` for each chunk that needs it and assume `dlopen` caches duplicate libraries.
-fn getDynLib(vm: *cy.VM, c: *cy.Chunk) !*std.DynLib {
-    const lib = try vm.alloc.create(std.DynLib);
+fn getDynLib(vm: *cy.VM, c: *cy.Chunk) !*dynlib.DynLib {
+    const lib = try vm.alloc.create(dynlib.DynLib);
     errdefer vm.alloc.destroy(lib);
     if (c.bind_lib) |path| {
         var final_path: C.Bytes = undefined;
@@ -56,7 +58,7 @@ fn getDynLib(vm: *cy.VM, c: *cy.Chunk) !*std.DynLib {
         };
     } else {
         if (builtin.os.tag == .macos) {
-            const exe = try std.fs.selfExePathAlloc(vm.alloc);
+            const exe = try std.process.executablePathAlloc(stdx.io(), vm.alloc);
             defer vm.alloc.free(exe);
             lib.* = os.dlopen(exe) catch |err| {
                 std.debug.print("Cannot dlopen {s}.\n", .{exe});
@@ -65,13 +67,10 @@ fn getDynLib(vm: *cy.VM, c: *cy.Chunk) !*std.DynLib {
         } else if (builtin.os.tag == .windows) {
             // Windows: GetModuleHandleW(null) returns handle to current executable
             // This is equivalent to dlopen(NULL) on Unix systems
-            const handle = std.os.windows.kernel32.GetModuleHandleW(null);
-            if (handle) |h| {
-                lib.* = std.DynLib{ .inner = .{ .dll = h } };
-            } else {
+            lib.* = dynlib.DynLib.openSelf() catch |err| {
                 std.debug.print("Cannot get module handle for self exe.\n", .{});
-                return error.FileNotFound;
-            }
+                return err;
+            };
         } else {
             lib.* = os.dlopen("") catch |err| {
                 std.debug.print("Cannot dlopen main.\n", .{});
@@ -94,7 +93,7 @@ fn getTccState(vm: *cy.VM) *tcc.TCCState {
     };
 }
 
-fn genFunc(c: *cy.cgen.Chunk, lib: *std.DynLib, state: *tcc.TCCState, w: anytype, func: *cy.Func) !void {
+fn genFunc(c: *cy.cgen.Chunk, lib: *dynlib.DynLib, state: *tcc.TCCState, w: anytype, func: *cy.Func) !void {
     if (func.type == .extern_) {
         try cy.cgen.genFuncForwardDecl(c, w, func);
         if (func.data.extern_.has_impl) {
@@ -188,9 +187,9 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
     var compiler = cy.cgen.Compiler{
         .base = t.c.vm.compiler,
         .alloc = t.alloc,
-        .syms = .{},
+        .syms = .empty,
         .c_names = .{},
-        .vtables = .{},
+        .vtables = .empty,
         .next_vtable_id = 0,
     };
     defer compiler.deinit();
@@ -228,9 +227,9 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
     }
 
     // Generate c code.
-    var csrc: std.ArrayListUnmanaged(u8) = .{};
+    var csrc: std.ArrayListUnmanaged(u8) = .empty;
     defer csrc.deinit(t.alloc);
-    const w = csrc.writer(t.alloc);
+    const w = stdx.listWriter(&csrc, t.alloc);
 
     try cy.cgen.genVmHeaders(w);
 

@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("stdx");
 const cy = @import("cyber.zig");
 const sema = cy.sema;
 const cte = cy.cte;
@@ -265,7 +266,7 @@ pub fn resolveCustomTypeAlias(c: *cy.Chunk, sym: *cy.sym.TypeAlias) anyerror!voi
 
     const bind_name = name orelse b: {
         c.tempBufU8.clearRetainingCapacity();
-        const w = c.tempBufU8.writer(c.alloc);
+        const w = stdx.listWriter(&c.tempBufU8, c.alloc);
         try sema.writeBindName(w, &sym.head);
         break :b c.tempBufU8.items;
     };

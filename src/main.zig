@@ -1,4 +1,5 @@
 const std = @import("std");
+const win32 = @import("win32.zig");
 const builtin = @import("builtin");
 const build_config = @import("build_config");
 const stdx = @import("stdx");
@@ -25,26 +26,28 @@ var prevWinConsoleOutputCP: u32 = undefined;
 // Default VM.
 var gvm: *c.VM = undefined;
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     if (!is_wasi) {
         app_debug.attachSegfaultHandler(sig_handler);
     }
 
     if (builtin.os.tag == .windows) {
-        prevWinConsoleOutputCP = std.os.windows.kernel32.GetConsoleOutputCP();
-        _ = std.os.windows.kernel32.SetConsoleOutputCP(CP_UTF8);
+        prevWinConsoleOutputCP = win32.GetConsoleOutputCP();
+        _ = win32.SetConsoleOutputCP(CP_UTF8);
     }
     defer {
         if (builtin.os.tag == .windows) {
-            _ = std.os.windows.kernel32.SetConsoleOutputCP(prevWinConsoleOutputCP);
+            _ = win32.SetConsoleOutputCP(prevWinConsoleOutputCP);
         }
     }
 
     const alloc = cli.getAllocator();
     defer cli.deinitAllocator();
 
-    const args = try std.process.argsAlloc(alloc);
-    defer std.process.argsFree(alloc, args);
+    os_mod.process_args = init.args;
+    var args_arena: std.heap.ArenaAllocator = .init(alloc);
+    defer args_arena.deinit();
+    const args = try init.args.toSlice(args_arena.allocator());
 
     var cmd = Command.repl;
     var arg0: ?[]const u8 = null;
@@ -131,9 +134,9 @@ pub fn main() !void {
 
 fn exit(code: u8) noreturn {
     if (builtin.os.tag == .windows) {
-        _ = std.os.windows.kernel32.SetConsoleOutputCP(prevWinConsoleOutputCP);
+        _ = win32.SetConsoleOutputCP(prevWinConsoleOutputCP);
     }
-    std.posix.exit(code);
+    std.process.exit(code);
 }
 
 const Command = enum {
@@ -364,7 +367,7 @@ fn panic_handler() !void {
     try app_debug.vm_panic_handler(gvm);
 }
 
-fn sig_handler(sig: i32, info: *const std.posix.siginfo_t, ctx_ptr: ?*anyopaque) callconv(.c) noreturn {
+fn sig_handler(sig: app_debug.Sig, info: *const std.posix.siginfo_t, ctx_ptr: ?*anyopaque) callconv(.c) void {
     app_debug.handleSegfaultPosix(sig, info, ctx_ptr, sig_handler_inner);
 }
 

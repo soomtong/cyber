@@ -932,19 +932,18 @@ pub fn get_or_buf_print_object(self: *cy.Heap, buf: []u8, val: Value) ![]const u
 }
 
 pub fn get_or_buf_print_object2(self: *cy.Heap, buf: []u8, val: Value, out_ascii: *bool) ![]const u8 {
-    var fbuf = std.io.fixedBufferStream(buf);
-    const w = fbuf.writer();
+    var w: std.Io.Writer = .fixed(buf);
 
     if (val.isRefString()) {
         out_ascii.* = val.asHeapObject().string.ascii();
         return val.asString();
     } else {
         const val_t = val.getRefeeType();
-        if (try self.writeValue(w, val_t, try self.unbox(val), false)) {
+        if (try self.writeValue(&w, val_t, try self.unbox(val), false)) {
             out_ascii.* = true;
-            return fbuf.getWritten();
+            return w.buffered();
         } else {
-            const res = fbuf.getWritten();
+            const res = w.buffered();
             out_ascii.* = cy.string.isAstring(res);
             return res;
         }

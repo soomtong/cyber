@@ -1,11 +1,11 @@
 // Copyright (c) 2023 Cyber (See LICENSE)
 
 pub fn load(comptime Size: usize, comptime T: type, buf: []const T) @Vector(Size, T) {
-    var v: @Vector(Size, T) = @splat(@as(T, 0));
+    var arr: [Size]T = @splat(0);
     for (buf, 0..) |it, i| {
-        v[i] = it;
+        arr[i] = it;
     }
-    return v;
+    return arr;
 }
 
 pub fn negIotaIntExt(comptime len: usize, comptime offset: u32, comptime factor: u32) @Vector(len, i32) {

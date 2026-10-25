@@ -1,10 +1,12 @@
 const std = @import("std");
-const t = @import("stdx").testing;
+const stdx = @import("stdx");
+const t = stdx.testing;
 const builtin = @import("builtin");
 const is_wasm = builtin.cpu.arch.isWasm();
 const test_config = @import("test_config");
 const app_debug = @import("../app_debug.zig");
 const cli = @import("../cli.zig");
+const os_mod = @import("../std/os.zig");
 const c = @import("../capi.zig");
 const log = std.log.scoped(.setup);
 
@@ -69,13 +71,14 @@ pub const Config = struct {
     }
 };
 
-export fn test_init() void {
+export fn test_init(args: *const anyopaque) void {
+    os_mod.process_args = @as(*const std.process.Args, @ptrCast(@alignCast(args))).*;
     if (!is_wasm) {
         app_debug.attachSegfaultHandler(sig_handler);
     }
 }
 
-fn sig_handler(sig: i32, info: *const std.posix.siginfo_t, ctx_ptr: ?*anyopaque) callconv(.c) noreturn {
+fn sig_handler(sig: app_debug.Sig, info: *const std.posix.siginfo_t, ctx_ptr: ?*anyopaque) callconv(.c) void {
     app_debug.handleSegfaultPosix(sig, info, ctx_ptr, sig_handler_inner);
 }
 
@@ -253,14 +256,15 @@ pub const VMrunner = struct {
         }
 
         // Set and restore cwd.
+        const io = stdx.io();
         var cwdBuf: [1024]u8 = undefined;
-        const cwd = try std.posix.getcwd(&cwdBuf);
+        const cwd = cwdBuf[0..try std.process.currentPath(io, &cwdBuf)];
         if (config.chdir) |chdir| {
-            try std.posix.chdir(chdir);
+            try std.process.setCurrentPath(io, chdir);
         }
         defer {
             if (config.chdir != null) {
-                std.posix.chdir(cwd) catch @panic("error");
+                std.process.setCurrentPath(io, cwd) catch @panic("error");
             }
         }
 
@@ -453,7 +457,7 @@ fn expand_tmpl_macros(main_path: []const u8, tmpl: []const u8) ![]const u8 {
                 var w = std.Io.Writer.fixed(&buf);
 
                 _ = try w.writeAll(cur[0..idx]);
-                const basePath = try std.fs.realpathAlloc(t.alloc, ".");
+                const basePath = try std.Io.Dir.cwd().realPathFileAlloc(stdx.io(), ".", t.alloc);
                 defer t.alloc.free(basePath);
                 _ = try w.writeAll(basePath);
                 try w.writeByte(std.fs.path.sep);

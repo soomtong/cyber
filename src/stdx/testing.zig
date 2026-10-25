@@ -45,7 +45,7 @@ pub fn eqApproxDec(exp: anytype, act: @TypeOf(exp), tolerance: @TypeOf(exp)) !vo
     }
 }
 
-pub fn eqUnionEnum(act: anytype, exp: @Type(.EnumLiteral)) !void {
+pub fn eqUnionEnum(act: anytype, exp: @EnumLiteral()) !void {
     if (@typeInfo(@TypeOf(act)) == .Union) {
         try eq(@intFromEnum(act), @intFromEnum(@as(@typeInfo(@TypeOf(act)).Union.tag_type.?, exp)));
     } else {
@@ -137,7 +137,7 @@ pub const Mock = struct {
         }
     }
 
-    pub fn add(self: *Self, comptime E: @Type(.EnumLiteral)) void {
+    pub fn add(self: *Self, comptime E: @EnumLiteral()) void {
         std.debug.print("add {s}\n", .{@tagName(E)});
         std.debug.assert(!self.funcs.contains(@tagName(E)));
         self.funcs.put(@tagName(E), .{
@@ -145,7 +145,7 @@ pub const Mock = struct {
         }) catch unreachable;
     }
 
-    pub fn getNumCalls(self: Self, comptime E: @Type(.EnumLiteral)) u32 {
+    pub fn getNumCalls(self: Self, comptime E: @EnumLiteral()) u32 {
         return self.funcs.get(@tagName(E)).?.call_count;
     }
 };

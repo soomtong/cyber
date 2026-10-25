@@ -1025,7 +1025,7 @@ test "meta constants" {
         \\  return meta.system()
     , &eval_res);
     try zt.eq(C.Success, res);
-    const exp_system = std.enums.nameCast(meta_mod.SystemKind, builtin.os.tag);
+    const exp_system = @field(meta_mod.SystemKind, @tagName(builtin.os.tag));
     try zt.eq(@intFromEnum(exp_system), @as(*i64, @ptrCast(eval_res.res)).*);
 
     res = C.vm_eval(vm, 
@@ -1043,7 +1043,7 @@ test "meta constants" {
         \\  return meta.endian()
     , &eval_res);
     try zt.eq(C.Success, res);
-    const exp_endian = std.enums.nameCast(Endian, builtin.cpu.arch.endian());
+    const exp_endian = @field(Endian, @tagName(builtin.cpu.arch.endian()));
     try zt.eq(@intFromEnum(exp_endian), @as(*i64, @ptrCast(eval_res.res)).*);
 }
 

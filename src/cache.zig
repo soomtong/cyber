@@ -15,7 +15,7 @@ const EntriesDir = "entries";
 
 fn getCyberPath(alloc: std.mem.Allocator) ![]const u8 {
     const S = struct {
-        var buf: [std.fs.max_path_bytes]u8 = undefined;
+        var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     };
     if (CyberPath.len == 0) {
         const homePath = (try platform.getPath(alloc, .home)) orelse return error.MissingHomeDir;
@@ -26,11 +26,12 @@ fn getCyberPath(alloc: std.mem.Allocator) ![]const u8 {
         CyberPath = S.buf[0..homePath.len+1+CyberDir.len];
 
         // Also ensure sub directories exist.
-        var dir = try std.fs.cwd().openDir(homePath, .{});
-        defer dir.close();
-        var cyberDir = try dir.makeOpenPath(CyberDir, .{});
-        defer cyberDir.close();
-        try cyberDir.makePath(EntriesDir);
+        const io = stdx.io();
+        var dir = try std.Io.Dir.cwd().openDir(io, homePath, .{});
+        defer dir.close(io);
+        var cyberDir = try dir.createDirPathOpen(io, CyberDir, .{});
+        defer cyberDir.close(io);
+        try cyberDir.createDirPath(io, EntriesDir);
     }
     return CyberPath;
 }
@@ -50,17 +51,18 @@ pub fn saveNewSpecFile(alloc: std.mem.Allocator, specGroup: SpecHashGroup, spec:
     const cacheSpec = try toCacheSpec(spec);
     const cyberPath = try getCyberPath(alloc);
 
-    const now: u64 = @intCast(std.time.timestamp());
+    const io = stdx.io();
+    const now: u64 = @intCast(std.Io.Timestamp.now(io, .real).toSeconds());
 
     const filePath = try std.fs.path.join(alloc, &.{cyberPath, cacheSpec});
     defer alloc.free(filePath);
 
     // Ensure path exists.
-    try std.fs.cwd().makePath(std.fs.path.dirname(filePath).?);
+    try std.Io.Dir.cwd().createDirPath(io, std.fs.path.dirname(filePath).?);
 
-    const file = try std.fs.cwd().createFile(filePath, .{ .truncate = true, .exclusive = false });
-    defer file.close();
-    try file.writeAll(contents);
+    const file = try std.Io.Dir.cwd().createFile(io, filePath, .{ .truncate = true, .exclusive = false });
+    defer file.close(io);
+    try file.writeStreamingAll(io, contents);
 
     const new = SpecEntry{
         .spec = try alloc.dupe(u8, cacheSpec),
@@ -71,14 +73,14 @@ pub fn saveNewSpecFile(alloc: std.mem.Allocator, specGroup: SpecHashGroup, spec:
     defer alloc.free(path);
 
     // Save spec entries.
-    const entryFile = std.fs.cwd().createFile(path, .{ .truncate = true, .exclusive = false }) catch |err| {
+    const entryFile = std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true, .exclusive = false }) catch |err| {
         if (err == error.FileNotFound) {
             return error.ExpectedSpecFile;
         } else {
             return err;
         }
     };
-    defer entryFile.close();
+    defer entryFile.close(io);
     for (specGroup.entries) |e| {
         if (e.removed) {
             continue;
@@ -92,8 +94,8 @@ pub fn saveNewSpecFile(alloc: std.mem.Allocator, specGroup: SpecHashGroup, spec:
 /// Example spec entry:
 /// @lib.com/mylib.cy
 /// cacheDate=1679911482
-fn writeSpecEntry(file: std.fs.File, entry: SpecEntry) !void {
-    var w = file.writer(&.{});
+fn writeSpecEntry(file: std.Io.File, entry: SpecEntry) !void {
+    var w = file.writer(stdx.io(), &.{});
     try w.interface.print("@{s}\n", .{entry.spec});
     try w.interface.print("cacheDate={}\n", .{entry.cacheDate});
 }
@@ -126,10 +128,10 @@ pub fn getSpecHashGroup(alloc: std.mem.Allocator, spec: []const u8) !SpecHashGro
 }
 
 fn readEntryFile(alloc: std.mem.Allocator, path: []const u8) ![]SpecEntry {
-    const content = try std.fs.cwd().readFileAlloc(alloc, path, 1e9);
+    const content = try std.Io.Dir.cwd().readFileAlloc(stdx.io(), path, alloc, .limited(1e9));
     defer alloc.free(content);
 
-    var entries: std.ArrayListUnmanaged(SpecEntry) = .{};
+    var entries: std.ArrayListUnmanaged(SpecEntry) = .empty;
     defer entries.deinit(alloc);
 
     var iter = std.mem.tokenizeAny(u8, content, "\r\n");
@@ -169,7 +171,7 @@ pub fn allocSpecFileContents(alloc: std.mem.Allocator, entry: SpecEntry) ![]cons
     const cyberPath = try getCyberPath(alloc);
     const path = try std.fs.path.join(alloc, &.{cyberPath, entry.spec});
     defer alloc.free(path);
-    return std.fs.cwd().readFileAlloc(alloc, path, 1e9);
+    return std.Io.Dir.cwd().readFileAlloc(stdx.io(), path, alloc, .limited(1e9));
 }
 
 fn computeSpecHashStr(spec: []const u8) [16]u8 {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const dynlib = @import("../dynlib.zig");
 const builtin = @import("builtin");
 const stdx = @import("stdx");
 const tcc = @import("tcc");
@@ -96,11 +97,11 @@ pub const FFI = struct {
 pub fn allocFFI(vm: *cy.VM, ffi_t: *cy.Type) !Value {
     const ffi: *FFI = @ptrCast(try vm.heap.allocHostObject(ffi_t.id(), @sizeOf(FFI)));
     ffi.* = .{
-        .cstructs = .{},
+        .cstructs = .empty,
         .typeToCStruct = .{},
         .carrayMap = .{},
-        .cfuncs = .{},
-        .managed = .{},
+        .cfuncs = .empty,
+        .managed = .empty,
     };
     return Value.initPtr(ffi);
 }
@@ -573,7 +574,7 @@ pub fn ffiBindLib(t: *cy.Thread, config: BindLibConfig, _: *DynLib) !c.Ret {
     const ffi = t.getPtr(*FFI, 0);
 
     var success = false;
-    var lib = try t.alloc.create(std.DynLib);
+    var lib = try t.alloc.create(dynlib.DynLib);
     defer {
         if (!success) {
             t.alloc.destroy(lib);
@@ -583,7 +584,7 @@ pub fn ffiBindLib(t: *cy.Thread, config: BindLibConfig, _: *DynLib) !c.Ret {
     const path = t.getPtr(*cy.heap.Object, 1);
     if (path.getValue(0).asInt() == 0) {
         if (builtin.os.tag == .macos) {
-            const exe = try std.fs.selfExePathAlloc(t.alloc);
+            const exe = try std.process.executablePathAlloc(stdx.io(), t.alloc);
             defer t.alloc.free(exe);
             lib.* = try dlopen(exe);
         } else {
@@ -602,9 +603,9 @@ pub fn ffiBindLib(t: *cy.Thread, config: BindLibConfig, _: *DynLib) !c.Ret {
     }
 
     // Generate c code.
-    var csrc: std.ArrayListUnmanaged(u8) = .{};
+    var csrc: std.ArrayListUnmanaged(u8) = .empty;
     defer csrc.deinit(t.alloc);
-    const w = csrc.writer(t.alloc);
+    const w = stdx.listWriter(&csrc, t.alloc);
 
     const cgen = CGen{};
     _ = cgen;
@@ -710,7 +711,7 @@ fn cAllocVectorEmpty(t: *cy.Thread, elem_tid: cy.TypeId, n: usize, size: usize) 
 }
 
 fn cPrintValue(val: u64) void {
-    const v: Value = @bitCast(val);
+    const v = Value{ .val = val };
     v.dump();
 }
 
@@ -728,9 +729,9 @@ pub fn ffiBindCallback(vm: *cy.VM) anyerror!Value {
     _ = params;
     // const ret = try ffi.toCType(vm, vm.getValue(3));
 
-    var csrc: std.ArrayListUnmanaged(u8) = .{};
+    var csrc: std.ArrayListUnmanaged(u8) = .empty;
     defer csrc.deinit(vm.alloc);
-    const w = csrc.writer(vm.alloc);
+    const w = stdx.listWriter(&csrc, vm.alloc);
     _ = w;
 
     const cgen = CGen{};

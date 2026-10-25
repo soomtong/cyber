@@ -2,15 +2,15 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 /// Template for a custom test runner.
-pub fn main() !void {
-    test_init();
+pub fn main(init: std.process.Init.Minimal) !void {
+    test_init(&init.args);
 
     var passed: usize = 0;
     for (builtin.test_functions) |t| {
         t.func() catch |err| {
             std.debug.print("{s} fail: {}\n", .{t.name, err});
             if (@errorReturnTrace()) |trace| {
-                std.debug.dumpStackTrace(trace.*);
+                std.debug.dumpErrorReturnTrace(trace);
             }
             continue;
         };
@@ -29,7 +29,8 @@ pub fn main() !void {
     _ = std.testing.allocator_instance.deinit();
 }
 
-extern fn test_init() void;
+/// `args` points to a `std.process.Args`.
+extern fn test_init(args: *const anyopaque) void;
 
 extern fn zpanic(msg: [*]const u8, msg_len: usize, first_trace_addr: usize) noreturn;
 

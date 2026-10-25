@@ -406,7 +406,7 @@ fn test_control_flow(run: *Runner) void {
 //       Compiler tests would only need to be run once.
 //       Right now we just run everything again since it's not that much.
 test "Tests." {
-    var run = Runner{ .cases = .{} };
+    var run = Runner{ .cases = .empty };
     defer run.cases.deinit(t.alloc);
 
     test_syntax(&run);
@@ -597,11 +597,11 @@ fn case2(config: Config) !void {
     if (config.chdir) |chdir| {
         const path = try std.fmt.allocPrint(t.alloc, "{s}/{s}", .{chdir, config.uri});
         defer t.alloc.free(path);
-        contents = try std.fs.cwd().readFileAllocOptions(t.alloc, path, 1e9, null, .@"1", null);
+        contents = try std.Io.Dir.cwd().readFileAlloc(stdx.io(), path, t.alloc, .limited(1e9));
         final_path = try t.alloc.dupe(u8, config.uri);
     } else {
         final_path = try std.mem.concat(t.alloc, u8, &.{"src/test/", config.uri});
-        contents = try std.fs.cwd().readFileAllocOptions(t.alloc, final_path, 1e9, null, .@"1", null);
+        contents = try std.Io.Dir.cwd().readFileAlloc(stdx.io(), final_path, t.alloc, .limited(1e9));
     }
     defer t.alloc.free(final_path);
     defer t.alloc.free(contents);

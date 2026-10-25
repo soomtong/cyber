@@ -291,7 +291,7 @@ fn encodeMOp(out: []u8, len: *usize, enc: Encoding, op: Op) void {
             out[len.*] = X64.ModRM.direct(rm, op.data.reg.lowEnc());
             len.* += 1;
         },
-        .mem => |_| {
+        .mem => {
             unreachable;
         },
         else => unreachable,

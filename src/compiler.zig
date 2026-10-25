@@ -121,12 +121,12 @@ pub const Compiler = struct {
             .vm = vm,
             .heap = try cy.Heap.init(vm, null, vm.alloc, undefined),
             .jitBuf = jitgen.CodeBuffer.init(vm.alloc),
-            .reports = .{},
+            .reports = .empty,
             .sema = try sema.Sema.init(vm.alloc, self),
             .loader = default_loader,
             .resolver = default_resolver,
             .dl_resolver = default_dl_resolver,
-            .chunks = .{},
+            .chunks = .empty,
             .builtins_chunk = undefined,
             .chunk_map = .{},
             .genSymMap = .{},
@@ -142,10 +142,10 @@ pub const Compiler = struct {
             .chunk_start = 0,
             .type_start = 0,
             .find_type_cache = .{},
-            .c_includes = .{},
-            .c_flags = .{},
+            .c_includes = .empty,
+            .c_flags = .empty,
             .compiling = false,
-            .debug_tables = .{},
+            .debug_tables = .empty,
             .build_flags = .{},
             .build_options = .{},
         };
@@ -284,7 +284,7 @@ pub const Compiler = struct {
         self.type_start = @intCast(self.sema.types.items.len);
         const res = self.compileInner(uri, src, config) catch |err| {
             if (dumpCompileErrorStackTrace and !C.silent()) {
-                std.debug.dumpStackTrace(@errorReturnTrace().?.*);
+                std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);
             }
             if (err == error.CompileError) {
                 return err;

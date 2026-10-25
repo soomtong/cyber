@@ -7,8 +7,11 @@ const is_wasm = builtin.cpu.arch.isWasm();
 /// NOTE: Dupe Zig segfault handler to wrap a custom user handler.
 var windows_segfault_handle: ?std.os.windows.HANDLE = null;
 
+/// Signal number type of a `SigactionFn`.
+pub const Sig = if (builtin.os.tag == .windows) i32 else std.posix.SIG;
+
 /// Attaches a global SIGSEGV handler which calls `@panic("segmentation fault");`
-const SigactionFn = if (builtin.os.tag == .windows) *const fn (i32, *const void, ?*anyopaque) callconv(.c) noreturn else std.posix.Sigaction.sigaction_fn;
+const SigactionFn = if (builtin.os.tag == .windows) *const fn (Sig, *const void, ?*anyopaque) callconv(.c) void else std.posix.Sigaction.sigaction_fn;
 
 pub fn attachSegfaultHandler(handler: SigactionFn) void {
     if (is_wasm) {
@@ -19,7 +22,7 @@ pub fn attachSegfaultHandler(handler: SigactionFn) void {
         @compileError("segfault handler not supported for this target");
     }
     if (builtin.os.tag == .windows) {
-        windows_segfault_handle = std.os.windows.kernel32.AddVectoredExceptionHandler(0, handleSegfaultWindows);
+        windows_segfault_handle = std.os.windows.ntdll.RtlAddVectoredExceptionHandler(0, handleSegfaultWindows);
         return;
     }
     const act = std.posix.Sigaction{
@@ -33,7 +36,7 @@ pub fn attachSegfaultHandler(handler: SigactionFn) void {
 fn resetSegfaultHandler() void {
     if (builtin.os.tag == .windows) {
         if (windows_segfault_handle) |handle| {
-            std.debug.assert(std.os.windows.kernel32.RemoveVectoredExceptionHandler(handle) != 0);
+            std.debug.assert(std.os.windows.ntdll.RtlRemoveVectoredExceptionHandler(handle) != 0);
             windows_segfault_handle = null;
         }
         return;
@@ -112,7 +115,7 @@ pub fn defaultPanic(
             }
             @trap();
         },
-        .cuda, .amdhsa => std.posix.abort(),
+        .cuda, .amdhsa => std.process.abort(),
         .plan9 => {
             var status: [std.os.plan9.ERRMAX]u8 = undefined;
             const len = @min(msg.len, status.len - 1);
@@ -129,32 +132,40 @@ pub fn defaultPanic(
         resetSegfaultHandler();
     }
 
-    // Note there is similar logic in handleSegfaultPosix and handleSegfaultWindowsExtra.
-    nosuspend switch (panic_stage) {
+    // Note there is similar logic in handleSegfault.
+    switch (panic_stage) {
         0 => {
             panic_stage = 1;
 
             _ = panicking.fetchAdd(1, .seq_cst);
 
-            {
-                const stderr = std.debug.lockStderrWriter(&.{});
-                defer std.debug.unlockStderrWriter();
+            trace: {
+                const stderr = std.debug.lockStderr(&.{}).terminal();
+                defer std.debug.unlockStderr();
+                const writer = stderr.writer;
 
                 if (builtin.single_threaded) {
-                    stderr.print("panic: ", .{}) catch std.posix.abort();
+                    writer.print("panic: ", .{}) catch break :trace;
                 } else {
                     const current_thread_id = std.Thread.getCurrentId();
-                    stderr.print("thread {} panic: ", .{current_thread_id}) catch std.posix.abort();
+                    writer.print("thread {d} panic: ", .{current_thread_id}) catch break :trace;
                 }
-                stderr.print("{s}\n", .{msg}) catch std.posix.abort();
+                writer.print("{s}\n", .{msg}) catch break :trace;
 
-                if (@errorReturnTrace()) |t| std.debug.dumpStackTrace(t.*);
-                std.debug.dumpCurrentStackTraceToWriter(first_trace_addr orelse @returnAddress(), stderr) catch {};
+                if (@errorReturnTrace()) |t| if (t.index > 0) {
+                    writer.writeAll("error return context:\n") catch break :trace;
+                    std.debug.writeErrorReturnTrace(t, stderr) catch break :trace;
+                    writer.writeAll("\nstack trace:\n") catch break :trace;
+                };
+                std.debug.writeCurrentStackTrace(.{
+                    .first_address = first_trace_addr orelse @returnAddress(),
+                    .allow_unsafe_unwind = true,
+                }, stderr) catch break :trace;
             }
 
             handler() catch |err| {
                 std.debug.print("error during panic: {}", .{err});
-                std.posix.abort();
+                std.process.abort();
             };
 
             waitForOtherThreadToFinishPanicking();
@@ -165,12 +176,13 @@ pub fn defaultPanic(
             // A panic happened while trying to print a previous panic message.
             // We're still holding the mutex but that's fine as we're going to
             // call abort().
-            std.fs.File.stderr().writeAll("aborting due to recursive panic\n") catch {};
+            const stderr = std.debug.lockStderr(&.{}).terminal();
+            stderr.writer.writeAll("aborting due to recursive panic\n") catch {};
         },
         else => {}, // Panicked while printing the recursive panic message.
-    };
+    }
 
-    std.posix.abort();
+    std.process.abort();
 }
 
 pub fn vm_segv_handler(_: *C.VM) !void {
@@ -189,98 +201,15 @@ pub fn vm_panic_handler(_: *C.VM) !void {
     C.thread_signal_host_panic(t);
 }
 
-pub fn handleSegfaultPosix(sig: i32, info: *const std.posix.siginfo_t, ctx_ptr: ?*anyopaque, handler: *const fn() callconv(.c) void) callconv(.c) noreturn {
+/// Modified from `std.debug.handleSegfaultPosix` to wrap a custom `handler`.
+pub fn handleSegfaultPosix(sig: Sig, info: *const std.posix.siginfo_t, ctx_ptr: ?*anyopaque, handler: *const fn() callconv(.c) void) noreturn {
     // Reset to the default handler so that if a segfault happens in this handler it will crash
     // the process. Also when this handler returns, the original instruction will be repeated
     // and the resulting segfault will crash the process rather than continually dump stack traces.
     resetSegfaultHandler();
 
-    const addr = switch (builtin.os.tag) {
-        .linux => @intFromPtr(info.fields.sigfault.addr),
-        .freebsd, .macos => @intFromPtr(info.addr),
-        .netbsd => @intFromPtr(info.info.reason.fault.addr),
-        .openbsd => @intFromPtr(info.data.fault.addr),
-        .solaris, .illumos => @intFromPtr(info.reason.fault.addr),
-        else => unreachable,
-    };
-
-    const code = if (builtin.os.tag == .netbsd) info.info.code else info.code;
-    nosuspend switch (panic_stage) {
-        0 => {
-            panic_stage = 1;
-            _ = panicking.fetchAdd(1, .seq_cst);
-
-            {
-                std.debug.lockStdErr();
-                defer std.debug.unlockStdErr();
-
-                dumpSegfaultInfoPosix(sig, code, addr, ctx_ptr);
-            }
-
-            handler();
-
-            waitForOtherThreadToFinishPanicking();
-        },
-        else => {
-            // panic mutex already locked
-            dumpSegfaultInfoPosix(sig, code, addr, ctx_ptr);
-        },
-    };
-
-    // We cannot allow the signal handler to return because when it runs the original instruction
-    // again, the memory may be mapped and undefined behavior would occur rather than repeating
-    // the segfault. So we simply abort here.
-    std.posix.abort();
-}
-
-fn handleSegfaultWindows(info: *std.os.windows.EXCEPTION_POINTERS) callconv(.winapi) c_long {
-    switch (info.ExceptionRecord.ExceptionCode) {
-        std.os.windows.EXCEPTION_DATATYPE_MISALIGNMENT => handleSegfaultWindowsExtra(info, 0, "Unaligned Memory Access"),
-        std.os.windows.EXCEPTION_ACCESS_VIOLATION => handleSegfaultWindowsExtra(info, 1, null),
-        std.os.windows.EXCEPTION_ILLEGAL_INSTRUCTION => handleSegfaultWindowsExtra(info, 2, null),
-        std.os.windows.EXCEPTION_STACK_OVERFLOW => handleSegfaultWindowsExtra(info, 0, "Stack Overflow"),
-        else => return std.os.windows.EXCEPTION_CONTINUE_SEARCH,
-    }
-}
-
-fn handleSegfaultWindowsExtra(info: *std.os.windows.EXCEPTION_POINTERS, msg: u8, label: ?[]const u8) noreturn {
-    // For backends that cannot handle the language features used by this segfault handler, we have a simpler one,
-    switch (builtin.zig_backend) {
-        .stage2_x86_64 => if (builtin.target.ofmt == .coff) @trap(),
-        else => {},
-    }
-
-    comptime std.debug.assert(std.os.windows.CONTEXT != void);
-    nosuspend switch (panic_stage) {
-        0 => {
-            panic_stage = 1;
-            _ = panicking.fetchAdd(1, .seq_cst);
-
-            {
-                const stderr = std.debug.lockStderrWriter(&.{});
-                defer std.debug.unlockStderrWriter();
-
-                dumpSegfaultInfoWindows(info, msg, label, stderr);
-            }
-
-            waitForOtherThreadToFinishPanicking();
-        },
-        1 => {
-            panic_stage = 2;
-            std.fs.File.stderr().writeAll("aborting due to recursive panic\n") catch {};
-        },
-        else => {},
-    };
-    std.posix.abort();
-}
-
-const native_arch = builtin.cpu.arch;
-const native_os = builtin.os.tag;
-fn dumpSegfaultInfoPosix(sig: i32, code: i32, addr: usize, ctx_ptr: ?*anyopaque) void {
-    const stderr = std.debug.lockStderrWriter(&.{});
-    defer std.debug.unlockStderrWriter();
-    _ = switch (sig) {
-        std.posix.SIG.SEGV => if (native_arch == .x86_64 and native_os == .linux and code == 128) // SI_KERNEL
+    const addr: ?usize, const name: []const u8 = info: {
+        if (native_os == .linux and native_arch == .x86_64) {
             // x86_64 doesn't have a full 64-bit virtual address space.
             // Addresses outside of that address space are non-canonical
             // and the CPU won't provide the faulting address to us.
@@ -288,59 +217,96 @@ fn dumpSegfaultInfoPosix(sig: i32, code: i32, addr: usize, ctx_ptr: ?*anyopaque)
             // but can also happen when no addressable memory is involved;
             // for example when reading/writing model-specific registers
             // by executing `rdmsr` or `wrmsr` in user-space (unprivileged mode).
-            stderr.writeAll("General protection exception (no address available)\n")
-        else
-            stderr.print("Segmentation fault at address 0x{x}\n", .{addr}),
-        std.posix.SIG.ILL => stderr.print("Illegal instruction at address 0x{x}\n", .{addr}),
-        std.posix.SIG.BUS => stderr.print("Bus error at address 0x{x}\n", .{addr}),
-        std.posix.SIG.FPE => stderr.print("Arithmetic exception at address 0x{x}\n", .{addr}),
-        else => unreachable,
-    } catch std.posix.abort();
-
-    switch (native_arch) {
-        .x86,
-        .x86_64,
-        .arm,
-        .armeb,
-        .thumb,
-        .thumbeb,
-        .aarch64,
-        .aarch64_be,
-        => {
-            // Some kernels don't align `ctx_ptr` properly. Handle this defensively.
-            const ctx: *align(1) std.posix.ucontext_t = @ptrCast(ctx_ptr);
-            var new_ctx: std.posix.ucontext_t = ctx.*;
-            if (builtin.os.tag.isDarwin() and builtin.cpu.arch == .aarch64) {
-                // The kernel incorrectly writes the contents of `__mcontext_data` right after `mcontext`,
-                // rather than after the 8 bytes of padding that are supposed to sit between the two. Copy the
-                // contents to the right place so that the `mcontext` pointer will be correct after the
-                // `relocateContext` call below.
-                new_ctx.__mcontext_data = @as(*align(1) extern struct {
-                    onstack: c_int,
-                    sigmask: std.c.sigset_t,
-                    stack: std.c.stack_t,
-                    link: ?*std.c.ucontext_t,
-                    mcsize: u64,
-                    mcontext: *std.c.mcontext_t,
-                    __mcontext_data: std.c.mcontext_t align(@sizeOf(usize)), // Disable padding after `mcontext`.
-                }, @ptrCast(ctx)).__mcontext_data;
+            const SI_KERNEL = 0x80;
+            if (sig == .SEGV and info.code == SI_KERNEL) {
+                break :info .{ null, "General protection exception" };
             }
-            std.debug.relocateContext(&new_ctx);
-            std.debug.dumpStackTraceFromBase(&new_ctx, stderr);
-        },
-        else => {},
-    }
+        }
+        const addr: usize = switch (native_os) {
+            .linux => @intFromPtr(info.fields.sigfault.addr),
+            .freebsd, .macos => @intFromPtr(info.addr),
+            .netbsd => @intFromPtr(info.info.reason.fault.addr),
+            .openbsd => @intFromPtr(info.data.fault.addr),
+            .illumos => @intFromPtr(info.reason.fault.addr),
+            else => unreachable,
+        };
+        const name = switch (sig) {
+            .SEGV => "Segmentation fault",
+            .ILL => "Illegal instruction",
+            .BUS => "Bus error",
+            .FPE => "Arithmetic exception",
+            else => unreachable,
+        };
+        break :info .{ addr, name };
+    };
+    const opt_cpu_context: ?std.debug.cpu_context.Native = std.debug.cpu_context.fromPosixSignalContext(ctx_ptr);
+    handleSegfault(addr, name, if (opt_cpu_context) |*ctx| ctx else null, handler);
 }
 
-fn dumpSegfaultInfoWindows(info: *std.os.windows.EXCEPTION_POINTERS, msg: u8, label: ?[]const u8, stderr: *std.io.Writer) void {
-    _ = switch (msg) {
-        0 => stderr.print("{s}\n", .{label.?}),
-        1 => stderr.print("Segmentation fault at address 0x{x}\n", .{info.ExceptionRecord.ExceptionInformation[1]}),
-        2 => stderr.print("Illegal instruction at address 0x{x}\n", .{info.ContextRecord.getRegs().ip}),
-        else => unreachable,
-    } catch std.posix.abort();
+fn handleSegfaultWindows(info: *std.os.windows.EXCEPTION_POINTERS) callconv(.winapi) c_long {
+    // For backends that cannot handle the language features used by this segfault handler, we have a simpler one,
+    switch (builtin.zig_backend) {
+        .stage2_x86_64 => if (builtin.target.ofmt == .coff) @trap(),
+        else => {},
+    }
 
-    std.debug.dumpStackTraceFromBase(info.ContextRecord, stderr);
+    const name: []const u8, const addr: ?usize = switch (info.ExceptionRecord.ExceptionCode) {
+        std.os.windows.EXCEPTION_DATATYPE_MISALIGNMENT => .{ "Unaligned Memory Access", null },
+        std.os.windows.EXCEPTION_ACCESS_VIOLATION => .{ "Segmentation fault", info.ExceptionRecord.ExceptionInformation[1] },
+        std.os.windows.EXCEPTION_ILLEGAL_INSTRUCTION => .{ "Illegal instruction", info.ContextRecord.getRegs().ip },
+        std.os.windows.EXCEPTION_STACK_OVERFLOW => .{ "Stack Overflow", null },
+        else => return std.os.windows.EXCEPTION_CONTINUE_SEARCH,
+    };
+    handleSegfault(addr, name, &std.debug.cpu_context.fromWindowsContext(info.ContextRecord), null);
+}
+
+const native_arch = builtin.cpu.arch;
+const native_os = builtin.os.tag;
+
+/// Modified from `std.debug.defaultHandleSegfault` to wrap a custom `handler`.
+fn handleSegfault(addr: ?usize, name: []const u8, opt_ctx: ?std.debug.CpuContextPtr, handler: ?*const fn() callconv(.c) void) noreturn {
+    // Note there is similar logic in defaultPanic.
+    switch (panic_stage) {
+        0 => {
+            panic_stage = 1;
+            _ = panicking.fetchAdd(1, .seq_cst);
+
+            trace: {
+                const stderr = std.debug.lockStderr(&.{}).terminal();
+                defer std.debug.unlockStderr();
+
+                if (addr) |a| {
+                    stderr.writer.print("{s} at address 0x{x}\n", .{ name, a }) catch break :trace;
+                } else {
+                    stderr.writer.print("{s} (no address available)\n", .{name}) catch break :trace;
+                }
+                if (opt_ctx) |context| {
+                    std.debug.writeCurrentStackTrace(.{
+                        .context = context,
+                        .allow_unsafe_unwind = true,
+                    }, stderr) catch break :trace;
+                }
+            }
+
+            if (handler) |handler_| handler_();
+
+            waitForOtherThreadToFinishPanicking();
+        },
+        1 => {
+            panic_stage = 2;
+            // A segfault happened while trying to print a previous panic message.
+            // We're still holding the mutex but that's fine as we're going to
+            // call abort().
+            const stderr = std.debug.lockStderr(&.{}).terminal();
+            stderr.writer.writeAll("aborting due to recursive panic\n") catch {};
+        },
+        else => {}, // Panicked while printing the recursive panic message.
+    }
+
+    // We cannot allow the signal handler to return because when it runs the original instruction
+    // again, the memory may be mapped and undefined behavior would occur rather than repeating
+    // the segfault. So we simply abort here.
+    std.process.abort();
 }
 
 /// Must be called only after adding 1 to `panicking`. There are three callsites.
@@ -351,11 +317,11 @@ fn waitForOtherThreadToFinishPanicking() void {
         if (builtin.single_threaded) unreachable;
 
         // Sleep forever without hammering the CPU
-        var futex = std.atomic.Value(u32).init(0);
-        while (true) std.Thread.Futex.wait(&futex, 0);
+        var futex: u32 = 0;
+        while (true) std.Options.debug_io.futexWaitUncancelable(u32, &futex, 0);
         unreachable;
     }
 }
 
-// Protected by `std.debug.lockStderrWriter`.
+// Protected by `std.debug.lockStderr`.
 pub var print_buf: [1024]u8 = undefined;

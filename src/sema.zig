@@ -271,7 +271,7 @@ pub const Proc = struct {
             .block_start = @intCast(block_start),
             .isStaticFuncBlock = isStaticFuncBlock,
             .node = node,
-            .captures = .{},
+            .captures = .empty,
             .varStart = varStart,
             .active_field_start = active_field_start,
             .global_init = false,
@@ -2233,7 +2233,7 @@ pub fn resolveGenericFunc(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig, params
         .callable = true,
         .decl = @ptrCast(decl),
         .instance_cache = .{},
-        .instances = .{},
+        .instances = .empty,
         .mod = undefined,
     };
     func.data = .{ .generic = template };
@@ -2622,7 +2622,7 @@ pub fn pushSymResolveContext(c: *cy.Chunk, sym: *cy.Sym, caller: ?*ast.Node) !vo
         .type = .sym,
         .has_ct_params = false,
         .ct_params = .{},
-        .ct_locals = .{},
+        .ct_locals = .empty,
         .chunk = c.compiler.chunks.items[sym.declNode().src()],
         .caller = caller,
         .data = .{ .sym = sym },
@@ -2635,7 +2635,7 @@ pub fn pushFuncResolveContext(c: *cy.Chunk, func: *cy.Func, caller: ?*ast.Node) 
         .type = .func,
         .has_ct_params = false,
         .ct_params = .{},
-        .ct_locals = .{},
+        .ct_locals = .empty,
         .chunk = c.compiler.chunks.items[func.src()],
         .caller = caller,
         .data = .{ .func = func },
@@ -2648,7 +2648,7 @@ pub fn pushChunkResolveContext(c: *cy.Chunk, caller: ?*ast.Node) !void {
         .type = .chunk,
         .has_ct_params = false,
         .ct_params = .{},
-        .ct_locals = .{},
+        .ct_locals = .empty,
         .chunk = c,
         .caller = caller,
         .data = undefined,
@@ -3230,7 +3230,7 @@ pub fn resolveHostVar(c: *cy.Chunk, sym: *cy.sym.HostVar) !void {
     const decl = sym.decl.?;
 
     c.tempBufU8.clearRetainingCapacity();
-    const w = c.tempBufU8.writer(c.alloc);
+    const w = stdx.listWriter(&c.tempBufU8, c.alloc);
     try writeBindName(w, &sym.head);
     const bind_name = c.tempBufU8.items;
 
@@ -5244,7 +5244,7 @@ fn semaSwitchChoicePrologue(c: *cy.Chunk, info: *SwitchInfo, control: ExprResult
 
 fn semaSwitchBody(c: *cy.Chunk, info: *SwitchInfo, block: *ast.SwitchBlock, control: ExprResult) !void {
     // TODO: Cases should be appended without a builder.
-    var cases_buf: std.ArrayListUnmanaged(*ir.Expr) = .{};
+    var cases_buf: std.ArrayListUnmanaged(*ir.Expr) = .empty;
     defer cases_buf.deinit(c.alloc);
 
     // TODO: Check for exhaustive by looking at all case conds.
@@ -5406,7 +5406,7 @@ fn semaSwitchElseCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt) !*ir
 fn semaSwitchCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt, control: ExprResult) !*ir.Expr {
     const hasCapture = case.data.case.capture != null;
 
-    var conds_buf: std.ArrayListUnmanaged(*ir.Expr) = .{};
+    var conds_buf: std.ArrayListUnmanaged(*ir.Expr) = .empty;
     defer conds_buf.deinit(c.alloc);
 
     var case_capture_type: ?*cy.Type = null;
@@ -8856,7 +8856,7 @@ pub fn semaTraceNopFmt(c: *cy.Chunk, comptime format: []const u8, args: anytype,
 
 pub fn semaNopFmt(c: *cy.Chunk, comptime format: []const u8, args: anytype, node: *ast.Node) !void {
     const start = c.ir.buf.items.len;
-    try c.ir.buf.writer(c.alloc).print(format, args);
+    try stdx.listWriter(&c.ir.buf, c.alloc).print(format, args);
     const len = c.ir.buf.items.len - start;
     _ = try c.ir.pushStmt(.nop_label, node, .{ .label_idx = start, .label_len = len });
 }
@@ -9299,11 +9299,11 @@ pub const Sema = struct {
             .eval_buffer_tmpl = undefined,
             .result_tmpl = undefined,
             .ref_child_tmpl = undefined,
-            .func_sigs = .{},
+            .func_sigs = .empty,
             .func_sig_map = .{},
-            .types = .{},
+            .types = .empty,
             .partial_struct_layouts = .{},
-            .symbols = .{},
+            .symbols = .empty,
             .symbols_map = .{},
             .vm_c_variadic_funcs = .{},
         };
@@ -9431,7 +9431,7 @@ pub const Sema = struct {
     /// Format: (Type, ...) RetType
     pub fn getFuncSigTempStr(s: *Sema, buf: *std.ArrayListUnmanaged(u8), funcSigId: FuncSigId) ![]const u8 {
         buf.clearRetainingCapacity();
-        const w = buf.writer(s.alloc);
+        const w = stdx.listWriter(&buf, s.alloc);
         try writeFuncSigStr(s, w, funcSigId);
         return buf.items;
     }
@@ -9454,10 +9454,10 @@ pub const Sema = struct {
     }
 
     pub fn allocFuncSigTypesStr(s: *Sema, params: []const *cy.Type, ret: TypeId, from: ?*cy.Chunk) ![]const u8 {
-        var buf: std.ArrayListUnmanaged(u8) = .{};
+        var buf: std.ArrayListUnmanaged(u8) = .empty;
         defer buf.deinit(s.alloc);
 
-        const w = buf.writer(s.alloc);
+        const w = stdx.listWriter(&buf, s.alloc);
         try writeFuncSigTypesStr(s, w, params, ret, from);
         return buf.toOwnedSlice(s.alloc);
     }

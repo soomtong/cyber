@@ -256,7 +256,7 @@ pub fn str(s: []const u8) FmtValue {
     };
 }
 
-fn formatValue(writer: *std.io.Writer, val: FmtValue) !void {
+fn formatValue(writer: *std.Io.Writer, val: FmtValue) !void {
     switch (val.type) {
         .bool => {
             if (val.data.bool) {
@@ -388,14 +388,13 @@ pub fn format(writer: *std.Io.Writer, fmt: []const u8, vals: []const FmtValue) !
 
 pub fn allocFormat(alloc: std.mem.Allocator, fmt: []const u8, vals: []const FmtValue) ![]u8 {
     @branchHint(.cold);
-    var buf: std.ArrayListUnmanaged(u8) = .{};
-    defer buf.deinit(alloc);
-    var adapter = buf.writer(alloc).adaptToNewApi(&.{});
-    try format(&adapter.new_interface, fmt, vals);
-    return buf.toOwnedSlice(alloc);
+    var aw: std.Io.Writer.Allocating = .init(alloc);
+    defer aw.deinit();
+    try format(&aw.writer, fmt, vals);
+    return aw.toOwnedSlice();
 }
 
-var printMutex = std.Thread.Mutex{};
+var printMutex: std.Io.Mutex = .init;
 
 pub fn printStdout(fmt: []const u8, vals: []const FmtValue) void {
     printStdoutOrErr(fmt, vals) catch |err| {
@@ -406,8 +405,8 @@ pub fn printStdout(fmt: []const u8, vals: []const FmtValue) void {
 
 pub fn printStdoutOrErr(fmt: []const u8, vals: []const FmtValue) !void {
     @branchHint(.cold);
-    printMutex.lock();
-    defer printMutex.unlock();
+    printMutex.lockUncancelable(stdx.io());
+    defer printMutex.unlock(stdx.io());
     const w = std.io.getStdOut().writer();
     if (builtin.is_test) {
         if (@intFromEnum(std.log.Level.debug) <= @intFromEnum(std.testing.log_level)) {
@@ -438,12 +437,12 @@ pub fn printStderr(fmt: []const u8, vals: []const FmtValue) void {
     };
 }
 
-pub const StderrWriter = if (!cy.isWasmFreestanding) std.fs.File.Writer else HostFileWriter;
+pub const StderrWriter = if (!cy.isWasmFreestanding) std.Io.File.Writer else HostFileWriter;
 
 pub fn lockStderrWriter() StderrWriter {
     if (!cy.isWasmFreestanding) {
-        printMutex.lock();
-        return std.fs.File.stderr().writer(&.{});
+        printMutex.lockUncancelable(stdx.io());
+        return std.Io.File.stderr().writer(stdx.io(), &.{});
     } else {
         return HostFileWriter{ .fid = 2 };
     }
@@ -451,7 +450,7 @@ pub fn lockStderrWriter() StderrWriter {
 
 pub fn unlockPrint() void {
     if (!cy.isWasmFreestanding) {
-        printMutex.unlock();
+        printMutex.unlock(stdx.io());
     }
 }
 

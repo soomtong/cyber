@@ -33,8 +33,8 @@ pub fn buildAndLink(b: *std.Build, mod: *std.Build.Module, opts: BuildOptions) !
         .name = "tcc",
         .root_module = root,
     });
-    obj.addIncludePath(b.path("lib/tcc/vendor"));
-    obj.linkLibC();
+    obj.root_module.addIncludePath(b.path("lib/tcc/vendor"));
+    obj.root_module.link_libc = true;
     obj.root_module.sanitize_c = .off;
 
     var c_flags = try std.ArrayList([]const u8).initCapacity(b.allocator, 0);
@@ -55,7 +55,7 @@ pub fn buildAndLink(b: *std.Build, mod: *std.Build.Module, opts: BuildOptions) !
     });
 
     for (sources.items) |src| {
-        obj.addCSourceFile(.{
+        obj.root_module.addCSourceFile(.{
             .file = b.path(src),
             .flags = c_flags.items,
         });

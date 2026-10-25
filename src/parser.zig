@@ -99,8 +99,8 @@ pub const Parser = struct {
             .next_pos = undefined,
             .savePos = undefined,
             .tokens = undefined,
-            .node_stack = .{},
-            .blockStack = .{},
+            .node_stack = .empty,
+            .blockStack = .empty,
             .cur_indent = 0,
             .name = "",
             .deps = .{},
@@ -151,7 +151,7 @@ pub const Parser = struct {
         tokenizer.tokenize() catch |err| {
             log.tracev("tokenize error: {}", .{err});
             if (dumpParseErrorStackTrace and !c.silent()) {
-                std.debug.dumpStackTrace(@errorReturnTrace().?.*);
+                std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);
             }
             if (err == error.TokenError) {
                 return ResultView{
@@ -170,7 +170,7 @@ pub const Parser = struct {
 
         self.ast.root = self.parseRoot() catch |err| {
             if (dumpParseErrorStackTrace and !c.silent()) {
-                std.debug.dumpStackTrace(@errorReturnTrace().?.*);
+                std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);
             }
             if (err == error.ParseError) {
                 return ResultView{

@@ -382,7 +382,7 @@ pub fn reserveTemplateFunc(
         .ct = node.ct,
         .decl = @ptrCast(node),
         .variant_cache = .{},
-        .instances = .{},
+        .instances = .empty,
         .mod = undefined,
     };
     func.data = .{ .template = template };

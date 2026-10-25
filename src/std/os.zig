@@ -1,4 +1,5 @@
 const std = @import("std");
+const dynlib = @import("../dynlib.zig");
 const stdx = @import("stdx");
 const builtin = @import("builtin");
 const C = @import("../capi.zig");
@@ -18,6 +19,9 @@ pub const Src = @embedFile("os.cy");
 
 /// Adjusted by the CLI main when args are used to interpret a script file.
 pub var argv_start: usize = 0;
+
+/// Set by the CLI `main`. Zig 0.16 hands the process arguments only to `main`, so an embedder sees none.
+pub var process_args: ?std.process.Args = null;
 
 const funcs = [_]struct{[]const u8, C.BindFunc}{
     // Top level
@@ -61,7 +65,7 @@ fn stderr(t: *C.Thread) !C.Ret {
     // if (!cy.hasStdFiles) return t.ret_panic("Unsupported.");
 
     const ret = C.thread_ret(t, File);
-    const handle = std.fs.File.stderr().handle;
+    const handle = std.Io.File.stderr().handle;
     ret.* = .{ .fd = handle };
     return C.RetOk;
 }
@@ -70,7 +74,7 @@ fn stdin(t: *C.Thread) !C.Ret {
     // if (!cy.hasStdFiles) return t.ret_panic("Unsupported.");
 
     const ret = C.thread_ret(t, File);
-    const handle = std.fs.File.stdin().handle;
+    const handle = std.Io.File.stdin().handle;
     ret.* = .{ .fd = handle };
     return C.RetOk;
 }
@@ -79,7 +83,7 @@ fn stdout(t: *C.Thread) !C.Ret {
     // if (!cy.hasStdFiles) return t.ret_panic("Unsupported.");
 
     const ret = C.thread_ret(t, File);
-    const handle = std.fs.File.stdout().handle;
+    const handle = std.Io.File.stdout().handle;
     ret.* = .{ .fd = handle };
     return C.RetOk;
 }
@@ -93,7 +97,7 @@ fn _args(t: *C.Thread) !C.Ret {
 
     const alloc = C.thread_allocator(t);
 
-    var args: std.ArrayListUnmanaged(C.str) = .{};
+    var args: std.ArrayListUnmanaged(C.str) = .empty;
     defer {
         for (args.items) |*arg| {
             C.str_deinit(t, arg);
@@ -101,11 +105,13 @@ fn _args(t: *C.Thread) !C.Ret {
         args.deinit(alloc);
     }
 
-    var iter = try std.process.argsWithAllocator(alloc);
-    defer iter.deinit();
-    while (iter.next()) |arg| {
-        const str = C.str_init(t, arg);
-        try args.append(alloc, str);
+    if (process_args) |process_args_| {
+        var iter = try process_args_.iterateAllocator(alloc);
+        defer iter.deinit();
+        while (iter.next()) |arg| {
+            const str = C.str_init(t, arg);
+            try args.append(alloc, str);
+        }
     }
 
     const final_args = args.items[argv_start..];
@@ -187,7 +193,7 @@ pub fn exec(t: *C.Thread) anyerror!C.Ret {
     const ret = C.thread_ret(t, ExecResult);
     const args_slice = C.thread_slice(t);
     const args = C.slice_items(args_slice, C.str);
-    var buf: std.ArrayListUnmanaged([]const u8) = .{};
+    var buf: std.ArrayListUnmanaged([]const u8) = .empty;
     defer {
         buf.deinit(alloc);
     }
@@ -195,10 +201,10 @@ pub fn exec(t: *C.Thread) anyerror!C.Ret {
         try buf.append(alloc, C.str_bytes(arg));
     }
 
-    const res = try std.process.Child.run(.{
-        .allocator = alloc,
+    const res = try std.process.run(alloc, stdx.io(), .{
         .argv = buf.items,
-        .max_output_bytes = 1024 * 1024 * 10,
+        .stdout_limit = .limited(1024 * 1024 * 10),
+        .stderr_limit = .limited(1024 * 1024 * 10),
     });
 
     defer alloc.free(res.stdout);
@@ -208,8 +214,8 @@ pub fn exec(t: *C.Thread) anyerror!C.Ret {
     var err = C.str_init(t, res.stderr);
     errdefer t.heap.destructStr(&err);
     var code: i64 = -1;
-    if (res.term == .Exited) {
-        code = @intCast(res.term.Exited);
+    if (res.term == .exited) {
+        code = @intCast(res.term.exited);
     }
 
     ret.* = .{
@@ -239,7 +245,7 @@ pub fn fetchUrl(t: *C.Thread) anyerror!C.Ret {
 
 extern fn hostFetchUrl(url: [*]const u8, urlLen: usize) void;
 
-pub fn dlopen(path: []const u8) !std.DynLib {
+pub fn dlopen(path: []const u8) !dynlib.DynLib {
     if (builtin.os.tag == .linux and builtin.link_libc) {
         const path_c = try std.posix.toPosixPath(path);
         // Place the lookup scope of the symbols in this library ahead of the global scope.
@@ -248,7 +254,7 @@ pub fn dlopen(path: []const u8) !std.DynLib {
             .LAZY = true,
         });
         mode |= RTLD_DEEPBIND;
-        return std.DynLib{
+        return dynlib.DynLib{
             .inner = .{
                 .handle = std.c.dlopen(&path_c, @bitCast(mode)) orelse {
                     return error.FileNotFound;
@@ -256,6 +262,6 @@ pub fn dlopen(path: []const u8) !std.DynLib {
             },
         };
     } else {
-        return std.DynLib.open(path);
+        return dynlib.DynLib.open(path);
     }
 }

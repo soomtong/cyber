@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("stdx");
 const cy = @import("../cyber.zig");
 const Ret = cy.C.Ret;
 const RetOk = cy.C.RetOk;
@@ -496,9 +497,9 @@ fn astringReplace(t: *cy.Thread, str: []const u8, needlev: cy.heap.Str, replacev
     const needle = needlev.slice();
     const replacement = replacev.slice();
 
-    var buf: std.ArrayListAligned(u8, .@"4") = .{};
+    var buf: std.ArrayListAligned(u8, .@"4") = .empty;
     defer buf.deinit(t.alloc);
-    const newLen = try string.prepReplacement(str, needle, replacement, buf.writer(t.alloc));
+    const newLen = try string.prepReplacement(str, needle, replacement, stdx.listWriter(&buf, t.alloc));
     const numIdxes = buf.items.len / 4;
     if (numIdxes > 0) {
         if (replacev.ascii()) {
@@ -523,9 +524,9 @@ fn ustringReplace(t: *cy.Thread, str: []const u8, needlev: cy.heap.Str, replacev
     const needle = needlev.slice();
     const replacement = replacev.slice();
 
-    var buf: std.ArrayListAligned(u8, .@"4") = .{};
+    var buf: std.ArrayListAligned(u8, .@"4") = .empty;
     defer buf.deinit(t.alloc);
-    const newLen = try string.prepReplacement(str, needle, replacement, buf.writer(t.alloc));
+    const newLen = try string.prepReplacement(str, needle, replacement, stdx.listWriter(&buf, t.alloc));
     const numIdxes = buf.items.len / 4;
     if (numIdxes > 0) {
         const new = try t.heap.init_ustr_undef(newLen);

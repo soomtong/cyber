@@ -373,7 +373,7 @@ fn popInlineCtBlock(c: *cy.Chunk, local_start: usize) !void {
     //     }
     //     const val = try cte.eval(c, call.args[0]);
     //     defer c.vm.destructValue(val);
-    //     var buf: std.ArrayListUnmanaged(u8) = .{};
+    //     var buf: std.ArrayListUnmanaged(u8) = .empty;
     //     defer buf.deinit(c.alloc);
     //     _ = try c.vm.writeValue(buf.writer(c.alloc), val.type.id(), val.value, false);
     //     return c.reportErrorFmt("{}", &.{v(buf.items)}, @ptrCast(node));

@@ -245,11 +245,11 @@ pub const Tokenizer = struct {
         return .{
             .alloc = alloc,
             .src = src,
-            .tokens = .{},
+            .tokens = .empty,
             .nextPos = 0,
             .parseComments = false,
             .ignoreErrors = false,
-            .comments = .{},
+            .comments = .empty,
             .reportFn = defaultReportFn,
             .ctx = undefined,
             .has_error = false,
@@ -262,7 +262,7 @@ pub const Tokenizer = struct {
     }
 
     pub fn consumeComments(self: *Tokenizer) std.ArrayListUnmanaged(cy.IndexSlice(u32)) {
-        defer self.comments = .{};
+        defer self.comments = .empty;
         return self.comments;
     }
 

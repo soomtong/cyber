@@ -63,7 +63,7 @@ pub fn performDCE(c: *cy.Compiler) !void {
             return true;
         }
     };
-    var ctx = Context{ .alloc = c.alloc, .stack = .{} };
+    var ctx = Context{ .alloc = c.alloc, .stack = .empty };
     var visit_ctx = ir.VisitContext{
         .ctx = &ctx,
         .visit_stmt = S.visitStmt,

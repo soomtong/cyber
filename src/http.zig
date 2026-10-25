@@ -63,6 +63,7 @@ pub const StdHttpClient = struct {
         return StdHttpClient{
             .client = .{
                 .allocator = alloc,
+                .io = stdx.io(),
             },
         };
     }

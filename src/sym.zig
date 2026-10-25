@@ -1280,7 +1280,7 @@ pub fn createFuncTemplate(c: *cy.Chunk, parent: *Sym, name: []const u8, callable
         .callable = callable,
         .decl = @ptrCast(decl),
         .instance_cache = .{},
-        .instances = .{},
+        .instances = .empty,
         .mod = undefined,
     });
     sym.getMod().* = cy.Module.init();
@@ -1296,7 +1296,7 @@ pub fn createTemplate(c: *cy.Chunk, parent: *Sym, name: []const u8,
         .decl = decl,
         .params = &.{},
         .instance_cache = .{},
-        .instances = .{},
+        .instances = .empty,
         .mod = undefined,
     });
     sym.getMod().* = cy.Module.init();

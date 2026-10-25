@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("stdx");
 const builtin = @import("builtin");
 const build_config = @import("build_config");
 const cy = @import("cyber.zig");
@@ -200,8 +201,7 @@ fn normalizeSymName(buf: []u8, name: []const u8) ![]const u8 {
     const ReplaceChars = "&|%^*/+-<>=~";
     if (std.mem.indexOfAny(u8, name, ReplaceChars)) |idx| {
         // Normalize to C name.
-        var fbuf = std.io.fixedBufferStream(buf);
-        const w = fbuf.writer();
+        var w: std.Io.Writer = .fixed(buf);
         try w.print("{s}{s}", .{ name[0..idx], normalizeChar(name[idx]) });
 
         var rest = name[idx + 1 ..];
@@ -210,7 +210,7 @@ fn normalizeSymName(buf: []u8, name: []const u8) ![]const u8 {
             rest = rest[idx2 + 1 ..];
         }
         try w.writeAll(rest);
-        return fbuf.getWritten();
+        return w.buffered();
     } else {
         return name;
     }
@@ -258,9 +258,9 @@ pub const Chunk = struct {
     ir: *cy.ir.Buffer,
     encoder: cy.ast.Encoder,
     out: std.ArrayListUnmanaged(u8),
-    outw: std.ArrayListUnmanaged(u8).Writer,
+    outw: stdx.ListWriter(std.ArrayListUnmanaged(u8)),
     buf: std.ArrayListUnmanaged(u8),
-    bufw: std.ArrayListUnmanaged(u8).Writer,
+    bufw: stdx.ListWriter(std.ArrayListUnmanaged(u8)),
     proc: Proc,
 
     /// Alias for `compiler.syms`. Assumes all needed syms are registered by compiler.
@@ -283,9 +283,9 @@ pub const Chunk = struct {
             .alloc = alloc,
             .ir = &c.ir,
             .encoder = c.encoder,
-            .out = .{},
+            .out = .empty,
             .outw = undefined,
-            .buf = .{},
+            .buf = .empty,
             .bufw = undefined,
             .syms = &compiler.syms,
             .proc = .{},
@@ -300,8 +300,8 @@ pub const Chunk = struct {
             .srcUri = c.srcUri,
             .last_ret_name = "",
         };
-        new.outw = new.out.writer(alloc);
-        new.bufw = new.buf.writer(alloc);
+        new.outw = stdx.listWriter(&new.out, alloc);
+        new.bufw = stdx.listWriter(&new.buf, alloc);
         return new;
     }
 
@@ -438,7 +438,7 @@ const Proc = struct {
     type: ProcType = .main,
 
     var_names: std.StringHashMapUnmanaged(u32) = .{},
-    locals: std.ArrayListUnmanaged(Local) = .{},
+    locals: std.ArrayListUnmanaged(Local) = .empty,
 
     resetVerboseOnEnd: bool = false,
 
@@ -517,9 +517,9 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
     var compiler = Compiler{
         .base = self,
         .alloc = self.alloc,
-        .syms = .{},
+        .syms = .empty,
         .c_names = .{},
-        .vtables = .{},
+        .vtables = .empty,
         .next_vtable_id = 0,
     };
     defer compiler.deinit();
@@ -647,8 +647,8 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
     }
 
     // Generate head at the end since it relies on chunk passes.
-    var head: std.ArrayListUnmanaged(u8) = .{};
-    const headw = head.writer(self.alloc);
+    var head: std.ArrayListUnmanaged(u8) = .empty;
+    const headw = stdx.listWriter(&head, self.alloc);
     try genHeader(&compiler, headw, chunks);
     defer head.deinit(self.alloc);
 
@@ -666,7 +666,8 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
     // TODO: Support spawning multiple `cc` processes and then linking them. Could be faster for larger projects and also necessary for incremental compilation.
 
     // Ensure that `out` directory exists.
-    std.fs.cwd().makeDir("out") catch |err| {
+    const io = stdx.io();
+    std.Io.Dir.cwd().createDir(io, "out", .default_dir) catch |err| {
         if (err != error.PathAlreadyExists) {
             return err;
         }
@@ -676,17 +677,18 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
     const outPath = try std.fmt.allocPrintSentinel(self.alloc, "out/{s}.c", .{outName}, 0);
     defer self.alloc.free(outPath);
 
-    const outFile = try std.fs.cwd().createFile(outPath, .{ .truncate = true });
-    defer outFile.close();
+    const outFile = try std.Io.Dir.cwd().createFile(io, outPath, .{ .truncate = true });
+    defer outFile.close(io);
 
-    try outFile.writeAll(head.items);
+    try outFile.writeStreamingAll(io, head.items);
 
     for (chunks) |chunk| {
-        try outFile.writeAll(chunk.out.items);
+        try outFile.writeStreamingAll(io, chunk.out.items);
     }
 
-    var w = outFile.writer(&.{}).interface;
-    try genFooter(&compiler, &w, chunks);
+    var fw = outFile.writer(io, &.{});
+    const w = &fw.interface;
+    try genFooter(&compiler, w, chunks);
 
     var exePath: [:0]const u8 = undefined;
     const stemName = std.fs.path.stem(outName);
@@ -754,7 +756,7 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
             return error.TCCError;
         }
     } else {
-        var args: std.ArrayListUnmanaged([]const u8) = .{};
+        var args: std.ArrayListUnmanaged([]const u8) = .empty;
         defer args.deinit(self.alloc);
 
         try args.appendSlice(self.alloc, &.{"cc", "-o", exePath, outPath});
@@ -763,12 +765,11 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
         try args.append(self.alloc, "-Wno-return-type");
         try args.appendSlice(self.alloc, self.c_flags.items);
 
-        const res = try std.process.Child.run(.{
-            .allocator = self.alloc,
+        const res = try std.process.run(self.alloc, stdx.io(), .{
             .argv = args.items,
         });
         defer self.alloc.free(res.stdout);
-        if (res.term != .Exited or res.term.Exited != 0) {
+        if (res.term != .exited or res.term.exited != 0) {
             _ = try self.addReportConsume(.compile_err, res.stderr, null, 0);
             return error.CompileError;
         }
@@ -3075,19 +3076,18 @@ pub fn cStringLit(self: *Chunk, raw: []const u8) ![]const u8 {
     // Escape to C literal.
     const ReplaceChars = "\\\"";
     if (std.mem.indexOfAny(u8, raw, ReplaceChars)) |idx| {
-        var fbuf = std.io.fixedBufferStream(self.base.tempBufU8.items[0..]);
-        const w = fbuf.writer();
+        var w: std.Io.Writer = .fixed(self.base.tempBufU8.items[0..]);
         try w.writeAll(raw[0..idx]);
-        try writeEscapedChar(w, raw[idx]);
+        try writeEscapedChar(&w, raw[idx]);
 
         var rest = raw[idx + 1 ..];
         while (std.mem.indexOfAny(u8, rest, ReplaceChars)) |idx2| {
             try w.writeAll(rest[0..idx2]);
-            try writeEscapedChar(w, rest[idx2]);
+            try writeEscapedChar(&w, rest[idx2]);
             rest = rest[idx2+1..];
         }
         try w.writeAll(rest);
-        return fbuf.getWritten();
+        return w.buffered();
     } else {
         return raw;
     }

@@ -734,8 +734,7 @@ pub fn dumpInst(vm: *cy.VM, code: cy.OpCode, chunk_id: ?usize, pc_off: ?usize, p
     if (cy.Trace) {
         const desc = c.buf.instDescs.items[instIdx];
         if (desc != cy.NullId) {
-            var fbuf = std.io.fixedBufferStream(&buf);
-            var w = fbuf.writer();
+            var w: std.Io.Writer = .fixed(&buf);
 
             const descExtra = c.buf.instDescExtras.items[desc];
             try w.writeByte('"');

@@ -2,6 +2,8 @@
 const std = @import("std");
 const root = @import("root");
 const builtin = @import("builtin");
+const stdx = @import("stdx");
+const win32 = @import("win32.zig");
 
 pub const KnownFolder = enum {
     home,
@@ -32,12 +34,12 @@ pub const KnownFolderConfig = struct {
 };
 
 /// Returns a directory handle, or, if the folder does not exist, `null`.
-pub fn open(allocator: std.mem.Allocator, folder: KnownFolder, args: std.fs.Dir.OpenOptions) (std.fs.Dir.OpenError || Error)!?std.fs.Dir {
+pub fn open(allocator: std.mem.Allocator, folder: KnownFolder, args: std.Io.Dir.OpenOptions) (std.Io.Dir.OpenError || Error)!?std.Io.Dir {
     const path_or_null = try getPath(allocator, folder);
     if (path_or_null) |path| {
         defer allocator.free(path);
 
-        return try std.fs.cwd().openDir(path, args);
+        return try std.Io.Dir.cwd().openDir(stdx.io(), path, args);
     } else {
         return null;
     }
@@ -47,7 +49,7 @@ pub fn open(allocator: std.mem.Allocator, folder: KnownFolder, args: std.fs.Dir.
 pub fn getPath(allocator: std.mem.Allocator, folder: KnownFolder) Error!?[]const u8 {
     if (folder == .executable_dir) {
         if (builtin.os.tag == .wasi) return null;
-        return std.fs.selfExeDirPathAlloc(allocator) catch |err| switch (err) {
+        return std.process.executableDirPathAlloc(stdx.io(), allocator) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => null,
         };
@@ -65,7 +67,7 @@ pub fn getPath(allocator: std.mem.Allocator, folder: KnownFolder) Error!?[]const
                     dwFlags: std.os.windows.DWORD,
                     hToken: ?std.os.windows.HANDLE,
                     ppszPathL: *std.os.windows.PWSTR,
-                ) callconv(.winapi) std.os.windows.HRESULT;
+                ) callconv(.winapi) win32.HRESULT;
                 extern "ole32" fn CoTaskMemFree(pv: std.os.windows.LPVOID) callconv(.winapi) void;
             };
 
@@ -76,11 +78,11 @@ pub fn getPath(allocator: std.mem.Allocator, folder: KnownFolder) Error!?[]const
                     var dir_path_ptr: [*:0]u16 = undefined;
                     switch (funcs.SHGetKnownFolderPath(
                         &guid,
-                        std.os.windows.KF_FLAG_CREATE, // TODO: Chose sane option here?
+                        win32.KF_FLAG_CREATE, // TODO: Chose sane option here?
                         null,
                         &dir_path_ptr,
                     )) {
-                        std.os.windows.S_OK => {
+                        win32.S_OK => {
                             defer funcs.CoTaskMemFree(@ptrCast(dir_path_ptr));
                             const global_dir = std.unicode.utf16LeToUtf8Alloc(allocator, std.mem.span(dir_path_ptr)) catch |err| switch (err) {
                                 error.UnexpectedSecondSurrogateHalf => return null,
@@ -90,20 +92,20 @@ pub fn getPath(allocator: std.mem.Allocator, folder: KnownFolder) Error!?[]const
                             };
                             return global_dir;
                         },
-                        std.os.windows.E_OUTOFMEMORY => return error.OutOfMemory,
+                        win32.E_OUTOFMEMORY => return error.OutOfMemory,
                         else => return null,
                     }
                 },
                 .by_env => |env_path| {
                     if (env_path.subdir) |sub_dir| {
-                        const root_path = std.process.getEnvVarOwned(arena.allocator(), env_path.env_var) catch |err| switch (err) {
+                        const root_path = stdx.getEnvVarOwned(arena.allocator(), env_path.env_var) catch |err| switch (err) {
                             error.EnvironmentVariableNotFound => return null,
                             error.InvalidWtf8 => return null,
                             error.OutOfMemory => |e| return e,
                         };
                         return try std.fs.path.join(allocator, &[_][]const u8{ root_path, sub_dir });
                     } else {
-                        return std.process.getEnvVarOwned(allocator, env_path.env_var) catch |err| switch (err) {
+                        return stdx.getEnvVarOwned(allocator, env_path.env_var) catch |err| switch (err) {
                             error.EnvironmentVariableNotFound => return null,
                             error.InvalidWtf8 => return null,
                             error.OutOfMemory => |e| return e,
@@ -122,10 +124,7 @@ pub fn getPath(allocator: std.mem.Allocator, folder: KnownFolder) Error!?[]const
                     return try allocator.dupe(u8, abs);
                 },
                 .suffix => |s| {
-                    const home_dir = if (std.posix.getenv("HOME")) |home|
-                        home
-                    else
-                        return null;
+                    const home_dir = stdx.getEnvVarOwned(arena.allocator(), "HOME") catch return null;
 
                     if (s) |suffix| {
                         return try std.fs.path.join(allocator, &[_][]const u8{ home_dir, suffix });
@@ -150,7 +149,7 @@ fn getPathXdg(allocator: std.mem.Allocator, arena: *std.heap.ArenaAllocator, fol
     if (@hasDecl(root, "known_folders_config") and root.known_folders_config.xdg_force_default) {
         if (folder_spec.default) |default| {
             if (default[0] == '~') {
-                const home = std.process.getEnvVarOwned(arena.allocator(), "HOME") catch null orelse return null;
+                const home = stdx.getEnvVarOwned(arena.allocator(), "HOME") catch null orelse return null;
                 return try std.mem.concat(allocator, u8, &[_][]const u8{ home, default[1..] });
             } else {
                 return try allocator.dupe(u8, default);
@@ -159,18 +158,19 @@ fn getPathXdg(allocator: std.mem.Allocator, arena: *std.heap.ArenaAllocator, fol
     }
 
     const env_opt = env_opt: {
-        if (std.process.getEnvVarOwned(arena.allocator(), folder_spec.env.name) catch null) |env_opt| break :env_opt env_opt;
+        if (stdx.getEnvVarOwned(arena.allocator(), folder_spec.env.name) catch null) |env_opt| break :env_opt env_opt;
 
         if (!folder_spec.env.user_dir) break :env_opt null;
 
         // TODO: add caching so we only need to read once in a run
         const config_dir_path = getPathXdg(arena.allocator(), arena, .local_configuration) catch null orelse break :env_opt null;
-        const config_dir = std.fs.cwd().openDir(config_dir_path, .{}) catch break :env_opt null;
-        const home = std.process.getEnvVarOwned(arena.allocator(), "HOME") catch null orelse break :env_opt null;
-        const user_dirs = config_dir.openFile("user-dirs.dirs", .{}) catch null orelse break :env_opt null;
+        const io = stdx.io();
+        const config_dir = std.Io.Dir.cwd().openDir(io, config_dir_path, .{}) catch break :env_opt null;
+        const home = stdx.getEnvVarOwned(arena.allocator(), "HOME") catch null orelse break :env_opt null;
+        const user_dirs = config_dir.openFile(io, "user-dirs.dirs", .{}) catch null orelse break :env_opt null;
 
         var read: [1024 * 8]u8 = undefined;
-        _ = user_dirs.readAll(&read) catch null orelse break :env_opt null;
+        _ = user_dirs.readPositionalAll(io, &read, 0) catch null orelse break :env_opt null;
         const start = folder_spec.env.name.len + "=\"$HOME".len;
 
         var line_it = std.mem.splitScalar(u8, &read, '\n');
@@ -203,7 +203,7 @@ fn getPathXdg(allocator: std.mem.Allocator, arena: *std.heap.ArenaAllocator, fol
     } else {
         const default = folder_spec.default orelse return null;
         if (default[0] == '~') {
-            const home = std.process.getEnvVarOwned(arena.allocator(), "HOME") catch null orelse return null;
+            const home = stdx.getEnvVarOwned(arena.allocator(), "HOME") catch null orelse return null;
             return try std.mem.concat(allocator, u8, &[_][]const u8{ home, default[1..] });
         } else {
             return try allocator.dupe(u8, default);
@@ -358,7 +358,7 @@ test "open each known folders" {
             else => return e,
         };
         if (dir_or_null) |*dir| {
-            dir.close();
+            dir.close(stdx.io());
         }
     }
 }

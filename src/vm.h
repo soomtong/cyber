@@ -801,15 +801,13 @@ typedef struct ZThread {
     ZHeap heap;
 } ZThread;
 
-extern __thread ZThread* cur_thread;
+extern _Thread_local ZThread* cur_thread;
 
 typedef struct ZVM {
 #if defined(__wasm__)
     u8 padding[184];
-#elif !(DEBUG) || defined(__linux__)
-    u8 padding[456];
 #else
-    u8 padding[464];
+    u8 padding[456];
 #endif
     VM c;
 } ZVM;

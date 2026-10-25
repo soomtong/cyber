@@ -108,7 +108,7 @@ jobs:
       BIN_EXT: ${{ contains(matrix.config.target, 'windows') && '.exe' || '' }}
       ZIG_MODE_FLAG: ${{ (matrix.config.mode == 'release' && '-Doptimize=ReleaseSafe') || '' }}
       DEV_FLAG: ${{ startsWith(github.ref, 'refs/tags/') && '-Ddev=false' || '' }}
-      ZIG_VERSION: 0.15.2
+      ZIG_VERSION: 0.17.0
     steps:
       - name: Install Linux deps.
         if: env.BUILD_HOST == 'ubuntu-22.04' && env.BUILD_TARGET == 'x86_64-linux-gnu'
@@ -332,7 +332,7 @@ jobs:
   docs:
     runs-on: ubuntu-22.04
     env:
-      ZIG_VERSION: 0.15.2
+      ZIG_VERSION: 0.17.0
     steps:
       - name: Clone repo.
         uses: actions/checkout@v3

@@ -751,9 +751,17 @@ typedef struct Heap {
     u64 trace_track_object_event;
 } Heap;
 
+// Zig 0.17 adds a `usize` pointer-stability lock to every `std.ArrayList` when runtime safety is on.
+// The Zig structs mirrored by `ZHeap` and `ZVM` hold such lists before their `c` field.
+#if RT_SAFETY
+#define ZIG_LIST_LOCK_SIZE sizeof(size_t)
+#else
+#define ZIG_LIST_LOCK_SIZE 0
+#endif
+
 typedef struct ZHeap {
 #if !defined(__wasm__)
-    u8 padding[112];
+    u8 padding[112 + 1 * ZIG_LIST_LOCK_SIZE];
 #endif
     Heap c;
 } ZHeap;
@@ -805,9 +813,9 @@ extern _Thread_local ZThread* cur_thread;
 
 typedef struct ZVM {
 #if defined(__wasm__)
-    u8 padding[184];
+    u8 padding[184 + 10 * ZIG_LIST_LOCK_SIZE];
 #else
-    u8 padding[456];
+    u8 padding[456 + 10 * ZIG_LIST_LOCK_SIZE];
 #endif
     VM c;
 } ZVM;

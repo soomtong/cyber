@@ -92,7 +92,7 @@ var mocks: std.ArrayList(*Mock) = std.ArrayList(*Mock).initCapacity(
     if (builtin.is_test) alloc else std.heap.page_allocator, 0,
 ) catch @panic("error");
 
-pub fn unitTrace(loc: std.builtin.SourceLocation) void {
+pub fn unitTrace(loc: std.lang.SourceLocation) void {
     for (mocks.items) |mock| {
         if (mock.funcs.getEntry(loc.fn_name)) |entry| {
             entry.value_ptr.call_count += 1;

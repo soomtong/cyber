@@ -1438,51 +1438,51 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
                         // TODO: Replace special cases with calls to @init_sequence, @init_record.
                         if (target_t.isInstanceOf(c.sema.slice_tmpl)) {
                             const new = try c.heap.newInstance(target_t, &.{
-                                C.toFieldInit("buf", @bitCast(Value.initPtr(null))),
-                                C.toFieldInit("ptr", @bitCast(Value.initPtr(null))),
-                                C.toFieldInit("_len", @bitCast(Value.initInt(0))),
-                                C.toFieldInit("header", @bitCast(Value.initInt(@bitCast(@as(u64, 1) << 63)))),
+                                C.toFieldInit("buf", Value.initPtr(null).val),
+                                C.toFieldInit("ptr", Value.initPtr(null).val),
+                                C.toFieldInit("_len", Value.initInt(0).val),
+                                C.toFieldInit("header", Value.initInt(@bitCast(@as(u64, 1) << 63)).val),
                             });
                             return Expr.initValue2(target_t, new);
                         }
                         if (target_t.isInstanceOf(c.sema.span_tmpl)) {
                             const new = try c.heap.newInstance(target_t, &.{
-                                C.toFieldInit("base", @bitCast(Value.initPtr(null))),
-                                C.toFieldInit("length", @bitCast(Value.initInt(0))),
+                                C.toFieldInit("base", Value.initPtr(null).val),
+                                C.toFieldInit("length", Value.initInt(0).val),
                             });
                             return Expr.initValue2(target_t, new);
                         }
                         if (target_t.isInstanceOf(c.sema.array_tmpl)) {
                             const new = try c.heap.newInstance(target_t, &.{
-                                C.toFieldInit("buf", @bitCast(Value.initPtr(null))),
-                                C.toFieldInit("length", @bitCast(Value.initInt(0))),
-                                C.toFieldInit("header", @bitCast(Value.initInt(0))),
+                                C.toFieldInit("buf", Value.initPtr(null).val),
+                                C.toFieldInit("length", Value.initInt(0).val),
+                                C.toFieldInit("header", Value.initInt(0).val),
                             });
                             return Expr.initValue2(target_t, new);
                         }
                         if (target_t.isInstanceOf(c.sema.map_tmpl)) {
                             const generic_map_t = target_t.cast(.struct_t).fields()[0].type;
                             const base = try c.heap.newInstance(generic_map_t, &.{
-                                C.toFieldInit("meta", @bitCast(Value.initPtr(null))),
-                                C.toFieldInit("_keys", @bitCast(Value.initPtr(null))),
-                                C.toFieldInit("vals", @bitCast(Value.initPtr(null))),
-                                C.toFieldInit("nvac", @bitCast(Value.initInt(0))),
-                                C.toFieldInit("len", @bitCast(Value.initInt(0))),
-                                C.toFieldInit("cap", @bitCast(Value.initInt(0))),
+                                C.toFieldInit("meta", Value.initPtr(null).val),
+                                C.toFieldInit("_keys", Value.initPtr(null).val),
+                                C.toFieldInit("vals", Value.initPtr(null).val),
+                                C.toFieldInit("nvac", Value.initInt(0).val),
+                                C.toFieldInit("len", Value.initInt(0).val),
+                                C.toFieldInit("cap", Value.initInt(0).val),
                             });
                             const new = try c.heap.newInstance(target_t, &.{
-                                C.toFieldInit("base", @bitCast(base)),
+                                C.toFieldInit("base", base.val),
                             });
                             return Expr.initValue2(target_t, new);
                         }
                         if (target_t.isInstanceOf(c.sema.hash_map_tmpl)) {
                             const new = try c.heap.newInstance(target_t, &.{
-                                C.toFieldInit("meta", @bitCast(Value.initPtr(null))),
-                                C.toFieldInit("_keys", @bitCast(Value.initPtr(null))),
-                                C.toFieldInit("vals", @bitCast(Value.initPtr(null))),
-                                C.toFieldInit("nvac", @bitCast(Value.initInt(0))),
-                                C.toFieldInit("len", @bitCast(Value.initInt(0))),
-                                C.toFieldInit("cap", @bitCast(Value.initInt(0))),
+                                C.toFieldInit("meta", Value.initPtr(null).val),
+                                C.toFieldInit("_keys", Value.initPtr(null).val),
+                                C.toFieldInit("vals", Value.initPtr(null).val),
+                                C.toFieldInit("nvac", Value.initInt(0).val),
+                                C.toFieldInit("len", Value.initInt(0).val),
+                                C.toFieldInit("cap", Value.initInt(0).val),
                             });
                             return Expr.initValue2(target_t, new);
                         }

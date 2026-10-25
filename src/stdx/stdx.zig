@@ -68,3 +68,9 @@ pub fn getEnvVarOwned(alloc: std.mem.Allocator, key: []const u8) error{ OutOfMem
     const val = std.c.getenv(key_z.ptr) orelse return error.EnvironmentVariableNotFound;
     return alloc.dupe(u8, std.mem.span(val));
 }
+
+/// Reinterprets the bytes of `v` as `T`, as `@bitCast` did for extern structs and unions before Zig 0.17.
+pub fn reinterpret(comptime T: type, v: anytype) T {
+    comptime std.debug.assert(@sizeOf(T) == @sizeOf(@TypeOf(v)));
+    return @as(*align(1) const T, @ptrCast(&v)).*;
+}

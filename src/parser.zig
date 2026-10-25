@@ -14,7 +14,7 @@ const TokenId = u32;
 const log = cy.log.scoped(.parser);
 const IndexSlice = cy.IndexSlice(u32);
 
-const dumpParseErrorStackTrace = !cy.isFreestanding and builtin.mode == .Debug and !cy.isWasm and true;
+const dumpParseErrorStackTrace = !cy.isFreestanding and builtin.mode == .debug and !cy.isWasm and true;
 
 const attributes = std.StaticStringMap(cy.ast.AttributeType).initComptime(.{
     .{ "bind", .bind },

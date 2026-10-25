@@ -1,7 +1,7 @@
 const std = @import("std");
 const stdx = @import("../stdx.zig");
 const builtin = @import("builtin");
-const debug = builtin.mode == .Debug;
+const debug = builtin.mode == .debug;
 
 /// Stack has more performant operations than std.ArrayList by using a top var.
 pub fn Stack(comptime T: type) type {

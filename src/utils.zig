@@ -5,7 +5,7 @@ const cy = @import("cyber.zig");
 const log = cy.log.scoped(.utils);
 
 pub fn dassert(pred: bool) void {
-    if (builtin.mode == .Debug) {
+    if (builtin.mode == .debug) {
         std.debug.assert(pred);
     }
 }

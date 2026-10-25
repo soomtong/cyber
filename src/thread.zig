@@ -163,8 +163,8 @@ test "thread internals." {
     try zt.eq(8, @alignOf(Thread));
     try zt.eq(@sizeOf(ThreadC), @sizeOf(vmc.Thread));
 
-    inline for (std.meta.fields(ThreadC)) |field| {
-        try zt.eq(@offsetOf(ThreadC, field.name), @offsetOf(vmc.Thread, field.name));
+    inline for (@typeInfo(ThreadC).@"struct".field_names) |field_name| {
+        try zt.eq(@offsetOf(ThreadC, field_name), @offsetOf(vmc.Thread, field_name));
     }
 
     // Check Zig/C structs.
@@ -554,7 +554,7 @@ pub const Thread = struct {
 
     /// This can be used to get boxed values.
     pub fn getValue(self: *Thread, idx: u32) Value {
-        return @bitCast(self.c.fp[CallArgStart + idx]);
+        return self.c.fp[CallArgStart + idx];
     }
 
     pub fn callUnion(self: *Thread, callee: Value, args: []const Value) !cy.Value {

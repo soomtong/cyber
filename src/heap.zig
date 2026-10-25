@@ -1121,7 +1121,7 @@ pub fn new_buffer_empty(self: *Heap, buffer_t: *cy.Type, cap: usize) !Value {
 }
 
 pub fn field_init(name: []const u8, val: Value) C.FieldInit {
-    return .{ .name = C.to_bytes(name), .value = @bitCast(val) };
+    return .{ .name = C.to_bytes(name), .value = val.val };
 }
 
 pub fn new_buffer(self: *Heap, buffer_t: *cy.Type, args: []Value) !Value {

@@ -1,9 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.mimalloc);
 
-const c = @cImport({
-    @cInclude("mimalloc.h");
-});
+const c = @import("mimalloc_c");
 
 pub fn collect(force: bool) void {
     c.mi_collect(force);

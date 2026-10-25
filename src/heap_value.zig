@@ -584,13 +584,13 @@ pub fn unbox2(self: *cy.Heap, val: Value, type_id: cy.TypeId) !Value {
             return Value.initFloat64(val.asRefF64());
         },
         bt.I8 => {
-            return @bitCast(@as(u64, @intCast(val.asRefByte())));
+            return .{ .val = @intCast(val.asRefByte()) };
         },
         bt.I32 => {
-            return @bitCast(val.asRefInt());
+            return .{ .val = @bitCast(val.asRefInt()) };
         },
         bt.I64 => {
-            return @bitCast(val.asRefInt());
+            return .{ .val = @bitCast(val.asRefInt()) };
         },
         bt.Symbol => {
             return Value.initSymbol(val.asRefSymbol());
@@ -613,10 +613,10 @@ pub fn unbox2(self: *cy.Heap, val: Value, type_id: cy.TypeId) !Value {
                     return val;
                 },
                 .pointer => {
-                    return @bitCast(val.asRefInt());
+                    return .{ .val = @bitCast(val.asRefInt()) };
                 },
                 .enum_t => {
-                    return @bitCast(val.asRefInt());
+                    return .{ .val = @bitCast(val.asRefInt()) };
                 },
                 else => {
                     std.debug.panic("TODO: {} {s}", .{type_.kind(), type_.name()});

@@ -586,15 +586,15 @@ export fn cl_vm_set_user_data(vm: *cy.VM, userData: ?*anyopaque) void {
 }
 
 export fn cl_str_init(t: *cy.Thread, cstr: C.Bytes) C.str {
-    return @bitCast(t.heap.init_str(C.from_bytes(cstr)) catch fatal());
+    return stdx.reinterpret(C.str, t.heap.init_str(C.from_bytes(cstr)) catch fatal());
 }
 
 export fn cl_astr_init(t: *cy.Thread, cstr: C.Bytes) C.str {
-    return @bitCast(t.heap.init_astr(C.from_bytes(cstr)) catch fatal());
+    return stdx.reinterpret(C.str, t.heap.init_astr(C.from_bytes(cstr)) catch fatal());
 }
 
 export fn cl_ustr_init(t: *cy.Thread, cstr: C.Bytes) C.str {
-    return @bitCast(t.heap.init_ustr(C.from_bytes(cstr)) catch fatal());
+    return stdx.reinterpret(C.str, t.heap.init_ustr(C.from_bytes(cstr)) catch fatal());
 }
 
 export fn cl_str_deinit(t: *cy.Thread, s: *cy.heap.Str) void {
@@ -1047,7 +1047,7 @@ test "meta constants" {
     try zt.eq(@intFromEnum(exp_endian), @as(*i64, @ptrCast(eval_res.res)).*);
 }
 
-// pub fn panic(msg: []const u8, trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+// pub fn panic(msg: []const u8, trace: ?*std.lang.StackTrace, ret_addr: ?usize) noreturn {
 //     _ = trace;
 //     _ = ret_addr;
 //     // if (is_wasm) {

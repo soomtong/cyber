@@ -603,10 +603,10 @@ pub const VariantFuncDecl = extern struct {
 pub const VariantFunc = extern struct {
     head: Sym,
     decl: VariantFuncDecl,
-    rest_: ZArrayList, 
+    rest_: ZArrayList(VariantFuncDecl),
 
     pub fn rest(self: *VariantFunc) *std.ArrayListUnmanaged(VariantFuncDecl) {
-        return @ptrCast(&self.rest_);
+        return self.rest_.list();
     }
 
     pub fn deinit(self: *VariantFunc, alloc: std.mem.Allocator) void {
@@ -767,7 +767,7 @@ pub const TypeSym = struct {
     decl: ?*ast.Node,
     type: *cy.Type,
     mod: vmc.Module,
-    impls_: ZArrayList,
+    impls_: std.ArrayListUnmanaged(*ast.ImplDecl),
     instance: ?*cy.Instance,
 
     pub fn deinit(self: *TypeSym, alloc: std.mem.Allocator) void {
@@ -779,7 +779,7 @@ pub const TypeSym = struct {
     }
 
     pub fn impls(self: *TypeSym) *std.ArrayListUnmanaged(*ast.ImplDecl) {
-        return @ptrCast(&self.impls_);
+        return &self.impls_;
     }
 
     pub fn has_decl(self: *TypeSym, name: []const u8) bool {
@@ -791,11 +791,24 @@ pub const TypeSym = struct {
     }
 };
 
-const ZArrayList = extern struct {
-    items_ptr: ?*anyopaque = null,
-    items_len: usize = 0,
-    cap: usize = 0,
-};
+/// Storage for a `std.ArrayListUnmanaged(T)` inside an extern struct. The std type has no defined
+/// layout (Zig 0.17 adds a pointer-stability lock in safe modes), so only its size and alignment are mirrored.
+fn ZArrayList(comptime T: type) type {
+    const List = std.ArrayListUnmanaged(T);
+    return extern struct {
+        bytes: [@sizeOf(List)]u8 align(@alignOf(List)),
+
+        pub fn init() @This() {
+            var self: @This() = undefined;
+            self.list().* = .empty;
+            return self;
+        }
+
+        pub fn list(self: *@This()) *List {
+            return @ptrCast(&self.bytes);
+        }
+    };
+}
 
 const ExtendEntry = struct {
     decl: *ast.ExtendDecl,
@@ -1160,7 +1173,7 @@ pub fn createTypeSym(c: *cy.Chunk, parent: *Sym, name: []const u8, opt_type: ?*c
         .decl = decl,
         .type = opt_type orelse undefined,
         .instance = null,
-        .impls_ = .{},
+        .impls_ = .empty,
         .mod = undefined,
     });
     if (opt_type) |type_| {
@@ -1324,7 +1337,7 @@ pub fn createVariantFunc(c: *cy.Chunk, parent: *Sym, name: []const u8, decl: *as
             .with_cstrs = .{ .ptr = undefined, .len = 0 },
             .resolved = false,
         },
-        .rest_ = .{},
+        .rest_ = .init(),
     });
     try c.syms.append(c.alloc, @ptrCast(sym));
     return sym;

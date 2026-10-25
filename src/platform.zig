@@ -260,9 +260,9 @@ fn KnownFolderSpec(comptime T: type) type {
         runtime: T,
 
         fn get(self: Self, folder: KnownFolder) T {
-            inline for (std.meta.fields(Self)) |fld| {
-                if (folder == @field(KnownFolder, fld.name))
-                    return @field(self, fld.name);
+            inline for (@typeInfo(Self).@"struct".field_names) |name| {
+                if (folder == @field(KnownFolder, name))
+                    return @field(self, name);
             }
             unreachable;
         }
@@ -341,19 +341,19 @@ comptime {
 }
 
 test "query each known folders" {
-    inline for (std.meta.fields(KnownFolder)) |fld| {
-        const path_or_null = try getPath(std.testing.allocator, @field(KnownFolder, fld.name));
+    inline for (@typeInfo(KnownFolder).@"enum".field_names) |name| {
+        const path_or_null = try getPath(std.testing.allocator, @field(KnownFolder, name));
         if (path_or_null) |path| {
             // TODO: Remove later
-            // std.debug.print("{s} => '{s}'\n", .{ fld.name, path });
+            // std.debug.print("{s} => '{s}'\n", .{ name, path });
             std.testing.allocator.free(path);
         }
     }
 }
 
 test "open each known folders" {
-    inline for (std.meta.fields(KnownFolder)) |fld| {
-        var dir_or_null = open(std.testing.allocator, @field(KnownFolder, fld.name), .{ .access_sub_paths = true }) catch |e| switch (e) {
+    inline for (@typeInfo(KnownFolder).@"enum".field_names) |name| {
+        var dir_or_null = open(std.testing.allocator, @field(KnownFolder, name), .{ .access_sub_paths = true }) catch |e| switch (e) {
             error.FileNotFound => return,
             else => return e,
         };

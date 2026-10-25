@@ -12,7 +12,7 @@ const v = cy.fmt.v;
 const tcc = @import("tcc");
 const vmc = @import("vmc");
 
-pub const DumpCGen = builtin.mode == .Debug and false;
+pub const DumpCGen = builtin.mode == .debug and false;
 
 const emit_nop = true;
 

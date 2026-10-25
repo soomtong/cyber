@@ -250,7 +250,7 @@ fn indexOfCharScalar(buf: []const u8, needle: u8) ?usize {
 }
 
 fn indexOfCharSimdRemain(comptime VecSize: usize, buf: []const u8, needle: u8) ?usize {
-    const MaskInt = std.meta.Int(.unsigned, VecSize);
+    const MaskInt = @Int(.unsigned, VecSize);
     const vbuf = cy.simd.load(VecSize, u8, buf);
     const mask: MaskInt = (@as(MaskInt, 1) << @intCast(buf.len)) - 1;
     const hitMask = @as(MaskInt, @bitCast(vbuf == @as(@Vector(VecSize, u8), @splat(needle)))) & mask;
@@ -262,7 +262,7 @@ fn indexOfCharSimdRemain(comptime VecSize: usize, buf: []const u8, needle: u8) ?
 
 fn indexOfCharSimdFixed4(comptime VecSize: usize, buf: []const u8, needle: u8) ?usize {
     if (VecSize == 32 and hasAvx2 and builtin.cpu.arch == .x86_64) {
-        // const MaskInt = std.meta.Int(.unsigned, VecSize);
+        // const MaskInt = @Int(.unsigned, VecSize);
         const vneedle: @Vector(VecSize, u8) = @splat(needle);
         var i: usize = 0;
         while (i + VecSize * 4 <= buf.len) : (i += VecSize * 4) {
@@ -322,7 +322,7 @@ fn indexOfCharSimdFixed4(comptime VecSize: usize, buf: []const u8, needle: u8) ?
 }
 
 fn indexOfCharSimdFixed(comptime VecSize: usize, buf: []const u8, needle: u8) ?usize {
-    const MaskInt = std.meta.Int(.unsigned, VecSize);
+    const MaskInt = @Int(.unsigned, VecSize);
     var vbuf: @Vector(VecSize, u8) = undefined;
     const vneedle: @Vector(VecSize, u8) = @splat(needle);
     var i: usize = 0;
@@ -347,7 +347,7 @@ fn indexOfScalar(str: []const u8, needle: []const u8) ?usize {
 /// `needle` can be any UTF-8 string.
 /// `str` is assumed to have `needle.len` additional bytes so that an offset buffer can loaded without bounds check.
 fn indexOfSimdFixed(comptime VecSize: usize, str: []const u8, needle: []const u8) ?usize {
-    const MaskInt = std.meta.Int(.unsigned, VecSize);
+    const MaskInt = @Int(.unsigned, VecSize);
     // Algorithm based on: http://0x80.pl/articles/simd-strfind.html.
 
     // Set up hashing. Hash end is currently always the last char position in needle.
@@ -380,7 +380,7 @@ fn indexOfSimdFixed(comptime VecSize: usize, str: []const u8, needle: []const u8
 
 /// `str.len` can be assumed to be >= 1 and < VecSize + needle.len.
 fn indexOfSimdRemain(comptime VecSize: usize, str_: []const u8, needle: []const u8) ?usize {
-    const MaskInt = std.meta.Int(.unsigned, VecSize);
+    const MaskInt = @Int(.unsigned, VecSize);
 
     // This will check up to `VecSize` bytes and any extras after that
     // can be discarded since the length will be < `needle.len`.
@@ -416,7 +416,7 @@ fn indexOfSimdRemain(comptime VecSize: usize, str_: []const u8, needle: []const 
 
 inline fn unsetLowestBit(mask: anytype, idx: anytype) @TypeOf(mask) {
     const Mask = @TypeOf(mask);
-    // const MaskShiftInt = std.meta.Int(.unsigned, std.math.log2(@bitSizeOf(Mask)));
+    // const MaskShiftInt = @Int(.unsigned, std.math.log2(@bitSizeOf(Mask)));
     return mask & ~(@as(Mask, 1) << @intCast(idx));
 }
 
@@ -453,8 +453,8 @@ fn indexOfAsciiSetScalar(str: []const u8, set: []const u8) ?usize {
 }
 
 pub fn indexOfAsciiSetSimdRemain(comptime VecSize: usize, str: []const u8, set: []const u8) ?usize {
-    const MaskInt = std.meta.Int(.unsigned, VecSize);
-    // const MaskShiftInt = std.meta.Int(.unsigned, std.math.log2(@bitSizeOf(MaskInt)));
+    const MaskInt = @Int(.unsigned, VecSize);
+    // const MaskShiftInt = @Int(.unsigned, std.math.log2(@bitSizeOf(MaskInt)));
 
     if (VecSize == 32 and hasAvx2) {
         // Same as SimdFixed version with a mask at the end.
@@ -523,7 +523,7 @@ pub fn indexOfAsciiSetSimdRemain(comptime VecSize: usize, str: []const u8, set: 
 }
 
 pub fn indexOfAsciiSetSimdFixed(comptime VecSize: usize, str: []const u8, set: []const u8) ?usize {
-    const MaskInt = std.meta.Int(.unsigned, VecSize);
+    const MaskInt = @Int(.unsigned, VecSize);
 
     if (VecSize == 32 and hasAvx2) {
         // Based on the algorithm: http://0x80.pl/articles/simd-byte-lookup.html
@@ -691,7 +691,7 @@ test "indexOfNewLineCpu()" {
 
 pub fn indexOfNewLine(buf: []const u8) ?usize {
     if (comptime std.simd.suggestVectorLength(u8)) |VecSize| {
-        const MaskInt = std.meta.Int(.unsigned, VecSize);
+        const MaskInt = @Int(.unsigned, VecSize);
         var vbuf: @Vector(VecSize, u8) = undefined;
         const lfNeedle: @Vector(VecSize, u8) = @splat(@as(u8, '\n'));
         const crNeedle: @Vector(VecSize, u8) = @splat(@as(u8, '\r'));

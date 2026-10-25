@@ -2,7 +2,7 @@
 To get the maximum performance, you'll need to build Cyber from source.
 
 ## Dependencies
-Get the Zig compiler (0.15.2):
+Get the Zig compiler (0.17.0):
 - [Zig download](https://ziglang.org/download)
 - If you use Zig often, you can use [zigup](https://github.com/marler8997/zigup) to manage different versions of the compiler.
 

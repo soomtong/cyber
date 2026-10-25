@@ -13,7 +13,7 @@ const bcgen = @import("bc_gen.zig");
 
 /// Surface bad inst generation by recording just the opcodes and comparing that by walking the bytecode.
 /// Used with `checkBytecode`.
-const RecordOpcodes = builtin.mode == .Debug and false;
+const RecordOpcodes = builtin.mode == .debug and false;
 
 pub const StringSlice = struct {
     idx: u64,
@@ -164,7 +164,7 @@ pub const ByteCodeBuffer = struct {
     pub fn getOrPushConstString(self: *ByteCodeBuffer, str: []const u8) !ConstString {
         const res = try self.const_string_map.getOrPut(self.alloc, str);
         if (!res.found_existing) {
-            res.key_ptr.* = try self.alloc.dupeZ(u8, str);
+            res.key_ptr.* = try self.alloc.dupeSentinel(u8, str, 0);
             res.value_ptr.* = cy.string.isAstring(str);
         }
         return .{

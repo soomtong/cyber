@@ -7,7 +7,7 @@ extern fn hostLogInfo(ptr: [*]const u8, len: usize) void;
 extern fn hostLogWarn(ptr: [*]const u8, len: usize) void;
 extern fn hostLogError(ptr: [*]const u8, len: usize) void;
 
-const DebugLog = builtin.mode == .Debug and true;
+const DebugLog = builtin.mode == .debug and true;
 
 /// Fixed sized scratch buffer for formatting logs.
 /// This allows small logs to still work without an allocator.

@@ -16,7 +16,7 @@ const TrackGlobalRC = vm_.TrackGlobalRC;
 const fmt = @import("../fmt.zig");
 const C = @import("../capi.zig");
 
-const debug = builtin.mode == .Debug;
+const debug = builtin.mode == .debug;
 const log = cy.log.scoped(.bindings);
 
 const NullId = std.math.maxInt(u32);
@@ -178,6 +178,7 @@ pub fn float_pow32(t: *cy.Thread) callconv(.c) C.Ret {
 }
 
 pub const QuickenType = enum(u8) {
+    _,
 };
 
 pub fn nop(vm: *cy.UserVM, _: [*]const Value, _: u8) Value {

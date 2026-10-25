@@ -420,7 +420,7 @@ pub fn replReadLine(t: *C.Thread) anyerror!C.Ret {
 
     var prefix = C.thread_param(t, C.str);
     defer C.str_deinit(t, &prefix);
-    const prefix_dup = try alloc.dupeZ(u8, C.str_bytes(prefix));
+    const prefix_dup = try alloc.dupeSentinel(u8, C.str_bytes(prefix), 0);
     defer alloc.free(prefix_dup);
     if (use_ln) {
         const line = try LnReadLine.read(undefined, prefix_dup);
@@ -628,7 +628,7 @@ pub fn zErrFunc(comptime f: fn (t: *C.Thread) anyerror!C.Ret) C.BindFunc {
 
 pub const isFreestanding = builtin.os.tag == .freestanding;
 
-pub fn prepPanicZError(t: *C.Thread, err: anyerror, optTrace: ?*std.builtin.StackTrace) C.Ret {
+pub fn prepPanicZError(t: *C.Thread, err: anyerror, optTrace: ?*std.lang.StackTrace) C.Ret {
     if (!isFreestanding and C.verbose()) {
         std.debug.print("{}", .{err});
         if (optTrace) |trace_| {
@@ -640,7 +640,7 @@ pub fn prepPanicZError(t: *C.Thread, err: anyerror, optTrace: ?*std.builtin.Stac
 
 var gpa: std.heap.DebugAllocator(.{
     .enable_memory_limit = false,
-    .stack_trace_frames = if (builtin.mode == .Debug) 12 else 0,
+    .stack_trace_frames = if (builtin.mode == .debug) 12 else 0,
 }) = .{};
 var miAlloc: mi.Allocator = undefined;
 var trace_allocator: TraceAllocator = undefined;

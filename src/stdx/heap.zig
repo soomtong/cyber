@@ -7,7 +7,7 @@ const IsWasm = builtin.target.isWasm();
 
 const MeasureMemory = false;
 var gpa: ?std.heap.DebugAllocator(.{
-    .stack_trace_frames = if (builtin.mode == .Debug) 10 else 0,
+    .stack_trace_frames = if (builtin.mode == .debug) 10 else 0,
     .enable_memory_limit = MeasureMemory
 }) = null;
 var wasm_gpa: WasmDefaultAllocator = undefined;

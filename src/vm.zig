@@ -294,6 +294,7 @@ pub const VM = struct {
                 // .binOp => {
                 //     self.alloc.free(it.*[0..vmc.CALL_OBJ_SYM_INST_LEN + 1]);
                 // },
+                _ => unreachable,
             }
         }
         if (reset) {
@@ -702,14 +703,14 @@ test "vm internals." {
     try zt.eq(8, @alignOf(VM));
 
     // Check Zig/C structs.
-    inline for (std.meta.fields(vmc.VM)) |field| {
-        try zt.eq(@offsetOf(vmc.VM, field.name), @offsetOf(VMC, field.name));
+    inline for (@typeInfo(vmc.VM).@"struct".field_names) |field_name| {
+        try zt.eq(@offsetOf(vmc.VM, field_name), @offsetOf(VMC, field_name));
     }
     // inline for (std.meta.fields(vmc.GlobalSym)) |field| {
     //     try zt.eq(@offsetOf(vmc.GlobalSym, field.name), @offsetOf(GlobalSym, field.name));
     // }
-    inline for (std.meta.fields(vmc.TypeInfo)) |field| {
-        try zt.eq(@offsetOf(vmc.TypeInfo, field.name), @offsetOf(TypeInfo, field.name));
+    inline for (@typeInfo(vmc.TypeInfo).@"struct".field_names) |field_name| {
+        try zt.eq(@offsetOf(vmc.TypeInfo, field_name), @offsetOf(TypeInfo, field_name));
     }
 
     try zt.eq(@offsetOf(VM, "c"), @offsetOf(vmc.ZVM, "c"));
@@ -728,7 +729,7 @@ pub const SymbolId = u64;
 const Root = @This();
 
 /// Generate assembly labels to find sections easier.
-const GenLabels = builtin.mode != .Debug and !builtin.cpu.arch.isWasm() and false;
+const GenLabels = builtin.mode != .debug and !builtin.cpu.arch.isWasm() and false;
 
 const DebugTraceStopAtNumOps: ?u32 = null;
 
@@ -898,7 +899,7 @@ fn zAllocFuncUnion(t: *cy.Thread, type_id: cy.TypeId, func_ptr: Value) callconv(
         };
     };
     return .{
-        .val = @bitCast(func_union),
+        .val = func_union.val,
         .code = vmc.RES_SUCCESS,
     };
 }
@@ -911,7 +912,7 @@ fn zAllocClosure(t: *cy.Thread, fp: [*]cy.Value, func_pc: [*]cy.Inst, union_t: c
         };
     };
     return .{
-        .val = @bitCast(func_union),
+        .val = func_union.val,
         .code = vmc.RES_SUCCESS,
     };
 }

@@ -35,7 +35,7 @@ const log = cy.log.scoped(.compiler);
 const f64NegOne = cy.Value.initF64(-1);
 const f64One = cy.Value.initF64(1);
 
-pub const dumpCompileErrorStackTrace = !cy.isFreestanding and builtin.mode == .Debug and !cy.isWasm and true;
+pub const dumpCompileErrorStackTrace = !cy.isFreestanding and builtin.mode == .debug and !cy.isWasm and true;
 
 const Root = @This();
 

@@ -3,7 +3,7 @@ const stdx = @import("stdx");
 const t = stdx.testing;
 const builtin = @import("builtin");
 const build_options = @import("build_options");
-const debug = builtin.mode == .Debug;
+const debug = builtin.mode == .debug;
 
 const cy = @import("cyber.zig");
 const bt = cy.types.BuiltinTypes;

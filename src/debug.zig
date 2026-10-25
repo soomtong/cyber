@@ -402,7 +402,7 @@ pub fn allocPanicMsg(t: *cy.Thread) ![]const u8 {
     switch (@as(cy.thread.PanicType, @enumFromInt(t.c.panic_type))) {
         .err => {
             var w = std.Io.Writer.fixed(@as([]u8, @ptrCast(&cy.tempBuf)));
-            _ = try t.heap.writeValue(&w, bt.Error, @bitCast(t.c.panic_payload), false);
+            _ = try t.heap.writeValue(&w, bt.Error, .{ .val = t.c.panic_payload }, false);
             const str = w.buffered();
             return try fmt.allocFormat(t.alloc, "{}", &.{v(str)});
         },
@@ -798,7 +798,7 @@ pub fn write_value_desc(vm: *cy.VM, w: *std.Io.Writer, val_t: cy.TypeId, val: *c
     }
 }
 
-const EnableTimerTrace = builtin.os.tag != .freestanding and builtin.mode == .Debug;
+const EnableTimerTrace = builtin.os.tag != .freestanding and builtin.mode == .debug;
 
 const TimerTrace = struct {
     timer: if (EnableTimerTrace) stdx.time.Timer else void,

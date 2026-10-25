@@ -1,16 +1,24 @@
 const std = @import("std");
 
-pub fn createModule(b: *std.Build) *std.Build.Module {
+pub fn createModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) *std.Build.Module {
+    // Replaces the `@cImport` of `mimalloc.h`, which Zig 0.17 removed.
+    const mimalloc_h = b.addTranslateC(.{
+        .root_source_file = b.path("lib/mimalloc/vendor/include/mimalloc.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mimalloc_h.addIncludePath(b.path("lib/mimalloc/vendor/include"));
     const mod = b.createModule(.{
         .root_source_file = b.path("lib/mimalloc/mimalloc.zig"),
     });
     mod.addIncludePath(b.path("lib/mimalloc/vendor/include"));
+    mod.addImport("mimalloc_c", mimalloc_h.createModule());
     return mod;
 }
 
 const BuildOptions = struct {
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
 };
 
 pub fn buildAndLink(b: *std.Build, mod: *std.Build.Module, opts: BuildOptions) !void {
@@ -39,7 +47,7 @@ pub fn buildAndLink(b: *std.Build, mod: *std.Build.Module, opts: BuildOptions) !
         lib.root_module.addSystemIncludePath(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX12.1.sdk/usr/include" });
         lib.root_module.addSystemIncludePath(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX12.3.sdk/usr/include" });
     }
-    if (opts.optimize == .Debug) {
+    if (opts.optimize == .debug) {
         // For debugging:
         // c_flags.append("-O0") catch @panic("error");
         // if (step.target.getCpuArch().isWasm()) {

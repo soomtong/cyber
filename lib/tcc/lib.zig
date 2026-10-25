@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn createModule(b: *std.Build, rtarget: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+pub fn createModule(b: *std.Build, rtarget: std.Build.ResolvedTarget, optimize: std.lang.Optimize) *std.Build.Module {
     const tcc = b.addTranslateC(.{
         .root_source_file = b.path("lib/tcc/vendor/libtcc.h"),
         .target = rtarget,
@@ -21,7 +21,7 @@ pub fn addImport(root: *std.Build.Module, name: []const u8, mod: *std.Build.Modu
 const BuildOptions = struct {
     selinux: bool = false,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
 };
 
 pub fn buildAndLink(b: *std.Build, mod: *std.Build.Module, opts: BuildOptions) !void {
@@ -43,7 +43,7 @@ pub fn buildAndLink(b: *std.Build, mod: *std.Build.Module, opts: BuildOptions) !
     }
     // c_flags.append("-D_GNU_SOURCE=1") catch @panic("error");
     if (opts.target.result.os.tag == .windows) {}
-    if (opts.optimize == .Debug) {
+    if (opts.optimize == .debug) {
         // For debugging:
         // c_flags.append("-O0") catch @panic("error");
     }

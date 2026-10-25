@@ -936,7 +936,7 @@ fn type_info2(c: *cy.Chunk, type_: *cy.Type) !cy.Value {
                     const opt_info_t = (try c.vm.findType("meta.OptionInfo")).?;
                     const elem_t = cy.Value.initPtr(type_.sym().instance.?.params[0].asPtr(*cy.Type));
                     const opt_info = try c.heap.newInstance(opt_info_t, &.{
-                        field_init("child", @bitCast(elem_t)),
+                        field_init("child", elem_t),
                     });
                     return c.heap.newChoice(info_t, "option", opt_info);
                 },
@@ -944,7 +944,7 @@ fn type_info2(c: *cy.Chunk, type_: *cy.Type) !cy.Value {
                     const res_info_t = (try c.vm.findType("meta.ResultInfo")).?;
                     const elem_t = cy.Value.initPtr(type_.sym().instance.?.params[0].asPtr(*cy.Type));
                     const opt_info = try c.heap.newInstance(res_info_t, &.{
-                        field_init("child", @bitCast(elem_t)),
+                        field_init("child", elem_t),
                     });
                     return c.heap.newChoice(info_t, "result", opt_info);
                 },
@@ -1045,14 +1045,14 @@ fn type_info2(c: *cy.Chunk, type_: *cy.Type) !cy.Value {
                     if (struct_t.cstruct) {
                         const struct_info_t = (try c.vm.findType("meta.CStructInfo")).?;
                         const struct_info = try c.heap.newInstance(struct_info_t, &.{
-                            field_init("name", @bitCast(namev)),
+                            field_init("name", namev),
                             field_init("fields", buffer),
                         });
                         return c.heap.newChoice(info_t, "cstruct", struct_info);
                     } else {
                         const struct_info_t = (try c.vm.findType("meta.StructInfo")).?;
                         const struct_info = try c.heap.newInstance(struct_info_t, &.{
-                            field_init("name", @bitCast(namev)),
+                            field_init("name", namev),
                             field_init("fields", buffer),
                         });
                         return c.heap.newChoice(info_t, "struct", struct_info);

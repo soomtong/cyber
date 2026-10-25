@@ -24,7 +24,7 @@ var threads: bool = undefined;
 
 var rtarget: std.Build.ResolvedTarget = undefined;
 var target: std.Target = undefined;
-var optimize: std.builtin.OptimizeMode = undefined;
+var optimize: std.lang.Optimize = undefined;
 var dev: bool = undefined;
 var isystem: []const []const u8 = undefined;
 
@@ -46,14 +46,14 @@ pub fn build(b: *std.Build) !void {
     optMalloc = b.option(Allocator, "malloc", "Override default allocator: `malloc`, `mimalloc`, `zig`");
     optFFI = b.option(bool, "ffi", "Override default FFI: true, false");
     optStatic = b.option(bool, "static", "Override default lib build type: true=static, false=dynamic");
-    trace = b.option(bool, "trace", "Enable tracing features.") orelse (optimize == .Debug);
+    trace = b.option(bool, "trace", "Enable tracing features.") orelse (optimize == .debug);
     optJIT = b.option(bool, "jit", "Build with JIT.");
     log_mem = b.option(bool, "log-mem", "Log memory traces.") orelse false;
     no_cache = b.option(bool, "no-cache", "Disable caching when running tests.") orelse false;
     dev = b.option(bool, "dev", "Marks version as dev.") orelse true;
     isystem = b.option([]const []const u8, "isystem", "System includes.") orelse &.{};
     strip = b.option(bool, "strip", "Override strip.") orelse b: {
-        if (optimize != .Debug and !trace) {
+        if (optimize != .debug and !trace) {
             // Sometimes there are issues with strip for ReleaseFast + wasi.
             if (target.os.tag != .wasi) {
                 break :b true;
@@ -86,7 +86,7 @@ pub fn build(b: *std.Build) !void {
     const vmc = try create_vmc_mod(b, opts);
 
     var cli_config = CliConfig.default();
-    if (optimize == .Debug or target.os.tag == .wasi) {
+    if (optimize == .debug or target.os.tag == .wasi) {
         // Dev build looks at `@root`, release build uses the exe dir as root.
         cli_config = cli_config.with_mod_root(abs_root_path);
     }
@@ -128,7 +128,7 @@ pub fn build(b: *std.Build) !void {
         // ).step);
 
         step.dependOn(&b.addInstallArtifact(exe, .{}).step);
-        if (optimize != .Debug) {
+        if (optimize != .debug) {
             step.dependOn(&b.addInstallFile(b.path("src/builtins/core.cy"), "bin/src/builtins/core.cy").step);
             step.dependOn(&b.addInstallFile(b.path("src/builtins/cy.cy"), "bin/src/builtins/cy.cy").step);
             step.dependOn(&b.addInstallFile(b.path("src/builtins/meta.cy"), "bin/src/builtins/meta.cy").step);
@@ -183,7 +183,7 @@ pub fn build(b: *std.Build) !void {
     //         .root_module = root,
     //     });
     //     lib.entry = .disabled;
-    //     if (optimize != .Debug) {
+    //     if (optimize != .debug) {
     //         // Disable to see better symbols when debugging wasm.
     //         lib.root_module.strip = true;
     //     }
@@ -270,9 +270,7 @@ pub fn build(b: *std.Build) !void {
         main_step.dependOn(behavior_test_cmd);
     }
 
-    const printStep = b.allocator.create(PrintStep) catch unreachable;
-    printStep.* = PrintStep.init(b, Version);
-    b.step("version", "Get the short version.").dependOn(&printStep.step);
+    b.step("version", "Get the short version.").dependOn(&addPrintStep(b, Version).step);
 }
 
 fn run_lib_standalone_test(b: *std.Build, path: []const u8, lib_bin: std.Build.LazyPath) *std.Build.Step.Run {
@@ -306,6 +304,7 @@ fn link_cli_deps(b: *std.Build, cli: *std.Build.Module, vmc: *std.Build.Module, 
     cli.addImport("linenoise", linenoise);
 
     cli.addImport("vmc", vmc);
+    cli.addImport("cyber_c", create_cyber_c_mod(b));
 
     const stdx = b.createModule(.{
         .root_source_file = b.path("src/stdx/stdx.zig"),
@@ -313,7 +312,7 @@ fn link_cli_deps(b: *std.Build, cli: *std.Build.Module, vmc: *std.Build.Module, 
     cli.addImport("stdx", stdx);
 
     if (config.malloc == .mimalloc) {
-        const mimalloc = mimalloc_lib.createModule(b);
+        const mimalloc = mimalloc_lib.createModule(b, rtarget, optimize);
         cli.addImport("mimalloc", mimalloc);
         try mimalloc_lib.buildAndLink(b, cli, .{
             .target = rtarget,
@@ -322,15 +321,27 @@ fn link_cli_deps(b: *std.Build, cli: *std.Build.Module, vmc: *std.Build.Module, 
     }
 }
 
+/// Zig API to `cyber.h` for `capi.zig`. Replaces its `@cImport`, which Zig 0.17 removed.
+fn create_cyber_c_mod(b: *std.Build) *std.Build.Module {
+    const mod = b.addTranslateC(.{
+        .root_source_file = b.path("src/include/cyber.h"),
+        .target = rtarget,
+        .optimize = optimize,
+    });
+    return b.createModule(.{
+        .root_source_file = mod.getOutput(),
+    });
+}
+
 pub fn create_vmc_mod(b: *std.Build, opts: Options) !*std.Build.Module {
     const mod = b.addTranslateC(.{
         .root_source_file = b.path("src/vm.h"),
         .target = rtarget,
         .optimize = optimize,
     });
-    const rt_safety = optimize == .Debug or optimize == .ReleaseSafe;
+    const rt_safety = optimize == .debug or optimize == .safe;
     mod.defineCMacro("RT_SAFETY", if (rt_safety) "1" else "0");
-    mod.defineCMacro("DEBUG", if (optimize == .Debug) "1" else "0");
+    mod.defineCMacro("DEBUG", if (optimize == .debug) "1" else "0");
     mod.defineCMacro("TRACE", if (opts.trace) "1" else "0");
     mod.defineCMacro("IS_32BIT", if (is32Bit(opts.target)) "1" else "0");
     return b.createModule(.{
@@ -343,7 +354,7 @@ pub const Options = struct {
     trace: bool,
     log_mem: bool,
     target: std.Target,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     static: bool,
     cyc: bool,
     ffi: bool,
@@ -398,7 +409,7 @@ const CliConfig = struct {
         if (target.cpu.arch.isWasm()) {
             malloc_ = .zig;
         } else {
-            if (optimize != .Debug) {
+            if (optimize != .debug) {
                 malloc_ = .mimalloc;
             } else {
                 malloc_ = .zig;
@@ -552,29 +563,25 @@ inline fn thisDir() []const u8 {
     return comptime std.fs.path.dirname(@src().file) orelse ".";
 }
 
-pub const PrintStep = struct {
-    step: std.Build.Step,
-    build: *std.Build,
-    str: []const u8,
-
-    pub fn init(build_: *std.Build, str: []const u8) PrintStep {
-        return PrintStep{
-            .build = build_,
-            .step = std.Build.Step.init(.{
-                .id = .custom,
-                .name = "print",
-                .owner = build_,
-                .makeFn = make,
-            }),
-            .str = build_.dupe(str),
-        };
-    }
-
-    fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
-        const self: *PrintStep = @fieldParentPtr("step", step);
-        std.Io.File.stdout().writeStreamingAll(step.owner.graph.io, self.str) catch unreachable;
-    }
-};
+/// Prints `str` to stdout. Zig 0.17 has no custom build steps, so a small host program does the printing.
+fn addPrintStep(b: *std.Build, str: []const u8) *std.Build.Step.Run {
+    const src = b.addWriteFiles().add("print.zig", b.fmt(
+        \\const std = @import("std");
+        \\pub fn main(init: std.process.Init) !void {{
+        \\    try std.Io.File.stdout().writeStreamingAll(init.io, "{f}");
+        \\}}
+    , .{std.zig.fmtString(str)}));
+    const exe = b.addExecutable(.{
+        .name = "print",
+        .root_module = b.createModule(.{
+            .root_source_file = src,
+            .target = b.graph.host,
+        }),
+    });
+    const run = b.addRunArtifact(exe);
+    run.stdio = .inherit;
+    return run;
+}
 
 pub fn buildCVM(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     const module = b.createModule(.{
@@ -589,13 +596,13 @@ pub fn buildCVM(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     lib.root_module.strip = strip;
 
     var cflags = try std.ArrayList([]const u8).initCapacity(b.allocator, 0);
-    const rt_safety = optimize == .Debug or optimize == .ReleaseSafe;
+    const rt_safety = optimize == .debug or optimize == .safe;
     if (rt_safety) {
         try cflags.append(b.allocator, "-DRT_SAFETY=1");
     } else {
         try cflags.append(b.allocator, "-DRT_SAFETY=0");
     }
-    if (optimize == .Debug) {
+    if (optimize == .debug) {
         try cflags.append(b.allocator, "-DDEBUG=1");
     } else {
         try cflags.append(b.allocator, "-DDEBUG=0");
@@ -660,6 +667,7 @@ fn create_lib_module(b: *std.Build, opts: Options) !*std.Build.Module {
 
     const vmc = try create_vmc_mod(b, opts);
     mod.addImport("vmc", vmc);
+    mod.addImport("cyber_c", create_cyber_c_mod(b));
 
     mod.link_libc = true;
 

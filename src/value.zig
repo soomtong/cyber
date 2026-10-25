@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const stdx = @import("stdx");
 const t = stdx.testing;
-const debug = builtin.mode == .Debug;
+const debug = builtin.mode == .debug;
 const cy = @import("cyber.zig");
 const C = @import("capi.zig");
 const bt = cy.types.BuiltinTypes;

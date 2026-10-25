@@ -1,9 +1,7 @@
 /// Zig API to `libcyber.h`.
 const std = @import("std");
 const builtin = @import("builtin");
-pub const c = @cImport({
-    @cInclude("include/cyber.h");
-});
+pub const c = @import("cyber_c");
 
 pub fn TRACE() bool {
     return c.CL_TRACE;

@@ -1247,7 +1247,7 @@ pub var NullSym = cy.sym.TypeSym{
     .decl = null,
     .type = undefined,
     .instance = null,
-    .impls_ = .{},
+    .impls_ = .empty,
     .mod = undefined,
 };
 

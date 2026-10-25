@@ -5,7 +5,7 @@ pub const wasm = @import("log_wasm.zig");
 const builtin = @import("builtin");
 
 const UseStd = !builtin.target.isWasm() or builtin.os.tag == .wasi;
-const UseTimer = builtin.mode == .Debug and false;
+const UseTimer = builtin.mode == .debug and false;
 
 var timer: ?stdx.time.Timer = null;
 

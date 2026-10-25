@@ -103,7 +103,7 @@ fn genFunc(c: *cy.cgen.Chunk, lib: *dynlib.DynLib, state: *tcc.TCCState, w: anyt
             try cy.cgen.genExternToVmFunc(c, w, func, @ptrCast(func.decl));
         } else {
             const extern_name = func.data.extern_.externName();
-            const extern_namez = try c.alloc.dupeZ(u8, extern_name);
+            const extern_namez = try c.alloc.dupeSentinel(u8, extern_name, 0);
             defer c.alloc.free(extern_namez);
             const ptr = lib.lookup(*anyopaque, extern_namez) orelse {
                 std.debug.print("Missing symbol `{s}`.", .{extern_name});
@@ -125,7 +125,7 @@ fn genFunc(c: *cy.cgen.Chunk, lib: *dynlib.DynLib, state: *tcc.TCCState, w: anyt
 
 fn bindExternFuncPtrDispatch(c: *cy.cgen.Compiler, state: *tcc.TCCState, func_ptr: *cy.types.FuncPtr) !void {
     var buf: [32]u8 = undefined;
-    const cname = try std.fmt.bufPrintZ(&buf, "cb_func_ptr{}", .{func_ptr.sig.id});
+    const cname = try std.fmt.bufPrintSentinel(&buf, "cb_func_ptr{}", .{func_ptr.sig.id}, 0);
     const ptr = tcc.tcc_get_symbol(state, cname.ptr) orelse {
         cy.panic("Failed to get symbol.");
     };
@@ -136,7 +136,7 @@ fn bindExternFuncPtrDispatch(c: *cy.cgen.Compiler, state: *tcc.TCCState, func_pt
 
 fn bindFunc(c: *cy.cgen.Compiler, state: *tcc.TCCState, func: *cy.Func) !void {
     if (func.type == .extern_ and !func.data.extern_.vm_variadic) {
-        const cname = try c.alloc.dupeZ(u8, func.data.extern_.externName());
+        const cname = try c.alloc.dupeSentinel(u8, func.data.extern_.externName(), 0);
         defer c.alloc.free(cname);
         const func_ptr = tcc.tcc_get_symbol(state, cname.ptr) orelse {
             cy.panic("Failed to get symbol.");
@@ -290,7 +290,7 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
         for (c.syms.items) |sym| {
             if (sym.type == .extern_var) {
                 const extern_var = sym.cast(.extern_var);
-                const extern_namez = try t.alloc.dupeZ(u8, extern_var.externName());
+                const extern_namez = try t.alloc.dupeSentinel(u8, extern_var.externName(), 0);
                 defer t.alloc.free(extern_namez);
                 const ptr = lib.lookup(*anyopaque, extern_namez) orelse {
                     std.debug.print("Missing symbol `{s}`.", .{extern_var.externName()});

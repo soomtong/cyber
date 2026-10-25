@@ -1,8 +1,5 @@
-pub const c = @cImport({
-    @cInclude("llvm-c/Core.h");
-    @cInclude("llvm-c/Analysis.h");
-    @cInclude("llvm-c/ExecutionEngine.h");
-});
+/// Translated LLVM-C headers. Supplied by the build once the LLVM backend is linked again.
+pub const c = @import("llvm_c");
 
 /// Top Level.
 pub const DisposeMessage = c.LLVMDisposeMessage;

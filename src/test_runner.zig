@@ -3,6 +3,10 @@ const builtin = @import("builtin");
 
 /// Template for a custom test runner.
 pub fn main(init: std.process.Init.Minimal) !void {
+    // Zig 0.17 leaves the testing allocator and Io to the test runner.
+    std.testing.allocator_instance = .init(std.heap.page_allocator, .{});
+    std.testing.io_instance = .init(std.testing.allocator, .{});
+
     test_init(&init.args);
 
     var passed: usize = 0;
@@ -26,6 +30,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
 
     // Deinit test allocator to surface leaks.
+    std.testing.io_instance.deinit();
     _ = std.testing.allocator_instance.deinit();
 }
 
@@ -34,7 +39,7 @@ extern fn test_init(args: *const anyopaque) void;
 
 extern fn zpanic(msg: [*]const u8, msg_len: usize, first_trace_addr: usize) noreturn;
 
-pub fn panic(msg: []const u8, trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+pub fn panic(msg: []const u8, trace: ?*std.lang.StackTrace, ret_addr: ?usize) noreturn {
     _ = trace;
     _ = ret_addr;
     zpanic(msg.ptr, msg.len, @returnAddress());

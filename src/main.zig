@@ -158,7 +158,7 @@ fn compilePath(alloc: std.mem.Allocator, path: []const u8) !void {
     defer cli.deinit_cli(vm);
 
     var config = c.defaultCompileConfig();
-    config.single_run = builtin.mode == .ReleaseFast;
+    config.single_run = builtin.mode == .fast;
     config.backend = backend;
     const res = c.vm_compile_path(vm, path, config);
     if (res != c.Success) {
@@ -193,7 +193,7 @@ fn repl(alloc: std.mem.Allocator) !void {
     a.config.reload = reload;
 
     var config = c.defaultEvalConfig();
-    config.single_run = builtin.mode == .ReleaseFast;
+    config.single_run = builtin.mode == .fast;
     config.backend = c.BackendVM;
     config.spawn_exe = false;
 
@@ -226,7 +226,7 @@ fn repl(alloc: std.mem.Allocator) !void {
                 std.debug.print("unexpected {}\n", .{res});
             },
         }
-        if (builtin.mode == .Debug) {
+        if (builtin.mode == .debug) {
             return error.EvalError;
         } else {
             exit(1);
@@ -264,7 +264,7 @@ fn evalPath(alloc: std.mem.Allocator, path: []const u8) !void {
     a.config.reload = reload;
 
     var config = c.defaultEvalConfig();
-    config.single_run = builtin.mode == .ReleaseFast;
+    config.single_run = builtin.mode == .fast;
     config.backend = backend;
     config.spawn_exe = true;
 
@@ -291,7 +291,7 @@ fn evalPath(alloc: std.mem.Allocator, path: []const u8) !void {
                 std.debug.print("unexpected {}\n", .{res});
             },
         }
-        if (builtin.mode == .Debug) {
+        if (builtin.mode == .debug) {
             return error.EvalError;
         } else {
             exit(1);
@@ -357,7 +357,7 @@ fn version() void {
     std.debug.print("{s}\n", .{c.full_version()});
 }
 
-pub fn panic(msg: []const u8, trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+pub fn panic(msg: []const u8, trace: ?*std.lang.StackTrace, ret_addr: ?usize) noreturn {
     _ = trace;
     _ = ret_addr;
     app_debug.defaultPanic(msg, @returnAddress(), panic_handler);

@@ -186,7 +186,12 @@ fn fread(ptr Ptr[void], size size_t, n size_t, stream Ptr[FILE]) -> size_t
 #[extern]
 fn free(ptr Ptr[void]) -> void
 
-#[extern]
+#[cond=meta.system() != .macos or meta.cpu() != 'x86_64', extern]
+fn fstat(fd fd_t, statbuf Ptr[void]) -> c_int
+
+-- x86_64 macOS keeps the legacy inode layout behind `fstat`/`stat`.
+-- `Stat` describes the 64-bit layout, which the `$INODE64` symbols fill.
+#[cond=meta.system() == .macos and meta.cpu() == 'x86_64', extern='fstat$INODE64']
 fn fstat(fd fd_t, statbuf Ptr[void]) -> c_int
 
 #[extern]
@@ -228,7 +233,10 @@ fn rmdir(pathname Ptr[byte]) -> c_int
 #[extern]
 fn setenv(name Ptr[byte], value Ptr[byte], overwrite c_int) -> c_int
 
-#[extern]
+#[cond=meta.system() != .macos or meta.cpu() != 'x86_64', extern]
+fn stat(pathname Ptr[byte], statbuf Ptr[Stat]) -> c_int
+
+#[cond=meta.system() == .macos and meta.cpu() == 'x86_64', extern='stat$INODE64']
 fn stat(pathname Ptr[byte], statbuf Ptr[Stat]) -> c_int
 
 #[extern]

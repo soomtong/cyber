@@ -891,7 +891,10 @@ pub fn zDumpObjectTrace(t: *cy.Thread, obj: *HeapObject) callconv(.c) void {
     t.c.vm.log(w.written());
 }
 
-fn zAllocFuncUnion(t: *cy.Thread, type_id: cy.TypeId, func_ptr: Value) callconv(.c) vmc.ValueResult {
+// `Value` crosses the C ABI as `uint64_t` (vm.h). The Zig union would be passed
+// indirectly on wasm32, so these entry points take the raw bits.
+fn zAllocFuncUnion(t: *cy.Thread, type_id: cy.TypeId, func_ptr_bits: u64) callconv(.c) vmc.ValueResult {
+    const func_ptr: Value = .{ .val = func_ptr_bits };
     const func_union = t.heap.allocFunc(type_id, func_ptr) catch {
         return .{
             .val = undefined,
@@ -924,7 +927,8 @@ fn z_ret_generator(t: *cy.Thread, type_id: cy.TypeId, ret_size: u16, fp: [*]Valu
     return vmc.RES_SUCCESS;
 }
 
-fn zAwait(t: *cy.Thread, fut_value_ptr: Value) callconv(.c) vmc.ResultCode {
+fn zAwait(t: *cy.Thread, fut_value_bits: u64) callconv(.c) vmc.ResultCode {
+    const fut_value_ptr: Value = .{ .val = fut_value_bits };
     const future = fut_value_ptr.asPtr(*cy.heap.FutureValue);
     if (future.shared_state) |shared_state| {
         var state = @atomicLoad(u8, shared_state, .acquire);

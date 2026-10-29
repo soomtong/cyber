@@ -637,8 +637,13 @@ pub const Chunk = struct {
         if (opt_node) |node| {
             chunk_id = node.src();
         } else {
-            const ctx = sema.getResolveContext(self);
-            chunk_id = ctx.chunk.id;
+            // Reports from module loading arrive before any resolve context exists.
+            if (self.resolve_stack.items.len > 0) {
+                const ctx = sema.getResolveContext(self);
+                chunk_id = ctx.chunk.id;
+            } else {
+                chunk_id = self.id;
+            }
         }
         return self.compiler.addReport(.compile_err, msg, chunk_id, @intFromPtr(opt_node));
     }

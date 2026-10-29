@@ -813,7 +813,7 @@ extern _Thread_local ZThread* cur_thread;
 
 typedef struct ZVM {
 #if defined(__wasm__)
-    u8 padding[184 + 10 * ZIG_LIST_LOCK_SIZE];
+    u8 padding[180 + 10 * ZIG_LIST_LOCK_SIZE];
 #else
     u8 padding[456 + 10 * ZIG_LIST_LOCK_SIZE];
 #endif

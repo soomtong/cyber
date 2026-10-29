@@ -28,3 +28,6 @@
 /cyber.sublime-project
 /cyber.sublime-workspace
 /cmd.cy
+/.deps/
+/docs/public/
+/.task/

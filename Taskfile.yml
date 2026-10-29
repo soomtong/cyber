@@ -1,0 +1,343 @@
+# Task runner for the Cyber repository (https://taskfile.dev).
+#
+# The build is driven by `zig build`; this file names the common invocations
+# found in build.zig, docs/build.md and .github/workflows so they are easy to
+# discover. Run `task` to list them.
+#
+# Common overrides (all optional):
+#   task build OPT=ReleaseSafe          # optimize mode: Debug, ReleaseSafe, ReleaseFast, ReleaseSmall
+#   task build TARGET=aarch64-linux-gnu # cross compile (adds -Dcpu=baseline like CI)
+#   task test FILTER=switch             # only tests whose name contains the filter
+#   task test:behavior BACKEND=tcc      # compiler backend for behavior tests: vm, jit, tcc, cc
+#   task build -- -Dmalloc=mimalloc     # any extra `zig build` flags after `--`
+
+version: '3'
+
+vars:
+  ZIG_VERSION: 0.17.0
+  OPT: '{{.OPT | default "Debug"}}'
+  TARGET: '{{.TARGET | default ""}}'
+  FILTER: '{{.FILTER | default ""}}'
+  BACKEND: '{{.BACKEND | default ""}}'
+  BIN: zig-out/bin/cyber
+  DEPS_DIR: .deps
+  MD4C_DIR: '{{.DEPS_DIR}}/md4c'
+  MD4C_LIB_DIR: '{{.MD4C_DIR}}/build/src'
+  DOCS_OUT: docs/public
+  INSTALL_PREFIX: '{{.INSTALL_PREFIX | default "/usr/local/bin"}}'
+
+tasks:
+  default:
+    desc: 'List available tasks.'
+    silent: true
+    cmds:
+      - task --list
+
+  # ---------------------------------------------------------------- toolchain
+
+  zig:check:
+    desc: 'Verify the installed Zig matches the version this repo targets.'
+    silent: true
+    cmds:
+      - |
+        got="$(zig version)"
+        if [ "$got" != "{{.ZIG_VERSION}}" ]; then
+          echo "zig {{.ZIG_VERSION}} required, found $got" >&2
+          exit 1
+        fi
+        echo "zig $got"
+
+  # Runs one `zig build` step with the flags assembled from OPT/TARGET/FILTER/BACKEND.
+  # Every build and test task goes through here so the overrides behave the same way.
+  zig:build:
+    internal: true
+    deps: ['zig:check']
+    requires:
+      vars: [STEP]
+    vars:
+      FLAGS: >-
+        -Doptimize={{.OPT}}
+        {{if .TARGET}}-Dtarget={{.TARGET}} -Dcpu=baseline{{end}}
+        {{if .FILTER}}-Dtest-filter={{.FILTER}}{{end}}
+        {{if .BACKEND}}-Dtest-backend={{.BACKEND}}{{end}}
+    cmds:
+      - zig build {{.STEP}} {{.FLAGS}} {{.CLI_ARGS}}
+
+  version:
+    desc: 'Print the short Cyber version from build.zig.'
+    cmds:
+      - zig build version
+
+  # -------------------------------------------------------------------- build
+
+  build:
+    desc: 'Build the CLI into zig-out/bin/cyber. Debug by default; OPT=ReleaseSafe for the shipped mode.'
+    cmds:
+      - task: zig:build
+        vars: { STEP: cli, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  build:release:
+    desc: 'Build the CLI in ReleaseSafe, the mode releases are shipped in.'
+    cmds:
+      - task: build
+        vars: { OPT: ReleaseSafe, TARGET: '{{.TARGET}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  build:all:
+    desc: 'Build the CLI, the library and every test binary without running them.'
+    cmds:
+      - task: zig:build
+        vars: { STEP: 'cli lib build-test', OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  lib:
+    desc: 'Build libcyber as a static library into zig-out/lib (FFI disabled, like the release build).'
+    cmds:
+      - task: zig:build
+        vars: { STEP: lib, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  lib:release:
+    desc: 'Build libcyber in ReleaseSafe.'
+    cmds:
+      - task: lib
+        vars: { OPT: ReleaseSafe, TARGET: '{{.TARGET}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  lib:wasm:
+    desc: 'Build libcyber for the browser (wasm32-freestanding, ReleaseSafe).'
+    cmds:
+      - task: lib
+        vars: { OPT: ReleaseSafe, TARGET: wasm32-freestanding, CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  cross:
+    desc: 'Cross compile the CLI in ReleaseSafe. Usage: task cross TARGET=aarch64-linux-gnu'
+    requires:
+      vars: [TARGET]
+    cmds:
+      - task: build
+        vars: { OPT: ReleaseSafe, TARGET: '{{.TARGET}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  cross:release-matrix:
+    desc: 'Cross compile the CLI for every target the release workflow ships.'
+    cmds:
+      - for: [x86_64-linux-gnu, x86_64-macos-none, aarch64-macos-none, x86_64-windows-gnu]
+        task: cross
+        vars: { TARGET: '{{.ITEM}}' }
+
+  # --------------------------------------------------------------------- test
+
+  test:
+    desc: 'Run every test suite (lib, lib standalone, cli, trace, behavior). FILTER= narrows by name.'
+    cmds:
+      - task: zig:build
+        vars: { STEP: test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  test:release:
+    desc: 'Run every test suite against a ReleaseSafe build, as CI does.'
+    cmds:
+      - task: test
+        vars: { OPT: ReleaseSafe, TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  test:behavior:
+    desc: 'Run the behavior tests (src/test/**.cy scripts). BACKEND=vm|jit|tcc|cc picks the compiler.'
+    cmds:
+      - task: zig:build
+        vars: { STEP: behavior-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  test:lib:
+    desc: 'Run the lib unit tests.'
+    cmds:
+      - task: zig:build
+        vars: { STEP: lib-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  test:lib-standalone:
+    desc: 'Build libcyber and link the examples/libcyber C programs against it.'
+    cmds:
+      - task: zig:build
+        vars: { STEP: lib-standalone-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  test:cli:
+    desc: 'Run the CLI tests.'
+    cmds:
+      - task: zig:build
+        vars: { STEP: cli-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  test:trace:
+    desc: 'Run the trace tests (a separate lib build with -Dtrace).'
+    cmds:
+      - task: zig:build
+        vars: { STEP: trace-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  test:no-cache:
+    desc: 'Run every test suite with Zig result caching disabled.'
+    cmds:
+      - task: test
+        vars: { OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '-Dno-cache {{.CLI_ARGS}}' }
+
+  test:wasi:
+    desc: 'Build the test binaries for wasm32-wasi and run them with wasm3.'
+    deps: ['zig:check']
+    preconditions:
+      - sh: command -v wasm3
+        msg: 'wasm3 is required (brew install wasm3).'
+    cmds:
+      - zig build build-test -Doptimize=ReleaseSafe -Dtarget=wasm32-wasi {{.CLI_ARGS}}
+      - wasm3 zig-out/bin/lib_test.wasm
+      - wasm3 zig-out/bin/cli_test.wasm
+      - wasm3 zig-out/bin/trace_test.wasm
+      - wasm3 zig-out/bin/behavior_test.wasm
+
+  # ---------------------------------------------------------------------- run
+
+  # Tasks that forward CLI_ARGS to a script clear it on their build dependency,
+  # otherwise the script arguments would also reach `zig build`.
+  run:
+    desc: 'Run a Cyber script with the debug CLI. Usage: task run -- examples/fibonacci.cy'
+    deps: [{ task: build, vars: { CLI_ARGS: '' } }]
+    cmds:
+      - '{{.BIN}} {{.CLI_ARGS}}'
+
+  repl:
+    desc: 'Start the Cyber REPL with the debug CLI.'
+    deps: [{ task: build, vars: { CLI_ARGS: '' } }]
+    interactive: true
+    cmds:
+      - '{{.BIN}}'
+
+  bench:
+    desc: 'Time a command with src/tools/bench.cy (the script must print "time: {ms}"). Usage: task bench -- zig-out/bin/cyber src/test/bench/fib/fib.cy'
+    deps: [{ task: 'build:release', vars: { CLI_ARGS: '' } }]
+    cmds:
+      - '{{.BIN}} src/tools/bench.cy {{.CLI_ARGS}}'
+
+  bench:hyperfine:
+    desc: 'Wall clock a Cyber script with hyperfine. Usage: task bench:hyperfine -- examples/fibonacci.cy'
+    deps: [{ task: 'build:release', vars: { CLI_ARGS: '' } }]
+    preconditions:
+      - sh: command -v hyperfine
+        msg: 'hyperfine is required (brew install hyperfine).'
+    cmds:
+      - hyperfine --warmup 3 '{{.BIN}} {{.CLI_ARGS}}'
+
+  # --------------------------------------------------------------------- docs
+
+  docs:md4c:
+    desc: 'Clone md4c into .deps/md4c and build its shared library with zig cc. gen-docs.cy loads it at runtime.'
+    deps: ['zig:check']
+    status:
+      - test -f {{.MD4C_LIB_DIR}}/libmd4c.dylib || test -f {{.MD4C_LIB_DIR}}/libmd4c.so
+    cmds:
+      - mkdir -p {{.DEPS_DIR}}
+      - test -d {{.MD4C_DIR}}/src || git clone --depth=1 https://github.com/mity/md4c.git {{.MD4C_DIR}}
+      - mkdir -p {{.MD4C_LIB_DIR}}
+      # Same sources as md4c's CMake target, built with the compiler this repo already requires.
+      - |
+        case "$(uname)" in
+          Darwin) out=libmd4c.dylib ;;
+          *) out=libmd4c.so ;;
+        esac
+        zig cc -O2 -shared -fPIC -I{{.MD4C_DIR}}/src \
+          -o {{.MD4C_LIB_DIR}}/$out \
+          {{.MD4C_DIR}}/src/md4c.c {{.MD4C_DIR}}/src/md4c-html.c {{.MD4C_DIR}}/src/entity.c
+
+  docs:gen:
+    desc: 'Generate docs/docs.html and docs/api.html from docs/docs.md with docs/gen-docs.cy. VERSION= overrides the version string.'
+    deps: [{ task: build, vars: { CLI_ARGS: '' } }, 'docs:md4c']
+    vars:
+      SHORT_VERSION:
+        sh: zig build version
+      COMMIT:
+        sh: git rev-parse --short HEAD
+      VERSION: '{{.VERSION | default (printf "v%s-DEV %s" .SHORT_VERSION .COMMIT)}}'
+    env:
+      # gen-docs.cy dlopens libmd4c; point both loaders at the local build.
+      DYLD_LIBRARY_PATH: '{{.MD4C_LIB_DIR}}'
+      LD_LIBRARY_PATH: '{{.MD4C_LIB_DIR}}'
+    cmds:
+      - '{{.BIN}} docs/gen-docs.cy -version="{{.VERSION}}"'
+
+  docs:site:
+    desc: 'Generate the docs and assemble the static site into docs/public (what gen-docs.yml deploys to GitHub Pages).'
+    deps: ['docs:gen']
+    cmds:
+      - mkdir -p {{.DOCS_OUT}}
+      - mv docs/docs.html {{.DOCS_OUT}}/docs.html
+      - mv docs/api.html {{.DOCS_OUT}}/api.html
+      - ln -sf docs.html {{.DOCS_OUT}}/index.html
+
+  docs:serve:
+    desc: 'Serve docs/public on http://localhost:8000.'
+    deps: ['docs:site']
+    cmds:
+      - python3 -m http.server 8000 --directory {{.DOCS_OUT}}
+
+  docs:clean:
+    desc: 'Remove generated docs output.'
+    cmds:
+      - rm -rf {{.DOCS_OUT}} docs/docs.html docs/api.html
+
+  # --------------------------------------------------------------- playground
+
+  playground:serve:
+    desc: 'Serve the web playground example on http://localhost:8000. Needs cyber.wasm in examples/web-playground (the web-lib build step is currently disabled in build.zig).'
+    preconditions:
+      - sh: test -f examples/web-playground/cyber.wasm
+        msg: 'examples/web-playground/cyber.wasm is missing; copy a cyber-web.wasm release asset there.'
+    cmds:
+      - python3 -m http.server 8000 --directory examples/web-playground
+
+  # -------------------------------------------------------------------- tools
+
+  tools:cbindgen:
+    desc: 'Generate Cyber bindings from a C header. Usage: task tools:cbindgen -- -o=out.cy path/to/header.h'
+    deps: [{ task: build, vars: { CLI_ARGS: '' } }]
+    cmds:
+      - '{{.BIN}} src/tools/cbindgen.cy {{.CLI_ARGS}}'
+
+  tools:copy-vendor:
+    desc: 'Refresh a vendored dependency from a local checkout using its vendor_files.txt. Usage: task tools:copy-vendor -- -dst=./lib/tcc -src=/path/to/tinycc'
+    deps: [{ task: build, vars: { CLI_ARGS: '' } }]
+    cmds:
+      - '{{.BIN}} src/tools/copy-vendor.cy {{.CLI_ARGS}}'
+
+  # ------------------------------------------------------------------ install
+
+  install:
+    desc: 'Build the CLI in ReleaseSafe and copy it to INSTALL_PREFIX (default /usr/local/bin).'
+    deps: [{ task: 'build:release', vars: { CLI_ARGS: '' } }]
+    cmds:
+      - sudo mkdir -p {{.INSTALL_PREFIX}}
+      - sudo install -m 755 {{.BIN}} {{.INSTALL_PREFIX}}/cyber
+      - echo "Installed to {{.INSTALL_PREFIX}}/cyber."
+
+  install:release:
+    desc: 'Install a published release with install.sh. Usage: task install:release -- latest (dev build)'
+    cmds:
+      - bash install.sh {{.CLI_ARGS}}
+
+  # ---------------------------------------------------------------------- ci
+
+  ci:lint:
+    desc: 'Lint the GitHub Actions workflows with actionlint.'
+    preconditions:
+      - sh: command -v actionlint
+        msg: 'actionlint is required (brew install actionlint).'
+    cmds:
+      - actionlint -shellcheck= .github/workflows/*.yml
+
+  ci:local:
+    desc: 'Mirror the PR workflow for the native target (debug tests, release tests, release CLI build).'
+    cmds:
+      - task: test
+      - task: test:release
+      - task: build:release
+
+  # -------------------------------------------------------------------- clean
+
+  clean:
+    desc: 'Remove build outputs and the local Zig cache.'
+    cmds:
+      - rm -rf zig-out .zig-cache
+
+  clean:all:
+    desc: 'Remove build outputs, the Zig cache, generated docs and fetched dependencies.'
+    deps: [clean, 'docs:clean']
+    cmds:
+      - rm -rf {{.DEPS_DIR}}

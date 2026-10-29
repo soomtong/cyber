@@ -24,19 +24,19 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - host: ubuntu-22.04
+          - host: ubuntu-24.04
             target: x86_64-linux-gnu
             mode: release
             cmd: cli
-          - host: ubuntu-22.04
+          - host: ubuntu-24.04
             target: x86_64-selinux-gnu
             mode: release
             cmd: cli
-          - host: macos-12
+          - host: macos-15-intel
             target: x86_64-macos-none
             mode: release
             cmd: cli
-          - host: macos-14
+          - host: macos-15
             target: aarch64-macos-none
             mode: release
             cmd: cli
@@ -44,11 +44,11 @@ jobs:
             target: x86_64-windows-gnu
             mode: release
             cmd: cli
-          - host: ubuntu-22.04
+          - host: ubuntu-24.04
             target: wasm32-freestanding
             mode: release
             cmd: web-lib
-          - host: ubuntu-22.04
+          - host: ubuntu-24.04
             target: wasm32-wasi
             mode: release
             cmd: cli
@@ -60,15 +60,15 @@ jobs:
             target: x86_64-windows-msvc
             mode: release
             cmd: lib
-          - host: ubuntu-22.04
+          - host: ubuntu-24.04
             target: x86_64-linux-gnu
             mode: release
             cmd: lib
-          - host: macos-12
+          - host: macos-15-intel
             target: x86_64-macos-none
             mode: release
             cmd: lib
-          - host: macos-14
+          - host: macos-15
             target: aarch64-macos-none
             mode: release
             cmd: lib
@@ -82,7 +82,7 @@ jobs:
           "x86_64-macos-none": "-Dtarget=x86_64-macos-none -Dcpu=baseline",
           "aarch64-macos-none": "-Dtarget=aarch64-macos-none -Dcpu=baseline",
           "wasm32-freestanding": "-Dtarget=wasm32-freestanding",
-          "wasm32-wasi": "-Dtarget=wasm32-wasi",
+          "wasm32-wasi": "-Dtarget=wasm32-wasi"
         }')[matrix.config.target] }}
       BUILD_HOST: ${{ matrix.config.host }}
       BUILD_TARGET: ${{ matrix.config.target }}
@@ -93,25 +93,25 @@ jobs:
       ZIG_VERSION: 0.17.0
     steps:
       - name: Install Linux deps.
-        if: env.BUILD_HOST == 'ubuntu-22.04' && env.BUILD_TARGET == 'x86_64-linux-gnu'
+        if: env.BUILD_HOST == 'ubuntu-24.04' && env.BUILD_TARGET == 'x86_64-linux-gnu'
         run: |
           sudo add-apt-repository -y "deb http://archive.ubuntu.com/ubuntu `lsb_release -sc` main universe restricted multiverse"
           sudo apt-get update -y -qq
           sudo apt-get install xz-utils
 
       - name: Clone repo.
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
           #submodules: recursive
 
       - name: Install zig.
-        if: env.BUILD_HOST == 'ubuntu-22.04'
+        if: env.BUILD_HOST == 'ubuntu-24.04'
         run: |
           wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-x86_64-linux-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin
 
       - name: Install wasm3.
-        if: env.BUILD_HOST == 'ubuntu-22.04' && (env.BUILD_TARGET == 'wasm32-freestanding' || env.BUILD_TARGET == 'wasm32-wasi')
+        if: env.BUILD_HOST == 'ubuntu-24.04' && (env.BUILD_TARGET == 'wasm32-freestanding' || env.BUILD_TARGET == 'wasm32-wasi')
         run: |
           git clone --depth=1 https://github.com/wasm3/wasm3.git
           cd wasm3
@@ -121,13 +121,13 @@ jobs:
           make
 
       - name: Install zig.
-        if: env.BUILD_HOST == 'macos-12'
+        if: env.BUILD_HOST == 'macos-15-intel'
         run: |
           wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-x86_64-macos-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin
           xcode-select --print-path
 
       - name: Install zig.
-        if: env.BUILD_HOST == 'macos-14'
+        if: env.BUILD_HOST == 'macos-15'
         run: |
           wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-aarch64-macos-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin
           xcode-select --print-path
@@ -145,7 +145,7 @@ jobs:
         with:
           path: |-
             ~/.cache/zig
-            zig-cache
+            .zig-cache
             ~/AppData/Local/zig
           key:
             pr-build-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-1

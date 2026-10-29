@@ -8,14 +8,16 @@ on:
     paths:
       - 'docs/**'
       - 'src/builtins/**'
+permissions:
+  contents: write
 jobs:
   deploy:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     env:
       ZIG_VERSION: 0.17.0
     steps:
       - name: Clone repo.
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           submodules: false
           fetch-depth: 0    # Fetch all history for .GitInfo and .Lastmod
@@ -34,7 +36,7 @@ jobs:
           make
 
       - name: Setup script.
-        uses: actions/github-script@v5
+        uses: actions/github-script@v7
         with:
           script: |
             async function execCmd(name, args) {
@@ -67,7 +69,7 @@ jobs:
         with:
           path: |-
             ~/.cache/zig
-            zig-cache
+            .zig-cache
           key:
             build-1
           restore-keys:
@@ -85,7 +87,7 @@ jobs:
           ln -sf docs.html docs/public/index.html
 
       - name: Deploy.
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         if: github.ref == 'refs/heads/master'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

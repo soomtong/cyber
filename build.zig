@@ -421,6 +421,9 @@ const CliConfig = struct {
         var malloc_: Allocator = undefined;
         if (target.cpu.arch.isWasm()) {
             malloc_ = .zig;
+        } else if (target.abi == .msvc) {
+            // Zig 0.17 translate-c rejects the `__declspec` attributes in mimalloc.h for MSVC targets.
+            malloc_ = .malloc;
         } else {
             if (optimize != .debug) {
                 malloc_ = .mimalloc;

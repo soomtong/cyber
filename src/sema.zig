@@ -9431,8 +9431,10 @@ pub const Sema = struct {
     /// Format: (Type, ...) RetType
     pub fn getFuncSigTempStr(s: *Sema, buf: *std.ArrayList(u8), funcSigId: FuncSigId) ![]const u8 {
         buf.clearRetainingCapacity();
-        const w = stdx.listWriter(&buf, s.alloc);
-        try writeFuncSigStr(s, w, funcSigId);
+        var w: std.Io.Writer.Allocating = .fromArrayList(s.alloc, buf);
+        const res = s.writeFuncSigStr(&w.writer, s.getFuncSig(funcSigId), null);
+        buf.* = w.toArrayList();
+        try res;
         return buf.items;
     }
 

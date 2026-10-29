@@ -322,8 +322,8 @@ pub fn err(c: Context, str: []const u8) void {
     if (build_options.rt == .vm) {
         c.print_err.?(@ptrCast(c), C.toStr(str));
     } else {
-        const w = std.io.getStdErr().writer();
-        w.writeAll(str) catch cy.fatal();
+        var w = std.Io.File.stderr().writer(stdx.io(), &.{});
+        w.interface.writeAll(str) catch cy.fatal();
     }
 }
 
@@ -333,19 +333,19 @@ pub fn errFmt(c: Context, format: []const u8, args: []const cy.fmt.FmtValue) voi
         cy.fmt.print(w, format, args);
         c.print_err.?(@ptrCast(c), C.toStr(c.getTempString()));
     } else {
-        const w = std.io.getStdErr().writer();
-        cy.fmt.print(w, format, args);
+        var w = std.Io.File.stderr().writer(stdx.io(), &.{});
+        cy.fmt.print(&w.interface, format, args);
     }
 }
 
 pub fn errZFmt(c: Context, comptime format: []const u8, args: anytype) void {
     if (build_options.rt == .vm) {
         const w = c.clearTempString();
-        std.fmt.format(w, format, args) catch cy.fatal();
+        w.print(format, args) catch cy.fatal();
         c.print_err.?(@ptrCast(c), C.toStr(c.getTempString()));
     } else {
-        const w = std.io.getStdErr().writer();
-        std.fmt.format(w, format, args) catch cy.fatal();
+        var w = std.Io.File.stderr().writer(stdx.io(), &.{});
+        w.interface.print(format, args) catch cy.fatal();
     }
 }
 
@@ -353,8 +353,8 @@ pub fn print(c: Context, str: []const u8) void {
     if (build_options.rt == .vm) {
         c.print.?(@ptrCast(c), C.toStr(str));
     } else {
-        const w = std.io.getStdOut().writer();
-        w.writeAll(str) catch cy.fatal();
+        var w = std.Io.File.stdout().writer(stdx.io(), &.{});
+        w.interface.writeAll(str) catch cy.fatal();
     }
 }
 
@@ -364,19 +364,19 @@ pub fn printFmt(c: Context, format: []const u8, args: []const cy.fmt.FmtValue) v
         cy.fmt.print(w, format, args);
         c.print.?(@ptrCast(c), C.toStr(c.getTempString()));
     } else {
-        const w = std.io.getStdOut().writer();
-        cy.fmt.print(w, format, args);
+        var w = std.Io.File.stdout().writer(stdx.io(), &.{});
+        cy.fmt.print(&w.interface, format, args);
     }
 }
 
 pub fn printZFmt(c: Context, comptime format: []const u8, args: anytype) void {
     if (build_options.rt == .vm) {
         const w = c.clearTempString();
-        std.fmt.format(w, format, args) catch cy.fatal();
+        w.print(format, args) catch cy.fatal();
         c.print.?(@ptrCast(c), C.toStr(c.getTempString()));
     } else {
-        const w = std.io.getStdOut().writer();
-        std.fmt.format(w, format, args) catch cy.fatal();
+        var w = std.Io.File.stdout().writer(stdx.io(), &.{});
+        w.interface.print(format, args) catch cy.fatal();
     }
 }
 
@@ -384,9 +384,9 @@ pub fn log(str: []const u8) void {
     if (build_options.rt == .vm) {
         C.getLog().?(C.toStr(str));
     } else {
-        const w = std.io.getStdErr().writer();
-        w.writeAll(str) catch cy.fatal();
-        w.writeByte('\n') catch cy.fatal();
+        var w = std.Io.File.stderr().writer(stdx.io(), &.{});
+        w.interface.writeAll(str) catch cy.fatal();
+        w.interface.writeByte('\n') catch cy.fatal();
     }
 }
 
@@ -394,9 +394,9 @@ pub fn logZFmt(comptime format: []const u8, args: anytype) void {
     if (build_options.rt == .vm) {
         cy.log.zfmt(format, args);
     } else {
-        const w = std.io.getStdErr().writer();
-        w.print(format, args) catch cy.fatal();
-        w.writeByte('\n') catch cy.fatal();
+        var w = std.Io.File.stderr().writer(stdx.io(), &.{});
+        w.interface.print(format, args) catch cy.fatal();
+        w.interface.writeByte('\n') catch cy.fatal();
     }
 }
 
@@ -404,9 +404,9 @@ pub fn logFmt(format: []const u8, args: []const cy.fmt.FmtValue) void {
     if (build_options.rt == .vm) {
         cy.log.fmt(format, args);
     } else {
-        const w = std.io.getStdErr().writer();
-        cy.fmt.print(w, format, args);
-        w.writeByte('\n') catch cy.fatal();
+        var w = std.Io.File.stderr().writer(stdx.io(), &.{});
+        cy.fmt.print(&w.interface, format, args);
+        w.interface.writeByte('\n') catch cy.fatal();
     }
 }
 

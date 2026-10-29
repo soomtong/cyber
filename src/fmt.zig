@@ -405,15 +405,14 @@ pub fn printStdout(fmt: []const u8, vals: []const FmtValue) void {
 
 pub fn printStdoutOrErr(fmt: []const u8, vals: []const FmtValue) !void {
     @branchHint(.cold);
-    printMutex.lockUncancelable(stdx.io());
-    defer printMutex.unlock(stdx.io());
-    const w = std.io.getStdOut().writer();
+    var w = lockStdoutWriter();
+    defer unlockPrint();
     if (builtin.is_test) {
         if (@backingInt(std.log.Level.debug) <= @backingInt(std.testing.log_level)) {
-            try format(w, fmt, vals);
+            try format(&w.interface, fmt, vals);
         }
     } else {
-        try format(w, fmt, vals);
+        try format(&w.interface, fmt, vals);
     }
 }
 
@@ -445,6 +444,15 @@ pub fn lockStderrWriter() StderrWriter {
         return std.Io.File.stderr().writer(stdx.io(), &.{});
     } else {
         return HostFileWriter{ .fid = 2 };
+    }
+}
+
+pub fn lockStdoutWriter() StderrWriter {
+    if (!cy.isWasmFreestanding) {
+        printMutex.lockUncancelable(stdx.io());
+        return std.Io.File.stdout().writer(stdx.io(), &.{});
+    } else {
+        return HostFileWriter{ .fid = 1 };
     }
 }
 

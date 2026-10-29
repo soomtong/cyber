@@ -16,8 +16,54 @@ pub const debug = @import("debug.zig");
 
 /// Process-wide `Io` for code reached through the C API, where no `Io` is passed down.
 /// Blocking and without task-level concurrency, like the std I/O before Zig 0.16.
+///
+/// Built on first use from `init_single_threaded`, but with a real allocator and the
+/// process environment. `std.Io.Threaded.global_single_threaded` has a failing allocator
+/// and an empty environment, so child processes could not be spawned through it and
+/// would inherit no environment variables.
 pub fn io() std.Io {
-    return std.Io.Threaded.global_single_threaded.io();
+    if (threaded_state.load(.acquire) != threaded_ready) initThreadedOnce();
+    return threaded.io();
+}
+
+var threaded: std.Io.Threaded = .init_single_threaded;
+
+const threaded_uninit: u8 = 0;
+const threaded_initing: u8 = 1;
+const threaded_ready: u8 = 2;
+var threaded_state: std.atomic.Value(u8) = .init(threaded_uninit);
+
+fn initThreadedOnce() void {
+    @branchHint(.cold);
+    if (threaded_state.cmpxchgStrong(threaded_uninit, threaded_initing, .acquire, .acquire) == null) {
+        // `Threaded` uses its allocator for `processSpawn` scratch memory and the memoized environment scan.
+        threaded.allocator = if (builtin.link_libc) std.heap.c_allocator else std.heap.page_allocator;
+        const block = processEnvironBlock();
+        threaded.environ = .{ .process_environ = .{ .block = block } };
+        threaded.environ_initialized = block.isEmpty();
+        threaded_state.store(threaded_ready, .release);
+        return;
+    }
+    while (threaded_state.load(.acquire) != threaded_ready) std.atomic.spinLoopHint();
+}
+
+const has_libc_environ = builtin.link_libc and switch (builtin.os.tag) {
+    .windows, .freestanding, .other => false,
+    else => true,
+};
+
+/// The environment the process was started with, as `std.start` would hand to `main`.
+/// Read through libc since Cyber also runs embedded, where `main` is not Zig's.
+fn processEnvironBlock() std.process.Environ.Block {
+    if (builtin.os.tag == .windows) return .global;
+    if (has_libc_environ) {
+        const c_environ = std.c.environ;
+        var n: usize = 0;
+        while (c_environ[n] != null) : (n += 1) {}
+        return .{ .slice = c_environ[0..n :null] };
+    } else {
+        return .empty;
+    }
 }
 
 /// Appends to an unmanaged byte `ArrayList` of any alignment.

@@ -59,7 +59,7 @@ jobs:
             const parts = version.split('.')
             const last_version = parts[0] + '.' + (parseInt(parts[1])-1)
             core.exportVariable('SHORT_VERSION', version);
-            await execCmd('git', ['fetch', '--all', '--tags']);
+            await execCmd('git', ['fetch', '--all', '--tags', '--force']);
             const build = await execCmd('git', ['rev-list', '--count', `${last_version}..${context.sha}`])
             core.exportVariable('BUILD', build.trim());
             core.exportVariable('COMMIT', context.sha.substring(0, 7));

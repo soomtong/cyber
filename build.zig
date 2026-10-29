@@ -5,8 +5,8 @@ const config_ = @import("src/config.zig");
 const mimalloc_lib = @import("lib/mimalloc/lib.zig");
 const tcc_lib = @import("lib/tcc/lib.zig");
 
-// FIND: v0.4
-const Version = "0.4";
+// FIND: v0.4.1
+const Version = "0.4.1";
 
 var optMalloc: ?Allocator = undefined;
 var selinux: bool = undefined;

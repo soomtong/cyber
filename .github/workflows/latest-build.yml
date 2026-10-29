@@ -29,7 +29,6 @@ jobs:
   build:
     name: host=${{ matrix.config.host }} cmd=${{ matrix.config.cmd }} target=${{ matrix.config.target }} mode=${{ matrix.config.mode }}
     runs-on: ${{ matrix.config.host }}
-    continue-on-error: ${{ matrix.config.experimental || false }}
     strategy:
       fail-fast: false
       matrix:
@@ -66,8 +65,6 @@ jobs:
             target: wasm32-wasi
             mode: release
             cmd: cli
-            # Passes locally under wasmtime; kept non-blocking until the wasm3 run in CI is confirmed green.
-            experimental: true
           - host: ubuntu-24.04
             target: x86_64-linux-gnu
             mode: release
@@ -262,14 +259,15 @@ jobs:
 
       - name: Zip. (linux/macos)
         if: (env.BUILD_HOST == 'ubuntu-24.04' || env.BUILD_HOST == 'macos-15-intel' || env.BUILD_HOST == 'macos-15') && env.BUILD_TARGET != 'wasm32-wasi' && env.BUILD_CMD == 'cli'
+        # The CLI loads its standard modules from `src/` next to the executable.
         run: |
-           tar -C zig-out/bin -czvf ${{ env.BIN_ZIP }} cyber
+           tar -C zig-out/bin -czvf ${{ env.BIN_ZIP }} cyber src
 
       - name: Zip. (windows)
         if: env.BUILD_TARGET == 'x86_64-windows-gnu' && env.BUILD_CMD == 'cli'
         shell: bash
         run: |
-          cd zig-out/bin && 7z a ../../${{env.BIN_ZIP}} cyber.exe
+          cd zig-out/bin && 7z a ../../${{env.BIN_ZIP}} cyber.exe src
 
       - name: Move. (windows lib)
         if: env.BUILD_TARGET == 'x86_64-windows-gnu' && env.BUILD_CMD == 'lib'

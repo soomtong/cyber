@@ -45,8 +45,13 @@ else
   CYBER_BUNDLE="${CYBER_RELEASES}/cyber-linux-x64.tar.gz"
 fi
 
-sudo sh -c "mkdir -p ${CYBER_PATH}; \
+# The bundle holds the executable and its standard modules (`src/`), which the
+# executable looks up next to itself. Keep them together and link the binary into PATH.
+CYBER_HOME="${CYBER_HOME:-/usr/local/lib/cyber}"
+
+sudo sh -c "mkdir -p ${CYBER_HOME} ${CYBER_PATH}; \
     echo 'Downloading ${CYBER_BUNDLE}.'; \
-    curl -fsSL $CYBER_BUNDLE | tar -xz -C $CYBER_PATH; \
-    chmod a+x ${CYBER_PATH}/cyber; \
-    echo 'Installed to ${CYBER_PATH}/cyber.'"
+    curl -fsSL $CYBER_BUNDLE | tar -xz -C $CYBER_HOME; \
+    chmod a+x ${CYBER_HOME}/cyber; \
+    ln -sf ${CYBER_HOME}/cyber ${CYBER_PATH}/cyber; \
+    echo 'Installed to ${CYBER_HOME}, linked as ${CYBER_PATH}/cyber.'"

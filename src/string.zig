@@ -461,14 +461,16 @@ pub fn indexOfAsciiSetSimdRemain(comptime VecSize: usize, str: []const u8, set: 
 
         // Construct the LUT.
         // Since it's ASCII, the upper needle mask can have at most 8 bits.
-        var lut: @Vector(VecSize, u8) = @splat(@as(u8, 0));
+        // Built as an array first: Zig 0.17 only allows comptime indices when storing into a vector.
+        var lut_arr: [VecSize]u8 = @splat(0);
         for (set) |code| {
             const lower = code & 0xF;
             const upper = code >> 4; // At most 7.
-            lut[lower] = @as(u8, 1) << @intCast(upper);
+            lut_arr[lower] = @as(u8, 1) << @intCast(upper);
             // Dupe to upper offset 128 for 256bit vpshufb.
-            lut[16 + lower] = @as(u8, 1) << @intCast(upper);
+            lut_arr[16 + lower] = @as(u8, 1) << @intCast(upper);
         }
+        const lut: @Vector(VecSize, u8) = lut_arr;
 
         var upperMaskLut: @Vector(VecSize, u8) = @splat(@as(u8, 0));
         comptime var j = 0;
@@ -530,14 +532,16 @@ pub fn indexOfAsciiSetSimdFixed(comptime VecSize: usize, str: []const u8, set: [
 
         // Construct the LUT.
         // Since it's ASCII, the upper needle mask can have at most 8 bits.
-        var lut: @Vector(VecSize, u8) = @splat(@as(u8, 0));
+        // Built as an array first: Zig 0.17 only allows comptime indices when storing into a vector.
+        var lut_arr: [VecSize]u8 = @splat(0);
         for (set) |code| {
             const lower = code & 0xF;
             const upper = code >> 4; // At most 7.
-            lut[lower] = @as(u8, 1) << @intCast(upper);
+            lut_arr[lower] = @as(u8, 1) << @intCast(upper);
             // Dupe to upper offset 128 for 256bit vpshufb.
-            lut[16 + lower] = @as(u8, 1) << @intCast(upper);
+            lut_arr[16 + lower] = @as(u8, 1) << @intCast(upper);
         }
+        const lut: @Vector(VecSize, u8) = lut_arr;
 
         var upperMaskLut: @Vector(VecSize, u8) = @splat(@as(u8, 0));
         comptime var j = 0;

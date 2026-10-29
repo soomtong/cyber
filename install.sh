@@ -7,6 +7,10 @@ then
   TAG="$@"
 fi
 
+# GitHub repository that hosts the release bundles. Override with CYBER_REPO.
+CYBER_REPO="${CYBER_REPO:-soomtong/cyber}"
+CYBER_RELEASES="https://github.com/${CYBER_REPO}/releases/download/${TAG}"
+
 abort() {
   printf "%s\n" "$@" >&2
   exit 1
@@ -32,13 +36,13 @@ then
   UNAME_MACHINE="$(/usr/bin/uname -m)"
   if [[ "${UNAME_MACHINE}" == "arm64" ]]
   then
-    CYBER_BUNDLE="https://github.com/fubark/cyber/releases/download/${TAG}/cyber-macos-arm64.tar.gz"
+    CYBER_BUNDLE="${CYBER_RELEASES}/cyber-macos-arm64.tar.gz"
   else
-    CYBER_BUNDLE="https://github.com/fubark/cyber/releases/download/${TAG}/cyber-macos-x64.tar.gz"
+    CYBER_BUNDLE="${CYBER_RELEASES}/cyber-macos-x64.tar.gz"
   fi
 else
   UNAME_MACHINE="$(uname -m)"
-  CYBER_BUNDLE="https://github.com/fubark/cyber/releases/download/${TAG}/cyber-linux-x64.tar.gz"
+  CYBER_BUNDLE="${CYBER_RELEASES}/cyber-linux-x64.tar.gz"
 fi
 
 sudo sh -c "mkdir -p ${CYBER_PATH}; \

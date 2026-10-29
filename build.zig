@@ -322,18 +322,31 @@ fn link_cli_deps(b: *std.Build, cli: *std.Build.Module, vmc: *std.Build.Module, 
 }
 
 /// Zig API to `cyber.h` for `capi.zig`. Replaces its `@cImport`, which Zig 0.17 removed.
+/// Translated once per build graph; the module has no per-config inputs.
 fn create_cyber_c_mod(b: *std.Build) *std.Build.Module {
+    if (cyber_c_mod) |mod| return mod;
     const mod = b.addTranslateC(.{
         .root_source_file = b.path("src/include/cyber.h"),
         .target = rtarget,
         .optimize = optimize,
     });
-    return b.createModule(.{
+    cyber_c_mod = b.createModule(.{
         .root_source_file = mod.getOutput(),
     });
+    return cyber_c_mod.?;
 }
+var cyber_c_mod: ?*std.Build.Module = null;
 
+/// Translated once per `trace` flag; the other macro inputs are build-wide.
 pub fn create_vmc_mod(b: *std.Build, opts: Options) !*std.Build.Module {
+    if (vmc_mods[@intFromBool(opts.trace)]) |mod| return mod;
+    const mod = try create_vmc_mod_uncached(b, opts);
+    vmc_mods[@intFromBool(opts.trace)] = mod;
+    return mod;
+}
+var vmc_mods: [2]?*std.Build.Module = .{ null, null };
+
+fn create_vmc_mod_uncached(b: *std.Build, opts: Options) !*std.Build.Module {
     const mod = b.addTranslateC(.{
         .root_source_file = b.path("src/vm.h"),
         .target = rtarget,

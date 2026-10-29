@@ -76,10 +76,7 @@ pub fn ListWriter(comptime List: type) type {
         pub const Error = std.mem.Allocator.Error;
 
         pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) Error!void {
-            const len = std.fmt.count(fmt, args);
-            try self.list.ensureUnusedCapacity(self.alloc, len);
-            _ = std.mem.print(self.list.unusedCapacitySlice(), fmt, args) catch unreachable;
-            self.list.items.len += len;
+            return self.list.print(self.alloc, fmt, args);
         }
 
         pub fn writeAll(self: @This(), bytes: []const u8) Error!void {
@@ -107,7 +104,16 @@ pub fn listWriter(list: anytype, alloc: std.mem.Allocator) ListWriter(@TypeOf(li
 
 /// Reads the environment through libc, which Cyber links on every target that has one.
 /// Zig 0.16 hands the environment only to `main`, but Cyber also runs embedded through the C API.
+/// On Windows the value comes from the process environment block as WTF-8, like
+/// `std.process.getEnvVarOwned` before Zig 0.16, since the CRT `getenv` would return the ANSI code page.
 pub fn getEnvVarOwned(alloc: std.mem.Allocator, key: []const u8) error{ OutOfMemory, EnvironmentVariableNotFound, InvalidWtf8 }![]u8 {
+    if (builtin.os.tag == .windows) {
+        const key_w = try std.unicode.wtf8ToWtf16LeAllocZ(alloc, key);
+        defer alloc.free(key_w);
+        const environ: std.process.Environ = .{ .block = .global };
+        const val_w = environ.getWindows(key_w) orelse return error.EnvironmentVariableNotFound;
+        return std.unicode.wtf16LeToWtf8Alloc(alloc, val_w);
+    }
     if (!builtin.link_libc) return error.EnvironmentVariableNotFound;
     var buf: [256]u8 = undefined;
     const key_z = std.mem.printSentinel(&buf, "{s}", .{key}, 0) catch return error.EnvironmentVariableNotFound;

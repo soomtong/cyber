@@ -45,10 +45,6 @@ jobs:
             mode: release
             cmd: cli
           - host: ubuntu-24.04
-            target: wasm32-freestanding
-            mode: release
-            cmd: web-lib
-          - host: ubuntu-24.04
             target: wasm32-wasi
             mode: release
             cmd: cli

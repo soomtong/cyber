@@ -11,6 +11,9 @@ on:
   push:
     branches:
       - master
+    # Version tags produce a GitHub release in the release job below.
+    tags:
+      - '[0-9]+.[0-9]+*'
     paths:
       - '**'
       - '!.github/**'
@@ -58,10 +61,6 @@ jobs:
             target: x86_64-windows-msvc
             mode: release
             cmd: lib
-          - host: ubuntu-24.04
-            target: wasm32-freestanding
-            mode: release
-            cmd: web-lib
           - host: ubuntu-24.04
             target: wasm32-wasi
             mode: release

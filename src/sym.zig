@@ -1733,7 +1733,8 @@ test "sym internals" {
         try t.eq(36, @sizeOf(Func));
     } else {
         try t.eq(24, @sizeOf(Sym));
-        try t.eq(72, @sizeOf(Func));
+        // `Func` holds a bare union, which carries a hidden tag only with runtime safety.
+        try t.eq(if (std.debug.runtime_safety) 72 else 64, @sizeOf(Func));
     }
 
     try t.eq(@offsetOf(Template, "head"), 0);

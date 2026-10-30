@@ -4346,6 +4346,8 @@ fn resolveFuncSig(c: *cy.Chunk, func: *cy.Func, resolve_new_types: bool, out_gen
         func.info.const_eval_only = true;
     }
 
+    // Always write `generic`. Callers assert on it, and an undefined bool there lets optimized builds drop code.
+    out_generic.generic = false;
     if (!variant) {
         const generic_params = c.func_template_param_stack.items[template_start..];
         if (generic_params.len > 0) {
@@ -4353,8 +4355,6 @@ fn resolveFuncSig(c: *cy.Chunk, func: *cy.Func, resolve_new_types: bool, out_gen
                 .generic = true,
                 .params = try c.alloc.dupe(cy.sym.FuncTemplateParam, generic_params),
             };
-        } else {
-            out_generic.generic = false;
         }
     }
     return c.sema.ensureFuncSig2(c.func_param_stack.items[start..], ret_t, func.info.extern_, scope_param_idx);
@@ -9672,7 +9672,8 @@ test "sema internals." {
         try t.eq(40, @sizeOf(Local));
         try t.eq(16, @sizeOf(FuncSig));
     } else {
-        try t.eq(56, @sizeOf(Local));
+        // `Local` holds a bare union, which carries a hidden tag only with runtime safety.
+        try t.eq(if (std.debug.runtime_safety) 56 else 48, @sizeOf(Local));
         try t.eq(24, @sizeOf(FuncSig));
     }
 }

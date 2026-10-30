@@ -21,16 +21,14 @@ OS="$(uname)"
 if [[ "${OS}" == "Linux" ]]
 then
   CYBER_LINUX=1
-  CYBER_PATH=/usr/local/bin
 elif [[ "${OS}" == "Darwin" ]]
 then
   CYBER_MACOS=1
-  CYBER_PATH=/usr/local/bin
 else
   abort "Install is only supported on macOS and Linux."
 fi
 
-# Required installation paths.
+# Pick the bundle for this machine.
 if [[ -n "${CYBER_MACOS}" ]]
 then
   UNAME_MACHINE="$(/usr/bin/uname -m)"
@@ -41,17 +39,54 @@ then
     CYBER_BUNDLE="${CYBER_RELEASES}/cyber-macos-x64.tar.gz"
   fi
 else
-  UNAME_MACHINE="$(uname -m)"
   CYBER_BUNDLE="${CYBER_RELEASES}/cyber-linux-x64.tar.gz"
 fi
 
 # The bundle holds the executable and its standard modules (`src/`), which the
-# executable looks up next to itself. Keep them together and link the binary into PATH.
+# executable looks up next to itself. Keep them together under CYBER_HOME and
+# link the binary into CYBER_BIN, which should be on PATH.
 CYBER_HOME="${CYBER_HOME:-/usr/local/lib/cyber}"
+CYBER_BIN="${CYBER_BIN:-/usr/local/bin}"
 
-sudo sh -c "mkdir -p ${CYBER_HOME} ${CYBER_PATH}; \
-    echo 'Downloading ${CYBER_BUNDLE}.'; \
-    curl -fsSL $CYBER_BUNDLE | tar -xz -C $CYBER_HOME; \
-    chmod a+x ${CYBER_HOME}/cyber; \
-    ln -sf ${CYBER_HOME}/cyber ${CYBER_PATH}/cyber; \
-    echo 'Installed to ${CYBER_HOME}, linked as ${CYBER_PATH}/cyber.'"
+# Use sudo only when the destination is not writable by the current user.
+# Set CYBER_SUDO=0 to never use sudo, or CYBER_SUDO=1 to always use it.
+first_existing_parent() {
+  local dir="$1"
+  while [[ ! -d "${dir}" && "${dir}" != "/" ]]
+  do
+    dir="$(dirname "${dir}")"
+  done
+  printf "%s" "${dir}"
+}
+
+if [[ -z "${CYBER_SUDO}" ]]
+then
+  CYBER_SUDO=0
+  for dir in "${CYBER_HOME}" "${CYBER_BIN}"
+  do
+    if [[ ! -w "$(first_existing_parent "${dir}")" ]]
+    then
+      CYBER_SUDO=1
+    fi
+  done
+fi
+
+if [[ "${CYBER_SUDO}" == "1" ]]
+then
+  if [[ "$(id -u)" == "0" ]]
+  then
+    SUDO=""
+  else
+    SUDO="sudo"
+  fi
+else
+  SUDO=""
+fi
+
+echo "Downloading ${CYBER_BUNDLE}."
+${SUDO} sh -c "mkdir -p '${CYBER_HOME}' '${CYBER_BIN}' && \
+    curl -fsSL '${CYBER_BUNDLE}' | tar -xz -C '${CYBER_HOME}' && \
+    chmod a+x '${CYBER_HOME}/cyber' && \
+    ln -sf '${CYBER_HOME}/cyber' '${CYBER_BIN}/cyber'" \
+  || abort "Install failed."
+echo "Installed to ${CYBER_HOME}, linked as ${CYBER_BIN}/cyber."

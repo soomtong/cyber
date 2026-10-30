@@ -32,8 +32,10 @@
   `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
   더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.
   0.4.1 릴리스 번들은 트리밍 전 17개 파일 그대로다(태그를 다시 찍지 않음).
-- 로컬 `-Doptimize=ReleaseFast` CLI는 `examples/hello.cy`에서도 세그폴트한다(aarch64-macos, Zig 0.17.0).
-  CI 릴리스 모드는 `ReleaseSafe`라 영향 없음. 번들 검증은 ReleaseSafe로 한다.
+- `-Doptimize=ReleaseFast`/`ReleaseSmall` CLI가 `examples/hello.cy`에서도 세그폴트하던 문제는 고쳤다(2026-10-30).
+  원인은 두 가지였다. `vm.h`의 `ZHeap`/`ZVM` padding이 safety를 켠 배치만 맞췄고, `resolveFuncSig`가
+  variant 경로에서 `out_generic`을 쓰지 않아 호출자의 `assert(!generic.generic)`가 undefined를 읽었다.
+  CI 릴리스 모드는 여전히 `ReleaseSafe`다.
 
 ## 타깃별 메모
 

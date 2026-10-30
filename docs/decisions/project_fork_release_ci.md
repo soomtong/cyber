@@ -31,7 +31,9 @@
 - 번들의 `src/`는 타깃별로 다르다. `build.zig`의 `cli` 스텝이 공통 10개에 macOS(`os.macos.cy`,
   `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
   더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.
-  0.4.1 릴리스 번들은 트리밍 전 17개 파일 그대로다(태그를 다시 찍지 않음).
+  0.4.1 릴리스 번들은 트리밍 전 17개 파일 그대로다(태그를 다시 찍지 않음). 0.4.2(2026-10-30)부터
+  트리밍된 번들(macOS · Linux 12개)이 나간다. `CYBER_HOME`/`CYBER_BIN`을 임시 디렉터리로 두고 `install.sh`로
+  받은 macOS arm64 바이너리가 `examples/hello.cy`를 실행하는 것까지 확인했다.
 - `-Doptimize=ReleaseFast`/`ReleaseSmall` CLI가 `examples/hello.cy`에서도 세그폴트하던 문제는 고쳤다(2026-10-30).
   원인은 두 가지였다. `vm.h`의 `ZHeap`/`ZVM` padding이 safety를 켠 배치만 맞췄고, `resolveFuncSig`가
   variant 경로에서 `out_generic`을 쓰지 않아 호출자의 `assert(!generic.generic)`가 undefined를 읽었다.

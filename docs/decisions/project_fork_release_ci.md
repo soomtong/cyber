@@ -13,13 +13,27 @@
 - 태그 체크아웃에서는 `actions/checkout`이 만든 로컬 태그 때문에 `git fetch --tags`가 거부된다.
   Setup 스크립트의 fetch에 `--force`를 둔 이유.
 - 워크플로 파일은 태그가 가리키는 커밋에서 읽힌다. 워크플로를 고치면 태그를 다시 찍어야 한다.
+- `concurrency.group: latest`에 `cancel-in-progress`가 켜져 있어 master push와 태그 push를 동시에 하면
+  master 쪽 run이 취소되고 `latest` 릴리스가 만들어지지 않는다. 둘을 따로 push하거나
+  `gh workflow run latest-build.yml --ref master`로 다시 돌린다.
+- GitHub Pages는 fork에서 꺼져 있었다. `gh api -X POST repos/soomtong/cyber/pages`로 `gh-pages` 루트를
+  소스로 켰다. 문서 주소는 `https://soomtong.github.io/cyber/`.
 
 ## 릴리스 번들
 
 - 릴리스 CLI는 `build_config.mod_root`가 없어서 실행 파일 디렉터리에서 `src/builtins/*.cy`,
   `src/std/*.cy`를 읽는다. 번들에 `src/`를 함께 넣는다(`cli` 스텝이 `zig-out/bin/src`에 설치).
-- `install.sh`는 번들을 `CYBER_HOME`(기본 `/usr/local/lib/cyber`)에 풀고 `/usr/local/bin/cyber`로
-  심링크한다. 실행 파일 경로는 심링크를 푼 실제 경로로 잡히므로 `src/`를 찾는다.
+- `install.sh`는 번들을 `CYBER_HOME`(기본 `/usr/local/lib/cyber`)에 풀고 `CYBER_BIN`(기본
+  `/usr/local/bin`)에 `cyber`를 심링크한다. 실행 파일 경로는 심링크를 푼 실제 경로로 잡히므로 `src/`를
+  찾는다. sudo는 대상 디렉터리(또는 가장 가까운 존재하는 상위)가 쓰기 불가일 때만 쓴다
+  (`CYBER_SUDO=0|1`로 강제). sudo 경로는 가짜 `sudo`로 명령 구성만 확인했고, 실제 `/usr/local` 설치는
+  사용자가 `bash install.sh`로 돌려야 한다.
+- 번들의 `src/`는 타깃별로 다르다. `build.zig`의 `cli` 스텝이 공통 10개에 macOS(`os.macos.cy`,
+  `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
+  더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.
+  0.4.1 릴리스 번들은 트리밍 전 17개 파일 그대로다(태그를 다시 찍지 않음).
+- 로컬 `-Doptimize=ReleaseFast` CLI는 `examples/hello.cy`에서도 세그폴트한다(aarch64-macos, Zig 0.17.0).
+  CI 릴리스 모드는 `ReleaseSafe`라 영향 없음. 번들 검증은 ReleaseSafe로 한다.
 
 ## 타깃별 메모
 

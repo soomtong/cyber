@@ -129,23 +129,33 @@ pub fn build(b: *std.Build) !void {
 
         step.dependOn(&b.addInstallArtifact(exe, .{}).step);
         if (optimize != .debug) {
-            step.dependOn(&b.addInstallFile(b.path("src/builtins/core.cy"), "bin/src/builtins/core.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/builtins/cy.cy"), "bin/src/builtins/cy.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/builtins/meta.cy"), "bin/src/builtins/meta.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/builtins/c.cy"), "bin/src/builtins/c.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/std/math.cy"), "bin/src/std/math.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/std/os.cy"), "bin/src/std/os.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/std/io.cy"), "bin/src/std/io.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/std/cli.cy"), "bin/src/std/cli.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/std/test.cy"), "bin/src/std/test.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/std/os.macos.cy"), "bin/src/std/os.macos.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/std/os.linux.cy"), "bin/src/std/os.linux.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/std/os.windows.cy"), "bin/src/std/os.windows.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/std/windows/windows.cy"), "bin/src/std/windows/windows.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/std/windows/kernel32.cy"), "bin/src/std/windows/kernel32.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/std/libc.cy"), "bin/src/std/libc.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/std/libc.macos.cy"), "bin/src/std/libc.macos.cy").step);
-            step.dependOn(&b.addInstallFile(b.path("src/std/libc.linux.cy"), "bin/src/std/libc.linux.cy").step);
+            // Release builds load the standard modules from `src/` next to the executable.
+            // Platform modules are imported behind `#[cond=meta.system() == ...]`, so each
+            // target only ships its own.
+            const common_mods = [_][]const u8{
+                "src/builtins/core.cy",
+                "src/builtins/cy.cy",
+                "src/builtins/meta.cy",
+                "src/builtins/c.cy",
+                "src/std/math.cy",
+                "src/std/os.cy",
+                "src/std/io.cy",
+                "src/std/cli.cy",
+                "src/std/test.cy",
+                "src/std/libc.cy",
+            };
+            const target_mods: []const []const u8 = switch (target.os.tag) {
+                .macos => &.{ "src/std/os.macos.cy", "src/std/libc.macos.cy" },
+                .linux => &.{ "src/std/os.linux.cy", "src/std/libc.linux.cy" },
+                .windows => &.{ "src/std/os.windows.cy", "src/std/windows/windows.cy", "src/std/windows/kernel32.cy" },
+                else => &.{},
+            };
+            for (common_mods) |mod| {
+                step.dependOn(&b.addInstallFile(b.path(mod), b.fmt("bin/{s}", .{mod})).step);
+            }
+            for (target_mods) |mod| {
+                step.dependOn(&b.addInstallFile(b.path(mod), b.fmt("bin/{s}", .{mod})).step);
+            }
         }
     }
 
@@ -247,7 +257,7 @@ pub fn build(b: *std.Build) !void {
         lib_standalone_test_cmd.dependOn(&test2.step);
     }
 
-    const cli_test_cmd = b.step("cli-test", "Run cli tests.");  
+    const cli_test_cmd = b.step("cli-test", "Run cli tests.");
     {
         var run = b.addRunArtifact(cli_test);
         run.has_side_effects = no_cache;

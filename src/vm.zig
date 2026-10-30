@@ -699,6 +699,14 @@ pub const VM = struct {
     }
 };
 
+// `vm.h` mirrors this offset with padding measured per build mode. Check it in every build mode and target,
+// not only in tests, so a mismatch fails the build instead of corrupting `VM.c` at runtime.
+comptime {
+    if (@offsetOf(VM, "c") != @offsetOf(vmc.ZVM, "c")) {
+        @compileError(std.fmt.comptimePrint("ZVM padding: Zig VM.c is at {}, C ZVM.c is at {}", .{ @offsetOf(VM, "c"), @offsetOf(vmc.ZVM, "c") }));
+    }
+}
+
 test "vm internals." {
     try zt.eq(8, @alignOf(VM));
 

@@ -159,6 +159,15 @@ pub fn freeHeapPages(t: *cy.Thread) !FreeHeapResult {
     return res;
 }
 
+// `vm.h` mirrors these offsets with padding measured per build mode. See the same check in `vm.zig`.
+comptime {
+    if (@offsetOf(Thread, "c") != @offsetOf(vmc.ZThread, "c") or @offsetOf(Thread, "heap") != @offsetOf(vmc.ZThread, "heap")) {
+        @compileError(std.fmt.comptimePrint("ZThread padding: Zig Thread.c/heap are at {}/{}, C ZThread.c/heap are at {}/{}", .{
+            @offsetOf(Thread, "c"), @offsetOf(Thread, "heap"), @offsetOf(vmc.ZThread, "c"), @offsetOf(vmc.ZThread, "heap"),
+        }));
+    }
+}
+
 test "thread internals." {
     try zt.eq(8, @alignOf(Thread));
     try zt.eq(@sizeOf(ThreadC), @sizeOf(vmc.Thread));

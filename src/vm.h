@@ -751,17 +751,17 @@ typedef struct Heap {
     u64 trace_track_object_event;
 } Heap;
 
-// Zig 0.17 adds a `usize` pointer-stability lock to every `std.ArrayList` when runtime safety is on.
-// The Zig structs mirrored by `ZHeap` and `ZVM` hold such lists before their `c` field.
-#if RT_SAFETY
-#define ZIG_LIST_LOCK_SIZE sizeof(size_t)
-#else
-#define ZIG_LIST_LOCK_SIZE 0
-#endif
-
+// `ZHeap` and `ZVM` padding is the offset of `c` in the Zig `Heap` and `VM` structs.
+// With runtime safety on, every `std.ArrayList` and `std.HashMapUnmanaged` carries a `usize`
+// pointer-stability lock, and Zig reorders the fields, so the offsets are measured per mode.
+// A mismatch is a compile error in `heap.zig`, `thread.zig` and `vm.zig`, which prints both offsets.
 typedef struct ZHeap {
 #if !defined(__wasm__)
-    u8 padding[112 + 1 * ZIG_LIST_LOCK_SIZE];
+#if RT_SAFETY
+    u8 padding[120];
+#else
+    u8 padding[96];
+#endif
 #endif
     Heap c;
 } ZHeap;
@@ -812,10 +812,14 @@ typedef struct ZThread {
 extern _Thread_local ZThread* cur_thread;
 
 typedef struct ZVM {
-#if defined(__wasm__)
-    u8 padding[180 + 10 * ZIG_LIST_LOCK_SIZE];
+#if defined(__wasm__) && RT_SAFETY
+    u8 padding[220];
+#elif defined(__wasm__)
+    u8 padding[172];
+#elif RT_SAFETY
+    u8 padding[536];
 #else
-    u8 padding[456 + 10 * ZIG_LIST_LOCK_SIZE];
+    u8 padding[432];
 #endif
     VM c;
 } ZVM;

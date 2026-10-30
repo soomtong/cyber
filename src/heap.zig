@@ -1746,10 +1746,18 @@ test "Free object invalidation." {
     }
 }
 
+// `vm.h` mirrors this offset with padding measured per build mode. See the same check in `vm.zig`.
+comptime {
+    if (@offsetOf(Heap, "c") != @offsetOf(vmc.ZHeap, "c")) {
+        @compileError(std.fmt.comptimePrint("ZHeap padding: Zig Heap.c is at {}, C ZHeap.c is at {}", .{ @offsetOf(Heap, "c"), @offsetOf(vmc.ZHeap, "c") }));
+    }
+}
+
 test "heap internals." {
     try t.eq(@offsetOf(Heap, "c"), @offsetOf(vmc.ZHeap, "c"));
 
-    try t.eq(24, @sizeOf(AsyncTask));
+    // `AsyncTask` holds a bare union, which carries a hidden tag only with runtime safety.
+    try t.eq(if (std.debug.runtime_safety) 24 else 16, @sizeOf(AsyncTask));
     if (cy.is32Bit) {
         try t.eq(40, @sizeOf(MapValue));
         try t.eq(16, @sizeOf(MapIterator));

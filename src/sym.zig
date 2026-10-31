@@ -553,7 +553,8 @@ pub const FuncSym = extern struct {
     numFuncs: u16,
 
     /// Duped to perform uniqueness check without dereferencing the first ModuleFunc.
-    firstFuncSig: *cy.FuncSig,
+    /// Null until the first func is resolved.
+    firstFuncSig: ?*cy.FuncSig,
 
     pub fn isResolved(self: *FuncSym) bool {
         return self.numFuncs > 0;
@@ -1431,7 +1432,7 @@ pub fn createFuncSym(c: *cy.Chunk, parent: *Sym, name: []const u8) !*FuncSym {
     const sym = try createSym(c.alloc, .func, .{
         .head = Sym.init(.func, parent, name),
         .numFuncs = 0,
-        .firstFuncSig = undefined,
+        .firstFuncSig = null,
         .first = undefined,
         .last = undefined,
     });
@@ -1728,12 +1729,12 @@ fn writeLocalFuncVariantParams(s: *cy.Sema, w: *std.Io.Writer, variant: *cy.Inst
 }
 
 test "sym internals" {
+    // `Func` holds a bare union, which carries a hidden tag only with runtime safety.
     if (cy.is32Bit) {
         try t.eq(16, @sizeOf(Sym));
-        try t.eq(36, @sizeOf(Func));
+        try t.eq(if (std.debug.runtime_safety) 36 else 32, @sizeOf(Func));
     } else {
         try t.eq(24, @sizeOf(Sym));
-        // `Func` holds a bare union, which carries a hidden tag only with runtime safety.
         try t.eq(if (std.debug.runtime_safety) 72 else 64, @sizeOf(Func));
     }
 

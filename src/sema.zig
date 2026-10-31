@@ -9668,11 +9668,11 @@ pub fn unescapeSeq(seq: []const u8) !CharAdvance {
 }
 
 test "sema internals." {
+    // `Local` holds a bare union, which carries a hidden tag only with runtime safety.
     if (cy.is32Bit) {
-        try t.eq(40, @sizeOf(Local));
+        try t.eq(if (std.debug.runtime_safety) 40 else 36, @sizeOf(Local));
         try t.eq(16, @sizeOf(FuncSig));
     } else {
-        // `Local` holds a bare union, which carries a hidden tag only with runtime safety.
         try t.eq(if (std.debug.runtime_safety) 56 else 48, @sizeOf(Local));
         try t.eq(24, @sizeOf(FuncSig));
     }

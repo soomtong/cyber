@@ -422,7 +422,7 @@ pub fn rune_at(t: *cy.Thread) anyerror!Ret {
             ret.* = @intCast(std.unicode.replacement_character);
             return RetOk;
         }
-        const rune = std.unicode.utf8Decode(str[uidx..uidx+rune_len]) catch {
+        const rune = stdx.utf8Decode(str[uidx..uidx+rune_len]) catch {
             ret.* = @intCast(std.unicode.replacement_character);
             return RetOk;
         };

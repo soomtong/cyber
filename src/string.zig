@@ -175,7 +175,7 @@ pub fn validateUtf8(s: []const u8) ?usize {
         if (i + cp_len > s.len) {
             return null;
         }
-        _ = std.unicode.utf8Decode(s[i .. i + cp_len]) catch {
+        _ = stdx.utf8Decode(s[i .. i + cp_len]) catch {
             return null;
         };
         i += cp_len;
@@ -205,7 +205,7 @@ pub fn utf8CharSliceAt(str: []const u8, idx: usize) ?[]const u8 {
         return null;
     }
     const slice = str[idx .. idx + cp_len];
-    _ = std.unicode.utf8Decode(slice) catch {
+    _ = stdx.utf8Decode(slice) catch {
         return null;
     };
     return slice;
@@ -666,7 +666,7 @@ pub fn charIndexOfCodepoint(str: []const u8, needle: u21) ?usize {
     var i: usize = 0;
     while (i < str.len) {
         const cpLen = std.unicode.utf8ByteSequenceLength(str[i]) catch cy.fatal();
-        const cp = std.unicode.utf8Decode(str[i..i+cpLen]) catch cy.fatal();
+        const cp = stdx.utf8Decode(str[i..i+cpLen]) catch cy.fatal();
         if (cp == needle) {
             return charIdx;
         }
@@ -761,7 +761,7 @@ pub fn replaceAtIdxes(dst: []u8, src: []const u8, needleLen: u32, replacement: [
 
 pub fn utf8CodeAtNoCheck(str: []const u8, idx: usize) u21 {
     const len = std.unicode.utf8ByteSequenceLength(str[idx]) catch cy.fatal();
-    return std.unicode.utf8Decode(str[0..len]) catch cy.fatal();
+    return stdx.utf8Decode(str[idx..idx+len]) catch cy.fatal();
 }
 
 pub fn runeSliceAt(str: []const u8, idx: usize, out_bad_byte: *bool) []const u8 {

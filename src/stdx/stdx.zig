@@ -126,3 +126,25 @@ pub fn reinterpret(comptime T: type, v: anytype) T {
     comptime std.debug.assert(@sizeOf(T) == @sizeOf(@TypeOf(v)));
     return @as(*align(1) const T, @ptrCast(&v)).*;
 }
+
+/// Decodes one codepoint, as the deprecated `std.unicode.utf8Decode` did. `bytes.len` is the sequence
+/// length from `std.unicode.utf8ByteSequenceLength`; Zig 0.17 only has the fixed-length decoders.
+pub fn utf8Decode(bytes: []const u8) error{ Utf8ExpectedContinuation, Utf8OverlongEncoding, Utf8EncodesSurrogateHalf, Utf8CodepointTooLarge }!u21 {
+    return switch (bytes.len) {
+        1 => bytes[0],
+        2 => std.unicode.utf8Decode2(bytes[0..2].*),
+        3 => std.unicode.utf8Decode3(bytes[0..3].*),
+        4 => std.unicode.utf8Decode4(bytes[0..4].*),
+        else => unreachable,
+    };
+}
+
+test utf8Decode {
+    try std.testing.expectEqual(@as(u21, 'a'), try utf8Decode("a"));
+    try std.testing.expectEqual(@as(u21, 0xE9), try utf8Decode("é"));
+    try std.testing.expectEqual(@as(u21, 0x4E16), try utf8Decode("世"));
+    try std.testing.expectEqual(@as(u21, 0x1F600), try utf8Decode("😀"));
+    try std.testing.expectError(error.Utf8ExpectedContinuation, utf8Decode("\xC3\x28"));
+    try std.testing.expectError(error.Utf8OverlongEncoding, utf8Decode("\xC0\x80"));
+    try std.testing.expectError(error.Utf8EncodesSurrogateHalf, utf8Decode("\xED\xA0\x80"));
+}

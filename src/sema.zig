@@ -9925,7 +9925,7 @@ pub fn semaTryStringLitCodepoint(c: *cy.Chunk, lit: []const u8, bits: u32, node:
         if (lit.len != len) {
             return null;
         }
-        const val = std.unicode.utf8Decode(lit[0..0+len]) catch {
+        const val = stdx.utf8Decode(lit[0..0+len]) catch {
             return null;
         };
         if (val <= 0xFF) {
@@ -9961,7 +9961,7 @@ pub fn semaStringLitCodepoint(c: *cy.Chunk, lit: []const u8, node: *ast.Node) !u
         if (lit.len != len) {
             return c.reportErrorFmt("Invalid UTF-8 Rune.", &.{}, node);
         }
-        val = std.unicode.utf8Decode(lit[0..0+len]) catch {
+        val = stdx.utf8Decode(lit[0..0+len]) catch {
             return c.reportErrorFmt("Invalid UTF-8 Rune.", &.{}, node);
         };
     }

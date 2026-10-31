@@ -148,12 +148,7 @@ pub fn freeHeapPages(t: *cy.Thread) !FreeHeapResult {
         }
     }
 
-    var iter = t.heap.buffers.iterator();
-    while (iter.next()) |e| {
-        const slice = e.key_ptr.*[0..e.value_ptr.*];
-        t.heap.alloc.free(slice);
-    }
-    t.heap.buffers.clearRetainingCapacity();
+    t.heap.freeAllBuffers();
 
     logger.tracev("free result: num_freed={}", .{res.num_freed});
     return res;

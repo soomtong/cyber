@@ -1998,7 +1998,10 @@ fn gen_ret_gen(c: *Chunk, stmt: *ir.ReturnGen, node: *ast.Node) !void {
         reg_size = stmt.next_t.reg_size();
     }
 
-    try c.pushFCode(.ret_gen, &.{ @intCast(stmt.gen_t.id()), @intCast(reg_size), c.cur_proc.reg_end, 0 }, node);
+    // `gen_t` is the returned `^Generator`. The heap object is the boxed `Generator`, so its type id is the
+    // child's like any other box. The panic sweep and `@getDeinitObject` read the size and dtor from it.
+    const box_t = stmt.gen_t.cast(.pointer).child_t;
+    try c.pushFCode(.ret_gen, &.{ @intCast(box_t.id()), @intCast(reg_size), c.cur_proc.reg_end, 0 }, node);
     try genStmts(c, stmt.deinit_head);
     c.buf.ops.items[pc + 4].val = @intCast(c.buf.ops.items.len - pc);
 }

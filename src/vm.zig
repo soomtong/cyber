@@ -201,6 +201,13 @@ pub const VM = struct {
             return;
         }
 
+        if (self.config.single_run or self.config.persist_main) {
+            // Release ops for the main block were skipped (`sema.shouldGenMainScopeReleaseOps`), so its
+            // locals still own heap objects and raw buffers. Sweep them like the panic path does, before
+            // the compiler deinit frees the types that give each object's size.
+            _ = cy.thread.freeHeapPages(self.main_thread) catch cy.fatal();
+        }
+
         if (!reset) {
             const data = self.getData(*cy.core.BuiltinsData, "builtins");
             self.alloc.destroy(data);
@@ -324,10 +331,6 @@ pub const VM = struct {
             self.worker_pool.deinit(self.alloc);
         }
 
-        if (self.config.single_run or self.config.persist_main) {
-            // Release ops for the main block were skipped, so its locals still own raw buffers.
-            self.main_thread.heap.freeAllBuffers();
-        }
         self.main_thread.deinit(reset);
         if (!reset) {
             self.alloc.destroy(self.main_thread);

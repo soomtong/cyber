@@ -841,6 +841,29 @@ test "single_run frees the main block's raw buffers at deinit." {
     , config, &res));
 }
 
+test "single_run frees big heap objects at deinit." {
+    // Leak-checking allocator: the main block's big objects (`Generator` is 48 bytes) must not survive deinit.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+
+    var config = C.defaultEvalConfig();
+    config.single_run = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "t",
+        \\#[generator]
+        \\fn inc() -> int:
+        \\  yield 0
+        \\
+        \\type IncFn = fn() -> int
+        \\
+        \\gens := Array[^Generator[IncFn]]{}
+        \\for 0..10:
+        \\  g := inc()
+        \\  _ = g.next()
+        \\  gens.append(g)
+    , config, &res));
+}
+
 test "cl_slice_init." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

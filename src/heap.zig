@@ -131,9 +131,8 @@ pub const Heap = struct {
         }
     }
 
-    /// Frees every raw buffer that is still registered. Used when the main block's release ops
-    /// were skipped (`sema.shouldGenMainScopeReleaseOps`), so buffers owned by main locals are
-    /// still alive at teardown.
+    /// Frees every raw buffer that is still registered. Part of `thread.freeHeapPages`, which runs
+    /// after a panic and at teardown when the main block's release ops were skipped.
     pub fn freeAllBuffers(self: *Heap) void {
         var iter = self.buffers.iterator();
         while (iter.next()) |e| {

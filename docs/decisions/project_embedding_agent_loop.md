@@ -37,8 +37,10 @@
 ## `single_run`
 
 - `CLEvalConfig.single_run = true`는 "이 프로세스는 eval 한 번 하고 끝난다"는 뜻이다. 컴파일러가 main 블록 지역 변수의
-  해제 코드를 생략하므로 빠르지만, 그 변수들이 가진 메모리는 `cl_vm_deinit`에서 한꺼번에 정리된다(raw buffer는
-  `Heap.freeAllBuffers`, heap 객체는 페이지 단위 해제). 제너레이터 프레임처럼 그 밖에서 할당된 것은 해제되지 않는다.
+  해제 코드를 생략하므로 빠르지만, 그 변수들이 가진 메모리는 `cl_vm_deinit`에서 한꺼번에 정리된다. `VM.deinit`이
+  맨 앞에서(타입 정보가 살아 있을 때) 패닉 경로와 같은 `thread.freeHeapPages` 스윕을 돌려 heap 객체를 소멸자 없이
+  타입 크기대로 해제하고 raw buffer도 해제한다. 큰 객체(32바이트 초과, 페이지 밖 할당)도 여기서 해제된다.
+  소멸자를 건너뛰므로 제너레이터 `@deinit` 같은 정리 코드는 돌지 않는다.
 - 임베딩에서 VM을 재사용하거나 누수 검사를 하려면 기본값 `false`를 유지한다. CLI는 ReleaseFast에서만 `true`를 켠다.
 
 ## 호스트 ↔ 스크립트 경계

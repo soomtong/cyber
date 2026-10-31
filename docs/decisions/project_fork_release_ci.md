@@ -26,8 +26,11 @@
 - `install.sh`는 번들을 `CYBER_HOME`(기본 `/usr/local/lib/cyber`)에 풀고 `CYBER_BIN`(기본
   `/usr/local/bin`)에 `cyber`를 심링크한다. 실행 파일 경로는 심링크를 푼 실제 경로로 잡히므로 `src/`를
   찾는다. sudo는 대상 디렉터리(또는 가장 가까운 존재하는 상위)가 쓰기 불가일 때만 쓴다
-  (`CYBER_SUDO=0|1`로 강제). sudo 경로는 가짜 `sudo`로 명령 구성만 확인했고, 실제 `/usr/local` 설치는
-  2026-10-31에 사용자가 `install.sh`로 0.4.2(build-552-2db5eb6)를 받아 `cyber version`까지 확인했다.
+  (`CYBER_SUDO=0|1`로 강제). 실제 `/usr/local` 설치는 2026-10-31에 사용자가 `install.sh`로 0.4.2를 받아
+  `cyber version`까지 확인했다. macOS arm64(build-552, 이후 build-562)와 Rocky Linux 9(el9_6 x86_64, 일반 사용자
+  `rocky`로 실행해 sudo 자동 사용 경로를 지남, build-562-56e3740) 두 곳이다. `-Dselinux` 번들은 TCC 백엔드의
+  JIT 메모리 확보 방식만 바꾸므로 기본 VM 백엔드로 스크립트를 돌리는 데는 일반 Linux 번들이면 되고, `install.sh`가
+  SELinux 번들을 자동으로 고르지 않는 것은 그대로 둔다.
 - 0.4.2는 2026-10-31에 다시 찍었다. 기존 릴리스와 태그를 지우고(`gh release delete 0.4.2 --cleanup-tag`)
   `56e3740`(translate-c 패키지 · `stdx.utf8Decode` · `-Dffi=false` panic · `SafeAllocator` 포함)에
   annotated 태그로 다시 push했다. 빌드 번호는 `build-562-56e3740`, 에셋 14개. 태그를 지우고 다시 push하면

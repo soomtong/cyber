@@ -35,6 +35,30 @@ c := a.append('a' + 'b')
 - 제자리 변경이 필요하면 `Array[T]`를 쓰라는 구도로 보인다. `Array`의 `append`는 `fn (&&Array[]) append(val T)`로
   배타적 빌림을 받아 제자리에서 바꾸고 값을 돌려주지 않는다. `Slice`는 값 의미(COW)를 맡는다.
 
+## 다른 언어 (2026-11-01 조사)
+
+- Swift `Array`: 길이(count)가 값이 아니라 공유 버퍼 헤더(`_ArrayBody`)에 있고, 저장소 deinit은
+  `deinitialize(count: countAndCapacity.count)`로 버퍼의 count만큼 해제한다. 그래서 한 버퍼를 길이가 다른 두 값이 나눠
+  가질 수 없다(부분 보기는 범위를 따로 가진 `ArraySlice`). 변경은 `mutating`이라 변경되는 변수 자신의 유일성을 검사하고
+  (`isUniquelyReferenced() && capacity >= minimumCapacity`일 때만 제자리), `+`처럼 값을 돌려주는 연산은 새 배열을 만든다.
+- Lean 4 · Koka(Perceus): `Array.push : Array α → α → Array α`는 함수형 시그니처지만 참조 카운트가 1이면 제자리에서 바꾼다.
+  인자는 소유(owned)로 넘어가고, 호출 뒤에도 쓰이는 값이면 컴파일러가 호출 전에 카운트를 올려 복사가 일어난다.
+  저자들은 빌린 참조는 RC = 1이어도 제자리 갱신이 안전하지 않다고 명시한다. Cyber의 `clone_on_resize`가 바로 빌린
+  `&Slice` 수신자에서 `@isUniqueRef`를 보고 `self.*`를 돌려주는 경우다.
+- Go: `append`가 용량이 남으면 원래 배열을 공유하고 길이만 다른 헤더를 돌려준다(Cyber와 같은 구조). GC라 누수 대신
+  의미상 별칭(덮어쓰기)과 길이 밖 원소의 수명 연장이 문제가 됐고, Go 1.22는 `slices.Delete` 등이 길이 밖으로 밀려난
+  원소를 0으로 지우게 바꿨다. 반환값을 버리고 원래 슬라이스를 쓰는 것은 여전히 잘못된 사용으로 본다.
+- Rust `Vec::push(&mut self)`: 배타적 빌림으로 제자리 변경만 한다. 별칭이 타입 수준에서 막힌다. Cyber의 `Array[T]`
+  (`&&` 수신자)와 같은 자리다. 공유 + COW가 필요하면 소유한 `Rc`에 `Rc::make_mut`를 쓴다.
+- Python `list`: `append`는 제자리, `a + b`는 항상 새 리스트. 빠른 경로와 값 연산이 분리돼 있다.
+
+정리하면 해제 정확성을 지키는 방법은 두 가지다. 길이를 버퍼 쪽에 두거나(Swift, 후보 1과 같은 방향), 제자리 갱신을 소유한
+값이나 변경되는 변수 자신에게만 허용한다(Lean · Koka · Swift `mutating`, 후보 2와 같은 방향). Go만 Cyber와 같은 구조인데
+GC라서 누수로 드러나지 않는다.
+
+출처: Swift `stdlib/public/core/ArrayBody.swift` · `ContiguousArrayBuffer.swift`, Ullrich · de Moura "Counting Immutable
+Beans"(IFL 2019) 및 Lean 발표 자료, Reinking 외 "Perceus"(PLDI 2021), Go Blog "Robust generic functions on slices"(2024-02).
+
 ## 해석
 
 `append` · `+` · `insert` 등 `clone_on_resize`를 거치는 연산은 "받는 쪽을 결과로 덮어쓴다"를 전제한 설계로 보인다.

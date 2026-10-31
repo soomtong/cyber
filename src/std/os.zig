@@ -31,7 +31,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"stderr",         zErrFunc(stderr)},
     .{"stdin",          zErrFunc(stdin)},
     .{"stdout",         zErrFunc(stdout)},
-    .{"exec",           zErrFunc(exec)},
+    .{"_exec",          zErrFunc(exec)},
     .{"_args",          zErrFunc(_args)},
     .{"openLib",        zErrFunc(openLib)},
 };
@@ -144,7 +144,9 @@ fn cacheUrl(t: *C.Thread) anyerror!C.Ret {
     const alloc = C.thread_allocator(t);
 
     const ret = C.thread_ret(t, C.str);
-    const url = C.str_bytes(C.thread_str(t));
+    var url_s = C.thread_str(t);
+    defer C.str_deinit(t, &url_s);
+    const url = C.str_bytes(url_s);
     const path = try allocCacheUrl(vm, url);
     defer alloc.free(path);
     ret.* = C.str_init(t, path);
@@ -191,8 +193,11 @@ pub fn exec(t: *C.Thread) anyerror!C.Ret {
     const alloc = C.thread_allocator(t);
 
     const ret = C.thread_ret(t, ExecResult);
-    const args_slice = C.thread_slice(t);
-    const args = C.slice_items(args_slice, C.str);
+    // `[&]str` span: borrowed, so nothing is released here. A `[]str` param would be owned by
+    // this host function and leak unless it ran the slice destructor.
+    const ArgsSpan = extern struct { ptr: [*]const C.str, len: u64 };
+    const args_span = C.thread_param(t, ArgsSpan);
+    const args = args_span.ptr[0..@intCast(args_span.len)];
     var buf: std.ArrayList([]const u8) = .empty;
     defer {
         buf.deinit(alloc);
@@ -230,7 +235,9 @@ pub fn fetchUrl(t: *C.Thread) anyerror!C.Ret {
     // if (is_wasm) return t.ret_panic("Unsupported.");
 
     const ret = C.thread_ret(t, C.str);
-    const url = C.str_bytes(C.thread_param(t, C.str));
+    var url_s = C.thread_param(t, C.str);
+    defer C.str_deinit(t, &url_s);
+    const url = C.str_bytes(url_s);
 
     const vm = C.thread_vm(t);
     const alloc = C.thread_allocator(t);

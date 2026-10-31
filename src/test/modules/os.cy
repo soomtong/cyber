@@ -17,6 +17,15 @@ os.accessFile('src/test/assets/file.txt', os.AccessExists)!
 res := os.args()
 t.eq(res.len() > 0, true)
 
+-- exec()
+-- Takes `[]str` and `[&]str`. The args are borrowed, so neither leaks (the runner checks refcounts).
+if meta.system() != .windows:
+    cmd := []str{'/bin/echo', 'a' + 'b'}
+    er := os.exec(cmd)
+    t.eq('ab\n', er.out)
+    t.eq(0, er.code)
+    t.eq('cd\n', os.exec([&]str{'/bin/echo', 'c' + 'd'}).out)
+
 -- createDir()
 if os.fileExists('src/test/assets/tempdir'):
     os.removeDir('src/test/assets/tempdir')!

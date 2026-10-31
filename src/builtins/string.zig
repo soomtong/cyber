@@ -132,6 +132,7 @@ pub fn insertFn(t: *cy.Thread) anyerror!Ret {
     const str = obj.slice();
     const idx = t.param(i64);
     const insert = t.param(cy.heap.Str);
+    defer t.heap.destructStr(&insert);
     if (idx < 0 or idx > str.len) {
         return error.OutOfBounds;
     }
@@ -154,7 +155,9 @@ pub fn index(t: *cy.Thread) !Ret {
     const ret = t.ret(cy.value.Option(i64));
     const obj = t.param(*cy.heap.Str);
     const str = obj.slice();
-    const needle = t.param(cy.heap.Str).slice();
+    const needle_s = t.param(cy.heap.Str);
+    defer t.heap.destructStr(&needle_s);
+    const needle = needle_s.slice();
     if (needle.len > 0 and needle.len <= str.len) {
         if (needle.len == 1) {
             // One ascii char special case. Perform indexOfChar.

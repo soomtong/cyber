@@ -141,6 +141,7 @@ fn test_memory(run: *Runner) void {
     run.case("memory/call_with_ref_local.cy");
     run.case("memory/call_with_ref_rvalue.cy");
     run.case("memory/custom_deinit.cy");
+    run.case("memory/host_str_params.cy");
 if (!is_wasm) {
     // run.case("memory/default_memory.cy");
 }

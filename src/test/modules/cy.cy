@@ -30,6 +30,10 @@ fn main() -> str:
 t.eq('hello 123', res.downcast(^str).*)
 t.eq(error.EvalError, cy.eval('a').unwrap_error())
 
+-- A heap source string is released by the host `VM.eval` (no unreleased refcount).
+res = cy.eval('fn main() -> int:\n    return ' + '7')!
+t.eq(7, res.downcast(^int).*)
+
 -- parse()
 fn parseStmts(src str) -> []^cy.Node:
     res := cy.parse(src)

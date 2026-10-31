@@ -148,8 +148,12 @@ pub fn UserVM_eval(t: *cy.Thread) !C.Ret {
     const ret = t.ret(EvalResult);
 
     const uvm = t.param(*UserVM);
-    const uri = t.param(cy.heap.Str).slice();
-    const src = t.param(cy.heap.Str).slice();
+    const uri_s = t.param(cy.heap.Str);
+    defer t.heap.destructStr(&uri_s);
+    const src_s = t.param(cy.heap.Str);
+    defer t.heap.destructStr(&src_s);
+    const uri = uri_s.slice();
+    const src = src_s.slice();
     const config = t.param(UserEvalConfig);
 
     const config_c = C.EvalConfig{

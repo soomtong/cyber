@@ -13,15 +13,22 @@
 // clang -o host_tool host_tool.c -I ../../src/include ../../zig-out/lib/libcyber.a
 
 // Host implementation of `agent.tool`. Both params arrive as `str`, the result is a new `str`.
+// A host function owns its by-value params, so it releases them with `cl_str_deinit`.
+// (Declare a `[&]T` span param instead when the host only needs to borrow.)
 CLRet tool(CLThread* t) {
     CLstr* ret = cl_thread_ret(t, sizeof(CLstr));
-    CLBytes name = cl_str_bytes(cl_thread_str(t));
-    CLBytes args = cl_str_bytes(cl_thread_str(t));
+    CLstr name_s = cl_thread_str(t);
+    CLstr args_s = cl_thread_str(t);
+    CLBytes name = cl_str_bytes(name_s);
+    CLBytes args = cl_str_bytes(args_s);
 
     char buf[256];
     int n = snprintf(buf, sizeof buf, "{\"tool\":\"%.*s\",\"args\":%.*s,\"ok\":true}",
         (int)name.len, name.ptr, (int)args.len, args.ptr);
     *ret = cl_str_init(t, (CLBytes){ buf, (size_t)n });
+
+    cl_str_deinit(t, &name_s);
+    cl_str_deinit(t, &args_s);
     return CL_RET_OK;
 }
 
@@ -65,10 +72,12 @@ int main() {
 
     int failed = 0;
 
-    // Script calls into the host.
+    // Script calls into the host. `args` is built at runtime, so it is a heap string the host releases.
+    // The lib test "Host functions release their owned str params." checks this with a leak-checking allocator.
     failed |= run(vm, "tool call",
         "use agent\n"
-        "r := agent.tool('read_file', '{\"path\":\"/etc/hosts\"}')\n"
+        "args := '{\"path\":' + '\"/etc/hosts\"}'\n"
+        "r := agent.tool('read_file', args)\n"
         "print(r)\n") != CL_SUCCESS;
 
     // A compile error and a panic leave the VM usable.

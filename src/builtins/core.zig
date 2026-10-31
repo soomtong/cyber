@@ -2041,7 +2041,9 @@ fn f64_fmt(t: *cy.Thread) anyerror!C.Ret {
 
 fn atof(t: *cy.Thread) !C.Ret {
     const ret = t.ret(f64);
-    const str = t.param(cy.heap.Str).slice();
+    const s = t.param(cy.heap.Str);
+    defer t.heap.destructStr(&s);
+    const str = s.slice();
     const res = std.fmt.parseFloat(f64, str) catch {
         ret.* = 0;
         return C.RetOk;
@@ -2052,7 +2054,9 @@ fn atof(t: *cy.Thread) !C.Ret {
 
 fn atof32(t: *cy.Thread) !C.Ret {
     const ret = t.ret(f32);
-    const str = t.param(cy.heap.Str).slice();
+    const s = t.param(cy.heap.Str);
+    defer t.heap.destructStr(&s);
+    const str = s.slice();
     const res = std.fmt.parseFloat(f32, str) catch {
         ret.* = 0;
         return C.RetOk;

@@ -182,8 +182,11 @@ fn dirname(path str) -> ?str:
     return path[0..end_index]
 
 --| Runs a shell command and returns the stdout/stderr.
-#[bind]
-fn exec(args []str) -> ExecResult
+fn exec(args AsSpan[str]) -> ExecResult:
+    return _exec(args.span())
+
+-- Takes a borrowed span so the caller keeps owning the strings.
+#[bind] fn _exec(args [&]str) -> ExecResult
 
 type ExecResult:
     out  str

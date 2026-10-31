@@ -934,6 +934,43 @@ test "Bind functions." {
     , &res);
 }
 
+test "Host functions release their owned str params." {
+    // Leak-checking allocator: a host function that skips `str_deinit` leaks the heap string.
+    // The strings are longer than 32 bytes so they are big objects allocated outside the heap pages.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+
+    const S = struct {
+        fn mod_len(t_: *C.Thread) callconv(.c) C.Ret {
+            const ret: *i64 = C.thread_ret(t_, i64);
+            var s = C.thread_str(t_);
+            defer C.str_deinit(t_, &s);
+            ret.* = @intCast(C.str_bytes(s).len);
+            return C.RetOk;
+        }
+        fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+            const name = C.from_bytes(uri);
+            if (std.mem.eql(u8, name, "mod")) {
+                C.mod_add_func(mod, "len", C.BIND_FUNC(&mod_len));
+                res[0].src = C.to_bytes("#[bind] fn len(s str) -> int");
+                return true;
+            } else {
+                return C.default_loader(vm_, mod, uri, res);
+            }
+        }
+    };
+    C.vm_set_loader(vm, @ptrCast(&S.loader));
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use mod
+        \\use test
+        \\s := 'abcdefghijklmnopqrstuvwxyz' + '0123456789'
+        \\test.eq(36, mod.len(s))
+        \\test.eq(36, mod.len('abcdefghijklmnopqrstuvwxyz' + '9876543210'))
+    , &res));
+}
+
 test "Stack trace unwinding." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

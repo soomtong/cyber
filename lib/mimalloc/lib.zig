@@ -1,18 +1,15 @@
 const std = @import("std");
+const build = @import("../../build.zig");
 
 pub fn createModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) *std.Build.Module {
     // Replaces the `@cImport` of `mimalloc.h`, which Zig 0.17 removed.
-    const mimalloc_h = b.addTranslateC(.{
-        .root_source_file = b.path("lib/mimalloc/vendor/include/mimalloc.h"),
-        .target = target,
-        .optimize = optimize,
-    });
+    const mimalloc_h = build.translateC(b, b.path("lib/mimalloc/vendor/include/mimalloc.h"), target, optimize);
     mimalloc_h.addIncludePath(b.path("lib/mimalloc/vendor/include"));
     const mod = b.createModule(.{
         .root_source_file = b.path("lib/mimalloc/mimalloc.zig"),
     });
     mod.addIncludePath(b.path("lib/mimalloc/vendor/include"));
-    mod.addImport("mimalloc_c", mimalloc_h.createModule());
+    mod.addImport("mimalloc_c", mimalloc_h.mod);
     return mod;
 }
 

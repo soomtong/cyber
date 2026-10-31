@@ -14,6 +14,10 @@
 
 ## 코드 규칙
 
+- C 헤더 번역은 `build.zig`의 `translateC`(translate-c 패키지의 `Translator`)로 한다. `b.addTranslateC`는
+  0.17에서 deprecated다. 패키지는 codeberg 주소와 커밋으로 고정한다(ghostty 미러와 해시가 같다).
+  `default_init = true`가 없으면 extern struct 필드의 0 기본값이 사라져 `CLBindFunc` 초기화가 깨진다.
+  받은 패키지는 `zig-pkg/`(gitignore, CI 캐시 경로)에 풀린다.
 - `Io`는 `stdx.io()`에서 얻는다. 환경 변수는 `stdx.getEnvVarOwned`(libc). 인자는 `std/os.zig`의
   `process_args`를 CLI `main`과 테스트 러너의 `test_init`이 채운다.
 - extern struct에 std 컨테이너를 흉내 내 넣지 않는다. std 타입은 배치가 정의되지 않고(0.17

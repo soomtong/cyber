@@ -11,6 +11,8 @@ Once you have zig installed, checkout the repo:
 git clone https://github.com/fubark/cyber.git
 ```
 
+The first `zig build` fetches the [translate-c](https://codeberg.org/ziglang/translate-c) package listed in `build.zig.zon` into `zig-pkg/`, so it needs network access once.
+
 ## Run Tests
 ```sh
 # Runs all tests.

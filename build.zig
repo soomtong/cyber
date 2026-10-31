@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 const config_ = @import("src/config.zig");
 const mimalloc_lib = @import("lib/mimalloc/lib.zig");
 const tcc_lib = @import("lib/tcc/lib.zig");
+const Translator = @import("translate_c").Translator;
 
 // FIND: v0.4.2
 const Version = "0.4.2";
@@ -331,18 +332,23 @@ fn link_cli_deps(b: *std.Build, cli: *std.Build.Module, vmc: *std.Build.Module, 
     }
 }
 
+/// Translates a C header with the translate-c package, which replaces `b.addTranslateC`
+/// (deprecated in Zig 0.17). `Translator.mod` imports the helpers that the translated code uses.
+/// `default_init` keeps the zero defaults on struct fields that `b.addTranslateC` gave.
+pub fn translateC(b: *std.Build, header: std.Build.LazyPath, rtarget_: std.Build.ResolvedTarget, optimize_: std.lang.Optimize) Translator {
+    return .init(b.dependency("translate_c", .{}), .{
+        .c_source_file = header,
+        .target = rtarget_,
+        .optimize = optimize_,
+        .default_init = true,
+    });
+}
+
 /// Zig API to `cyber.h` for `capi.zig`. Replaces its `@cImport`, which Zig 0.17 removed.
 /// Translated once per build graph; the module has no per-config inputs.
 fn create_cyber_c_mod(b: *std.Build) *std.Build.Module {
     if (cyber_c_mod) |mod| return mod;
-    const mod = b.addTranslateC(.{
-        .root_source_file = b.path("src/include/cyber.h"),
-        .target = rtarget,
-        .optimize = optimize,
-    });
-    cyber_c_mod = b.createModule(.{
-        .root_source_file = mod.getOutput(),
-    });
+    cyber_c_mod = translateC(b, b.path("src/include/cyber.h"), rtarget, optimize).mod;
     return cyber_c_mod.?;
 }
 var cyber_c_mod: ?*std.Build.Module = null;
@@ -357,19 +363,13 @@ pub fn create_vmc_mod(b: *std.Build, opts: Options) !*std.Build.Module {
 var vmc_mods: [2]?*std.Build.Module = .{ null, null };
 
 fn create_vmc_mod_uncached(b: *std.Build, opts: Options) !*std.Build.Module {
-    const mod = b.addTranslateC(.{
-        .root_source_file = b.path("src/vm.h"),
-        .target = rtarget,
-        .optimize = optimize,
-    });
+    const vm_h = translateC(b, b.path("src/vm.h"), rtarget, optimize);
     const rt_safety = optimize == .debug or optimize == .safe;
-    mod.defineCMacro("RT_SAFETY", if (rt_safety) "1" else "0");
-    mod.defineCMacro("DEBUG", if (optimize == .debug) "1" else "0");
-    mod.defineCMacro("TRACE", if (opts.trace) "1" else "0");
-    mod.defineCMacro("IS_32BIT", if (is32Bit(opts.target)) "1" else "0");
-    return b.createModule(.{
-        .root_source_file = mod.getOutput(),
-    });
+    vm_h.defineCMacro("RT_SAFETY", if (rt_safety) "1" else "0");
+    vm_h.defineCMacro("DEBUG", if (optimize == .debug) "1" else "0");
+    vm_h.defineCMacro("TRACE", if (opts.trace) "1" else "0");
+    vm_h.defineCMacro("IS_32BIT", if (is32Bit(opts.target)) "1" else "0");
+    return vm_h.mod;
 }
 
 pub const Options = struct {
@@ -772,14 +772,7 @@ fn buildLib(b: *std.Build, lib_mod: *std.Build.Module, opts: Options) !*std.Buil
 
 pub fn createLinenoiseModule(b: *std.Build) !*std.Build.Module {
     if (target.os.tag != .windows and target.os.tag != .wasi) {
-        const linenoise_ = b.addTranslateC(.{
-            .root_source_file = b.path("lib/linenoise/linenoise.h"),
-            .target = rtarget,
-            .optimize = optimize,
-        });
-        const mod = b.createModule(.{
-            .root_source_file = linenoise_.getOutput(),
-        });
+        const mod = translateC(b, b.path("lib/linenoise/linenoise.h"), rtarget, optimize).mod;
         mod.addIncludePath(b.path("lib/linenoise"));
         try buildAndLinkLinenoise(b, mod);
         return mod;

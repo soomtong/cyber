@@ -70,6 +70,7 @@ jobs:
           path: |-
             ~/.cache/zig
             .zig-cache
+            zig-pkg
           key:
             build-1
           restore-keys:

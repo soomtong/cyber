@@ -194,6 +194,7 @@ jobs:
           path: |-
             ~/.cache/zig
             .zig-cache
+            zig-pkg
             ~/AppData/Local/zig
           key:
             build-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-1
@@ -399,6 +400,7 @@ jobs:
           path: |-
             ~/.cache/zig
             .zig-cache
+            zig-pkg
           key:
             build-1
           restore-keys:

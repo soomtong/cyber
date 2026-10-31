@@ -142,6 +142,7 @@ jobs:
           path: |-
             ~/.cache/zig
             .zig-cache
+            zig-pkg
             ~/AppData/Local/zig
           key:
             pr-build-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-1

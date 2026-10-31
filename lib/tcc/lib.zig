@@ -1,14 +1,8 @@
 const std = @import("std");
+const build = @import("../../build.zig");
 
 pub fn createModule(b: *std.Build, rtarget: std.Build.ResolvedTarget, optimize: std.lang.Optimize) *std.Build.Module {
-    const tcc = b.addTranslateC(.{
-        .root_source_file = b.path("lib/tcc/vendor/libtcc.h"),
-        .target = rtarget,
-        .optimize = optimize,
-    });
-    const mod = b.createModule(.{
-        .root_source_file = tcc.getOutput(),
-    });
+    const mod = build.translateC(b, b.path("lib/tcc/vendor/libtcc.h"), rtarget, optimize).mod;
     mod.addIncludePath(b.path("lib/tcc/vendor"));
     return mod;
 }

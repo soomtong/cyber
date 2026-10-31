@@ -22,6 +22,19 @@ c := a.append('a' + 'b')
 - `c := a.append(s1)` 뒤 `d := a.append(s2)`는 덮어쓰지 않는다. 첫 append로 버퍼 참조가 2가 되어 두 번째는 복사한다
   (`c[1]`은 `ab`, `d[1]`은 `cd`로 확인). 다만 첫 append의 누수는 그대로 남는다.
 
+## 경위
+
+- `clone_on_resize`의 유일 참조 빠른 경로, `Slice.@deinit`, 값을 돌려주는 `Slice.append`는 모두 upstream `b751ca6c`
+  (2025-11-21, "[all] some updates")에서 한꺼번에 들어왔다. 코루틴 삭제와 같은 대형 커밋이라 설계 이유는 남아 있지 않다.
+- 그 전(`c992b94e`, 2024-09)에는 `List.append(self, val) void`처럼 제자리에서 바꾸는 참조형 리스트였다. 별칭 문제가 없었다.
+- 이후 upstream 변경은 기계적이다. `ecb7df2c`(2025-12-12)가 append 연산자를 `<<`에서 `+`로 바꿨고(`res <<= x` →
+  `res += x`), `e4804c08`(2025-12-12)이 `$`를 `self`로 바꿨다. upstream 마지막 커밋 `c853fcc2`(2025-12-21)까지 로직은 같다.
+- `<<` → `+` 변경은 위험을 키운다. `c := a + b`는 새 값을 만드는 덧셈으로 읽혀 받는 쪽을 남기는 코드를 부추긴다.
+- 문서(`docs/docs.md` "Slice operations")와 테스트(`src/test/core/Slice.cy`)는 모두 `arr = arr.append(x)` · `a = a + 1`처럼
+  덮어쓰는 형태만 쓴다. 받는 쪽을 남기는 경우의 규칙은 어디에도 없다.
+- 제자리 변경이 필요하면 `Array[T]`를 쓰라는 구도로 보인다. `Array`의 `append`는 `fn (&&Array[]) append(val T)`로
+  배타적 빌림을 받아 제자리에서 바꾸고 값을 돌려주지 않는다. `Slice`는 값 의미(COW)를 맡는다.
+
 ## 해석
 
 `append` · `+` · `insert` 등 `clone_on_resize`를 거치는 연산은 "받는 쪽을 결과로 덮어쓴다"를 전제한 설계로 보인다.

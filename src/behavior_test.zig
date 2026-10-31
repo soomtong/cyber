@@ -481,10 +481,11 @@ test "Compile." {
     }
 
     // benchmarks.
+    try compileCase("test/bench/alloc/alloc.cy");
     try compileCase("test/bench/fib/fib.cy");
-    // try compileCase("test/bench/fiber/fiber.cy"); TODO: Re-enable.
+    try compileCase("test/bench/fiber/fiber.cy");
     try compileCase("test/bench/for/for.cy");
-    // try compileCase("test/bench/heap/heap.cy"); TODO: Re-enable
+    try compileCase("test/bench/heap/heap.cy");
     try compileCase("test/bench/string/index.cy");
 }
 

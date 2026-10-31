@@ -1,65 +1,67 @@
 use os
 
-var start = os.now()
+start := os.now()!
 
 type Node:
-    value  int
-
-fn Heap.new() Heap:
-    return Heap{nodes=.{}}
+    value int
 
 type Heap:
-    nodes List[Node]
+    nodes Array[Node]
 
-    fn insert(self, n Node):
-        var pos = self.nodes.len()
-        self.nodes.append(n)
-        self.siftUp(pos)
+fn Heap :: @init() -> Heap:
+    return {nodes={}}
 
-    fn siftUp(self, pos int):
-        while pos != 0:
-            var parent = (pos - 1) / 2
-            if self.nodes[parent].value < self.nodes[pos].value:
-                self.swap(pos, parent)
-                pos = parent
+fn (&Heap) insert(n Node):
+    pos := self.nodes.len()
+    self.nodes.append(n)
+    self.sift_up(pos)
 
-    fn siftDown(self, pos int):
-        while:
-            var left = pos * 2 + 1
-            if left >= self.nodes.len():
-                break
-            if self.nodes[left].value > self.nodes[pos].value:
-                self.swap(pos, left)
-                pos = left
-                continue
-            var right = left + 1
-            if right >= self.nodes.len():
-                break
-            if self.nodes[right].value > self.nodes[pos].value:
-                self.swap(pos, right)
-                pos = right
-                continue
+fn (&Heap) sift_up(pos int):
+    while pos != 0:
+        parent := (pos - 1) / 2
+        if self.nodes[parent].value < self.nodes[pos].value:
+            self.swap(pos, parent)
+            pos = parent
+        else:
             break
 
-    fn swap(self, a, b int):
-        var temp = self.nodes[a]
-        self.nodes[a] = self.nodes[b]
-        self.nodes[b] = temp
+fn (&Heap) sift_down(pos int):
+    while:
+        left := pos * 2 + 1
+        if left >= self.nodes.len():
+            break
+        if self.nodes[left].value > self.nodes[pos].value:
+            self.swap(pos, left)
+            pos = left
+            continue
+        right := left + 1
+        if right >= self.nodes.len():
+            break
+        if self.nodes[right].value > self.nodes[pos].value:
+            self.swap(pos, right)
+            pos = right
+            continue
+        break
 
-    fn pop(self) Node:
-        var top = self.nodes[0]
-        self.nodes[0] = self.nodes[self.nodes.len()-1]
-        self.nodes.remove(self.nodes.len()-1)
-        self.siftDown(0)
-        return top
+fn (&Heap) swap(a int, b int):
+    temp := self.nodes[a]
+    self.nodes[a] = self.nodes[b]
+    self.nodes[b] = temp
 
-var h = Heap.new()
-for 1..20000 -> i:
-    h.insert(Node{value=i}) 
+fn (&Heap) pop() -> Node:
+    top := self.nodes[0]
+    self.nodes[0] = self.nodes[self.nodes.len() - 1]
+    self.nodes.remove(self.nodes.len() - 1)
+    self.sift_down(0)
+    return top
 
-var sum = 0
-for 1..20000 -> i:
-    sum = sum + h.pop().value
+h := Heap()
+for 1..20000 |i|:
+    h.insert(Node{value=i})
 
-print "time: ${(os.now() - start) * 1000}"
-print sum
+sum := 0
+for 1..20000:
+    sum += h.pop().value
+
+print('time: %{float(os.now()! - start) / 1000000}')
+print(sum)

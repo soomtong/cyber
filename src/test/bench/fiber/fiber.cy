@@ -1,22 +1,27 @@
 use os
 
-var start = os.now()
+start := os.now()!
 
-var .count = 0
+-- The old fiber API (coinit/coresume/coyield) is gone. Generators are the stackless
+-- replacement: each one is resumed once when created and once more in the second loop.
+global count int = 0
 
-fn inc() dyn:
+#[generator]
+fn inc() -> int:
     count += 1
-    coyield
+    yield 0
     count += 1
 
-var fibers = List[dyn]{}
+type IncFn = fn() -> int
+
+gens := Array[^Generator[IncFn]]{}
 for 0..100000:
-    var f = coinit(inc)
-    coresume f
-    fibers.append(f)
+    g := inc()
+    _ = g.next()
+    gens.append(g)
 
-for fibers -> f:
-    coresume f
+for gens |g|:
+    _ = g.next()
 
-print("time: ${(os.now() - start) * 1000}")
+print('time: %{float(os.now()! - start) / 1000000}')
 print(count)

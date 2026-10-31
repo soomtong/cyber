@@ -51,8 +51,6 @@ print('Total: %{totalTime}ms')
 print('Script: %{scriptTime}ms')
 print('Load: %{totalTime - scriptTime}ms')
 print('Peak Memory: %{mem / 1000000} MB')
--- `args = args + cmd` reassigns on purpose: `Slice.append` may share the buffer with its receiver,
--- and keeping both views leaks the appended strings (see `project_slice_append_aliasing.md`).
 fn peak_memory(cmd []str) -> float:
     #if meta.system() == .linux:
         -- GNU time: `\tMaximum resident set size (kbytes): 9312`

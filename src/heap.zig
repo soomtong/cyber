@@ -1162,11 +1162,29 @@ pub fn new_raw_buffer(self: *Heap, buffer_t: cy.TypeId, n: usize, elem_size: usi
     return obj;
 }
 
+/// Byte offset of the elements in a `Slice` buffer. The first 8 bytes hold the number of
+/// initialized elements, which `Slice.@deinit` destructs (see `new_slice_buffer` in core.cy).
+pub const SliceBufferElemsOffset = 8;
+
+/// Allocates a `Slice` buffer for `n` elements and records all `n` as initialized.
+/// The caller must initialize every element.
+fn new_slice_buffer(self: *Heap, byte_buffer_t: cy.TypeId, n: usize, elem_size: usize) !*cy.HeapObject {
+    const buffer = try self.new_raw_buffer(byte_buffer_t, SliceBufferElemsOffset + n * elem_size, 1);
+    const count: *u64 = @ptrCast(buffer.raw_buffer.elemsPtr());
+    count.* = n;
+    return buffer;
+}
+
+fn slice_buffer_elems(buffer: *cy.HeapObject) [*]u8 {
+    const data: [*]u8 = @ptrCast(buffer.raw_buffer.elemsPtr());
+    return data + SliceBufferElemsOffset;
+}
+
 pub fn init_slice_undef(self: *Heap, byte_buffer_t: cy.TypeId, n: usize, elem_size: usize) !Slice {
-    const buffer = try self.new_raw_buffer(byte_buffer_t, n * elem_size, 1);
+    const buffer = try new_slice_buffer(self, byte_buffer_t, n, elem_size);
     return .{
         .buf = @ptrCast(buffer),
-        .ptr = buffer.raw_buffer.elemsPtr(),
+        .ptr = slice_buffer_elems(buffer),
         .len = n,
         .header = n,
     };
@@ -1175,9 +1193,9 @@ pub fn init_slice_undef(self: *Heap, byte_buffer_t: cy.TypeId, n: usize, elem_si
 pub fn new_slice(self: *Heap, slice_t: *cy.Type, args: []Value) !Value {
     const elem_t = slice_t.sym().instance.?.params[0].asPtr(*cy.Type);
     const raw_buffer_t = slice_t.cast(.struct_t).fields()[0].type.cast(.option).child_t.cast(.pointer).child_t;
-    const elem_size = raw_buffer_t.sym().instance.?.params[0].asPtr(*cy.Type).size();
-    const raw_buffer = try self.new_raw_buffer(raw_buffer_t.id(), args.len, elem_size);
-    const dst: [*]u8 = @ptrCast(raw_buffer.raw_buffer.elemsPtr());
+    // The buffer is `RawBuffer[byte]`, so size it by the slice's element type.
+    const raw_buffer = try new_slice_buffer(self, raw_buffer_t.id(), args.len, elem_t.size());
+    const dst: [*]u8 = slice_buffer_elems(raw_buffer);
     for (args, 0..) |arg, i| {
         try self.copyValueTo2(elem_t, dst + i * elem_t.size(), arg);
     }

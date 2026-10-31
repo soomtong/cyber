@@ -1,6 +1,6 @@
 # Slice.append의 버퍼 공유와 누수
 
-2026-11-01, `src/tools/bench.cy`를 고치다 발견했다. 기록만 하고 고치지 않았다(설계 결정이 필요).
+2026-11-01, `src/tools/bench.cy`를 고치다 발견했다. 같은 날 후보 1(버퍼에 초기화된 원소 수)로 고쳤다. 아래 "결정" 참고.
 
 ## 재현
 
@@ -69,6 +69,33 @@ Beans"(IFL 2019) 및 Lean 발표 자료, Reinking 외 "Perceus"(PLDI 2021), Go B
 2. 유일 참조여도 `self`가 지역 변수로 계속 살아 있으면 복사한다. 컴파일러가 "마지막 사용"을 알아야 한다.
 3. 빠른 경로를 없애 항상 새 버퍼를 만든다. 반복 append가 O(n^2)가 되어 받아들이기 어렵다.
 
-## 지금의 우회
+## 고치기 전의 우회
 
-받는 쪽을 덮어쓴다(`args = args + cmd`). `src/tools/bench.cy`의 `peak_memory`가 이렇게 쓴다.
+받는 쪽을 덮어쓴다(`args = args + cmd`). 수정 뒤에는 필요 없다.
+
+## 결정 (2026-11-01)
+
+후보 1을 택했다. Swift처럼 해제 정확성을 버퍼에 맡기고, 의미(별칭) 문제는 남긴다. 후보 2는 컴파일러의 마지막 사용 분석이
+필요해 따로 검토한다.
+
+- Slice 버퍼(`RawBuffer[byte]`)의 데이터 앞 8바이트에 초기화된 원소 수(count)를 둔다. 원소는 그 뒤에서 시작한다.
+  `length`는 이 8바이트를 포함한 바이트 수라 `@size`와 해제 크기는 그대로 맞는다.
+- 버퍼를 만드는 곳(`new_slice_buffer`, Zig `init_slice_undef`)이 count를 쓴다. 크기를 바꾸는 연산(`append` · `insert` ·
+  `remove` · `size_down` · `size_up`)은 끝에서 count를 결과 길이로 맞춘다.
+- `Slice.@deinit`은 버퍼가 유일 참조일 때 count만큼 해제한다. 부분 슬라이스의 `header`에 든 부모 길이는 해제에 더는 쓰지 않는다.
+- `clone_on_resize`의 빠른 경로는 버퍼가 유일하므로 이 보기의 길이 뒤에 남은 초기화 원소(앞서 버퍼를 공유하던 결과가
+  붙이고 사라진 것)를 먼저 해제하고 count를 줄인 뒤 재사용한다.
+- 남는 것: 크기를 줄이는 연산 뒤 원래 슬라이스를 계속 읽으면 이미 해제된 칸을 볼 수 있다(예: `b := a.size_down(0)` 뒤
+  `a[0]`). Go와 같은 "반환값을 받은 뒤 원래 슬라이스는 쓰지 않는다" 규칙이 여전히 필요하다.
+- 구현: `src/builtins/core.cy`의 `new_slice_buffer` · `slice_buffer_count` · `slice_buffer_elems`, Zig `heap.zig`의
+  `new_slice_buffer` · `init_slice_undef`(`SliceBufferElemsOffset = 8`). 크기 변경 연산은 함수 호출 없이
+  `(as[Ptr[int]] res.ptr)[-1] = res._len`으로 count를 쓴다(`clone_on_resize` 결과는 부분 슬라이스가 아니라 `ptr`가 원소 시작).
+- 성능(ReleaseFast, `src/tools/bench.cy` 50회 평균): count 기록을 `#if type.managed(T)`로 감싸 `[]int` append 200만 회는
+  361 → 358 ms로 차이가 없다. `[]str` append 100만 회는 386 → 400 ms(+3.6%). 처음 `sync_count()` 메서드 호출로 쓴 버전은
+  `[]int`까지 +8.8%였다(인터프리터의 호출 비용).
+- 함께 드러난 문제: 고치기 전에는 `remove` · `insert`도 같은 빠른 경로를 써서, 원래 슬라이스를 남기면 이중 해제가 났다
+  (새 테스트를 옛 코드로 돌리면 `Double free`). 또 `size_down`이 관리 원소에서 없는 메서드 `PtrSpan.destruct()`를 불러
+  `[]str.size_down`이 컴파일조차 되지 않았다. 원소별 `@destruct` 루프로 고쳤다.
+- 회귀 테스트: `src/test/memory/slice_shared_buffer.cy`(append · `+` · remove · insert · size_down · size_up을 받는 쪽을
+  남긴 채 호출, 버퍼 재사용, 부분 슬라이스).
+

@@ -5,4 +5,4 @@
 - [fork의 용도와 방향](docs/decisions/project_direction.md) — Python · Perl · Shell 대용 스크립트 CLI, 네이티브 바이너리 불필요(TCC/C AOT로 충분), LLVM 백엔드 닫음, TARS 에이전트 루프(CodeAct) 언어 후보
 - [libcyber 임베딩 검토](docs/decisions/project_embedding_agent_loop.md) — 라이브러리 모듈 구성(os 없음, c 남음), 호스트 도구 바인딩 패턴, 외부 중단 수단 없음, persist_main은 upstream 미완성, 반복 eval 버그 수정 기록, CLI REPL 시작 실패, 호스트 함수는 값 매개변수를 소유(해제 필요)
 - [코루틴 경위](docs/decisions/project_coroutines.md) — coinit · coresume · coyield는 upstream `b751ca6c`(2025-11)에서 삭제, 지금은 `#[generator]`만 동작, 스택형 `Fiber`는 미구현, `#[generator]`가 반환 타입을 바꾸는 점에 대한 평가, 비어 있는 부분은 fork가 직접 설계
-- [Slice.append 버퍼 공유](docs/decisions/project_slice_append_aliasing.md) — 유일 참조 버퍼를 공유하는 빠른 경로 때문에 `c := a.append(x)`처럼 받는 쪽을 남기면 관리 원소가 샘, 우회는 덮어쓰기, 수정 후보 3개
+- [Slice.append 버퍼 공유](docs/decisions/project_slice_append_aliasing.md) — 유일 참조 버퍼를 공유하는 빠른 경로 때문에 `c := a.append(x)`처럼 받는 쪽을 남기면 관리 원소가 샘. 2026-11-01 버퍼 앞 8바이트에 초기화 원소 수를 두는 방식(Swift식)으로 고침, 관리 타입만 기록, 별칭 의미 문제는 남음

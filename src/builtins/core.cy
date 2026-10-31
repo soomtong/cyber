@@ -1027,6 +1027,7 @@ type Slice[T Any]:
     with AsSpan[T]
 
     -- Elements stored as byte buffer to override destruction logic.
+    -- The buffer starts with the number of initialized elements (see `new_slice_buffer`).
     -- TODO: Should just be managed as a rc pointer.
     buf     ?^RawBuffer[byte]
     ptr     Ptr[T]
@@ -1046,8 +1047,10 @@ fn Slice[] :: @init_sequence(init [&]T) -> Self:
         }
     cap := compute_new_cap(0, init.length)
     buf := new_slice_buffer(T, cap)
-    elems_ptr := as[Ptr[T]] buf.elems_ptr()
+    raw := @unsafeCast(Ptr[RawBuffer[byte]], buf)
+    elems_ptr := slice_buffer_elems(T, raw)
     elems_ptr[0..init.length].init(as init)
+    slice_buffer_count(raw).* = init.length
     return {
         buf    = move buf,
         ptr    = elems_ptr,
@@ -1055,17 +1058,32 @@ fn Slice[] :: @init_sequence(init [&]T) -> Self:
         header = cap,
     }
 
+--| A `Slice` buffer holds the number of initialized elements in its first 8 bytes, then the elements.
+--| Slices that share a buffer can have different lengths, so `Slice.@deinit` destructs this count
+--| instead of its own length. Ops that resize keep it equal to the result's length. The result of
+--| `clone_on_resize` is never a sub-slice, so its count is `(as[Ptr[int]] ptr)[-1]` (no call, hot path).
+--| Only managed element types read the count, so the resize ops skip it for the others.
 fn new_slice_buffer(%T type, cap int) -> ^RawBuffer[byte]:
-    ptr := @new_object_undef(type.id(RawBuffer[byte]), 8 + type.size(T) * cap)
+    nbytes := 8 + type.size(T) * cap
+    ptr := @new_object_undef(type.id(RawBuffer[byte]), 8 + nbytes)
     buf := as[^RawBuffer[byte]] ptr
-    buf.length = type.size(T) * cap
+    buf.length = nbytes
+    slice_buffer_count(@unsafeCast(Ptr[RawBuffer[byte]], buf)).* = 0
     return move buf
+
+fn slice_buffer_count(buf Ptr[RawBuffer[byte]]) -> Ptr[int]:
+    return as[Ptr[int]] buf.elems_ptr()
+
+fn slice_buffer_elems(%T type, buf Ptr[RawBuffer[byte]]) -> Ptr[T]:
+    return as[Ptr[T]] (buf.elems_ptr() + 8)
 
 --| Creates a `Slice` with initial length and capacity of `n` and values set to `val`.
 fn Slice[] :: @init(n int, val T) -> Self:
     buf := new_slice_buffer(T, n)
-    elems_ptr := as[Ptr[T]] buf.elems_ptr()
+    raw := @unsafeCast(Ptr[RawBuffer[byte]], buf)
+    elems_ptr := slice_buffer_elems(T, raw)
     elems_ptr[0..n].init(val)
+    slice_buffer_count(raw).* = n
     return {
         buf    = buf,
         ptr    = elems_ptr,
@@ -1075,18 +1093,14 @@ fn Slice[] :: @init(n int, val T) -> Self:
 
 fn (&Slice[]) @deinit():
     #if type.managed(T):
-        buf := @unsafeCast(Ptr[RawBuffer[T]], self.buf)
+        buf := @unsafeCast(Ptr[RawBuffer[byte]], self.buf)
         if buf == none: return
         if !@isUniqueRef(buf): return
 
-        if self.header >> 63 != 0:
-            base := as[Ptr[T]] buf.elems_ptr()
-            -- `header` contains the active length for a sub-slice.
-            for 0..self.header && ~(1 << 63) |i|:
-                @destruct(T, base + i)
-        else:
-            for 0..self._len |i|:
-                @destruct(T, self.ptr + i)
+        -- The buffer's count, not `_len`: another slice that shared the buffer may have been longer.
+        base := slice_buffer_elems(T, buf)
+        for 0..slice_buffer_count(buf).* |i|:
+            @destruct(T, base + i)
 
 fn (scope &Slice[]) @index_addr(idx int) -> scope &T:
     if idx.uge(self._len):
@@ -1195,6 +1209,8 @@ fn (&Slice[]) append(val T) -> Self:
     res := self.clone_on_resize(self._len + 1)
     @ptr_init(res.ptr + res._len, val)
     res._len += 1
+    #if type.managed(T):
+        (as[Ptr[int]] res.ptr)[-1] = res._len
     return res
 
 --| Appends the elements of a `Span` to the end of this `Slice`.
@@ -1205,6 +1221,8 @@ fn (&Slice[]) append(span [&]T) -> Self:
     res := self.clone_on_resize(self._len + span.length)
     res.ptr[res._len..res._len + span.length].init(as span)
     res._len += span.length
+    #if type.managed(T):
+        (as[Ptr[int]] res.ptr)[-1] = res._len
     return res
 
 --| Appends the elements of a `AsSpan` to the end of this array.
@@ -1232,6 +1250,14 @@ fn (&Slice[]) contains(needle T) -> bool:
 fn (&Slice[]) clone_on_resize(new_cap int) -> Self:
     sub_slice := (self.header >> 63 != 0)
     if !sub_slice and @isUniqueRef(@unsafeCast(Ptr[void], self.buf)) and new_cap <= self.header:
+        -- Reuse in place. Elements past this view's length were left by a longer result that
+        -- shared the buffer and is gone now, so nothing else can see them.
+        #if type.managed(T):
+            count := (as[Ptr[int]] self.ptr)[-1]
+            if count != self._len:
+                for self._len..count |i|:
+                    @destruct(T, self.ptr + i)
+                (as[Ptr[int]] self.ptr)[-1] = self._len
         return self.*
 
     if new_cap < self._len:
@@ -1247,8 +1273,10 @@ fn (&Slice[]) clone_on_resize(new_cap int) -> Self:
 
     -- Copy underlying buffer to new buffer.
     buf := new_slice_buffer(T, new_cap)
-    elems_ptr := as[Ptr[T]] buf.elems_ptr()
+    raw := @unsafeCast(Ptr[RawBuffer[byte]], buf)
+    elems_ptr := slice_buffer_elems(T, raw)
     elems_ptr[0..self._len].init(self.ptr[0..self._len])
+    slice_buffer_count(raw).* = self._len
     return {
         buf = buf,
         ptr = elems_ptr,
@@ -1276,6 +1304,8 @@ fn (&Slice[]) insert(idx int, val T) -> Self:
         -- Appending to end.
         @ptr_init(cur.ptr + cur._len, val)
         cur._len += 1
+        #if type.managed(T):
+            (as[Ptr[int]] cur.ptr)[-1] = cur._len
         return cur
 
     if idx < cur._len:
@@ -1284,6 +1314,8 @@ fn (&Slice[]) insert(idx int, val T) -> Self:
         cur.ptr[idx+1..cur._len].set_backwards(cur.ptr[idx..cur._len-1])
     cur.ptr[idx] = val
     cur._len += 1
+    #if type.managed(T):
+        (as[Ptr[int]] cur.ptr)[-1] = cur._len
     return cur
 
 --| Returns a new iterator over the slice elements.
@@ -1332,6 +1364,8 @@ fn (&Slice[]) remove(idx int) -> Self:
     size := type.size(T) * (cur._len-idx-1)
     @memmove(as (cur.ptr + idx), as (cur.ptr + idx + 1), size)
     cur._len -= 1
+    #if type.managed(T):
+        (as[Ptr[int]] cur.ptr)[-1] = cur._len
     return cur
 
 --| Decreases the size of the `Slice` to `new_len` elements.
@@ -1344,8 +1378,11 @@ fn (&Slice[]) size_down(new_len int) -> Self:
 
     cur := self.clone_on_resize(0)
     #if type.managed(T):
-        cur.ptr[new_len..cur._len].destruct()
+        for new_len..cur._len |i|:
+            @destruct(T, cur.ptr + i)
     cur._len = new_len
+    #if type.managed(T):
+        (as[Ptr[int]] cur.ptr)[-1] = cur._len
     return cur
 
 --| Increases the size of the `Slice` to `new_len` elements. If the new size is bigger, `init` values
@@ -1361,6 +1398,8 @@ fn (&Slice[]) size_up(new_len int, init T) -> Self:
     -- Initialize new slots with `init` value.
     cur.ptr[cur._len..new_len].init(init)
     cur._len = new_len
+    #if type.managed(T):
+        (as[Ptr[int]] cur.ptr)[-1] = cur._len
     return cur
 
 fn (&Slice[]) set_last(val T) -> void:

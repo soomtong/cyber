@@ -22,3 +22,11 @@
 
 - 릴리스 번들과 `install.sh`는 CLI 실행 환경(실행 파일 + `src/` 표준 모듈)을 바로 쓰게 하는 데 맞춘다.
 - 에이전트 루프 쪽 검토는 임베딩 API(`src/lib.zig`, `cyber.h`)와 `-Dffi=false` 같은 작은 구성이 기준이 된다.
+
+## upstream과의 관계 (2026-10-31 추가)
+
+- upstream(fubark/cyber)은 2025-11 커밋 이후 사실상 멈춰 있다. 재설계가 끝나지 않은 부분(스택형 `Fiber`, 제너레이터
+  reset, REPL의 지역 변수 이월, Attributes 문서 등)은 기다리지 않고 이 fork가 직접 설계하고 구현한다.
+- 순서는 용도를 따른다. 스크립트 CLI와 에이전트 루프 임베딩에 필요한 것부터 하고, 언어 문법은 upstream과 호환을 깨지
+  않는 범위에서 바꾼다. 바꿀 때는 `docs/decisions`에 결정을 먼저 적는다.
+- 코루틴 관련 경위와 평가는 `project_coroutines.md`에 있다.

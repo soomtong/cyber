@@ -27,7 +27,7 @@
   `/usr/local/bin`)에 `cyber`를 심링크한다. 실행 파일 경로는 심링크를 푼 실제 경로로 잡히므로 `src/`를
   찾는다. sudo는 대상 디렉터리(또는 가장 가까운 존재하는 상위)가 쓰기 불가일 때만 쓴다
   (`CYBER_SUDO=0|1`로 강제). sudo 경로는 가짜 `sudo`로 명령 구성만 확인했고, 실제 `/usr/local` 설치는
-  사용자가 `bash install.sh`로 돌려야 한다.
+  2026-10-31에 사용자가 `install.sh`로 0.4.2(build-552-2db5eb6)를 받아 `cyber version`까지 확인했다.
 - 번들의 `src/`는 타깃별로 다르다. `build.zig`의 `cli` 스텝이 공통 10개에 macOS(`os.macos.cy`,
   `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
   더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.

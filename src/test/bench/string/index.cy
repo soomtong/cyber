@@ -8,5 +8,5 @@ idx := 0
 for 0..50:
     idx = s.index('waldo').?
 
-print('time: %{(os.now()! - start) * 1000}')
+print('time: %{float(os.now()! - start) / 1000000}')
 print(idx)

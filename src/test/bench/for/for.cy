@@ -11,5 +11,5 @@ sum := 0
 for arr |i|:
     sum += i
 
-print('time: %{(os.now()! - start) * 1000}')
+print('time: %{float(os.now()! - start) / 1000000}')
 print(sum)

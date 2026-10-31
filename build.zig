@@ -98,7 +98,7 @@ pub fn build(b: *std.Build) !void {
 
     const trace_test = try addTraceTest(b, opts, cli_test_config);
 
-    const behavior_test = try addBehaviorTest(b, lib, vmc, cli_test_config);
+    const behavior_test = try addBehaviorTest(b, lib, vmc, cli_test_config, opts.ffi);
 
     {
         const step = b.step("cli", "Build main cli.");
@@ -414,11 +414,13 @@ fn getDefaultOptions() Options {
 
 const TestConfig = struct {
     test_backend: config_.TestBackend,
+    ffi: bool,
 };
 
 fn create_test_config(b: *std.Build, config: TestConfig) !*std.Build.Module {
     const options = b.addOptions();
     options.addOption(config_.TestBackend, "test_backend", config.test_backend);
+    options.addOption(bool, "ffi", config.ffi);
     return options.createModule();
 }
 
@@ -510,7 +512,7 @@ fn add_lib_test(b: *std.Build, lib: *std.Build.Module) !*std.Build.Step.Compile 
     return step;
 }
 
-fn addBehaviorTest(b: *std.Build, lib: *std.Build.Step.Compile, vmc: *std.Build.Module, config: CliConfig) !*std.Build.Step.Compile {
+fn addBehaviorTest(b: *std.Build, lib: *std.Build.Step.Compile, vmc: *std.Build.Module, config: CliConfig, ffi: bool) !*std.Build.Step.Compile {
     const root = b.createModule(.{
         .root_source_file = b.path("src/behavior_test.zig"),
         .target = rtarget,
@@ -534,6 +536,7 @@ fn addBehaviorTest(b: *std.Build, lib: *std.Build.Step.Compile, vmc: *std.Build.
 
     const test_config = try create_test_config(b, .{
         .test_backend = test_backend,
+        .ffi = ffi,
     });
     step.root_module.addImport("test_config", test_config);
     return step;
@@ -572,6 +575,7 @@ fn addTraceTest(b: *std.Build, lib_config_: Options, cli_config_: CliConfig) !*s
 
     const test_config = try create_test_config(b, .{
         .test_backend = test_backend,
+        .ffi = lib_config.ffi,
     });
     step.root_module.addImport("test_config", test_config);
 

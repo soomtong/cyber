@@ -8,7 +8,9 @@
   (`debian:stable-slim`, aarch64)에서만 잰다.
 - Linux 컨테이너 기준선은 원래 빨갛다. `modules/os.cy:25`(`os.open_dir` InvalidArgument)와 `FFI.`
   (FileNotFound). 비교는 "같은 실패가 같은 자리에서 나는가"로 한다.
-- `-Dffi=false`의 `modules/os.cy` 세그폴트는 0.15.2에서도 난다.
+- `-Dffi=false`의 `modules/os.cy` 세그폴트는 0.15.2에서도 나던 문제였고 고쳤다(2026-10-31). std의 libc 바인딩은
+  `#[extern]`이라 TCC 없이는 실행할 수 없다. FFI가 없으면 extern 호출은 panic으로 끝나고, FFI가 필요한
+  테스트는 `test_config.ffi`(build.zig `TestConfig.ffi`)로 거른다.
 
 ## 코드 규칙
 

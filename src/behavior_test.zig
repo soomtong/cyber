@@ -263,10 +263,11 @@ if (!aot) {
     run.case("modules/test_eq_panic.cy");
     run.case("modules/test.cy");
     if (!is_wasm) {
-        if (builtin.target.os.tag != .windows) {
+        // Both call libc through extern functions, which need FFI.
+        if (test_config.ffi and builtin.target.os.tag != .windows) {
             run.case("modules/libc.cy");
         }
-        if (builtin.target.abi != .msvc) {
+        if (test_config.ffi and builtin.target.abi != .msvc) {
             run.case("modules/os.cy");
         }
         // run.case("modules/io.cy");
@@ -495,7 +496,7 @@ fn compileCase(path: []const u8) !void {
 }
 
 test "FFI." {
-    if (is_wasm or builtin.target.abi == .msvc) {
+    if (is_wasm or !test_config.ffi or builtin.target.abi == .msvc) {
         return;
     }
 

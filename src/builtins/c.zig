@@ -178,10 +178,52 @@ fn bindFunc(c: *cy.cgen.Compiler, state: *tcc.TCCState, func: *cy.Func) !void {
     }
 }
 
+fn externWithoutFFI(t: *cy.Thread) callconv(.c) C.Ret {
+    return t.ret_panic("Calling an extern function requires FFI, which this build disables (-Dffi=false).");
+}
+
+/// Without TCC there is no C glue for extern functions. Bind their VM entries to a panic
+/// so that a call reports the missing FFI instead of jumping to a null function.
+fn bindExternFuncsWithoutFFI(c: *cy.Compiler) !void {
+    const vm_func = cy.vm.FuncSymbol.initHostFunc(@ptrCast(@alignCast(&externWithoutFFI)));
+    for (c.chunks.items) |chunk| {
+        if (!chunk.has_extern_func) {
+            continue;
+        }
+        for (chunk.funcs.items) |func| {
+            var id: u32 = undefined;
+            if (func.type == .extern_ and !func.data.extern_.vm_variadic) {
+                if (func.data.extern_.has_impl) {
+                    continue;
+                }
+                id = (try bc.ensureExternFunc(c, func)).vm_id;
+            } else if (func.type == .vm_extern_variant) {
+                id = try bc.ensureFunc(c, func);
+            } else {
+                continue;
+            }
+            if (c.vm.funcSyms.items[id].type == .null) {
+                bc.completeFunc(c, id, func, vm_func);
+            }
+        }
+    }
+    for (c.sema.types.items) |type_| {
+        if (type_.kind() == .func_ptr) {
+            const func_ptr = type_.cast(.func_ptr);
+            if (func_ptr.extern_is_called) {
+                const id = try bc.ensureExternFuncPtrDispatch(c, func_ptr);
+                c.vm.funcSyms.items[id] = vm_func;
+            }
+        }
+    }
+}
+
 /// First compile C bindings and link with dll symbols.
 /// Second iteration, gets the generated symbols and binds them to the VM symbols.
 pub fn initBindLib(t: *cy.Thread) !C.Ret {
     if (!cy.hasFFI) {
+        try bindExternFuncsWithoutFFI(t.c.vm.compiler);
+        performRtRelocations(t.c.vm.compiler);
         return C.RetOk;
     }
     var compiler = cy.cgen.Compiler{
@@ -367,8 +409,13 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
         }
     }
 
-    // Perform runtime relocations.
-    for (t.c.vm.compiler.chunks.items) |c| {
+    performRtRelocations(t.c.vm.compiler);
+    return C.RetOk;
+}
+
+/// Writes the bound extern function and variable addresses into the call sites.
+fn performRtRelocations(compiler: *cy.Compiler) void {
+    for (compiler.chunks.items) |c| {
         for (c.rt_relocations.items) |rel| {
             const ptr: *align(2) [6]u8 = @ptrCast(&c.buf.ops.items[rel.pc]);
             switch (rel.kind) {
@@ -405,8 +452,6 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
             }
         }
     }
-
-    return C.RetOk;
 }
 
 fn createVariadicType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {

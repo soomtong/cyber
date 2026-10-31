@@ -20,6 +20,11 @@
   `ArrayList`와 `HashMapUnmanaged`마다 `usize` lock이 붙고 Zig가 필드 순서를 바꾸므로 공식으로 세지 않는다.
   64-bit은 safe 120/536, unsafe 96/432, wasm32 `ZVM`은 220/172. 어긋나면 `vm.zig` · `heap.zig` ·
   `thread.zig`의 comptime 검사가 두 offset을 찍으며 빌드를 멈춘다(모든 모드 · 타깃).
-- out 파라미터는 모든 경로에서 쓴다. 최적화 빌드에서 undefined 값에 대한 `std.debug.assert`는 UB라
-  주변 코드가 사라진다(`resolveFuncSig`의 `out_generic`). ReleaseFast 테스트로 잡는다.
+- 읽힐 수 있는 필드와 out 파라미터는 `undefined`로 두지 않는다. 최적화 빌드에서 undefined 값을 읽는 비교나
+  `std.debug.assert`는 UB라 결과가 임의로 정해지거나 주변 코드가 사라진다. 실제로 난 두 곳:
+  `resolveFuncSig`의 `out_generic`(템플릿 함수 `sig`가 null), `FuncSym.firstFuncSig`(wasm32에서 첫 resolve가
+  "same function signature" 중복으로 판정됨, 이제 `?*FuncSig` + `null`).
+- CI는 x86_64-linux · aarch64-macos cli job에서 `zig build test -Doptimize=ReleaseFast`를, wasi job에서
+  ReleaseFast `build-test`를 돌린다. 크기 단언 테스트는 bare union의 safety tag만큼 모드별 값을 둔다
+  (64-bit 8, wasm32 `Local` · `Func` 4).
 - extern 타입의 재해석은 `@bitCast` 대신 `.val` 또는 `stdx.reinterpret`(0.17은 extern `@bitCast` 금지).

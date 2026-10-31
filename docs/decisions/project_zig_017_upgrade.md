@@ -34,3 +34,7 @@
   ReleaseFast `build-test`를 돌린다. 크기 단언 테스트는 bare union의 safety tag만큼 모드별 값을 둔다
   (64-bit 8, wasm32 `Local` · `Func` 4).
 - extern 타입의 재해석은 `@bitCast` 대신 `.val` 또는 `stdx.reinterpret`(0.17은 extern `@bitCast` 금지).
+- Zig 쪽 범용 allocator는 `std.heap.SafeAllocator.init(std.heap.page_allocator, ...)`다(`cli.zig` `gpa`,
+  `stdx/heap.zig`). `DebugAllocator`는 deprecated고, 바꿔도 피크 메모리는 Debug +7% · ReleaseFast
+  `-Dmalloc=zig` -12%, 시간은 같았다(2026-10-31, `src/test/bench/alloc/alloc.cy`). backing은 메모리를
+  재사용하지 않는 page_allocator여야 write-after-free 검출이 된다. 기본 릴리스 CLI는 mimalloc을 쓴다.

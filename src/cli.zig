@@ -638,10 +638,12 @@ pub fn prepPanicZError(t: *C.Thread, err: anyerror, optTrace: ?*std.lang.StackTr
     return C.thread_ret_panic(t, @errorName(err));
 }
 
-var gpa: std.heap.DebugAllocator(.{
-    .enable_memory_limit = false,
+// Backed by the page allocator so freed memory is never reused: SafeAllocator
+// relies on that to catch writes after free. The default CLI build uses this
+// only in Debug (`-Dmalloc=zig` selects it in other modes).
+var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{
     .stack_trace_frames = if (builtin.mode == .debug) 12 else 0,
-}) = .{};
+});
 var miAlloc: mi.Allocator = undefined;
 var trace_allocator: TraceAllocator = undefined;
 var initedAllocator = false;

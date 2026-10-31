@@ -5,11 +5,7 @@ const t = stdx.testing;
 
 const IsWasm = builtin.target.isWasm();
 
-const MeasureMemory = false;
-var gpa: ?std.heap.DebugAllocator(.{
-    .stack_trace_frames = if (builtin.mode == .debug) 10 else 0,
-    .enable_memory_limit = MeasureMemory
-}) = null;
+var gpa: ?std.heap.SafeAllocator = null;
 var wasm_gpa: WasmDefaultAllocator = undefined;
 var wasm_gpa_inited = false;
 
@@ -23,7 +19,9 @@ pub fn getDefaultAllocator() std.mem.Allocator {
         // return std.heap.page_allocator;
     } else {
         if (gpa == null) {
-            gpa = .{};
+            gpa = .init(std.heap.page_allocator, .{
+                .stack_trace_frames = if (builtin.mode == .debug) 10 else 0,
+            });
         }
         return gpa.?.allocator();
     }
@@ -36,14 +34,6 @@ pub fn deinitDefaultAllocator() void {
         // This will report memory leaks in debug mode.
         _ = gpa.?.deinit();
         gpa = null;
-    }
-}
-
-pub fn getTotalRequestedMemory() usize {
-    if (IsWasm or !MeasureMemory) {
-        // @panic("unsupported");
-    } else {
-        return gpa.?.total_requested_bytes;
     }
 }
 

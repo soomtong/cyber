@@ -254,8 +254,10 @@ pub fn build(b: *std.Build) !void {
         const lib_bin = standalone_lib_artifact.emitted_bin.?;
         var test1 = run_lib_standalone_test(b, "examples/libcyber/main.c", lib_bin);
         var test2 = run_lib_standalone_test(b, "examples/libcyber/bind_module.c", lib_bin);
+        var test3 = run_lib_standalone_test(b, "examples/libcyber/host_tool.c", lib_bin);
         lib_standalone_test_cmd.dependOn(&test1.step);
         lib_standalone_test_cmd.dependOn(&test2.step);
+        lib_standalone_test_cmd.dependOn(&test3.step);
     }
 
     const cli_test_cmd = b.step("cli-test", "Run cli tests.");

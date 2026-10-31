@@ -357,10 +357,11 @@ pub const Compiler = struct {
                             break :b type_sym.type.isResolved();
                         },
                         .func => b: {
-                            if (std.mem.eql(u8, sym.name(), "@main_init")) {
+                            // Hidden funcs are reserved again for the new main chunk.
+                            if (std.mem.eql(u8, sym.name(), "@program_init")) {
                                 continue;
                             }
-                            if (std.mem.eql(u8, sym.name(), "@main_deinit")) {
+                            if (std.mem.eql(u8, sym.name(), "@program_deinit")) {
                                 continue;
                             }
                             break :b sym.cast(.func).isResolved();
@@ -398,7 +399,12 @@ pub const Compiler = struct {
             try resolveChunkSyms(chunk);
         }
 
+        // Clear the previous eval's `main`, otherwise a later eval without one is rejected.
+        self.main_func = null;
         if (self.main_chunk.sym.getMod().getSym("main")) |main_func| {
+            if (main_func.type != .func) {
+                return self.main_chunk.reportError("Expected `main` to be a function.", null);
+            }
             const sym = main_func.cast(.func);
             if (sym.numFuncs > 1) {
                 return self.main_chunk.reportError("Expected only one `main` function.", sym.first.decl);

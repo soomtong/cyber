@@ -795,6 +795,38 @@ test "Return from main." {
     try zt.eq(123, @as(*i64, @ptrCast(res.res)).*);
 }
 
+test "Eval without main after an eval with main." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\fn main() -> int:
+        \\  return 123
+    , &res));
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\a := 1
+    , &res));
+}
+
+test "persist_main keeps top level funcs across evals." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\fn foo() -> int:
+        \\  return 123
+    , config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\fn main() -> int:
+        \\  return foo()
+    , config, &res));
+    try zt.eq(123, @as(*i64, @ptrCast(res.res)).*);
+}
+
 test "cl_slice_init." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

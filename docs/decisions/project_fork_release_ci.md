@@ -28,7 +28,9 @@
   찾는다. sudo는 대상 디렉터리(또는 가장 가까운 존재하는 상위)가 쓰기 불가일 때만 쓴다
   (`CYBER_SUDO=0|1`로 강제). 실제 `/usr/local` 설치는 2026-10-31에 사용자가 `install.sh`로 0.4.2를 받아
   `cyber version`까지 확인했다. macOS arm64(build-552, 이후 build-562)와 Rocky Linux 9(el9_6 x86_64, 일반 사용자
-  `rocky`로 실행해 sudo 자동 사용 경로를 지남, build-562-56e3740) 두 곳이다. `-Dselinux` 번들은 TCC 백엔드의
+  `rocky`로 실행해 sudo 자동 사용 경로를 지남, build-562-56e3740) 두 곳이다. Rocky에서는 `print('hello')` 스크립트
+  실행까지 확인했고 번들 내용은 `cyber`와 `src/` 둘뿐이다(`examples/`는 들어가지 않는다). 그 VM은 `getenforce`가
+  `Disabled`라 SELinux Enforcing 환경은 아직 확인하지 않았다. `-Dselinux` 번들은 TCC 백엔드의
   JIT 메모리 확보 방식만 바꾸므로 기본 VM 백엔드로 스크립트를 돌리는 데는 일반 Linux 번들이면 되고, `install.sh`가
   SELinux 번들을 자동으로 고르지 않는 것은 그대로 둔다.
 - 0.4.2는 2026-10-31에 다시 찍었다. 기존 릴리스와 태그를 지우고(`gh release delete 0.4.2 --cleanup-tag`)

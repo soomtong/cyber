@@ -827,6 +827,20 @@ test "persist_main keeps top level funcs across evals." {
     try zt.eq(123, @as(*i64, @ptrCast(res.res)).*);
 }
 
+test "single_run frees the main block's raw buffers at deinit." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    var config = C.defaultEvalConfig();
+    config.single_run = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "t",
+        \\arr := Array[int]{}
+        \\for 0..10 |i|:
+        \\  arr.append(i)
+    , config, &res));
+}
+
 test "cl_slice_init." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

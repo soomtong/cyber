@@ -34,6 +34,13 @@
   호출만 panic으로 막힌다. 스크립트를 신뢰하지 않는다면 로더에서 `c`를 거르는 것을 고려한다.
 - `cl_vm_initx(CLAllocator)`로 할당자를 바꿀 수 있어 메모리 상한을 호스트 할당자에서 걸 수 있다.
 
+## `single_run`
+
+- `CLEvalConfig.single_run = true`는 "이 프로세스는 eval 한 번 하고 끝난다"는 뜻이다. 컴파일러가 main 블록 지역 변수의
+  해제 코드를 생략하므로 빠르지만, 그 변수들이 가진 메모리는 `cl_vm_deinit`에서 한꺼번에 정리된다(raw buffer는
+  `Heap.freeAllBuffers`, heap 객체는 페이지 단위 해제). 제너레이터 프레임처럼 그 밖에서 할당된 것은 해제되지 않는다.
+- 임베딩에서 VM을 재사용하거나 누수 검사를 하려면 기본값 `false`를 유지한다. CLI는 ReleaseFast에서만 `true`를 켠다.
+
 ## 호스트 ↔ 스크립트 경계
 
 - 호스트 함수는 모듈 로더에서 `#[bind] fn` 선언 소스와 `cl_mod_add_func`로 묶는다. 인자는 `cl_thread_str` 등으로

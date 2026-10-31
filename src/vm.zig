@@ -159,7 +159,7 @@ pub const VM = struct {
             .debug_tables = &.{},
             // Initialize to NullId to indicate vm is still in initing.
             .deinited = false,
-            .config = undefined,
+            .config = C.defaultEvalConfig(),
             .userData = null,
             .data = .empty,
             .print = default_print,
@@ -324,6 +324,10 @@ pub const VM = struct {
             self.worker_pool.deinit(self.alloc);
         }
 
+        if (self.config.single_run or self.config.persist_main) {
+            // Release ops for the main block were skipped, so its locals still own raw buffers.
+            self.main_thread.heap.freeAllBuffers();
+        }
         self.main_thread.deinit(reset);
         if (!reset) {
             self.alloc.destroy(self.main_thread);

@@ -131,6 +131,17 @@ pub const Heap = struct {
         }
     }
 
+    /// Frees every raw buffer that is still registered. Used when the main block's release ops
+    /// were skipped (`sema.shouldGenMainScopeReleaseOps`), so buffers owned by main locals are
+    /// still alive at teardown.
+    pub fn freeAllBuffers(self: *Heap) void {
+        var iter = self.buffers.iterator();
+        while (iter.next()) |e| {
+            self.alloc.free(e.key_ptr.*[0..e.value_ptr.*]);
+        }
+        self.buffers.clearRetainingCapacity();
+    }
+
     pub fn next_trace_event(self: *Heap) u64 {
         defer self.c.trace_event += 1;
         if (cy.Trace and self.c.trace_panic_at_event == self.c.trace_event) {

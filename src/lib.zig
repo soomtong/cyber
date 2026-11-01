@@ -1116,6 +1116,23 @@ test "Spawned threads stop with the eval and do not abort the host." {
     , &res));
 }
 
+test "Spawn without args works in every VM." {
+    // `FnTuple[Sig]` loops zero times for a function without params. The compile-time body
+    // used to read an unset loop result, which crashed later VMs in ReleaseSafe.
+    if (is_wasm) return;
+    for (0..2) |_| {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_eval(vm,
+            \\fn zero() -> int:
+            \\  return 7
+            \\use test
+            \\test.eq(7, spawn(zero, {}).await())
+        , &res));
+    }
+}
+
 test "single_run frees the main block's raw buffers at deinit." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

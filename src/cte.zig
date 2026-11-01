@@ -354,6 +354,10 @@ pub fn pop_ct_block(c: *cy.Chunk, local_start: usize) void {
 
 fn forRangeInner(c: *cy.Chunk, for_range: *ast.ForRangeStmt, data: ?*anyopaque) anyerror!void {
     const ctx: *EvalContextAndResult = @ptrCast(@alignCast(data));
+    if (ctx.res.ret) {
+        // An earlier iteration returned. Later iterations must not replace its value.
+        return;
+    }
     ctx.res = try evalStmts(c, ctx.ctx, for_range.stmts);
 }
 
@@ -488,12 +492,12 @@ fn evalStmt(c: *cy.Chunk, ctx: EvalContext, stmt: *ast.Node) !EvalStmtResult {
             try cte.localDecl(c, stmt.cast(.var_decl));
         },
         .for_range_stmt => {
-            var mut_ctx = EvalContextAndResult{ .ctx = ctx, .res = undefined };
+            var mut_ctx = EvalContextAndResult{ .ctx = ctx, .res = .{ .ret = false, .ret_value = undefined } };
             try forRangeStmt(c, stmt.cast(.for_range_stmt), forRangeInner, &mut_ctx);
             return mut_ctx.res;
         },
         .switch_stmt => {
-            var mut_ctx = EvalContextAndResult{ .ctx = ctx, .res = undefined };
+            var mut_ctx = EvalContextAndResult{ .ctx = ctx, .res = .{ .ret = false, .ret_value = undefined } };
             try switchStmt(c, stmt.cast(.switch_stmt), false, switchCaseInner, &mut_ctx, null);
             return mut_ctx.res;
         },
@@ -1721,7 +1725,7 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
             const eval_ctx = EvalContext{
                 .ret = c.sema.void_t,
             };
-            var mut_ctx = EvalContextAndResult{ .ctx = eval_ctx, .res = undefined };
+            var mut_ctx = EvalContextAndResult{ .ctx = eval_ctx, .res = .{ .ret = false, .ret_value = undefined } };
             try switchStmt(c, block, false, switchExprCaseInner, &mut_ctx, opt_target);
             if (!mut_ctx.res.ret) {
                 return c.reportError("Expected expression value.", node);

@@ -70,9 +70,9 @@ interrupt도 받지 않았고, 메인은 `zAwait`의 spin 루프에 갇혀 검�
 - 처리한 요청은 지운다. 남겨 두면 eval 밖에서 호스트가 VM 함수를 다시 부를 때 곧바로 멈춘다.
 - 테스트: lib "Spawned threads stop with the eval and do not abort the host."(fuel 상속, 다른 스레드의 interrupt가 await
   중인 메인과 작업 스레드에 도달, 작업 스레드 panic, 이후 재사용). ReleaseSafe 캐시 없이 3회 반복 통과.
-- 별개의 기존 버그(고치지 않음): 프로세스의 두 번째 이후 VM에서 인자 없는 `spawn(f, {})`는 ReleaseSafe 컴파일 중
-  "incorrect alignment"(템플릿 확장, `value.zig` `asPtr`)로 죽는다. 변경 전 빌드도 같고, CLI 단독 실행과 인자 있는
-  `spawn(f, {1})`은 정상이다. 테스트는 인자 있는 함수를 쓴다.
+- 별개의 기존 버그: 프로세스의 두 번째 이후 VM에서 인자 없는 `spawn(f, {})`는 ReleaseSafe 컴파일 중
+  "incorrect alignment"(템플릿 확장, `value.zig` `asPtr`)로 죽었다. 원인은 중단 기능과 무관한 컴파일 타임 평가의
+  미초기화 결과였고 2026-11-01에 고쳤다(`project_ct_eval_loop_result.md`).
 
 ## 미정
 

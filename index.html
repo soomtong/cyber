@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.2-dev 597-1a109ce</div>
+    <div class="sub-title">v0.4.2-dev 601-e6401ce</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -4417,10 +4417,8 @@ hello!
 </code></pre>
 <a href="#cli">^topic</a>
 <h2 id="jit-compiler">JIT compiler. <a href="#jit-compiler">#</a></h2>
-<p>Cyber's just-in-time compiler is incomplete and unstable. To run your script with JIT enabled:</p>
-<pre><code class="language-bash">cyber -jit &lt;script&gt;
-</code></pre>
-<p>The goal of the JIT compiler is to be fast at compilation while still being significantly faster than the interpreter. The codegen involves stitching together pregenerated machine code that targets the same runtime stack slots used by the VM. This technique is also known as <code>copy-and-patch</code>.</p>
+<p>The JIT compiler is not supported. Passing <code>-jit</code> (or <code>CL_JIT</code> through the embedding API) fails with a compile error. Use the default bytecode VM, or the C backend (<code>-tcc</code>, <code>-cc</code>) for native performance.</p>
+<p>The JIT was an experiment that stitched together pregenerated machine code targeting the same runtime stack slots used by the VM, a technique known as <code>copy-and-patch</code>. Its code generator has not kept up with the current IR and bytecode.</p>
 <a href="#cli">^topic</a>
 <h2 id="c-backend">C backend. <a href="#c-backend">#</a></h2>
 <p>The C backend generates a static binary from Cyber source code by transpiling to C code and relying on a local C compiler.

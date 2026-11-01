@@ -37,6 +37,10 @@
   `56e3740`(translate-c 패키지 · `stdx.utf8Decode` · `-Dffi=false` panic · `SafeAllocator` 포함)에
   annotated 태그로 다시 push했다. 빌드 번호는 `build-562-56e3740`, 에셋 14개. 태그를 지우고 다시 push하면
   `latest-build.yml`이 그대로 새 릴리스를 만든다. 사용자가 혼자 쓰는 저장소라 태그 재사용을 허용했다.
+- 2026-11-01에 0.4.2를 한 번 더 `e6401ce7`(배열 핫 경로 호출 줄이기 · 상수 접기 · `add_mul_i16` · JIT 거절 포함)로
+  다시 찍었다. 순서: master push → 그 Latest Build run 완료 대기 → `gh release delete 0.4.2 --cleanup-tag -y` →
+  `git tag -d 0.4.2` · `git tag -a 0.4.2 -m 0.4.2 e6401ce7` → `git push origin 0.4.2`. 빌드 번호
+  `build-601-e6401ce`, 에셋 14개. 받은 macOS arm64 번들로 `version` · 스크립트 실행 · `-jit` 오류를 확인했다.
 - 번들의 `src/`는 타깃별로 다르다. `build.zig`의 `cli` 스텝이 공통 10개에 macOS(`os.macos.cy`,
   `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
   더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.

@@ -25,6 +25,9 @@
   (`# Cyber x.y.z`)과 빈 줄을 뺀 것이다:
   `tail -n +3 docs/releases/<v>.md > notes.md && gh release edit <v> -R soomtong/cyber --notes-file notes.md`.
 - 릴리스 워크플로는 본문을 비워 둔 채 릴리스를 만든다. 태그를 다시 찍어 릴리스가 새로 생기면 본문도 다시 올려야 한다.
+- 사용자가 GitHub 웹에서 본문을 고칠 수 있다(줄 끝이 CRLF가 된다). `gh release delete`는 본문도 지우므로, 다시 찍기 전에
+  `gh release view <v> --json body --jq .body > saved.md`로 저장하고 새 릴리스에 그대로 올린다. 로컬 `docs/releases/<v>.md`는
+  CR을 지운 사용자 버전에 맞춘다. 2026-11-01 사용자가 0.4.2 본문에서 "이전 0.4.2 빌드와의 차이" 절을 지웠다.
 - 0.4.2 노트에는 이전 빌드(`build-562`)와 구분하는 스크립트 · 표를 넣었다. 성능 표는 이전 빌드를 worktree에서
   ReleaseSafe로 빌드해 같은 머신에서 잰 값이다.
 
@@ -50,6 +53,8 @@
   다시 찍었다. 순서: master push → 그 Latest Build run 완료 대기 → `gh release delete 0.4.2 --cleanup-tag -y` →
   `git tag -d 0.4.2` · `git tag -a 0.4.2 -m 0.4.2 e6401ce7` → `git push origin 0.4.2`. 빌드 번호
   `build-601-e6401ce`, 에셋 14개. 받은 macOS arm64 번들로 `version` · 스크립트 실행 · `-jit` 오류를 확인했다.
+- 같은 날 REPL EOF 수정(`a2c586c2`)으로 0.4.2를 한 번 더 찍었다. `build-605-a2c586c`, 에셋 14개, 릴리스 본문은 사용자가
+  고친 버전을 그대로 다시 올림. 받은 macOS arm64 번들로 `version`, `printf 'print(1)\n' | cyber`(종료 코드 0), `-jit` 오류 확인.
 - 번들의 `src/`는 타깃별로 다르다. `build.zig`의 `cli` 스텝이 공통 10개에 macOS(`os.macos.cy`,
   `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
   더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.

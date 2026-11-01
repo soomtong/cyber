@@ -7,3 +7,4 @@
 - [코루틴 경위](docs/decisions/project_coroutines.md) — coinit · coresume · coyield는 upstream `b751ca6c`(2025-11)에서 삭제, 지금은 `#[generator]`만 동작, 스택형 `Fiber`는 미구현, `#[generator]`가 반환 타입을 바꾸는 점에 대한 평가, 비어 있는 부분은 fork가 직접 설계
 - [Slice.append 버퍼 공유](docs/decisions/project_slice_append_aliasing.md) — 유일 참조 버퍼를 공유하는 빠른 경로 때문에 `c := a.append(x)`처럼 받는 쪽을 남기면 관리 원소가 샘. 2026-11-01 버퍼 앞 8바이트에 초기화 원소 수를 두는 방식(Swift식)으로 고침, 관리 타입만 기록, 별칭 의미 문제는 남음
 - [VM 실행 중단](docs/decisions/project_vm_interrupt.md) — `cl_vm_interrupt`(스레드 안전) · `cl_vm_set_fuel`(검사점 횟수), 검사점은 역방향 JUMP와 CALL 계열, 결과 `CL_ERROR_INTERRUPT`, 오버헤드 1~2%
+- [0.3 → 0.4 재설계 역사](docs/history/cyber_0_3_to_0_4_overview.md) — 세 구간(upstream 2024 재설계 · upstream 2025 `b751ca6c` · fork 2026), 기준 커밋, 키워드 diff, 미완 40곳의 우선순위. 주제 문서: type_system · ownership_memory · coroutines_concurrency · error_handling · embedding_cli

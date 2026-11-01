@@ -49,7 +49,8 @@ VM의 `CALL` · `CHK_STK` · `RET`은 이미 가볍다(`src/vm.c:902`, `:917`). 
   (`sema_ptr_index`)이 만드는 `add(p, mul(idx, const))`를 bc_gen `gen_add`가 이 명령 하나로 내린다. 명령 3개 → 1개.
 - `gen_add`는 오른쪽이 i16 범위 상수인 덧셈도 기존 `add_i16`으로 내린다(`x + 1`이 `const_16s` + `add`였음).
 - 새 opcode는 `CodeAddI16` 바로 뒤에 넣었다. jump table(`JENTRY`)이 enum 순서를 따르므로 두 곳을 같이 고쳐야 한다.
-  JIT(`src/jit/gen.zig`)는 이 명령을 모르지만 JIT는 fork 범위 밖이다.
+  JIT(`src/jit/gen.zig`)에는 `add_mul_i16` · `add_i16` 처리가 없지만 JIT는 동작하지 않는 코드라 대응하지 않는다.
+  상태는 `project_direction.md`의 "복사-패치 JIT" 항목에 적었다.
 
 결과(ReleaseSafe): append 29 → 23 ms, `for arr` 30 → 24 ms, `arr[i]` 17 → 15 ms. 벤치 전체(hyperfine)는 for 70 → 58 ms
 (Lua 16 ms), heap 47 → 39 ms(Lua 28.5 ms), fib는 33 ms로 변화 없음. opcode 수 검사(`src/bytecode.zig` 테스트)를 131로 올렸다.

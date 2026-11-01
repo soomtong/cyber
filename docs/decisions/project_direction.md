@@ -17,6 +17,15 @@
 - LLVM 백엔드(`src/llvm.zig` · `src/llvm_gen.zig`, `-Djit`)는 켜지 않는다. upstream도 2025-11 이후
   손대지 않은 미완성 경로다. Zig 0.17 업그레이드의 남은 항목 7(LLVM-C 번역 모듈)은 이 이유로 닫았다.
   코드는 `cy.hasJIT` 뒤에 있어 빌드에 영향이 없으므로 지우지 않고 둔다.
+- 복사-패치 JIT(`src/jit/`, CLI `-jit`)는 LLVM 백엔드와 다른 경로다. 2026-11-01 확인 결과 세 겹으로 동작하지 않는다.
+  1. `src/compiler.zig`의 `C.BackendJIT` 분기가 `jitgen.gen` 앞에서 무조건 `error.Unsupported`를 돌려준다(upstream
+     `f401a101`, 2024-07-10 "Refactor to `Slot`"부터).
+  2. 그 분기를 지우면 `src/jit/gen.zig`에 `gen` 함수가 없어 컴파일되지 않는다. gen.zig는 IR을 `idx` 정수로 다루던 옛
+     API(`genStmt(c, idx: u32)` 등) 그대로라 지금 IR(`*ir.Stmt` · `*ir.Expr`)과 맞지 않는다. Zig는 도달하지 않는 코드를
+     분석하지 않아서 빌드는 통과한다.
+  3. 그보다 앞서 `cyber -jit x.cy`는 `core.cy`의 `#[bind]` 함수에서 "Expected function implementation"으로 멈춘다.
+  bytecode에 새 opcode를 넣을 때 JIT 지원은 맞추지 않는다. JIT를 살리려면 gen.zig를 지금 IR · bytecode에 맞춰 다시 써야
+  하므로 별도 결정이 필요하다.
 
 ## 따라오는 우선순위
 

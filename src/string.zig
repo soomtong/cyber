@@ -356,6 +356,47 @@ fn indexOfSimdFixed(comptime VecSize: usize, str: []const u8, needle: []const u8
     const last: @Vector(VecSize, u8) = @splat(needle[needle.len-1]);
 
     var i: usize = 0;
+
+    // Scan `Unroll` vectors per step in two stages, without bitmasks until a candidate shows up.
+    // Bitmasks are slow on targets without a movemask instruction (aarch64).
+    // 1. A byte of `buf1 ^ first` is 0 where the first byte matches. When no byte in the block
+    //    matches, the block is skipped after one load per vector, like memchr.
+    // 2. A byte of `(buf1 ^ first) | (buf2 ^ last)` is 0 only where the first and the last byte match.
+    //    This drops most candidates when the first byte is common.
+    const Vec = @Vector(VecSize, u8);
+    const zero: Vec = @splat(0);
+    const Unroll = 8;
+    const Block = VecSize * Unroll;
+    while (i + Block <= str.len) : (i += Block) {
+        var firsts: [Unroll]Vec = undefined;
+        inline for (0..Unroll) |k| {
+            const b1: Vec = str[i + k * VecSize ..][0..VecSize].*;
+            firsts[k] = b1 ^ first;
+        }
+        if (@reduce(.Min, minAll(Unroll, Vec, firsts)) != 0) {
+            continue;
+        }
+        var cands: [Unroll]Vec = undefined;
+        inline for (0..Unroll) |k| {
+            const b2: Vec = @as([*]const u8, @ptrCast(str.ptr + i + k * VecSize + offset))[0..VecSize].*;
+            cands[k] = firsts[k] | (b2 ^ last);
+        }
+        if (@reduce(.Min, minAll(Unroll, Vec, cands)) != 0) {
+            continue;
+        }
+        inline for (0..Unroll) |k| {
+            const at = i + k * VecSize;
+            var hitMask: MaskInt = @bitCast(cands[k] == zero);
+            while (hitMask > 0) {
+                const idx = @ctz(hitMask);
+                if (std.mem.eql(u8, @as([*]const u8, @ptrCast(str.ptr + at + idx))[0..needle.len], needle)) {
+                    return at + idx;
+                }
+                hitMask = unsetLowestBit(hitMask, idx);
+            }
+        }
+    }
+
     while (i + VecSize <= str.len) : (i += VecSize) {
         const buf1: @Vector(VecSize, u8) = str[i..i + VecSize][0..VecSize].*;
         const firstMask: MaskInt = @bitCast(buf1 == first);
@@ -414,6 +455,12 @@ fn indexOfSimdRemain(comptime VecSize: usize, str_: []const u8, needle: []const 
     return null;
 }
 
+inline fn minAll(comptime N: usize, comptime V: type, vs: [N]V) V {
+    var m = vs[0];
+    inline for (1..N) |k| m = @min(m, vs[k]);
+    return m;
+}
+
 inline fn unsetLowestBit(mask: anytype, idx: anytype) @TypeOf(mask) {
     const Mask = @TypeOf(mask);
     // const MaskShiftInt = @Int(.unsigned, std.math.log2(@bitSizeOf(Mask)));
@@ -423,24 +470,30 @@ inline fn unsetLowestBit(mask: anytype, idx: anytype) @TypeOf(mask) {
 /// `needle.len` is assumed to be at most `str.len`.
 pub fn indexOf(str: []const u8, needle: []const u8) ?usize {
     if (comptime std.simd.suggestVectorLength(u8)) |VecSize| {
-        var i: usize = 0;
-        // Ensure that there is `needle.len` additional bytes after the fixed width.
-        const iters = @divTrunc(str.len - needle.len, VecSize);
-        if (iters > 0) {
-            if (indexOfSimdFixed(VecSize, str[0..iters * VecSize], needle)) |idx| {
-                return idx;
-            }
-            i += iters * VecSize;
-        }
-        if (i < str.len) {
-            if (indexOfSimdRemain(VecSize, str[i..], needle)) |idx| {
-                return i + idx;
-            }
-        }
-        return null;
+        return indexOfSimd(VecSize, str, needle);
     } else {
         return indexOfScalar(str, needle);
     }
+}
+
+/// Takes the vector size so tests can check those of other targets (32 for AVX2, 64 for AVX-512).
+/// `needle.len` is assumed to be at most `str.len`.
+fn indexOfSimd(comptime VecSize: usize, str: []const u8, needle: []const u8) ?usize {
+    var i: usize = 0;
+    // Ensure that there is `needle.len` additional bytes after the fixed width.
+    const iters = @divTrunc(str.len - needle.len, VecSize);
+    if (iters > 0) {
+        if (indexOfSimdFixed(VecSize, str[0..iters * VecSize], needle)) |idx| {
+            return idx;
+        }
+        i += iters * VecSize;
+    }
+    if (i < str.len) {
+        if (indexOfSimdRemain(VecSize, str[i..], needle)) |idx| {
+            return i + idx;
+        }
+    }
+    return null;
 }
 
 fn indexOfAsciiSetScalar(str: []const u8, set: []const u8) ?usize {
@@ -683,6 +736,48 @@ fn indexOfNewLineCpu(buf: []const u8) ?usize {
         }
     }
     return null;
+}
+
+test "string.indexOf matches std.mem.find." {
+    const find = struct {
+        fn check(str: []const u8, needle: []const u8) !void {
+            if (needle.len == 0 or needle.len > str.len) return;
+            const exp = std.mem.find(u8, str, needle);
+            try t.eq(exp, indexOf(str, needle));
+            // Vector sizes of other targets: NEON/SSE, AVX2, AVX-512.
+            inline for (.{ 16, 32, 64 }) |vec_size| {
+                try t.eq(exp, indexOfSimd(vec_size, str, needle));
+            }
+        }
+    };
+
+    // A needle at every position, across the vector and unrolled block boundaries.
+    var buf: [400]u8 = @splat('a');
+    for (0..buf.len - 5) |pos| {
+        @memcpy(buf[pos..][0..5], "xyzzy");
+        try find.check(&buf, "xyzzy");
+        try find.check(buf[0 .. pos + 5], "xyzzy");
+        try find.check(&buf, "xyzz!");
+        @memset(buf[pos..][0..5], 'a');
+    }
+
+    // Random text over a small alphabet, so first and last byte candidates are common.
+    var prng = std.Random.DefaultPrng.init(0xc0ffee);
+    const rand = prng.random();
+    var str: [700]u8 = undefined;
+    var needle: [12]u8 = undefined;
+    for (0..3000) |_| {
+        const len = rand.uintAtMost(usize, str.len);
+        for (str[0..len]) |*ch| ch.* = 'a' + rand.uintLessThan(u8, 3);
+        const nlen = 1 + rand.uintLessThan(usize, needle.len);
+        if (len >= nlen and rand.boolean()) {
+            const at = rand.uintAtMost(usize, len - nlen);
+            @memcpy(needle[0..nlen], str[at..][0..nlen]);
+        } else {
+            for (needle[0..nlen]) |*ch| ch.* = 'a' + rand.uintLessThan(u8, 3);
+        }
+        try find.check(str[0..len], needle[0..nlen]);
+    }
 }
 
 test "indexOfNewLineCpu()" {

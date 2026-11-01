@@ -101,4 +101,16 @@
 - CLI REPL(`cyber`를 인자 없이 실행)은 시작 직후 "CompileError: Import path does not exist: `main`"으로 끝난다.
   `src/main.zig`의 `repl()`이 부트스트랩 소스를 uri `main`으로 eval하는데 CLI resolver(`src/cli.zig`의 `zResolve`)가
   uri를 파일 경로로 보고 `realpath`를 하기 때문이다. upstream의 Zig 0.15 코드에도 같은 구조라 fork에서 생긴 문제는
-  아니다. REPL은 fork의 우선 과제가 아니어서 기록만 한다.
+  아니다. 2026-11-01 고침: `repl()`이 CLI 앱의 짧은 이름 표(`mod_uris`)에 `main` → `main`을 넣어 resolver가 그대로
+  통과시킨다. 파일 실행 경로는 영향이 없다. 그 뒤 첫 입력에서 세그폴트가 났는데, 원인은 아래 "지역 변수 반환" 버그였다
+  (`REPL.new()`가 `VM`을 담은 지역 `ctx`를 반환하면서 `vm_deinit`이 실행됨). 둘을 고친 뒤 REPL은 시작하고 표현식 ·
+  함수 호출을 평가한다. 지역 변수를 선언하면 다음 입력부터 위의 `persist_main` TODO에 걸린다.
+  `trackMainLocal`(`src/builtins/core.zig`)은 이전 프레임의 스택 주소를 저장할 뿐 값을 복사하지 않고, 복원 코드는
+  8바이트 값(`semaConst`)만 가정한다. 이 부분은 아직 남았다.
+- 지역 변수 반환이 복사였다(2026-11-01 고침). `return r`이 `semaOwn`으로 복사본을 만들었고, `@copy`가 없는 타입은
+  비트 단위 복사라 반환 시 지역의 `@deinit`과 호출자 쪽 `@deinit`이 같은 상태에 두 번 돌았다(자원 이중 해제).
+  명시적 `move`는 "같은 블록에서 선언한 변수만" 허용해 분기 안의 `return move r`도 막혀 있었다.
+  `semaReturnExprStmt`(`src/sema.zig`)가 이제 이 함수가 소유한 관리 타입 지역(참조 매개변수 · 부분 move된 지역 ·
+  main 블록 제외)을 반환하면 move한다. 반환용 소멸 코드를 만드는 동안만 지역을 dead로 두고 되돌리므로, return 뒤는
+  도달 불가이고 다른 분기에는 영향이 없다. 반환 타입으로 감싸는 변환(`-> ?R`에 `r` 반환 등)을 거치면 아직 복사다.
+  회귀 테스트 `memory/return_local_move.cy`(수정을 되돌리면 실패 확인).

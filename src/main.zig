@@ -191,6 +191,8 @@ fn repl(alloc: std.mem.Allocator) !void {
 
     const a: *cli.App = @ptrCast(@alignCast(c.vm_user_data(vm)));
     a.config.reload = reload;
+    // The REPL bootstrap is an in-memory chunk, not a file, so the resolver must not `realpath` its uri.
+    try a.mod_uris.putNoClobber(alloc, "main", "main");
 
     var config = c.defaultEvalConfig();
     config.single_run = builtin.mode == .fast;

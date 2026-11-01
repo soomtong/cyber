@@ -203,7 +203,8 @@ test "ARC in loops." {
         \\  test.eq(2, meta.trace_releases())
         \\  for a |ref|:
         \\    b := ref.*
-        \\test.eq(11, meta.trace_retains())
-        \\test.eq(11, meta.trace_releases())
+        \\-- Returning a local moves it, so iterating no longer retains and releases each element once more.
+        \\test.eq(9, meta.trace_retains())
+        \\test.eq(9, meta.trace_releases())
     );
 }

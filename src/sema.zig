@@ -935,16 +935,87 @@ fn semaReturnExprStmt(c: *cy.Chunk, child: *ast.Node, ret_opt: ?*cy.Type, node: 
     const var_start = c.varStack.items.len;
 
     var expr: ExprResult = undefined;
+    // For a plain name, fit the return type after the move check so that wrapping a local
+    // (`T` -> `?T`, `!T`) moves it too. Other expressions keep the usual constraint since
+    // `fit_target` also steers how their children are checked.
+    const defer_fit = ret_opt != null and child.type() == .ident;
     if (ret_opt) |ret_t| {
-        expr = try c.semaExprCstr(child, ret_t);
+        if (defer_fit) {
+            expr = try c.semaExpr(child, .{
+                .target_t = ret_t,
+                .reqTypeCstr = false,
+                .fit_target = false,
+            });
+        } else {
+            expr = try c.semaExprCstr(child, ret_t);
+        }
     } else {
         expr = try c.semaExpr(child, .{});
     }
-    expr = try semaOwn(c, expr, child);
 
-    try semaReturnExpr(c, expr, node);
+    // Returning a local moves it instead of copying it. A type without `@copy` is copied bitwise,
+    // so a copy would run the local's destructor here and the caller's on the same state.
+    // The local is only marked dead while the return's destructors are generated. Code after a return
+    // is unreachable, so other paths that still use the local are unaffected.
+    const moved_local = implicitReturnMoveLocal(c, expr);
+    if (moved_local != null) {
+        expr.owned = true;
+    }
+    if (defer_fit) {
+        expr = try fitReturnType(c, expr, ret_opt.?, child);
+    }
+
+    if (moved_local) |local_id| {
+        c.varStack.items[local_id].type = .dead;
+        defer c.varStack.items[local_id].type = .local;
+        try semaReturnExpr(c, expr, node);
+    } else {
+        expr = try semaOwn(c, expr, child);
+        try semaReturnExpr(c, expr, node);
+    }
     try popLocals2(c, var_start, false, node);
     return expr.type;
+}
+
+/// The tail of `semaExpr` with `reqTypeCstr` and `fit_target` set.
+fn fitReturnType(c: *cy.Chunk, expr: ExprResult, ret_t: *cy.Type, node: *ast.Node) !ExprResult {
+    if (expr.type == ret_t) {
+        return expr;
+    }
+    if (try semaFitTarget(c, expr, ret_t, node)) |new| {
+        return new;
+    }
+    if (expr.type.id() == bt.Never) {
+        return expr;
+    }
+    return reportExpectedType(c, ret_t, expr.type, node);
+}
+
+fn implicitReturnMoveLocal(c: *cy.Chunk, expr: ExprResult) ?LocalId {
+    if (expr.owned or expr.resType != .value_local) {
+        return null;
+    }
+    const proc = c.proc();
+    if (proc.func == null) {
+        return null;
+    }
+    const local_id = expr.data.value_local;
+    const local = &c.varStack.items[local_id];
+    if (local.type != .local or local.has_inactive_struct_fields) {
+        return null;
+    }
+    // A local declared outside this function (a captured or static var) is not owned by this frame.
+    if (local_id < proc.varStart) {
+        return null;
+    }
+    if (!local.decl_t.isManaged()) {
+        return null;
+    }
+    // Reference params are not owned by regular functions.
+    if (local.inner.local.isParam and local.decl_t.isObjectLike()) {
+        return null;
+    }
+    return local_id;
 }
 
 /// Extracted `cond_n` and `stmts` to be compatible with IfStmt/ElseIfBlock.

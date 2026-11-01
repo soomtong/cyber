@@ -275,6 +275,7 @@ typedef enum {
     CodeLSR,
     CodeAdd,
     CodeAddI16,
+    CodeAddMulI16,
     CodeSub,
     CodeIMUL,
     CodeMUL,

@@ -487,7 +487,7 @@ fn genExpr(c: *Chunk, expr: *ir.Expr, cstr: Cstr) anyerror!GenValue {
     }
 
     const res = try switch (expr.code) {
-        .add                => genBinOp2(c, expr.cast(.add), .add, cstr, node),
+        .add                => gen_add(c, expr.cast(.add), cstr, node),
         .address_of         => gen_addr_of(c, expr.cast(.address_of), cstr, node),
         .and_op             => genBinOp2(c, expr.cast(.and_op), .and_, cstr, node),
         .binary_op          => genBinOp(c, expr.cast(.binary_op), cstr, node),
@@ -1652,6 +1652,36 @@ fn gen_fadd(c: *Chunk, expr: *ir.BinOp2, cstr: Cstr, node: *ast.Node) !GenValue 
     try pop_temp_value(c, rightv, node);
     try pop_temp_value(c, leftv, node);
     return dst;
+}
+
+/// `a + i * k` with a small constant `k` (pointer indexing) becomes one `add_mul_i16`, `a + k` one `add_i16`.
+fn gen_add(c: *Chunk, expr: *ir.BinOp2, cstr: Cstr, node: *ast.Node) !GenValue {
+    if (expr.right.code == .mul or expr.right.code == .imul) {
+        const mul: *ir.BinOp2 = @ptrCast(@alignCast(expr.right));
+        if (mul.right.code == .const64) {
+            const k = mul.right.cast(.const64).val;
+            if (k > 0 and k <= std.math.maxInt(u16)) {
+                const dst = try bc.selectReg(c, expr.base.type, cstr, node);
+                const leftv = try genExpr(c, expr.left, Cstr.localOrTemp());
+                const idxv = try genExpr(c, mul.left, Cstr.localOrTemp());
+                try c.pushCode2(.add_mul_i16, dst.isTemp(), &.{ dst.reg, leftv.reg, idxv.reg, @intCast(k) }, node);
+                try pop_temp_value(c, idxv, node);
+                try pop_temp_value(c, leftv, node);
+                return dst;
+            }
+        }
+    } else if (expr.right.code == .const64) {
+        const k: i64 = @bitCast(expr.right.cast(.const64).val);
+        if (k >= std.math.minInt(i16) and k <= std.math.maxInt(i16)) {
+            const dst = try bc.selectReg(c, expr.base.type, cstr, node);
+            const leftv = try genExpr(c, expr.left, Cstr.localOrTemp());
+            const imm: i16 = @intCast(k);
+            try c.pushCode2(.add_i16, dst.isTemp(), &.{ dst.reg, leftv.reg, @bitCast(imm) }, node);
+            try pop_temp_value(c, leftv, node);
+            return dst;
+        }
+    }
+    return genBinOp2(c, expr, .add, cstr, node);
 }
 
 fn genBinOp2(c: *Chunk, expr: *ir.BinOp2, op: cy.OpCode, cstr: Cstr, node: *ast.Node) !GenValue {

@@ -38,10 +38,24 @@ VM의 `CALL` · `CHK_STK` · `RET`은 이미 가볍다(`src/vm.c:902`, `:917`). 
 - `Vector.@index_addr`의 `idx.uge(N)`을 `as[r64] N`으로 바꾸면 컴파일러가 "integer does not fit in destination type"으로
   panic한다(ct 상수 `N`의 `as[r64]` 변환). 원래대로 둔다.
 
+## 2단계: 상수 접기와 주소 계산 명령 (2026-11-01)
+
+- 상수 접기(`src/sema.zig` `fold_const_int`): 정수 이항 연산(`+ - * && || ~ << >>`)과 `~` 단항에서 피연산자가 모두
+  `const64`이고 타입이 `int` · `r64`이면 `const64` 하나로 바꾼다. VM과 같게 덧셈 · 뺄셈 · 곱셈은 wrap, 시프트 양이 64
+  이상이면 접지 않는다(VM은 `& 0xff`로 자르므로 결과가 플랫폼 따라 다를 수 있음). 나눗셈 · 나머지는 0 나누기 오류를
+  런타임에 남기려고 접지 않는다. 64비트가 아닌 타입은 리터럴이 `const8` · `const16` 등으로 오므로 대상에서 뺐다.
+  `3 << 62` · `~(...)`가 명령 4개에서 `const_64` 하나가 됐다.
+- `add_mul_i16`(`src/vm.c` `AddMulI16`): `dst = left + idx * scale`, `scale`은 u16 즉시값. `Ptr[T]` 인덱싱
+  (`sema_ptr_index`)이 만드는 `add(p, mul(idx, const))`를 bc_gen `gen_add`가 이 명령 하나로 내린다. 명령 3개 → 1개.
+- `gen_add`는 오른쪽이 i16 범위 상수인 덧셈도 기존 `add_i16`으로 내린다(`x + 1`이 `const_16s` + `add`였음).
+- 새 opcode는 `CodeAddI16` 바로 뒤에 넣었다. jump table(`JENTRY`)이 enum 순서를 따르므로 두 곳을 같이 고쳐야 한다.
+  JIT(`src/jit/gen.zig`)는 이 명령을 모르지만 JIT는 fork 범위 밖이다.
+
+결과(ReleaseSafe): append 29 → 23 ms, `for arr` 30 → 24 ms, `arr[i]` 17 → 15 ms. 벤치 전체(hyperfine)는 for 70 → 58 ms
+(Lua 16 ms), heap 47 → 39 ms(Lua 28.5 ms), fib는 33 ms로 변화 없음. opcode 수 검사(`src/bytecode.zig` 테스트)를 131로 올렸다.
+
 ## 남은 일
 
-손으로 푸는 방식은 표준 라이브러리 몇 곳에만 듣는다. Lua 수준(`for` 벤치 약 16 ms)에 가려면 다음이 필요하다.
-
-- 작은 함수(본문이 `return <식>` 하나 등)를 sema 또는 IR 단계에서 인라인. 사용자 코드의 메서드 호출에도 듣는다.
-- 상수 접기: `3 << 62`가 `const` · `const` · `lsl` · `not` 네 명령으로 남는다.
-- 인덱스 주소 계산: `const 8` + `mul` + `add`가 매번 나온다. 크기를 곱한 주소로 바로 읽는 명령이나 `mul_i16`이 있으면 줄어든다.
+- 작은 함수(본문이 `return <식>` 하나 등)를 sema 또는 IR 단계에서 인라인. 남은 비용의 대부분은 `@index_addr` ·
+  `next` · `append` 호출 자체(호출 · `chk_stk` · 인자 `mov` · `ret`)다. 사용자 코드의 메서드 호출에도 듣는다.
+- `Span.@index_addr`의 포인터 식 panic과 `as[r64] N` 컴파일러 panic의 원인.

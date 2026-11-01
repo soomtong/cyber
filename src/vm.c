@@ -556,6 +556,7 @@ ResultCode execBytecode(ZThread* t) {
         JENTRY(LSR),
         JENTRY(Add),
         JENTRY(AddI16),
+        JENTRY(AddMulI16),
         JENTRY(Sub),
         JENTRY(IMUL),
         JENTRY(MUL),
@@ -1576,6 +1577,16 @@ beginSwitch:
         u16 right = pc[3];
         stack[dst] = BITCAST(u64, left) + BITCAST(u64, (i64)BITCAST(i16, right));
         pc += 4;
+        NEXT();
+    }
+    CASE(AddMulI16): {
+        // dst = left + idx * scale. Pointer offset for `Ptr[T]` indexing.
+        u16 dst = pc[1];
+        u64 left = stack[pc[2]];
+        u64 idx = stack[pc[3]];
+        u16 scale = pc[4];
+        stack[dst] = left + idx * (u64)scale;
+        pc += 5;
         NEXT();
     }
     CASE(Sub): {

@@ -8068,7 +8068,7 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: Cstr) !ExprResult {
                     const op = try c.ir.newExpr(.not, child.type, node, .{
                         .expr = child.ir,
                     });
-                    return ExprResult.init(op, child.type);
+                    return fold_const_int(c, ExprResult.init(op, child.type));
                 },
                 else => {},
             }
@@ -8138,6 +8138,42 @@ fn sema_bin_expr3(c: *cy.Chunk, left: ExprResult, left_n: *ast.Node, right: Expr
             return c.semaCallFuncSymRec2(func_sym, &args, node);
         },
     }
+}
+
+/// Folds a 64-bit integer op whose operands are all `const64` into one `const64`.
+/// Matches the VM: wrapping add/sub/mul, shift amount masked by 0xff (>= 64 is not folded).
+fn fold_const_int(c: *cy.Chunk, res: ExprResult) !ExprResult {
+    const expr = res.ir;
+    switch (expr.type.id()) {
+        bt.I64, bt.R64 => {},
+        else => return res,
+    }
+    const val: u64 = switch (expr.code) {
+        .not => b: {
+            const child = expr.cast(.not).expr;
+            if (child.code != .const64) return res;
+            break :b ~child.cast(.const64).val;
+        },
+        .add, .sub, .mul, .imul, .and_op, .or_op, .xor, .lsl, .lsr => b: {
+            const bin: *ir.BinOp2 = @ptrCast(@alignCast(expr));
+            if (bin.left.code != .const64 or bin.right.code != .const64) return res;
+            const l = bin.left.cast(.const64).val;
+            const r = bin.right.cast(.const64).val;
+            break :b switch (expr.code) {
+                .add => l +% r,
+                .sub => l -% r,
+                .mul, .imul => l *% r,
+                .and_op => l & r,
+                .or_op => l | r,
+                .xor => l ^ r,
+                .lsl => if (r < 64) l << @intCast(r) else return res,
+                .lsr => if (r < 64) l >> @intCast(r) else return res,
+                else => unreachable,
+            };
+        },
+        else => return res,
+    };
+    return c.semaConst(val, expr.type, expr.node);
 }
 
 fn sema_bin_expr2(c: *cy.Chunk, left: ExprResult, left_n: *ast.Node, right: ExprResult, right_n: *ast.Node, op: cy.BinaryExprOp, node: *ast.Node) !ExprResult {
@@ -8408,7 +8444,7 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: Cstr, left_n: *ast.Node, op: cy.BinaryExp
                     // Infer type from right.
                     const right = try c.semaExprHint(right_n, expr.target_t);
                     const left = try c.semaExprCstr(left_n, right.type);
-                    return sema_bin_expr2(c, left, left_n, right, right_n, op, node);
+                    return fold_const_int(c, try sema_bin_expr2(c, left, left_n, right, right_n, op, node));
                 },
                 else => {},
             }
@@ -8445,10 +8481,10 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: Cstr, left_n: *ast.Node, op: cy.BinaryExp
                         };
                     }
                 }
-                return sema_bin_expr2(c, left, left_n, right, right_n, op, node);
+                return fold_const_int(c, try sema_bin_expr2(c, left, left_n, right, right_n, op, node));
             } else if (left.type.kind() == .float) {
                 const right = try c.semaExprTarget(right_n, left.type);
-                return sema_bin_expr2(c, left, left_n, right, right_n, op, node);
+                return fold_const_int(c, try sema_bin_expr2(c, left, left_n, right, right_n, op, node));
             }
 
             // Look for sym under left type's module.

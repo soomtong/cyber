@@ -35,6 +35,8 @@
   (2026-11-01, `-Dmalloc=zig` + trace 끔에서 "remap of invalid memory ... canary" panic, mimalloc에서는 조용히 손상).
   `std.mem.writeInt`/`readInt(u48, *[6]u8, ...)`를 쓴다. 회귀 테스트는 lib "setOpArgU48 writes only its 6-byte operand.".
   `bytecode.zig` 안의 `test` 블록은 어느 테스트 단계에서도 참조되지 않아 실행되지 않는다.
+  같은 날 wasm32 CI 실패(run 41253320696)를 음수 `Ptr` 인덱스 탓으로 돌렸는데, 실제 원인은 이 버그였다
+  (`project_slice_append_aliasing.md`).
 - CI는 x86_64-linux · aarch64-macos cli job에서 `zig build test -Doptimize=ReleaseFast`를, wasi job에서
   ReleaseFast `build-test`를 돌린다. 크기 단언 테스트는 bare union의 safety tag만큼 모드별 값을 둔다
   (64-bit 8, wasm32 `Local` · `Func` 4).

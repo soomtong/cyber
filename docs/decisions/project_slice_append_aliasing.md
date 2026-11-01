@@ -99,10 +99,10 @@ Beans"(IFL 2019) 및 Lean 발표 자료, Reinking 외 "Perceus"(PLDI 2021), Go B
 - 회귀 테스트: `src/test/memory/slice_shared_buffer.cy`(append · `+` · remove · insert · size_down · size_up을 받는 쪽을
   남긴 채 호출, 버퍼 재사용, 부분 슬라이스).
 - wasm32 사고(2026-11-01): 처음에는 count를 음수 인덱스 `(as[Ptr[int]] res.ptr)[-1]`로 썼는데, push 뒤 Latest Build의
-  `wasm32-wasi` 잡이 `core/Slice.cy`에서 "remap of invalid memory ... canary"로 죽었다(run 41253320696, 다른 11개 잡은 성공,
-  `latest` 릴리스는 갱신되지 않음). 로컬에서 `zig build build-test -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe` 뒤
-  `wasmtime run --dir=.::/ zig-out/bin/behavior_test.wasm`으로 재현했다. 슬라이스를 쓰지 않는 프로그램도 실패해 `core.cy`를
-  컴파일하는 단계에서 손상이 생긴다. 음수 인덱스를 정수 주소 계산 `(as[int] ptr) - 8`로 바꾸자 통과했다. `sema_ptr_index`는
-  포인터를 `i64`로 비트캐스트해 `idx * 크기`를 더하는데, 32비트에서 음수 상수 인덱스를 어디서 잘못 다루는지는 추적하지
-  않았다. 64비트 macOS 테스트는 해제된 메모리를 재사용하지 않는 allocator라 드러나지 않은 것으로 본다.
-
+  `wasm32-wasi` 잡이 `core/Slice.cy`에서 "remap of invalid memory ... canary"로 죽었다(run 41253320696). 그때는 음수 인덱스를
+  의심해 정수 주소 계산 `(as[int] ptr) - 8`로 바꿨고(`718b4d7`) 통과했다. 이 진단은 틀렸다. 진짜 원인은
+  `ByteCodeBuffer.setOpArgU48`이 `*u48`(저장 크기 8바이트)로 6바이트 피연산자를 써서, `call` 명령이 `ops` 버퍼 용량 끝에
+  걸리면 allocator footer를 2바이트 덮는 버그였다(`c4e443e`, `project_zig_017_upgrade.md`). 코드 배치에 따라 드러나므로
+  `core.cy`를 조금 바꾼 것만으로 증상이 사라졌던 것이다. 확인: 원래 커밋 `8eb4a90`을 worktree로 받아 wasm32 ReleaseSafe
+  behavior 테스트가 같은 panic으로 죽는 것을 재현했고, `setOpArgU48` 한 줄만 고치면 통과했다. 그래서 `[-1]` 형태로
+  되돌렸다(wasm32 ReleaseSafe · ReleaseFast의 lib · cli · trace · behavior 테스트 통과).

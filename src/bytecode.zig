@@ -253,7 +253,9 @@ pub const ByteCodeBuffer = struct {
         if (cy.Trace) {
             if (idx + 3 > self.ops.items.len) @panic("OutOfBounds");
         }
-        @as(*align(2) u48, @ptrCast(&self.ops.items[idx])).* = arg;
+        // Not `*u48`: its store size is 8 bytes, which wrote past the 6-byte operand
+        // and, at the end of the buffer, over the allocator's metadata.
+        std.mem.writeInt(u48, @as(*[6]u8, @ptrCast(&self.ops.items[idx])), arg, .little);
     }
 
     pub fn setOpArgU32(self: *ByteCodeBuffer, idx: usize, arg: u32) void {

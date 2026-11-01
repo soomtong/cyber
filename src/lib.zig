@@ -1052,6 +1052,24 @@ test "Host functions release their owned slice params." {
     , &res));
 }
 
+test "setOpArgU48 writes only its 6-byte operand." {
+    // A `*u48` store is 8 bytes. At the end of the ops buffer it overwrote the allocator's metadata.
+    var buf: cy.ByteCodeBuffer = undefined;
+    buf.ops = .empty;
+    defer buf.ops.deinit(zt.alloc);
+    try buf.ops.ensureTotalCapacityPrecise(zt.alloc, 8);
+    buf.ops.items.len = 8;
+    @memset(buf.ops.items, .{ .val = 0xabcd });
+    buf.ops.items.len = 4;
+
+    buf.setOpArgU48(1, 0x112233445566);
+    try zt.eq(0xabcd, buf.ops.items[0].val);
+    try zt.eq(0x5566, buf.ops.items[1].val);
+    try zt.eq(0x3344, buf.ops.items[2].val);
+    try zt.eq(0x1122, buf.ops.items[3].val);
+    try zt.eq(0xabcd, buf.ops.items.ptr[4].val);
+}
+
 test "Stack trace unwinding." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

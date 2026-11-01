@@ -30,6 +30,11 @@
   `std.debug.assert`는 UB라 결과가 임의로 정해지거나 주변 코드가 사라진다. 실제로 난 두 곳:
   `resolveFuncSig`의 `out_generic`(템플릿 함수 `sig`가 null), `FuncSym.firstFuncSig`(wasm32에서 첫 resolve가
   "same function signature" 중복으로 판정됨, 이제 `?*FuncSig` + `null`).
+- 바이트코드 피연산자를 `*u48` 포인터로 읽고 쓰지 않는다. `@sizeOf(u48)`는 8이라 6바이트 피연산자 뒤 2바이트까지
+  건드린다. `setOpArgU48`이 이렇게 써서, `call` 명령이 `ops` 버퍼 용량 끝에 걸리면 SafeAllocator footer를 덮었다
+  (2026-11-01, `-Dmalloc=zig` + trace 끔에서 "remap of invalid memory ... canary" panic, mimalloc에서는 조용히 손상).
+  `std.mem.writeInt`/`readInt(u48, *[6]u8, ...)`를 쓴다. 회귀 테스트는 lib "setOpArgU48 writes only its 6-byte operand.".
+  `bytecode.zig` 안의 `test` 블록은 어느 테스트 단계에서도 참조되지 않아 실행되지 않는다.
 - CI는 x86_64-linux · aarch64-macos cli job에서 `zig build test -Doptimize=ReleaseFast`를, wasi job에서
   ReleaseFast `build-test`를 돌린다. 크기 단언 테스트는 bare union의 safety tag만큼 모드별 값을 둔다
   (64-bit 8, wasm32 `Local` · `Func` 4).

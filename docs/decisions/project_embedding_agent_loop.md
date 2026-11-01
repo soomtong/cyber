@@ -121,6 +121,12 @@
   함수 호출을 평가하고, 지역 변수 이월(위)까지 넣은 뒤에는 변수도 이어진다. `cy.cy`의 `TypeVoid`가 0으로 잘못 적혀
   있어(`TYPE_VOID`는 1) void 결과마다 빈 줄을 찍던 것도 고쳤다. 맨 이름(`x`)만 입력하는 것은 언어 규칙상 컴파일 에러라
   REPL이 값을 바로 보여 주지는 않는다(`print(x)`를 써야 함).
+- REPL 입력 끝(EOF) 처리(2026-11-01 고침). Ctrl-D나 파이프로 넣은 stdin이 끝나면 linenoise가 `null`을 돌려주고
+  `replReadLine`(`src/cli.zig`)이 `error.EndOfStream`을 올려 `panic: EndOfStream`으로 끝났다. 이제 EOF는 `.exit`과 같게
+  처리해 종료 코드 0으로 끝난다(`repl_end_of_input`). REPL 스크립트(`cy.cy`의 `ReadLineFn`)의 타입은 바꾸지 않았다.
+  Windows용 `FallbackReadLine`은 stdin을 끝까지 통째로 읽고 EOF 뒤에는 빈 문자열을 계속 돌려줘 무한 루프가 될 수
+  있었다. 이제 한 바이트씩 한 줄만 읽고(`\r\n` 처리), 읽은 것 없이 EOF면 `error.EndOfStream`을 낸다. 이 경로는
+  `use_ln`이 comptime이라 macOS 빌드에서 분석되지 않으므로 `-Dtarget=x86_64-windows-gnu` 교차 빌드로 컴파일만 확인했다.
 - 지역 변수 반환이 복사였다(2026-11-01 고침). `return r`이 `semaOwn`으로 복사본을 만들었고, `@copy`가 없는 타입은
   비트 단위 복사라 반환 시 지역의 `@deinit`과 호출자 쪽 `@deinit`이 같은 상태에 두 번 돌았다(자원 이중 해제).
   명시적 `move`는 "같은 블록에서 선언한 변수만" 허용해 분기 안의 `return move r`도 막혀 있었다.

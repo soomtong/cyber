@@ -423,17 +423,29 @@ pub fn replReadLine(t: *C.Thread) anyerror!C.Ret {
     const prefix_dup = try alloc.dupeSentinel(u8, C.str_bytes(prefix), 0);
     defer alloc.free(prefix_dup);
     if (use_ln) {
-        const line = try LnReadLine.read(undefined, prefix_dup);
+        const line = LnReadLine.read(undefined, prefix_dup) catch |err| {
+            if (err == error.EndOfStream) return repl_end_of_input(t, ret);
+            return err;
+        };
         defer LnReadLine.free(undefined, line);
         ret.* = C.str_init(t, line);
     } else {
         var read_line = FallbackReadLine{
             .alloc = alloc,
         };
-        const line = try FallbackReadLine.read(&read_line, prefix_dup);
+        const line = FallbackReadLine.read(&read_line, prefix_dup) catch |err| {
+            if (err == error.EndOfStream) return repl_end_of_input(t, ret);
+            return err;
+        };
         defer FallbackReadLine.free(&read_line, line);
         ret.* = C.str_init(t, line);
     }
+    return C.RetOk;
+}
+
+/// End of input (Ctrl-D, or a piped stdin that ran out) ends the REPL like `.exit`.
+fn repl_end_of_input(t: *C.Thread, ret: *C.str) C.Ret {
+    ret.* = C.str_init(t, ".exit");
     return C.RetOk;
 }
 
@@ -460,8 +472,27 @@ pub const FallbackReadLine = struct {
     pub fn read(ptr: *anyopaque, prefix: [:0]const u8) anyerror![]const u8 {
         const self: *@This() = @ptrCast(@alignCast(ptr));
         try std.Io.File.stdout().writeStreamingAll(stdx.io(), prefix);
-        var r = std.Io.File.stdin().reader(stdx.io(), &.{});
-        return r.interface.allocRemaining(self.alloc, .limited(10e8));
+        // Read one line, one byte at a time, so no input past the newline is consumed.
+        var line: std.ArrayList(u8) = .empty;
+        errdefer line.deinit(self.alloc);
+        const stdin = std.Io.File.stdin();
+        while (true) {
+            var byte: [1]u8 = undefined;
+            const n = stdin.readStreaming(stdx.io(), &.{&byte}) catch |err| {
+                if (err == error.EndOfStream) {
+                    if (line.items.len == 0) return error.EndOfStream;
+                    break;
+                }
+                return err;
+            };
+            if (n == 0) continue;
+            if (byte[0] == '\n') break;
+            try line.append(self.alloc, byte[0]);
+        }
+        if (line.items.len > 0 and line.items[line.items.len - 1] == '\r') {
+            line.items.len -= 1;
+        }
+        return line.toOwnedSlice(self.alloc);
     }
 
     pub fn free(ptr: *anyopaque, line: []const u8) void {

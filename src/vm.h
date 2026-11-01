@@ -805,8 +805,11 @@ typedef struct Thread {
     i64 fuel;
     // Set with `cl_vm_set_fuel`. Zero or less means no limit.
     i64 fuel_limit;
-    // Set by `cl_vm_interrupt`, possibly from another thread. Cleared at the start of each eval.
-    u8 interrupt;
+    // Points at the main thread's `interrupt_flag`, so one request reaches every thread of the VM.
+    // 1: `cl_vm_interrupt`, possibly from another thread. 2: the main thread is stopping (panic, fuel)
+    // and waits for the spawned threads. Cleared at the start of each eval.
+    u8* interrupt;
+    u8 interrupt_flag;
 } Thread;
 
 typedef struct ZThread {

@@ -50,6 +50,17 @@ pub const Pool = struct {
         };
     }
 
+    /// Waits until no task is queued or running.
+    pub fn wait_idle(self: *Pool) void {
+        while (true) {
+            self.mutex.lockUncancelable(stdx.io());
+            const idle = self.active_workers == 0 and self.task_queue.first == null;
+            self.mutex.unlock(stdx.io());
+            if (idle) return;
+            std.atomic.spinLoopHint();
+        }
+    }
+
     pub fn deinit(self: *Pool, alloc: std.mem.Allocator) void {
         alloc.free(self.workers);
     }
@@ -139,11 +150,19 @@ pub const Worker = struct {
 
                     // Ensure `fp_end` is set.
                     thread.c.fp_end = thread.c.stack_ptr + 1;
+                    const state = task.data.thread.fut_sync_state;
                     const ret = thread.callFunc2(thread.c.stack_ptr, ret_reg_size, task.data.thread.func_ptr) catch |err| {
-                        std.debug.panic("error: {}", .{err});
+                        // The thread already unwound and freed its heap. Mark the future so `await` stops
+                        // waiting, instead of aborting the host: 4 when it was stopped (interrupt, fuel), 3 otherwise.
+                        log.tracev("thread task failed: {}", .{err});
+                        const failed: u8 = if (err == error.Interrupted) 4 else 3;
+                        _ = @cmpxchgStrong(u8, state, 0, failed, .acq_rel, .monotonic);
+                        thread.deinit(false);
+                        pool.alloc.destroy(thread);
+                        pool.alloc.destroy(task);
+                        continue;
                     };
 
-                    const state = task.data.thread.fut_sync_state;
                     while (@cmpxchgWeak(u8, state, 0, 1, .acquire, .monotonic)) |actual| {
                         if (actual == 3) {
                             @panic("TODO: future was invalidated");

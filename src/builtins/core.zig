@@ -1597,6 +1597,10 @@ pub fn new_thread(t: *cy.Thread) !C.Ret {
     var thread = try t.alloc.create(cy.Thread);
     const id = t.c.vm.next_thread_id;
     try thread.init(id, t.alloc, t.c.vm);
+    // The host's interrupt and fuel limit reach spawned threads too.
+    thread.c.interrupt = t.c.vm.main_thread.c.interrupt;
+    thread.c.fuel_limit = t.c.vm.main_thread.c.fuel_limit;
+    thread.resetFuel();
     t.c.vm.next_thread_id += 1;
     ret.* = thread;
     return C.RetOk;

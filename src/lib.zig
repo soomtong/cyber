@@ -252,7 +252,7 @@ export fn cl_vm_evalx(vm: *cy.VM, uri: C.Bytes, src: C.Bytes, config: C.EvalConf
 }
 
 export fn cl_vm_interrupt(vm: *cy.VM) void {
-    @atomicStore(u8, &vm.main_thread.c.interrupt, 1, .release);
+    @atomicStore(u8, vm.main_thread.c.interrupt, 1, .release);
 }
 
 export fn cl_vm_set_fuel(vm: *cy.VM, fuel: i64) void {
@@ -1030,6 +1030,90 @@ test "cl_vm_interrupt stops a running eval." {
         \\  pass
     , &res));
     thread.join();
+}
+
+test "Spawned threads stop with the eval and do not abort the host." {
+    if (is_wasm) return;
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    const S = struct {
+        var started = std.atomic.Value(bool).init(false);
+        fn mod_started(t_: *C.Thread) callconv(.c) C.Ret {
+            _ = C.thread_ret(t_, void);
+            started.store(true, .release);
+            return C.RetOk;
+        }
+        fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+            const name = C.from_bytes(uri);
+            if (std.mem.eql(u8, name, "mod")) {
+                C.mod_add_func(mod, "started", C.BIND_FUNC(&mod_started));
+                res[0].src = C.to_bytes("#[bind] fn started()");
+                return true;
+            } else {
+                return C.default_loader(vm_, mod, uri, res);
+            }
+        }
+        fn interrupter(vm_: *C.VM) void {
+            while (!started.load(.acquire)) {
+                std.atomic.spinLoopHint();
+            }
+            C.vm_interrupt(vm_);
+        }
+    };
+    C.vm_set_loader(vm, @ptrCast(&S.loader));
+    var res: C.EvalResult = undefined;
+
+    // The spawned functions take an argument: `spawn(f, {})` with no arguments crashes at compile time in
+    // ReleaseSafe when it is not the process's first VM (also before this change).
+    // A spawned thread inherits the fuel limit.
+    C.vm_set_fuel(vm, 10000);
+    try zt.eq(C.ErrorInterrupt, C.vm_eval(vm,
+        \\fn spin(start int) -> int:
+        \\  i := start
+        \\  while true:
+        \\    i += 1
+        \\  return i
+        \\_ = spawn(spin, {0}).await()
+    , &res));
+    C.vm_set_fuel(vm, 0);
+
+    // A host interrupt reaches the main thread waiting in `await` and the spawned thread.
+    const thread = try std.Thread.spawn(.{}, S.interrupter, .{vm});
+    try zt.eq(C.ErrorInterrupt, C.vm_eval(vm,
+        \\use mod
+        \\fn spin(start int) -> int:
+        \\  mod.started()
+        \\  i := start
+        \\  while true:
+        \\    i += 1
+        \\  return i
+        \\_ = spawn(spin, {0}).await()
+    , &res));
+    thread.join();
+
+    // A panic in a spawned thread fails the eval instead of aborting the process.
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm,
+        \\fn boom(n int) -> int:
+        \\  panic('boom')
+        \\  return n
+        \\_ = spawn(boom, {1}).await()
+    , &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try zt.eq(true, std.mem.startsWith(u8, report, "panic: Spawned thread did not finish."));
+    }
+
+    // Still usable.
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\fn add(a int, b int) -> int:
+        \\  return a + b
+        \\use test
+        \\test.eq(5, spawn(add, {2, 3}).await())
+    , &res));
 }
 
 test "single_run frees the main block's raw buffers at deinit." {

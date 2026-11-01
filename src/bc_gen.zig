@@ -689,7 +689,7 @@ fn gen_breakpoint(c: *Chunk, node: *ast.Node) !void {
 
 fn gen_await(c: *Chunk, stmt: *ir.Await, node: *ast.Node) !void {
     const childv = try genExpr(c, stmt.expr, Cstr.localOrTemp());
-    try c.pushCode(.await_op, &.{childv.reg}, node);
+    try c.pushFCode(.await_op, &.{childv.reg}, node);
     try pop_temp_value(c, childv, node);
 }
 

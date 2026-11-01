@@ -383,6 +383,17 @@ pub const VM = struct {
         self.compiler.cont = false;
     }
 
+    /// Asks every spawned thread to stop at its next checkpoint and waits until the worker pool is idle.
+    /// A thread blocked inside a host function is waited for.
+    pub fn stopSpawnedThreads(self: *VM) void {
+        if (comptime !build_config.threads) return;
+        const set = @cmpxchgStrong(u8, self.main_thread.c.interrupt, 0, 2, .acq_rel, .monotonic) == null;
+        self.worker_pool.wait_idle();
+        if (set) {
+            @atomicStore(u8, self.main_thread.c.interrupt, 0, .release);
+        }
+    }
+
     /// Copies the main locals tracked during the last eval off the stack so the next eval can restore them.
     fn copyMainLocalSaves(self: *VM) void {
         const stack = self.main_thread.c.stack();
@@ -977,11 +988,22 @@ fn zAwait(t: *cy.Thread, fut_value_bits: u64) callconv(.c) vmc.ResultCode {
         }
 
         if (t == t.c.vm.main_thread) {
-            // Block until future is done.
+            // Block until future is done. Stops for an interrupt, and when the spawned thread failed
+            // (it panicked, was interrupted or ran out of fuel).
             while (true) {
                 state = @atomicLoad(u8, shared_state, .acquire);
                 if (state == 2) {
                     break;
+                }
+                if (state == 3) {
+                    _ = t.ret_panic("Spawned thread did not finish.");
+                    return vmc.RES_PANIC;
+                }
+                if (state == 4) {
+                    return vmc.RES_INTERRUPT;
+                }
+                if (@atomicLoad(u8, t.c.interrupt, .acquire) != 0) {
+                    return vmc.RES_INTERRUPT;
                 }
                 std.atomic.spinLoopHint();
             }

@@ -331,7 +331,7 @@ static Value buildGenCallInfo(bool cont, u8 call_inst_off, u8 stack_size) {
 // Placed at loop back edges and calls, which every long-running program passes through.
 #define CHECKPOINT() \
     do { \
-        if (UNLIKELY(*(volatile u8*)&t->c.interrupt || --t->c.fuel < 0)) { \
+        if (UNLIKELY(*(volatile u8*)t->c.interrupt || --t->c.fuel < 0)) { \
             RETURN(RES_INTERRUPT); \
         } \
     } while (false)
@@ -1488,6 +1488,11 @@ beginSwitch:
         ResultCode code = zAwait(t, future);
         if (code == RES_AWAIT) {
             RETURN(RES_AWAIT);
+        }
+        if (UNLIKELY(code != RES_SUCCESS)) {
+            // The spawned thread failed or the eval was interrupted while waiting. Report at the `AWAIT` inst.
+            pc -= 2;
+            RETURN(code);
         }
         NEXT();
     }

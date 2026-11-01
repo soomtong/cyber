@@ -198,7 +198,8 @@ pub const ThreadC = extern struct {
 
     fuel: i64,
     fuel_limit: i64,
-    interrupt: u8,
+    interrupt: *u8,
+    interrupt_flag: u8,
 
     pub fn stack(self: *ThreadC) []Value {
         return self.stack_ptr[0..self.stack_len];
@@ -238,7 +239,8 @@ pub const Thread = struct {
                 .trace_fp = undefined,
                 .fuel = std.math.maxInt(i64),
                 .fuel_limit = 0,
-                .interrupt = 0,
+                .interrupt = undefined,
+                .interrupt_flag = 0,
             },
 
             .unwinding = false,
@@ -246,6 +248,9 @@ pub const Thread = struct {
             .compact_trace = .empty,
             .stack_trace = .{},
         };
+
+        // Spawned threads share the main thread's flag (`new_thread`).
+        self.c.interrupt = &self.c.interrupt_flag;
 
         // 4KB default stack size. 
         try self.stackEnsureTotalCapacityPrecise(511);
@@ -419,6 +424,10 @@ pub const Thread = struct {
 
     /// If successful, execution should continue.
     pub fn handleInterrupt(self: *Thread) !void {
+        if (self == self.c.vm.main_thread) {
+            // Spawned threads can write to the main heap (their futures), so stop them before it is freed.
+            self.c.vm.stopSpawnedThreads();
+        }
         if (self.unwinding) {
             // Abort.
             std.debug.panic("Panic during unwinding. TODO: Abort.", .{});
@@ -432,8 +441,10 @@ pub const Thread = struct {
 
     /// Unwinds like a panic, with the stop reason as the message, but reports `error.Interrupted`.
     fn handleStop(self: *Thread, handle_panic: bool) !void {
-        const msg = if (self.c.interrupt != 0) "Interrupted." else "Out of fuel.";
+        const msg = if (@atomicLoad(u8, self.c.interrupt, .acquire) == 1) "Interrupted." else "Out of fuel.";
         _ = self.ret_panic(msg);
+        // The request is handled. Host calls into the VM after this eval should not stop at once.
+        defer if (self == self.c.vm.main_thread) @atomicStore(u8, self.c.interrupt, 0, .release);
         if (handle_panic) {
             handleInterrupt(self) catch |err| {
                 if (err == error.Panic) return error.Interrupted;
@@ -445,7 +456,11 @@ pub const Thread = struct {
 
     /// Prepares a new eval: clears an earlier interrupt and refills the fuel.
     pub fn resetStop(self: *Thread) void {
-        @atomicStore(u8, &self.c.interrupt, 0, .release);
+        @atomicStore(u8, self.c.interrupt, 0, .release);
+        self.resetFuel();
+    }
+
+    pub fn resetFuel(self: *Thread) void {
         self.c.fuel = if (self.c.fuel_limit > 0) self.c.fuel_limit else std.math.maxInt(i64);
     }
 

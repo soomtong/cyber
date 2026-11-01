@@ -53,7 +53,30 @@ VM 핫 루프에 검사점을 두고, 호스트가 두 가지 방법으로 실�
   다른 스레드에서. wasm32에서는 스레드 부분을 건너뜀). 누수 검사 allocator. 네이티브 Debug · ReleaseSafe · ReleaseFast ·
   trace 끔, wasm32 ReleaseSafe · ReleaseFast(wasmtime) 통과.
 
+## spawn 스레드(2026-11-01, 자동 보안 리뷰 지적으로 추가)
+
+처음 구현은 메인 스레드에만 적용됐다. 스크립트가 `spawn(무한 루프).await()`를 하면 작업 스레드는 fuel 무제한에
+interrupt도 받지 않았고, 메인은 `zAwait`의 spin 루프에 갇혀 검사점을 지나지 않으므로 `cl_vm_interrupt`도 듣지 않았다.
+호스트가 영구히 멈춘다. 또 작업 스레드의 panic은 `worker.zig`가 `std.debug.panic`으로 호스트 프로세스를 죽였다(기존 동작).
+
+- `Thread.interrupt`는 이제 포인터다. 모든 스레드가 메인 스레드의 `interrupt_flag`를 가리킨다(`new_thread`에서 설정).
+  값 1은 호스트 interrupt, 2는 "메인이 멈추는 중"이다. `new_thread`는 메인의 `fuel_limit`도 물려받는다(스레드마다 따로 셈).
+- `zAwait`의 spin은 플래그를 확인해 `RES_INTERRUPT`를 돌려준다. `AWAIT` 명령은 원래 `RES_AWAIT` 말고는 결과를 무시했다.
+  이제 오류면 pc를 `AWAIT`로 되돌려 반환하고, 트레이스용으로 `await_op`을 `pushFCode`로 내보낸다.
+- 작업 스레드가 실패하면 프로세스를 죽이지 않고 future 상태를 바꾼다. 4는 멈춤(interrupt, fuel)이라 메인의 await는
+  `CL_ERROR_INTERRUPT`, 3은 그 밖의 panic이라 "Spawned thread did not finish." panic이 된다.
+- 메인이 panic이나 중단으로 힙을 스윕하기 전에 `VM.stopSpawnedThreads`가 플래그 2를 세우고 worker 풀이 빌 때까지
+  기다린다(`Pool.wait_idle`). 작업 스레드가 메인 힙의 `FutureValue`에 쓰는 것과 스윕이 겹치지 않게 하려는 것이다.
+- 처리한 요청은 지운다. 남겨 두면 eval 밖에서 호스트가 VM 함수를 다시 부를 때 곧바로 멈춘다.
+- 테스트: lib "Spawned threads stop with the eval and do not abort the host."(fuel 상속, 다른 스레드의 interrupt가 await
+  중인 메인과 작업 스레드에 도달, 작업 스레드 panic, 이후 재사용). ReleaseSafe 캐시 없이 3회 반복 통과.
+- 별개의 기존 버그(고치지 않음): 프로세스의 두 번째 이후 VM에서 인자 없는 `spawn(f, {})`는 ReleaseSafe 컴파일 중
+  "incorrect alignment"(템플릿 확장, `value.zig` `asPtr`)로 죽는다. 변경 전 빌드도 같고, CLI 단독 실행과 인자 있는
+  `spawn(f, {1})`은 정상이다. 테스트는 인자 있는 함수를 쓴다.
+
 ## 미정
 
 - 호스트 함수 안(예: `os.exec`, 긴 I/O)에서 막힌 경우는 이 방법으로 끊지 못한다. 호스트 함수가 직접 확인해야 한다.
-- 스레드 풀 작업 스레드(`spawn`)의 interrupt 전파.
+  `stopSpawnedThreads`도 그런 작업 스레드를 기다린다.
+- fuel은 스레드마다 따로 세므로 스크립트가 스레드를 많이 만들면 총량이 늘어난다(`spawn` 자체도 호출이라 메인 fuel을 쓰므로
+  상한은 있다).

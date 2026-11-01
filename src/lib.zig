@@ -159,6 +159,26 @@ export fn cl_slice_init(t: *cy.Thread, num_elems: usize, elem_size: usize) cy.he
     return t.heap.init_slice_undef(t.c.vm.sema.raw_buffer_byte_t.id(), num_elems, elem_size) catch fatal();
 }
 
+/// Releases a slice that a host function owns, e.g. a `[]T` param from `cl_thread_slice`.
+/// `elem_t` is the element type. It may be null when the elements are not managed.
+/// Like `Slice.@deinit`, the initialized elements are destructed only when this slice holds the last reference
+/// to the buffer.
+export fn cl_slice_deinit(t: *cy.Thread, elem_t: ?*cy.Type, s: *cy.heap.Slice) void {
+    const buf: *cy.HeapObject = @ptrCast(s.buf orelse return);
+    if (elem_t) |et| {
+        if (et.isManaged() and buf.rc() == 1) {
+            const data: [*]u8 = @ptrCast(buf.raw_buffer.elemsPtr());
+            const count = @as(*u64, @ptrCast(@alignCast(data))).*;
+            const elems = data + cy.heap.SliceBufferElemsOffset;
+            const size = et.size();
+            for (0..@intCast(count)) |i| {
+                t.heap.destructValueAt(et, elems + i * size);
+            }
+        }
+    }
+    t.heap.releaseObject(buf);
+}
+
 export fn cl_vm_alloc(vm: *cy.VM, size: usize) *anyopaque {
     const slice = vm.alloc.alignedAlloc(u8, .@"8", size) catch fatal();
     return slice.ptr;
@@ -968,6 +988,67 @@ test "Host functions release their owned str params." {
         \\s := 'abcdefghijklmnopqrstuvwxyz' + '0123456789'
         \\test.eq(36, mod.len(s))
         \\test.eq(36, mod.len('abcdefghijklmnopqrstuvwxyz' + '9876543210'))
+    , &res));
+}
+
+test "Host functions release their owned slice params." {
+    // Leak-checking allocator: a host function that skips `slice_deinit` leaks the buffer
+    // and, for `[]str`, the heap strings in it.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+
+    const S = struct {
+        fn mod_sum(t_: *C.Thread) callconv(.c) C.Ret {
+            const ret: *i64 = C.thread_ret(t_, i64);
+            var s = C.thread_slice(t_);
+            defer C.slice_deinit(t_, null, &s);
+            const elems: [*]i64 = @ptrCast(@alignCast(s.ptr));
+            var sum: i64 = 0;
+            for (elems[0..@intCast(s.len)]) |e| sum += e;
+            ret.* = sum;
+            return C.RetOk;
+        }
+        fn mod_total_len(t_: *C.Thread) callconv(.c) C.Ret {
+            const ret: *i64 = C.thread_ret(t_, i64);
+            var s = C.thread_slice(t_);
+            const str_t = C.vm_find_type(C.thread_vm(t_), "str");
+            defer C.slice_deinit(t_, str_t, &s);
+            const elems: [*]C.str = @ptrCast(@alignCast(s.ptr));
+            var total: i64 = 0;
+            for (elems[0..@intCast(s.len)]) |e| total += @intCast(C.str_bytes(e).len);
+            ret.* = total;
+            return C.RetOk;
+        }
+        fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+            const name = C.from_bytes(uri);
+            if (std.mem.eql(u8, name, "mod")) {
+                C.mod_add_func(mod, "sum", C.BIND_FUNC(&mod_sum));
+                C.mod_add_func(mod, "total_len", C.BIND_FUNC(&mod_total_len));
+                res[0].src = C.to_bytes(
+                    \\#[bind] fn sum(s []int) -> int
+                    \\#[bind] fn total_len(s []str) -> int
+                );
+                return true;
+            } else {
+                return C.default_loader(vm_, mod, uri, res);
+            }
+        }
+    };
+    C.vm_set_loader(vm, @ptrCast(&S.loader));
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use mod
+        \\use test
+        \\nums := []int{1, 2, 3}
+        \\test.eq(6, mod.sum(nums))
+        \\test.eq(6, nums.len() + 3)
+        \\test.eq(10, mod.sum([]int{4, 6}))
+        \\a := 'abcdefghijklmnopqrstuvwxyz' + '0123456789'
+        \\strs := []str{a, a + '!'}
+        \\test.eq(73, mod.total_len(strs))
+        \\test.eq(73, mod.total_len([]str{a, a + '?'}))
+        \\test.eq(36, strs[0].len())
     , &res));
 }
 

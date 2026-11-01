@@ -313,6 +313,7 @@ pub const thread_float = c.cl_thread_float;
 pub const thread_str = c.cl_thread_str;
 pub const thread_slice = c.cl_thread_slice;
 pub const slice_init = c.cl_slice_init;
+pub const slice_deinit = c.cl_slice_deinit;
 
 pub fn slice_items(slice: Slice, comptime E: type) []E {
     var buf: [*]E = @ptrCast(@alignCast(slice.ptr));

@@ -581,6 +581,10 @@ CLBytes cl_object_string(CLThread* t, CLValue val);  // Conversion from value to
 
 // Initializes a new slice with undefined elements.
 CLSlice cl_slice_init(CLThread* t, size_t num_elems, size_t elem_size);
+// Releases a slice that a host function owns, such as a `[]T` param from `cl_thread_slice`.
+// `elem_t` is the element type, or NULL when the elements are not managed.
+// The elements are destructed only when this slice holds the last reference to the buffer.
+void cl_slice_deinit(CLThread* t, CLType* elem_t, CLSlice* s);
 
 // Functions.
 CLFuncSig* cl_vm_ensure_func_sig(CLVM* vm, const CLType* params, size_t nparams, CLType* ret_t);

@@ -62,8 +62,11 @@
   쓰이지 않던 `@refCount(obj Object)`도 같은 결함이라 `Ptr[void]`로 바꿨다. `@start_thread`의 `^FutureValue`는 object 타입이라
   문제없고, `FnTuple` 인자는 `move`로 넘겨 스레드 스택에 복사되므로 소유가 넘어간다. 나머지 바인딩은 `&T` 수신자,
   `Ptr`, 원시 값, 관리 필드 없는 구조체(`NumberFormatConfig`, `cy.Value`)만 받는다.
-- C API 공백: `cl_thread_slice`로 `[]T`를 값으로 받을 수는 있지만 해제할 `cl_slice_deinit`이 없다. 지금은 `[&]T` span으로
-  선언해 빌리는 것이 유일한 안전한 방법이다.
+- `[]T` 값 매개변수는 `cl_thread_slice`로 받고 `cl_slice_deinit(t, elem_t, &s)`로 해제한다(2026-11-01 추가). `elem_t`는
+  원소 타입이고 관리 타입이 아니면 NULL이어도 된다. `Slice.@deinit`과 같이 버퍼가 유일 참조일 때만 버퍼 앞 8바이트의
+  초기화 원소 수만큼 원소를 해제한 뒤 버퍼를 release한다. 관리 원소(`[]str` 등)에 NULL을 넘기면 원소가 샌다.
+  빌리기만 할 거라면 여전히 `[&]T` span이 더 싸다. 회귀 테스트는 lib "Host functions release their owned slice params."
+  (해제를 빼거나 `[]str`에 NULL을 넘기면 누수 검사에 걸리는 것을 확인).
 - 스크립트의 결과는 `fn main() -> T`의 반환값으로 받는다. `CLEvalResult.res`가 값 포인터, `res_t`가 타입 id이고
   `cl_value_desc`로 문자열화할 수 있다. 상위 문장만 있는 스크립트는 `res_t`가 void(1)다.
 - 출력은 `cl_vm_set_printer` · `cl_vm_set_eprinter`로 가로챈다. `print`는 본문과 개행을 따로 두 번 호출한다.

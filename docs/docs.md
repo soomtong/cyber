@@ -3968,12 +3968,9 @@ Top level declarations such as imports, types, and functions can be referenced i
 ```
 
 ## JIT compiler.
-Cyber's just-in-time compiler is incomplete and unstable. To run your script with JIT enabled:
-```bash
-cyber -jit &lt;script&gt;
-```
+The JIT compiler is not supported. Passing `-jit` (or `CL_JIT` through the embedding API) fails with a compile error. Use the default bytecode VM, or the C backend (`-tcc`, `-cc`) for native performance.
 
-The goal of the JIT compiler is to be fast at compilation while still being significantly faster than the interpreter. The codegen involves stitching together pregenerated machine code that targets the same runtime stack slots used by the VM. This technique is also known as `copy-and-patch`.
+The JIT was an experiment that stitched together pregenerated machine code targeting the same runtime stack slots used by the VM, a technique known as `copy-and-patch`. Its code generator has not kept up with the current IR and bytecode.
 
 ## C backend.
 The C backend generates a static binary from Cyber source code by transpiling to C code and relying on a local C compiler.

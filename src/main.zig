@@ -343,8 +343,6 @@ fn help() void {
         \\          Slow build, fast perf.
         \\  -tcc    Compile to C with builtin TinyC compiler. Experimental.
         \\          Mid build, mid perf.
-        \\  -jit    Compile to machine code based on bytecode. Experimental.
-        \\          Fast build, mid perf.
         \\
         \\General options:
         \\  -r      Refetch url imports and cached assets.

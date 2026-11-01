@@ -1133,6 +1133,22 @@ test "Spawn without args works in every VM." {
     }
 }
 
+test "JIT backend is rejected with a clear compile error." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var config = C.defaultEvalConfig();
+    config.backend = C.BackendJIT;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "t", "_ = 1 + 2", config, &res));
+    const summary = C.vm_compile_error_summary(vm);
+    defer C.vm_freeb(vm, summary);
+    try zt.expect(std.mem.indexOf(u8, summary, "The JIT backend is not supported.") != null);
+}
+
 test "single_run frees the main block's raw buffers at deinit." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

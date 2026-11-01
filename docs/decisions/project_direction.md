@@ -26,6 +26,10 @@
   3. 그보다 앞서 `cyber -jit x.cy`는 `core.cy`의 `#[bind]` 함수에서 "Expected function implementation"으로 멈춘다.
   bytecode에 새 opcode를 넣을 때 JIT 지원은 맞추지 않는다. JIT를 살리려면 gen.zig를 지금 IR · bytecode에 맞춰 다시 써야
   하므로 별도 결정이 필요하다.
+  2026-11-01 결정: `Compiler.compile()` 맨 앞에서 `C.BackendJIT`를 "The JIT backend is not supported."
+  컴파일 오류로 거절한다(CLI `-jit`과 임베딩 API `CL_JIT` 공통, lib 테스트 "JIT backend is rejected with a clear
+  compile error."). `cyber help`에서 `-jit`를 뺐고 `docs/docs.md`의 JIT 절은 지원하지 않는다고 고쳤다. `CL_JIT`
+  enum 값은 ABI 호환을 위해 남긴다.
 
 ## 따라오는 우선순위
 

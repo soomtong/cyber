@@ -282,6 +282,13 @@ pub const Compiler = struct {
         
         self.chunk_start = @intCast(self.chunks.items.len);
         self.type_start = @intCast(self.sema.types.items.len);
+
+        // The copy-and-patch JIT (`src/jit/`) is not maintained. See docs/decisions/project_direction.md.
+        if (config.backend == C.BackendJIT) {
+            _ = try self.addReportFmt(.compile_err, "The JIT backend is not supported. Use the bytecode VM (default) or the C backend (-tcc, -cc).", &.{}, null, 0);
+            return error.CompileError;
+        }
+
         const res = self.compileInner(uri, src, config) catch |err| {
             if (dumpCompileErrorStackTrace and !C.silent()) {
                 std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);

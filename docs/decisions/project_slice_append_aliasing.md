@@ -89,7 +89,7 @@ Beans"(IFL 2019) 및 Lean 발표 자료, Reinking 외 "Perceus"(PLDI 2021), Go B
   `a[0]`). Go와 같은 "반환값을 받은 뒤 원래 슬라이스는 쓰지 않는다" 규칙이 여전히 필요하다.
 - 구현: `src/builtins/core.cy`의 `new_slice_buffer` · `slice_buffer_count` · `slice_buffer_elems`, Zig `heap.zig`의
   `new_slice_buffer` · `init_slice_undef`(`SliceBufferElemsOffset = 8`). 크기 변경 연산은 함수 호출 없이
-  `(as[Ptr[int]] res.ptr)[-1] = res._len`으로 count를 쓴다(`clone_on_resize` 결과는 부분 슬라이스가 아니라 `ptr`가 원소 시작).
+  `(as[Ptr[int]] ((as[int] res.ptr) - 8)).* = res._len`으로 count를 쓴다(`clone_on_resize` 결과는 부분 슬라이스가 아니라 `ptr`가 원소 시작).
 - 성능(ReleaseFast, `src/tools/bench.cy` 50회 평균): count 기록을 `#if type.managed(T)`로 감싸 `[]int` append 200만 회는
   361 → 358 ms로 차이가 없다. `[]str` append 100만 회는 386 → 400 ms(+3.6%). 처음 `sync_count()` 메서드 호출로 쓴 버전은
   `[]int`까지 +8.8%였다(인터프리터의 호출 비용).
@@ -98,4 +98,11 @@ Beans"(IFL 2019) 및 Lean 발표 자료, Reinking 외 "Perceus"(PLDI 2021), Go B
   `[]str.size_down`이 컴파일조차 되지 않았다. 원소별 `@destruct` 루프로 고쳤다.
 - 회귀 테스트: `src/test/memory/slice_shared_buffer.cy`(append · `+` · remove · insert · size_down · size_up을 받는 쪽을
   남긴 채 호출, 버퍼 재사용, 부분 슬라이스).
+- wasm32 사고(2026-11-01): 처음에는 count를 음수 인덱스 `(as[Ptr[int]] res.ptr)[-1]`로 썼는데, push 뒤 Latest Build의
+  `wasm32-wasi` 잡이 `core/Slice.cy`에서 "remap of invalid memory ... canary"로 죽었다(run 41253320696, 다른 11개 잡은 성공,
+  `latest` 릴리스는 갱신되지 않음). 로컬에서 `zig build build-test -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe` 뒤
+  `wasmtime run --dir=.::/ zig-out/bin/behavior_test.wasm`으로 재현했다. 슬라이스를 쓰지 않는 프로그램도 실패해 `core.cy`를
+  컴파일하는 단계에서 손상이 생긴다. 음수 인덱스를 정수 주소 계산 `(as[int] ptr) - 8`로 바꾸자 통과했다. `sema_ptr_index`는
+  포인터를 `i64`로 비트캐스트해 `idx * 크기`를 더하는데, 32비트에서 음수 상수 인덱스를 어디서 잘못 다루는지는 추적하지
+  않았다. 64비트 macOS 테스트는 해제된 메모리를 재사용하지 않는 allocator라 드러나지 않은 것으로 본다.
 

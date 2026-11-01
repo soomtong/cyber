@@ -1511,9 +1511,9 @@ pub fn await_(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !voi
 
 pub fn notifyFutureComplete(t: *cy.Thread) anyerror!C.Ret {
     _ = t.ret(void);
-    const future = t.param(cy.heap.Future);
+    const future = t.param(*cy.heap.FutureValue);
 
-    try completeFuture(t, future);
+    try completeFuture(t, .{ .inner = future });
     return C.RetOk;
 }
 

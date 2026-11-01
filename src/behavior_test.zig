@@ -143,6 +143,7 @@ fn test_memory(run: *Runner) void {
     run.case("memory/custom_deinit.cy");
     run.case("memory/host_str_params.cy");
     run.case("memory/slice_shared_buffer.cy");
+    run.case("memory/future_resolver.cy");
 if (!is_wasm) {
     // run.case("memory/default_memory.cy");
 }

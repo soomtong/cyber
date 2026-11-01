@@ -54,6 +54,16 @@
   넘기는 형태로 바꿨다. 회귀 테스트는 lib "Host functions release their owned str params."(32바이트 초과 문자열이라야
   누수 검사 allocator에 걸린다), `memory/host_str_params.cy`, `modules/os.cy`의 `exec()`, `modules/cy.cy`.
   `cl_thread_count_objects`로는 이 누수가 잡히지 않았다.
+- 소유 규칙의 근거는 `ownOrManageArg`(`src/sema_func.zig`)다. object 타입 인자(`^T` 등)는 호출자가 관리하므로 호스트
+  함수는 빌리기만 한다. 그 밖의 타입(구조체 값)은 복사되어 피호출자가 소유한다. 따라서 `str` · `[]T`뿐 아니라 관리 필드를
+  가진 구조체(`Future[T]`, `Object` 등)를 값으로 받는 바인딩도 해제 의무가 있다.
+  2026-11-01 `str` 외 매개변수 감사: `@notifyFutureComplete(f Future[T])`가 복사본을 해제하지 않아 `FutureResolver.complete`
+  마다 `FutureValue`가 샜다. `@await_`처럼 `&FutureValue[T]`를 빌리도록 바꿨다(회귀 테스트 `memory/future_resolver.cy`).
+  쓰이지 않던 `@refCount(obj Object)`도 같은 결함이라 `Ptr[void]`로 바꿨다. `@start_thread`의 `^FutureValue`는 object 타입이라
+  문제없고, `FnTuple` 인자는 `move`로 넘겨 스레드 스택에 복사되므로 소유가 넘어간다. 나머지 바인딩은 `&T` 수신자,
+  `Ptr`, 원시 값, 관리 필드 없는 구조체(`NumberFormatConfig`, `cy.Value`)만 받는다.
+- C API 공백: `cl_thread_slice`로 `[]T`를 값으로 받을 수는 있지만 해제할 `cl_slice_deinit`이 없다. 지금은 `[&]T` span으로
+  선언해 빌리는 것이 유일한 안전한 방법이다.
 - 스크립트의 결과는 `fn main() -> T`의 반환값으로 받는다. `CLEvalResult.res`가 값 포인터, `res_t`가 타입 id이고
   `cl_value_desc`로 문자열화할 수 있다. 상위 문장만 있는 스크립트는 `res_t`가 void(1)다.
 - 출력은 `cl_vm_set_printer` · `cl_vm_set_eprinter`로 가로챈다. `print`는 본문과 개행을 따로 두 번 호출한다.

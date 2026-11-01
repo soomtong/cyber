@@ -2547,7 +2547,7 @@ fn @init_ustr_undef(thread Thread, len int) -> str:
 #[bind] fn @retain(obj Ptr[void])
 
 --| Returns the current reference count of an object.
-#[bind] fn @refCount(obj Object) -> int
+#[bind] fn @refCount(obj Ptr[void]) -> int
 
 #[bind] fn @isUniqueRef(ptr Ptr[void]) -> bool
 
@@ -4078,7 +4078,7 @@ fn Option[] :: @init(x Self) -> Self:
 fn @await_(fut &FutureValue[%T])
 
 #[bind]
-fn @notifyFutureComplete(f Future[%T])
+fn @notifyFutureComplete(fut &FutureValue[%T])
 
 type Future[T Any]:
     inner ^FutureValue[T]
@@ -4153,7 +4153,7 @@ fn (&FutureResolver[]) complete(val T):
 
     self.future_.inner.completed = true
     self.future_.inner.data = val
-    @notifyFutureComplete(self.future_)
+    @notifyFutureComplete(as[&FutureValue[T]] self.future_.inner)
 
 fn (&FutureResolver[]) future() -> Future[T]:
     return self.future_

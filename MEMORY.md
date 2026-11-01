@@ -8,3 +8,4 @@
 - [Slice.append 버퍼 공유](docs/decisions/project_slice_append_aliasing.md) — 유일 참조 버퍼를 공유하는 빠른 경로 때문에 `c := a.append(x)`처럼 받는 쪽을 남기면 관리 원소가 샘. 2026-11-01 버퍼 앞 8바이트에 초기화 원소 수를 두는 방식(Swift식)으로 고침, 관리 타입만 기록, 별칭 의미 문제는 남음
 - [VM 실행 중단](docs/decisions/project_vm_interrupt.md) — `cl_vm_interrupt`(스레드 안전) · `cl_vm_set_fuel`(검사점 횟수), 검사점은 역방향 JUMP와 CALL 계열, 결과 `CL_ERROR_INTERRUPT`, 오버헤드 1~2%
 - [0.3 → 0.4 재설계 역사](docs/history/cyber_0_3_to_0_4_overview.md) — 세 구간(upstream 2024 재설계 · upstream 2025 `b751ca6c` · fork 2026), 기준 커밋, 키워드 diff, 미완 40곳의 우선순위. 주제 문서: type_system · ownership_memory · coroutines_concurrency · error_handling · embedding_cli
+- [tars 에이전트 요구사항 초안 검토](docs/decisions/project_tars_agent_runtime_review.md) — 초안 §1.3은 0.3 기준이라 틀림, 호스트 함수 안에서 멈추고 재개하는 수단 없음(await는 spin-wait, 비-main await TODO), 대안 A(동기 호스트 함수 + VM당 OS 스레드) 권고, VM당 RSS 약 2 MB(첫 VM 6.7 MB), JSON · 정규식 · 날짜 라이브러리 없음, tcc LGPL은 FFI 끄면 미링크

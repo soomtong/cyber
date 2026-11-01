@@ -222,6 +222,8 @@ pub fn vm_initx(allocator: std.mem.Allocator) *VM {
 }
 pub const vm_reset = c.cl_vm_reset;
 pub const vm_deinit = c.cl_vm_deinit;
+pub const vm_interrupt = c.cl_vm_interrupt;
+pub const vm_set_fuel = c.cl_vm_set_fuel;
 
 pub fn vm_compile(vm: *VM, uri: []const u8, src: []const u8, config: CompileConfig) ResultCode {
     return c.cl_vm_compile(vm, to_bytes(uri), to_bytes(src), config);
@@ -408,6 +410,7 @@ pub const Await = c.CL_AWAIT;
 pub const ErrorCompile = c.CL_ERROR_COMPILE;
 pub const ErrorPanic = c.CL_ERROR_PANIC;
 pub const ErrorUnknown = c.CL_ERROR_UNKNOWN;
+pub const ErrorInterrupt = c.CL_ERROR_INTERRUPT;
 
 pub fn vm_find_type(vm: *VM, spec: []const u8) ?*Type {
     return c.cl_find_type(vm, to_bytes(spec));

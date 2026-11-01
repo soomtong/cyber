@@ -799,6 +799,14 @@ typedef struct Thread {
     // This allows bugs related to actual context to surface. (VM persists context when exiting the hot loop)
     Inst* trace_pc;
     Value* trace_fp;
+
+    // Checkpoints (loop back edges and calls) left before the eval stops with `RES_INTERRUPT`.
+    // Reset from `fuel_limit` at the start of each eval. `INT64_MAX` means no limit.
+    i64 fuel;
+    // Set with `cl_vm_set_fuel`. Zero or less means no limit.
+    i64 fuel_limit;
+    // Set by `cl_vm_interrupt`, possibly from another thread. Cleared at the start of each eval.
+    u8 interrupt;
 } Thread;
 
 typedef struct ZThread {
@@ -867,6 +875,8 @@ enum {
     RES_PANIC,
     RES_STACK_OVERFLOW,
     RES_UNKNOWN,
+    // `cl_vm_interrupt` or the fuel limit stopped the eval.
+    RES_INTERRUPT,
 };
 
 typedef struct BufferResult {

@@ -234,6 +234,9 @@ export fn cl_vm_evalx(vm: *cy.VM, uri: C.Bytes, src: C.Bytes, config: C.EvalConf
             error.Panic => {
                 res = C.ErrorPanic;
             },
+            error.Interrupted => {
+                res = C.ErrorInterrupt;
+            },
             error.Await => {
                 res = C.Await;
             },
@@ -248,6 +251,14 @@ export fn cl_vm_evalx(vm: *cy.VM, uri: C.Bytes, src: C.Bytes, config: C.EvalConf
     return res;
 }
 
+export fn cl_vm_interrupt(vm: *cy.VM) void {
+    @atomicStore(u8, &vm.main_thread.c.interrupt, 1, .release);
+}
+
+export fn cl_vm_set_fuel(vm: *cy.VM, fuel: i64) void {
+    vm.main_thread.c.fuel_limit = fuel;
+}
+
 export fn cl_vm_eval_path(vm: *cy.VM, uri: C.Bytes, config: C.EvalConfig, out: *C.EvalResult) C.ResultCode {
     var res = C.Success;
     out.* = vm.eval(C.from_bytes(uri), null, config) catch |err| b: {
@@ -257,6 +268,9 @@ export fn cl_vm_eval_path(vm: *cy.VM, uri: C.Bytes, config: C.EvalConfig, out: *
             },
             error.Panic => {
                 res = C.ErrorPanic;
+            },
+            error.Interrupted => {
+                res = C.ErrorInterrupt;
             },
             error.Await => {
                 res = C.Await;
@@ -428,6 +442,7 @@ export fn clResultName(code: C.ResultCode) C.Bytes {
         C.Success => return C.to_bytes("Success"),
         C.ErrorCompile => return C.to_bytes("CompileError"),
         C.ErrorPanic => return C.to_bytes("PanicError"),
+        C.ErrorInterrupt => return C.to_bytes("InterruptError"),
         C.ErrorUnknown => return C.to_bytes("UnknownError"),
         else => fatal(),
     }
@@ -438,7 +453,7 @@ var tempBuf: [1024]u8 align(8) = undefined;
 export fn cl_vm_error_summary(vm: *cy.VM) C.Bytes {
     if (vm.last_res == C.ErrorCompile) {
         return cl_vm_compile_error_summary(vm);
-    } else if (vm.last_res == C.ErrorPanic) {
+    } else if (vm.last_res == C.ErrorPanic or vm.last_res == C.ErrorInterrupt) {
         return cl_thread_panic_summary(vm.main_thread);
     } else {
         return C.NullStr;
@@ -895,6 +910,126 @@ test "persist_main keeps main locals across evals." {
     // A panic frees the heap, so the saves are dropped.
     try zt.eq(C.ErrorPanic, C.vm_evalx(vm, "repl", "panic('boom')", config, &res));
     try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "print(x)", config, &res));
+}
+
+test "cl_vm_set_fuel stops runaway loops and recursion." {
+    // Leak-checking allocator: stopping unwinds like a panic and frees the heap.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    C.vm_set_fuel(vm, 10000);
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.ErrorInterrupt, C.vm_eval(vm,
+        \\s := 'abcdefghijklmnopqrstuvwxyz' + '0123456789'
+        \\i := 0
+        \\while true:
+        \\  i += 1
+    , &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try zt.eq(true, std.mem.startsWith(u8, report, "panic: Out of fuel."));
+    }
+    try zt.eq(C.ErrorInterrupt, C.vm_eval(vm,
+        \\fn f(n int) -> int:
+        \\  return f(n + 1)
+        \\_ = f(0)
+    , &res));
+
+    // Enough fuel for a bounded loop, and the VM is still usable.
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\sum := 0
+        \\for 0..100 |i|:
+        \\  sum += i
+        \\use test
+        \\test.eq(4950, sum)
+    , &res));
+
+    // No limit.
+    C.vm_set_fuel(vm, 0);
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\sum := 0
+        \\for 0..100000 |i|:
+        \\  sum += 1
+    , &res));
+}
+
+test "cl_vm_interrupt stops a running eval." {
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    const S = struct {
+        var started = std.atomic.Value(bool).init(false);
+        var calls: usize = 0;
+
+        // Interrupts from inside the eval on the 100th call.
+        fn mod_tick(t_: *C.Thread) callconv(.c) C.Ret {
+            _ = C.thread_ret(t_, void);
+            calls += 1;
+            if (calls == 100) {
+                C.vm_interrupt(C.thread_vm(t_));
+            }
+            return C.RetOk;
+        }
+        // Lets the other thread know the loop is running.
+        fn mod_started(t_: *C.Thread) callconv(.c) C.Ret {
+            _ = C.thread_ret(t_, void);
+            started.store(true, .release);
+            return C.RetOk;
+        }
+        fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+            const name = C.from_bytes(uri);
+            if (std.mem.eql(u8, name, "mod")) {
+                C.mod_add_func(mod, "tick", C.BIND_FUNC(&mod_tick));
+                C.mod_add_func(mod, "started", C.BIND_FUNC(&mod_started));
+                res[0].src = C.to_bytes(
+                    \\#[bind] fn tick()
+                    \\#[bind] fn started()
+                );
+                return true;
+            } else {
+                return C.default_loader(vm_, mod, uri, res);
+            }
+        }
+        fn interrupter(vm_: *C.VM) void {
+            while (!started.load(.acquire)) {
+                std.atomic.spinLoopHint();
+            }
+            C.vm_interrupt(vm_);
+        }
+    };
+    C.vm_set_loader(vm, @ptrCast(&S.loader));
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.ErrorInterrupt, C.vm_eval(vm,
+        \\use mod
+        \\while true:
+        \\  mod.tick()
+    , &res));
+    try zt.eq(100, S.calls);
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try zt.eq(true, std.mem.startsWith(u8, report, "panic: Interrupted."));
+    }
+
+    // The next eval starts with the request cleared.
+    try zt.eq(C.Success, C.vm_eval(vm, "use mod\nmod.tick()", &res));
+
+    // From another thread.
+    if (cy.isWasm) return;
+    const thread = try std.Thread.spawn(.{}, S.interrupter, .{vm});
+    try zt.eq(C.ErrorInterrupt, C.vm_eval(vm,
+        \\use mod
+        \\mod.started()
+        \\while true:
+        \\  pass
+    , &res));
+    thread.join();
 }
 
 test "single_run frees the main block's raw buffers at deinit." {

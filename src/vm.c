@@ -327,6 +327,15 @@ static Value buildGenCallInfo(bool cont, u8 call_inst_off, u8 stack_size) {
         return code; \
     } while (false)
 
+// Stops the eval when the host asked for it (`cl_vm_interrupt`) or the fuel ran out.
+// Placed at loop back edges and calls, which every long-running program passes through.
+#define CHECKPOINT() \
+    do { \
+        if (UNLIKELY(*(volatile u8*)&t->c.interrupt || --t->c.fuel < 0)) { \
+            RETURN(RES_INTERRUPT); \
+        } \
+    } while (false)
+
 #define SAVE_STATE(code) \
     do { \
         vm->c.curPc = pc; \
@@ -854,7 +863,11 @@ beginSwitch:
         NEXT();
     }
     CASE(JUMP): {
-        pc += (int16_t)pc[1];
+        int16_t offset = (int16_t)pc[1];
+        if (offset < 0) {
+            CHECKPOINT();
+        }
+        pc += offset;
         NEXT();
     }
     CASE(ReleaseOpt): {
@@ -903,6 +916,7 @@ beginSwitch:
     }
     CASE(CALL): {
         DUMP_OP()
+        CHECKPOINT();
         u16 base = pc[1];
         uintptr_t ret_fp = (uintptr_t)stack;
         stack += base;
@@ -937,6 +951,7 @@ beginSwitch:
     }
     CASE(CALL_TRAIT): {
         DUMP_OP()
+        CHECKPOINT();
         u16 base = pc[1];
         u16 vtable_idx = pc[2];
         PcFpResult res = zCallTrait(t, pc, stack, vtable_idx, base);
@@ -996,6 +1011,7 @@ beginSwitch:
     }
     CASE(CALL_PTR): {
         DUMP_OP()
+        CHECKPOINT();
         u16 base = pc[1];
 
         PcFpResult res = zCallPtr(t, pc, stack, base);
@@ -1008,6 +1024,7 @@ beginSwitch:
     }
     CASE(CALL_UNION): {
         DUMP_OP()
+        CHECKPOINT();
         u16 base = pc[1];
 
         PcFpResult res = zCallUnion(t, pc, stack, base);

@@ -443,14 +443,16 @@ pub const Chunk = struct {
         return start;
     }
 
+    // A backward `jump` is a checkpoint that can stop the eval (`cl_vm_interrupt`, fuel), so jumps carry a
+    // debug sym like other failable insts. `pushEmptyJump` can be patched backward by `continue`.
     pub fn pushJumpBackTo(self: *Chunk, toPc: usize, node: *ast.Node) !void {
         const pc = self.buf.ops.items.len;
-        try self.pushCode(.jump, &.{@bitCast(-@as(i16, @intCast(pc - toPc)))}, node);
+        try self.pushFCode(.jump, &.{@bitCast(-@as(i16, @intCast(pc - toPc)))}, node);
     }
 
     pub fn pushEmptyJump(self: *Chunk, node: *ast.Node) !u32 {
         const start: u32 = @intCast(self.buf.ops.items.len);
-        try self.pushCode(.jump, &.{0}, node);
+        try self.pushFCode(.jump, &.{0}, node);
         return start;
     }
 

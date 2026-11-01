@@ -590,6 +590,7 @@ pub const VM = struct {
             self.num_evals += 1;
         }
 
+        self.main_thread.resetStop();
         try @call(.never_inline, cy.Thread.exec_auto, .{self.main_thread, true});
         logger.tracev("main stack size: {}", .{buf.mainStackSize});
 

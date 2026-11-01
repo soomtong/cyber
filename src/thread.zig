@@ -196,6 +196,10 @@ pub const ThreadC = extern struct {
     trace_pc: [*]cy.Inst,
     trace_fp: [*]cy.Value,
 
+    fuel: i64,
+    fuel_limit: i64,
+    interrupt: u8,
+
     pub fn stack(self: *ThreadC) []Value {
         return self.stack_ptr[0..self.stack_len];
     }
@@ -232,6 +236,9 @@ pub const Thread = struct {
                 .trace = undefined,
                 .trace_pc = undefined,
                 .trace_fp = undefined,
+                .fuel = std.math.maxInt(i64),
+                .fuel_limit = 0,
+                .interrupt = 0,
             },
 
             .unwinding = false,
@@ -423,9 +430,28 @@ pub const Thread = struct {
         return error.Panic;
     }
 
+    /// Unwinds like a panic, with the stop reason as the message, but reports `error.Interrupted`.
+    fn handleStop(self: *Thread, handle_panic: bool) !void {
+        const msg = if (self.c.interrupt != 0) "Interrupted." else "Out of fuel.";
+        _ = self.ret_panic(msg);
+        if (handle_panic) {
+            handleInterrupt(self) catch |err| {
+                if (err == error.Panic) return error.Interrupted;
+                return err;
+            };
+        }
+        return error.Interrupted;
+    }
+
+    /// Prepares a new eval: clears an earlier interrupt and refills the fuel.
+    pub fn resetStop(self: *Thread) void {
+        @atomicStore(u8, &self.c.interrupt, 0, .release);
+        self.c.fuel = if (self.c.fuel_limit > 0) self.c.fuel_limit else std.math.maxInt(i64);
+    }
+
     /// To reduce the amount of code inlined in the hot loop, handle StackOverflow at the top and resume execution.
     /// This is also the entry way for native code to call into the VM, assuming pc, framePtr, and virtual registers are already set.
-    pub fn exec_auto(self: *Thread, handle_panic: bool) error{OutOfMemory, Panic, NoDebugSym, Unexpected, Await, End}!void {
+    pub fn exec_auto(self: *Thread, handle_panic: bool) error{OutOfMemory, Panic, Interrupted, NoDebugSym, Unexpected, Await, End}!void {
         logger.tracev("begin eval loop", .{});
 
         if (comptime build_config.vmEngine == .zig) {
@@ -446,6 +472,10 @@ pub const Thread = struct {
                 if (res == vmc.RES_STACK_OVERFLOW) {
                     try @call(.never_inline, cy.Thread.growStackAuto, .{self});
                     continue;
+                }
+
+                if (res == vmc.RES_INTERRUPT) {
+                    try @call(.never_inline, handleStop, .{self, handle_panic});
                 }
 
                 if (handle_panic) {

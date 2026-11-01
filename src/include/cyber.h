@@ -43,6 +43,8 @@ enum {
     CL_ERROR_COMPILE,
     CL_ERROR_PANIC,
     CL_ERROR_UNKNOWN,
+    // `cl_vm_interrupt` or the fuel limit (`cl_vm_set_fuel`) stopped the eval.
+    CL_ERROR_INTERRUPT,
 };
 
 enum {
@@ -385,6 +387,15 @@ CLResultCode cl_vm_eval(CLVM* vm, CLBytes src, CLEvalResult* res);
 
 // Accepts a `uri` and EvalConfig.
 CLResultCode cl_vm_evalx(CLVM* vm, CLBytes uri, CLBytes src, CLEvalConfig config, CLEvalResult* res);
+
+// Asks the running eval to stop at its next checkpoint (a loop back edge or a call).
+// Safe to call from another thread. The eval returns `CL_ERROR_INTERRUPT` after unwinding like a panic,
+// and the VM can be used again. Each eval clears an earlier request when it starts.
+void cl_vm_interrupt(CLVM* vm);
+
+// Limits each following eval to `fuel` checkpoints (loop back edges and calls). Zero or less removes the limit.
+// An eval that runs out returns `CL_ERROR_INTERRUPT`.
+void cl_vm_set_fuel(CLVM* vm, int64_t fuel);
 
 // Uses a `uri` to load the source code.
 CLResultCode cl_vm_eval_path(CLVM* vm, CLBytes uri, CLEvalConfig config, CLEvalResult* res);

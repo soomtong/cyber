@@ -19,6 +19,15 @@
 - GitHub Pages는 fork에서 꺼져 있었다. `gh api -X POST repos/soomtong/cyber/pages`로 `gh-pages` 루트를
   소스로 켰다. 문서 주소는 `https://soomtong.github.io/cyber/`.
 
+## 릴리스 노트 (2026-11-01)
+
+- 릴리스 노트의 원본은 `docs/releases/<버전>.md`이고 한국어로 쓴다. GitHub 릴리스 본문은 이 파일에서 제목 줄
+  (`# Cyber x.y.z`)과 빈 줄을 뺀 것이다:
+  `tail -n +3 docs/releases/<v>.md > notes.md && gh release edit <v> -R soomtong/cyber --notes-file notes.md`.
+- 릴리스 워크플로는 본문을 비워 둔 채 릴리스를 만든다. 태그를 다시 찍어 릴리스가 새로 생기면 본문도 다시 올려야 한다.
+- 0.4.2 노트에는 이전 빌드(`build-562`)와 구분하는 스크립트 · 표를 넣었다. 성능 표는 이전 빌드를 worktree에서
+  ReleaseSafe로 빌드해 같은 머신에서 잰 값이다.
+
 ## 릴리스 번들
 
 - 릴리스 CLI는 `build_config.mod_root`가 없어서 실행 파일 디렉터리에서 `src/builtins/*.cy`,

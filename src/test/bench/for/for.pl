@@ -1,14 +1,18 @@
+use v5.34;
+use warnings;
+use Time::HiRes qw(time);
 
+my $start = time;
 
-@list = ();
-
-for (my $i = 0; $i < 1000000; $i++) {
-    push(@list, $i);
+my @list;
+for my $i (0 .. 999_999) {
+    push @list, $i;
 }
 
-$sum = 0;
+my $sum = 0;
 for my $i (@list) {
     $sum += $i;
 }
 
-print($sum);
+say 'time: ', (time - $start) * 1000;
+say $sum;

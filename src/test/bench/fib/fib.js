@@ -1,12 +1,10 @@
-const start = Date.now()
+'use strict'
 
 function fib(n) {
-    if (n < 2) {
-        return n
-    }
-    return fib(n - 1) + fib(n - 2)
+    return n < 2 ? n : fib(n - 1) + fib(n - 2)
 }
 
+const start = performance.now()
 const res = fib(30)
-console.log(`time: ${Date.now() - start}`)
+console.log(`time: ${performance.now() - start}`)
 console.log(res)

@@ -1,15 +1,16 @@
-const start = Date.now()
+'use strict'
 
-let list = []
+const start = performance.now()
 
-for (let i = 0; i < 1000000; i += 1) {
-    list.push(i)
+const arr = []
+for (let i = 0; i < 1_000_000; i++) {
+    arr.push(i)
 }
 
 let sum = 0
-for (let i of list) {
+for (const i of arr) {
     sum += i
 }
 
-console.log(`time: ${Date.now() - start}`)
+console.log(`time: ${performance.now() - start}`)
 console.log(sum)

@@ -1,13 +1,17 @@
-local start = os.clock()
+local clock = os.clock
+
+local start = clock()
+
+-- 1-based keys stay in the table's array part.
 local list = {}
 for i = 0, 999999 do
-  list[i] = i
+    list[i + 1] = i
 end
 
 local sum = 0
-for k, i in pairs(list) do
-  sum = sum + i
+for j = 1, #list do
+    sum = sum + list[j]
 end
 
-io.write("time: ", (os.clock() - start) * 1000, "\n")
-io.write(sum .. "\n")
+print(string.format("time: %f", (clock() - start) * 1000))
+print(string.format("%d", sum))

@@ -1,9 +1,12 @@
-let str = 'abcdefghijklmnopqrstuvwxyz123456'.repeat(1000000);
-str = str.concat('waldo');
+'use strict'
 
-let start = Date.now();
+const str = 'abcdefghijklmnopqrstuvwxyz123456'.repeat(1_000_000) + 'waldo'
+
+const start = performance.now()
 let idx = 0
-for (let i = 0; i < 50; i += 1) {
-    idx = str.indexOf('waldo');
+for (let i = 0; i < 50; i++) {
+    idx = str.indexOf('waldo')
 }
-console.log(`idx: ${idx} ms: ${Date.now() - start}`);
+
+console.log(`time: ${performance.now() - start}`)
+console.log(idx)

@@ -1,23 +1,29 @@
 import time
+from collections.abc import Iterator
 
-start = time.process_time()
-count = 0
 
-def inc():
-    global count
-    count += 1
-    yield
-    count += 1
-    yield
+def main() -> None:
+    start = time.perf_counter()
+    count = 0
 
-list = []
-for i in range(0, 100000):
-    f = inc()
-    next(f)
-    list.append(f)
+    def inc() -> Iterator[None]:
+        nonlocal count
+        count += 1
+        yield
+        count += 1
 
-for f in list:
-    next(f)
+    gens: list[Iterator[None]] = []
+    for _ in range(100_000):
+        g = inc()
+        next(g)
+        gens.append(g)
 
-print("time: " + str((time.process_time() - start)*1000))
-print(count)
+    for g in gens:
+        next(g, None)
+
+    print(f"time: {(time.perf_counter() - start) * 1000}")
+    print(count)
+
+
+if __name__ == "__main__":
+    main()

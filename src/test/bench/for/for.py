@@ -1,14 +1,20 @@
 import time
 
-start = time.process_time()
 
-list = []
-for i in range(0, 1000000):
-  list.append(i)
+def main() -> None:
+    start = time.perf_counter()
 
-sum = 0
-for i in list:
-  sum += i
+    arr: list[int] = []
+    for i in range(1_000_000):
+        arr.append(i)
 
-print("time: " + str((time.process_time() - start)*1000))
-print(sum)
+    total = 0
+    for i in arr:
+        total += i
+
+    print(f"time: {(time.perf_counter() - start) * 1000}")
+    print(total)
+
+
+if __name__ == "__main__":
+    main()

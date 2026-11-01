@@ -1,7 +1,7 @@
-local start = os.clock()
-local cocreate = coroutine.create
-local coresume = coroutine.resume
-local coyield = coroutine.yield
+local clock = os.clock
+local cocreate, coresume, coyield = coroutine.create, coroutine.resume, coroutine.yield
+
+local start = clock()
 local count = 0
 
 local function inc()
@@ -12,14 +12,14 @@ end
 
 local list = {}
 for i = 1, 100000 do
-    local f = cocreate(inc)
-    coresume(f)
-    list[i] = f
+    local co = cocreate(inc)
+    coresume(co)
+    list[i] = co
 end
 
-for _, f in ipairs(list) do
-    coresume(f)
+for i = 1, #list do
+    coresume(list[i])
 end
 
-io.write("time: ", (os.clock() - start) * 1000, "\n")
-io.write(count, "\n")
+print(string.format("time: %f", (clock() - start) * 1000))
+print(count)

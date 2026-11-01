@@ -1,8 +1,10 @@
-str = 'abcdefghijklmnopqrstuvwxyz123456' * 1000000 + 'waldo'
+# frozen_string_literal: true
 
-start = Time.now
+str = 'abcdefghijklmnopqrstuvwxyz123456' * 1_000_000 + 'waldo'
+
+start = Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
 idx = 0
-50.times { |i|
-    idx = str.index('waldo')
-}
-puts "idx: #{idx} ms: #{(Time.now - start) * 1000}"
+50.times { idx = str.index('waldo') }
+
+puts "time: #{Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond) - start}"
+puts idx

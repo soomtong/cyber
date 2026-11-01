@@ -1,11 +1,18 @@
 import time
 
-start = time.process_time()
 
-def fib(n):
-  if n < 2: return n
-  return fib(n - 1) + fib(n - 2)
+def fib(n: int) -> int:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
 
-res = fib(30)
-print("time: " + str((time.process_time() - start)*1000))
-print(res)
+
+def main() -> None:
+    start = time.perf_counter()
+    res = fib(30)
+    print(f"time: {(time.perf_counter() - start) * 1000}")
+    print(res)
+
+
+if __name__ == "__main__":
+    main()

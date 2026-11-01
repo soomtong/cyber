@@ -1,16 +1,17 @@
-$count = 0
+# frozen_string_literal: true
 
-fibers = []
-100000.times do |i| 
-    f = Fiber.new do 
-        $count += 1
-        Fiber.yield
-        $count += 1
-    end
-    f.resume()
-    fibers << f
+start = Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
+count = 0
+
+fibers = Array.new(100_000) do
+  Fiber.new do
+    count += 1
+    Fiber.yield
+    count += 1
+  end.tap(&:resume)
 end
 
-fibers.each {|f| f.resume() }
+fibers.each(&:resume)
 
-puts $count
+puts "time: #{Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond) - start}"
+puts count

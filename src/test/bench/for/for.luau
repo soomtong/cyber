@@ -1,13 +1,18 @@
+--!strict
+--!native
+--!optimize 2
+
 local start = os.clock()
-local list = {}
+
+local list: {number} = {}
 for i = 0, 999999 do
-  list[i] = i
+    list[i + 1] = i
 end
 
 local sum = 0
-for k, i in pairs(list) do
-  sum = sum + i
+for _, i in list do
+    sum += i
 end
 
-print("time: ", (os.clock() - start) * 1000, "\n")
-print(sum .. "\n")
+print(`time: {(os.clock() - start) * 1000}`)
+print(string.format("%d", sum))

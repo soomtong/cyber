@@ -1,10 +1,12 @@
-start = Time.now
+# frozen_string_literal: true
+
+start = Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
 
 list = []
-1000000.times {|i| list << i}
+1_000_000.times { list << it }
 
 sum = 0
-list.each {|i| sum += i}
+list.each { sum += it }
 
-puts "time: " + ((Time.now - start) * 1000).to_s
+puts "time: #{Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond) - start}"
 puts sum

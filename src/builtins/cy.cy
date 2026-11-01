@@ -15,7 +15,7 @@ const Await        = 1
 const ErrorCompile = 2
 const ErrorPanic   = 3
 
-const TypeVoid  = 0
+const TypeVoid  = 1
 const TypeBool  = 2
 const TypeI64   = 6
 const TypeInt   = TypeI64
@@ -1384,6 +1384,8 @@ fn (&REPL) eval_print(code str):
         else res.code == ErrorPanic:
             report := self.vm.panic_summary()
             eprint(report)
+            -- The panic freed the heap, so the VM drops the saved variables.
+            eprint('Variables were reset.')
         else:
             eprint('Unknown error')
         return

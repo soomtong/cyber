@@ -9,8 +9,9 @@
 - 라이브러리 경로는 쓸 만하다. VM 하나를 만들어 두고 스크립트를 반복 eval하면서 호스트 함수를 도구로 노출하는
   패턴이 동작하고, 컴파일 에러 · 런타임 panic 뒤에도 같은 VM을 계속 쓸 수 있다.
 - 실행 중인 스크립트를 밖에서 멈출 수단은 없다. 폭주 스크립트 차단은 호스트가 프로세스 · 스레드 수준에서 해야 한다.
-- REPL식 상태 유지(`persist_main`)는 upstream에서 미완성이다. 함수 · 타입 선언은 다음 eval로 넘어가지만
-  지역 변수는 넘어가지 않는다. 에이전트 루프에서는 상태를 호스트가 들고 있거나 매 턴 전체 스크립트를 다시 eval하는 쪽이 맞다.
+- REPL식 상태 유지(`persist_main`): 함수 · 타입 · `use` 선언과 main의 지역 변수가 다음 eval로 넘어간다(지역 변수는
+  2026-11-01부터). 같은 이름을 다시 선언하면 새 선언이 이긴다. panic이 나면 힙이 비워지므로 지역 변수는 모두 버려진다.
+  에이전트 루프에서는 panic에도 남아야 하는 상태라면 여전히 호스트가 들고 있는 편이 안전하다.
 
 ## 측정값
 
@@ -92,9 +93,20 @@
   모듈의 심볼을 use alias로 넘기는 루프가 `@main_init` · `@main_deinit`이라는 옛 이름만 걸러서 숨은 함수
   `@program_init` · `@program_deinit`까지 넘겼고, 새 main 청크가 같은 이름을 다시 예약하면서 중복 심볼 보고가
   decl 없는 alias의 `declNode()`를 호출했다. 걸러내는 이름을 현재 이름으로 바꿨다.
-- 그 뒤에도 `persist_main`으로 지역 변수를 넘기는 경로(`src/sema.zig`의 `sema_program`, "For REPL, restore
-  variables from previous evaluation")는 `return error.TODO`로 막혀 있어 "CompileError: Error: TODO"를 돌려준다.
-  upstream 미완성이며 이 fork에서는 손대지 않았다.
+- `persist_main` 지역 변수 이월(2026-11-01 구현). upstream은 `sema_program`에서 `return error.TODO`로 막혀 있었고,
+  `trackMainLocal`은 선언 시점의 스택 절대 주소만 저장했다. 지금 구조:
+  - `trackMainLocal`은 main 스레드 스택 시작 기준 레지스터 오프셋과 크기를 기록한다. 실행 중 스택이 커지면
+    `growStackPrecise`가 스택을 새로 할당하므로 절대 주소는 쓸 수 없다.
+  - `VM.eval`이 실행을 마치면 `copyMainLocalSaves`가 값을 VM 소유 버퍼로 복사한다. `persist_main`은 main 블록 해제
+    코드를 만들지 않으므로 값의 소유권은 저장본으로 넘어온 상태다.
+  - 다음 `sema_program`은 저장본마다 `Ptr[T]` 상수를 역참조해 지역을 선언한다(비트 단위 move, `@copy` 없음).
+    복원된 지역이 다시 track되면 이전 버퍼는 해제만 한다. 컴파일 에러면 저장본이 그대로 남는다.
+  - panic이면 unwind가 main 프레임을 해제하고 `freeHeapPages`가 힙을 비우므로 `dropMainLocalSaves`가 기록만 지운다.
+    CLI REPL은 이때 "Variables were reset."을 출력한다.
+  - 이월된 심볼은 decl 없는 use alias다. 새 main이 같은 이름을 선언하면 중복 보고(`declNode()` panic) 대신 대체되게
+    했다(`src/module.zig`의 `isCarriedOverSym`). 이전에는 `use test`를 두 번 eval하면 프로세스가 죽었다.
+  - 회귀 테스트는 lib "persist_main keeps main locals across evals."(누수 검사 allocator, 구조체 · 힙 문자열 ·
+    스택 재할당 · 재선언 · 컴파일 에러 · panic).
 
 ## 발견한 다른 문제
 
@@ -104,9 +116,9 @@
   아니다. 2026-11-01 고침: `repl()`이 CLI 앱의 짧은 이름 표(`mod_uris`)에 `main` → `main`을 넣어 resolver가 그대로
   통과시킨다. 파일 실행 경로는 영향이 없다. 그 뒤 첫 입력에서 세그폴트가 났는데, 원인은 아래 "지역 변수 반환" 버그였다
   (`REPL.new()`가 `VM`을 담은 지역 `ctx`를 반환하면서 `vm_deinit`이 실행됨). 둘을 고친 뒤 REPL은 시작하고 표현식 ·
-  함수 호출을 평가한다. 지역 변수를 선언하면 다음 입력부터 위의 `persist_main` TODO에 걸린다.
-  `trackMainLocal`(`src/builtins/core.zig`)은 이전 프레임의 스택 주소를 저장할 뿐 값을 복사하지 않고, 복원 코드는
-  8바이트 값(`semaConst`)만 가정한다. 이 부분은 아직 남았다.
+  함수 호출을 평가하고, 지역 변수 이월(위)까지 넣은 뒤에는 변수도 이어진다. `cy.cy`의 `TypeVoid`가 0으로 잘못 적혀
+  있어(`TYPE_VOID`는 1) void 결과마다 빈 줄을 찍던 것도 고쳤다. 맨 이름(`x`)만 입력하는 것은 언어 규칙상 컴파일 에러라
+  REPL이 값을 바로 보여 주지는 않는다(`print(x)`를 써야 함).
 - 지역 변수 반환이 복사였다(2026-11-01 고침). `return r`이 `semaOwn`으로 복사본을 만들었고, `@copy`가 없는 타입은
   비트 단위 복사라 반환 시 지역의 `@deinit`과 호출자 쪽 `@deinit`이 같은 상태에 두 번 돌았다(자원 이중 해제).
   명시적 `move`는 "같은 블록에서 선언한 변수만" 허용해 분기 안의 `return move r`도 막혀 있었다.

@@ -847,6 +847,56 @@ test "persist_main keeps top level funcs across evals." {
     try zt.eq(123, @as(*i64, @ptrCast(res.res)).*);
 }
 
+test "persist_main keeps main locals across evals." {
+    // Leak-checking allocator: restored values are moved, not copied, and a panic drops the saves.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\type P:
+        \\  n int
+        \\  name str
+        \\fn depth(n int) -> int:
+        \\  return if (n == 0) 0 else 1 + depth(n - 1)
+        \\x := 5
+        \\s := 'abcdefghijklmnopqrstuvwxyz' + '0123456789'
+        \\p := P{n=1, name=s + '!'}
+        \\-- Grows the stack after the locals were declared.
+        \\_ = depth(20000)
+    , config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\use test
+        \\test.eq(5, x)
+        \\test.eq(36, s.len())
+        \\test.eq(37, p.name.len())
+        \\x = x + 1
+        \\p.n += 1
+    , config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\use test
+        \\test.eq(6, x)
+        \\test.eq(2, p.n)
+        \\-- Redeclaring releases the previous value.
+        \\s := 10
+        \\test.eq(10, s)
+    , config, &res));
+    // The expected errors would print error traces.
+    C.setSilent(true);
+    defer C.setSilent(false);
+    // A compile error keeps the saves.
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "undefined_thing", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\use test
+        \\test.eq(6, x)
+    , config, &res));
+    // A panic frees the heap, so the saves are dropped.
+    try zt.eq(C.ErrorPanic, C.vm_evalx(vm, "repl", "panic('boom')", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "print(x)", config, &res));
+}
+
 test "single_run frees the main block's raw buffers at deinit." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

@@ -95,18 +95,28 @@ pub fn reportDupSym(c: *cy.Chunk, sym: *cy.Sym, name: []const u8, decl: ?*ast.No
     return error.CompileError;
 }
 
+/// A `persist_main` eval carries the previous main's symbols over as use aliases without a declaration.
+/// A new declaration of the same name replaces them, like redefining in a REPL.
+fn isCarriedOverSym(sym: *cy.Sym) bool {
+    return sym.type == .use_alias and sym.cast(.use_alias).decl == null;
+}
+
 pub fn addUniqueSym(c: *cy.Chunk, mod: *Module, name: []const u8, sym: *cy.Sym, decl: ?*ast.Node) !void {
     const res = try mod.symMap.getOrPut(c.alloc, name);
     if (res.found_existing) {
         const existing = res.value_ptr.*;
-        try reportDupSym(c, existing, name, decl);
+        if (!isCarriedOverSym(existing)) {
+            try reportDupSym(c, existing, name, decl);
+        }
     }
     res.value_ptr.* = sym;
 }
 
 fn prepareFuncSym(c: *cy.Chunk, parent: *cy.Sym, mod: *Module, name: []const u8, decl: ?*ast.FuncDecl) !*cy.sym.FuncSym {
     if (mod.symMap.get(name)) |sym| {
-        if (sym.type == .func) {
+        if (isCarriedOverSym(sym)) {
+            _ = mod.symMap.remove(name);
+        } else if (sym.type == .func) {
             return sym.cast(.func);
         } else {
             try reportDupSym(c, sym, name, @ptrCast(decl));

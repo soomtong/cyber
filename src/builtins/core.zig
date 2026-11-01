@@ -1530,30 +1530,29 @@ pub fn readCodepoint(t: *cy.Thread) !Value {
 
 pub fn trackMainLocal(t: *cy.Thread) !C.Ret {
     _ = t.ret(void);
-    const name = t.param(cy.heap.Str).slice();
+    const name_s = t.param(cy.heap.Str);
+    defer t.heap.destructStr(&name_s);
+    const name = name_s.slice();
     const type_id = t.param(i64);
     const val = t.param([*]Value);
     const val_t = t.heap.getType(@intCast(type_id));
-    const reg_size = (val_t.size() + 7) >> 3;
+    const save: cy.vm.LocalSave = .{
+        .name = try t.alloc.dupe(u8, name),
+        .val_t = val_t,
+        .stack_off = @divExact(@intFromPtr(val) - @intFromPtr(t.c.stack_ptr), @sizeOf(Value)),
+        .reg_size = (val_t.size() + 7) >> 3,
+    };
     const res = try t.c.vm.env_local_saves_map.getOrPut(t.alloc, name);
     if (!res.found_existing) {
-        const name_dup = try t.alloc.dupe(u8, name);
-        res.key_ptr.* = name_dup;
+        res.key_ptr.* = save.name;
         res.value_ptr.* = t.c.vm.env_local_saves.items.len;
-        try t.c.vm.env_local_saves.append(t.alloc, .{
-            .name = name_dup,
-            .val_t = val_t,
-            .value = val[0..reg_size],
-        });
+        try t.c.vm.env_local_saves.append(t.alloc, save);
     } else {
-        const name_dup = try t.alloc.dupe(u8, name);
-        res.key_ptr.* = name_dup;
+        // A restored or redeclared local replaces the previous save. Its value was already moved
+        // into the local, so only the copy is freed.
+        res.key_ptr.* = save.name;
         t.c.vm.env_local_saves.items[res.value_ptr.*].deinit(t.alloc);
-        t.c.vm.env_local_saves.items[res.value_ptr.*] = .{
-            .name = name_dup,
-            .val_t = val_t,
-            .value = val[0..reg_size],
-        };
+        t.c.vm.env_local_saves.items[res.value_ptr.*] = save;
     }
     return C.RetOk;
 }

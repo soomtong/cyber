@@ -383,6 +383,26 @@ pub const VM = struct {
         self.compiler.cont = false;
     }
 
+    /// Copies the main locals tracked during the last eval off the stack so the next eval can restore them.
+    fn copyMainLocalSaves(self: *VM) void {
+        const stack = self.main_thread.c.stack();
+        for (self.env_local_saves.items) |*save| {
+            if (save.owned) continue;
+            save.value = self.alloc.dupe(cy.Value, stack[save.stack_off..save.stack_off + save.reg_size]) catch cy.fatal();
+            save.owned = true;
+        }
+    }
+
+    /// A panic unwinds the main frame and frees the thread's heap, so the tracked values are gone.
+    /// Only the bookkeeping is freed here.
+    fn dropMainLocalSaves(self: *VM) void {
+        for (self.env_local_saves.items) |save| {
+            save.deinit(self.alloc);
+        }
+        self.env_local_saves.clearRetainingCapacity();
+        self.env_local_saves_map.clearRetainingCapacity();
+    }
+
     pub fn api(self: *VM) *C.ZVM {
         return @ptrCast(self);
     }
@@ -438,7 +458,11 @@ pub const VM = struct {
             tt = cy.debug.timer();
             defer tt.endPrintVerbose("eval");
 
-            const val = try self.exec_bytecode(res.vm);
+            const val = self.exec_bytecode(res.vm) catch |err| {
+                if (config.persist_main) self.dropMainLocalSaves();
+                return err;
+            };
+            if (config.persist_main) self.copyMainLocalSaves();
             return .{
                 .res = @ptrCast(val),
                 .res_t = if (self.compiler.main_func) |main_func| main_func.sig.ret.id() else bt.Void,
@@ -1248,13 +1272,23 @@ pub fn getFuncPtrType(vm: *cy.VM, sig: cy.sema.FuncSigId) !*cy.Type {
     return cy.sema.getFuncPtrType(chunk, sig);
 }
 
-const LocalSave = struct {
+/// A main local kept for the next `persist_main` eval (REPL).
+pub const LocalSave = struct {
     name: []const u8,
     val_t: *cy.Type,
-    value: []const cy.Value,
+    /// Register offset from the main thread's stack start. An offset, not a pointer, since the stack can be
+    /// reallocated when it grows.
+    stack_off: usize,
+    reg_size: usize,
+    /// A copy owned by the VM, made when the eval that declared the local ends. Empty until then.
+    value: []const cy.Value = &.{},
+    owned: bool = false,
 
     pub fn deinit(self: *const LocalSave, alloc: std.mem.Allocator) void {
         alloc.free(self.name);
+        if (self.owned) {
+            alloc.free(self.value);
+        }
     }
 };
 

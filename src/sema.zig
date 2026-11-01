@@ -4569,21 +4569,20 @@ pub fn sema_program(c: *cy.Chunk, opt_main_func: ?*cy.Func) !*ir.Stmt {
 
     // For REPL, restore variables from previous evaluation.
     if (c.vm.config.persist_main) {
+        // `VM.eval` copied each saved local into a VM-owned buffer after the previous run.
+        // The new local takes the value over bitwise (a move): the buffer is not destructed, only freed,
+        // when the restored local is tracked again. The saves stay intact if this compile fails.
         for (c.vm.env_local_saves.items) |save| {
-            {
-                return error.TODO;
-            }
-            const init = try c.semaConst(save.value.val, save.val_t, c.ast.null_node);
+            std.debug.assert(save.owned);
+            const ptr_t = try getPtrType(c, save.val_t);
+            const addr = try c.semaConst(@intFromPtr(save.value.ptr), ptr_t, c.ast.null_node);
+            const init = try semaDeref(c, addr, c.ast.null_node);
             const name_dup = try c.ir.alloc.dupe(u8, save.name);
             const local_res = try declareLocalInit(c, name_dup, save.val_t, init, c.ast.null_node);
             const local = &c.varStack.items[local_res.id];
             local.inner.local.allow_redeclare = true;
             try semaTrackMainLocal(c, local, c.ast.null_node);
-
-            save.deinit(c.alloc);
         }
-        c.vm.env_local_saves.clearRetainingCapacity();
-        c.vm.env_local_saves_map.clearRetainingCapacity();
     }
 
     if (opt_main_func) |main_func| {

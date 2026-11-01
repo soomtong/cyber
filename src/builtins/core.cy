@@ -941,9 +941,9 @@ fn (&Buffer[]) @release_borrow():
     self.header &&= ~(3 << 62)
 
 fn (scope &Buffer[]) @index_addr(idx int) -> scope &T:
-    if idx.uge(self.length):
+    if (as[r64] idx) >= (as[r64] self.length):
         panic_oob(idx)
-    return @scope_ptr_to_borrow('self', self.base + idx)
+    return @scope_ptr_to_borrow('self', *self.base[idx])
 
 fn (&&Buffer[]) `<<`(elem T):
     if self.length == self.cap():
@@ -1103,9 +1103,9 @@ fn (&Slice[]) @deinit():
             @destruct(T, base + i)
 
 fn (scope &Slice[]) @index_addr(idx int) -> scope &T:
-    if idx.uge(self._len):
+    if (as[r64] idx) >= (as[r64] self._len):
         panic_oob(idx)
-    return @scope_ptr_to_borrow('self', as[Ptr[T]] self.ptr + idx)
+    return @scope_ptr_to_borrow('self', *self.ptr[idx])
 
 -- Old $index_addr kept for reference.
 -- fn (&Slice[]) @index_addr(idx int) -> RefChild[PartialBuffer[T], T]:
@@ -1117,12 +1117,12 @@ fn (scope &Slice[]) @index_addr(idx int) -> scope &T:
 --     }
 
 fn (&Slice[]) @index(idx int) -> T:
-    if idx.uge(self._len):
+    if (as[r64] idx) >= (as[r64] self._len):
         panic_oob(idx)
     return self.ptr[idx]
 
 fn (&Slice[]) @set_index(idx int, val T):
-    if idx.uge(self._len):
+    if (as[r64] idx) >= (as[r64] self._len):
         panic_oob(idx)
     self.ptr[idx] = val
 
@@ -1449,7 +1449,7 @@ fn Span[] :: @init_sequence(scope span [&]T) -> scope [&]T:
     return span
 
 fn (&Span[]) @index_addr(idx int) -> Ptr[T]:
-    if idx.uge(self.length):
+    if (as[r64] idx) >= (as[r64] self.length):
         panic_oob(idx)
     return as[Ptr[T]] self.base + idx
 
@@ -1592,12 +1592,12 @@ fn (&ArrayStore[]) @deinit():
     free(self.buf)
 
 fn (&ArrayStore[]) @index(idx int) -> T:
-    if idx.uge(self.length):
+    if (as[r64] idx) >= (as[r64] self.length):
         panic_oob(idx)
     return self.buf[idx]
 
 fn (&ArrayStore[]) @set_index(idx int, val T):
-    if idx.uge(self.length):
+    if (as[r64] idx) >= (as[r64] self.length):
         panic_oob(idx)
     self.buf[idx] = val
 
@@ -1725,17 +1725,17 @@ fn (&Array[]) @release_borrow():
     self.header &&= ~(3 << 62)
 
 fn (scope &Array[]) @index_addr(idx int) -> scope &T:
-    if idx.uge(self.length):
+    if (as[r64] idx) >= (as[r64] self.length):
         panic_oob(idx)
-    return @scope_ptr_to_borrow('self', as[Ptr[T]] self.buf + idx)
+    return @scope_ptr_to_borrow('self', *self.buf[idx])
 
 fn (&Array[]) @index(idx int) -> T:
-    if idx.uge(self.length):
+    if (as[r64] idx) >= (as[r64] self.length):
         panic_oob(idx)
     return self.buf[idx]
 
 fn (&Array[]) @set_index(idx int, val T):
-    if idx.uge(self.length):
+    if (as[r64] idx) >= (as[r64] self.length):
         panic_oob(idx)
     self.buf[idx] = val
 
@@ -1782,8 +1782,9 @@ fn (&&Array[]) `<<`(arr AsSpan[T]):
 
 --| Appends a value to the end of the array.
 fn (&&Array[]) append(val T):
-    self.ensure_cap(self.length + 1)
-    @ptr_init(self.buf + self.length, val)
+    if self.length >= (self.header && ~(3 << 62)):
+        self.ensure_cap(self.length + 1)
+    @ptr_init(*self.buf[self.length], val)
     self.length += 1
 
 --| Appends the elements of a span to the end of this array.
@@ -1918,11 +1919,12 @@ fn (sink Array[]) as_buffer() -> Buffer[T]:
     }
 
 fn (&Array[]) next(idx &int) -> ?T:
-    if idx.* == self.length:
+    i := idx.*
+    if (as[r64] i) >= (as[r64] self.length):
         return none
 
-    val := self[idx.*]
-    idx.* += 1
+    val := self.buf[i]
+    idx.* = i + 1
     return val
 
 --| Removes an element at index `idx`.
@@ -3383,7 +3385,7 @@ fn (scope &str) span() -> scope Span[byte]:
 --| Returns the rune at byte index `idx`. The replacement character (0xFFFD) is returned for an invalid UTF-8 rune.
 #[bind]
 fn (&str) rune_at(idx int) -> r32:
-    if idx.uge(self.len()):
+    if (as[r64] idx) >= (as[r64] self.len()):
         panic('OutOfBounds')
     if self.hasAsciiFlag():
         return self.ptr[idx]
@@ -3728,7 +3730,7 @@ fn (&str) lower() -> str:
     return res
 
 fn (&str) next(idx &int) -> ?byte:
-    if idx.*.uge(self.len()):
+    if (as[r64] idx.*) >= (as[r64] self.len()):
         return none
     res := self[idx.*]
     idx.* += 1
@@ -3862,7 +3864,7 @@ type GenericVector[T Any] _
 type PartialVector[T Any, const N int] _
 
 fn (scope &PartialVector[]) @index_addr(idx int) -> scope &T:
-    if idx.uge(self.len()):
+    if (as[r64] idx) >= (as[r64] self.len()):
         panic_oob(idx)
     elem_addr := @unsafeCast(int, self) + 8
     return @scope_ptr_to_borrow('self', as[Ptr[T]] elem_addr + idx)
@@ -4172,7 +4174,7 @@ type PtrSpan[T Any]:
     length int    = 0
 
 fn (&PtrSpan[]) @index_addr(idx int) -> Ptr[T]:
-    if idx.uge(self.length):
+    if (as[r64] idx) >= (as[r64] self.length):
         panic_oob(idx)
     return *self.ptr[idx]
 

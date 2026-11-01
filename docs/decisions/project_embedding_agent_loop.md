@@ -112,5 +112,8 @@
   명시적 `move`는 "같은 블록에서 선언한 변수만" 허용해 분기 안의 `return move r`도 막혀 있었다.
   `semaReturnExprStmt`(`src/sema.zig`)가 이제 이 함수가 소유한 관리 타입 지역(참조 매개변수 · 부분 move된 지역 ·
   main 블록 제외)을 반환하면 move한다. 반환용 소멸 코드를 만드는 동안만 지역을 dead로 두고 되돌리므로, return 뒤는
-  도달 불가이고 다른 분기에는 영향이 없다. 반환 타입으로 감싸는 변환(`-> ?R`에 `r` 반환 등)을 거치면 아직 복사다.
+  도달 불가이고 다른 분기에는 영향이 없다. 반환식이 이름 하나일 때는 반환 타입 맞춤(`r` → `?R` · `!R`)을 move 판단 뒤로 미뤄 감싸는 경우도 move한다. 다른 식은
+  `fit_target`이 하위 식 검사에도 쓰여 기존 경로를 유지한다. `trace_test`의 "ARC in loops" 기대값은 move로 retain/release가
+  두 쌍 줄어 11에서 9로 바꿨다. 이 변경을 처음 넣었을 때 드러난 ReleaseFast 메모리 손상은 move가 아니라 `setOpArgU48`의
+  8바이트 쓰기 때문이었다(`project_zig_017_upgrade.md`).
   회귀 테스트 `memory/return_local_move.cy`(수정을 되돌리면 실패 확인).

@@ -1,0 +1,276 @@
+============================================================
+Use statements
+============================================================
+
+use os
+use t 'test'
+use * 'mod'
+-use math.Vec2 = Vec2
+
+------------------------------------------------------------
+
+(source_file
+  (use_statement
+    (module_path
+      (identifier)))
+  (use_statement
+    (module_path
+      (identifier))
+    (string
+      (string_content)))
+  (use_statement
+    (wildcard)
+    (string
+      (string_content)))
+  (use_statement
+    (visibility)
+    (module_path
+      (identifier)
+      (identifier))
+    (identifier)))
+
+============================================================
+Type with fields and methods
+============================================================
+
+type Account:
+    name    str
+    -balance float = 0
+
+fn Account :: @init(name str) -> Account:
+    return {name=name, balance=0}
+
+fn (&Account) deposit(amt float):
+    self.balance += amt
+
+------------------------------------------------------------
+
+(source_file
+  (type_declaration
+    (identifier)
+    (member_block
+      (field_declaration
+        (identifier)
+        (identifier))
+      (field_declaration
+        (visibility)
+        (identifier)
+        (identifier)
+        (number))))
+  (function_definition
+    (identifier)
+    (at_identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier)))
+    (return_type
+      (identifier))
+    (block
+      (return_statement
+        (initializer
+          (pair
+            (identifier)
+            (identifier))
+          (pair
+            (identifier)
+            (number))))))
+  (function_definition
+    (receiver
+      (borrow_expression
+        (identifier)))
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier)))
+    (block
+      (augmented_assignment
+        (member_expression
+          (identifier)
+          (identifier))
+        (identifier)))))
+
+============================================================
+Enum, cunion, trait and alias
+============================================================
+
+type Color enum:
+    case red
+    case green
+
+type Shape cunion:
+    with Drawable
+    case circle Circle
+    case square Square
+
+type Drawable trait:
+    fn draw(self) -> void
+
+type Vec2(x float, y float)
+
+-type c_int = c.c_int
+type Handle _
+
+------------------------------------------------------------
+
+(source_file
+  (type_declaration
+    (identifier)
+    (member_block
+      (case_declaration
+        (identifier))
+      (case_declaration
+        (identifier))))
+  (type_declaration
+    (identifier)
+    (member_block
+      (impl_declaration
+        (identifier))
+      (case_declaration
+        (identifier)
+        (identifier))
+      (case_declaration
+        (identifier)
+        (identifier))))
+  (type_declaration
+    (identifier)
+    (block
+      (function_definition
+        (identifier)
+        (parameters
+          (parameter
+            (identifier)))
+        (return_type
+          (identifier)))))
+  (type_declaration
+    (identifier)
+    (tuple_fields
+      (field_declaration
+        (identifier)
+        (identifier))
+      (field_declaration
+        (identifier)
+        (identifier))))
+  (type_alias
+    (visibility)
+    (identifier)
+    (member_expression
+      (identifier)
+      (identifier)))
+  (type_declaration
+    (identifier)
+    (custom)))
+
+============================================================
+Templates and attributes
+============================================================
+
+with [K Copyable, V Copyable]
+fn hash(k K, v V) -> int:
+    return 0
+
+fn eq(exp %T, act T):
+    pass
+
+#[bind='Wyhash.hash']
+fn hash_str(s str, seed int) -> int
+
+#[generator]
+fn go() -> int:
+    yield 0
+
+------------------------------------------------------------
+
+(source_file
+  (with_declaration
+    (parameter
+      (identifier)
+      (identifier))
+    (parameter
+      (identifier)
+      (identifier))
+    (function_definition
+      (identifier)
+      (parameters
+        (parameter
+          (identifier)
+          (identifier))
+        (parameter
+          (identifier)
+          (identifier)))
+      (return_type
+        (identifier))
+      (block
+        (return_statement
+          (number)))))
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (template_parameter))
+      (parameter
+        (identifier)
+        (identifier)))
+    (block
+      (pass_statement)))
+  (decorated_definition
+    (attribute_list
+      (attribute
+        (identifier)
+        (string
+          (string_content))))
+    (function_definition
+      (identifier)
+      (parameters
+        (parameter
+          (identifier)
+          (identifier))
+        (parameter
+          (identifier)
+          (identifier)))
+      (return_type
+        (identifier))))
+  (decorated_definition
+    (attribute_list
+      (attribute
+        (identifier)))
+    (function_definition
+      (identifier)
+      (parameters)
+      (return_type
+        (identifier))
+      (block
+        (yield_statement
+          (number))))))
+
+============================================================
+Constants and globals
+============================================================
+
+const N = 10
+const Max int = 100
+global counter int = 0
+var buf [4]byte = undef
+
+------------------------------------------------------------
+
+(source_file
+  (const_declaration
+    (identifier)
+    (number))
+  (const_declaration
+    (identifier)
+    (identifier)
+    (number))
+  (global_declaration
+    (identifier)
+    (identifier)
+    (number))
+  (var_declaration
+    (identifier)
+    (vector_type
+      (number)
+      (identifier))
+    (undef)))

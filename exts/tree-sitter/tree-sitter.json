@@ -1,0 +1,38 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "cyber",
+      "camelcase": "Cyber",
+      "title": "Cyber",
+      "scope": "source.cyber",
+      "file-types": ["cy"],
+      "first-line-regex": "^#!.*\\bcyber\\b",
+      "injection-regex": "^(cy|cyber)$",
+      "highlights": "queries/highlights.scm",
+      "locals": "queries/locals.scm",
+      "tags": "queries/tags.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.4.2",
+    "license": "MIT",
+    "description": "Cyber grammar for tree-sitter",
+    "authors": [
+      { "name": "instance.id" },
+      { "name": "YoungTaek", "email": "soomtong@gmail.com" }
+    ],
+    "links": {
+      "repository": "https://github.com/soomtong/cyber"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": false,
+    "node": false,
+    "python": false,
+    "rust": false,
+    "swift": false,
+    "zig": false
+  }
+}

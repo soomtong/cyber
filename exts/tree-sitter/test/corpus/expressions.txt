@@ -1,0 +1,250 @@
+============================================================
+Operators and precedence
+============================================================
+
+a := 1 + 2 * 3 ** 4 << 1
+b := not x and y or z
+c := a.b.c(1, name: 2)[0]
+d := -x.!y.?.*
+
+------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (binary_expression
+      (number)
+      (binary_expression
+        (number)
+        (binary_expression
+          (number)
+          (binary_expression
+            (number)
+            (number))))))
+  (variable_declaration
+    (identifier)
+    (not_expression
+      (binary_expression
+        (binary_expression
+          (identifier)
+          (identifier))
+        (identifier))))
+  (variable_declaration
+    (identifier)
+    (index_expression
+      (call_expression
+        (member_expression
+          (member_expression
+            (identifier)
+            (identifier))
+          (identifier))
+        (arguments
+          (number)
+          (named_argument
+            (identifier)
+            (number))))
+      (number)))
+  (variable_declaration
+    (identifier)
+    (unary_expression
+      (dereference
+        (unwrap_option
+          (unwrap_choice
+            (identifier)
+            (identifier)))))))
+
+============================================================
+Types as expressions
+============================================================
+
+a := []int{1, 2, 3}
+b := Map[str, int]{}
+c := as[i32] n
+p := ?*Node
+v := [&]byte
+f := fn(int, str) -> bool
+
+------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (slice_type
+      (init_expression
+        (identifier)
+        (initializer
+          (number)
+          (number)
+          (number)))))
+  (variable_declaration
+    (identifier)
+    (init_expression
+      (index_expression
+        (identifier)
+        (identifier)
+        (identifier))
+      (initializer)))
+  (variable_declaration
+    (identifier)
+    (cast_expression
+      (identifier)
+      (identifier)))
+  (variable_declaration
+    (identifier)
+    (option_type
+      (pointer_type
+        (identifier))))
+  (variable_declaration
+    (identifier)
+    (span_type
+      (identifier)))
+  (variable_declaration
+    (identifier)
+    (function_type
+      (parameters
+        (parameter
+          (identifier))
+        (parameter
+          (identifier)))
+      (return_type
+        (identifier)))))
+
+============================================================
+Lambdas
+============================================================
+
+a := |x| x + 1
+b := fn(x int) -> int => x * 2
+c := fn(x int) -> int:
+    return x
+items.sort(&|a, b| a < b)
+
+------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (infer_lambda
+      (parameter)
+      (binary_expression
+        (identifier)
+        (number))))
+  (variable_declaration
+    (identifier)
+    (lambda
+      (parameters
+        (parameter
+          (identifier)
+          (identifier)))
+      (return_type
+        (identifier))
+      (binary_expression
+        (identifier)
+        (number))))
+  (variable_declaration
+    (identifier)
+    (lambda
+      (parameters
+        (parameter
+          (identifier)
+          (identifier)))
+      (return_type
+        (identifier))
+      (block
+        (return_statement
+          (identifier)))))
+  (expression_statement
+    (call_expression
+      (member_expression
+        (identifier)
+        (identifier))
+      (arguments
+        (borrow_expression
+          (infer_lambda
+            (parameter)
+            (parameter)
+            (binary_expression
+              (identifier)
+              (identifier))))))))
+
+============================================================
+Unwrap with default
+============================================================
+
+a := opt ?else 0
+b := res !else |e|:
+    return e
+idx := path.lastIndexOf('/') ?else: return path
+
+------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (unwrap_or_expression
+      (identifier)
+      (number)))
+  (variable_declaration
+    (identifier)
+    (unwrap_or_block
+      (identifier)
+      (capture
+        (identifier))
+      (block
+        (return_statement
+          (identifier)))))
+  (variable_declaration
+    (identifier)
+    (unwrap_or_block
+      (call_expression
+        (member_expression
+          (identifier)
+          (identifier))
+        (arguments
+          (string
+            (string_content))))
+      (block
+        (return_statement
+          (identifier))))))
+
+============================================================
+Strings
+============================================================
+
+a := 'single %{name} text'
+b := "double \n"
+c := '''multi
+line %{x}'''
+d := `raw`
+e := c'a'
+
+------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (string
+      (string_content)
+      (interpolation
+        (identifier))
+      (string_content)))
+  (variable_declaration
+    (identifier)
+    (string
+      (string_content)
+      (escape_sequence)))
+  (variable_declaration
+    (identifier)
+    (string
+      (string_content)
+      (interpolation
+        (identifier))))
+  (variable_declaration
+    (identifier)
+    (raw_string))
+  (variable_declaration
+    (identifier)
+    (special_string
+      (identifier)
+      (string
+        (string_content)))))

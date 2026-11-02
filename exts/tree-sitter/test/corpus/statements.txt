@@ -1,0 +1,241 @@
+============================================================
+If, else and unwrap
+============================================================
+
+if a > 1:
+    print(a)
+else b:
+    pass
+else:
+    pass
+
+if opt |x|: print(x)
+
+------------------------------------------------------------
+
+(source_file
+  (if_statement
+    (binary_expression
+      (identifier)
+      (number))
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (arguments
+            (identifier)))))
+    (else_if_clause
+      (identifier)
+      (block
+        (pass_statement)))
+    (else_clause
+      (block
+        (pass_statement))))
+  (if_statement
+    (identifier)
+    (capture
+      (identifier))
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (arguments
+            (identifier)))))
+    (block)))
+
+============================================================
+Loops
+============================================================
+
+for 0..10 |i|:
+    print(i)
+
+for items |idx, item|:
+    continue
+
+while:
+    break
+
+while cond: x += 1
+
+while next() |v|:
+    use_it(v)
+
+------------------------------------------------------------
+
+(source_file
+  (for_statement
+    (range_expression
+      (number)
+      (number))
+    (capture
+      (identifier))
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (arguments
+            (identifier))))))
+  (for_statement
+    (identifier)
+    (capture
+      (identifier)
+      (identifier))
+    (block
+      (continue_statement)))
+  (while_statement
+    (block
+      (break_statement)))
+  (while_statement
+    (identifier)
+    (block
+      (augmented_assignment
+        (identifier)
+        (number)))
+    (block))
+  (while_statement
+    (call_expression
+      (identifier)
+      (arguments))
+    (capture
+      (identifier))
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (arguments
+            (identifier)))))))
+
+============================================================
+Switch
+============================================================
+
+switch x:
+    case 0, 1:
+        print('small')
+    case .circle |c| => c.r
+    case 2
+    else => none
+
+res := switch tag:
+    case .a => 1
+    else => 2
+
+------------------------------------------------------------
+
+(source_file
+  (switch_statement
+    (identifier)
+    (case_clause
+      (number)
+      (number)
+      (block
+        (expression_statement
+          (call_expression
+            (identifier)
+            (arguments
+              (string
+                (string_content)))))))
+    (case_clause
+      (symbol_literal
+        (identifier))
+      (capture
+        (identifier))
+      (member_expression
+        (identifier)
+        (identifier)))
+    (case_clause
+      (number))
+    (switch_else_clause
+      (none)))
+  (variable_declaration
+    (identifier)
+    (switch_expression
+      (identifier)
+      (case_clause
+        (symbol_literal
+          (identifier))
+        (number))
+      (switch_else_clause
+        (number)))))
+
+============================================================
+Try and begin
+============================================================
+
+try:
+    risky()!
+else err:
+    print(err)
+
+begin:
+    pass
+
+------------------------------------------------------------
+
+(source_file
+  (try_statement
+    (block
+      (expression_statement
+        (unwrap_expression
+          (call_expression
+            (identifier)
+            (arguments)))))
+    (catch_clause
+      (identifier)
+      (block
+        (expression_statement
+          (call_expression
+            (identifier)
+            (arguments
+              (identifier)))))))
+  (begin_statement
+    (block
+      (pass_statement))))
+
+============================================================
+Compile time statements
+============================================================
+
+#if meta.is_vm_target():
+    pass
+#else:
+    pass
+
+switch t:
+    #for meta.enum_values(T) |Tag|:
+        case Tag:
+            pass
+
+------------------------------------------------------------
+
+(source_file
+  (comptime_statement
+    (if_statement
+      (call_expression
+        (member_expression
+          (identifier)
+          (identifier))
+        (arguments))
+      (block
+        (pass_statement))
+      (else_clause
+        (block
+          (pass_statement)))))
+  (switch_statement
+    (identifier)
+    (comptime_statement
+      (for_statement
+        (call_expression
+          (member_expression
+            (identifier)
+            (identifier))
+          (arguments
+            (identifier)))
+        (capture
+          (identifier))
+        (block
+          (case_clause
+            (identifier)
+            (block
+              (pass_statement))))))))

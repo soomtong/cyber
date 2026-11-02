@@ -30,6 +30,7 @@ const Intrinsic = enum {
     null,
     dtor_str,
     cmp_str,
+    copy_str,
 };
 
 pub fn genAll(c: *cy.Compiler) !void {
@@ -83,6 +84,11 @@ pub fn genAll(c: *cy.Compiler) !void {
     // Register intrinsics.
     c.sema.str_t.dtor.?.info.gen_intrinsic = @backingInt(Intrinsic.dtor_str);
     (try sema.getEqFunc(c.main_chunk, c.sema.str_t, null)).info.gen_intrinsic = @backingInt(Intrinsic.cmp_str);
+    if (c.sema.str_t.copy_ctor) |copy_ctor| {
+        if (!c.sema.str_t.info.copy_user) {
+            copy_ctor.info.gen_intrinsic = @backingInt(Intrinsic.copy_str);
+        }
+    }
 
     for (c.newChunks()) |chunk| {
         log.tracev("prep chunk", .{});
@@ -1335,6 +1341,17 @@ fn genCallIntrinsic(c: *Chunk, call: *ir.Call, cstr: Cstr, intrinsic: Intrinsic,
             try c.pushCode(.cmp_str, &.{dst.reg, borrow_a.reg, borrow_b.reg }, node);
             try pop_temp_value(c, borrow_b, node);
             try pop_temp_value(c, borrow_a, node);
+            return dst;
+        },
+        .copy_str => {
+            // `@copy[str](src Ptr[str])`: Load the 3 words and retain the buffer.
+            if (cstr.type == .discard) {
+                return GenValue.discard();
+            }
+            const dst = try bc.selectReg(c, call.base.type, cstr, node);
+            const src_ptr = try genExpr(c, call.args[0], Cstr.localOrTemp());
+            try c.pushCode(.copy_str, &.{dst.reg, src_ptr.reg}, node);
+            try pop_temp_value(c, src_ptr, node);
             return dst;
         },
     }

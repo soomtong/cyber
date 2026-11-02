@@ -472,6 +472,7 @@ ResultCode execBytecode(ZThread* t) {
         JENTRY(ReleaseOpt),
         JENTRY(Release),
         JENTRY(DTOR_STR),
+        JENTRY(COPY_STR),
         JENTRY(CHK_STK),
         JENTRY(CALL),
         JENTRY(CALL_HOST),
@@ -898,6 +899,15 @@ beginSwitch:
             release(t, (HeapObject*)buf);
         }
         pc += 2;
+        NEXT();
+    }
+    CASE(COPY_STR): {
+        String val = *(String*)stack[pc[2]];
+        if (val.buf != 0) {
+            retain(t, (HeapObject*)val.buf);
+        }
+        *(String*)(stack + pc[1]) = val;
+        pc += 3;
         NEXT();
     }
     CASE(CHK_STK): {

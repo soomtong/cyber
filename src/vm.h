@@ -187,6 +187,7 @@ typedef enum {
     CodeReleaseOpt,
     CodeRelease,
     CodeDTOR_STR,
+    CodeCOPY_STR,
 
     CodeCHK_STK,
     CodeCALL,

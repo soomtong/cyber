@@ -43,3 +43,33 @@ tombstone을 만들 때 `nvac`을 늘리지 않으므로). 테스트는 `src/tes
 ## 남는 것
 
 - `HashMap.resize`가 해시를 다시 계산한다. 해시를 저장하면 재해시 비용이 사라지지만 메모리가 늘어 보류.
+
+## 2단계: `copy_str` opcode
+
+`Map[str]`이 `Map[int]`보다 느린 원인을 바이트코드(`cyber compile`)로 보면, `key K`를 값으로 넘길 때마다
+`core.@copy[str]` 호출(안에서 `@copy[?^StrBuffer]`를 또 호출해 retain)과 함수 끝의 `dtor_str`이 붙는다. 새 키 하나 삽입에
+`Map.@set_index` → `HashMap.@set_index` → `set`(2회) → `findSetSlot` → `AutoHash`로 str 복사가 약 5번, VM 호출이 약 10번 늘어난다.
+해제 쪽은 이미 `dtor_str` 명령이 있으므로 복사 쪽에 짝이 되는 `copy_str dst, src_ptr`를 둔다.
+
+- `bc_gen.zig` `Intrinsic`에 `copy_str` 추가(`gen_intrinsic`이 `u2`라 0~3이 꽉 참). `genAll`에서 `str_t.copy_ctor`가 있으면 표시.
+- VM: `src_ptr`의 String 3워드를 읽고 `buf`가 있으면 retain한 뒤 `dst..dst+3`에 쓴다. 결과를 버리는 경우(discard)는 명령을 내지 않는다.
+- 기준(ReleaseSafe, hyperfine wall): 미리 만든 키 `Map[str, int]` 100만 삽입 775 ms, `Map[int, int]` 422 ms, alloc 1971 ms.
+
+결과(ReleaseSafe, hyperfine wall 5회): 미리 만든 키 `Map[str, int]` 775 → 493 ms(−36%), alloc 1948 → 1391 ms(−29%).
+바이트코드에서 `core.@copy(` 호출이 33곳 → 4곳(str 이외 타입)으로 줄었다. `Map[int]`와의 차이는 약 60 ms만 남는다.
+fib · for · heap은 ±2% 안(잡음)이다. `Map[int, int]`만 422 → 430 ms(+2%)로 일관되게 느린데, 이 경로에는 str이 없어
+인터프리터 디스패치 루프의 코드 배치가 바뀐 영향으로 추정한다(미확인).
+
+### wasm32에서 드러난 `heap.Span` 버그
+
+wasm32에서는 포인터가 4바이트라 `str`이 16바이트(레지스터 2개)이고 C `String` 구조체와 레이아웃이 같다. 그래서
+`COPY_STR`은 `String` 구조체를 그대로 복사한다. 처음에 "str은 항상 64비트 워드 3개"로 가정한 시도는 틀렸다.
+
+`copy_str` 뒤 wasm32 `meta/get_set.cy`가 호스트 함수에서 "integer does not fit"으로 panic했다. 원인은 `copy_str`이
+아니라 `heap.Span.items`다. Cyber `[&]T`는 wasm32에서 `{base 4바이트, 패딩 4바이트, length 8바이트}`인데 Zig `Span`은
+`ptr: u64`를 `@intCast`로 `usize`로 바꿔서, 패딩에 쓰레기가 있으면 panic한다. `Wyhash.hash(0, k.span())`를 직접
+불러도 재현됐다. 레지스터 내용이 바뀌면서 패딩이 우연히 0이 아니게 된 것이다. `@truncate`로 고쳤다(64비트는 동작 같음).
+`[&]byte`를 받는 다른 호스트 함수(`str.index_any_byte` 등)도 같은 위험이 있었다.
+
+wasm CLI로 재현하는 법: `zig build cli -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe --prefix <dir>`, `<dir>/bin`에
+`zig-out/bin/src`를 복사하고 스크립트도 넣은 뒤 `wasmtime run --dir=<dir>/bin::/ <dir>/bin/cyber.wasm /t.cy`.

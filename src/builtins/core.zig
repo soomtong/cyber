@@ -174,6 +174,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"str.index_any_byte", zErrFunc(str_index_any_byte)},
     .{"str.index_any_rune", zErrFunc(string.index_any_rune)},
     .{"str.fmt_bytes",    zErrFunc(str_fmt_bytes)},
+    .{"Wyhash.hash",     zErrFunc(Wyhash_hash)},
     .{"str.rune_at",     zErrFunc(string.rune_at)},
     .{"str.@index",      zErrFunc(str_byteAt)},
     .{"str.insert",      zErrFunc(string.insertFn)},
@@ -1792,6 +1793,81 @@ const Endian = enum {
     little,
     big,
 };
+
+fn Wyhash_hash(t: *cy.Thread) !C.Ret {
+    const ret = t.ret(i64);
+    const seed: u64 = @bitCast(t.param(i64));
+    const input = t.param(cy.heap.Span).items(u8);
+    ret.* = @bitCast(wyhash32(seed, input));
+    return C.RetOk;
+}
+
+/// Same 32-bit mum variant as `Wyhash` in core.cy (`WYHASH_32BIT_MUM`), not `std.hash.Wyhash`.
+const wy_secret = [4]u64{ 0xa0761d6478bd642f, 0xe7037ed1a0b428db, 0x8ebc6af09c88c6e3, 0x589965cc75374cc3 };
+
+inline fn wyMum32(a: *u64, b: *u64) void {
+    const hh = (a.* >> 32) *% (b.* >> 32);
+    const hl = (a.* >> 32) *% (b.* & 0xffffffff);
+    const lh = (a.* & 0xffffffff) *% (b.* >> 32);
+    const ll = (a.* & 0xffffffff) *% (b.* & 0xffffffff);
+    a.* = std.math.rotr(u64, hl, 32) ^ hh;
+    b.* = std.math.rotr(u64, lh, 32) ^ ll;
+}
+
+inline fn wyMix(a_: u64, b_: u64) u64 {
+    var a = a_;
+    var b = b_;
+    wyMum32(&a, &b);
+    return a ^ b;
+}
+
+inline fn wyRead64(s: []const u8, i: usize) u64 {
+    return std.mem.readInt(u64, s[i..][0..8], .little);
+}
+
+inline fn wyRead32(s: []const u8, i: usize) u64 {
+    return std.mem.readInt(u32, s[i..][0..4], .little);
+}
+
+pub fn wyhash32(seed: u64, input: []const u8) u64 {
+    const s0 = seed ^ wyMix(seed ^ wy_secret[0], wy_secret[1]);
+    var state = [3]u64{ s0, s0, s0 };
+    var a: u64 = 0;
+    var b: u64 = 0;
+    if (input.len <= 16) {
+        if (input.len >= 4) {
+            const end = input.len - 4;
+            const quarter = (input.len >> 3) << 2;
+            a = (wyRead32(input, 0) << 32) | wyRead32(input, quarter);
+            b = (wyRead32(input, end) << 32) | wyRead32(input, end - quarter);
+        } else if (input.len > 0) {
+            a = (@as(u64, input[0]) << 16) | (@as(u64, input[input.len >> 1]) << 8) | input[input.len - 1];
+        }
+    } else {
+        var i: usize = 0;
+        if (input.len >= 48) {
+            while (i + 48 < input.len) : (i += 48) {
+                inline for (0..3) |k| {
+                    const ra = wyRead64(input, i + 16 * k);
+                    const rb = wyRead64(input, i + 16 * k + 8);
+                    state[k] = wyMix(ra ^ wy_secret[k + 1], rb ^ state[k]);
+                }
+            }
+            state[0] ^= state[1] ^ state[2];
+        }
+        const rest = input[i..];
+        var j: usize = 0;
+        while (j + 16 < rest.len) : (j += 16) {
+            state[0] = wyMix(wyRead64(rest, j) ^ wy_secret[1], wyRead64(rest, j + 8) ^ state[0]);
+        }
+        a = wyRead64(input, input.len - 16);
+        b = wyRead64(input, input.len - 8);
+    }
+    a ^= wy_secret[1];
+    b ^= state[0];
+    wyMum32(&a, &b);
+    return wyMix(a ^ wy_secret[0] ^ @as(u64, input.len), b ^ wy_secret[1]);
+}
 
 fn str_index_any_byte(t: *cy.Thread) !C.Ret {
     const ret = t.ret(cy.value.Option(i64));

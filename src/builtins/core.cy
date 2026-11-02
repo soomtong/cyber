@@ -3044,7 +3044,7 @@ fn Wyhash :: @init(seed int) -> Wyhash:
     new.state[2] = new.state[0]
     return move new
 
---@inline
+#[bind='Wyhash.hash']
 fn Wyhash :: hash(seed int, input Span[byte]) -> int:
     input_span := input.span()
     new := Wyhash(seed)

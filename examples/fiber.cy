@@ -1,11 +1,14 @@
--- TODO: Implement new fibers.
--- fn go() dyn:
---     print 'start'
---     coyield
---     for 0..100 -> i:
---         print i
---         coyield
+-- The legacy fiber API (coinit/coresume/coyield) is deprecated.
+-- Generators are the stackless replacement: `#[generator]` turns the function into
+-- a `Generator[Fn]` that runs until the next `yield` on each `next()` call.
+#[generator]
+fn go() -> int:
+    print('start')
+    yield 0
+    for 0..100 |i|:
+        print(i)
+        yield i
 
--- var f = coinit(go)
--- while f.status() != .done:
---     coresume f
+gen := go()
+while gen.status() != .done:
+    _ = gen.next()

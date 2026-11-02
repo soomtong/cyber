@@ -12,8 +12,10 @@
   `?(type.fn_ret(Fn))`, `status()`가 `paused` · `running` · `done`을 준다. 스택리스라 프레임 하나만 저장한다
   (`src/builtins/core.cy`의 `type Generator`). 테스트는 `src/test/concurrency/generator.cy`.
 - 스택형 `Fiber` 타입은 `docs/docs.md`의 "Fibers." 절에 설계만 있다(`Fiber(fn, args)` · `f.resume()` · `Fiber.yield()`).
-  본문에 TODO 표시가 있고 소스 어디에도 `type Fiber` 선언이 없다. `examples/fiber.cy`는 "TODO: Implement new fibers"
-  주석과 옛 코드만 남아 있다. `src/fiber.zig`는 옛 VM용 코드이며 현재 어디서도 import하지 않는다.
+  본문에 TODO 표시가 있고 소스 어디에도 `type Fiber` 선언이 없다. `src/fiber.zig`는 옛 VM용 코드이며 현재 어디서도
+  import하지 않는다.
+- 2026-11-02, `examples/fiber.cy`를 제너레이터로 다시 썼다. 옛 fiber API는 deprecated로 보고, 예제는 `#[generator]`
+  함수와 `gen.next()` · `gen.status()`로 같은 흐름(`start` 출력 후 0..99를 한 번에 하나씩)을 보여 준다.
 - 제너레이터 10만 개를 만들어 두 번씩 resume하는 벤치는 ReleaseSafe CLI에서 28 ms다(`fiber.cy`, 결과 200000).
 
 ## 제거 이유에 대한 해석

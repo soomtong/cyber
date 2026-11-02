@@ -33,6 +33,48 @@ pub fn concat(t: *cy.Thread) !Ret {
     return RetOk;
 }
 
+/// `strs.len == args.len + 1`. Both spans are borrowed.
+pub fn interpolate(t: *cy.Thread) !Ret {
+    const ret = t.ret(cy.heap.Str);
+    const strs = t.param(cy.heap.Span).items(cy.heap.Str);
+    const args = t.param(cy.heap.Span).items(cy.heap.Str);
+    if (strs.len != args.len + 1) {
+        return error.InvalidArgument;
+    }
+    if (args.len == 0) {
+        t.heap.retainObjectOpt(@ptrCast(strs[0].buf));
+        ret.* = strs[0];
+        return RetOk;
+    }
+
+    var len: usize = 0;
+    var ascii = true;
+    for (strs) |*s| {
+        len += s.len();
+        ascii = ascii and s.ascii();
+    }
+    for (args) |*s| {
+        len += s.len();
+        ascii = ascii and s.ascii();
+    }
+
+    const res = if (ascii) try t.heap.init_astr_undef(len) else try t.heap.init_ustr_undef(len);
+    const dst = res.mutSlice();
+    var pos: usize = 0;
+    for (args, 0..) |*arg, i| {
+        const lit = strs[i].slice();
+        @memcpy(dst[pos..pos+lit.len], lit);
+        pos += lit.len;
+        const a = arg.slice();
+        @memcpy(dst[pos..pos+a.len], a);
+        pos += a.len;
+    }
+    const last = strs[args.len].slice();
+    @memcpy(dst[pos..pos+last.len], last);
+    ret.* = res;
+    return RetOk;
+}
+
 fn concat2(heap: *cy.Heap, left: *cy.heap.Str, right: *const cy.heap.Str) !cy.heap.Str {
     if (left.ascii() and right.ascii()) {
         return heap.init_astr_concat(left.slice(), right.slice());

@@ -163,6 +163,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"str.initPtrSpan", zErrFunc(string.initPtrSpan)},
     .{"str.+",           zErrFunc(string.concat)},
     .{"str.concat",      zErrFunc(string.concat)},
+    .{"str.interpolate", zErrFunc(string.interpolate)},
     .{"str.count",       cFunc(string.count)},
     // func("str.decode",       String_decode),
     // func("str.decode2",      String_decode2),

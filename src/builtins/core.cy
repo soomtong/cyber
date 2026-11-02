@@ -171,7 +171,7 @@ fn to_print_string(x %T) -> str:
     #else T == i8:
         return str(x)
     #else T == int:
-        return str(x)
+        return int_fmt(x, .dec)
     #else T == i32:
         return str(x)
     #else T == i16:
@@ -546,7 +546,7 @@ fn (Int[]) `**`(e Self) -> Self:
     return result
 
 fn (Int[]) fmt() -> str:
-    return self.fmt(.dec)
+    return int_fmt(self, .dec)
 
 --| Formats the integer using a NumberFormat.
 fn (Int[]) fmt(format NumberFormat) -> str:
@@ -3256,7 +3256,8 @@ fn str :: @init(x %T) -> str:
     #else T == i32:
         return x.fmt()
     #else T == int:
-        return x.fmt()
+        -- Calls `int_fmt` directly since the VM does not inline `Int.fmt`.
+        return int_fmt(x, .dec)
     #else T == float:
         return x.fmt()
     #else T == f32:
@@ -3291,6 +3292,7 @@ fn str :: initz(src str) -> str:
         res.header = len
     return move res
 
+#[bind='str.interpolate']
 fn str :: interpolate(strs [&]str, args [&]str) -> str:
     res := strs[0]
     for args |i, arg|:

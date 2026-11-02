@@ -136,4 +136,20 @@ for 0..10 |i|:
     t.eq(str(i), m2[str(i)].a)
     t.eq(i, m2[str(i)].b)
 
+-- Replacing a value keeps the size and does not use up vacant slots.
+m3 := Map[str, int]{}
+for 0..100 |i|:
+    m3['a'] = i
+t.eq(1, m3.size())
+t.eq(99, m3['a'])
+
+-- Reusing a tombstone slot.
+m4 := Map[int, int]{}
+for 0..100 |i|:
+    m4[i] = i
+    m4[i + 1] = i
+    m4.remove(i)
+t.eq(1, m4.size())
+t.eq(99, m4[100])
+
 --cytest: pass

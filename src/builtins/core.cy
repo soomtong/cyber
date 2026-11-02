@@ -2447,16 +2447,16 @@ fn (&HashMap[]) set(key K, val V):
 
     slot := self.findSetSlot(key)
     if slot && int.min == 0:
-        -- Initialize.
+        -- Initialize. A reused tombstone was never counted as vacant.
+        if self.meta[slot] == 0:
+            self.nvac -= 1
         @ptr_init(self._keys + slot, key)
         self.meta[slot] = 1
         @ptr_init(self.vals + slot, val)
+        self.len += 1
     else:
         -- Replace.
         self.vals[slot && int.max] = val
-
-    self.nvac -= 1
-    self.len += 1
 
 fn (&HashMap[]) size() -> int:
     return self.len

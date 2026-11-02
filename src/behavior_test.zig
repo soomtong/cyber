@@ -108,6 +108,8 @@ fn test_functions(run: *Runner) void {
     run.case("functions/call_missing_assignment_error.cy");
     run.case("functions/decl_over_builtin.cy");
     run.case("functions/funcsym_type.cy");
+    run.case("functions/inline_leaf.cy");
+    run.case("functions/inline_leaf_panic.cy");
     run.case("functions/func_type.cy");
     run.case("functions/func_type_closure_error.cy");
     run.case("functions/func_type_error.cy");

@@ -932,7 +932,10 @@ const FuncInfo = packed struct {
 
     jit: bool = false,
 
-    padding: u5 = undefined,
+    /// Bytecode inline candidacy cache: 0 unknown, 1 inlinable, 2 not inlinable.
+    bc_inline: u2 = 0,
+
+    padding: u3 = undefined,
 };
 
 pub const FuncConfig = struct {

@@ -142,6 +142,12 @@ pub const Chunk = struct {
     /// Maps ir local to bc reg.
     bc_local_map: std.ArrayList(bc.Reg),
 
+    /// Set while generating an inlined callee body. See `bc_gen.gen_inline_call`.
+    inline_ctx: ?*bc.InlineCtx = null,
+
+    /// Offset added to IR local ids. Non-zero only while inlining.
+    inline_local_base: usize = 0,
+
     relocations: std.ArrayList(bc.Relocation),
     rt_relocations: std.ArrayList(bc.Relocation),
 
@@ -674,15 +680,18 @@ pub const Chunk = struct {
     /// An optional debug sym is only included in Trace builds.
     pub fn pushOptionalDebugSym(c: *Chunk, node: *ast.Node) !void {
         if (cy.Trace or c.compiler.vm.config.gen_all_debug_syms) {
+            // Inlined callee nodes belong to another chunk's source, so attribute them to the call site.
+            const n = if (c.inline_ctx) |ctx| ctx.node else node;
             try c.buf.pushFailableDebugSym(
-                c.buf.ops.items.len, c.cur_proc.chunk_id, node.pos(), c.cur_proc.id,
+                c.buf.ops.items.len, c.cur_proc.chunk_id, n.pos(), c.cur_proc.id,
             );
         }
     }
 
     pub fn pushFailableDebugSym(self: *Chunk, node: *ast.Node) !void {
+        const n = if (self.inline_ctx) |ctx| ctx.node else node;
         try self.buf.pushFailableDebugSym(
-            self.buf.ops.items.len, self.cur_proc.chunk_id, node.pos(), self.cur_proc.id,
+            self.buf.ops.items.len, self.cur_proc.chunk_id, n.pos(), self.cur_proc.id,
         );
     }
 

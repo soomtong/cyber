@@ -380,7 +380,8 @@ fn genStmt(c: *Chunk, stmt: *ir.Stmt) anyerror!void {
     const node = stmt.node;
     c.curNode = node;
     if (cy.Trace) {
-        const contextStr = c.encoder.formatTrunc(node);
+        // An inlined callee node belongs to another chunk's source.
+        const contextStr = if (c.inline_ctx == null) c.encoder.formatTrunc(node) else "<inlined>";
         if (cc.verbose()) {
             log.log("{f}| {s}: `{s}` reg_end={}", .{
                 cy.fmt.Repeat{.s=" ", .count=c.indent * 4}, @tagName(stmt.code), contextStr,
@@ -483,7 +484,8 @@ fn genExpr(c: *Chunk, expr: *ir.Expr, cstr: Cstr) anyerror!GenValue {
     const node = expr.node;
     if (cy.Trace) {
         c.indent += 1;
-        const contextStr = c.encoder.formatTrunc(node);
+        // An inlined callee node belongs to another chunk's source.
+        const contextStr = if (c.inline_ctx == null) c.encoder.formatTrunc(node) else "<inlined>";
         if (cc.verbose()) {
             log.log("{f}( {s}: `{s}` {s} reg_end={}", .{
                 cy.fmt.Repeat{.s=" ", .count=c.indent * 4}, @tagName(expr.code), contextStr, @tagName(cstr.type),
@@ -582,11 +584,16 @@ fn gen_release(c: *Chunk, stmt: *ir.Release, node: *ast.Node) !void {
 }
 
 fn gen_trap(c: *Chunk, node: *ast.Node) !void {
+    if (c.inline_ctx != null) {
+        // Unreachable end marker of an inlined body. Returns already jump past it.
+        return;
+    }
     try c.pushFCode(.trap, &.{}, node);
 }
 
 fn gen_nop_label(c: *Chunk, stmt: *ir.NopLabel, node: *ast.Node) !void {
-    if (!emit_nop) {
+    if (!emit_nop or c.inline_ctx != null) {
+        // An inlined callee's label lives in another chunk's IR buffer.
         return;
     }
     const label = c.ir.buf.items[stmt.label_idx..stmt.label_idx + stmt.label_len];
@@ -1394,6 +1401,13 @@ fn gen_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenValue {
         return genCallIntrinsic(c, expr, cstr, @fromBackingInt(@intCast(expr.func.info.gen_intrinsic)), node);
     }
 
+    if (c.inline_ctx == null and can_inline(expr.func)) {
+        // Leave room in the u8 register window. Inlining extends the caller's frame.
+        if (c.cur_proc.reg_end < inline_max_reg_end) {
+            return gen_inline_call(c, expr, cstr, node);
+        }
+    }
+
     const ret_t = expr.base.type;
     var callee_ret_t = ret_t;
     if (expr.func.info.generator) {
@@ -1427,6 +1441,267 @@ fn gen_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenValue {
     }
 
     return endCall(c, inst, ret_t, node);
+}
+
+/// State while generating an inlined callee body. See `docs/decisions/project_bc_inline.md`.
+pub const InlineCtx = struct {
+    /// Call site node. Debug syms of the inlined body are attributed to it.
+    node: *ast.Node,
+    ret_reg: Reg,
+    /// The callee's top level body. A trailing `ret_expr` there needs no jump.
+    body_head: ?*ir.Stmt,
+    /// `jump` insts that go to the end of the inlined body.
+    end_jumps: std.ArrayList(u32),
+};
+
+const inline_max_nodes = 40;
+const inline_max_params = 8;
+/// Registers are u8 indexed by the VM (`chk_stk` frame size), keep a margin for the inlined body.
+const inline_max_reg_end = 160;
+
+/// Whether `func` is a small leaf function whose IR body only uses allowed statements and expressions.
+/// Allowed bodies cannot panic, so inlining never changes a stack trace.
+fn can_inline(func: *cy.Func) bool {
+    switch (func.info.bc_inline) {
+        1 => return true,
+        2 => return false,
+        else => {},
+    }
+    const res = check_inline(func);
+    func.info.bc_inline = if (res) 1 else 2;
+    return res;
+}
+
+fn check_inline(func: *cy.Func) bool {
+    if (func.type != .userFunc) return false;
+    if (func.info.generator or func.info.jit or func.info.extern_) return false;
+    if (func.sig.params_len > inline_max_params) return false;
+    const loc = func.data.userFunc.loc;
+    if (loc.code != .funcBlock) return false;
+    const block = loc.cast(.funcBlock);
+    if (block.skip) return false;
+    var count: u32 = 0;
+    return check_inline_stmts(block.bodyHead, &count);
+}
+
+fn check_inline_stmts(head: ?*ir.Stmt, count: *u32) bool {
+    var stmt_opt = head;
+    while (stmt_opt) |stmt| {
+        count.* += 1;
+        if (count.* > inline_max_nodes) return false;
+        switch (stmt.code) {
+            .declare_local => {
+                const data = stmt.cast(.declare_local);
+                if (data.init) |init| {
+                    if (!check_inline_expr(init, count)) return false;
+                }
+            },
+            .set_local => if (!check_inline_expr(stmt.cast(.set_local).right, count)) return false,
+            .set_ret => if (!check_inline_expr(stmt.cast(.set_ret).right, count)) return false,
+            .set_global => if (!check_inline_expr(stmt.cast(.set_global).expr, count)) return false,
+            .set_field => {
+                const data = stmt.cast(.set_field);
+                if (!check_inline_expr(data.field, count)) return false;
+                if (!check_inline_expr(data.right, count)) return false;
+            },
+            .set_deref => {
+                const data = stmt.cast(.set_deref);
+                if (!check_inline_expr(data.ptr, count)) return false;
+                if (!check_inline_expr(data.right, count)) return false;
+            },
+            .discard => if (!check_inline_expr(stmt.cast(.discard).expr, count)) return false,
+            .ret_expr => if (!check_inline_expr(stmt.cast(.ret_expr).expr, count)) return false,
+            .if_block => {
+                const data = stmt.cast(.if_block);
+                if (!check_inline_expr(data.cond_expr, count)) return false;
+                if (!check_inline_stmts(data.body_head, count)) return false;
+            },
+            .block => if (!check_inline_stmts(stmt.cast(.block).bodyHead, count)) return false,
+            .ret,
+            .trap,
+            .nop_label,
+            .pop_locals,
+            .release => {},
+            else => return false,
+        }
+        stmt_opt = stmt.next;
+    }
+    return true;
+}
+
+fn check_inline_expr(expr: *ir.Expr, count: *u32) bool {
+    count.* += 1;
+    if (count.* > inline_max_nodes) return false;
+    switch (expr.code) {
+        .local,
+        .const8,
+        .const16,
+        .const32,
+        .const64,
+        .truev,
+        .falsev,
+        .voidv,
+        .undef,
+        .string,
+        .global,
+        .init_zero => return true,
+        // Integer `/` and `%` can panic (division by zero) and are rejected below, so an inlined body never
+        // panics and never needs its own frame in a stack trace.
+        .and_op, .or_op, .xor, .lsl, .asr, .lsr, .add, .sub, .imul, .mul,
+        .fadd, .fsub, .fmod, .fmul, .fdiv => {
+            // All of these are `BinOp2`. `cast` would check the exact code in Trace builds.
+            const data: *ir.BinOp2 = @ptrCast(@alignCast(expr));
+            return check_inline_expr(data.left, count) and check_inline_expr(data.right, count);
+        },
+        .cmp => {
+            const data = expr.cast(.cmp);
+            return check_inline_expr(data.left, count) and check_inline_expr(data.right, count);
+        },
+        .neg, .not, .fneg, .fabs, .f2i, .i2f => {
+            const data: *ir.UnOp2 = @ptrCast(@alignCast(expr));
+            return check_inline_expr(data.expr, count);
+        },
+        .sext, .zext => {
+            const data: *ir.Widen = @ptrCast(@alignCast(expr));
+            return check_inline_expr(data.expr, count);
+        },
+        .is_zero => return check_inline_expr(expr.cast(.is_zero).child, count),
+        .field => return check_inline_expr(expr.cast(.field).rec, count),
+        .cast => {
+            const data = expr.cast(.cast);
+            // A runtime cast can panic.
+            if (data.isRtCast) return false;
+            return check_inline_expr(data.expr, count);
+        },
+        .bitcast => return check_inline_expr(expr.cast(.bitcast).expr, count),
+        .address_of => return check_inline_expr(expr.cast(.address_of).expr, count),
+        .deref => return check_inline_expr(expr.cast(.deref).expr, count),
+        .trunc => return check_inline_expr(expr.cast(.trunc).expr, count),
+        .retain => return check_inline_expr(expr.cast(.retain).expr, count),
+        .init => {
+            const data = expr.cast(.init);
+            for (data.args[0..data.nargs]) |arg| {
+                if (!check_inline_expr(arg, count)) return false;
+            }
+            return true;
+        },
+        .call => {
+            // Leaf only: intrinsics are single instructions.
+            const data = expr.cast(.call);
+            if (data.func.info.gen_intrinsic == 0) return false;
+            for (data.args[0..data.numArgs]) |arg| {
+                if (!check_inline_expr(arg, count)) return false;
+            }
+            return true;
+        },
+        else => return false,
+    }
+}
+
+fn inline_ret_jump(c: *Chunk, ctx: *InlineCtx, stmt: *ir.Stmt, node: *ast.Node) !void {
+    // A return that ends the callee's top level body falls through to the end.
+    // Only `trap` (an unreachable end marker, skipped when inlining) may follow it.
+    var rest = stmt.next;
+    while (rest) |r| {
+        if (r.code != .trap) break;
+        rest = r.next;
+    }
+    if (rest == null and is_top_level_stmt(ctx.body_head, stmt)) {
+        return;
+    }
+    const pc = try c.pushEmptyJump(node);
+    try ctx.end_jumps.append(c.alloc, pc);
+}
+
+fn is_top_level_stmt(head: ?*ir.Stmt, target: *ir.Stmt) bool {
+    var stmt_opt = head;
+    while (stmt_opt) |stmt| {
+        if (stmt == target) return true;
+        stmt_opt = stmt.next;
+    }
+    return false;
+}
+
+/// Generates the callee's IR body in the caller's proc instead of a `call`.
+/// Args are evaluated into temps like a call, and the callee's param locals are bound to them.
+fn gen_inline_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenValue {
+    const func = expr.func;
+    const block = func.data.userFunc.loc.cast(.funcBlock);
+    const ret_t = expr.base.type;
+    const ret_size: u16 = @intCast(ret_t.reg_size());
+
+    const temp_start = c.cur_proc.reg_end;
+    // Return straight into the destination when it is a register. Args are copied to fresh temps
+    // before the body runs, so `x = f(x)` still reads the old `x`.
+    const direct_dst = ret_size > 0 and (cstr.type == .localReg or cstr.type == .tempReg);
+    var ret_reg: Reg = 0;
+    if (direct_dst) {
+        ret_reg = cstr.data.slot.dst;
+    } else if (ret_size > 0) {
+        ret_reg = try reserve_reg(c, ret_t);
+    }
+
+    const saved_local_base = c.inline_local_base;
+    const saved_local_len = c.bc_local_map.items.len;
+
+    const args = expr.args[0..expr.numArgs];
+    var arg_regs: [inline_max_params]Reg = undefined;
+    for (args, 0..) |arg, i| {
+        const temp = try reserve_reg(c, arg.type);
+        _ = try genExpr(c, arg, Cstr.toTemp(temp));
+        arg_regs[i] = temp;
+    }
+
+    // Bind callee param locals to the arg temps.
+    c.inline_local_base = c.bc_local_map.items.len;
+    for (arg_regs[0..args.len]) |reg| {
+        try c.bc_local_map.append(c.alloc, reg);
+    }
+
+    var ctx = InlineCtx{
+        .node = node,
+        .ret_reg = ret_reg,
+        .body_head = block.bodyHead,
+        .end_jumps = .empty,
+    };
+    defer ctx.end_jumps.deinit(c.alloc);
+    c.inline_ctx = &ctx;
+    const saved_cur_node = c.curNode;
+    {
+        defer {
+            c.inline_ctx = null;
+            c.inline_local_base = saved_local_base;
+            c.curNode = saved_cur_node;
+        }
+        try pushBlock(c, node);
+        try genStmts(c, block.bodyHead);
+        try popBlock(c);
+    }
+    for (ctx.end_jumps.items) |pc| {
+        c.patchJumpToCurPc(pc);
+    }
+    c.bc_local_map.items.len = saved_local_len;
+
+    if (ret_size == 0) {
+        try pop_regs(c, temp_start, node);
+        return if (cstr.type == .discard) GenValue.discard() else GenValue.initTemp(temp_start);
+    }
+    switch (cstr.type) {
+        .localReg, .tempReg => {
+            const dst = cstr.data.slot.dst;
+            try pop_regs(c, temp_start, node);
+            return if (cstr.type == .localReg) GenValue.initLocal(dst) else GenValue.initTemp(dst);
+        },
+        .discard => {
+            try pop_regs(c, temp_start, node);
+            return GenValue.discard();
+        },
+        else => {
+            // The return temp stays reserved for the caller.
+            try pop_regs(c, ret_reg + ret_size, node);
+            return GenValue.initTemp(ret_reg);
+        },
+    }
 }
 
 fn gen_call_union(c: *Chunk, expr: *ir.CallUnion, cstr: Cstr, node: *ast.Node) !GenValue {
@@ -1771,10 +2046,11 @@ fn gen_captured(c: *Chunk, expr: *ir.Captured, cstr: Cstr, node: *ast.Node) !Gen
 }
 
 pub fn toLocalReg(c: *Chunk, ir_id: u8) Reg {
-    if (ir_id >= c.bc_local_map.items.len) {
+    const idx = c.inline_local_base + ir_id;
+    if (idx >= c.bc_local_map.items.len) {
         std.debug.panic("expected mapping to IR local `{}`.", .{ir_id});
     }
-    return c.bc_local_map.items.ptr[ir_id];
+    return c.bc_local_map.items.ptr[idx];
 }
 
 fn push_load_32(c: *cy.Chunk, dst: Reg, src: Reg, src_off: u16, debugNode: *ast.Node) !void {
@@ -1907,7 +2183,8 @@ fn reserveFuncSlots(c: *Chunk, params: []align(1) const ir.FuncParam, ret_t: *cy
     c.cur_proc.max_regs = c.cur_proc.reg_end;
 }
 
-fn reserve_local(c: *Chunk, local_id: usize, local_t: *cy.Type, node: *ast.Node) !Reg {
+fn reserve_local(c: *Chunk, local_id_: usize, local_t: *cy.Type, node: *ast.Node) !Reg {
+    const local_id = c.inline_local_base + local_id_;
     if (cy.Trace) {
         if (local_id != c.bc_local_map.items.len) {
             return c.reportErrorFmt("Expected next IR local to be {}, got {}.", &.{v(c.bc_local_map.items.len), v(local_id)}, node);
@@ -2008,7 +2285,7 @@ fn gen_set_captured(c: *Chunk, stmt: *ir.SetGeneric, node: *ast.Node) !void {
 
 fn gen_set_ret(c: *Chunk, stmt: *ir.SetReturn, node: *ast.Node) !void {
     _ = node;
-    const dst = Cstr.toLocal(0);
+    const dst = if (c.inline_ctx) |ctx| Cstr.toLocal(ctx.ret_reg) else Cstr.toLocal(0);
     _ = try genExpr(c, stmt.right, dst);
 }
 
@@ -2019,7 +2296,10 @@ fn gen_set_local(c: *Chunk, stmt: *ir.SetLocal, node: *ast.Node) !void {
 }
 
 fn gen_ret(c: *Chunk, stmt: *ir.Return, node: *ast.Node) !void {
-    _ = stmt;
+    if (c.inline_ctx) |ctx| {
+        try inline_ret_jump(c, ctx, &stmt.base, node);
+        return;
+    }
     if (c.cur_proc.type == .main) {
         try c.pushCode(.end, &.{}, node);
     } else {
@@ -2054,6 +2334,11 @@ fn gen_ret_gen(c: *Chunk, stmt: *ir.ReturnGen, node: *ast.Node) !void {
 }
 
 fn gen_ret_expr(c: *Chunk, stmt: *ir.ReturnExpr, node: *ast.Node) !void {
+    if (c.inline_ctx) |ctx| {
+        _ = try genExpr(c, stmt.expr, Cstr.toLocal(ctx.ret_reg));
+        try inline_ret_jump(c, ctx, &stmt.base, node);
+        return;
+    }
     if (c.cur_proc.type == .main) {
         // Main block.
         var childv: GenValue = undefined;
@@ -2521,8 +2806,9 @@ fn gen_lambda(c: *Chunk, expr: *ir.Lambda, cstr: Cstr, node: *ast.Node) !GenValu
 
 fn gen_pop_locals(c: *Chunk, stmt: *ir.PopLocals, node: *ast.Node) !void {
     _ = node;
-    const reg_start = c.bc_local_map.items[stmt.local_end];
-    c.bc_local_map.items.len = stmt.local_end;
+    const local_end = c.inline_local_base + stmt.local_end;
+    const reg_start = c.bc_local_map.items[local_end];
+    c.bc_local_map.items.len = local_end;
 
     var num_ptr_locals: usize = 0;
     for (c.buf.ptr_layout_builder.items[reg_start..c.cur_proc.reg_end]) |ptr| {

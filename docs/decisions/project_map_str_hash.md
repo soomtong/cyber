@@ -73,3 +73,27 @@ wasm32에서는 포인터가 4바이트라 `str`이 16바이트(레지스터 2�
 
 wasm CLI로 재현하는 법: `zig build cli -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe --prefix <dir>`, `<dir>/bin`에
 `zig-out/bin/src`를 복사하고 스크립트도 넣은 뒤 `wasmtime run --dir=<dir>/bin::/ <dir>/bin/cyber.wasm /t.cy`.
+
+## 3단계: HashMap 핫 경로의 호출 줄이기
+
+보간 개선 뒤 alloc(903 ms)에서는 Map이 가장 크다. `Map[int, int]`도 캐시에 들어가는 5000개 Map을 200번 새로 채우면
+445 ms(python dict 95 ms)인데, 같은 Map에 덮어쓰기만 하면 130 ms(python 90 ms)다. 차이는 grow(resize)와 생성 · 해제다.
+resize는 이전 슬롯마다 `PtrSpan.next` → `@index_addr` 호출 2번, 살아 있는 원소마다 `set` 경로 전체(호출 약 8번, 같은 키 비교
+포함)를 다시 타고, 관리 타입이 아니어도 빈 해제 루프로 슬롯을 한 번 더 돈다.
+
+- `resize`: 인덱스 루프로 이전 슬롯을 돌고, 키가 서로 다르고 새 테이블에 tombstone이 없으므로 해시 후 빈 슬롯까지 선형 탐사만
+  한다. 원소는 옮긴다(관리 타입은 `@memcpy`로 비트 이동, 아니면 `@ptr_init`). 그래서 copy 후 release하던 해제 루프가 없어진다.
+- `set`: `self._keys + slot`(`Ptr.+` 호출)을 `*self._keys[slot]`으로.
+- `splitmix64_hash`: `umul` 호출 대신 `r64` 곱셈(부호 없는 MUL). int `*`도 하위 64비트는 같지만 C에서 부호 있는 overflow라 쓰지 않음.
+- `Map.@set_index`가 `HashMap.@set_index`를 거치지 않고 `set`을 바로 부름. `grow`의 `2 ** 3`을 `8`로.
+- `HashMap.@deinit`의 슬롯 루프를 `#if type.managed(K) or type.managed(V)` 안으로. `AutoHash[int]`에 splitmix 본문을 직접 씀.
+
+결과(ReleaseSafe, hyperfine wall 5회, 5000개 Map × 200회): `Map[int, int]` 새로 채우기 446 → 257 ms(python 95 ms),
+`Map[str, int]` 503 → 347 ms, 덮어쓰기만 131 → 116 ms(python 90 ms), alloc 902 → 752 ms. 해시 값과 순회 순서는 같다.
+`src/test/core/Map.cy`에 grow 중 관리 키 · 값 이동과 tombstone 제거 테스트를 추가.
+
+## 구조체 해제에서 관리 타입이 아닌 필드 건너뛰기
+
+`@destruct`의 struct 분기가 모든 필드에 `@destruct(field.type, ...)`를 불러, int · 포인터 필드도 nop뿐인 함수를 호출했다
+(generator 해제 한 번에 빈 호출 7번). `#if type.managed(field.type)`로 감쌌다. `managed`는 `has_managed_child or
+has_user_deinit`이라 `@deinit`가 있는 타입은 그대로 불린다. fiber 벤치 43.3 → 39.1 ms, 나머지 벤치 변화 없음.

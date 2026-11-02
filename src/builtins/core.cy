@@ -2190,7 +2190,7 @@ fn (&Map[]) @index(key K) -> V:
     return self.base.@index(key)
 
 fn (&Map[]) @set_index(key K, val V):
-    self.base.@set_index(key, val)
+    self.base.set(key, val)
 
 fn (&Map[]) clear():
     self.base.clear()
@@ -2289,7 +2289,7 @@ fn (&HashMap[]) get(key K) -> ?V:
 
 fn (&HashMap[]) grow():
     if self.cap == 0:
-        self.resize(2 ** 3)
+        self.resize(8)
     else:
         self.resize(self.cap << 1)
 
@@ -2419,24 +2419,30 @@ fn (&HashMap[]) resize(new_cap int):
     self._keys = alloc(K, new_cap).ptr
 
     self.vals = alloc(V, new_cap).ptr
-    self.len = 0
-    self.nvac = new_cap * HashMap.LoadFactor / 100
+    self.nvac = new_cap * HashMap.LoadFactor / 100 - self.len
     self.cap = new_cap
 
     if old_cap == 0:
         return
 
-    for old_meta[0..old_cap] |i, slot_data|:
-        if slot_data != 1:
-            continue
-        self.set(old_keys[i], old_vals[i])
-
+    -- Keys are distinct and the new table has no tombstones, so only probe for a vacant slot.
+    -- Entries are moved, so the old buffers are freed without destructing them.
+    mask := new_cap - 1
     for 0..old_cap |i|:
-        if old_meta[i] == 1:
-            #if type.managed(K):
-                @destruct(K, *old_keys[i])
-            #if type.managed(V):
-                @destruct(V, *old_vals[i])
+        if old_meta[i] != 1:
+            continue
+        slot := HASH(old_keys[i]) && mask
+        while self.meta[slot] != 0:
+            slot = (slot + 1) && mask
+        self.meta[slot] = 1
+        #if type.managed(K):
+            @memcpy(as *self._keys[slot], as *old_keys[i], type.size(K))
+        #else:
+            @ptr_init(*self._keys[slot], old_keys[i])
+        #if type.managed(V):
+            @memcpy(as *self.vals[slot], as *old_vals[i], type.size(V))
+        #else:
+            @ptr_init(*self.vals[slot], old_vals[i])
     free(old_meta)
     free(old_keys)
     free(old_vals)
@@ -2450,9 +2456,9 @@ fn (&HashMap[]) set(key K, val V):
         -- Initialize. A reused tombstone was never counted as vacant.
         if self.meta[slot] == 0:
             self.nvac -= 1
-        @ptr_init(self._keys + slot, key)
+        @ptr_init(*self._keys[slot], key)
         self.meta[slot] = 1
-        @ptr_init(self.vals + slot, val)
+        @ptr_init(*self.vals[slot], val)
         self.len += 1
     else:
         -- Replace.
@@ -2465,12 +2471,13 @@ fn (&HashMap[]) @deinit():
     if self.cap == 0:
         return
 
-    for 0..self.cap |i|:
-        if self.meta[i] == 1:
-            #if type.managed(K):
-                @destruct(K, *self._keys[i])
-            #if type.managed(V):
-                @destruct(V, *self.vals[i])
+    #if type.managed(K) or type.managed(V):
+        for 0..self.cap |i|:
+            if self.meta[i] == 1:
+                #if type.managed(K):
+                    @destruct(K, *self._keys[i])
+                #if type.managed(V):
+                    @destruct(V, *self.vals[i])
 
     free(self.meta)
     free(self._keys)
@@ -2871,7 +2878,9 @@ fn @destruct(%T type, val Ptr[T]):
         #case .struct |struct_t|:
             #for 0..struct_t.fields.len() |i|:
                 #field := struct_t.fields[i]
-                @destruct(field.type, *meta.access(val, field.name))
+                -- Unmanaged fields have nothing to destruct. Skipping them avoids a call per field.
+                #if type.managed(field.type):
+                    @destruct(field.type, *meta.access(val, field.name))
 
         #case .cstruct |cstruct_t|:
             -- No destructor.
@@ -2976,7 +2985,14 @@ fn AutoHash[K Any](key K) -> int:
     #if K == str:
         return Wyhash.hash(0, key.span())
     #else K == int:
-        return splitmix64_hash(key)
+        -- Same as `splitmix64_hash`, written out since the VM does not inline it.
+        x := as[r64] (key + 0x9e3779b97f4a7c15)
+        x ~= x >> 30
+        x = x * 0xbf58476d1ce4e5b9
+        x ~= x >> 27
+        x = x * 0x94d049bb133111eb
+        x ~= x >> 31
+        return as[int] x
     #else K == float:
         return @bitCast(int, key)
     #else K == Object:
@@ -3005,13 +3021,14 @@ fn AutoEq[K Any](a K, b K) -> bool:
         return a == b
 
 fn splitmix64_hash(x_ int) -> int:
-    x := x_ + 0x9e3779b97f4a7c15
+    -- Unsigned multiply directly since the VM does not inline `umul`.
+    x := as[r64] (x_ + 0x9e3779b97f4a7c15)
     x ~= x >> 30
-    x = x.umul(0xbf58476d1ce4e5b9)
+    x = x * 0xbf58476d1ce4e5b9
     x ~= x >> 27
-    x = x.umul(0x94d049bb133111eb)
+    x = x * 0x94d049bb133111eb
     x ~= x >> 31
-    return x
+    return as[int] x
 
 --| Wyhash implementation ported from Zig's std.
 type Wyhash:

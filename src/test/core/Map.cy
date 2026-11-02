@@ -152,4 +152,25 @@ for 0..100 |i|:
 t.eq(1, m4.size())
 t.eq(99, m4[100])
 
+-- Growing moves managed keys and values, and drops tombstones.
+type Box:
+    s str
+    n int
+m5 := Map[str, Box]{}
+for 0..300 |i|:
+    m5['k%{i}'] = Box{s='v%{i}', n=i}
+    if i % 3 == 0:
+        m5.remove('k%{i}')
+t.eq(200, m5.size())
+for 0..300 |i|:
+    if i % 3 == 0:
+        t.eq(false, m5.contains('k%{i}'))
+    else:
+        t.eq('v%{i}', m5['k%{i}'].s)
+cnt := 0
+for m5 |e|:
+    t.eq('k%{e.value.n}', e.key)
+    cnt += 1
+t.eq(200, cnt)
+
 --cytest: pass

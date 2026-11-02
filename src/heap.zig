@@ -717,7 +717,8 @@ pub const Span = extern struct {
     len: u64, 
 
     pub fn items(self: *const Span, comptime T: type) []T {
-        const addr: usize = @intCast(self.ptr);
+        // On wasm32 the pointer only fills the low 4 bytes and the rest is padding.
+        const addr: usize = @truncate(self.ptr);
         var buf: [*]T = @ptrFromInt(addr);
         return buf[0..@intCast(self.len)];
     }

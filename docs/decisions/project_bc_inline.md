@@ -145,3 +145,49 @@ alloc 696 → 670 ms(−3.7%). 다음 후보: `HashMap.set`(노드 한도 · `fi
   `inline_nested_panic.cy`(3단 중첩 안의 panic이 inner · middle · outer · main 프레임으로 보임).
 - ReleaseSafe, hyperfine 30회, `b40531a1` 대비(부하 있는 상태): Map[int] 100만 채우기+갱신 563.5 → 516.0 ms(−8.4%),
   heap 33.9 → 31.7 ms(−6.6%), alloc 670 → 667 ms, for · fiber · fib는 잡음 범위(fib 함수 본문 바이트코드는 같음).
+
+# 4단계: 루프가 있는 본문
+
+작성일 2026-11-03.
+
+## 결정
+
+허용 목록에 `loop_block`(`while`), `forRangeStmt`(`for a..b`), `continue_`를 더한다. 따로 바꿀 생성 코드는 없다.
+
+- 루프 생성(`gen_loop_block` · `gen_for_range_stmt`)은 break · continue를 고칠 때 `cur_proc.block_depth`(caller proc 기준
+  절대 깊이)를 쓰고, 인라인 중의 `break_` · `continue_`는 3단계에서 이미 `InlineCtx.block_base`를 더한다. 그래서 callee의
+  break는 callee의 루프로, caller의 break는 caller의 루프로 간다.
+- 루프 안의 `return`은 다른 조기 반환과 같이 끝으로 가는 `jump`가 된다. 루프 지역 변수의 해제는 IR이 `return` 앞에 이미
+  넣어 둔다.
+- 역방향 jump는 VM 검사점(중단 · fuel)이다. 인라인 구간 안의 pc이므로 트레이스는 `inline_sites`로 펼쳐진다.
+- `for` 루프 카운터 · 끝 · 조건 레지스터 3개가 caller 프레임에 더해진다. `inline_max_reg_end`(160)는 그대로 둔다.
+
+대상: `HashMap.findSetSlot` · `findSlot`(`while:` 탐사), `get` · `contains` · `@index`(findSlot 경유), 루프 있는 작은
+사용자 함수.
+
+## 테스트
+
+`functions/inline_loop.cy`(for · while 안의 조기 반환, continue · break, 끝없는 `while:` 안의 반환, 이중 루프, 인라인 루프
+안의 인라인 루프, 인라인된 루프 뒤 caller 자신의 continue · break), `inline_loop_panic.cy`(인라인 루프의 세 번째 반복에서
+panic해도 inner · outer · main 프레임).
+
+## 결과 (ReleaseSafe, hyperfine wall, `8fbc0f21` 대비, 부하 있는 상태)
+
+for 50.9 → 51.4 ms(+1.0%, 핫 루프 명령은 pc를 빼면 같음), heap 31.9 → 31.4 ms(−1.6%), alloc 669.8 → 655.7 ms(−2.1%),
+fib · fiber · 시작 시간(`print(1)` 7.0 → 7.1 ms)은 잡음 범위. 전체 바이트코드(core 포함 덤프 줄 수)는 약 23% 늘었다.
+for 벤치에서 새로 펼쳐진 것은 오류 경로의 `@destruct`뿐이다. 성능 이득은 작고, 루프 있는 사용자 함수도 인라인 대상이
+된다는 일반성 때문에 남긴다.
+
+## 시도했으나 버린 것: Map 탐사 함수 `#[inline]`
+
+`findSlot`(IR 노드 117) · `findSetSlot`(116)은 기본 한도 40을 넘는다. `AutoHash`는 38, `AutoEq`는 5다. Map 100만 채우기 ·
+갱신 · get · contains 벤치(base 824.7 ms)로 잰 결과:
+
+- `findSlot`에 `#[inline]`, 누적 예산 256: +7.6%. `m[i]`는 `Map.@index` → `HashMap.@index` → `findSlot` → `AutoHash`로
+  깊이 4라, 깊이 한도 3에 걸려 `AutoHash` · `AutoEq`가 새 호출로 남는다(호출 1개를 없애고 2~3개를 만듦).
+- 위에 깊이 한도 4: +0.4%(get 경로가 전부 펼쳐져도 이득 없음).
+- `findSetSlot`도 `#[inline]`, 예산 320, 깊이 4: +7.4%(±75, main 바이트코드 243 → 494줄).
+
+Map의 시간은 호출이 아니라 메모리 접근 · 해시 계산 쪽으로 보인다. 깊이 3 · 예산 160 · `#[inline]`은 `HashMap.set`에만
+두는 3단계 설정을 유지한다. 깊이 한도를 올리면 래퍼(`Map.@index` 같은 한 줄 함수)가 깊이를 먹는 문제가 있으니, 나중에
+래퍼를 깊이에서 빼는 규칙(노드 10 이하는 깊이를 세지 않음 등)을 검토할 수 있다.

@@ -114,6 +114,8 @@ fn test_functions(run: *Runner) void {
     run.case("functions/inline_call_panic.cy");
     run.case("functions/inline_nested.cy");
     run.case("functions/inline_nested_panic.cy");
+    run.case("functions/inline_loop.cy");
+    run.case("functions/inline_loop_panic.cy");
     run.case("functions/func_type.cy");
     run.case("functions/func_type_closure_error.cy");
     run.case("functions/func_type_error.cy");

@@ -1586,8 +1586,18 @@ fn check_inline_stmts(head: ?*ir.Stmt, count: *InlineCount) bool {
                 if (!check_inline_stmts(data.body_head, count)) return false;
             },
             .block => if (!check_inline_stmts(stmt.cast(.block).bodyHead, count)) return false,
-            // Only exits a block here since loops are rejected.
+            // Loops use the caller's absolute block depth, and `break_` · `continue_` add `InlineCtx.block_base`.
+            // A backward jump checkpoint inside the body is expanded through the inline site like any other pc.
+            .loop_block => if (!check_inline_stmts(stmt.cast(.loop_block).body_head, count)) return false,
+            .forRangeStmt => {
+                const data = stmt.cast(.forRangeStmt);
+                if (!check_inline_expr(data.start, count)) return false;
+                if (!check_inline_expr(data.end, count)) return false;
+                if (!check_inline_stmts(data.declHead, count)) return false;
+                if (!check_inline_stmts(data.bodyHead, count)) return false;
+            },
             .break_,
+            .continue_,
             .ret,
             .trap,
             .nop_label,

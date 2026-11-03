@@ -1511,13 +1511,14 @@ const inline_max_params = 8;
 const inline_max_reg_end = 160;
 
 /// Returns the cost of inlining `func` at the current site, or null when nesting limits are reached.
-/// A function is not inlined into itself (recursion), including the function of the proc being generated.
+/// A self call (recursion) is unrolled one level: the site is hot, and the copy's own calls stay calls
+/// because the inline context chain already holds the function.
 fn inline_cost_fits(c: *Chunk, func: *cy.Func) ?u32 {
-    if (c.funcs_debug.items[c.cur_proc.id].func == func) return null;
+    const self_call = c.funcs_debug.items[c.cur_proc.id].func == func;
     // `can_inline` cached the body's node count.
     const block = func.data.userFunc.loc.cast(.funcBlock);
     const cost = block.bc_inline_cost;
-    if (cost > inline_small_nodes and c.cur_proc.loop_depth == 0 and !block.bc_inline_attr) return null;
+    if (cost > inline_small_nodes and c.cur_proc.loop_depth == 0 and !block.bc_inline_attr and !self_call) return null;
     const ctx = c.inline_ctx orelse return cost;
     if (ctx.depth >= inline_max_depth) return null;
     var root = ctx;

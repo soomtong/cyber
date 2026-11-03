@@ -1192,8 +1192,9 @@ test "Bytecode inlining of functions with loops." {
     // so the sites are in a loop (hot). See "Inline site rules." for sites outside a loop.
     try zt.eq(3, count_debug_frames(vm, "find_first"));
     try zt.eq(2, count_debug_frames(vm, "unwrap_sum"));
-    // A recursive function is inlined once into `main`, but never into its own body.
-    try zt.eq(2, count_debug_frames(vm, "rec"));
+    // A recursive function is inlined once into `main` and unrolled one level into its own body
+    // (the self call site counts as hot). The unrolled copy's self call stays a call.
+    try zt.eq(3, count_debug_frames(vm, "rec"));
 }
 
 test "Inline site rules." {

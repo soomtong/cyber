@@ -87,6 +87,9 @@ t.eq('abcdefghijklmnopqrstuvwxyz123456'.index_any({'6', 'm'}).?, 12)
 t.eq('abcdefghijklmnopqrstuvwxyz123456'.index_any({'0'}), none)
 t.eq('abcdefghijklmnopqrstuvwxyz123456'.index_any({'0', '7'}), none)
 t.eq('abcdefghijklmnopqrstuvwxyz123456'.index_any({'0', '7', 'm'}).?, 12)
+-- `,` (0x2C) and `<` (0x3C) share a lower nibble.
+t.eq('abcdefghijklmnopqrstuvwxyz12345,'.index_any({'<', ','}).?, 31)
+t.eq('abcdefghijklmnopqrstuvwxyz12345,'.index_any({',', '<'}).?, 31)
 
 -- index_any([]byte) simd 32-byte remain
 t.eq('abcdefghijklmnopqrstuvwxyz123456789'.index_any({'7'}).?, 32)
@@ -95,6 +98,7 @@ t.eq('abcdefghijklmnopqrstuvwxyz123456789'.index_any({'9'}).?, 34)
 t.eq('abcdefghijklmnopqrstuvwxyz123456789'.index_any({'9', '8'}).?, 33)
 t.eq('abcdefghijklmnopqrstuvwxyz123456789'.index_any({'0'}), none)
 t.eq('abcdefghijklmnopqrstuvwxyz123456789'.index_any({'0', '8'}).?, 33)
+t.eq('abcdefghijklmnopqrstuvwxyz1234567,9'.index_any({'<', ','}).?, 33)
 
 -- index(byte)
 t.eq(s.index(byte('a')).?, 0)

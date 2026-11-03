@@ -509,7 +509,7 @@ pub fn indexOfAsciiSetSimdRemain(comptime VecSize: usize, str: []const u8, set: 
     const MaskInt = @Int(.unsigned, VecSize);
     // const MaskShiftInt = @Int(.unsigned, std.math.log2(@bitSizeOf(MaskInt)));
 
-    if (VecSize == 32 and hasAvx2) {
+    if (VecSize == 32 and hasAvx2 and builtin.target.cpu.arch == .x86_64) {
         // Same as SimdFixed version with a mask at the end.
 
         // Construct the LUT.
@@ -519,9 +519,10 @@ pub fn indexOfAsciiSetSimdRemain(comptime VecSize: usize, str: []const u8, set: 
         for (set) |code| {
             const lower = code & 0xF;
             const upper = code >> 4; // At most 7.
-            lut_arr[lower] = @as(u8, 1) << @intCast(upper);
+            // OR: codes that share a lower nibble keep each other's upper bit.
+            lut_arr[lower] |= @as(u8, 1) << @intCast(upper);
             // Dupe to upper offset 128 for 256bit vpshufb.
-            lut_arr[16 + lower] = @as(u8, 1) << @intCast(upper);
+            lut_arr[16 + lower] |= @as(u8, 1) << @intCast(upper);
         }
         const lut: @Vector(VecSize, u8) = lut_arr;
 
@@ -579,7 +580,7 @@ pub fn indexOfAsciiSetSimdRemain(comptime VecSize: usize, str: []const u8, set: 
 pub fn indexOfAsciiSetSimdFixed(comptime VecSize: usize, str: []const u8, set: []const u8) ?usize {
     const MaskInt = @Int(.unsigned, VecSize);
 
-    if (VecSize == 32 and hasAvx2) {
+    if (VecSize == 32 and hasAvx2 and builtin.target.cpu.arch == .x86_64) {
         // Based on the algorithm: http://0x80.pl/articles/simd-byte-lookup.html
 
         // Construct the LUT.
@@ -589,9 +590,10 @@ pub fn indexOfAsciiSetSimdFixed(comptime VecSize: usize, str: []const u8, set: [
         for (set) |code| {
             const lower = code & 0xF;
             const upper = code >> 4; // At most 7.
-            lut_arr[lower] = @as(u8, 1) << @intCast(upper);
+            // OR: codes that share a lower nibble keep each other's upper bit.
+            lut_arr[lower] |= @as(u8, 1) << @intCast(upper);
             // Dupe to upper offset 128 for 256bit vpshufb.
-            lut_arr[16 + lower] = @as(u8, 1) << @intCast(upper);
+            lut_arr[16 + lower] |= @as(u8, 1) << @intCast(upper);
         }
         const lut: @Vector(VecSize, u8) = lut_arr;
 
@@ -627,21 +629,14 @@ pub fn indexOfAsciiSetSimdFixed(comptime VecSize: usize, str: []const u8, set: [
             );
 
             var hitMask: MaskInt = @bitCast((needle & upperMask) == upperMask);
-            if (hitMask > 0) {
-                var res = i + @ctz(hitMask);
-                if (str[res] & 0x80 == 0) {
-                    return res;
-                } else {
-                    // Non-ascii result. Move to next bit in `hitMask`.
-                    hitMask = unsetLowestBit(hitMask, res);
-                    while (hitMask > 0) {
-                        res = i + @ctz(hitMask);
-                        if (str[res] & 0x80 == 0) {
-                            return res;
-                        }
-                        hitMask = unsetLowestBit(hitMask, res);
-                    }
+            // `hitMask` bits are relative to `i`.
+            while (hitMask > 0) {
+                const bit = @ctz(hitMask);
+                if (str[i + bit] & 0x80 == 0) {
+                    return i + bit;
                 }
+                // Non-ascii result. Move to next bit in `hitMask`.
+                hitMask = unsetLowestBit(hitMask, bit);
             }
         }
         return null;
@@ -775,6 +770,25 @@ test "string.indexOf matches std.mem.find." {
             for (needle[0..nlen]) |*ch| ch.* = 'a' + rand.uintLessThan(u8, 3);
         }
         try find.check(str[0..len], needle[0..nlen]);
+    }
+}
+
+test "indexOfAsciiSet matches the scalar search." {
+    // Codes that share a lower nibble (`,` 0x2C and `<` 0x3C) and non-ascii bytes after the first vector.
+    var prng = std.Random.DefaultPrng.init(0x5e7);
+    const rand = prng.random();
+    const alphabet = "ab,<L\\|\x80\xc3";
+    const sets = [_][]const u8{ ",<", "<,", ",", "<", "L|\\", "z", ",<L|" };
+    var str: [300]u8 = undefined;
+    for (0..3000) |_| {
+        const len = rand.uintAtMost(usize, str.len);
+        for (str[0..len]) |*ch| {
+            // Mostly filler so hits land in later vectors.
+            ch.* = if (rand.uintLessThan(u8, 8) == 0) alphabet[rand.uintLessThan(usize, alphabet.len)] else 'x';
+        }
+        for (sets) |set| {
+            try t.eq(indexOfAsciiSetScalar(str[0..len], set), indexOfAsciiSet(str[0..len], set));
+        }
     }
 }
 

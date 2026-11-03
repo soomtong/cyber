@@ -144,6 +144,8 @@ pub const Chunk = struct {
 
     /// Set while generating an inlined callee body. See `bc_gen.gen_inline_call`.
     inline_ctx: ?*bc.InlineCtx = null,
+    /// Nesting of statement lists that end with a `never` call (error paths). Calls in them are not inlined.
+    cold_depth: u32 = 0,
 
     /// Offset added to IR local ids. Non-zero only while inlining.
     inline_local_base: usize = 0,

@@ -369,11 +369,32 @@ fn genChunk(c: *Chunk) !void {
 }
 
 fn genStmts(c: *Chunk, head: ?*ir.Stmt) !void {
+    const cold = stmts_end_in_never(head);
+    if (cold) c.cold_depth += 1;
+    defer if (cold) {
+        c.cold_depth -= 1;
+    };
     var stmt_opt = head;
     while (stmt_opt) |stmt| {
         try genStmt(c, stmt);
         stmt_opt = stmt.next;
     }
+}
+
+/// Whether a statement list ends with a call that does not return (`never`), like `panic`. Such a block is an
+/// error path that runs at most once, so calls in it are not worth inlining. A loop in the list keeps it hot.
+fn stmts_end_in_never(head: ?*ir.Stmt) bool {
+    var cold = false;
+    var stmt_opt = head;
+    while (stmt_opt) |stmt| : (stmt_opt = stmt.next) {
+        switch (stmt.code) {
+            .discard => cold = stmt.cast(.discard).expr.type.id() == bt.Never,
+            .pop_locals, .trap, .nop_label, .release => {},
+            .loop_block, .forRangeStmt => return false,
+            else => cold = false,
+        }
+    }
+    return cold;
 }
 
 fn genStmt(c: *Chunk, stmt: *ir.Stmt) anyerror!void {
@@ -1408,8 +1429,8 @@ fn gen_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenValue {
         return genCallIntrinsic(c, expr, cstr, @fromBackingInt(@intCast(expr.func.info.gen_intrinsic)), node);
     }
 
-    // Leave room in the u8 register window. Inlining extends the caller's frame.
-    if (c.cur_proc.reg_end < inline_max_reg_end and can_inline(expr.func)) {
+    // Leave room in the u8 register window. Inlining extends the caller's frame. Error paths stay calls.
+    if (c.cold_depth == 0 and c.cur_proc.reg_end < inline_max_reg_end and can_inline(expr.func)) {
         if (inline_cost_fits(c, expr.func)) |cost| {
             return gen_inline_call(c, expr, cost, cstr, node);
         }
@@ -1483,6 +1504,8 @@ const inline_max_nodes_attr = 120;
 const inline_max_depth = 3;
 /// Limit on IR nodes inlined under one outermost call site, so nesting does not multiply code size.
 const inline_max_total = 160;
+/// A body up to this many nodes is inlined at any site. Bigger bodies only at hot sites (in a loop) or with `#[inline]`.
+const inline_small_nodes = 16;
 const inline_max_params = 8;
 /// Registers are u8 indexed by the VM (`chk_stk` frame size), keep a margin for the inlined body.
 const inline_max_reg_end = 160;
@@ -1492,7 +1515,9 @@ const inline_max_reg_end = 160;
 fn inline_cost_fits(c: *Chunk, func: *cy.Func) ?u32 {
     if (c.funcs_debug.items[c.cur_proc.id].func == func) return null;
     // `can_inline` cached the body's node count.
-    const cost = func.data.userFunc.loc.cast(.funcBlock).bc_inline_cost;
+    const block = func.data.userFunc.loc.cast(.funcBlock);
+    const cost = block.bc_inline_cost;
+    if (cost > inline_small_nodes and c.cur_proc.loop_depth == 0 and !block.bc_inline_attr) return null;
     const ctx = c.inline_ctx orelse return cost;
     if (ctx.depth >= inline_max_depth) return null;
     var root = ctx;
@@ -1531,7 +1556,9 @@ fn can_inline(func: *cy.Func) bool {
     }
     if (check_inline(func)) |cost| {
         func.info.bc_inline = 1;
-        func.data.userFunc.loc.cast(.funcBlock).bc_inline_cost = cost;
+        const block = func.data.userFunc.loc.cast(.funcBlock);
+        block.bc_inline_cost = cost;
+        block.bc_inline_attr = has_inline_attr(func);
         return true;
     }
     func.info.bc_inline = 2;
@@ -1542,6 +1569,8 @@ fn can_inline(func: *cy.Func) bool {
 fn check_inline(func: *cy.Func) ?u32 {
     if (func.type != .userFunc) return null;
     if (func.info.generator or func.info.jit or func.info.extern_) return null;
+    // A function that does not return runs at most once per call site, so the call is not worth removing.
+    if (func.sig.ret.id() == bt.Never) return null;
     if (func.sig.params_len > inline_max_params) return null;
     const loc = func.data.userFunc.loc;
     if (loc.code != .funcBlock) return null;
@@ -2603,6 +2632,8 @@ fn gen_loop_block(c: *cy.Chunk, stmt: *ir.LoopBlock, node: *ast.Node) !void {
 
     try pushBlock(c, node);
     {
+        c.cur_proc.loop_depth += 1;
+        defer c.cur_proc.loop_depth -= 1;
         try genStmts(c, stmt.body_head);
         c.blockJumpStack.items.len = c.patchForBlockJumps(jump_start, c.cur_proc.block_depth-1, c.buf.ops.items.len, top_pc);
     } 
@@ -2659,7 +2690,9 @@ fn gen_for_range_stmt(c: *Chunk, stmt: *ir.ForRangeStmt, node: *ast.Node) !void 
 
     const jumpStackSave = c.blockJumpStack.items.len;
 
+    c.cur_proc.loop_depth += 1;
     try genStmts(c, stmt.bodyHead);
+    c.cur_proc.loop_depth -= 1;
 
     const block_offset = c.cur_proc.block_depth - 1;
     try popLoopBlock(c);
@@ -3057,6 +3090,9 @@ pub const Proc = struct {
     debugNode: *ast.Node,
 
     block_depth: u32,
+
+    /// Nesting of loops being generated, including loops of inlined bodies. A call in a loop is a hot site.
+    loop_depth: u32 = 0,
 
     // Alive pointer locals.
     num_ptr_locals: usize,

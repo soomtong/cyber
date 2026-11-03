@@ -241,3 +241,63 @@ lib-test `A function body ends at its last return.`이 main chunk의 `markers`�
 Map의 시간은 호출이 아니라 메모리 접근 · 해시 계산 쪽으로 보인다. 깊이 3 · 예산 160 · `#[inline]`은 `HashMap.set`에만
 두는 3단계 설정을 유지한다. 깊이 한도를 올리면 래퍼(`Map.@index` 같은 한 줄 함수)가 깊이를 먹는 문제가 있으니, 나중에
 래퍼를 깊이에서 빼는 규칙(노드 10 이하는 깊이를 세지 않음 등)을 검토할 수 있다.
+
+# 5단계: 호출 지점 규칙 (비용 모델)
+
+작성일 2026-11-03.
+
+## 배경
+
+인라인을 끈 빌드와 비교하니 전체 바이트코드(core · os 포함 덤프 명령 줄 수)가 for 벤치 기준 8190 → 19064(+133%)였다. 늘어난
+곳의 대부분은 실행되지 않는 오류 경로였다. `Vector.@index_addr`(61곳) · `Ptr.@slice` 같은 경계 검사 함수가 지점마다 펼쳐지고,
+그 안의 `panic_oob`(22곳)까지 펼쳐져 문자열 보간 · `interpolate` · `panic` 호출(약 25명령)이 지점마다 복사됐다.
+`Wyhash.final`은 68 → 938명령. 4단계에서 본 `Slice.@deinit`(23곳) · `File.close`(21곳)도 핫 경로가 아닌 지점에 펼쳐진 것이다.
+
+## 결정
+
+세 규칙을 더한다. 한도(기본 40 · `#[inline]` 120 · 깊이 3 · 누적 160)는 그대로다.
+
+- A. `never`를 반환하는 callee는 인라인하지 않는다(`check_inline`). 돌아오지 않는 함수는 한 번만 실행되므로 호출을 없앨
+  이유가 없다. core.cy의 `panic_oob`에 `-> never`를 붙였다(그 덕에 sema도 `panic_oob` 뒤를 도달 불가로 본다).
+- B. `never` 호출로 끝나는 문 목록(오류 경로) 안에서는 인라인하지 않는다. `genStmts`가 `stmts_end_in_never`로 판단해
+  `Chunk.cold_depth`를 올리고, `gen_call`은 `cold_depth == 0`일 때만 인라인한다. 목록에 루프가 있으면 차갑지 않다.
+  마지막 문만 보므로 `never` 호출 뒤에 문이 더 있으면(sema가 허용) 차갑지 않다.
+- C. 본문이 `inline_small_nodes`(16)보다 크면 루프 안의 호출 지점이거나 `#[inline]`일 때만 인라인한다(`inline_cost_fits`).
+  `Proc.loop_depth`를 `gen_loop_block` · `gen_for_range_stmt`가 올리며, 인라인된 본문 안의 루프도 같은 proc의 깊이라
+  중첩 인라인의 호출 지점도 루프 안으로 센다. `#[inline]` 여부는 `ir.FuncBlock.bc_inline_attr`에 비용과 함께 캐시한다.
+
+인라인 가능 함수 35개의 비용 분포(for 벤치, 규칙 A 적용 후): 0~7 6개, 8~15 8개, 16~23 8개, 24~31 6개, 32~39 6개, 40 1개
+(`File.close`). `Array.append` 39, `Slice.@slice` 38, `next` 36, `Slice.@deinit` 32, `@index_addr` 23 · 18.
+
+## 결과 (ReleaseSafe, `7563e3b4` 대비)
+
+덤프 명령 줄 수(전체 / for의 main chunk):
+
+| 변형 | for | heap | alloc | fib | fiber | for main |
+|---|---|---|---|---|---|---|
+| 인라인 없음 | 8190 | 8375 | 8628 | 7864 | 8343 | 586 |
+| `7563e3b4` | 19064 | 20120 | 20113 | 18484 | 19464 | 1035 |
+| A + B | 13906 | 14424 | 14829 | 13395 | 14200 | 906 |
+| A + B + C | 10399 | 10777 | 11140 | 10000 | 10604 | 739 |
+
+인라인 없음 대비 +133% → +27%. 남은 증가는 핫 루프 안의 `@index_addr` · `@slice` · `append` · `next`처럼 의도한 것이다
+(경계 검사 `uge` · `jump_f` · `call panic_oob` 약 8명령이 지점마다 남는다).
+
+시간(hyperfine, 부하 있음): A + B는 for −1.4%, heap −2.6%, fib −1.4%, fiber −7.1%, alloc −0.3%. 거기에 C는 for −3.2%,
+heap −10.7%, fib −4.9%, fiber +0.5%, alloc +0.8%. 핫 경로의 생성 코드는 같아 모두 잡음 범위이고 회귀는 없다.
+
+## 테스트
+
+lib-test `Inline site rules.`: 작은 함수는 어디서나 펼쳐지지만 `never`로 끝나는 블록 안에서는 아니고(2), 큰 함수는 루프 안
+지점에서만(2), `-> never` 함수는 본문이 작고 뒤에 문이 있어도 호출로 남는다(1). 규칙 하나씩 끄면 각각 "expected 2, found 3" ·
+"expected 2, found 3" · "expected 1, found 2"로 실패한다. `Bytecode inlining of functions with loops.`는 호출 지점을
+`for 0..2` 안으로 옮겼다(루프 있는 본문은 16을 넘으므로).
+
+## 남은 것
+
+- 재귀 함수의 자기 호출 지점은 루프 밖이라도 핫하다. 재귀 가드가 자기 본문 인라인을 막고 있어 지금은 영향이 없지만, 가드를
+  재검토하면 "callee가 현재 proc의 함수"를 핫으로 봐야 한다.
+- 콜백 · 생성기 본문처럼 루프 밖이지만 자주 불리는 지점은 규칙 C가 놓친다. `#[inline]`으로 지정하는 수밖에 없다.
+- 오류 경로 자체를 지점마다 복사하지 않으려면(callee 안의 `if idx >= len: panic_oob(idx)`) callee 쪽 코드를 바꾸는 게 아니라
+  차가운 블록을 한 번만 생성해 공유해야 하는데, 인라인 지점마다 레지스터 base가 달라 간단하지 않다.
+

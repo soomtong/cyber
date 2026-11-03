@@ -144,7 +144,7 @@ fn eprints(x %T):
 --| Builds a stack trace and aborts the current thread.
 #[bind] fn panic(msg str) -> never
 
--fn panic_oob(x int):
+-fn panic_oob(x int) -> never:
     panic('Out of bounds index: %{x}')
 
 --| Logs a value to the host. Thread-safe.

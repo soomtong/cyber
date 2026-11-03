@@ -1181,17 +1181,59 @@ test "Bytecode inlining of functions with loops." {
         \\  return t + rec(n - 1)
         \\
         \\xs := []int{4, 8, 15}
-        \\_ = find_first(xs, 15)
-        \\_ = find_first(xs, 99)
-        \\_ = unwrap_sum(3)
-        \\_ = rec(3)
+        \\for 0..2 |i|:
+        \\  _ = find_first(xs, 15)
+        \\  _ = find_first(xs, i)
+        \\  _ = unwrap_sum(i)
+        \\  _ = rec(i)
     , C.defaultCompileConfig()));
 
-    // `for` and `while` bodies are inlined at each call.
+    // `for` and `while` bodies are inlined at each call. The bodies are bigger than `inline_small_nodes`,
+    // so the sites are in a loop (hot). See "Inline site rules." for sites outside a loop.
     try zt.eq(3, count_debug_frames(vm, "find_first"));
     try zt.eq(2, count_debug_frames(vm, "unwrap_sum"));
     // A recursive function is inlined once into `main`, but never into its own body.
     try zt.eq(2, count_debug_frames(vm, "rec"));
+}
+
+test "Inline site rules." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    try zt.eq(C.Success, C.vm_compile(vm, "main",
+        \\fn small(a int, b int) -> int:
+        \\  return a * b + 1
+        \\
+        \\fn big(xs []int, target int) -> int:
+        \\  for 0..xs.len() |i|:
+        \\    if xs[i] == target:
+        \\      return i
+        \\  return -1
+        \\
+        \\fn die(code int) -> never:
+        \\  _ = code
+        \\  panic('dead')
+        \\
+        \\xs := []int{4, 8, 15}
+        \\a := small(2, 3)
+        \\b := big(xs, 8)
+        \\if a == 0:
+        \\  c := small(a, b)
+        \\  die(c)
+        \\if b == 99:
+        \\  die(b)
+        \\  b = 1
+        \\for 0..2 |i|:
+        \\  b += big(xs, i)
+    , C.defaultCompileConfig()));
+
+    // A small body is inlined at any site, but not in a block that ends with a `never` call (an error path).
+    try zt.eq(2, count_debug_frames(vm, "small"));
+    // A body over `inline_small_nodes` is inlined only at a site inside a loop.
+    try zt.eq(2, count_debug_frames(vm, "big"));
+    // A function that does not return is never inlined. Its body is small and the second `die` site is followed
+    // by a statement, so neither the size nor the error path rule applies there and only the `never` rule keeps it a call.
+    try zt.eq(1, count_debug_frames(vm, "die"));
 }
 
 /// Counts the instructions after the last `ret` of `name`'s body in the main chunk (from its `markers` entry to the

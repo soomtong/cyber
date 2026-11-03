@@ -475,6 +475,8 @@ pub const FuncBlock = extern struct {
 
     /// IR node count of the body, set by `bc_gen.can_inline` when the function is inlinable (`FuncInfo.bc_inline == 1`).
     bc_inline_cost: u32 = 0,
+    /// The function has `#[inline]`, so every site is treated as hot.
+    bc_inline_attr: bool = false,
 
     /// Mark a func block to skip generation.
     /// Useful for removing temporary compile-time functions.

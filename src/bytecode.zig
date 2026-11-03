@@ -870,15 +870,18 @@ pub const DebugSym = extern struct {
     file: u16,
 };
 
-/// An inlined callee body occupying `[start, end)`. Debug syms inside it point to the callee.
-/// The stack trace adds a caller frame at `call_loc`.
+/// An inlined callee body occupying `[start, end)`. Debug syms inside it point to the innermost callee.
+/// The stack trace adds a caller frame at `call_loc` for each site from the innermost to the outermost.
+/// Sites are properly nested and ordered by `start`.
 pub const InlineSite = struct {
     start: u32,
     end: u32,
     /// Source pos of the call expression.
     call_loc: u32,
-    /// Caller's index into `Chunk.funcs_debug`.
+    /// Caller's index into `Chunk.funcs_debug`. For a nested site, the enclosing inlined callee.
     caller_frame: u32,
+    /// Enclosing site index, or `NullId`.
+    parent: u32,
 };
 
 pub const PcPtrLayout = extern struct {

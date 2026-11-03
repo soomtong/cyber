@@ -598,14 +598,20 @@ pub fn allocStackTrace(vm: *cy.VM, stack: []const cy.Value, cframes: []const vmc
         logger.tracev("build stackframe pc={*}, fp={}", .{cframe.pc, cframe.fpOffset});
         try frames.append(vm.alloc, try cy.debug.compactToStackFrame(vm, stack, cframe));
         if (cframe.pc) |pc| {
-            // An inlined callee frame is followed by its caller's frame at the call site.
+            // An inlined callee frame is followed by its callers' frames at each call site.
             if (getInlineSite(vm, pc)) |res| {
-                try frames.append(vm.alloc, try getStackFrame(vm, .{
-                    .pc = res.site.start,
-                    .loc = res.site.call_loc,
-                    .frameLoc = res.site.caller_frame,
-                    .file = @intCast(res.chunk.id),
-                }));
+                const sites = res.chunk.buf.inline_sites.items;
+                var idx = res.idx;
+                while (idx != cy.NullId) {
+                    const site = sites[idx];
+                    try frames.append(vm.alloc, try getStackFrame(vm, .{
+                        .pc = site.start,
+                        .loc = site.call_loc,
+                        .frameLoc = site.caller_frame,
+                        .file = @intCast(res.chunk.id),
+                    }));
+                    idx = site.parent;
+                }
             }
         }
     }
@@ -614,7 +620,8 @@ pub fn allocStackTrace(vm: *cy.VM, stack: []const cy.Value, cframes: []const vmc
 
 const InlineSiteResult = struct {
     chunk: *cy.Chunk,
-    site: bytecode.InlineSite,
+    /// Innermost site containing the pc.
+    idx: u32,
 };
 
 fn getInlineSite(vm: *const cy.VM, pc: *anyopaque) ?InlineSiteResult {
@@ -630,9 +637,16 @@ fn getInlineSite(vm: *const cy.VM, pc: *anyopaque) ?InlineSiteResult {
     };
     const upper = std.sort.upperBound(bytecode.InlineSite, sites, off, S.compare);
     if (upper == 0) return null;
-    const site = sites[upper - 1];
-    if (off >= site.end) return null;
-    return .{ .chunk = entry.chunk, .site = site };
+    // The last site starting at or before `off` is the innermost one if it contains `off`.
+    // Otherwise a containing site encloses it, so walk up its parents.
+    var idx: u32 = @intCast(upper - 1);
+    while (idx != cy.NullId) {
+        if (off < sites[idx].end) {
+            return .{ .chunk = entry.chunk, .idx = idx };
+        }
+        idx = sites[idx].parent;
+    }
+    return null;
 }
 
 pub fn nextEventId() u64 {

@@ -1033,12 +1033,19 @@ fn gen_init_zero(c: *Chunk, expr: *ir.InitZero, cstr: Cstr, node: *ast.Node) !Ge
 
 fn gen_break(c: *Chunk, stmt: *ir.Break, node: *ast.Node) !void {
     const pc = try c.pushEmptyJump(node);
-    try c.blockJumpStack.append(c.alloc, .{ .jumpT = .brk, .pc = pc, .block_offset = stmt.block_offset });
+    const offset = stmt.block_offset + inline_block_base(c);
+    try c.blockJumpStack.append(c.alloc, .{ .jumpT = .brk, .pc = pc, .block_offset = offset });
 }
 
 fn gen_continue(c: *Chunk, stmt: *ir.Continue, node: *ast.Node) !void {
     const pc = try c.pushEmptyJump(node);
-    try c.blockJumpStack.append(c.alloc, .{ .jumpT = .cont, .pc = pc, .block_offset = stmt.block_offset });
+    const offset = stmt.block_offset + inline_block_base(c);
+    try c.blockJumpStack.append(c.alloc, .{ .jumpT = .cont, .pc = pc, .block_offset = offset });
+}
+
+/// IR block offsets count from the callee's function block. An inlined body starts deeper in the caller.
+fn inline_block_base(c: *Chunk) u32 {
+    return if (c.inline_ctx) |ctx| ctx.block_base else 0;
 }
 
 fn gen_set_deref(c: *Chunk, stmt: *ir.SetDeref, node: *ast.Node) !void {
@@ -1401,10 +1408,10 @@ fn gen_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenValue {
         return genCallIntrinsic(c, expr, cstr, @fromBackingInt(@intCast(expr.func.info.gen_intrinsic)), node);
     }
 
-    if (c.inline_ctx == null and can_inline(expr.func)) {
-        // Leave room in the u8 register window. Inlining extends the caller's frame.
-        if (c.cur_proc.reg_end < inline_max_reg_end) {
-            return gen_inline_call(c, expr, cstr, node);
+    // Leave room in the u8 register window. Inlining extends the caller's frame.
+    if (c.cur_proc.reg_end < inline_max_reg_end and can_inline(expr.func)) {
+        if (inline_cost_fits(c.inline_ctx, expr.func)) |cost| {
+            return gen_inline_call(c, expr, cost, cstr, node);
         }
     }
 
@@ -1445,6 +1452,17 @@ fn gen_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenValue {
 
 /// State while generating an inlined callee body. See `docs/decisions/project_bc_inline.md`.
 pub const InlineCtx = struct {
+    /// Enclosing inline. Its body contains this call site.
+    parent: ?*InlineCtx,
+    func: *cy.Func,
+    /// 1 for an inline in a proc body, 2 for an inline inside it, and so on.
+    depth: u8,
+    /// IR nodes inlined under the outermost inline, including nested ones. Only kept in the outermost ctx.
+    total_cost: u32,
+    /// Index into `ByteCodeBuffer.inline_sites`.
+    site: u32,
+    /// Caller's block depth at the call. Added to the callee's IR block offsets.
+    block_base: u32,
     /// Call site node.
     node: *ast.Node,
     /// Callee's source chunk.
@@ -1459,12 +1477,56 @@ pub const InlineCtx = struct {
 };
 
 const inline_max_nodes = 40;
+/// Node limit for a function marked `#[inline]`.
+const inline_max_nodes_attr = 120;
+/// Nested inlines stop at this depth.
+const inline_max_depth = 3;
+/// Limit on IR nodes inlined under one outermost call site, so nesting does not multiply code size.
+const inline_max_total = 160;
 const inline_max_params = 8;
 /// Registers are u8 indexed by the VM (`chk_stk` frame size), keep a margin for the inlined body.
 const inline_max_reg_end = 160;
 
+/// Returns the cost of inlining `func` at the current site, or null when nesting limits are reached.
+/// A function is not inlined into itself (recursion).
+fn inline_cost_fits(ctx_opt: ?*InlineCtx, func: *cy.Func) ?u32 {
+    const ctx = ctx_opt orelse return inline_cost(func);
+    if (ctx.depth >= inline_max_depth) return null;
+    var root = ctx;
+    var cur: ?*InlineCtx = ctx;
+    while (cur) |cx| {
+        if (cx.func == func) return null;
+        root = cx;
+        cur = cx.parent;
+    }
+    const cost = inline_cost(func);
+    if (root.total_cost + cost > inline_max_total) return null;
+    return cost;
+}
+
+fn inline_cost(func: *cy.Func) u32 {
+    var count = InlineCount{ .n = 0, .limit = std.math.maxInt(u32) };
+    _ = check_inline_stmts(func.data.userFunc.loc.cast(.funcBlock).bodyHead, &count);
+    return count.n;
+}
+
+const InlineCount = struct {
+    n: u32,
+    limit: u32,
+};
+
+/// `#[inline]` raises the node limit for a hot function that is too big for the default limit.
+fn has_inline_attr(func: *cy.Func) bool {
+    const decl = func.decl orelse return false;
+    if (decl.type() != .funcDecl) return false;
+    for (decl.cast(.funcDecl).attrs.slice()) |attr| {
+        if (attr.type == .inline_) return true;
+    }
+    return false;
+}
+
 /// Whether `func` is a small function whose IR body only uses allowed statements and expressions.
-/// Calls inside the body are generated as calls. Inline sites are expanded in stack traces.
+/// Calls inside the body are generated as calls or nested inlines. Inline sites are expanded in stack traces.
 fn can_inline(func: *cy.Func) bool {
     switch (func.info.bc_inline) {
         1 => return true,
@@ -1484,15 +1546,18 @@ fn check_inline(func: *cy.Func) bool {
     if (loc.code != .funcBlock) return false;
     const block = loc.cast(.funcBlock);
     if (block.skip) return false;
-    var count: u32 = 0;
+    var count = InlineCount{
+        .n = 0,
+        .limit = if (has_inline_attr(func)) inline_max_nodes_attr else inline_max_nodes,
+    };
     return check_inline_stmts(block.bodyHead, &count);
 }
 
-fn check_inline_stmts(head: ?*ir.Stmt, count: *u32) bool {
+fn check_inline_stmts(head: ?*ir.Stmt, count: *InlineCount) bool {
     var stmt_opt = head;
     while (stmt_opt) |stmt| {
-        count.* += 1;
-        if (count.* > inline_max_nodes) return false;
+        count.n += 1;
+        if (count.n > count.limit) return false;
         switch (stmt.code) {
             .declare_local => {
                 const data = stmt.cast(.declare_local);
@@ -1521,6 +1586,8 @@ fn check_inline_stmts(head: ?*ir.Stmt, count: *u32) bool {
                 if (!check_inline_stmts(data.body_head, count)) return false;
             },
             .block => if (!check_inline_stmts(stmt.cast(.block).bodyHead, count)) return false,
+            // Only exits a block here since loops are rejected.
+            .break_,
             .ret,
             .trap,
             .nop_label,
@@ -1533,9 +1600,9 @@ fn check_inline_stmts(head: ?*ir.Stmt, count: *u32) bool {
     return true;
 }
 
-fn check_inline_expr(expr: *ir.Expr, count: *u32) bool {
-    count.* += 1;
-    if (count.* > inline_max_nodes) return false;
+fn check_inline_expr(expr: *ir.Expr, count: *InlineCount) bool {
+    count.n += 1;
+    if (count.n > count.limit) return false;
     switch (expr.code) {
         .local,
         .const8,
@@ -1559,6 +1626,11 @@ fn check_inline_expr(expr: *ir.Expr, count: *u32) bool {
             const data = expr.cast(.cmp);
             return check_inline_expr(data.left, count) and check_inline_expr(data.right, count);
         },
+        .binary_op => {
+            const data = expr.cast(.binary_op);
+            return check_inline_expr(data.left, count) and check_inline_expr(data.right, count);
+        },
+        .unary_op => return check_inline_expr(expr.cast(.unary_op).expr, count),
         .neg, .not, .fneg, .fabs, .f2i, .i2f => {
             const data: *ir.UnOp2 = @ptrCast(@alignCast(expr));
             return check_inline_expr(data.expr, count);
@@ -1622,7 +1694,7 @@ fn is_top_level_stmt(head: ?*ir.Stmt, target: *ir.Stmt) bool {
 
 /// Generates the callee's IR body in the caller's proc instead of a `call`.
 /// Args are evaluated into temps like a call, and the callee's param locals are bound to them.
-fn gen_inline_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenValue {
+fn gen_inline_call(c: *Chunk, expr: *ir.Call, cost: u32, cstr: Cstr, node: *ast.Node) !GenValue {
     const func = expr.func;
     const block = func.data.userFunc.loc.cast(.funcBlock);
     const ret_t = expr.base.type;
@@ -1658,9 +1730,32 @@ fn gen_inline_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenV
 
     const frame_id: u32 = @intCast(c.funcs_debug.items.len);
     try c.funcs_debug.append(c.alloc, .{ .func = func, .name = func.name(), .src_chunk = func.decl.?.src() });
+
+    // The site is added before the body so sites stay ordered by `start`, a parent before its nested sites.
+    const parent = c.inline_ctx;
+    var call_loc = node.pos();
+    var caller_frame = c.cur_proc.id;
+    if (parent) |p| {
+        caller_frame = p.frame_id;
+        if (node.src() != p.src_chunk) call_loc = cy.NullId;
+    }
+    const site: u32 = @intCast(c.buf.inline_sites.items.len);
     const start_pc: u32 = @intCast(c.buf.ops.items.len);
+    try c.buf.inline_sites.append(c.alloc, .{
+        .start = start_pc,
+        .end = start_pc,
+        .call_loc = call_loc,
+        .caller_frame = caller_frame,
+        .parent = if (parent) |p| p.site else cy.NullId,
+    });
 
     var ctx = InlineCtx{
+        .parent = parent,
+        .func = func,
+        .depth = if (parent) |p| p.depth + 1 else 1,
+        .total_cost = cost,
+        .site = site,
+        .block_base = c.cur_proc.block_depth,
         .node = node,
         .src_chunk = func.decl.?.src(),
         .frame_id = frame_id,
@@ -1669,11 +1764,16 @@ fn gen_inline_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenV
         .end_jumps = .empty,
     };
     defer ctx.end_jumps.deinit(c.alloc);
+    if (parent) |p| {
+        var root = p;
+        while (root.parent) |pp| root = pp;
+        root.total_cost += cost;
+    }
     c.inline_ctx = &ctx;
     const saved_cur_node = c.curNode;
     {
         defer {
-            c.inline_ctx = null;
+            c.inline_ctx = parent;
             c.inline_local_base = saved_local_base;
             c.curNode = saved_cur_node;
         }
@@ -1688,12 +1788,11 @@ fn gen_inline_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenV
 
     const end_pc: u32 = @intCast(c.buf.ops.items.len);
     if (end_pc > start_pc) {
-        try c.buf.inline_sites.append(c.alloc, .{
-            .start = start_pc,
-            .end = end_pc,
-            .call_loc = node.pos(),
-            .caller_frame = c.cur_proc.id,
-        });
+        c.buf.inline_sites.items[site].end = end_pc;
+    } else {
+        // An empty body has no nested sites after it.
+        std.debug.assert(site == c.buf.inline_sites.items.len - 1);
+        c.buf.inline_sites.items.len = site;
     }
 
     if (ret_size == 0) {

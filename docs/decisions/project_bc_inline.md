@@ -105,3 +105,43 @@ panic 때 unwind는 프레임 기록만 하고 지역 변수를 해제하지 않
 for 52.8 → 48.8 ms(−7.6%), heap 36.6 → 33.7 ms(−8.1%), fiber 34.9 → 33.1 ms(−5.2%), fib 33.4 → 29.1 ms(−13%),
 alloc 696 → 670 ms(−3.7%). 다음 후보: `HashMap.set`(노드 한도 · `findSetSlot`의 while 루프), 루프가 있는 본문 허용,
 중첩 인라인(인라인 구간에 부모 구간을 두면 트레이스 펼치기를 그대로 확장할 수 있다).
+
+# 3단계: 중첩 인라인과 `#[inline]` (HashMap.set)
+
+작성일 2026-11-03.
+
+## 원인
+
+`m[k] = v`는 `Map.@set_index`(작은 래퍼) → `HashMap.set` → `findSetSlot` 순서로 호출한다. 2단계에서는 래퍼가 인라인되고
+그 안의 `HashMap.set` 호출은 "한 단계만" 제한 때문에 인라인 후보조차 아니었다. `HashMap.set` 자체도 세 가지로 막혀 있었다.
+
+1. `if ... else`가 IR에서 `block` + `if_block` + 블록을 빠져나가는 `break_`가 된다. `break_`는 허용 목록 밖이었다.
+2. 일반 이항 · 단항 연산 IR(`binary_op` · `unary_op`, 예: `slot && int.min`)이 허용 목록 밖이었다.
+3. IR 노드 87개(str 키 91개)로 한도 40을 넘는다.
+
+## 결정
+
+- 중첩 인라인: `InlineCtx.parent`, 깊이 한도 3, 같은 함수 재진입 금지(재귀는 한 단계만 펼침), 바깥 인라인 하나 아래의
+  누적 노드 예산 160. `InlineSite.parent`를 두고, 구간은 본문 생성 전에 자리를 잡아 `start` 순서(부모가 자식보다 앞)를
+  유지한다. 빈 본문이면 마지막 항목이므로 지운다. 중첩 구간의 `caller_frame`은 부모 인라인의 callee 항목이고, 호출 노드가
+  부모 소스가 아니면 위치를 `NullId`로 둔다.
+- 트레이스: `getInlineSite`는 `start <= pc`인 마지막 구간에서 시작해, pc를 포함하지 않으면 부모를 따라 올라간다(구간이
+  올바르게 중첩되므로 포함하는 가장 안쪽 구간은 그 후보의 조상이다). `allocStackTrace`는 그 구간부터 부모 사슬을 따라
+  caller 프레임을 하나씩 붙인다.
+- `break_` · `continue_`: IR `block_offset`은 callee 함수 블록 기준이므로 인라인 중에는 시작 시점의 caller 블록 깊이
+  (`InlineCtx.block_base`)를 더한다. 루프는 아직 거부하므로 허용 목록에는 `break_`만 넣었다.
+- `binary_op` · `unary_op` 허용(프레임에 의존하지 않는 일반 생성).
+- 한도: 기본 40은 유지하고, 함수 속성 `#[inline]`이 붙으면 120. 전역 한도를 100으로 올려 봤을 때 Map은 빨라졌지만 for가
+  조금 느려 보였고(잡음 범위) 모든 함수의 코드가 커지므로, 핫 함수에만 명시하는 쪽을 택했다. 속성은 bc_gen이 `funcDecl`의
+  attrs를 직접 본다(제네릭 타입의 메서드 인스턴스도 같은 decl을 가리켜 sema 경로를 건드릴 필요가 없다). 지금은
+  `HashMap.set`에만 붙였다. 카운터는 전역 변수 없이 `InlineCount{n, limit}`로 넘긴다(VM별 스레드 컴파일 대비).
+
+드문 경로인 `grow`도 함께 펼쳐진다(코드만 조금 늘고 `resize` 호출은 그대로). 필요하면 나중에 "드문 분기 안의 호출은
+인라인하지 않음" 같은 규칙을 추가한다.
+
+## 테스트와 결과
+
+- `functions/inline_nested.cy`(else 사슬을 가진 함수의 3단 중첩, 루프 안 if/else, 재귀, Map[int] · Map[str] set/get),
+  `inline_nested_panic.cy`(3단 중첩 안의 panic이 inner · middle · outer · main 프레임으로 보임).
+- ReleaseSafe, hyperfine 30회, `b40531a1` 대비(부하 있는 상태): Map[int] 100만 채우기+갱신 563.5 → 516.0 ms(−8.4%),
+  heap 33.9 → 31.7 ms(−6.6%), alloc 670 → 667 ms, for · fiber · fib는 잡음 범위(fib 함수 본문 바이트코드는 같음).

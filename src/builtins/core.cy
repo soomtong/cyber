@@ -2447,6 +2447,7 @@ fn (&HashMap[]) resize(new_cap int):
     free(old_keys)
     free(old_vals)
 
+#[inline]
 fn (&HashMap[]) set(key K, val V):
     if self.nvac == 0:
         self.grow()

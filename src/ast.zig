@@ -164,6 +164,8 @@ pub const AttributeType = enum(u8) {
     consteval,
     reserve,
     jit,
+    /// Bytecode inlining with a larger size limit. See `bc_gen.has_inline_attr`.
+    inline_,
 };
 
 const OptionType = extern struct {

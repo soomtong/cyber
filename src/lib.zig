@@ -1149,6 +1149,58 @@ test "JIT backend is rejected with a clear compile error." {
     try zt.expect(std.mem.indexOf(u8, summary, "The JIT backend is not supported.") != null);
 }
 
+/// Counts `funcs_debug` entries named `name` in the main chunk. A function body has one entry and each inline site of it
+/// adds one, so the result minus one is the number of inline sites.
+fn count_debug_frames(vm: ?*C.VM, name: []const u8) u32 {
+    const zvm: *cy.VM = @ptrCast(@alignCast(vm.?));
+    var n: u32 = 0;
+    for (zvm.compiler.main_chunk.funcs_debug.items) |f| {
+        if (std.mem.eql(u8, f.name, name)) n += 1;
+    }
+    return n;
+}
+
+test "Bytecode inlining of functions with loops." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    try zt.eq(C.Success, C.vm_compile(vm, "main",
+        \\fn find_first(xs []int, target int) -> int:
+        \\  for 0..xs.len() |i|:
+        \\    if xs[i] == target:
+        \\      return i
+        \\  return -1
+        \\
+        \\fn unwrap_sum(o ?int) -> int:
+        \\  cur := o
+        \\  total := 0
+        \\  while cur |v|:
+        \\    total += v
+        \\    cur = none
+        \\  return total
+        \\
+        \\fn rec(n int) -> int:
+        \\  if n <= 0:
+        \\    return 0
+        \\  t := 0
+        \\  for 0..n |i|:
+        \\    t += i
+        \\  return t + rec(n - 1)
+        \\
+        \\xs := []int{4, 8, 15}
+        \\_ = find_first(xs, 15)
+        \\_ = find_first(xs, 99)
+        \\_ = unwrap_sum(3)
+        \\_ = rec(3)
+    , C.defaultCompileConfig()));
+
+    // `for` and `while` bodies are inlined at each call.
+    try zt.eq(3, count_debug_frames(vm, "find_first"));
+    try zt.eq(2, count_debug_frames(vm, "unwrap_sum"));
+    // A recursive function is inlined once into `main`, but never into its own body.
+    try zt.eq(2, count_debug_frames(vm, "rec"));
+}
+
 test "single_run frees the main block's raw buffers at deinit." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

@@ -162,8 +162,8 @@ alloc 696 → 670 ms(−3.7%). 다음 후보: `HashMap.set`(노드 한도 · `fi
 - 역방향 jump는 VM 검사점(중단 · fuel)이다. 인라인 구간 안의 pc이므로 트레이스는 `inline_sites`로 펼쳐진다.
 - `for` 루프 카운터 · 끝 · 조건 레지스터 3개가 caller 프레임에 더해진다. `inline_max_reg_end`(160)는 그대로 둔다.
 
-대상: `HashMap.findSetSlot` · `findSlot`(`while:` 탐사), `get` · `contains` · `@index`(findSlot 경유), 루프 있는 작은
-사용자 함수.
+대상: 루프 있는 작은 사용자 함수, `while opt |v|`(loop_block + unwrap)도 포함. `HashMap.findSetSlot` · `findSlot`(노드
+117 · 116)은 기본 한도 40을 넘어 인라인되지 않는다(아래 "시도했으나 버린 것").
 
 ## 테스트
 
@@ -189,6 +189,17 @@ for 벤치에서 새로 펼쳐진 것은 오류 경로의 `@destruct`뿐이다. 
 for +23.9% → +8.2%, alloc +24.8% → +9.5%. 남은 증가는 `Slice.@deinit` · `File.close`(해제 코드가 빠져 한도 안으로 들어옴) ·
 `compute_new_cap` · `PtrSpan.init`. 시간(hyperfine, `8fbc0f21` 대비): for +1.3%, heap −1.8%, fiber +1.9%, alloc −1.1%,
 fib 잡음. 모두 잡음 범위.
+
+### 재귀 가드와 인라인 검증 테스트
+
+`inline_cost_fits`는 가장 바깥 호출에서 callee가 지금 생성 중인 proc의 함수(`funcs_debug[cur_proc.id].func`)와 같으면
+인라인하지 않는다. 전에는 `InlineCtx` 체인만 봐서 루프 있는 재귀 함수가 자기 본문 사본을 한 단계 펼쳤다(`main`에는 한 번
+펼쳐지는 것이 맞다).
+
+트레이스는 인라인 여부와 관계없이 같아서 동작 테스트로는 인라인 회귀를 못 잡는다. lib-test `Bytecode inlining of functions with
+loops.`가 main chunk의 `funcs_debug`에서 이름별 항목 수(함수 본문 1 + 인라인 지점마다 1)를 센다: `for` 함수 2곳 → 3,
+`while opt |v|` 함수 → 2, 재귀 함수 → 2(가드 없이는 3). `functions/inline_loop.cy`에 `while opt |v|`(`drain`) 동작도 더했다.
+`?str` 버전은 기본 한도 40을 넘어 인라인되지 않는다.
 
 ## 시도했으나 버린 것: Map 탐사 함수 `#[inline]`
 

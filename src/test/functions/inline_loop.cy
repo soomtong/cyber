@@ -38,6 +38,18 @@ fn grid(n int) -> int:
             count += 1
     return count
 
+-- `while opt |v|` lowers to a loop with an unwrap.
+fn drain(o ?int) -> int:
+    cur := o
+    total := 0
+    while cur |v|:
+        total += v
+        if v > 0:
+            cur = v - 1
+        else:
+            cur = none
+    return total
+
 fn sum_probes(n int) -> int:
     total := 0
     for 0..n |i|:
@@ -52,6 +64,8 @@ test.eq(sum_odd_until(5, 100), 9)
 test.eq(probe(0, 15), 5)
 test.eq(probe(13, 15), 15)
 test.eq(grid(4), 7)
+test.eq(drain(4), 10)
+test.eq(drain(none), 0)
 -- A loop inlined inside another inlined loop.
 test.eq(sum_probes(4), 20)
 

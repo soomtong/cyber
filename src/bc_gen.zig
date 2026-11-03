@@ -1410,7 +1410,7 @@ fn gen_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenValue {
 
     // Leave room in the u8 register window. Inlining extends the caller's frame.
     if (c.cur_proc.reg_end < inline_max_reg_end and can_inline(expr.func)) {
-        if (inline_cost_fits(c.inline_ctx, expr.func)) |cost| {
+        if (inline_cost_fits(c, expr.func)) |cost| {
             return gen_inline_call(c, expr, cost, cstr, node);
         }
     }
@@ -1488,9 +1488,10 @@ const inline_max_params = 8;
 const inline_max_reg_end = 160;
 
 /// Returns the cost of inlining `func` at the current site, or null when nesting limits are reached.
-/// A function is not inlined into itself (recursion).
-fn inline_cost_fits(ctx_opt: ?*InlineCtx, func: *cy.Func) ?u32 {
-    const ctx = ctx_opt orelse return inline_cost(func);
+/// A function is not inlined into itself (recursion), including the function of the proc being generated.
+fn inline_cost_fits(c: *Chunk, func: *cy.Func) ?u32 {
+    if (c.funcs_debug.items[c.cur_proc.id].func == func) return null;
+    const ctx = c.inline_ctx orelse return inline_cost(func);
     if (ctx.depth >= inline_max_depth) return null;
     var root = ctx;
     var cur: ?*InlineCtx = ctx;
@@ -1667,7 +1668,7 @@ fn check_inline_expr(expr: *ir.Expr, count: *InlineCount) bool {
             return true;
         },
         .call => {
-            // Calls in an inlined body are not inlined again.
+            // A call in an inlined body is generated as a call or a nested inline (`inline_cost_fits` decides).
             const data = expr.cast(.call);
             for (data.args[0..data.numArgs]) |arg| {
                 if (!check_inline_expr(arg, count)) return false;

@@ -79,7 +79,6 @@ pub const worker = @import("worker.zig");
 pub const vmc = @import("vmc");
 pub const Fiber = vmc.Fiber;
 
-// pub const fifo = @import("fifo.zig");
 pub const BoundedArray = @import("bounded_array.zig").BoundedArray;
 
 pub const debug = @import("debug.zig");

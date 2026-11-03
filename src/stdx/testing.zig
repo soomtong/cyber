@@ -28,7 +28,7 @@ pub fn eqApprox(exp: anytype, act: @TypeOf(exp), tolerance: @TypeOf(exp)) !void 
 }
 
 pub fn eqApproxEps(exp: anytype, act: @TypeOf(exp)) !void {
-    const eps = comptime std.math.epsilon(@TypeOf(exp));
+    const eps = comptime std.math.floatEps(@TypeOf(exp));
     try eqApprox(act, exp, eps);
 }
 
@@ -36,18 +36,18 @@ pub fn eqApproxEps(exp: anytype, act: @TypeOf(exp)) !void {
 pub fn eqApproxDec(exp: anytype, act: @TypeOf(exp), tolerance: @TypeOf(exp)) !void {
     const T = @TypeOf(exp);
     switch (@typeInfo(T)) {
-        .Float => if (!std.math.approxEqAbs(T, exp, act, tolerance)) {
+        .float => if (!std.math.approxEqAbs(T, exp, act, tolerance)) {
             std.debug.print("actual {d}, not within absolute tolerance {d:.3} of expected {d}\n", .{ act, tolerance, exp });
             return error.TestExpectedApproxEqAbs;
         },
-        .ComptimeFloat => @compileError("Cannot approximately compare two comptime_float values"),
+        .comptime_float => @compileError("Cannot approximately compare two comptime_float values"),
         else => @compileError("Unable to compare non floating point values"),
     }
 }
 
 pub fn eqUnionEnum(act: anytype, exp: @EnumLiteral()) !void {
-    if (@typeInfo(@TypeOf(act)) == .Union) {
-        try eq(@backingInt(act), @backingInt(@as(@typeInfo(@TypeOf(act)).Union.tag_type.?, exp)));
+    if (@typeInfo(@TypeOf(act)) == .@"union") {
+        try eq(@backingInt(act), @backingInt(@as(@typeInfo(@TypeOf(act)).@"union".tag_type.?, exp)));
     } else {
         unreachable;
     }

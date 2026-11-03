@@ -1420,38 +1420,6 @@ pub fn getSymName(vm: *cy.VM, id: u32) []const u8 {
     return vm.syms.buf[id].name;
 }
 
-// pub fn print_err(vm: *cy.VM, str: []const u8) void {
-//     vm.print_err.?(@ptrCast(vm), C.toStr(str));
-// }
-
-// pub fn print_err_fmt(vm: *cy.VM, format: []const u8, args: []const cy.fmt.FmtValue) void {
-//     var adapter = vm.clearTempString().adaptToNewApi(&.{});
-//     cy.fmt.print(&adapter.new_interface, format, args);
-//     vm.print_err.?(@ptrCast(vm), C.toStr(vm.getTempString()));
-// }
-
-// pub fn print_err_zfmt(vm: *cy.VM, comptime format: []const u8, args: anytype) void {
-//     const w = vm.clearTempString();
-//     std.fmt.format(w, format, args) catch cy.fatal();
-//     vm.print_err.?(@ptrCast(vm), C.toStr(vm.getTempString()));
-// }
-
-// pub fn print(vm: *cy.VM, str: []const u8) void {
-//     vm.print.?(@ptrCast(vm), C.toStr(str));
-// }
-
-// pub fn print_fmt(vm: *cy.VM, format: []const u8, args: []const cy.fmt.FmtValue) void {
-//     const w = vm.clearTempString();
-//     cy.fmt.print(w, format, args);
-//     vm.print.?(@ptrCast(vm), C.toStr(vm.getTempString()));
-// }
-
-// pub fn print_zfmt(vm: *cy.VM, comptime format: []const u8, args: anytype) void {
-//     const w = vm.clearTempString();
-//     std.fmt.format(w, format, args) catch cy.fatal();
-//     vm.print.?(@ptrCast(vm), C.toStr(vm.getTempString()));
-// }
-
 pub fn writeStderr(s: []const u8) void {
     @branchHint(.cold);
     var w = cy.fmt.lockStderrWriter();

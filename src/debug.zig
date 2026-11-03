@@ -592,12 +592,47 @@ fn getStackFrame(vm: *cy.VM, sym: cy.DebugSym) !C.StackFrame {
 pub fn allocStackTrace(vm: *cy.VM, stack: []const cy.Value, cframes: []const vmc.CompactFrame) ![]C.StackFrame {
     @branchHint(.cold);
     logger.tracev("build stacktrace {}", .{cframes.len});
-    var frames = try vm.alloc.alloc(C.StackFrame, cframes.len);
-    for (cframes, 0..) |cframe, i| {
+    var frames: std.ArrayList(C.StackFrame) = try .initCapacity(vm.alloc, cframes.len);
+    errdefer frames.deinit(vm.alloc);
+    for (cframes) |cframe| {
         logger.tracev("build stackframe pc={*}, fp={}", .{cframe.pc, cframe.fpOffset});
-        frames[i] = try cy.debug.compactToStackFrame(vm, stack, cframe);
+        try frames.append(vm.alloc, try cy.debug.compactToStackFrame(vm, stack, cframe));
+        if (cframe.pc) |pc| {
+            // An inlined callee frame is followed by its caller's frame at the call site.
+            if (getInlineSite(vm, pc)) |res| {
+                try frames.append(vm.alloc, try getStackFrame(vm, .{
+                    .pc = res.site.start,
+                    .loc = res.site.call_loc,
+                    .frameLoc = res.site.caller_frame,
+                    .file = @intCast(res.chunk.id),
+                }));
+            }
+        }
     }
-    return frames;
+    return frames.toOwnedSlice(vm.alloc);
+}
+
+const InlineSiteResult = struct {
+    chunk: *cy.Chunk,
+    site: bytecode.InlineSite,
+};
+
+fn getInlineSite(vm: *const cy.VM, pc: *anyopaque) ?InlineSiteResult {
+    const table_idx = indexOfTableEntry(vm.debug_tables, pc) orelse return null;
+    const entry = vm.debug_tables[table_idx];
+    const sites = entry.chunk.buf.inline_sites.items;
+    if (sites.len == 0) return null;
+    const off: usize = @as([*]cy.Inst, @ptrCast(@alignCast(pc))) - entry.ptr;
+    const S = struct {
+        fn compare(cx: usize, site: bytecode.InlineSite) std.math.Order {
+            return std.math.order(cx, site.start);
+        }
+    };
+    const upper = std.sort.upperBound(bytecode.InlineSite, sites, off, S.compare);
+    if (upper == 0) return null;
+    const site = sites[upper - 1];
+    if (off >= site.end) return null;
+    return .{ .chunk = entry.chunk, .site = site };
 }
 
 pub fn nextEventId() u64 {

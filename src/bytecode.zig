@@ -65,6 +65,9 @@ pub const ByteCodeBuffer = struct {
 
     ptr_layout_builder: std.ArrayList(bool),
 
+    /// Pc ranges of inlined callee bodies, ordered by `start`. See `bc_gen.gen_inline_call`.
+    inline_sites: std.ArrayList(InlineSite),
+
     markers: std.AutoHashMapUnmanaged(u32, *cy.Func),
 
     /// JIT requires BC label locations to know how to map jumps.
@@ -94,6 +97,7 @@ pub const ByteCodeBuffer = struct {
             .ptr_layouts = .empty,
             .ptr_layout_map = .empty,
             .ptr_layout_builder = .empty,
+            .inline_sites = .empty,
             .markers = .empty,
             .labels = .empty,
         };
@@ -123,6 +127,7 @@ pub const ByteCodeBuffer = struct {
         self.ptr_layouts.deinit(self.alloc);
         self.ptr_layout_map.deinit(self.alloc);
         self.ptr_layout_builder.deinit(self.alloc);
+        self.inline_sites.deinit(self.alloc);
         self.markers.deinit(self.alloc);
         self.labels.deinit(self.alloc);
     }
@@ -135,6 +140,7 @@ pub const ByteCodeBuffer = struct {
         self.consts_boxed.clearRetainingCapacity();
         self.debugTable.clearRetainingCapacity();
         self.func_table.clearRetainingCapacity();
+        self.inline_sites.clearRetainingCapacity();
         self.unwind_table.clearRetainingCapacity();
         self.unwind_slot_obj.clearRetainingCapacity();
         self.unwind_slot_obj_prev.clearRetainingCapacity();
@@ -862,6 +868,17 @@ pub const DebugSym = extern struct {
 
     /// ChunkId.
     file: u16,
+};
+
+/// An inlined callee body occupying `[start, end)`. Debug syms inside it point to the callee.
+/// The stack trace adds a caller frame at `call_loc`.
+pub const InlineSite = struct {
+    start: u32,
+    end: u32,
+    /// Source pos of the call expression.
+    call_loc: u32,
+    /// Caller's index into `Chunk.funcs_debug`.
+    caller_frame: u32,
 };
 
 pub const PcPtrLayout = extern struct {

@@ -63,3 +63,45 @@ for 58.7 → 53.4 ms(−9%), fiber 38.7 → 35.2 ms, alloc 745 → 710 ms, 나�
 대부분(`Array.append` → `ensure_cap`, `HashMap.set` → `findSetSlot`, `findSetSlot`의 while 루프, `@index_addr`의 panic 경로)이
 호출이나 루프를 품어 leaf가 아니기 때문이다. 다음 단계 후보: 본문 안의 일반 호출 허용(드문 경로의 panic · `ensure_cap` 호출은
 그대로 call로 남김), 그다음 루프 허용(break · continue의 block_offset 처리 필요).
+
+# 2단계: 인라인 프레임을 트레이스에 펼치기, 본문 안 호출 허용
+
+작성일 2026-11-03.
+
+## 결정
+
+1단계는 "인라인된 본문은 panic할 수 없다"는 조건으로 트레이스를 지켰다. 2단계는 조건 대신 디버그 정보로 지킨다.
+
+1. 인라인 1회마다 caller chunk의 `funcs_debug`에 callee 항목(`func`, 이름, `src_chunk = func.decl.src()`)을 하나 추가한다.
+2. 인라인 중에 기록하는 DebugSym은 노드가 callee 소스(`node.src() == callee src_chunk`)이면 `loc = 노드 위치`,
+   `frameLoc = 그 callee 항목`으로 기록한다. 그 밖의 노드(호출 지점 등)는 1단계처럼 호출 지점과 caller proc으로 기록한다.
+   `getStackFrame`은 줄 번호를 `sym.file`이 아니라 `funcs_debug[frameLoc].src_chunk`로 계산하므로 다른 chunk의 위치도 맞다.
+3. `ByteCodeBuffer.inline_sites`에 `{start, end, call_loc, caller_frame}`(pc는 버퍼 오프셋)를 남긴다. 중첩 인라인이 없어
+   구간은 겹치지 않고 pc 순서로 쌓인다.
+4. `debug.allocStackTrace`는 VM 프레임의 pc가 인라인 구간 안이면 프레임 두 개(callee, 호출 지점의 caller)로 펼친다.
+   그래서 인라인 여부와 관계없이 트레이스가 같다.
+
+이 장치로 1단계의 panic 가능 식 거부(정수 `/` · `%`, 런타임 cast)를 풀고, 본문 안의 일반 `call`을 허용한다(호출된 함수는
+인라인하지 않는 한 단계만). 핫 경로 대상은 `Array.@index` · `@set_index`(드문 경로의 `panic_oob`), `append`(`ensure_cap`),
+`HashMap.set`(`grow` · `findSetSlot`).
+
+panic 때 unwind는 프레임 기록만 하고 지역 변수를 해제하지 않으므로(힙 페이지 통째 해제) 인라인 지역 변수의 해제 정보는
+필요 없다. 호출 지점의 스택 포인터 레이아웃(`ptr_table`)은 인라인 지역 변수도 caller proc의 `reserve_reg`로 잡으므로 이미 맞다.
+
+## 2단계 구현 메모
+
+- 처음에는 callee 소스가 아닌 노드를 1단계처럼 호출 지점 + caller 프레임으로 기록했다. 소스 노드가 없는 생성 함수
+  `@program_init`이 main에 인라인되자 그 안의 `@init` 호출 심볼이 caller 프레임을 가리켜, 펼치면 `main`이 두 번 나왔다
+  (cli 테스트 "Stack traces."). 인라인 중에는 항상 callee 프레임으로 기록하고, callee 소스가 아닌 노드는 위치를 `NullId`로
+  두어 숨은 함수처럼 보이게 했다.
+- 새로 인라인되는 핫 함수: `Array.append`(`ensure_cap` 호출은 그대로), `@index` · `@set_index`(`panic_oob` 호출은 그대로),
+  재귀 함수의 한 단계(fib). `HashMap.set`은 노드 40개를 넘어 아직 호출이다.
+- 테스트: `functions/inline_call.cy`(본문 안 호출 순서, 재귀, append · 인덱스, str 원소), `inline_call_panic.cy`(인라인된
+  `outer` 안의 실제 호출 `inner`가 panic하면 트레이스가 inner · outer · main). `inline_leaf_panic.cy`는 이제 `div`가 인라인된
+  상태에서 같은 트레이스를 확인한다.
+
+## 2단계 결과 (ReleaseSafe, hyperfine wall 20회, master `d8ddbe44` 대비)
+
+for 52.8 → 48.8 ms(−7.6%), heap 36.6 → 33.7 ms(−8.1%), fiber 34.9 → 33.1 ms(−5.2%), fib 33.4 → 29.1 ms(−13%),
+alloc 696 → 670 ms(−3.7%). 다음 후보: `HashMap.set`(노드 한도 · `findSetSlot`의 while 루프), 루프가 있는 본문 허용,
+중첩 인라인(인라인 구간에 부모 구간을 두면 트레이스 펼치기를 그대로 확장할 수 있다).

@@ -1445,8 +1445,12 @@ fn gen_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenValue {
 
 /// State while generating an inlined callee body. See `docs/decisions/project_bc_inline.md`.
 pub const InlineCtx = struct {
-    /// Call site node. Debug syms of the inlined body are attributed to it.
+    /// Call site node.
     node: *ast.Node,
+    /// Callee's source chunk.
+    src_chunk: u32,
+    /// Callee's index into `Chunk.funcs_debug`.
+    frame_id: u32,
     ret_reg: Reg,
     /// The callee's top level body. A trailing `ret_expr` there needs no jump.
     body_head: ?*ir.Stmt,
@@ -1459,8 +1463,8 @@ const inline_max_params = 8;
 /// Registers are u8 indexed by the VM (`chk_stk` frame size), keep a margin for the inlined body.
 const inline_max_reg_end = 160;
 
-/// Whether `func` is a small leaf function whose IR body only uses allowed statements and expressions.
-/// Allowed bodies cannot panic, so inlining never changes a stack trace.
+/// Whether `func` is a small function whose IR body only uses allowed statements and expressions.
+/// Calls inside the body are generated as calls. Inline sites are expanded in stack traces.
 fn can_inline(func: *cy.Func) bool {
     switch (func.info.bc_inline) {
         1 => return true,
@@ -1545,9 +1549,7 @@ fn check_inline_expr(expr: *ir.Expr, count: *u32) bool {
         .string,
         .global,
         .init_zero => return true,
-        // Integer `/` and `%` can panic (division by zero) and are rejected below, so an inlined body never
-        // panics and never needs its own frame in a stack trace.
-        .and_op, .or_op, .xor, .lsl, .asr, .lsr, .add, .sub, .imul, .mul,
+        .and_op, .or_op, .xor, .lsl, .asr, .lsr, .add, .sub, .imul, .mul, .div, .idiv, .mod, .imod,
         .fadd, .fsub, .fmod, .fmul, .fdiv => {
             // All of these are `BinOp2`. `cast` would check the exact code in Trace builds.
             const data: *ir.BinOp2 = @ptrCast(@alignCast(expr));
@@ -1568,10 +1570,7 @@ fn check_inline_expr(expr: *ir.Expr, count: *u32) bool {
         .is_zero => return check_inline_expr(expr.cast(.is_zero).child, count),
         .field => return check_inline_expr(expr.cast(.field).rec, count),
         .cast => {
-            const data = expr.cast(.cast);
-            // A runtime cast can panic.
-            if (data.isRtCast) return false;
-            return check_inline_expr(data.expr, count);
+            return check_inline_expr(expr.cast(.cast).expr, count);
         },
         .bitcast => return check_inline_expr(expr.cast(.bitcast).expr, count),
         .address_of => return check_inline_expr(expr.cast(.address_of).expr, count),
@@ -1586,9 +1585,8 @@ fn check_inline_expr(expr: *ir.Expr, count: *u32) bool {
             return true;
         },
         .call => {
-            // Leaf only: intrinsics are single instructions.
+            // Calls in an inlined body are not inlined again.
             const data = expr.cast(.call);
-            if (data.func.info.gen_intrinsic == 0) return false;
             for (data.args[0..data.numArgs]) |arg| {
                 if (!check_inline_expr(arg, count)) return false;
             }
@@ -1658,8 +1656,14 @@ fn gen_inline_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenV
         try c.bc_local_map.append(c.alloc, reg);
     }
 
+    const frame_id: u32 = @intCast(c.funcs_debug.items.len);
+    try c.funcs_debug.append(c.alloc, .{ .func = func, .name = func.name(), .src_chunk = func.decl.?.src() });
+    const start_pc: u32 = @intCast(c.buf.ops.items.len);
+
     var ctx = InlineCtx{
         .node = node,
+        .src_chunk = func.decl.?.src(),
+        .frame_id = frame_id,
         .ret_reg = ret_reg,
         .body_head = block.bodyHead,
         .end_jumps = .empty,
@@ -1681,6 +1685,16 @@ fn gen_inline_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenV
         c.patchJumpToCurPc(pc);
     }
     c.bc_local_map.items.len = saved_local_len;
+
+    const end_pc: u32 = @intCast(c.buf.ops.items.len);
+    if (end_pc > start_pc) {
+        try c.buf.inline_sites.append(c.alloc, .{
+            .start = start_pc,
+            .end = end_pc,
+            .call_loc = node.pos(),
+            .caller_frame = c.cur_proc.id,
+        });
+    }
 
     if (ret_size == 0) {
         try pop_regs(c, temp_start, node);

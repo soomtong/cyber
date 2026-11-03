@@ -1,7 +1,7 @@
 fn div(a int, b int) -> int:
     return a / b
 
--- Integer division can panic, so `div` is not inlined and keeps its frame in the trace.
+-- `div` is inlined into main. The trace still shows its frame.
 print(div(1, 0))
 
 --cytest: panic

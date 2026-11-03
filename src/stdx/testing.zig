@@ -27,11 +27,6 @@ pub fn eqApprox(exp: anytype, act: @TypeOf(exp), tolerance: @TypeOf(exp)) !void 
     try std.testing.expectApproxEqAbs(exp, act, tolerance);
 }
 
-pub fn eqApproxEps(exp: anytype, act: @TypeOf(exp)) !void {
-    const eps = comptime std.math.floatEps(@TypeOf(exp));
-    try eqApprox(act, exp, eps);
-}
-
 // Format using decimal.
 pub fn eqApproxDec(exp: anytype, act: @TypeOf(exp), tolerance: @TypeOf(exp)) !void {
     const T = @TypeOf(exp);

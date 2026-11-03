@@ -175,47 +175,6 @@ pub fn build(b: *std.Build) !void {
         step.dependOn(&standalone_lib_artifact.step);
     }
 
-    // {
-    //     const main_step = b.step("web-lib", "Build wasm lib for web.");
-
-    //     var opts = getDefaultOptions();
-    //     opts.ffi = false;
-    //     opts.malloc = if (target.cpu.arch.isWasm()) .zig else .malloc;
-    //     opts.cli = false;
-    //     opts.applyOverrides();
-
-    //     const root = b.createModule(.{
-    //         .root_source_file = b.path("src/web.zig"),
-    //         .target = rtarget,
-    //         .optimize = optimize,
-    //     });
-    //     const lib = b.addExecutable(.{
-    //         .name = "cyber-web",
-    //         .root_module = root,
-    //     });
-    //     lib.entry = .disabled;
-    //     if (optimize != .debug) {
-    //         // Disable to see better symbols when debugging wasm.
-    //         lib.root_module.strip = true;
-    //     }
-    //     lib.addIncludePath(b.path("src"));
-
-    //     if (target.cpu.arch.isWasm()) {
-    //         // Export table so non-exported functions can still be invoked from:
-    //         // `instance.exports.__indirect_function_table`
-    //         lib.export_table = true;
-    //     }
-    //     lib.rdynamic = true;
-
-    //     const build_options = try create_lib_config(b, opts);
-    //     const stdx = b.createModule(.{
-    //         .root_source_file = b.path("src/stdx/stdx.zig"),
-    //     });
-
-    //     try buildAndLinkDeps(lib.root_module, build_options, stdx, opts);
-    //     main_step.dependOn(&b.addInstallArtifact(lib, .{}).step);
-    // }
-
     {
         const main_step = b.step("build-test", "Build tests.");
 

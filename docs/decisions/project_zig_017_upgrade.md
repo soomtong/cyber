@@ -53,3 +53,11 @@
   `.Float` → 소문자, `callconv(.C)` → `.c`, `std.mem.zeroes` → `@splat(0)`, `comptime var` + `inline while` →
   `inline for (0..8)`. `string.zig`의 AVX2 분기(`hasAvx2`)는 baseline x86_64 CI에서도 컴파일되지 않으므로
   `-Dtarget=x86_64-linux-gnu -Dcpu=x86_64_v3`로 따로 확인한다.
+- 리뷰 뒤 더 지운 것: `string.zig` `HeapStringBuilder`(`std.fmt.format`, 전체 미참조) · `src/web.zig`와 `build.zig`의
+  주석 처리된 web-lib 블록(`capi.zig`에 없는 심볼) · `heap.zig` `TraceAllocator`(`cli.zig`에 같은 복사본) · `lib.zig`
+  `printLogger` · `stdx/testing.zig` `eqApproxEps`(인자 순서가 뒤바뀜).
+- 같은 리뷰에서 `string.zig` AVX2 `indexOfAsciiSetSimd*`의 원래 버그를 고쳤다. LUT를 `=`로 채워 하위 nibble이 같은 문자
+  (`,` 0x2C · `<` 0x3C)가 서로 덮어썼고(`"a,b".index_any({',', '<'})`가 none), Fixed 쪽은 절대 인덱스를 `hitMask` 비트
+  위치로 썼으며, 분기에 `arch == .x86_64` 가드가 없었다. `string.zig` 테스트 `indexOfAsciiSet matches the scalar
+  search.`와 `strings_ascii.cy`가 잡는다. x86_64_v3 실행은 OrbStack `docker run --platform linux/amd64`에서
+  `build-test` 산출물을 저장소와 같은 경로로 마운트해 돌렸다(lib_test 54 · behavior_test 8 통과, 수정을 되돌리면 둘 다 실패).

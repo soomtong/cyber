@@ -684,13 +684,6 @@ export fn cl_lift(t: *cy.Thread, type_: *cy.Type, value: *anyopaque) Value {
     return Value.initPtr(res);
 }
 
-// To enable logging for tests:
-// c.setVerbose(true);
-// c.setLog(printLogger);
-fn printLogger(str: C.Bytes) callconv(.c) void {
-    std.debug.print("{s}\n", .{ C.from_bytes(str) });
-}
-
 export fn cl_error(vm: *cy.VM, name: C.Bytes) u64 {
     return vm.sema.ensureSymbol(C.from_bytes(name)) catch @panic("error");
 }

@@ -361,6 +361,9 @@ fn semaExprStmt(c: *cy.Chunk, node: *ast.Node) !void {
     _ = try c.ir.pushStmt(.discard, node, .{ .expr = expr.ir });
     if (expr.type.id() == bt.Never) {
         c.block().endReachable = false;
+        // A `never` call does not return, so destructing its temporaries would be dead code.
+        try popLocals2(c, var_start, false, node);
+        return;
     }
     try popLocals(c, var_start, node);
 }

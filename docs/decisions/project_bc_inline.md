@@ -178,6 +178,18 @@ fib · fiber · 시작 시간(`print(1)` 7.0 → 7.1 ms)은 잡음 범위. 전�
 for 벤치에서 새로 펼쳐진 것은 오류 경로의 `@destruct`뿐이다. 성능 이득은 작고, 루프 있는 사용자 함수도 인라인 대상이
 된다는 일반성 때문에 남긴다.
 
+### 늘어난 바이트코드의 출처와 `never` 뒤 해제 제거
+
+함수별 덤프 비교(`8fbc0f21` 대비, for 벤치 +4480 명령): `core.@destruct` +3096(69%, 호출 지점 324), `Slice.@deinit` +714,
+`PtrSpan.init` +247, `core.compute_new_cap` +236, `PtrSpan.index` +117. 모든 벤치가 약 +24%로 같아 증가는 core 쪽이고, for의
+`<main>`은 +60뿐이다. `[N]str`의 `@destruct`에 `for 0..len`이 있어 인라인 대상이 됐는데, 옛 덤프의 `call core.@destruct`
+460개 중 438개는 `panic(...)` 바로 뒤(문자열 보간 임시값 해제)라 실행되지 않는 코드였다.
+
+`sema.semaExprStmt`에서 `never` 타입 식문 뒤에는 `popLocals2(..., false, ...)`로 지역을 해제 없이 내린다. 결과:
+for +23.9% → +8.2%, alloc +24.8% → +9.5%. 남은 증가는 `Slice.@deinit` · `File.close`(해제 코드가 빠져 한도 안으로 들어옴) ·
+`compute_new_cap` · `PtrSpan.init`. 시간(hyperfine, `8fbc0f21` 대비): for +1.3%, heap −1.8%, fiber +1.9%, alloc −1.1%,
+fib 잡음. 모두 잡음 범위.
+
 ## 시도했으나 버린 것: Map 탐사 함수 `#[inline]`
 
 `findSlot`(IR 노드 117) · `findSetSlot`(116)은 기본 한도 40을 넘는다. `AutoHash`는 38, `AutoEq`는 5다. Map 100만 채우기 ·

@@ -61,3 +61,10 @@
   위치로 썼으며, 분기에 `arch == .x86_64` 가드가 없었다. `string.zig` 테스트 `indexOfAsciiSet matches the scalar
   search.`와 `strings_ascii.cy`가 잡는다. x86_64_v3 실행은 OrbStack `docker run --platform linux/amd64`에서
   `build-test` 산출물을 저장소와 같은 경로로 마운트해 돌렸다(lib_test 54 · behavior_test 8 통과, 수정을 되돌리면 둘 다 실패).
+- musl 정적 타깃(`-Dtarget=x86_64-linux-musl`)은 `src/std/os.zig` `dlopen`이 `link_libc`만 보고 `DlDynLib`의 `handle`을
+  채워 컴파일이 안 됐다(2026-11-04 수정). std 0.17은 musl 정적 링크에서 `std.DynLib.inner`를 `ElfDynLib`으로 고르고,
+  `ElfDynLib`은 ET_DYN 파일만 열므로 실행 파일 자신(`#c.bind_lib(none)` · `use c`의 self dlopen)은 열 수 없다. 그래서
+  `dlopen`은 `@hasField(@FieldType(std.DynLib, "inner"), "handle")`로 libc `dlopen` 경로를 고르고, `build.zig` 기본
+  `ffi`는 musl에서 끈다(`-Dffi=true`로 덮어쓸 수 있음). ffi가 꺼지면 extern 함수는 `bindExternFuncsWithoutFFI`
+  경로로 정적 링크된 심볼에 묶여 `math`는 동작하고, behavior_test는 `modules/os.cy` · `libc.cy`와 FFI 테스트를 건너뛴다.
+  OrbStack 컨테이너 실행: musl lib_test 56 · behavior_test 280/280 통과, gnu(FFI 있음) lib_test 56 · behavior_test 282/282 통과.

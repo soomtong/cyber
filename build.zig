@@ -367,7 +367,9 @@ fn getDefaultOptions() Options {
         .optimize = optimize,
         .cyc = true,
         .static = true,
-        .ffi = !target.cpu.arch.isWasm(),
+        // A static musl binary can not dlopen itself (`ElfDynLib` only loads ET_DYN files), so `use c`
+        // bindings go through the no-FFI path there.
+        .ffi = !target.cpu.arch.isWasm() and !target.abi.isMusl(),
         .cli = !target.cpu.arch.isWasm(),
         .jit = false,
     };

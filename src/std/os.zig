@@ -252,8 +252,12 @@ pub fn fetchUrl(t: *C.Thread) anyerror!C.Ret {
 
 extern fn hostFetchUrl(url: [*]const u8, urlLen: usize) void;
 
+/// `std.DynLib` wraps libc's `dlopen` handle only when it links a dynamic libc. A static musl build
+/// gets `ElfDynLib`, which has no handle, so `RTLD_DEEPBIND` applies only to the libc case.
+const dynlib_has_dl_handle = @hasField(@FieldType(std.DynLib, "inner"), "handle");
+
 pub fn dlopen(path: []const u8) !dynlib.DynLib {
-    if (builtin.target.os.tag == .linux and builtin.link_libc) {
+    if (builtin.target.os.tag == .linux and builtin.link_libc and dynlib_has_dl_handle) {
         const path_c = try std.posix.toPosixPath(path);
         // Place the lookup scope of the symbols in this library ahead of the global scope.
         const RTLD_DEEPBIND = 0x00008;

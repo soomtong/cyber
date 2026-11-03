@@ -1491,7 +1491,9 @@ const inline_max_reg_end = 160;
 /// A function is not inlined into itself (recursion), including the function of the proc being generated.
 fn inline_cost_fits(c: *Chunk, func: *cy.Func) ?u32 {
     if (c.funcs_debug.items[c.cur_proc.id].func == func) return null;
-    const ctx = c.inline_ctx orelse return inline_cost(func);
+    // `can_inline` cached the body's node count.
+    const cost = func.data.userFunc.loc.cast(.funcBlock).bc_inline_cost;
+    const ctx = c.inline_ctx orelse return cost;
     if (ctx.depth >= inline_max_depth) return null;
     var root = ctx;
     var cur: ?*InlineCtx = ctx;
@@ -1500,15 +1502,8 @@ fn inline_cost_fits(c: *Chunk, func: *cy.Func) ?u32 {
         root = cx;
         cur = cx.parent;
     }
-    const cost = inline_cost(func);
     if (root.total_cost + cost > inline_max_total) return null;
     return cost;
-}
-
-fn inline_cost(func: *cy.Func) u32 {
-    var count = InlineCount{ .n = 0, .limit = std.math.maxInt(u32) };
-    _ = check_inline_stmts(func.data.userFunc.loc.cast(.funcBlock).bodyHead, &count);
-    return count.n;
 }
 
 const InlineCount = struct {
@@ -1534,24 +1529,30 @@ fn can_inline(func: *cy.Func) bool {
         2 => return false,
         else => {},
     }
-    const res = check_inline(func);
-    func.info.bc_inline = if (res) 1 else 2;
-    return res;
+    if (check_inline(func)) |cost| {
+        func.info.bc_inline = 1;
+        func.data.userFunc.loc.cast(.funcBlock).bc_inline_cost = cost;
+        return true;
+    }
+    func.info.bc_inline = 2;
+    return false;
 }
 
-fn check_inline(func: *cy.Func) bool {
-    if (func.type != .userFunc) return false;
-    if (func.info.generator or func.info.jit or func.info.extern_) return false;
-    if (func.sig.params_len > inline_max_params) return false;
+/// Returns the body's IR node count when `func` can be inlined.
+fn check_inline(func: *cy.Func) ?u32 {
+    if (func.type != .userFunc) return null;
+    if (func.info.generator or func.info.jit or func.info.extern_) return null;
+    if (func.sig.params_len > inline_max_params) return null;
     const loc = func.data.userFunc.loc;
-    if (loc.code != .funcBlock) return false;
+    if (loc.code != .funcBlock) return null;
     const block = loc.cast(.funcBlock);
-    if (block.skip) return false;
+    if (block.skip) return null;
     var count = InlineCount{
         .n = 0,
         .limit = if (has_inline_attr(func)) inline_max_nodes_attr else inline_max_nodes,
     };
-    return check_inline_stmts(block.bodyHead, &count);
+    if (!check_inline_stmts(block.bodyHead, &count)) return null;
+    return count.n;
 }
 
 fn check_inline_stmts(head: ?*ir.Stmt, count: *InlineCount) bool {

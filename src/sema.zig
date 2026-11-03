@@ -4816,12 +4816,13 @@ pub fn popBlock2(c: *cy.Chunk, destruct_locals: bool) !cy.ir.StmtBlock {
 
     // Execute destructors.
     var should_destruct = destruct_locals;
-    if (should_destruct and proc.func == null) {
-        if (proc.block_depth == 1 and !shouldGenMainScopeReleaseOps(c.compiler)) {
-            should_destruct = false;
-        } else if (!b.endReachable) {
-            should_destruct = false;
-        }
+    if (should_destruct and proc.func == null and proc.block_depth == 1 and !shouldGenMainScopeReleaseOps(c.compiler)) {
+        should_destruct = false;
+    }
+    // A block that ends with `return`, `break`, `continue` or a `never` call never reaches its end,
+    // and those statements already destruct the locals they leave. Emitting destructors here would be dead code.
+    if (!b.endReachable) {
+        should_destruct = false;
     }
     if (should_destruct) {
         // try semaTraceNopFmt(c, "pop block destruct: {s}", .{@tagName(b.node.type())}, proc.node);
@@ -9136,6 +9137,7 @@ pub fn procPrologue(c: *cy.Chunk) !void {
                 .ret_opt_t = opt_t,
                 .end = true,
             });
+            c.block().endReachable = false;
         } else {
             const ret_t = proc.getReturnType(c.sema);
             if (ret_t.id() == bt.Void or (ret_t.kind() == .result and ret_t.cast(.result).child_t.id() == bt.Void)) {

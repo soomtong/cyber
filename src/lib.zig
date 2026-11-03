@@ -1194,6 +1194,61 @@ test "Bytecode inlining of functions with loops." {
     try zt.eq(2, count_debug_frames(vm, "rec"));
 }
 
+/// Counts the instructions after the last `ret` of `name`'s body in the main chunk (from its `markers` entry to the
+/// next function header). Only the Trace build's `trap` end marker may follow a body's last return.
+fn count_insts_after_last_ret(vm: ?*C.VM, name: []const u8) !u32 {
+    const zvm: *cy.VM = @ptrCast(@alignCast(vm.?));
+    const chunk = zvm.compiler.main_chunk;
+    var start: ?u32 = null;
+    var iter = chunk.buf.markers.iterator();
+    while (iter.next()) |e| {
+        if (std.mem.eql(u8, e.value_ptr.*.name(), name)) start = e.key_ptr.*;
+    }
+    const ops = chunk.buf.ops.items;
+    var pc: usize = start orelse return error.FuncNotFound;
+    var after: u32 = 0;
+    while (pc < ops.len) {
+        const code = ops[pc].opcode();
+        // The next function starts with a `nop32` header.
+        if (code == .nop32) break;
+        switch (code) {
+            .ret, .ret_0, .ret_n => after = 0,
+            .trap => {},
+            else => after += 1,
+        }
+        pc += cy.bytecode.getInstLenAt(ops.ptr + pc);
+    }
+    return after;
+}
+
+test "A function body ends at its last return." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    // Both params are managed values that a block end would destruct. `return` destructs them itself,
+    // so sema must not emit the block end destructors after it.
+    try zt.eq(C.Success, C.vm_compile(vm, "main",
+        \\fn find_first(xs []int, target int) -> int:
+        \\  for 0..xs.len() |i|:
+        \\    if xs[i] == target:
+        \\      return i
+        \\  return -1
+        \\
+        \\fn pick(s str, n int) -> int:
+        \\  if n > 0:
+        \\    return s.len()
+        \\  else:
+        \\    return -1
+        \\
+        \\xs := []int{4, 8, 15}
+        \\_ = find_first(xs, 15)
+        \\_ = pick('abc', 1)
+    , C.defaultCompileConfig()));
+
+    try zt.eq(0, count_insts_after_last_ret(vm, "find_first"));
+    try zt.eq(0, count_insts_after_last_ret(vm, "pick"));
+}
+
 test "single_run frees the main block's raw buffers at deinit." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

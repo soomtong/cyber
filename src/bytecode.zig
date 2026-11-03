@@ -551,7 +551,7 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
         //     _ = try fmt.printCount(w, "%{} = %{}[%{}]", &.{v(dst), v(list), v(index)});
         // },
         .jump => {
-            const jump = pc[1].val;
+            const jump: i16 = @bitCast(pc[1].val);
             const abs = @abs(jump);
             if (jump < 0) {
                 if (pc_off) |off| {

@@ -201,6 +201,33 @@ loops.`가 main chunk의 `funcs_debug`에서 이름별 항목 수(함수 본문 
 `while opt |v|` 함수 → 2, 재귀 함수 → 2(가드 없이는 3). `functions/inline_loop.cy`에 `while opt |v|`(`drain`) 동작도 더했다.
 `?str` 버전은 기본 한도 40을 넘어 인라인되지 않는다.
 
+### 도달 불가 블록 끝의 해제 코드 제거, 비용 캐시, 덤프 수정
+
+인라인 리뷰 후속으로 `inline_ret_jump`가 `return` 뒤의 `trap`만 건너뛰어 루프 뒤 `return -1` 다음에 param 해제와 끝으로
+가는 jump가 남는다고 보았는데, 덤프를 보니 인라인이 아닌 일반 함수 본문에도 같은 코드가 있었다. `sema.popBlock2`가 블록 끝에
+도달할 수 없어도(`endReachable == false`) main proc이 아니면 지역 해제를 냈기 때문이다. 함수 proc 블록의 끝은 `return`(명시
+또는 `popFuncBlock`이 넣는 암시)이 이미 해제를 끝낸 뒤라 항상 도달 불가이고, `break` · `continue` · `never` 호출로 끝나는
+안쪽 블록도 마찬가지다. 그래서 `popBlock2`는 proc 종류와 관계없이 `endReachable`이 거짓이면 해제를 내지 않는다. 생성기의
+암시적 끝 `yield`(`procPrologue`) 뒤에도 `endReachable`을 거짓으로 둔다.
+
+결과(ReleaseSafe, `cyber compile` 덤프의 명령 줄 수, `32fab0fa` 대비): for 20271 → 19064(−6.0%), heap −5.7%, fib −6.1%,
+fiber −5.9%, alloc −5.8%, string index −6.1%. 줄어든 곳은 모두 죽은 코드다. `parseArgs` −211, `[]ArgOption.append` −103,
+`write_file` −100, `[]str.append` −94, `copy_file` −84. 사라진 `call`은 `core.@deinitObject` 80 → 47, `RawBuffer.elems_ptr`
+46 → 26, `Ptr.+` 32 → 22로, 죽은 `@destruct[Slice]` 인라인 본문 안의 호출들이다. 인라인 비용 계산이 보는 IR 노드 수도
+같이 줄어 전에 한도 40을 넘던 함수가 인라인 대상이 될 수 있다.
+시간(hyperfine, 다른 프로세스 부하 있음): for −1.5%, heap +3.8%, fib +1.7%, fiber −0.4%. 모두 잡음 범위(σ 3~7 ms).
+
+lib-test `A function body ends at its last return.`이 main chunk의 `markers`로 함수 시작 pc를 찾아 다음 함수 헤더(`nop32`)
+까지 걸으며 마지막 `ret` 뒤의 명령 수를 센다(`trap`만 허용). 수정 전에는 `find_first`에서 "expected 0, found 15"로 실패한다.
+
+비용 캐시: `inline_cost`가 호출 지점마다 callee 본문을 다시 순회하던 것을 없애고, `can_inline`이 `check_inline`에서 센
+노드 수를 `ir.FuncBlock.bc_inline_cost`에 저장한다. 처음에는 `FuncInfo`의 padding(u3) 자리에 u7로 두었는데 packed struct가
+20비트가 되어 wasm32에서 `@sizeOf(Func)` 테스트가 36 → 40으로 깨졌다(64비트는 정렬 여유로 통과). IR 노드는 크기 제약이 없고
+비용은 본문의 속성이라 그쪽이 맞다.
+
+덤프 수정: `bytecode.write_inst`의 `.jump`가 오프셋을 u16으로 읽어 역방향 jump 대상이 `@65811`처럼 찍혔다(`pushJumpBackTo`는
+`@bitCast(-i16)`으로 쓴다). `i16`으로 읽어 `jmp @313`처럼 나온다. 실행에는 영향 없음.
+
 ## 시도했으나 버린 것: Map 탐사 함수 `#[inline]`
 
 `findSlot`(IR 노드 117) · `findSetSlot`(116)은 기본 한도 40을 넘는다. `AutoHash`는 38, `AutoEq`는 5다. Map 100만 채우기 ·

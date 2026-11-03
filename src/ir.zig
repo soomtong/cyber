@@ -473,6 +473,9 @@ pub const FuncBlock = extern struct {
     // For methods only.
     parentType: ?*cy.Type,
 
+    /// IR node count of the body, set by `bc_gen.can_inline` when the function is inlinable (`FuncInfo.bc_inline == 1`).
+    bc_inline_cost: u32 = 0,
+
     /// Mark a func block to skip generation.
     /// Useful for removing temporary compile-time functions.
     skip: bool = false,

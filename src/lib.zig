@@ -687,7 +687,7 @@ export fn cl_lift(t: *cy.Thread, type_: *cy.Type, value: *anyopaque) Value {
 // To enable logging for tests:
 // c.setVerbose(true);
 // c.setLog(printLogger);
-fn printLogger(str: C.Bytes) callconv(.C) void {
+fn printLogger(str: C.Bytes) callconv(.c) void {
     std.debug.print("{s}\n", .{ C.from_bytes(str) });
 }
 

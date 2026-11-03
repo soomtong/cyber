@@ -526,8 +526,7 @@ pub fn indexOfAsciiSetSimdRemain(comptime VecSize: usize, str: []const u8, set: 
         const lut: @Vector(VecSize, u8) = lut_arr;
 
         var upperMaskLut: @Vector(VecSize, u8) = @splat(@as(u8, 0));
-        comptime var j = 0;
-        inline while (j < 8) : (j += 1) {
+        inline for (0..8) |j| {
             upperMaskLut[j] = 1 << j;
             upperMaskLut[8 + j] = 255;
             // Dupe to upper offset 128 for 256bit vpshufb.
@@ -597,8 +596,7 @@ pub fn indexOfAsciiSetSimdFixed(comptime VecSize: usize, str: []const u8, set: [
         const lut: @Vector(VecSize, u8) = lut_arr;
 
         var upperMaskLut: @Vector(VecSize, u8) = @splat(@as(u8, 0));
-        comptime var j = 0;
-        inline while (j < 8) : (j += 1) {
+        inline for (0..8) |j| {
             upperMaskLut[j] = 1 << j;
             // Non-ascii maps to full mask.
             // This is unlikely to match the `lut` but if it does, the final resulting char is validated. 

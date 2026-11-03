@@ -90,9 +90,7 @@ const anyNone = cy.builtins.anyNone;
 const anySome = cy.builtins.anySome;
 
 pub fn getBuiltinSymbol(id: u64) ?Symbol {
-    return std.meta.intToEnum(Symbol, id) catch {
-        return null;
-    };
+    return std.enums.fromInt(Symbol, id);
 }
 
 pub fn bindCore(self: *cy.VM) !void {

@@ -32,7 +32,7 @@ const WebContext = struct {
 
 pub const Src = @embedFile("web.cy");
 
-pub fn loader(vm: ?*C.VM, spec_: C.Str, res: ?*C.Module) callconv(.C) bool {
+pub fn loader(vm: ?*C.VM, spec_: C.Str, res: ?*C.Module) callconv(.c) bool {
     const spec = C.fromStr(spec_);
     if (std.mem.eql(u8, "web", spec)) {
         const mod = C.createModule(vm, spec_, C.toStr(Src));
@@ -53,17 +53,17 @@ pub const funcs = [_]C.HostFuncEntry{
 };
 
 extern fn hostPrint(str: [*]const u8, strLen: usize) void;
-fn print(_: ?*C.VM, str: C.Str) callconv(.C) void {
+fn print(_: ?*C.VM, str: C.Str) callconv(.c) void {
     hostPrint(str.ptr, str.len);
 }
 
 extern fn hostErrPrint(str: [*]const u8, strLen: usize) void;
-fn errPrint(_: ?*C.VM, str: C.Str) callconv(.C) void {
+fn errPrint(_: ?*C.VM, str: C.Str) callconv(.c) void {
     hostErrPrint(str.ptr, str.len);
 }
 
 extern fn hostLogInfo(ptr: [*]const u8, len: usize) void;
-fn logger(str: C.Str) callconv(.C) void {
+fn logger(str: C.Str) callconv(.c) void {
     hostLogInfo(str.ptr, str.len);
 }
 

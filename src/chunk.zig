@@ -417,26 +417,6 @@ pub const Chunk = struct {
         }
     }
 
-    /// Given two local values, determine the next destination temp local.
-    /// The type of the dest value is left undefined to be set by caller.
-    fn nextTempDestValue(self: *cy.Compiler, src1: bc.GenValue, src2: bc.GenValue) !bc.GenValue {
-        if (src1.isTempLocal == src2.isTempLocal) {
-            if (src1.isTempLocal) {
-                const minTempLocal = std.math.min(src1.local, src2.local);
-                self.setFirstFreeTempLocal(minTempLocal + 1);
-                return bc.GenValue.initTempValue(minTempLocal, undefined);
-            } else {
-                return bc.GenValue.initTempValue(try self.nextFreeTempLocal(), undefined);
-            }
-        } else {
-            if (src1.isTempLocal) {
-                return bc.GenValue.initTempValue(src1.local, undefined);
-            } else {
-                return bc.GenValue.initTempValue(src2.local, undefined);
-            }
-        }
-    }
-
     pub fn get_chunk_by_uri(self: *Chunk, uri: []const u8) !?*cy.Chunk {
         var buf: [1024]u8 = undefined;
         const ruri = try cy.compiler.resolveModuleUriFrom(self, &buf, uri, null);
@@ -881,8 +861,6 @@ pub const Chunk = struct {
     // pub const semaCallGenericFuncRec = sema.semaCallGenericFuncRec;
 
     pub const sema_expr_cstr_template = sema.sema_expr_cstr_template;
-
-    // pub usingnamespace jitgen.ChunkExt;
 };
 
 const FuncDebugInfo = struct {

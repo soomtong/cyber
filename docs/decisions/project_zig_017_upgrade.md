@@ -41,7 +41,15 @@
   ReleaseFast `build-test`를 돌린다. 크기 단언 테스트는 bare union의 safety tag만큼 모드별 값을 둔다
   (64-bit 8, wasm32 `Local` · `Func` 4).
 - extern 타입의 재해석은 `@bitCast` 대신 `.val` 또는 `stdx.reinterpret`(0.17은 extern `@bitCast` 금지).
-- Zig 쪽 범용 allocator는 `std.heap.SafeAllocator.init(std.heap.page_allocator, ...)`다(`cli.zig` `gpa`,
-  `stdx/heap.zig`). `DebugAllocator`는 deprecated고, 바꿔도 피크 메모리는 Debug +7% · ReleaseFast
+- Zig 쪽 범용 allocator는 `std.heap.SafeAllocator.init(std.heap.page_allocator, ...)`다(`cli.zig` `gpa`). `DebugAllocator`는 deprecated고, 바꿔도 피크 메모리는 Debug +7% · ReleaseFast
   `-Dmalloc=zig` -12%, 시간은 같았다(2026-10-31, `src/test/bench/alloc/alloc.cy`). backing은 메모리를
   재사용하지 않는 page_allocator여야 write-after-free 검출이 된다. 기본 릴리스 CLI는 mimalloc을 쓴다.
+- 참조되지 않는 함수는 Zig가 분석하지 않아, 0.17에 없는 API를 불러도 빌드가 통과한다. 2026-11-03에 그런 코드를
+  지우거나 고쳤다. 지운 것: `src/fifo.zig`(`std.fifo` 복사본, `std.io` 기반) · `src/stdx/heap.zig`(0.9 시절
+  `Allocator` vtable의 wasm allocator, `std.mem.set`) · `fmt.zig` `formatFloatValue`(`std.fmt.formatFloat` ·
+  `fixedBufferStream`) · `compiler.zig` `replaceIntoShorterList`(`std.mem.copy`) · `chunk.zig` `nextTempDestValue`
+  (`std.math.min`) · `simd.zig` `iotaExt` · `negIotaIntExt`(const에 쓰기). 고친 것: `std.meta.intToEnum` →
+  `std.enums.fromInt`, `std.math.epsilon` → `floatEps`, `@typeInfo` 태그 `.Optional` · `.Pointer` · `.Union` ·
+  `.Float` → 소문자, `callconv(.C)` → `.c`, `std.mem.zeroes` → `@splat(0)`, `comptime var` + `inline while` →
+  `inline for (0..8)`. `string.zig`의 AVX2 분기(`hasAvx2`)는 baseline x86_64 CI에서도 컴파일되지 않으므로
+  `-Dtarget=x86_64-linux-gnu -Dcpu=x86_64_v3`로 따로 확인한다.

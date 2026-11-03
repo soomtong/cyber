@@ -687,11 +687,6 @@ fn initAllocator() void {
             miAlloc.init();
         },
     }
-    // var traceAlloc: stdx.heap.TraceAllocator = undefined;
-    // traceAlloc.init(miAlloc.allocator());
-    // traceAlloc.init(child);
-    // defer traceAlloc.dump();
-    // const alloc = traceAlloc.allocator();
 }
 
 pub fn getAllocator() std.mem.Allocator {

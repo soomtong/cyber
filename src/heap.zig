@@ -229,7 +229,7 @@ pub const Heap = struct {
         const pobj = obj.asPoolObject();
         if (cy.Trace) {
             // Clear any memory unused by freeSpan to help surface dangling pointer access.
-            pobj.data = std.mem.zeroes([32]u8);
+            pobj.data = @splat(0);
 
             // Tracing performs LRU allocation to surface double free errors better.
             // When an object is constantly reused, the most recent traced alloc/free info

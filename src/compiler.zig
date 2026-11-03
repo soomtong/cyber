@@ -1392,29 +1392,6 @@ const Load = struct {
     tempOffset: u8,
 };
 
-// Same as std.mem.replace except writes to an ArrayList. Final result is also known to be at most the size of the original.
-pub fn replaceIntoShorterList(comptime T: type, input: []const T, needle: []const T, replacement: []const T, output: *std.ArrayList(T), alloc: std.mem.Allocator) !usize {
-    // Known upper bound.
-    try output.resize(alloc, input.len);
-    var i: usize = 0;
-    var slide: usize = 0;
-    var replacements: usize = 0;
-    while (slide < input.len) {
-        if (std.mem.find(T, input[slide..], needle) == @as(usize, 0)) {
-            std.mem.copy(u8, output.items[i..i+replacement.len], replacement);
-            i += replacement.len;
-            slide += needle.len;
-            replacements += 1;
-        } else {
-            output.items[i] = input[slide];
-            i += 1;
-            slide += 1;
-        }
-    }
-    output.items.len = i;
-    return replacements;
-}
-
 const unexpected = cy.fatal;
 
 pub fn initModuleCompat(comptime name: []const u8, comptime initFn: fn (vm: *Compiler, modId: cy.ModuleId) anyerror!void) cy.ModuleLoaderFunc {

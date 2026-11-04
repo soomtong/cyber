@@ -29,9 +29,21 @@ placeholder"로 거절한다. 그래서 REPL에서 `1 + 2` · `x`는 컴파일 �
 ## 표시 형식
 
 `debug.write_value_desc`는 docs.md의 REPL 예시대로 `` `타입` 값 ``으로 찍는다(`` `int` 3 ``, `` `str` 'abc' ``). error · symbol은
-id 대신 이름(`error.Oops`)을 보이고, 렌더링을 모르는 타입(Map · struct · 배열)은 타입 이름만 보인다. 값을 펼쳐 보이려면
-일반 값 포매터가 필요한데 `print`도 struct는 타입 이름만 찍으므로 별도 과제다. `destructValueAt`에 `error` 타입이 빠져 있어
+id 대신 이름(`error.Oops`)을 보인다. `destructValueAt`에 `error` 타입이 빠져 있어
 `error.Oops`를 결과로 돌려준 뒤 다음 eval에서 "Unsupported: error"로 죽던 것도 고쳤다.
+
+2026-11-04 값 포매터: 처음에는 Map · struct · 배열이 타입 이름만 보였다. `write_value`가 타입 레이아웃을 따라 값을 걷는다
+(core.cy의 `dump_str`를 Zig로 옮긴 셈이지만 REPL 결과는 호스트 쪽 `TypeId` + 레지스터 포인터라 Cyber 코드로는 받을 수 없다).
+
+- 정수 · raw · float은 비트 수대로 읽고, enum은 `.case`, choice는 `.case(payload)`(void payload면 괄호 없음).
+- option은 `zero_union`이면 8바이트가 0일 때 `none`, 아니면 tag(i64, 오프셋 0) 뒤 오프셋 8의 payload.
+- struct는 `{a=1, b='x'}`(record 리터럴 모양). `Slice`(`ptr` · `_len`) · `Array`(`buf` · `length`) · `Vector`는 `{1, 2, 3}`,
+  `Map`은 `base` HashMap의 `meta`(1이면 값 있음) · `_keys` · `vals`를 걸어 `{'a': 1}`(해시 순서). 10개 넘으면 `...N more`.
+- `^T`는 `^` 뒤에 가리키는 값, `Ptr[T]`는 주소. 중첩은 깊이 3에서 `...`로 끊어 순환 참조도 짧게 끝난다.
+- 결과 해제 `destructValueAt`에 choice가 없어 `Shape.circle(5)` 다음 eval에서 "Unsupported: Shape"로 죽던 것을 tag로 payload를
+  해제하게 고쳤다.
+
+lib-test "value_desc renders values from the type layout."가 위 경우를 문자열로 검사한다(누수 검사 allocator).
 
 ## 테스트
 

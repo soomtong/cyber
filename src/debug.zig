@@ -760,47 +760,220 @@ pub fn alloc_value_desc(vm: *cy.VM, val_t: cy.TypeId, val: *cy.Value) ![]const u
     return buf.toOwnedSlice();
 }
 
-/// `` `type` value `` as the REPL shows it (`docs/docs.md`, REPL). A type without a known rendering shows only its name.
+/// `` `type` value `` as the REPL shows it (`docs/docs.md`, REPL). Values are rendered by walking the type layout,
+/// nesting up to `DescMaxDepth` and showing up to `DescMaxElems` elements of a container.
 pub fn write_value_desc(vm: *cy.VM, w: *std.Io.Writer, val_t: cy.TypeId, val: *cy.Value) !void {
     if (val_t == bt.Void) return;
+    const type_ = vm.main_thread.heap.getType(val_t);
     try w.writeByte('`');
-    try vm.sema.writeTypeName(w, vm.main_thread.heap.getType(val_t), null);
+    try vm.sema.writeTypeName(w, type_, null);
     try w.writeAll("` ");
-    switch (val_t) {
-        bt.Bool => try w.print("{}", .{val.asBool()}),
-        bt.I64 => try w.print("{}", .{val.asInt()}),
-        bt.F64 => {
-            const f = val.asF64();
-            if (cy.Value.floatCanBeInteger(f)) {
-                try w.print("{d:.1}", .{f});
-            } else {
-                try w.print("{d}", .{f});
-            }
-        },
+    try write_value(vm, w, type_, @ptrCast(val), 0);
+}
+
+const DescMaxDepth = 3;
+const DescMaxElems = 10;
+const DescMaxStrLen = 30;
+
+fn write_value(vm: *cy.VM, w: *std.Io.Writer, type_: *cy.Type, ptr: [*]const u8, depth: u32) anyerror!void {
+    const heap = &vm.main_thread.heap;
+    switch (type_.id()) {
+        bt.Bool => try w.print("{}", .{ptr[0] != 0}),
+        bt.I64 => try w.print("{}", .{read(i64, ptr)}),
+        bt.F64 => try write_float(w, read(f64, ptr)),
         bt.Void => {},
         bt.Error => {
-            try w.print("error.{s}", .{vm.main_thread.heap.getSymbolName(val.asError())});
+            try w.print("error.{s}", .{heap.getSymbolName(read(u64, ptr))});
         },
         bt.Symbol => {
-            try w.print(".{s}", .{vm.main_thread.heap.getSymbolName(val.asSymbol())});
+            try w.print(".{s}", .{heap.getSymbolName(read(u64, ptr))});
         },
         bt.Type => {
             try w.print("type=", .{});
-            const type_ptr = val.asPtr(*cy.Type);
+            const type_ptr = read(*cy.Type, ptr);
             try vm.sema.writeTypeName(w, type_ptr, null);
         },
         bt.Str => {
-            const MaxStrLen = 30;
-            const str: *cy.heap.Str = @ptrCast(val);
+            const str: *const cy.heap.Str = @ptrCast(@alignCast(ptr));
             const slice = str.slice();
-            if (slice.len > MaxStrLen) {
-                try w.print("'{s}'...", .{slice[0..MaxStrLen]});
+            if (slice.len > DescMaxStrLen) {
+                try w.print("'{s}'...", .{slice[0..DescMaxStrLen]});
             } else {
                 try w.print("'{s}'", .{slice});
             }
         },
-        else => {},
+        else => switch (type_.kind()) {
+            .int => switch (type_.cast(.int).bits) {
+                8 => try w.print("{}", .{read(i8, ptr)}),
+                16 => try w.print("{}", .{read(i16, ptr)}),
+                32 => try w.print("{}", .{read(i32, ptr)}),
+                64 => try w.print("{}", .{read(i64, ptr)}),
+                else => {},
+            },
+            .raw => switch (type_.cast(.raw).bits) {
+                8 => try w.print("{}", .{ptr[0]}),
+                16 => try w.print("{}", .{read(u16, ptr)}),
+                32 => try w.print("{}", .{read(u32, ptr)}),
+                64 => try w.print("{}", .{read(u64, ptr)}),
+                else => {},
+            },
+            .float => switch (type_.cast(.float).bits) {
+                32 => try write_float(w, read(f32, ptr)),
+                64 => try write_float(w, read(f64, ptr)),
+                else => {},
+            },
+            .bool => try w.print("{}", .{ptr[0] != 0}),
+            .enum_t => {
+                const tag: u32 = @truncate(read(u64, ptr));
+                try w.print(".{s}", .{type_.cast(.enum_t).getCaseByTag(tag).head.name()});
+            },
+            .option => {
+                const option_t = type_.cast(.option);
+                if (option_t.zero_union) {
+                    if (read(u64, ptr) == 0) {
+                        try w.writeAll("none");
+                    } else {
+                        try write_value(vm, w, option_t.child_t, ptr, depth);
+                    }
+                } else {
+                    if (read(i64, ptr) == 0) {
+                        try w.writeAll("none");
+                    } else {
+                        try write_value(vm, w, option_t.child_t, ptr + option_t.fields_arr[1].offset, depth);
+                    }
+                }
+            },
+            .choice => {
+                const choice_t = type_.cast(.choice);
+                const tag: u32 = @truncate(read(u64, ptr));
+                const case = choice_t.getCaseByTag(tag);
+                try w.print(".{s}", .{case.head.name()});
+                if (case.payload_t.id() != bt.Void) {
+                    try w.writeByte('(');
+                    try write_nested(vm, w, case.payload_t, ptr + choice_t.fields_arr[1].offset, depth);
+                    try w.writeByte(')');
+                }
+            },
+            .vector => {
+                const vector_t = type_.cast(.vector);
+                try write_elems(vm, w, vector_t.elem_t, ptr, vector_t.n, depth);
+            },
+            .pointer => {
+                const ptr_t = type_.cast(.pointer);
+                const addr = read(usize, ptr);
+                if (ptr_t.ref) {
+                    if (addr == 0) return;
+                    try w.writeByte('^');
+                    try write_nested(vm, w, ptr_t.child_t, @ptrFromInt(addr), depth);
+                } else {
+                    try w.print("0x{x}", .{addr});
+                }
+            },
+            .struct_t => {
+                if (type_.instanceOf(vm.sema.slice_tmpl)) |instance| {
+                    const elem_t = instance.params[0].asPtr(*cy.Type);
+                    const elems = read_struct_field(type_, ptr, "ptr", [*]const u8);
+                    const len = read_struct_field(type_, ptr, "_len", i64);
+                    try write_elems(vm, w, elem_t, elems, @intCast(len), depth);
+                } else if (type_.instanceOf(vm.sema.array_tmpl)) |instance| {
+                    const elem_t = instance.params[0].asPtr(*cy.Type);
+                    const elems = read_struct_field(type_, ptr, "buf", [*]const u8);
+                    const len = read_struct_field(type_, ptr, "length", i64);
+                    try write_elems(vm, w, elem_t, elems, @intCast(len), depth);
+                } else if (type_.instanceOf(vm.sema.map_tmpl) != null) {
+                    // `Map` wraps a `HashMap` as its only field.
+                    const base = type_.cast(.struct_t).fields()[0];
+                    try write_value(vm, w, base.type, ptr + base.offset, depth);
+                } else if (type_.instanceOf(vm.sema.hash_map_tmpl)) |instance| {
+                    try write_hash_map(vm, w, instance, type_, ptr, depth);
+                } else {
+                    try write_struct(vm, w, type_, ptr, depth);
+                }
+            },
+            else => {},
+        },
     }
+}
+
+fn read(comptime T: type, ptr: [*]const u8) T {
+    return std.mem.bytesAsValue(T, ptr[0..@sizeOf(T)]).*;
+}
+
+fn read_struct_field(type_: *cy.Type, ptr: [*]const u8, name: []const u8, comptime T: type) T {
+    for (type_.cast(.struct_t).fields()) |field| {
+        if (std.mem.eql(u8, field.sym.head.name(), name)) {
+            return read(T, ptr + field.offset);
+        }
+    }
+    std.debug.panic("Missing field: {s}", .{name});
+}
+
+fn write_float(w: *std.Io.Writer, f: f64) !void {
+    if (cy.Value.floatCanBeInteger(f)) {
+        try w.print("{d:.1}", .{f});
+    } else {
+        try w.print("{d}", .{f});
+    }
+}
+
+/// A nested value stops at `DescMaxDepth` so cyclic references and deep records stay short.
+fn write_nested(vm: *cy.VM, w: *std.Io.Writer, type_: *cy.Type, ptr: [*]const u8, depth: u32) anyerror!void {
+    if (depth >= DescMaxDepth) {
+        try w.writeAll("...");
+        return;
+    }
+    try write_value(vm, w, type_, ptr, depth + 1);
+}
+
+fn write_elems(vm: *cy.VM, w: *std.Io.Writer, elem_t: *cy.Type, elems: [*]const u8, len: usize, depth: u32) !void {
+    const elem_size = elem_t.size();
+    try w.writeByte('{');
+    const shown = @min(len, DescMaxElems);
+    for (0..shown) |i| {
+        if (i > 0) try w.writeAll(", ");
+        try write_nested(vm, w, elem_t, elems + i * elem_size, depth);
+    }
+    if (len > shown) {
+        try w.print(", ...{} more", .{len - shown});
+    }
+    try w.writeByte('}');
+}
+
+fn write_struct(vm: *cy.VM, w: *std.Io.Writer, type_: *cy.Type, ptr: [*]const u8, depth: u32) !void {
+    const fields = type_.cast(.struct_t).fields();
+    try w.writeByte('{');
+    for (fields, 0..) |field, i| {
+        if (i > 0) try w.writeAll(", ");
+        try w.print("{s}=", .{field.sym.head.name()});
+        try write_nested(vm, w, field.type, ptr + field.offset, depth);
+    }
+    try w.writeByte('}');
+}
+
+/// `HashMap` keeps parallel key and value arrays; `meta` marks a slot as 1 when it holds a pair.
+fn write_hash_map(vm: *cy.VM, w: *std.Io.Writer, instance: *cy.Instance, type_: *cy.Type, ptr: [*]const u8, depth: u32) !void {
+    const key_t = instance.params[0].asPtr(*cy.Type);
+    const val_t = instance.params[1].asPtr(*cy.Type);
+    const meta = read_struct_field(type_, ptr, "meta", [*]const u8);
+    const keys = read_struct_field(type_, ptr, "_keys", [*]const u8);
+    const vals = read_struct_field(type_, ptr, "vals", [*]const u8);
+    const len: usize = @intCast(read_struct_field(type_, ptr, "len", i64));
+    const cap: usize = @intCast(read_struct_field(type_, ptr, "cap", i64));
+    try w.writeByte('{');
+    var shown: usize = 0;
+    for (0..cap) |i| {
+        if (shown >= len or shown >= DescMaxElems) break;
+        if (meta[i] != 1) continue;
+        if (shown > 0) try w.writeAll(", ");
+        try write_nested(vm, w, key_t, keys + i * key_t.size(), depth);
+        try w.writeAll(": ");
+        try write_nested(vm, w, val_t, vals + i * val_t.size(), depth);
+        shown += 1;
+    }
+    if (len > shown) {
+        try w.print(", ...{} more", .{len - shown});
+    }
+    try w.writeByte('}');
 }
 
 const EnableTimerTrace = builtin.target.os.tag != .freestanding and builtin.mode == .debug;

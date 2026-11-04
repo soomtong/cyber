@@ -3996,6 +3996,18 @@ Top level declarations such as imports, types, and functions can be referenced i
 `int` 123
 ```
 
+Records, slices, maps and optionals are shown with their contents. Nesting stops after a few levels and long containers are cut short:
+```bash
+> f
+`Foo` {a=123}
+> []str{'a', 'b'}
+`[]str` {'a', 'b'}
+> Map[str, int]{a=1}
+`Map[str, int]` {'a': 1}
+> ?int(none)
+`?int` none
+```
+
 ## JIT compiler.
 The JIT compiler is not supported. Passing `-jit` (or `CL_JIT` through the embedding API) fails with a compile error. Use the default bytecode VM, or the C backend (`-tcc`, `-cc`) for native performance.
 

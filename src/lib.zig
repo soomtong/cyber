@@ -941,6 +941,78 @@ test "persist_main keeps main locals across evals." {
     try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "print(x)", config, &res));
 }
 
+test "value_desc renders values from the type layout." {
+    // Leak-checking allocator: each result (including choice payloads) is released before the next eval.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    const S = struct {
+        fn expect(vm_: *C.VM, config_: C.EvalConfig, src: []const u8, exp: []const u8) !void {
+            var res: C.EvalResult = undefined;
+            try zt.eq(C.Success, C.vm_evalx(vm_, "repl", src, config_, &res));
+            const desc = C.value_desc(vm_, res.res_t, res.res);
+            defer C.vm_freeb(vm_, desc);
+            try zt.eqStr(exp, desc);
+        }
+    };
+    try S.expect(vm, config, "?int(none)", "`?int` none");
+    try S.expect(vm, config, "?int(3)", "`?int` 3");
+    try S.expect(vm, config, "?str('abc')", "`?str` 'abc'");
+    try S.expect(vm, config,
+        \\type P:
+        \\  a int
+        \\  b str
+        \\P{a=1, b='x'}
+    , "`P` {a=1, b='x'}");
+    try S.expect(vm, config, "^P{a=3, b='z'}", "`^P` ^{a=3, b='z'}");
+    try S.expect(vm, config, "[]int{1, 2, 3}", "`[]int` {1, 2, 3}");
+    try S.expect(vm, config, "[]str{'a', 'b'}", "`[]str` {'a', 'b'}");
+    try S.expect(vm, config, "[3]int{4, 5, 6}", "`[3]int` {4, 5, 6}");
+    try S.expect(vm, config, "[]int{1,2,3,4,5,6,7,8,9,10,11,12}", "`[]int` {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...2 more}");
+    try S.expect(vm, config,
+        \\m := Map[str, int]{}
+        \\m['a'] = 1
+        \\m
+    , "`Map[str, int]` {'a': 1}");
+    try S.expect(vm, config, "Map[int, str]{}", "`Map[int, str]` {}");
+    try S.expect(vm, config,
+        \\type Color enum:
+        \\  case red
+        \\  case blue
+        \\Color.blue
+    , "`Color` .blue");
+    try S.expect(vm, config,
+        \\type Shape enum:
+        \\  case dot
+        \\  case circle int
+        \\  case label str
+        \\Shape.circle(5)
+    , "`Shape` .circle(5)");
+    try S.expect(vm, config, "Shape.dot", "`Shape` .dot");
+    try S.expect(vm, config, "Shape.label('hi')", "`Shape` .label('hi')");
+    try S.expect(vm, config, "[]Shape{Shape.dot, Shape.circle(2)}", "`[]Shape` {.dot, .circle(2)}");
+    try S.expect(vm, config,
+        \\type Q:
+        \\  inner P
+        \\  opt ?int
+        \\Q{inner=P{a=1, b='q'}, opt=none}
+    , "`Q` {inner={a=1, b='q'}, opt=none}");
+    // Nesting stops at the depth limit, so a cyclic reference stays short.
+    try S.expect(vm, config,
+        \\type Node:
+        \\  next ?^Node
+        \\  v int
+        \\n := ^Node{next=none, v=1}
+        \\n.next = n
+        \\n
+    , "`^Node` ^{next=^{next=..., v=...}, v=1}");
+    try S.expect(vm, config, "1.5", "`float` 1.5");
+    try S.expect(vm, config, "true", "`bool` true");
+    try S.expect(vm, config, "error.Oops", "`error` error.Oops");
+}
+
 test "cl_vm_set_fuel stops runaway loops and recursion." {
     // Leak-checking allocator: stopping unwinds like a panic and frees the heap.
     const vm = C.vm_initx(zt.alloc);

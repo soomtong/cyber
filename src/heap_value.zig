@@ -456,6 +456,12 @@ pub fn destructValueAt(self: *cy.Heap, val_t: *cy.Type, ptr: [*]u8) void {
                         destructValueAt(self, vector_t.elem_t, ptr + offset);
                     }
                 },
+                .choice => {
+                    const choice_t = val_t.cast(.choice);
+                    const tag: u32 = @intCast(valueCast(ptr)[0].asInt());
+                    const case = choice_t.getCaseByTag(tag);
+                    destructValueAt(self, case.payload_t, ptr + choice_t.fields_arr[1].offset);
+                },
                 .ref_trait => {
                     self.release(valueCast(ptr)[0]);
                 },

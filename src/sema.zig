@@ -715,6 +715,11 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
         },
         .yield_stmt => {
             const yield = node.cast(.yield_stmt);
+            const proc_func = c.proc().func;
+            if (proc_func == null or !proc_func.?.info.generator) {
+                // Without this, the return type below is cast as a generator pointer and the VM crashes at runtime.
+                return c.reportError("`yield` is only allowed in a `#[generator]` function.", node);
+            }
             const gen_t = c.proc().getReturnType(c.sema).cast(.pointer).child_t;
             const funcptr_t = gen_t.sym().instance.?.params[0].asPtr(*cy.Type);
             const val_t = funcptr_t.cast(.func_ptr).sig.ret;

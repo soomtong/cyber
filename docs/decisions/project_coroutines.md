@@ -107,3 +107,10 @@
 `thread.zig` 수정을 빼면 두 테스트가 abort하고, `meta.zig` 수정을 빼면 두 번째가 실패한다.
 
 남은 것: F-31의 다른 절반(`dump_frame`이 `chk_stk`의 `stack_size`를 `+3`에서 읽음)은 손대지 않았다.
+
+## 일반 함수 안의 `yield` (2026-11-04)
+
+`#[generator]`가 아닌 함수나 main 블록에 `yield`를 쓰면 sema가 반환 타입을 `^Generator[...]`로 그냥 캐스트해 컴파일을 통과시키고
+실행 시 segfault했다(REPL에서 `#[generator]` 줄이 따로 제출돼 속성 없는 `fn gen(): yield 1`이 만들어지면서 발견). 이제 sema가
+"`yield` is only allowed in a `#[generator]` function."으로 거절한다. 테스트 `src/test/concurrency/yield_outside_generator_error.cy`.
+REPL에서는 속성 줄이 `:`로 끝나지 않아 블록으로 묶이지 않으므로 제너레이터 선언은 파일로 넣어야 한다(남은 과제).

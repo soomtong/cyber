@@ -306,6 +306,7 @@ fn test_concurrency(run: *Runner) void {
 if (!aot) {
     run.case("concurrency/await.cy");
     run.case("concurrency/generator.cy");
+    run.case("concurrency/yield_outside_generator_error.cy");
     if (!is_wasm) {
         run.case("concurrency/spawn.cy");
     }

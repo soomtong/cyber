@@ -6064,7 +6064,16 @@ pub fn semaCallFuncSymRec(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, re
     }
 }
 
+/// A call site inside a loop marks the callee hot. bc_gen then inlines at the sites in the callee's body
+/// as if they were in a loop (`inline_cost_fits`).
+pub fn markHotCall(c: *cy.Chunk, func: *cy.Func) void {
+    if (c.semaProcs.items.len > 0 and c.loopBlock(c.proc().block_start) != null) {
+        func.info.bc_hot = true;
+    }
+}
+
 pub fn sema_call_ir(c: *cy.Chunk, func: *cy.Func, args: []const *ir.Expr, node: *ast.Node) !ExprResult {
+    markHotCall(c, func);
     const expr = try c.ir.newExpr(.call, func.sig.ret, node, .{ 
         .func = func, .numArgs = @intCast(args.len), .args = args.ptr,
     });

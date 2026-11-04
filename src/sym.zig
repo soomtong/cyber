@@ -935,7 +935,10 @@ const FuncInfo = packed struct {
     /// Bytecode inline candidacy cache: 0 unknown, 1 inlinable, 2 not inlinable.
     bc_inline: u2 = 0,
 
-    padding: u3 = undefined,
+    /// Some call site is inside a loop. bc_gen then treats the sites in this function's body as hot.
+    bc_hot: bool = false,
+
+    padding: u2 = undefined,
 };
 
 pub const FuncConfig = struct {

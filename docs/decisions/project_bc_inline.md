@@ -308,9 +308,35 @@ lib-test `Inline site rules.`: 작은 함수는 어디서나 펼쳐지지만 `ne
 
 lib-test `Bytecode inlining of functions with loops.`의 `rec`는 본문 1 + `main` 지점 1 + 자기 본문 지점 1 = 3으로 바꿨다.
 
+## 루프에서 불리는 함수의 지점을 핫으로 (2026-11-04)
+
+규칙 C의 "핫"은 현재 proc의 루프 깊이뿐이라, heap 벤치의 `Heap.pop` · `swap`처럼 본문에 루프가 없지만 핫 루프에서 불리는
+함수 안의 `Array.@index_addr`(24) · `@set_index`(22) · `remove`(38)가 호출로 남았다(거절 이유를 stderr로 찍는 측정용
+빌드로 확인). "한 줄 래퍼를 깊이에서 빼는 규칙"은 측정해 보니 요점이 아니었다. Map 사슬에서 남는 호출은 깊이가 아니라
+`findSlot`(117노드) 자체이고, main의 지점에는 이미 `findSlot` · `findSetSlot`까지 펼쳐져 있다.
+
+sema가 호출 IR을 만들 때(`sema_call_ir` · `sema_func.matchFuncSym2`) 호출 지점이 루프 블록 안이면 callee에
+`FuncInfo.bc_hot`을 표시하고(`markHotCall`, padding u3 → u2), `inline_cost_fits`는 `loop_depth > 0`이거나 현재 proc의
+함수가 `bc_hot`이면 지점을 핫으로 본다. 모든 chunk의 sema가 끝난 뒤 codegen이 돌므로 순서 문제는 없다. 호출 그래프를
+따라 전파하지는 않는다(core는 거의 모든 함수가 어떤 루프에서든 불리므로 전파하면 규칙 C가 사라진다). 호출된 함수가
+인라인되면 그 본문의 지점은 같은 proc 안이라 핫함을 이어받는다.
+
+비교한 변형(ReleaseSafe, hyperfine, 덤프 명령 줄 수는 for 기준):
+
+| 변형 | heap | 다른 벤치 | 바이트코드 |
+|---|---|---|---|
+| `inline_small_nodes` 16 → 24 | −11.4% | 잡음 | +10.9% |
+| `inline_max_nodes` 40 → 48 | −2.0% | 잡음 | +1.5% |
+| 규칙 C를 core chunk에만 | −9.0% | 잡음 | +18.2%(os 모듈도 전부 펼쳐짐) |
+| 채택: 루프에서 불리는 함수 핫 | −8.7% (33.6 → 30.7 ms) | for · fiber · alloc · fib · Map ±1.5% | +2.9% |
+
+heap에 남은 호출은 `Heap.pop`(41노드, 한도 40 초과)뿐이다. lib-test `Hot callee sites.`: 루프에서 불리는 한 줄 래퍼 안의
+큰 함수는 펼쳐지고(3), 루프 밖에서 한 번 불리는 래퍼 안에서는 호출로 남는다.
+
 ## 남은 것
 
-- 콜백 · 생성기 본문처럼 루프 밖이지만 자주 불리는 지점은 규칙 C가 놓친다. `#[inline]`으로 지정하는 수밖에 없다.
+- 콜백 · 생성기 본문처럼 루프 밖이지만 자주 불리는 지점은 규칙 C가 놓친다. 루프에서 직접 불리는 함수는 `bc_hot`으로
+  잡히지만, 함수 포인터로 불리는 콜백은 `#[inline]`으로 지정하는 수밖에 없다.
 - 오류 경로 자체를 지점마다 복사하지 않으려면(callee 안의 `if idx >= len: panic_oob(idx)`) callee 쪽 코드를 바꾸는 게 아니라
   차가운 블록을 한 번만 생성해 공유해야 하는데, 인라인 지점마다 레지스터 base가 달라 간단하지 않다.
 

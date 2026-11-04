@@ -1237,6 +1237,37 @@ test "Inline site rules." {
     try zt.eq(1, count_debug_frames(vm, "die"));
 }
 
+test "Hot callee sites." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    try zt.eq(C.Success, C.vm_compile(vm, "main",
+        \\fn big(xs []int, target int) -> int:
+        \\  for 0..xs.len() |i|:
+        \\    if xs[i] == target:
+        \\      return i
+        \\  return -1
+        \\
+        \\fn wrap_hot(xs []int, t int) -> int:
+        \\  return big(xs, t) + 1
+        \\
+        \\fn wrap_cold(xs []int, t int) -> int:
+        \\  return big(xs, t) + 2
+        \\
+        \\xs := []int{4, 8, 15}
+        \\a := wrap_cold(xs, 8)
+        \\for 0..2 |i|:
+        \\  a += wrap_hot(xs, i)
+    , C.defaultCompileConfig()));
+
+    // `wrap_hot` is called from a loop, so the `big` site in its body is hot: body + site in `wrap_hot` + site in
+    // the copy of `wrap_hot` inside the main loop. `wrap_cold` is called once outside loops, so `big` stays a call
+    // there in both its body and its copy in main.
+    try zt.eq(3, count_debug_frames(vm, "big"));
+    try zt.eq(2, count_debug_frames(vm, "wrap_hot"));
+    try zt.eq(2, count_debug_frames(vm, "wrap_cold"));
+}
+
 /// Counts the instructions after the last `ret` of `name`'s body in the main chunk (from its `markers` entry to the
 /// next function header). Only the Trace build's `trap` end marker may follow a body's last return.
 fn count_insts_after_last_ret(vm: ?*C.VM, name: []const u8) !u32 {

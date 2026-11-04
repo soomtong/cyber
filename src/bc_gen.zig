@@ -1514,11 +1514,13 @@ const inline_max_reg_end = 160;
 /// A self call (recursion) is unrolled one level: the site is hot, and the copy's own calls stay calls
 /// because the inline context chain already holds the function.
 fn inline_cost_fits(c: *Chunk, func: *cy.Func) ?u32 {
-    const self_call = c.funcs_debug.items[c.cur_proc.id].func == func;
+    const proc_func = c.funcs_debug.items[c.cur_proc.id].func;
+    const self_call = proc_func == func;
     // `can_inline` cached the body's node count.
     const block = func.data.userFunc.loc.cast(.funcBlock);
     const cost = block.bc_inline_cost;
-    if (cost > inline_small_nodes and c.cur_proc.loop_depth == 0 and !block.bc_inline_attr and !self_call) return null;
+    const hot = c.cur_proc.loop_depth > 0 or (if (proc_func) |f| f.info.bc_hot else false);
+    if (cost > inline_small_nodes and !hot and !block.bc_inline_attr and !self_call) return null;
     const ctx = c.inline_ctx orelse return cost;
     if (ctx.depth >= inline_max_depth) return null;
     var root = ctx;

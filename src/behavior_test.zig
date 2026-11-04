@@ -315,6 +315,7 @@ if (!aot) {
 
 fn test_core(run: *Runner) void {
     run.case("core/Array.cy");
+    run.case("core/ArrayStore.cy");
     run.case("core/Array_oob_panic.cy");
     run.case("core/Array_neg_oob_panic.cy");
     run.case("core/arithmetic_ops.cy");

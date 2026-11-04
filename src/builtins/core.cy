@@ -1656,6 +1656,17 @@ fn (&ArrayStore[]) ensure_cap(new_cap int):
 fn (&ArrayStore[]) len() -> int:
     return self.length
 
+--| Returns a new iterator over the elements.
+fn (&ArrayStore[]) iterator() -> int:
+    return 0
+
+fn (&ArrayStore[]) next(idx &int) -> ?T:
+    if idx.* >= self.length:
+        return none
+    val := self[idx.*]
+    idx.* += 1
+    return val
+
 --| A dynamically sized data structure that contains a sequence of elements.
 --| Can be cloned or sliced into mutable spans.
 --| Any operation that resizes the array requires an exclusive borrow.

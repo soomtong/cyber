@@ -127,5 +127,5 @@ REPL에서는 속성 줄이 `:`로 끝나지 않아 블록으로 묶이지 않�
 메모리를 읽어 `paused`, 다음 `next()`는 segfault). 지금까지 `^T` 중 `iterator`를 가진 타입이 없어 드러나지 않았다. ref pointer면
 `semaOwn`(retain)하도록 고쳤다(`sema.zig` `.for_iter_stmt`). 임시값(`for g() |v|`)은 이미 owned라 복사가 없다.
 
-`^ArrayStore`는 여전히 `iterator`가 없어 `for`로 돌 수 없다. 별개 과제.
+`^ArrayStore`도 같은 이유로 `for`가 안 되던 것을 `iterator()` · `next(idx &int)`를 더해 돌게 했다(테스트 `core/ArrayStore.cy`).
 테스트는 `concurrency/generator.cy` 끝의 `for` 절 5개.

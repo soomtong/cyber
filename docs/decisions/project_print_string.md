@@ -37,3 +37,21 @@ core.cy에는 깊은 덤프용 `dump_str`가 있지만 여러 줄 형식이고 �
 
 테스트는 `src/test/modules/core.cy`의 `to_print_string()` 절(struct · 튜플 struct · 보간 · choice 세 형태 · Slice · Vector ·
 option 원소 · 중첩 struct). 문서는 `docs/docs.md` "String interpolation." 절.
+
+## `dump` · `dump_str` 손질
+
+2026-11-04. 깊은 덤프용 `dump_str(val &%T, indent int)`는 기본 타입 분기가 없어 struct 필드를 `x: int`처럼 타입 이름으로 찍었고,
+`.vector` 분기는 `children += dump(val[i])`로 `void`를 더해 `dump([3]int{...})`가 컴파일 오류였다. `dump(val %T)`의 `move val`은
+`^T` 인자에서 "Cannot move a reference parameter"였다. 학습 문서 `docs/study/10-findings-register.md` F-75에 적혀 있던 문제다.
+
+- 기본 타입 · enum · 포인터 · 함수 등 다른 분기가 없는 타입은 `to_print_string(val.*)`로 `print`와 같은 값(`1` · `true` · `error.Foo`).
+  문자열은 `'abc'`로 따옴표 유지(이전 `str 'abc'`).
+- struct는 `Point{\n  x: 1\n  y: 2\n}`처럼 한 줄에 필드 하나(이전 형식 유지, 값만 바뀜). 필드가 없으면 `T{}`.
+- option은 `none` 아니면 payload를 같은 들여쓰기로(이전 `?int(none)` · `?` 접두어 삭제, `print`와 같음).
+- choice는 `Shape.circle(5)` · `Shape.rect(Point{\n  x: 1\n  y: 2\n})`, payload `void`면 `Shape.empty`(이전 `Shape.empty(void)`).
+- Slice · Vector는 `[]int{\n  1\n  2\n}` · `[3]int{...}`처럼 타입 이름을 붙이고 한 줄에 원소 하나. 비어 있으면 `[]int{}` · `[0]int{}`.
+  `print`의 `{1, 2}`와 달리 타입 이름을 두는 것은 덤프가 타입 확인 용도이기 때문이다(이전 Slice는 `[]int(3)`으로 길이만).
+- `^T`는 타입 이름 그대로(중복 캐시 없음), `dump`는 `dump_str(&val, 0)`로 빌려 `^T` 인자도 받는다.
+- `Map` · `Array`는 `print`와 같은 이유(NoCopy 값 인자)로 못 넘긴다.
+
+테스트는 `src/test/modules/core.cy`의 `dump_str()` 절 네 묶음, 문서는 `docs/docs.md` "String interpolation." 절 끝.

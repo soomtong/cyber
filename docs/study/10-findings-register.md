@@ -113,7 +113,7 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 | F-76 | 64비트를 넘는 정수 리터럴이 에러 없이 wrap된다. `9223372036854775808`이 `-9223372036854775808`, `18446744073709551615`가 `-1`로 출력된다. 모델이 큰 수(ID, 타임스탬프 나노초 등)를 쓰면 조용히 틀린 값이 된다 | 정수 리터럴 처리(토크나이저 또는 sema, 위치 미확인) | 메인 재현 + [00 §7.3](00-language-tour.md) | 높음 | 범위 검사를 추가해 컴파일 에러로 |
 | F-77 | `!else \|err\|:` 블록이 끝에서 빠져나가지 않으면 `Expected unreachable block end.`. 문서의 case fallthrough 예제(본문 없는 `case 100`)는 `Unexpected indentation.`으로 파싱 실패. `{1,2,3}`은 목표 타입이 없으면 `TODO: infer tuple type`. `int(enum)`은 컴파일 에러. 문서의 `Func(FN)`은 실제로 `Func[FN]` | `docs/docs.md` 해당 절들 | 챕터 재현 [00 §7.2](00-language-tour.md) | 중간 | 문서 정정 |
 | F-78 | 토크나이저 쪽 작은 결함: `tokenizer.cy:408`은 `:=` 뒤 `advance`가 빠져 `=` 토큰이 중복된다(`cy.parse` 경로). `struct := 1`은 통과하는데 `scope := 1`은 거부된다(예약어 취급 불일치). 열 번호는 바이트 기준이라 한글이 앞에 있으면 캐럿이 어긋난다. 오류 복구가 없어 첫 오류만 보고한다 | `src/tokenizer.cy:408`, `src/tokenizer.zig` | 챕터 재현 [00](00-language-tour.md), [01 §7](01-pipeline-front-end.md) | 낮음 | |
-| F-75 | `print(slice)`는 내용 대신 `[]int`를 찍고 `dump(x)`는 값 대신 타입 구조를 찍는다. 정수 값 실수는 소수점 없이 출력(`add[float](1, 2)`가 `3`) | `core.cy`의 print 변환 | 챕터 재현 [00 §7.2](00-language-tour.md) | 낮음 | |
+| F-75 | `print(slice)`는 내용 대신 `[]int`를 찍고 `dump(x)`는 값 대신 타입 구조를 찍는다. 정수 값 실수는 소수점 없이 출력(`add[float](1, 2)`가 `3`) | `core.cy`의 print 변환 | 챕터 재현 [00 §7.2](00-language-tour.md) | 낮음 | 2026-11-04 `print`(`6f46a8aa`) · `dump`(`dump_str` 손질)가 값을 찍도록 수정(`docs/decisions/project_print_string.md`). 실수 표시는 그대로 |
 
 ## 우선순위 한 장 요약
 

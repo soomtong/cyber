@@ -1425,7 +1425,7 @@ print(d.items.len())
    `3`이어야 하지만 `1`이 나온다(필드 앞에 다른 필드를 두면 segfault). `cyber compile`을 보면 `fn D.push`가 `addr %7 = *%4`로 `self`(빌림 포인터가 든 슬롯 %4)의 주소를 필드 시작 주소로 쓴다. 정수 필드 접근(`load_64 [%4 + 0]`)은 포인터 값을 제대로 쓴다. `^D` 수신자나 메인 블록의 `d.items << 1`은 정상이다. 원인 후보는 bc_gen의 "빌림 매개변수를 거친 필드의 주소 취하기" 경로이며 03/04 챕터에서 확인한다(추정).
 5. `^Dyn[Trait]` 값을 `[]`/`Array`/`ArrayStore`에 넣으면 죽는다(`xs += d`). ReleaseSafe에서는 `panic: integer overflow`, 트레이스 빌드에서는 `Double free`다(Circle의 힙 객체를 `@copy`한 뒤 이중 해제). 컨테이너 없이 `^Dyn`/`&Dyn`를 인자로 넘기고 변수에 재대입하는 것은 정상이다.
 6. `cyber fmt`는 `std.debug.panic("TODO: Embed src/tools/fmt.cy")`다(`main.zig:120-121`).
-7. `print(slice)`는 내용 대신 `[]int`를, `dump(x)`는 값 대신 타입 구조를 출력한다.
+7. `print(slice)`는 내용 대신 `[]int`를, `dump(x)`는 값 대신 타입 구조를 출력한다. (2026-11-04 둘 다 값을 찍도록 수정, `docs/decisions/project_print_string.md`)
 8. `-fn`/`-필드` 비공개 표시는 대부분 강제되지 않는다(7.2).
 9. 정수 오버플로는 랩어라운드하고(`9223372036854775807 + 1`), 단일 문자 문자열이 정수 자리에서 코드포인트로 바뀐다(`f("s")`가 115).
 10. 제너레이터 지역 변수 상태 보존 문제는 07 챕터에서 다룬다.

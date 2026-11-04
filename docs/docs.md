@@ -679,6 +679,17 @@ print('%{[]Point{Point{x=1, y=2}}}') --> {Point{x=1, y=2}}
 ```
 A reference prints its type name (`^Point`) and a `Ptr` prints its address.
 
+`dump` and `dump_str` render the same values over several lines for inspection. Each struct field or sequence element takes its own line, slices and vectors carry their type name, and scalars render like `print`:
+```cy
+dump([]Point{Point{x=1, y=2}})
+--> []Point{
+-->   Point{
+-->     x: 1
+-->     y: 2
+-->   }
+--> }
+```
+
 ### String formatting.
 Formatting replaces `{}` placeholders with values converted to strings:
 ```cy

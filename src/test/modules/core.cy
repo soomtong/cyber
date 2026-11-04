@@ -61,4 +61,37 @@ t.eq(to_print_string([3]int{1, 2, 3}), '{1, 2, 3}')
 t.eq(to_print_string([](?int){1, none}), '{1, none}')
 t.eq(to_print_string([]Point{Point{x=1, y=2}}), '{Point{x=1, y=2}}')
 
+-- dump_str(), scalars render like print and strings keep their quotes.
+t.eq(dump_str(123), '123')
+t.eq(dump_str('abc'), "'abc'")
+t.eq(dump_str(true), 'true')
+t.eq(dump_str(error.Foo), 'error.Foo')
+t.eq(dump_str(?int(3)), '3')
+t.eq(dump_str(?int(none)), 'none')
+
+-- dump_str(), structs put each field on its own line with the field value.
+t.eq(dump_str(Point{x=1, y=2}), 'Point{\n  x: 1\n  y: 2\n}')
+t.eq(dump_str(Tup{1, 'x'}), "Tup{\n  a: 1\n  b: 'x'\n}")
+t.eq(dump_str(Named{name='rex', tag=none, xs=[]int{1, 2}}), "Named{\n  name: 'rex'\n  tag: none\n  xs: []int{\n    1\n    2\n  }\n}")
+t.eq(dump_str(Named{name='rex', tag='t', xs=[]int{}}), "Named{\n  name: 'rex'\n  tag: 't'\n  xs: []int{}\n}")
+
+-- dump_str(), choices and enums render as the case, payloads nest with the current indent.
+t.eq(dump_str(Shape.circle(5)), 'Shape.circle(5)')
+t.eq(dump_str(Shape.rect(Point{x=1, y=2})), 'Shape.rect(Point{\n  x: 1\n  y: 2\n})')
+t.eq(dump_str(Shape.empty), 'Shape.empty')
+type Color enum:
+    case red
+    case blue
+t.eq(dump_str(Color.red), 'Color.red')
+
+-- dump_str(), slices and vectors carry their type name and one element per line.
+t.eq(dump_str([]str{'a', 'b'}), "[]str{\n  'a'\n  'b'\n}")
+t.eq(dump_str([](?int){1, none}), '[]?int{\n  1\n  none\n}')
+t.eq(dump_str([3]int{1, 2, 3}), '[3]int{\n  1\n  2\n  3\n}')
+t.eq(dump_str([0]int{}), '[0]int{}')
+t.eq(dump_str([]Point{Point{x=1, y=2}}), '[]Point{\n  Point{\n    x: 1\n    y: 2\n  }\n}')
+
+-- dump_str(), references render as their type name.
+t.eq(dump_str(^Point{x=1, y=2}), '^Point')
+
 --cytest: pass

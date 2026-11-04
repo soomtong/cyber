@@ -70,62 +70,79 @@ fn binary_search_lower(len int, needle %T, compare &OpaqueFunc[CompareIndexFn[T]
             high = mid
     return low
 
---| Deep dump of a value.
+--| Deep dump of a value. Records, slices and vectors put each field or element on its own line
+--| and nested strings keep their quotes. Scalars render like `print`.
 fn dump(val %T):
-    log(dump_str(move val))
+    log(dump_str(&val, 0))
 
 fn dump_str(val %T) -> str:
     return dump_str(&val, 0)
 
 fn dump_str(val &%T, indent int) -> str:
     #if T == str:
-        return "str '%{val.*}'"
+        return "'" + val.* + "'"
     #else type.is_instance_of(T, Slice):
-        return '%{type.name(T)}(%{val.len()})'
+        if val.len() == 0:
+            return type.name(T) + '{}'
+        out := type.name(T) + '{\n'
+        for 0..val.len() |i|:
+            out += '  '.repeat(indent+1)
+            out += dump_str(&val[i], indent+1) + '\n'
+        out += '  '.repeat(indent)
+        out += '}'
+        return out
     #else:
         #switch type.info(T):
             #case .struct |info|:
-                out := '%{type.name(T)}{\n'
-                #for 0..info.fields.len() |i|:
-                    #field := info.fields[i]
-                    out += '  '.repeat(indent+1)
-                    out += '%{#{field.name}}: %{dump_str(&meta.access(val, field.name), indent+1)}\n'
-                out += '  '.repeat(indent)
-                out += '}'
-                return out
+                #if info.fields.len() == 0:
+                    return type.name(T) + '{}'
+                #else:
+                    out := type.name(T) + '{\n'
+                    #for 0..info.fields.len() |i|:
+                        #field := info.fields[i]
+                        out += '  '.repeat(indent+1)
+                        out += '%{#{field.name}}: %{dump_str(&meta.access(val, field.name), indent+1)}\n'
+                    out += '  '.repeat(indent)
+                    out += '}'
+                    return out
 
             #case .option |info|:
                 if meta.is_none(val):
-                    return '%{type.name(T)}(none)'
+                    return 'none'
                 else:
-                    out := '?'
-                    out += dump_str(&meta.access_option_payload(val.*), indent)
-                    return out
+                    return dump_str(&meta.access_option_payload(val.*), indent)
 
             #case .choice |info|:
-                out := '%{type.name(T)}.%{meta.enum_name(meta.choice_tag(val.*))}('
+                out := type.name(T) + '.'
                 switch meta.choice_tag(val.*):
                     #for meta.enum_values(T.Tag) |Tag|:
                         case Tag:
-                            out += dump_str(&meta.access_choice_case(val.*, Tag), indent)
-                out += ')'
+                            out += #{meta.enum_case(Tag).name}
+                            #if meta.CasePayload[T, Tag] != void:
+                                out += '(' + dump_str(&meta.access_choice_case(val.*, Tag), indent) + ')'
                 return out
+
+            #case .enum:
+                return type.name(T) + '.' + meta.enum_name(val.*)
 
             #case .ref |info|:
                 -- Skip dereferencing since that would need a dedupe cache.
-                return '%{type.name(T)}'
-
-            #case .ptr |info|:
-                return '%{type.name(T)} %{val.*}'
+                return type.name(T)
 
             #case .vector |info|:
-                children := []str{}
-                for 0..#{info.len} |i|:
-                    children += dump(val[i])
-                return '{%{children.join(', ')}}'
+                #if info.len == 0:
+                    return type.name(T) + '{}'
+                #else:
+                    out := type.name(T) + '{\n'
+                    for 0..#{info.len} |i|:
+                        out += '  '.repeat(indent+1)
+                        out += dump_str(&val[i], indent+1) + '\n'
+                    out += '  '.repeat(indent)
+                    out += '}'
+                    return out
 
             #else:
-                return '%{type.name(T)}'
+                return to_print_string(val.*)
 
 --| Prints a value to the error stream.
 fn eprint(x %T):

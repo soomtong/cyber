@@ -679,6 +679,15 @@ print('%{[]Point{Point{x=1, y=2}}}') --> {Point{x=1, y=2}}
 ```
 A reference prints its type name (`^Point`) and a `Ptr` prints its address.
 
+`Map` and `Array` can not be passed by value, so pass a borrow. A borrowed `Map` renders its entries, a borrowed `Array` or `ArrayStore` its elements, and any other borrow the value it borrows:
+```cy
+m := Map[str, int]{a=1}
+a := Array[int]{1, 2}
+print(&m)                           --> {'a': 1}
+print(&a)                           --> {1, 2}
+print('%{&Point{x=1, y=2}}')        --> Point{x=1, y=2}
+```
+
 `dump` and `dump_str` render the same values over several lines for inspection. Each struct field or sequence element takes its own line, slices and vectors carry their type name, and scalars render like `print`:
 ```cy
 dump([]Point{Point{x=1, y=2}})
@@ -687,6 +696,10 @@ dump([]Point{Point{x=1, y=2}})
 -->     x: 1
 -->     y: 2
 -->   }
+--> }
+dump(&m)
+--> Map[str, int]{
+-->   'a': 1
 --> }
 ```
 

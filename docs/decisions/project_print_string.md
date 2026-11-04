@@ -55,3 +55,19 @@ option 원소 · 중첩 struct). 문서는 `docs/docs.md` "String interpolation.
 - `Map` · `Array`는 `print`와 같은 이유(NoCopy 값 인자)로 못 넘긴다.
 
 테스트는 `src/test/modules/core.cy`의 `dump_str()` 절 네 묶음, 문서는 `docs/docs.md` "String interpolation." 절 끝.
+
+## 빌림으로 넘긴 `Map` · `Array` 표시
+
+2026-11-04. `print(m)` · `dump(m)`은 값 매개변수 복사 단계에서 "Cannot copy `Map[str, int]`"다. `print`가 `&%T`를 받게 하는
+대신, 이미 되는 `print(&m)`(`type.info(T)`가 `.borrow`, 이전에는 `&Map[str, int]`라는 타입 이름만 찍음)에 분기를 두었다.
+
+- `to_print_string` `.borrow |info|`: `info.child`가 `Map` · `HashMap`이면 `{'a': 1}`(REPL 포매터와 같은 모양, 키 · 값은
+  `to_elem_string`), `Array` · `ArrayStore`면 `{1, 2}`(Slice와 같음), 그 밖의 빌림은 `to_print_string(x.*)`로 빌린 값 그대로
+  (`print(&p)` → `Point{x=1, y=2}`, `print(&s)` → `abc`).
+- `dump_str` `.borrow |info|`: `Map[str, int]{\n  'a': 1\n}` · `Array[int]{\n  1\n  2\n}`처럼 `type.name(info.child)`를 붙이고 한 줄에
+  항목 하나, 비어 있으면 `Map[str, int]{}`. 그 밖의 빌림은 `dump_str(val.*, indent)`.
+- 메서드 호출은 빌림을 한 단계만 벗기므로(`val &&Map`에서 `val.size()`는 "Can not find the symbol `size` in `&&Map`") `b := val.*`로
+  받아 쓴다. `for x.* |entry|`는 빌린 값을 복사하지 않고 돈다. `for x |e|`는 `&&Map`이라 `iterator` 매칭 실패.
+- Map 순서는 해시 슬롯 순서라 테스트는 항목 하나짜리만 쓴다.
+
+테스트는 `src/test/modules/core.cy`의 `to_print_string()` · `dump_str()` 절 끝 묶음, 문서는 `docs/docs.md` "String interpolation." 절.

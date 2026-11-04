@@ -61,6 +61,23 @@ t.eq(to_print_string([3]int{1, 2, 3}), '{1, 2, 3}')
 t.eq(to_print_string([](?int){1, none}), '{1, none}')
 t.eq(to_print_string([]Point{Point{x=1, y=2}}), '{Point{x=1, y=2}}')
 
+-- to_print_string(), a borrowed Map or Array renders its entries, other borrows render the value.
+m := Map[str, int]{}
+m['a'] = 1
+t.eq(to_print_string(&m), "{'a': 1}")
+t.eq('%{&m}', "{'a': 1}")
+t.eq(to_print_string(&Map[str, int]{}), '{}')
+arr := Array[int]{}
+arr << 1
+arr << 2
+t.eq(to_print_string(&arr), '{1, 2}')
+t.eq(to_print_string(&Array[str]{}), '{}')
+store := ArrayStore[int]{}
+store << 7
+t.eq(to_print_string(&store), '{7}')
+pt := Point{x=1, y=2}
+t.eq(to_print_string(&pt), 'Point{x=1, y=2}')
+
 -- dump_str(), scalars render like print and strings keep their quotes.
 t.eq(dump_str(123), '123')
 t.eq(dump_str('abc'), "'abc'")
@@ -93,5 +110,13 @@ t.eq(dump_str([]Point{Point{x=1, y=2}}), '[]Point{\n  Point{\n    x: 1\n    y: 2
 
 -- dump_str(), references render as their type name.
 t.eq(dump_str(^Point{x=1, y=2}), '^Point')
+
+-- dump_str(), a borrowed Map or Array carries its type name, other borrows dump the value.
+t.eq(dump_str(&m), "Map[str, int]{\n  'a': 1\n}")
+t.eq(dump_str(&Map[str, int]{}), 'Map[str, int]{}')
+t.eq(dump_str(&arr), 'Array[int]{\n  1\n  2\n}')
+t.eq(dump_str(&Array[str]{}), 'Array[str]{}')
+t.eq(dump_str(&store), 'ArrayStore[int]{\n  7\n}')
+t.eq(dump_str(&pt), 'Point{\n  x: 1\n  y: 2\n}')
 
 --cytest: pass

@@ -125,6 +125,32 @@ fn dump_str(val &%T, indent int) -> str:
             #case .enum:
                 return type.name(T) + '.' + meta.enum_name(val.*)
 
+            #case .borrow |info|:
+                #if type.is_instance_of(info.child, Map) or type.is_instance_of(info.child, HashMap):
+                    b := val.*
+                    if b.size() == 0:
+                        return type.name(info.child) + '{}'
+                    out := type.name(info.child) + '{\n'
+                    for b.* |entry|:
+                        out += '  '.repeat(indent+1)
+                        out += dump_str(&entry.key, indent+1) + ': ' + dump_str(&entry.value, indent+1) + '\n'
+                    out += '  '.repeat(indent)
+                    out += '}'
+                    return out
+                #else type.is_instance_of(info.child, Array) or type.is_instance_of(info.child, ArrayStore):
+                    b := val.*
+                    if b.len() == 0:
+                        return type.name(info.child) + '{}'
+                    out := type.name(info.child) + '{\n'
+                    for b.* |elem|:
+                        out += '  '.repeat(indent+1)
+                        out += dump_str(&elem, indent+1) + '\n'
+                    out += '  '.repeat(indent)
+                    out += '}'
+                    return out
+                #else:
+                    return dump_str(val.*, indent)
+
             #case .ref |info|:
                 -- Skip dereferencing since that would need a dedupe cache.
                 return type.name(T)
@@ -245,6 +271,19 @@ fn to_print_string(x %T) -> str:
                 for 0..#{info.len} |i|:
                     parts += to_elem_string(x[i])
                 return '{' + parts.join(', ') + '}'
+            #case .borrow |info|:
+                #if type.is_instance_of(info.child, Map) or type.is_instance_of(info.child, HashMap):
+                    parts := []str{}
+                    for x.* |entry|:
+                        parts += to_elem_string(entry.key) + ': ' + to_elem_string(entry.value)
+                    return '{' + parts.join(', ') + '}'
+                #else type.is_instance_of(info.child, Array) or type.is_instance_of(info.child, ArrayStore):
+                    parts := []str{}
+                    for x.* |elem|:
+                        parts += to_elem_string(elem)
+                    return '{' + parts.join(', ') + '}'
+                #else:
+                    return to_print_string(x.*)
             #case .ptr |ptr|:
                 return '@' + (as[r64] x).fmt()
             #case .func |func|:

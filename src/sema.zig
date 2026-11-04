@@ -5787,7 +5787,10 @@ pub fn semaDeref(c: *cy.Chunk, ptr: ExprResult, node: *ast.Node) !ExprResult {
     const parent_local = ptr.recParentLocal();
     var res = ExprResult.init2(deref);
     res.data.value.parent_local = parent_local;
-    res.addressable = ptr.addressable;
+    // A dereference is always addressable: its address is the pointer value itself.
+    // Taking `ptr.addressable` made `*(as[Ptr[T]] p)[i]` copy the element into a hidden
+    // temp (no retain), return the temp's address and then destruct the temp.
+    res.addressable = true;
     return res;
 }
 

@@ -1544,7 +1544,7 @@ fn Span[] :: @init_sequence(scope span [&]T) -> scope [&]T:
 fn (&Span[]) @index_addr(idx int) -> Ptr[T]:
     if (as[r64] idx) >= (as[r64] self.length):
         panic_oob(idx)
-    return as[Ptr[T]] self.base + idx
+    return *(as[Ptr[T]] self.base)[idx]
 
 fn (scope Span[]) @slice() -> scope [&]T:
     return self

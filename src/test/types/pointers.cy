@@ -71,4 +71,17 @@ test.eq(2, foo_span.len())
 test.eq(123, foo_span[0].a)
 test.eq(234, foo_span[1].a)
 
+-- Address of an indexed element through a pointer expression that is not addressable
+-- (a bitcast) refers to the element itself, not to a copy of it.
+type Named:
+    name str
+    n    int
+named := Named{name='abc', n=1}
+named_addr := as[int] *named
+np := *(as[Ptr[Named]] named_addr)[0]
+test.eq(named_addr, as[int] np)
+np.n = 2
+test.eq(2, named.n)
+test.eq('abc', np.name)
+
 --cytest: pass

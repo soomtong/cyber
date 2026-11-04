@@ -66,8 +66,24 @@ VM의 `CALL` · `CHK_STK` · `RET`은 이미 가볍다(`src/vm.c:902`, `:917`). 
 - `Vector.@index_addr`의 `idx.uge(N)` → `(as[r64] idx) >= (as[r64] N)`: 이제 panic이 없다(당시의 "integer does not fit"은
   `fold_const_int` 이전이거나 아래 Span 변경과 섞인 결과로 보인다). 적용했다. `Int.uge` 인라인 복사가 사라져 덤프 명령 줄 수가
   벤치마다 −464(약 −4.3%)이고 시간은 같다(for · heap ±0.2%).
-- `Span.@index_addr`의 `as[Ptr[T]] self.base + idx` → `*(as[Ptr[T]] self.base)[idx]`: 적용하지 않는다. 이득이 없고(`Ptr.+`는
-  이제 인라인됨) `zig build test`(Debug, trace 켜짐)의 behavior 테스트 `functions/call_typed_param.cy`에서 `str.len()`이 깨진
-  헤더를 읽어 "integer does not fit in destination type"으로 죽는다. CLI(trace 꺼짐)로 같은 파일을 직접 돌리면 통과한다.
-  `base`가 `&T`(빌림)라 `as[Ptr[T]]` 뒤 `@index_addr` 경로(`sema_ptr_index`)가 `Ptr.+`와 다르게 취급되는 것으로 보이며, 원인은
-  미확인. 재현: 변경을 넣고 `zig build test`.
+- `Span.@index_addr`의 `as[Ptr[T]] self.base + idx` → `*(as[Ptr[T]] self.base)[idx]`: 처음에는 `zig build test`(Debug, trace 켜짐)의
+  behavior 테스트 `functions/call_typed_param.cy`에서 `str.len()`이 깨진 헤더를 읽어 "integer does not fit in destination type"으로
+  죽어 보류했다. 2026-11-04 저녁에 원인을 찾아 적용했다(아래 "포인터 역참조의 주소" 절).
+
+## 포인터 역참조의 주소 (2026-11-04)
+
+재현은 Debug(trace 켜짐) CLI로 `m := Map[str, int]{a=123}` 한 줄이면 된다(ReleaseSafe CLI는 trace가 꺼져 있어 헤더 검사가 없을 뿐,
+같은 코드가 돈다). 덤프를 비교하니 인라인된 `Span.@index_addr`가 원소 주소를 돌려주는 대신 원소(`Pair[str, int]`, 32바이트)를
+숨은 지역 `_temp`에 `load_4w`로 복사하고 그 임시의 주소를 돌려준 뒤 임시를 `dtor_str`로 해제했다. retain 없는 복사를 해제하니
+Map이 소유한 키 문자열이 풀려 헤더가 깨진다.
+
+원인은 sema다. `p[i]`(포인터 인덱스)는 `sema_ptr_index`가 포인터 산술을 만들고 `semaDeref`가 `.deref`로 감싸는데, `semaDeref`가
+`res.addressable = ptr.addressable`로 두어 포인터 식이 지역 · 필드가 아니면(`as[Ptr[T]] self.base`는 bitcast) 역참조 결과가
+"주소 없는 값"으로 분류됐다. `*expr`(`semaPtrOrType`)은 `semaEnsureAddressable`로 그런 값을 `_temp`에 복사한 뒤 주소를 잡는다.
+`PtrSpan.@index_addr`의 `*self.ptr[idx]`는 `self.ptr`이 필드라 addressable이어서 같은 문제가 안 보였다.
+
+역참조는 항상 addressable이다(그 주소가 포인터 값 자체이고 bc_gen `genAddressOf2`의 `.deref` 분기도 포인터 식을 그대로 생성한다).
+`semaDeref`가 `res.addressable = true`를 두도록 고쳤다. 사용자 코드에서도 `*(as[Ptr[T]] addr)[0]`처럼 bitcast · 호출 결과 포인터를
+인덱스한 뒤 주소를 잡으면 같은 복사 · 이중 해제가 났다. 회귀 테스트는 `src/test/types/pointers.cy` 끝(임시 복사본이면 주소가 다르고
+`n` 쓰기가 원본에 반영되지 않는다). 고친 뒤 Span 변경을 적용하니 `Ptr[T].+` 함수와 지점마다 `mov` 하나가 사라진다(s1 덤프 기준
+funcs 49 → 48).

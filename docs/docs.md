@@ -4002,6 +4002,13 @@ Unlike conventional Cyber code, the REPL allows variable redeclarations:
 `str` 'a is now a string'
 ```
 
+Top level variables are carried over to the next input. A span literal `[&]T{...}` borrows a hidden vector that is not carried over, so it can not be assigned to a top level variable in the REPL. Use an owned sequence instead:
+```bash
+> sp := [&]int{1, 2}
+CompileError: Cannot persist local `sp` that borrows a temporary vector. Use an owned `[]T{...}`.
+> sp := []int{1, 2}
+```
+
 When the first input ends with `:`, the REPL will automatically indent the next line. To recede the indentation, provide an empty input. Once the indent returns to the beginning, the entire code block is submitted for evaluation:
 ```bash
 > if true:

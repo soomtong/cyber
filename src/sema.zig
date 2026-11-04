@@ -1739,6 +1739,9 @@ fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.
                 right_res = try c.semaExprOrOpAssignBinExpr(right, right_cstr, opts.rhsOpAssignBinExpr);
                 if (right_res.resType == .value and right_res.data.value.has_aux_local) {
                     var_start += 1;
+                    if (isPersistedMainLocal(c, svar.name())) {
+                        return c.reportErrorFmt("Cannot persist local `{}` that borrows a temporary vector. Use an owned `[]T{...}`.", &.{v(svar.name())}, right);
+                    }
                 }
                 right_res = try semaOwn(c, right_res, right);
 
@@ -3452,6 +3455,7 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
     svar.inner.local.declIrStart = declare;
 
     var var_start = c.varStack.items.len;
+    var init_after_aux = false;
 
     // Infer rhs type and enforce constraint.
     // It shouldn't matter if an rvalue gets its lifetime extended `var x = &<rvalue>`
@@ -3470,7 +3474,14 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
             }
         }
         if (right.data.value.has_aux_local) {
+            // The aux local (`_vec` of a `[&]T{...}` literal) outlives this statement, but its `declare_local`
+            // was pushed after `declare`, so the init has to follow it as a `set_local`.
             var_start += 1;
+            init_after_aux = true;
+            if (c.vm.config.persist_main and c.proc().func == null and c.semaBlocks.items.len == 1) {
+                // The hidden vector is not carried over to the next eval, so the persisted span would dangle.
+                return c.reportErrorFmt("Cannot persist local `{}` that borrows a temporary vector. Use an owned `[]T{...}`.", &.{v(name)}, node.right);
+            }
         }
     }
 
@@ -3484,7 +3495,7 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
     // Local now alive.
     svar = &c.varStack.items[var_idx];
     svar.type = .local;
-    if (var_start == c.varStack.items.len) {
+    if (var_start == c.varStack.items.len and !init_after_aux) {
         declare.cast(.declare_local).init = right.ir;
     } else {
         _ = try c.ir.pushStmt(.set_local, @ptrCast(node), .{
@@ -3532,6 +3543,7 @@ fn semaMainResultStmt(c: *cy.Chunk, node: *ast.Node) !void {
     svar.inner.local.declIrStart = declare;
 
     var var_start = c.varStack.items.len;
+    var init_after_aux = false;
     var right = try c.semaExpr(child, .{ .assign_to_local = true });
     const no_value = right.type.id() == bt.Void or right.type.id() == bt.Never or right.type.kind() == .result or
         (right.resType == .ct_value and right.data.ct_value.type.id() == bt.Void);
@@ -3556,7 +3568,9 @@ fn semaMainResultStmt(c: *cy.Chunk, node: *ast.Node) !void {
             }
         }
         if (right.data.value.has_aux_local) {
+            // See `localDecl`: the aux local's `declare_local` comes after `declare`.
             var_start += 1;
+            init_after_aux = true;
         }
     }
     right = try semaOwn(c, right, child);
@@ -3565,7 +3579,7 @@ fn semaMainResultStmt(c: *cy.Chunk, node: *ast.Node) !void {
     svar.decl_t = right.type;
     declare.cast(.declare_local).decl_t = right.type;
     svar.type = .local;
-    if (var_start == c.varStack.items.len) {
+    if (var_start == c.varStack.items.len and !init_after_aux) {
         declare.cast(.declare_local).init = right.ir;
     } else {
         _ = try c.ir.pushStmt(.set_local, node, .{
@@ -3595,6 +3609,13 @@ fn semaMainResult(c: *cy.Chunk, val_t: *cy.Type, stack_idx: u32, borrowed: bool,
     };
     const call = try c.semaCallFunc2(c.sema.main_result_fn, &args, &.{}, node);
     _ = try declareHiddenLocal(c, "@res", c.sema.void_t, call, node);
+}
+
+/// Whether `name` is a main block local that `persist_main` carries over to the next eval (see `semaTrackMainLocal`).
+fn isPersistedMainLocal(c: *cy.Chunk, name: []const u8) bool {
+    if (!c.vm.config.persist_main or c.proc().func != null) return false;
+    const entry = c.proc().var_cache_entries.get(name) orelse return false;
+    return entry.type == .local and entry.data.local.blockId == 0;
 }
 
 fn semaTrackMainLocal(c: *cy.Chunk, local: *Local, node: *ast.Node) !void {

@@ -218,6 +218,7 @@ fn test_types(run: *Runner) void {
     run.case("types/object_set_field_error.cy");
     run.case("types/pointers.cy");
     run.case("types/PtrSpan.cy");
+    run.case("types/Span.cy");
     run.case("types/Self.cy");
     run.case("types/struct_circular_dep_error.cy");
     run.case("types/structs.cy");

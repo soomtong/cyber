@@ -869,8 +869,25 @@ fn write_value(vm: *cy.VM, w: *std.Io.Writer, type_: *cy.Type, ptr: [*]const u8,
                     try w.print("0x{x}", .{addr});
                 }
             },
+            .borrow, .ex_borrow => {
+                const addr = read(usize, ptr);
+                if (addr == 0) return;
+                try w.writeByte('&');
+                try write_nested(vm, w, type_.getRefLikeChild().?, @ptrFromInt(addr), depth);
+            },
             .struct_t => {
-                if (type_.instanceOf(vm.sema.slice_tmpl)) |instance| {
+                if (type_.instanceOf(vm.sema.span_tmpl)) |instance| {
+                    // `[&]T`: `base` is a borrow of the first element.
+                    const elem_t = instance.params[0].asPtr(*cy.Type);
+                    const elems = read_struct_field(type_, ptr, "base", [*]const u8);
+                    const len = read_struct_field(type_, ptr, "length", i64);
+                    try write_elems(vm, w, elem_t, elems, @intCast(len), depth);
+                } else if (type_.instanceOf(vm.sema.ptr_span_tmpl)) |instance| {
+                    const elem_t = instance.params[0].asPtr(*cy.Type);
+                    const elems = read_struct_field(type_, ptr, "ptr", [*]const u8);
+                    const len = read_struct_field(type_, ptr, "length", i64);
+                    try write_elems(vm, w, elem_t, elems, @intCast(len), depth);
+                } else if (type_.instanceOf(vm.sema.slice_tmpl)) |instance| {
                     const elem_t = instance.params[0].asPtr(*cy.Type);
                     const elems = read_struct_field(type_, ptr, "ptr", [*]const u8);
                     const len = read_struct_field(type_, ptr, "_len", i64);

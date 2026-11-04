@@ -932,6 +932,13 @@ test "persist_main keeps main locals across evals." {
     defer C.setSilent(false);
     // A compile error keeps the saves.
     try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "undefined_thing", config, &res));
+    // A `[&]T{...}` local would borrow a hidden vector that is not carried over.
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "sp := [&]int{1, 2}", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl",
+        \\v := [2]int{1, 2}
+        \\sp := v[0..2]
+        \\sp = [&]int{3, 4}
+    , config, &res));
     try zt.eq(C.Success, C.vm_evalx(vm, "repl",
         \\use test
         \\test.eq(6, x)
@@ -970,6 +977,11 @@ test "value_desc renders values from the type layout." {
     try S.expect(vm, config, "[]int{1, 2, 3}", "`[]int` {1, 2, 3}");
     try S.expect(vm, config, "[]str{'a', 'b'}", "`[]str` {'a', 'b'}");
     try S.expect(vm, config, "[3]int{4, 5, 6}", "`[3]int` {4, 5, 6}");
+    try S.expect(vm, config, "[&]int{7, 8}", "`[&]int` {7, 8}");
+    try S.expect(vm, config,
+        \\x := P{a=2, b='y'}
+        \\&x
+    , "`&P` &{a=2, b='y'}");
     try S.expect(vm, config, "[]int{1,2,3,4,5,6,7,8,9,10,11,12}", "`[]int` {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...2 more}");
     try S.expect(vm, config,
         \\m := Map[str, int]{}

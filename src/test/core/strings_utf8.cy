@@ -120,4 +120,14 @@ t.eq(s.trim({'a', '🐶'}), 'bc🦊xyz')
 -- upper()
 t.eq(s.upper(), 'ABC🦊XYZ🐶')
 
+-- from_utf8() validates, str(bytes) does not.
+t.eq(str.from_utf8('abc🦊'.span()) !else 'bad', 'abc🦊')
+t.eq(str.from_utf8([]byte{104, 105}) !else 'bad', 'hi')
+t.eq(str.from_utf8([]byte{}) !else 'bad', '')
+t.eq(str.from_utf8([]byte{0xff, 0x61}) !else 'bad', 'bad')
+t.eq(str.from_utf8([]byte{0xf0, 0x9f, 0xa6}) !else 'bad', 'bad')
+t.eq(str.is_utf8([]byte{0xf0, 0x9f, 0xa6, 0x8a}.span()), true)
+t.eq(str.is_utf8([]byte{0xc0, 0x80}.span()), false)
+t.eq(str([]byte{0xff, 0x61}).len(), 2)
+
 --cytest: pass

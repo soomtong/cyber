@@ -161,6 +161,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     // str
     .{"str.initRune",    zErrFunc(str_initRune)},
     .{"str.initPtrSpan", zErrFunc(string.initPtrSpan)},
+    .{"str.isUtf8",      cFunc(string.isUtf8)},
     .{"str.+",           zErrFunc(string.concat)},
     .{"str.concat",      zErrFunc(string.concat)},
     .{"str.interpolate", zErrFunc(string.interpolate)},

@@ -24,6 +24,19 @@ pub fn initPtrSpan(t: *cy.Thread) !Ret {
     }
 }
 
+pub fn isUtf8(t: *cy.Thread) callconv(.c) Ret {
+    const ret = t.ret(bool);
+    const span = t.param(cy.heap.PtrSpan);
+    if (span.len == 0) {
+        ret.* = true;
+        return RetOk;
+    }
+    const addr: usize = @intCast(span.ptr);
+    const ptr: [*]const u8 = @ptrFromInt(addr);
+    ret.* = cy.string.validateUtf8(ptr[0..@intCast(span.len)]) != null;
+    return RetOk;
+}
+
 pub fn concat(t: *cy.Thread) !Ret {
     const ret = t.ret(cy.heap.Str);
     const str = t.param(*cy.heap.Str);

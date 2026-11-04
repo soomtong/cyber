@@ -3252,9 +3252,29 @@ fn str :: @init(slice []byte) -> str:
 fn str :: @init(span [&]byte) -> str:
     return str(as[PtrSpan[byte]] span)
 
---| Returns a `str` copied from the byte slice.
+--| Returns a `str` copied from the byte slice. The bytes are not validated, see `str.from_utf8`.
 #[bind='str.initPtrSpan']
 fn str :: @init(span PtrSpan[byte]) -> str
+
+--| Returns a `str` copied from the bytes, or `error.Unicode` when they are not valid UTF-8.
+--| Use this for bytes from outside the program (files, sockets, process output); `str(bytes)` does not validate.
+fn str :: from_utf8(span PtrSpan[byte]) -> !str:
+    if !str.is_utf8(span):
+        return error.Unicode
+    return str(span)
+
+fn str :: from_utf8(span [&]byte) -> !str:
+    return str.from_utf8(as[PtrSpan[byte]] span)
+
+fn str :: from_utf8(slice []byte) -> !str:
+    return str.from_utf8(slice.span())
+
+--| Returns whether the bytes are valid UTF-8.
+#[bind='str.isUtf8']
+fn str :: is_utf8(span PtrSpan[byte]) -> bool
+
+fn str :: is_utf8(span [&]byte) -> bool:
+    return str.is_utf8(as[PtrSpan[byte]] span)
 
 fn str :: @init(x %T) -> str:
     #if T == bool:
@@ -3568,14 +3588,6 @@ fn (&str) count() -> int:
         res += 1
         idx += cp_len
     return res
-
---| Calls decode(@utf8)
--- #[bind] fn str.decode(self str) -> str
-
---| Decodes the array based on an `encoding`. Supported encodings: `.utf8`.
---| Returns the decoded string or throws `error.Decode`.
--- #[bind='str.decode2']
--- fn str.decode(self str, encoding symbol) -> str
 
 --| Returns whether the string ends with `suffix`.
 #[bind]

@@ -599,6 +599,17 @@ Example:
 print('\xF0\x9F\x90\xB6')    --> 🐶
 ```
 
+### Strings from bytes.
+`str(bytes)` copies a `[]byte` or `PtrSpan[byte]` into a string without checking the encoding.
+`str.from_utf8(bytes)` checks that the bytes are valid UTF-8 and returns `error.Unicode` otherwise,
+so it is the one to use for bytes that come from outside the program:
+```cy
+data := os.read_file('notes.txt')!
+text := str.from_utf8(data) !else ''
+if str.is_utf8(data.span()):
+    print('valid')
+```
+
 ### String indexing.
 The index operator returns the `byte` from a given index:
 ```cy

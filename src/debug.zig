@@ -760,7 +760,12 @@ pub fn alloc_value_desc(vm: *cy.VM, val_t: cy.TypeId, val: *cy.Value) ![]const u
     return buf.toOwnedSlice();
 }
 
+/// `` `type` value `` as the REPL shows it (`docs/docs.md`, REPL). A type without a known rendering shows only its name.
 pub fn write_value_desc(vm: *cy.VM, w: *std.Io.Writer, val_t: cy.TypeId, val: *cy.Value) !void {
+    if (val_t == bt.Void) return;
+    try w.writeByte('`');
+    try vm.sema.writeTypeName(w, vm.main_thread.heap.getType(val_t), null);
+    try w.writeAll("` ");
     switch (val_t) {
         bt.Bool => try w.print("{}", .{val.asBool()}),
         bt.I64 => try w.print("{}", .{val.asInt()}),
@@ -774,10 +779,10 @@ pub fn write_value_desc(vm: *cy.VM, w: *std.Io.Writer, val_t: cy.TypeId, val: *c
         },
         bt.Void => {},
         bt.Error => {
-            try w.print("error.{}", .{val.asError()});
+            try w.print("error.{s}", .{vm.main_thread.heap.getSymbolName(val.asError())});
         },
         bt.Symbol => {
-            try w.print("@{}", .{val.asSymbol()});
+            try w.print(".{s}", .{vm.main_thread.heap.getSymbolName(val.asSymbol())});
         },
         bt.Type => {
             try w.print("type=", .{});
@@ -794,9 +799,7 @@ pub fn write_value_desc(vm: *cy.VM, w: *std.Io.Writer, val_t: cy.TypeId, val: *c
                 try w.print("'{s}'", .{slice});
             }
         },
-        else => {
-            try w.print("(type={}){}", .{val_t, val.val});
-        },
+        else => {},
     }
 }
 

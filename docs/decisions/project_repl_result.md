@@ -26,6 +26,13 @@ placeholder"로 거절한다. 그래서 REPL에서 `1 + 2` · `x`는 컴파일 �
 - 결과 식이 임시값을 빌리는 경우(`borrow_only` + temp)는 `localDecl`과 같은 이유로 오류다.
 - `VM.deinit`은 힙 페이지를 쓸기 전에 결과를 해제한다(버린 main 지역과 힙 객체를 공유하므로 순서가 바뀌면 이중 해제).
 
+## 표시 형식
+
+`debug.write_value_desc`는 docs.md의 REPL 예시대로 `` `타입` 값 ``으로 찍는다(`` `int` 3 ``, `` `str` 'abc' ``). error · symbol은
+id 대신 이름(`error.Oops`)을 보이고, 렌더링을 모르는 타입(Map · struct · 배열)은 타입 이름만 보인다. 값을 펼쳐 보이려면
+일반 값 포매터가 필요한데 `print`도 struct는 타입 이름만 찍으므로 별도 과제다. `destructValueAt`에 `error` 타입이 빠져 있어
+`error.Oops`를 결과로 돌려준 뒤 다음 eval에서 "Unsupported: error"로 죽던 것도 고쳤다.
+
 ## 테스트
 
 lib-test "persist_main returns the last top level expression as the eval result.": `1 + 2` → int 3, 문자열 지역을 결과로

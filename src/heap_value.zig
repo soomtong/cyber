@@ -416,6 +416,7 @@ pub fn destructValueAt(self: *cy.Heap, val_t: *cy.Type, ptr: [*]u8) void {
         bt.F32,
         bt.F64,
         bt.Symbol,
+        bt.Error,
         bt.Type,
         bt.Bool => {},
         bt.EvalStr,

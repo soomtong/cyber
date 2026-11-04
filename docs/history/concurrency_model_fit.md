@@ -75,7 +75,7 @@
 | Generator | 호출 깊이 중간 yield 불가, `yield*` 위임 TODO, `next(arg)`로 값 되받기 없음 | 2.4, 6.2 |
 | Thread | 보낼 수 있는 타입이 `int` 계열과 `str`뿐. 연달아 spawn하면 직렬화될 수 있음 | 2.6 |
 | Future | main 스레드 `await`는 spin, 비-main 스레드 `await`는 `@panic("TODO")`로 호스트 abort | 2.6 |
-| Fiber | 소스에 없음. `src/fiber.zig`는 import되지 않는 잔재 | `project_coroutines.md` |
+| Fiber | 소스에 없음. import되지 않던 0.3 잔재 `src/fiber.zig`도 `bc169c5`에서 삭제됐다 | `project_coroutines.md`, `project_zig_017_upgrade.md` |
 
 ---
 

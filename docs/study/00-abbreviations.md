@@ -10,7 +10,7 @@ tags:
 
 > 소스 파일 이름과 식별자에 나오는 약어를 풀어 쓰고, 이 저장소에서 가리키는 대상을 적는다.
 > 개념 설명은 [용어집](00-glossary.md)과 각 장에 있고, 이 문서는 "이 글자가 무엇의 줄임인가"에 집중한다.
-> 위치는 HEAD 67eb7d8 기준이다. "유래" 열은 일반 지식이며 이 저장소의 사실이 아니다.
+> 위치는 master e4c0347 기준이다. "유래" 열은 일반 지식이며 이 저장소의 사실이 아니다.
 
 ## 읽는 법
 
@@ -27,7 +27,7 @@ tags:
 | --- | --- |
 | 파일 | `src/ir.zig` |
 | 만드는 곳 | sema 패스(`src/sema.zig`)가 AST를 훑으면서 동시에 만든다 |
-| 쓰는 곳 | 백엔드 `bc_gen`(바이트코드), `cgen`(C AOT), `llvm_gen`(미사용) |
+| 쓰는 곳 | 백엔드 `bc_gen`(바이트코드), `cgen`(C AOT). LLVM 백엔드는 `compiler.zig`에서 `error.TODO`이고 `llvm_gen.zig`는 `bc169c5`에서 삭제됐다 |
 | 수명 | 코드젠이 소비한 직후 버려진다 |
 
 `ir.zig` 머리 주석이 설계 의도를 직접 밝힌다. AST는 sema 결과를 담기에 맞지 않으므로, 타입 검사 · 수명 · ARC · 소멸자 같은
@@ -72,14 +72,14 @@ source ─▶ tokenizer ─▶ parser(AST) ─▶ sema ──▶ IR ──▶ bc
 
 | 정의 위치 | 무엇을 제약하나 | 주요 필드 |
 | --- | --- | --- |
-| `sema.zig:3735` `sema.Cstr` | **기대 타입**과 맞춤 정책 | `target_t`(기대 타입), `reqTypeCstr`(안 맞으면 오류), `fit_target`(맞춰 변환), `use_as_borrow`, `assign_to_local`, `return_infer_error`, `allow_ct_sym` |
-| `bc_gen.zig:3315` `bc_gen.Cstr` | 값을 **어느 레지스터**에 둘지 | `type: CstrType`(`simple` · `tempReg` · `localReg` · `captured` · `discard` · `none`), `data.slot.dst` |
+| `sema.zig:3690` `sema.Cstr` | **기대 타입**과 맞춤 정책 | `target_t`(기대 타입), `reqTypeCstr`(안 맞으면 오류), `fit_target`(맞춰 변환), `use_as_borrow`, `assign_to_local`, `return_infer_error`, `allow_ct_sym` |
+| `bc_gen.zig:3464` `bc_gen.Cstr` | 값을 **어느 레지스터**에 둘지 | `type: CstrType`(`simple` · `tempReg` · `localReg` · `captured` · `discard` · `none`), `data.slot.dst` |
 | `cgen.zig:505` `cgen.Cstr` | (C 백엔드용 자리) | 비어 있다 |
 | `cte.zig:767` `CallCstr` | cte 호출이 값을 요구하는지 | `req_value` |
 | `cte.zig:826` `ExprCstr` | cte 식의 기대 타입 | `type`, `check`, `fit_target`, `match_generic_type`, `resolve_new_type` |
-| `sym.zig:590` `WithCstr` | 템플릿 `with` 절의 타입 제약 | `name`, `cstr_t` |
+| `sym.zig:566` `WithCstr` | 템플릿 `with` 절의 타입 제약 | `name`, `cstr_t` |
 
-`bc_gen.Cstr`의 `retain` 규칙은 정의 위 주석(`bc_gen.zig:3305~3314`)에 있다. 호출자가 `retain`을 요구하면 값은 RC가 +1된 상태로 와야 한다.
+`bc_gen.Cstr`의 `retain` 규칙은 정의 위 주석(`bc_gen.zig:3456~3463`)에 있다. 호출자가 `retain`을 요구하면 값은 RC가 +1된 상태로 와야 한다.
 
 ~~~zig
 // sema 쪽: "이 식은 int여야 한다, 안 맞으면 오류"
@@ -103,8 +103,7 @@ const cstr = sema.Cstr.initRequire(int_t);   // target_t = int, reqTypeCstr = tr
 | `sym` | symbol | `sym.zig` | 이름 있는 모든 것의 공통 머리 |
 | `bc_gen` / `bcgen` | bytecode generation | `bc_gen.zig` | IR → 바이트코드 |
 | `cgen` | C (code) generation | `cgen.zig` | IR → C 소스 (AOT) |
-| `llvm_gen` | LLVM generation | `llvm_gen.zig` | 켜지 않는 백엔드(`project_direction.md`) |
-| `dce` | Dead Code Elimination | `dce.zig` | main부터 도달 가능한 함수만 표시. 현재 `compiler.zig:507`의 `enable_dce = false`로 꺼져 있다 |
+| `dce` | Dead Code Elimination | (삭제됨) | `dce.zig`는 `enable_dce = false` 뒤의 죽은 코드라 `bc169c5`에서 지웠다. 약어는 결정 문서에 남아 있다 |
 | `cte` | compile-time evaluation | `cte.zig` | 1절 |
 | `ct_inline` | compile-time inline | `ct_inline.zig` | 1절 |
 | `capi` | C API | `capi.zig` | `cyber.h`의 Zig 쪽 미러. 소스에서는 보통 `const C = @import("capi.zig")` |
@@ -121,7 +120,7 @@ const cstr = sema.Cstr.initRequire(int_t);   // target_t = int, reqTypeCstr = tr
 | `fmt` | format | `fmt.zig` | 오류 메시지 포맷. 소스에서 `const v = cy.fmt.v` |
 | `cy` | Cyber | `cyber.zig`, `builtins/cy.cy` | Zig 쪽 루트 네임스페이스이자 스크립트용 `cy` 모듈 |
 | `cache` | — | `cache.zig` | URL 캐시(`os.cacheUrl`) |
-| `utils` / `bounded_array` / `fifo` | — | 같은 이름 | 범용 자료구조 |
+| `utils` / `bounded_array` | — | 같은 이름 | 범용 자료구조 (`fifo.zig`는 `a7b51ce`에서 삭제) |
 
 ---
 
@@ -164,7 +163,7 @@ const cstr = sema.Cstr.initRequire(int_t);   // target_t = int, reqTypeCstr = tr
 | `res` | result | `ExprResult`, `CLEvalResult.res` |
 | `src` / `dst` | source / destination | 레지스터 이동 |
 | `_t` 접미사 | type | `target_t`, `elem_t`, `res_t`, `cstr_t` |
-| `NullId` | null id | `maxInt(u32)`. 없는 id를 뜻하는 센티널(`cyber.zig:118`) |
+| `NullId` | null id | `maxInt(u32)`. 없는 id를 뜻하는 센티널(`cyber.zig:114`) |
 
 ### 4.2 VM · 런타임
 
@@ -182,7 +181,7 @@ const cstr = sema.Cstr.initRequire(int_t);   // target_t = int, reqTypeCstr = tr
 | `dyn` | dynamic | 0.3의 동적 타입. 0.4에는 흔적만 |
 | `i8`~`i64` / `r8`~`r64` / `f32`·`f64` | signed integer / **raw** integer / float | `r`은 unsigned가 아니라 "부호 비트를 해석하지 않는 raw 정수"다. `byte`는 `r8`의 별칭(`docs/docs.md:467`). `bt.R8` 등 |
 | `u48` | unsigned 48-bit | `setOpArgU48`: 6바이트 피연산자에 호스트 함수 포인터를 담는다 |
-| `debug sym` | debug symbol | pc → 소스 위치 표. `pushFCode`의 F는 "실패할 수 있는(failable)" 명령이라 debug sym을 붙인다는 뜻(`chunk.zig:721`) |
+| `debug sym` | debug symbol | pc → 소스 위치 표. `pushFCode`의 F는 "실패할 수 있는(failable)" 명령이라 debug sym을 붙인다는 뜻(`chunk.zig:595`) |
 
 ### 4.3 opcode (`vm.h`)
 
@@ -203,7 +202,7 @@ const cstr = sema.Cstr.initRequire(int_t);   // target_t = int, reqTypeCstr = tr
 | 접두사 | 뜻 | 예 |
 | --- | --- | --- |
 | `cl_` / `CL` | 임베딩 C API(`include/cyber.h`). 무엇의 줄임인지는 헤더에 적혀 있지 않다(Cyber Library로 추정) | `cl_vm_eval`, `CLVM`, `CL_AWAIT` |
-| `z` / `z_` | Zig로 구현해 C(`vm.c`)에 export한 함수(`vm.zig:1206~`) | `zAwait`, `zAllocPoolObject`, `z_ret_generator` |
+| `z` / `z_` | Zig로 구현해 C(`vm.c`)에 export한 함수(`vm.zig:1133~`) | `zAwait`, `zAllocPoolObject`, `z_ret_generator` |
 | `Z` | C 쪽에서 본 Zig 구조체 | `ZThread`, `ZVM` (`vm.h`) |
 | `RES_` | VM 실행 결과 코드(C) | `RES_AWAIT`, `RES_INTERRUPT` |
 | `@` (Cyber 소스) | 컴파일러 · 런타임 내부 함수 | `@send`, `@await_`, `@program_init` |
@@ -222,4 +221,4 @@ const cstr = sema.Cstr.initRequire(int_t);   // target_t = int, reqTypeCstr = tr
 | `aot` vs `jit` | 미리 C로 컴파일(동작) vs 실행 중 기계어 생성(동작 안 함) |
 | `inst` vs `instance` | VM instruction(약어) vs 템플릿 instance(풀어 씀) |
 | `cont` | Future continuation vs 루프 continue |
-| `fiber.zig` | 이름과 달리 지금은 import되지 않는 0.3 잔재. 현재 코루틴은 generator(`RET_GEN` 계열) |
+| `fiber` | 0.3의 `fiber.zig`는 `bc169c5`에서 삭제됐다. 현재 코루틴은 generator(`RET_GEN` 계열)이고 `Fiber`는 문서에만 있다 |

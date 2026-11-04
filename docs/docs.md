@@ -4002,10 +4002,10 @@ Unlike conventional Cyber code, the REPL allows variable redeclarations:
 `str` 'a is now a string'
 ```
 
-Top level variables are carried over to the next input. A span literal `[&]T{...}` borrows a hidden vector that is not carried over, so it can not be assigned to a top level variable in the REPL. Use an owned sequence instead:
+Top level variables are carried over to the next input by moving their values. A borrow would keep pointing at the old location, so a top level variable can not have a borrow type such as `&T` or `[&]T`. Use an owned type, or declare the borrow inside a block:
 ```bash
 > sp := [&]int{1, 2}
-CompileError: Cannot persist local `sp` that borrows a temporary vector. Use an owned `[]T{...}`.
+CompileError: Cannot persist local `sp` of borrow type `[&]int` across evals. Declare it inside a block or use an owned type.
 > sp := []int{1, 2}
 ```
 

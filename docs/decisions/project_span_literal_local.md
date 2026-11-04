@@ -27,9 +27,13 @@
 `sp := [&]int{1, 2, 3}`을 REPL 맨 위에서 선언하면 `sp`는 이월되지만 숨은 `_vec`는 이름이 없어 track되지 않는다. 다음 eval에서
 `sp.base`는 옛 스택 슬롯을 가리켜 쓰레기나 "Retaining untracked heap object"가 난다. `_vec`를 함께 이월하는 것도 생각했지만
 이월된 빌림은 지금도 슬롯 배치가 같다는 우연(`r := &x` 뒤 다음 eval의 `r.*`)에 기대므로 그 위에 더 쌓지 않는다.
-`localDecl`과 `=` 대입(`isPersistedMainLocal`: main proc · 블록 0의 지역)에서 `has_aux_local`이면 컴파일 오류
-"Cannot persist local `sp` that borrows a temporary vector. Use an owned `[]T{...}`."를 낸다. 중첩 블록 안의 지역(`if` 안)은
-이월되지 않으므로 허용한다. lib-test "persist_main keeps main locals across evals."에 두 경우를 넣었다.
+처음에는 `has_aux_local`인 선언 · 대입만 막았지만, 같은 세션에 이월된 빌림 자체가 깨지는 것을 확인했다: `x := 1` · `r := &x` 뒤
+재귀로 스택을 키우는 eval(`depth(5000)`)을 하면 `growStackPrecise`가 스택을 새로 할당해 다음 `r.*`가 해제된 메모리를 읽는다
+(36310383665086464 같은 값). 그래서 `localDecl`에서 `persist_main` · main proc · 블록 0이고 지역 타입이 `borrow_only`(`&T` ·
+`[&]T` · 빌림 필드를 가진 struct)면 컴파일 오류 "Cannot persist local `r` of borrow type `&int` across evals. Declare it inside a
+block or use an owned type."를 낸다. 중첩 블록 안의 지역(`if` 안)은 이월되지 않으므로 허용하고, 맨 표현식 결과(`&x`)는 eval 직후
+복사해 바로 보여 주므로 그대로다. 이월 지역에 빌림 타입이 없으니 `=` 대입 쪽 검사는 필요 없다. lib-test "persist_main keeps main
+locals across evals."에 오류 세 경우와 블록 안 허용 한 경우를 넣었다. docs.md REPL 절에도 적었다.
 
 REPL 값 포매터(`debug.write_value`)는 `[&]T`를 `{base=, length=3}`로 보여 줬다(빌림 필드는 `else => {}`). `Span`(`base` · `length`) ·
 `PtrSpan`(`ptr` · `length`)을 원소 목록으로, `&T` · `&&T`는 `^T`처럼 `&` 뒤에 가리키는 값으로 보이게 했다. lib-test

@@ -1739,9 +1739,6 @@ fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.
                 right_res = try c.semaExprOrOpAssignBinExpr(right, right_cstr, opts.rhsOpAssignBinExpr);
                 if (right_res.resType == .value and right_res.data.value.has_aux_local) {
                     var_start += 1;
-                    if (isPersistedMainLocal(c, svar.name())) {
-                        return c.reportErrorFmt("Cannot persist local `{}` that borrows a temporary vector. Use an owned `[]T{...}`.", &.{v(svar.name())}, right);
-                    }
                 }
                 right_res = try semaOwn(c, right_res, right);
 
@@ -3478,10 +3475,6 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
             // was pushed after `declare`, so the init has to follow it as a `set_local`.
             var_start += 1;
             init_after_aux = true;
-            if (c.vm.config.persist_main and c.proc().func == null and c.semaBlocks.items.len == 1) {
-                // The hidden vector is not carried over to the next eval, so the persisted span would dangle.
-                return c.reportErrorFmt("Cannot persist local `{}` that borrows a temporary vector. Use an owned `[]T{...}`.", &.{v(name)}, node.right);
-            }
         }
     }
 
@@ -3490,6 +3483,14 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
         var_t = right.type;
         c.varStack.items[var_idx].decl_t = right.type;
         declare.cast(.declare_local).decl_t = var_t;
+    }
+    if (var_t.info.borrow_only and c.vm.config.persist_main and c.proc().func == null and c.semaBlocks.items.len == 1) {
+        // Top level locals are carried over to the next eval by moving their values into new stack slots.
+        // A borrow would keep pointing at the old slot, which is freed once the stack grows, and a `[&]T{...}`
+        // literal borrows a hidden vector that is not carried over at all.
+        const type_name = try c.sema.allocTypeName(var_t);
+        defer c.alloc.free(type_name);
+        return c.reportErrorFmt("Cannot persist local `{}` of borrow type `{}` across evals. Declare it inside a block or use an owned type.", &.{v(name), v(type_name)}, node.right);
     }
 
     // Local now alive.
@@ -3609,13 +3610,6 @@ fn semaMainResult(c: *cy.Chunk, val_t: *cy.Type, stack_idx: u32, borrowed: bool,
     };
     const call = try c.semaCallFunc2(c.sema.main_result_fn, &args, &.{}, node);
     _ = try declareHiddenLocal(c, "@res", c.sema.void_t, call, node);
-}
-
-/// Whether `name` is a main block local that `persist_main` carries over to the next eval (see `semaTrackMainLocal`).
-fn isPersistedMainLocal(c: *cy.Chunk, name: []const u8) bool {
-    if (!c.vm.config.persist_main or c.proc().func != null) return false;
-    const entry = c.proc().var_cache_entries.get(name) orelse return false;
-    return entry.type == .local and entry.data.local.blockId == 0;
 }
 
 fn semaTrackMainLocal(c: *cy.Chunk, local: *Local, node: *ast.Node) !void {

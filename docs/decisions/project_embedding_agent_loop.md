@@ -104,6 +104,9 @@
   - 다음 `sema_program`은 저장본마다 `Ptr[T]` 상수를 역참조해 지역을 선언한다(비트 단위 move, `@copy` 없음).
     복원된 지역이 다시 track되면 이전 버퍼는 해제만 한다. 컴파일 에러면 저장본이 그대로 남는다.
   - panic이면 unwind가 main 프레임을 해제하고 `freeHeapPages`가 힙을 비우므로 `dropMainLocalSaves`가 기록만 지운다.
+  - 빌림 타입(`&T` · `[&]T` · 빌림 필드를 가진 struct) 지역은 이월하지 않는다(2026-11-04). 값을 새 슬롯으로 옮기므로 빌림은 옛
+    슬롯을 가리키고, 스택이 커져 재할당되면 해제된 메모리를 읽는다. `localDecl`이 맨 위 선언을 컴파일 오류로 막는다
+    (`docs/decisions/project_span_literal_local.md` REPL 절). 블록 안 지역은 이월되지 않으므로 그대로 쓸 수 있다.
     CLI REPL은 이때 "Variables were reset."을 출력한다.
   - 이월된 심볼은 decl 없는 use alias다. 새 main이 같은 이름을 선언하면 중복 보고(`declNode()` panic) 대신 대체되게
     했다(`src/module.zig`의 `isCarriedOverSym`). 이전에는 `use test`를 두 번 eval하면 프로세스가 죽었다.

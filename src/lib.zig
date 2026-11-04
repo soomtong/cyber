@@ -932,16 +932,24 @@ test "persist_main keeps main locals across evals." {
     defer C.setSilent(false);
     // A compile error keeps the saves.
     try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "undefined_thing", config, &res));
-    // A `[&]T{...}` local would borrow a hidden vector that is not carried over.
-    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "sp := [&]int{1, 2}", config, &res));
-    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl",
-        \\v := [2]int{1, 2}
-        \\sp := v[0..2]
-        \\sp = [&]int{3, 4}
-    , config, &res));
     try zt.eq(C.Success, C.vm_evalx(vm, "repl",
         \\use test
         \\test.eq(6, x)
+    , config, &res));
+    // A top level borrow would point at the old stack slot after the next eval grows the stack, and a
+    // `[&]T{...}` literal borrows a hidden vector that is not carried over. Borrows inside a block are fine.
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "sp := [&]int{1, 2}", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "r := &x", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl",
+        \\v := [2]int{1, 2}
+        \\sp := v[0..2]
+    , config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\if true:
+        \\  r := &x
+        \\  sp := [&]int{1, 2}
+        \\  test.eq(6, r.*)
+        \\  test.eq(2, sp[1])
     , config, &res));
     // A panic frees the heap, so the saves are dropped.
     try zt.eq(C.ErrorPanic, C.vm_evalx(vm, "repl", "panic('boom')", config, &res));

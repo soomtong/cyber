@@ -40,6 +40,9 @@ id 대신 이름(`error.Oops`)을 보인다. `destructValueAt`에 `error` 타입
 - struct는 `{a=1, b='x'}`(record 리터럴 모양). `Slice`(`ptr` · `_len`) · `Array`(`buf` · `length`) · `Vector`는 `{1, 2, 3}`,
   `Map`은 `base` HashMap의 `meta`(1이면 값 있음) · `_keys` · `vals`를 걸어 `{'a': 1}`(해시 순서). 10개 넘으면 `...N more`.
 - `^T`는 `^` 뒤에 가리키는 값, `Ptr[T]`는 주소. 중첩은 깊이 3에서 `...`로 끊어 순환 참조도 짧게 끝난다.
+- `[&]T`(`Span`: `base` · `length`) · `PtrSpan`(`ptr` · `length`)은 `{1, 2}`로, `&T` · `&&T`는 `&` 뒤에 가리키는 값으로
+  (2026-11-04, 이전에는 빌림 필드가 비어 `{base=, length=3}`로 보였다). 맨 표현식 `&x`는 eval 직후 복사해 바로 보여 주므로
+  가능하지만, 빌림 타입 지역은 이월하지 않는다(`project_span_literal_local.md`).
 - 결과 해제 `destructValueAt`에 choice가 없어 `Shape.circle(5)` 다음 eval에서 "Unsupported: Shape"로 죽던 것을 tag로 payload를
   해제하게 고쳤다.
 

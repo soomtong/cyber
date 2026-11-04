@@ -26,8 +26,18 @@
   알릴 수단이 없어 그대로 돌지만, 반복 변수 선언 외에는 하는 일이 없다.
 - 테스트: `src/test/meta/ct_eval_loop.cy`(0회 루프, 루프 안 반환), lib "Spawn without args works in every VM."
 
-## 남은 문제
+## type const가 기존 타입을 반환할 때 (2026-11-04 수정)
 
-- `resolve_type_const`는 반환된 타입의 sym 이름 · parent · instance를 type const의 것으로 덮어쓴다. 본문이 `int`처럼
-  기존 타입을 그대로 반환하면 그 타입이 오염된다(예: `int`의 메서드를 찾지 못함). 지금 내장 type const는 모두 새 타입을
-  만들어 반환하므로 드러나지 않는다. 기존 타입이면 alias로 다루거나 이름을 바꾸지 않아야 한다.
+`resolve_type_const`는 반환된 타입의 sym 이름 · parent · instance를 type const의 것으로 덮어썼다. `type MyInt const: return int`
+뒤에는 `int`가 `MyInt`로 바뀌어 `print(x + 1)`조차 core.cy 안에서 "Can not find the symbol `fmt` in `MyInt`"로 실패했다.
+내장 type const 중 `ExInner[T]`는 `T`에 `$acquire_ex_borrow`가 있으면 `T`를 그대로 돌려주므로 같은 경로다.
+
+본문이 만든 타입만 이름을 받는다: 평가 전 `c.syms.items.len`을 기억해 두고, 결과 sym이 그 뒤에 추가됐고(`created_by`)
+템플릿 인스턴스가 아니면(`instance == null`) 이름 · parent · instance를 덮어쓴다. `meta.new_struct`가 만드는 익명 `Struct`가
+여기 해당하고, 기존 타입이나 템플릿 인스턴스(`ExDefaultInner[T]`)는 제 이름을 유지한다. 테스트 `src/test/meta/type_const.cy`.
+
+같은 테스트가 드러낸 두 번째 문제: 비제네릭 type const(`type Pair const:`)는 선언 해석 단계(`compiler.zig`의
+`resolve_type_const` 호출)에서 바로 평가되는데, 그때 `meta.new_struct`의 인자 타입 `meta.StructConfig`가 아직 해석되지 않아
+Trace 빌드(`zig build test`의 Debug)에서 `isManaged`가 "Expected resolved type StructConfig."로 panic했다. ReleaseSafe CLI는
+그 검사가 없어 조용히 지나갔다. `ensure_eval_eligible_type`이 `ensure_resolved_type`을 먼저 부르게 했다. 제네릭 type const
+(`Ints[N]`)는 사용 지점에서 늦게 평가되므로 드러나지 않았다.

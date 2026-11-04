@@ -20,15 +20,29 @@ pub fn resolve_type_const(c: *cy.Chunk, sym: *cy.sym.TypeConst) !void {
 
     sema.getResolveContext(c).is_inline_eval = true;
 
+    const syms_before = c.syms.items.len;
     const res = try cte.evalFuncBody(c, sym.decl.stmts.slice(), c.sema.type_t, @ptrCast(sym.decl));
     const res_t = res.asPtr(*cy.Type);
     sym.type = res_t;
 
-    res_t.sym().head.parent = sym.head.parent.?;
-    res_t.sym().head.namePtr = sym.head.namePtr;
-    res_t.sym().head.nameLen = sym.head.nameLen;
-    res_t.sym().instance = sym.instance;
+    // Only a type the body created (an anonymous `meta.new_struct` result) takes the const's name.
+    // An existing type is returned as it is: `type X const: return int` must not rename `int`.
+    const res_sym = res_t.sym();
+    if (res_sym.instance == null and created_by(c, syms_before, @ptrCast(res_sym))) {
+        res_sym.head.parent = sym.head.parent.?;
+        res_sym.head.namePtr = sym.head.namePtr;
+        res_sym.head.nameLen = sym.head.nameLen;
+        res_sym.instance = sym.instance;
+    }
     sym.resolved = true;
+}
+
+/// Whether `sym` was appended to the chunk's symbols at or after `start`.
+fn created_by(c: *cy.Chunk, start: usize, sym: *cy.Sym) bool {
+    for (c.syms.items[start..]) |s| {
+        if (s == sym) return true;
+    }
+    return false;
 }
 
 /// Explicit `decl` for specialization declarations.
@@ -1331,6 +1345,9 @@ pub fn implements(c: *cy.Chunk, impl_t: *cy.Type, trait: *cy.types.GenericTrait,
 }
 
 pub fn ensure_eval_eligible_type(c: *cy.Chunk, type_: *cy.Type, node: *ast.Node) !void {
+    // A type const at the top level is evaluated while declarations are still being resolved, so the
+    // argument type (`meta.StructConfig` for `new_struct`) may not be resolved yet.
+    try ensure_resolved_type(c, type_, node);
     if (type_.isManaged()) {
         const name = try c.sema.allocTypeName(type_);
         defer c.alloc.free(name);

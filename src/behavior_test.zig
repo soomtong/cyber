@@ -290,6 +290,7 @@ fn test_meta(run: *Runner) void {
     // Disabled test: printing to stdout hangs test runner.
     // run.case2(.{ .silent = true }, "meta/dump_locals.cy");
     run.case("meta/ct_eval_loop.cy");
+    run.case("meta/type_const.cy");
     run.case("meta/ct_if.cy");
     run.case("meta/get_panic.cy"); 
     run.case("meta/get_set.cy"); 

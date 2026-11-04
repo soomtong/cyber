@@ -718,6 +718,9 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
             if (yield.child) |child| {
                 const var_start = c.varStack.items.len;
                 var expr = try c.semaExprCstr(child, val_t);
+                // The yielded value is handed to the consumer, which destructs it. A local stays alive in the
+                // generator, so it is copied like a returned value.
+                expr = try semaOwn(c, expr, child);
                 if (opt_t.cast(.option).zero_union) {
                     expr = try semaBitcast(c, expr, opt_t, child);
                 } else {
@@ -914,6 +917,8 @@ fn semaReturnExprStmt(c: *cy.Chunk, child: *ast.Node, ret_opt: ?*cy.Type, node: 
 
         const var_start = c.varStack.items.len;
         var expr = try c.semaExprCstr(child, val_t);
+        // Same as `yield`: the generator's locals are destructed below, so the result is a copy.
+        expr = try semaOwn(c, expr, child);
         if (opt_t.cast(.option).zero_union) {
             expr = try semaBitcast(c, expr, opt_t, child);
         } else {

@@ -688,11 +688,6 @@ fn create_lib_module(b: *std.Build, opts: Options) !*std.Build.Module {
         mod.stack_protector = false;
     }
 
-    if (opts.jit) {
-        // step.addIncludePath(.{ .path = "/opt/homebrew/Cellar/llvm/17.0.1/include" });
-        // step.addLibraryPath(.{ .path = "/opt/homebrew/Cellar/llvm/17.0.1/lib" });
-        // step.linkSystemLibrary("LLVM-17");
-    }
     return mod;
 }
 

@@ -861,16 +861,6 @@ pub const TemplateDecl = struct {
     params: []*FuncParam,
     child_decl: *Node,
 
-    pub fn getAttrs(self: *TemplateDecl) []const *Attribute {
-        switch (self.child_decl.type()) {
-            .funcDecl => {
-                return self.child_decl.cast(.funcDecl).attrs;
-            },
-            else => {
-                std.debug.panic("TODO: {}", .{self.child_decl.type()});
-            }
-        }
-    }
 };
 
 pub const Range = extern struct {
@@ -1920,51 +1910,6 @@ pub const AstView = struct {
         outLine.* = line;
         outCol.* = pos - lineStart;
         outLineStart.* = lineStart;
-    }
-
-    pub fn declNamePath(self: AstView, n: *Node) ![]const u8 {
-        return switch (n.type()) {
-            .cstruct_decl => b: {
-                break :b n.cast(.cstruct_decl).name.declName();
-            },
-            .struct_decl => b: {
-                break :b n.cast(.struct_decl).name.declName();
-            },
-            .custom_type_decl => n.cast(.custom_type_decl).name.declName(),
-            .trait_decl => n.cast(.trait_decl).name.declName(),
-            .enumDecl => n.cast(.enumDecl).name.declName(),
-            .import_stmt => b: {
-                const import_stmt = n.cast(.import_stmt);
-                if (import_stmt.name.type() == .all) {
-                    break :b "*";
-                }
-                break :b import_stmt.name.declName();
-            },
-            .use_alias => n.cast(.use_alias).name.declName(),
-            .type_alias_decl => n.cast(.type_alias_decl).name.declName(),
-            .template => try self.declNamePath(n.cast(.template).child_decl),
-            .global_decl => self.getNamePathBase(n.cast(.global_decl).name).name_path,
-            .const_decl => self.getNamePathBase(n.cast(.const_decl).name).name_path,
-            .funcDecl => self.getNamePathBase(n.cast(.funcDecl).name).name_path,
-            else => {
-                log.tracev("{}", .{n.type()});
-                return error.Unsupported;
-            }
-        };
-    }
-
-    pub fn fieldNameString(self: AstView, n: *Node) []const u8 {
-        return self.declNameString(n);
-    }
-
-    pub fn declNameString(self: AstView, n: *Node) []const u8 {
-        switch (n.type()) {
-            .ident => return n.cast(.ident).name,
-            .raw_string_lit => return n.cast(.raw_string_lit).value,
-            else => {
-                return self.nodeString(n);
-            }
-        }
     }
 
     pub fn nodeString(self: AstView, n: *Node) []const u8 {

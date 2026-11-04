@@ -340,10 +340,6 @@ pub const VM = struct {
         self.last_exe_error = "";
     }
 
-    pub fn getConstBytes(self: *VM) []const u8 {
-        return self.c.const_bytes[0..self.c.const_bytes_len];
-    }
-
     pub fn validate(self: *VM, srcUri: []const u8, src: ?[]const u8, config: C.ValidateConfig) !void {
         _ = config;
         var compile_c = C.defaultCompileConfig();
@@ -412,10 +408,6 @@ pub const VM = struct {
         }
         self.env_local_saves.clearRetainingCapacity();
         self.env_local_saves_map.clearRetainingCapacity();
-    }
-
-    pub fn api(self: *VM) *C.ZVM {
-        return @ptrCast(self);
     }
 
     pub fn eval(self: *VM, src_uri: []const u8, src: ?[]const u8, config: C.EvalConfig) !C.EvalResult {
@@ -511,30 +503,6 @@ pub const VM = struct {
         }
     }
 
-    pub fn dumpInfo(self: *VM) !void {
-        const w = std.debug.lockStderr(&cy.debug.print_buf).terminal().writer;
-        defer std.debug.unlockStderr();
-
-        try w.print("main stack size: {}\n", .{self.main_thread.c.stack_len});
-        try w.print("main stack fp: {}\n", .{cy.thread.getStackOffset(self.main_thread.c.stack_ptr, self.main_thread.c.fp)});
-        try w.print("main heap pages: {}\n", .{self.main_thread.heap.heapPages.items.len});
-        if (cy.TrackGlobalRC) {
-            try w.print("main global rc: {}\n", .{self.main_thread.heap.c.refCounts});
-        }
-
-        // Dump func symbols.
-        {
-            try w.print("func syms:\n", .{});
-            for (self.funcSyms.items, 0..) |_, i| {
-                const details = self.funcSymDetails.items[i];
-                const name = details.name_ptr[0..details.name_len];
-                const sig = self.sema.getFuncSig(details.sig);
-                const sigStr = try self.sema.formatFuncSig(sig, &cy.tempBuf, null);
-                try w.print("\t{s}{s}: {}\n", .{name, sigStr, i});
-            }
-        }
-    }
-
     pub fn getData(self: *cy.VM, comptime T: type, key: []const u8) T {
         return @ptrCast(@alignCast(self.data.get(key).?));
     }
@@ -566,10 +534,6 @@ pub const VM = struct {
             1 => @compileError("Not supported."),
             else => @compileError("Unsupported num return values."),
         }
-    }
-
-    pub fn fillUndefinedStackSpace(self: *VM, val: Value) void {
-        @memset(self.stack, val);
     }
 
     pub fn prepCtEval(self: *VM, buf: *cy.ByteCodeBuffer) !void {
@@ -631,17 +595,8 @@ pub const VM = struct {
         self.compiler.apiError = try self.alloc.dupe(u8, str);
     }
 
-    pub fn clearTempString(vm: *VM) stdx.ListWriter(std.array_list.Aligned(u8, .@"8")) {
-        vm.u8Buf.clearRetainingCapacity();
-        return stdx.listWriter(&vm.u8Buf, vm.alloc);
-    }
-
     pub fn getTempString(vm: *VM) []const u8 {
         return vm.u8Buf.items;
-    }
-
-    pub fn getNewFramePtrOffset(self: *VM, args: [*]const Value, nargs: u8) u32 {
-        return @intCast(cy.fiber.getStackOffset(self.c.stack, args + nargs));
     }
 
     pub fn expandTypeTemplate(vm: *cy.VM, template: *cy.sym.Template, arg_types: []const *cy.Type, args: []const cy.Value) !*cy.Type {
@@ -812,34 +767,6 @@ fn allocValueTypeIds(vm: *cy.VM, vals: []const Value) ![]const cy.TypeId {
         typeIds[i] = val.getBoxType();
     }
     return typeIds;
-}
-
-/// Like Value.dump but shows heap values.
-pub fn dumpValue(vm: *const VM, val: Value) void {
-    if (val.isFloat()) {
-        fmt.printStdout("Float {}\n", &.{ v(val.asF64()) });
-    } else {
-        if (val.isBoxPtr()) {
-            const obj = val.asHeapObject();
-            switch (obj.getTypeId()) {
-                bt.Str => {
-                    const str = obj.string.slice();
-                    if (str.len > 20) {
-                        fmt.printStdout("String {} len={} str=\"{}\"...\n", &.{v(obj), v(str.len), v(str[0..20])});
-                    } else {
-                        fmt.printStdout("String {} len={} str=\"{}\"\n", &.{v(obj), v(str.len), v(str)});
-                    }
-                },
-                bt.Fiber => fmt.printStdout("Fiber {}\n", &.{v(obj)}),
-                else => {
-                    const name = vm.compiler.sema.types.items[obj.getTypeId()].name();
-                    fmt.printStdout("HeapObject {} {} {}\n", &.{v(obj), v(obj.getTypeId()), v(name)});
-                },
-            }
-        } else {
-            fmt.printStdout("{}\n", &.{v(val.val)});
-        }
-    }
 }
 
 fn z_write_ptr(buf: C.Bytes, ptr: ?*anyopaque) callconv(.c) usize {
@@ -1041,7 +968,7 @@ pub fn appendCont(vm: *cy.VM, fut: *cy.heap.Future, node_id: usize) void {
         fut.inner.cont_tail = node_id;
         return;
     }
-    vm.task_nodes.items[fut.inner.cont_tail].next = node_id;
+    vm.task_nodes.items[@intCast(fut.inner.cont_tail)].next = node_id;
     fut.inner.cont_tail = node_id;
 }
 
@@ -1290,11 +1217,6 @@ fn spawn(args: struct {
     return try child.wait(io);
 }
 
-pub fn getFuncPtrType(vm: *cy.VM, sig: cy.sema.FuncSigId) !*cy.Type {
-    const chunk = vm.sema.func_ptr_tmpl.chunk();
-    return cy.sema.getFuncPtrType(chunk, sig);
-}
-
 /// A main local kept for the next `persist_main` eval (REPL).
 pub const LocalSave = struct {
     name: []const u8,
@@ -1411,14 +1333,6 @@ pub const GlobalSym = struct {
         }
     }
 };
-
-pub fn getTypeName(vm: *cy.VM, type_h: cy.TypeId) []const u8 {
-    return vm.getType(type_h).name();
-}
-
-pub fn getSymName(vm: *cy.VM, id: u32) []const u8 {
-    return vm.syms.buf[id].name;
-}
 
 pub fn writeStderr(s: []const u8) void {
     @branchHint(.cold);

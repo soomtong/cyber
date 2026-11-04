@@ -126,14 +126,6 @@ pub const Parser = struct {
         self.node_stack.deinit(self.alloc);
     }
 
-    pub fn parseNoErr(self: *Parser, src: []const u8, opts: ParseOptions) !ResultView {
-        const res = try self.parse(src, opts);
-        if (res.has_error) {
-            return error.ParseError;
-        }
-        return res;
-    }
-
     pub fn parse(self: *Parser, src: []const u8, src_id: u32, opts: ParseOptions) !ResultView {
         self.ast.src = src;
         self.ast.src_id = src_id;
@@ -4611,52 +4603,6 @@ pub const Parser = struct {
     }
 };
 
-pub const Result = struct {
-    inner: ResultView,
-
-    pub fn init(alloc: std.mem.Allocator, view: ResultView) !Result {
-        const arr = try view.nodes.clone(alloc);
-        const nodes = try alloc.create(std.ArrayList(ast.Node));
-        nodes.* = arr;
-
-        const new_src = try alloc.dupe(u8, view.src);
-
-        const deps = try alloc.create(std.StringHashMapUnmanaged(*ast.Node));
-        deps.* = .{};
-        var iter = view.deps.iterator();
-        while (iter.next()) |entry| {
-            const dep = entry.key_ptr.*;
-            const offset = @intFromPtr(dep.ptr) - @intFromPtr(view.src.ptr);
-            try deps.put(alloc, new_src[offset .. offset + dep.len], entry.value_ptr.*);
-        }
-
-        return Result{
-            .inner = .{
-                .has_error = view.has_error,
-                .err_msg = try alloc.dupe(u8, view.err_msg),
-                .root_id = view.root_id,
-                .src = new_src,
-                .name = try alloc.dupe(u8, view.name),
-                .deps = deps,
-            },
-        };
-    }
-
-    pub fn deinit(self: Result, alloc: std.mem.Allocator) void {
-        alloc.free(self.inner.err_msg);
-        self.inner.nodes.deinit(alloc);
-        alloc.destroy(self.inner.nodes);
-        alloc.free(self.inner.tokens);
-        alloc.free(self.inner.src);
-        self.inner.func_decls.deinit(alloc);
-        alloc.destroy(self.inner.func_decls);
-        alloc.free(self.inner.func_params);
-        alloc.free(self.inner.name);
-        self.inner.deps.deinit(alloc);
-        alloc.destroy(self.inner.deps);
-    }
-};
-
 /// Result data is not owned.
 pub const ResultView = struct {
     root: ?*ast.Root,
@@ -4666,10 +4612,6 @@ pub const ResultView = struct {
 
     name: []const u8,
     deps: *std.StringHashMapUnmanaged(*ast.Node),
-
-    pub fn dupe(self: ResultView, alloc: std.mem.Allocator) !Result {
-        return try Result.init(alloc, self);
-    }
 };
 
 fn toBinExprOp(op: cy.tokenizer.TokenType) ?cy.ast.BinaryExprOp {

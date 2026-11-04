@@ -196,10 +196,6 @@ pub const Value = extern union {
         return val.asPtr(*cy.heap.Str).slice();
     }
 
-    pub fn asStrZ(val: Value) []const u8 {
-        return val.asPtr(*cy.heap.StrZ).slice();
-    }
-
     pub inline fn assumeNotBoolToBool(self: *const Value) bool {
         return !self.isNone();
     }
@@ -390,26 +386,7 @@ pub const Value = extern union {
         };
     }
 
-    pub fn toC(self: Value) C.Value {
-        return @bitCast(self);
-    }
 };
-
-pub fn isHostFunc(vm: *cy.VM, val: Value) bool {
-    const obj = val.asHeapObject();
-    const type_id = obj.getTypeId();
-    if (type_id == bt.Func) {
-        return obj.func.kind == .host;
-    }
-    const type_e = vm.getType(type_id);
-    if (type_e.kind() == .func_ptr) {
-        return vm.funcSyms.buf[@intCast(obj.integer.val)].type == .host_func;
-    } else if (type_e.kind() == .func_union) {
-        return obj.func_union.kind == .host;
-    } else {
-        return false;
-    }
-}
 
 test "floatCanBeInteger" {
     var f: f64 = -100000000000;

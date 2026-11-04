@@ -432,7 +432,6 @@ pub const Heap = struct {
     pub const init_eval_str = Root.init_eval_str;
     pub const init_eval_str_undef = Root.init_eval_str_undef;
     pub const init_eval_str_concat = Root.init_eval_str_concat;
-    pub const newEmptyString = Root.newEmptyString;
     pub const init_empty_str = Root.init_empty_str;
     pub const newAstr = Root.newAstr;
     pub const newUstr = Root.newUstr;
@@ -440,16 +439,12 @@ pub const Heap = struct {
     pub const newUstrConcat = Root.newUstrConcat;
     pub const newAstrConcat3 = Root.newAstrConcat3;
     pub const newUstrConcat3 = Root.newUstrConcat3;
-    pub const newAstrSlice = Root.newAstrSlice;
     pub const init_astr_slice = Root.init_astr_slice;
     pub const init_ustr_slice = Root.init_ustr_slice;
     pub const newUstrSlice = Root.newUstrSlice;
     pub const new_byte_buffer = Root.new_byte_buffer;
     pub const free_byte_buffer = Root.free_byte_buffer;
-    pub const allocHostObject = Root.allocHostObject;
-    pub const allocHostFuncPtr = Root.allocHostFuncPtr;
     pub const allocHostFuncUnion = Root.allocHostFuncUnion;
-    pub const allocTable = Root.allocTable;
     pub const allocMapZero = Root.allocMapZero;
     pub const newEmptyArray = Root.newEmptyArray;
     pub const newArray = Root.newArray;
@@ -460,10 +455,8 @@ pub const Heap = struct {
     pub const new_buffer_empty = Root.new_buffer_empty;
     pub const new_buffer_undef = Root.new_buffer_undef;
     pub const new_eval_buffer_undef = Root.new_eval_buffer_undef;
-    pub const allocVector = Root.allocVector;
     pub const allocInt = Root.allocInt;
     pub const allocBool = Root.allocBool;
-    pub const allocFuncSig = Root.allocFuncSig;
     pub const allocBoxValue = Root.allocBoxValue;
     pub const allocPoolObject = Root.allocPoolObject;
     pub const allocBigObject = Root.allocBigObject;
@@ -479,7 +472,6 @@ pub const Heap = struct {
     pub const newStringBufferUndef = Root.newStringBufferUndef;
     pub const allocFunc = Root.allocFunc;
     pub const allocClosure = Root.allocClosure;
-    pub const allocTrait = Root.allocTrait;
     pub const allocTccState = Root.allocTccState;
 
     pub const destroyObject = heap_value.destroyObject;
@@ -487,7 +479,6 @@ pub const Heap = struct {
     pub const destructValue = heap_value.destructValue;
     pub const destructValue2 = heap_value.destructValue2;
     pub const destructValueAt = heap_value.destructValueAt;
-    pub const moveValueAt = heap_value.moveValueAt;
     pub const moveValueTo = heap_value.moveValueTo;
     pub const copy_str = heap_value.copy_str;
     pub const copy_value = heap_value.copyValue;
@@ -501,7 +492,6 @@ pub const Heap = struct {
     pub const release_object_opt = heap_value.release_object_opt;
     pub const releaseOnly = heap_value.releaseOnly;
     pub const releaseObject = heap_value.releaseObject;
-    pub const releaseOpaque = heap_value.releaseOpaque;
     pub const retain = heap_value.retain;
     pub const retainObject = heap_value.retainObject;
     pub const retainObjectOpt = heap_value.retainObjectOpt;
@@ -752,31 +742,6 @@ pub const MapValue = extern struct {
     //     return self.map().get(key);
     // }
 
-    /// index and val already have +1 retain.
-    pub fn setConsume(self: *MapValue, vm: *cy.VM, index: Value, val: Value) !void {
-        const m = cy.ptrAlignCast(*cy.MapInner, &self.inner);
-        const res = try m.getOrPut(vm.alloc, index);
-        if (res.foundExisting) {
-            cy.arc.release(vm, res.valuePtr.*);
-            cy.arc.release(vm, index);
-        } else {
-            // No previous entry, nop.
-        }
-        res.valuePtr.* = val;
-    }
-
-    pub fn set(self: *MapValue, vm: *cy.VM, index: Value, val: Value) !void {
-        const m = cy.ptrAlignCast(*cy.MapInner, &self.inner);
-        const res = try m.getOrPut(vm.alloc, index);
-        if (res.foundExisting) {
-            cy.arc.release(vm, res.valuePtr.*);
-        } else {
-            // No previous entry, retain key.
-            cy.arc.retain(vm, index);
-        }
-        cy.arc.retain(vm, val);
-        res.valuePtr.* = val;
-    }
 };
 
 pub const MapIterator = extern struct {
@@ -839,15 +804,6 @@ pub const Trait = extern struct {
     vtable: u64,
     impl: Value,
 };
-
-fn allocTrait(vm: *cy.VM, type_id: cy.TypeId, vtable: u16, impl: cy.Value) !cy.Value {
-    const obj = try allocPoolObject(vm, type_id);
-    obj.trait = .{
-        .impl = impl,
-        .vtable = vtable,
-    };
-    return Value.initPtr(obj);
-}
 
 pub const Object = extern struct {
     firstValue: Value,
@@ -1278,43 +1234,6 @@ pub fn allocArrayUndef(heap: *Heap, type_id: cy.TypeId, size: usize) !*cy.HeapOb
     return arr;
 }
 
-/// Reuse `Object` so that address_of refers to the first element for both structs and arrays.
-pub fn allocVector(self: *Heap, type_id: cy.TypeId, elems: []const Value) !Value {
-    const type_e = self.getType(type_id);
-    const child_t = type_e.cast(.vector).elem_t;
-    const elem_size = child_t.size();
-    const arr = try allocArrayUndef(self, type_id, elem_size * elems.len);
-
-    const dst: [*]u8 = @ptrCast(arr);
-    if (child_t.isVmStackLifted()) {
-        for (elems, 0..) |elem, i| {
-            const src = elem.asBytes()[0..elem_size];
-            @memcpy(dst[i*elem_size..i*elem_size + elem_size], src);
-        }
-    } else {
-        if (elem_size == 8) {
-            const src: [*]const u8 = @ptrCast(elems.ptr);
-            @memcpy(dst[0..elems.len * elem_size], src[0..elems.len * elem_size]);
-        } else {
-            for (elems, 0..) |*elem, i| {
-                const elem_bytes: [*]const u8 = @ptrCast(elem);
-                @memcpy(dst[i*elem_size..i*elem_size+elem_size], elem_bytes[0..elem_size]);
-            }
-        }
-    }
-    return Value.initPtr(arr);
-}
-
-pub fn allocTable(self: *Heap) !Value {
-    const obj = try allocPoolObject(self);
-    obj.table = .{
-        .typeId = bt.Table,
-        .rc = 1,
-        .inner_map = try self.allocEmptyMap(),
-    };
-    return Value.initPtr(obj);
-}
-
 pub fn allocMapZero(self: *Heap, type_id: cy.TypeId) !Value {
     const obj = try allocBigObject(self, type_id, 6 * @sizeOf(Value));
     obj.map = .{
@@ -1371,11 +1290,6 @@ pub fn allocBcFuncUnion(self: *Heap, union_t: cy.TypeId, pc: [*]cy.Inst) !Value 
 pub fn init_empty_str(self: *Heap) !Str {
     const empty = "";
     return self.init_astr_slice(empty, null);
-} 
-
-pub fn newEmptyString(self: *Heap) !Value {
-    const empty = "";
-    return self.newAstrSlice(empty, null);
 } 
 
 pub fn init_eval_str_undef(self: *Heap, len: usize, ascii: bool) !*EvalStr {
@@ -1605,17 +1519,6 @@ pub fn init_astr_slice(self: *Heap, slice: []const u8, buf: ?*StrBuffer) !Str {
     };
 }
 
-/// Consumes `buf` +1.
-pub fn newAstrSlice(self: *Heap, slice: []const u8, buf: ?*StrBuffer) !Value {
-    const obj = try allocPoolObject(self, bt.Str);
-    obj.string = .{
-        .buf_ = buf,
-        .ptr = slice.ptr,
-        .len_ = slice.len | (1 << 63),
-    };
-    return Value.initPtr(obj);
-}
-
 pub fn allocHostFuncUnion(self: *Heap, union_t: cy.TypeId, func: cy.ZHostFn) !Value {
     const obj = try allocPoolObject(self, union_t);
     obj.func = .{
@@ -1628,6 +1531,8 @@ pub fn allocHostFuncUnion(self: *Heap, union_t: cy.TypeId, func: cy.ZHostFn) !Va
 }
 
 pub fn allocTccState(self: *Heap, state: *tcc.TCCState, optLib: ?*DynLib) !Value {
+    // Without FFI the `tccState` object field is `void`, and nothing calls this.
+    if (comptime !cy.hasFFI) return error.Unsupported;
     const obj = try allocPoolObject(self, bt.TccState);
     obj.tccState = .{
         .state = state,

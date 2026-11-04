@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const cy = @import("cyber.zig");
 const log = cy.log.scoped(.worker);
 const build_config = @import("build_config");
@@ -67,6 +68,8 @@ pub const Pool = struct {
 
     // Assumes in critical section.
     pub fn request_idle_worker(self: *Pool) !void {
+        // A single-threaded target (wasm32) never spawns workers. Keeps `std.Thread.spawn` out of its analysis.
+        if (comptime builtin.single_threaded) return error.Unsupported;
         if (self.active_workers < self.num_workers) return;
         if (self.num_workers == self.workers.len) return;
 
@@ -120,6 +123,8 @@ pub const Worker = struct {
     os_thread: std.Thread,
 
     pub fn run(self: *Worker, pool: *Pool) void {
+        // Never spawned on a single-threaded target (wasm32); its `@fieldParentPtr` does not type-check there.
+        if (comptime builtin.single_threaded) return;
         pool.mutex.lockUncancelable(stdx.io());
         defer pool.mutex.unlock(stdx.io());
         while (true) {

@@ -164,12 +164,6 @@ pub const Sym = extern struct {
         return @ptrCast(&self.metadata);
     }
 
-    pub fn setResolving(self: *Sym, resolving: bool) void {
-        var metadata = self.getMetadata();
-        metadata.resolving = resolving;
-        self.metadata = @bitCast(metadata);
-    }
-
     pub fn instance(self: *Sym) ?*cy.Instance {
         switch (self.type) {
             .type       => return self.cast(.type).instance,
@@ -356,19 +350,6 @@ pub const Sym = extern struct {
         }
     }
 
-    pub fn dump(self: *Sym, opts: SymDumpOptions) !void {
-        if (!cy.Trace) return;
-        const path = try self.writeAbsPathToBuf(&cy.tempBuf);
-        fmt.printStderr("{}{} {}\n", &.{fmt.repeat(' ', opts.indent), v(path), v(@tagName(self.type))});
-        if (opts.dumpModule) {
-            if (self.getMod()) |mod| {
-                for (mod.syms.items) |childSym| {
-                    try childSym.dump(.{ .indent = 2, .dumpModule = false });
-                }
-            }
-        }
-    }
-
     pub fn declNode(self: *Sym) *ast.Node {
         switch (self.type) {
             .type_alias => {
@@ -439,11 +420,6 @@ const Metadata = packed struct {
     private: bool,
 
     padding: u14,
-};
-
-const SymDumpOptions = struct {
-    indent: u32 = 0,
-    dumpModule: bool = false,
 };
 
 pub fn createSym(alloc: std.mem.Allocator, comptime symT: SymType, init: SymChild(symT)) !*SymChild(symT) {
@@ -1398,16 +1374,6 @@ pub fn createUseAlias(c: *cy.Chunk, parent: *Sym, name: []const u8, decl: ?*ast.
     try c.syms.append(c.alloc, @ptrCast(sym));
     return sym;
 } 
-
-pub fn createModuleAlias(c: *cy.Chunk, parent: *Sym, name: []const u8, importedSym: *Sym, declId: *ast.Node) !*ModuleAlias {
-    const sym = try createSym(c.alloc, .module_alias, .{
-        .head = Sym.init(.import, parent, name),
-        .declId = declId,
-        .sym = importedSym,
-    });
-    try c.syms.append(c.alloc, @ptrCast(sym));
-    return sym;
-}
 
 pub fn createFunc(c: *cy.Chunk, ftype: FuncKind, parent: *Sym, config: FuncConfig, decl: ?*ast.Node) !*Func {
     const func = try c.alloc.create(Func);

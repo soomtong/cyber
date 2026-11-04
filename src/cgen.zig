@@ -3069,30 +3069,6 @@ fn writeEscapedChar(w: anytype, ch: u8, prev_hex_escape: bool) !bool {
     return false;
 }
 
-pub fn cStringLit(self: *Chunk, raw: []const u8) ![]const u8 {
-    // Big enough to hold escaped C literal.
-    try self.base.tempBufU8.resize(self.alloc, raw.len * 2);
-
-    // Escape to C literal.
-    const ReplaceChars = "\\\"";
-    if (std.mem.findAny(u8, raw, ReplaceChars)) |idx| {
-        var w: std.Io.Writer = .fixed(self.base.tempBufU8.items[0..]);
-        try w.writeAll(raw[0..idx]);
-        try writeEscapedChar(&w, raw[idx]);
-
-        var rest = raw[idx + 1 ..];
-        while (std.mem.findAny(u8, rest, ReplaceChars)) |idx2| {
-            try w.writeAll(rest[0..idx2]);
-            try writeEscapedChar(&w, rest[idx2]);
-            rest = rest[idx2+1..];
-        }
-        try w.writeAll(rest);
-        return w.buffered();
-    } else {
-        return raw;
-    }
-}
-
 fn writeTraitFuncType(c: *Chunk, w: anytype, name: []const u8, sig: *cy.FuncSig) !void {
     try w.print("{f} (*{s})(CB_Thread*, void*", .{ c.typeNameRet(sig.ret), name });
     if (sig.params_len > 1) {

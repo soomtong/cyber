@@ -75,9 +75,6 @@ pub const defaultEvalConfig = c.clDefaultEvalConfig;
 // pub const reset = c.clReset;
 // pub const runReadyTasks = c.clRunReadyTasks;
 pub const defaultCompileConfig = c.clDefaultCompileConfig;
-pub fn getType(val: Value) *ZType {
-    return @ptrCast(c.clGetType(val));
-}
 // pub const newFunc = c.clNewFunc;
 // pub const newType = c.clNewType;
 // pub const newEmptyMap = c.clNewEmptyMap;
@@ -179,7 +176,6 @@ pub const Node = c.CLNode;
 
 pub const ValueSlice = c.CLValueSlice;
 pub const HostFn = c.CLHostFn;
-pub const SemaFn = c.CLSemaFn;
 pub const BindGlobal = c.CLBindGlobal;
 pub const BindFunc = c.CLBindFunc;
 pub const PrintFn = c.CLPrintFn;
@@ -380,12 +376,6 @@ pub const BackendJIT = c.CL_JIT;
 pub const BackendTCC = c.CL_TCC;
 pub const BackendCC = c.CL_CC;
 pub const BackendLLVM = c.CL_LLVM;
-
-pub const ZType = struct {
-    pub fn id(self: *ZType) TypeId {
-        return c.clTypeId(@ptrCast(self));
-    }
-};
 
 pub const str = c.CLstr;
 

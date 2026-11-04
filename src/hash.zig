@@ -22,23 +22,6 @@ pub const KeyU64 = extern union {
         };
     }
 
-    pub fn initVarKey(parentSymId: sema.SymbolId, nameId: sema.NameSymId) KeyU64 {
-        return .{
-            .rtVarKey = .{
-                .parentSymId = parentSymId,
-                .nameId = nameId,
-            }
-        };
-    }
-
-    pub fn initResolvedSymKey(parentSymId: sema.SymbolId, nameId: sema.NameSymId) KeyU64 {
-        return .{
-            .resolvedSymKey = .{
-                .parentSymId = parentSymId,
-                .nameId = nameId,
-            },
-        };
-    }
 };
 
 pub const KeyU64Context = struct {

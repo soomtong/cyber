@@ -11,7 +11,6 @@ pub const TokenType = tokenizer.TokenType;
 pub const parser = @import("parser.zig");
 pub const Parser = parser.Parser;
 pub const ParseResultView = parser.ResultView;
-pub const ParseResult = parser.Result;
 
 pub const sema = @import("sema.zig");
 pub const sema_func = @import("sema_func.zig");
@@ -26,7 +25,6 @@ pub const template = @import("template.zig");
 pub const Instance = template.Instance;
 
 pub const ir = @import("ir.zig");
-pub const dce = @import("dce.zig");
 
 pub const cgen = @import("cgen.zig");
 pub const jitgen = @import("jit/gen.zig");
@@ -110,7 +108,6 @@ const build_config = @import("build_config");
 pub var event_id: u64 = 1;
 pub const Trace = build_config.trace;
 pub const TraceRC = Trace and true;
-pub const Malloc = build_config.malloc;
 pub var tempBuf: [1000]u8 align(4) = undefined;
 
 const std = @import("std");

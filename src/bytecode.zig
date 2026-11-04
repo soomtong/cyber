@@ -132,28 +132,6 @@ pub const ByteCodeBuffer = struct {
         self.labels.deinit(self.alloc);
     }
 
-    pub fn clear(self: *ByteCodeBuffer) void {
-        self.main_pc = 0;
-        self.ops.clearRetainingCapacity();
-        self.opcodes.clearRetainingCapacity();
-        self.consts.clearRetainingCapacity();
-        self.consts_boxed.clearRetainingCapacity();
-        self.debugTable.clearRetainingCapacity();
-        self.func_table.clearRetainingCapacity();
-        self.inline_sites.clearRetainingCapacity();
-        self.unwind_table.clearRetainingCapacity();
-        self.unwind_slot_obj.clearRetainingCapacity();
-        self.unwind_slot_obj_prev.clearRetainingCapacity();
-        self.unwind_slot_typed.clearRetainingCapacity();
-        if (cy.Trace) {
-            self.instDescs.clearRetainingCapacity();
-            for (self.instDescExtras.items) |extra| {
-                self.alloc.free(extra.text);
-            }
-            self.instDescExtras.clearRetainingCapacity();
-        }
-    }
-
     pub inline fn len(self: *ByteCodeBuffer) usize {
         return self.ops.items.len;
     }

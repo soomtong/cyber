@@ -272,23 +272,6 @@ pub fn BoundedArrayAligned(
             @memset(self.slice()[old_len..self.len], value);
         }
 
-        pub const Writer = if (T != u8)
-            @compileError("The Writer interface is only defined for BoundedArray(u8, ...) " ++
-                "but the given type is BoundedArray(" ++ @typeName(T) ++ ", ...)")
-        else
-            std.Io.Writer(*Self, error{Overflow}, appendWrite);
-
-        /// Initializes a writer which will write into the array.
-        pub fn writer(self: *Self) Writer {
-            return .{ .context = self };
-        }
-
-        /// Same as `appendSlice` except it returns the number of bytes written, which is always the same
-        /// as `m.len`. The purpose of this function existing is to match `std.Io.Writer` API.
-        fn appendWrite(self: *Self, m: []const u8) error{Overflow}!usize {
-            try self.appendSlice(m);
-            return m.len;
-        }
     };
 }
 
@@ -392,10 +375,6 @@ test BoundedArray {
     try testing.expectEqual(a.len, 36);
 
     while (a.pop()) |_| {}
-    const w = a.writer();
-    const s = "hello, this is a test string";
-    try w.writeAll(s);
-    try testing.expectEqualStrings(s, a.constSlice());
 }
 
 test "BoundedArrayAligned" {

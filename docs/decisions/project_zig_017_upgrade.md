@@ -68,3 +68,15 @@
   `ffi`는 musl에서 끈다(`-Dffi=true`로 덮어쓸 수 있음). ffi가 꺼지면 extern 함수는 `bindExternFuncsWithoutFFI`
   경로로 정적 링크된 심볼에 묶여 `math`는 동작하고, behavior_test는 `modules/os.cy` · `libc.cy`와 FFI 테스트를 건너뛴다.
   OrbStack 컨테이너 실행: musl lib_test 56 · behavior_test 280/280 통과, gnu(FFI 있음) lib_test 56 · behavior_test 282/282 통과.
+- 미참조 decl을 빌드가 잡게 했다(2026-11-04). lib-test `All declarations compile.`이 `cy`에서 닿는 모든 `pub` 선언을
+  재귀로 참조한다(std 0.17에는 `refAllDeclsRecursive`가 없어 직접 작성, 선언 이름과 타입 이름이 같은 컨테이너만 내려가므로
+  `pub const W = std.Io.File.Writer` 같은 별칭으로 std 내부에 들어가지 않음, translate-c 모듈 `vmc` · `c`와 죽은 JIT
+  `jitgen`은 건너뜀). 처음 돌리자 78개 오류가 나왔고 모두 삭제된 API를 쓰는 죽은 코드였다. 지운 것: 약 70개 함수 · 메서드
+  (sema의 옛 `declareModuleAlias` · `reserveUserFunc` · `getResolvedSym` 복사본, heap의 `MapValue.set` · `allocVector` ·
+  `newAstrSlice` · `allocTrait`, vm의 `dumpValue` · `dumpInfo`, chunk의 `genGetVar` · `dumpLocals` 등), 파일 `src/fiber.zig`
+  (어디서도 import 안 됨) · `src/dce.zig`(`enable_dce = false` 뒤의 죽은 DCE) · `src/llvm.zig` · `src/llvm_gen.zig`(닫은 LLVM
+  백엔드, `chunk.zig`의 `hasJIT` LLVM 필드와 함께), IR visitor(`ir.visitStmts` · `visitExpr`, DCE만 썼음), `parser.Result`,
+  `ByteCodeBuffer.clear`(없는 `unwind_*` 필드), `bounded_array`의 옛 `Writer`, `String_decode` · `String_decode2`(바인딩
+  안 된 `str.decode` 구현, 되살리려면 새로 짜야 함). 오류 행이 함수 안이 아니라 그 아래 별칭 행(`pub const x = module.x;`)인
+  경우가 있어 감싸는 함수를 기계적으로 지우면 안 된다(`Chunk.findResolvedType`를 그렇게 잘못 지웠다가 복원, `meta.type.field`가 씀).
+  복사-패치 JIT(`src/jit/`, `Compiler.jitBuf`, `FuncInfo.jit`, `-Djit`)는 남아 있고 테스트에서 제외했다. 지울지는 사용자 결정.

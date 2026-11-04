@@ -2504,36 +2504,6 @@ pub fn declareUseImport(c: *cy.Chunk, node: *ast.ImportStmt) !void {
     }
 }
 
-pub fn declareModuleAlias(c: *cy.Chunk, node: *ast.ImportStmt) !void {
-    const name = node.name.as_name();
-
-    var specPath: []const u8 = undefined;
-    if (node.spec) |spec| {
-        specPath = spec.as_name();
-    } else {
-        specPath = name;
-    }
-
-    var buf: [4096]u8 = undefined;
-    const uri = try cy.compiler.resolveModuleUri(c, &buf, specPath, node.spec);
-
-    const import = try c.declareModuleAlias(@ptrCast(c.sym), name, undefined, node);
-
-    // resUri is duped. Moves to chunk afterwards.
-    const dupedResUri = try c.alloc.dupe(u8, uri);
-
-    // Queue import task.
-    try c.compiler.import_tasks.append(c.alloc, .{
-        .type = .module_alias,
-        .from = c,
-        .node = node,
-        .absSpec = dupedResUri,
-        .data = .{ .module_alias = .{
-            .sym = import,
-        }},
-    });
-}
-
 // TODO: Rename to SemaContextKind
 const ResolveContextType = enum(u8) {
     chunk,
@@ -2780,14 +2750,6 @@ pub fn reserve_func_instance(c: *cy.Chunk, template: *cy.sym.FuncTemplate, insta
     return func;
 }
 
-pub fn reserveExternFunc(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, node: *ast.FuncDecl) !*cy.Func {
-    const config = cy.sym.FuncConfig{
-        .is_method = false,
-        .ct = false,
-    };
-    return c.reserveExternFunc(parent, name, config, node);
-}
-
 pub fn resolveFuncVariant(c: *cy.Chunk, func: *cy.Func, resolve_new_types: bool, node: ?*ast.Node) !void {
     if (func.isResolved()) {
         return;
@@ -2996,16 +2958,6 @@ pub fn resolveHostBindFunc(c: *cy.Chunk, func: *cy.Func, host_attr: *ast.Attribu
             return c.reportErrorFmt("Host func `{}` failed to load.", &.{v(bind_name)}, @ptrCast(func.decl));
         };
     };
-}
-
-/// Declares a user function in a given module.
-pub fn reserveUserFunc(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: *ast.FuncDecl) !*cy.Func {
-    const config = cy.sym.FuncConfig{
-        .is_method = decl.sig_t == .method,
-        .ct = decl.ct,
-    };
-    const deferred = parent.instance() != null;
-    return c.reserveUserFunc(parent, name, config, decl, deferred);
 }
 
 pub fn resolveUserFuncVariant(c: *cy.Chunk, func: *cy.Func, resolve_new_types: bool, node: ?*ast.Node) !void {
@@ -4147,19 +4099,6 @@ pub fn apiResolveName(c: *cy.Chunk, name: []const u8) ?NameResult {
     return NameResult.initSym(@ptrCast(chunk.sym));
 }
 
-pub fn getResolvedSym(c: *cy.Chunk, name: []const u8, node: *ast.Node) !?*cy.Sym {
-    const res = (try getResolvedName(c, name, node)) orelse return null;
-    switch (res.type) {
-        .sym => {
-            return res.data.sym;
-        },
-        .param_value,
-        .ct_value => {
-            return c.reportError("Expected symbol.", node);
-        },
-    }
-}
-
 pub fn getResolvedName(c: *cy.Chunk, name: []const u8, node: *ast.Node) !?NameResult {
     const resolve_ctx_idx = c.resolve_stack.items.len-1;
     const ctx = c.resolve_stack.items[resolve_ctx_idx];
@@ -4269,19 +4208,6 @@ pub fn ensureResolvedTemplate(c: *cy.Chunk, template: *cy.sym.Template) !void {
         return;
     }
     try sema.resolveTemplate(c, template);
-}
-
-fn ensureLocalNamePathSym(c: *cy.Chunk, path: []*ast.Node) !*Sym {
-    const name = path[0].as_name();
-    var sym = (try getResolvedSym(c, name, path[0])) orelse {
-        return c.reportErrorFmt("Undeclared symbol: `{}`", &.{v(name)}, path[0]);
-    };
-    try c.checkResolvedSymIsDistinct(sym, path[0]);
-    for (path[1..]) |n| {
-        sym = try c.getResolvedSymOrFail(sym, n.as_name(), n);
-        try c.checkResolvedSymIsDistinct(sym, n);
-    }
-    return sym;
 }
 
 pub fn getResolveContext(c: *cy.Chunk) *ResolveContext {
@@ -6166,10 +6092,6 @@ pub fn semaCallFuncSym(c: *cy.Chunk, sym: *cy.sym.FuncSym, args: []const *ast.No
 //     return sema_func.matchGenericFunc(c, func, &.{}, args, req_value, node);
 // }
 
-pub fn semaCallGenericFunc2(c: *cy.Chunk, func: *cy.sym.FuncTemplate, args: []const Argument, req_value: bool, node: *ast.Node) !ExprResult {
-    return sema_func.matchGenericFunc(c, func, args, &.{}, req_value, node);
-}
-
 /// Skips emitting IR for a sym.
 pub fn semaExprSkipSym(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
     switch (node.type()) {
@@ -6303,15 +6225,6 @@ pub fn semaExprCstr(c: *cy.Chunk, node: *ast.Node, target_t: *cy.Type) !ExprResu
         .reqTypeCstr = true,
         .fit_target = true,
     });
-}
-
-pub fn semaExprManage(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
-    const res = try c.semaExpr(node, cstr);
-    if (res.type.isManaged(c.compiler.config.backend) and !res.addressable) {
-        const tempv = try declareHiddenLocal(c, "_temp", res.type, res, node);
-        return semaLocal(c, false, tempv.id, node);
-    }
-    return res;
 }
 
 pub fn semaExpr(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
@@ -9474,16 +9387,6 @@ pub const Sema = struct {
         }
     }
 
-    pub fn type_name(self: *const Sema, type_id: cy.TypeId) []const u8 {
-        if (type_id == cy.NullId & vmc.TYPE_MASK) {
-            return "danglingObject";
-        }
-        if (type_id == cy.heap.BigObjectPtrType & vmc.TYPE_MASK) {
-            return "bigObjectPtr";
-        }
-        return self.sema.types.items[type_id].name();
-    }
-
     pub fn initSymbol(self: *Sema, name: []const u8) !Value {
         const id = try self.ensureSymbol(name);
         return Value.initInt(@intCast(id));
@@ -9558,32 +9461,6 @@ pub const Sema = struct {
         return buf.items;
     }
 
-    pub fn allocTypesStr(s: *Sema, types: []const *cy.Type, from: ?*cy.Chunk) ![]const u8 {
-        var w = std.Io.Writer.Allocating.init(s.alloc);
-        defer w.deinit();
-
-        if (types.len > 0) {
-            try s.writeTypeName(&w, types[0], from);
-
-            if (types.len > 1) {
-                for (types[1..]) |type_| {
-                    try w.writeAll(", ");
-                    try s.writeTypeName(&w, type_, from);
-                }
-            }
-        }
-        return w.buffered();
-    }
-
-    pub fn allocFuncSigTypesStr(s: *Sema, params: []const *cy.Type, ret: TypeId, from: ?*cy.Chunk) ![]const u8 {
-        var buf: std.ArrayList(u8) = .empty;
-        defer buf.deinit(s.alloc);
-
-        const w = stdx.listWriter(&buf, s.alloc);
-        try writeFuncSigTypesStr(s, w, params, ret, from);
-        return buf.toOwnedSlice(s.alloc);
-    }
-
     pub fn allocFuncSigStr(s: *Sema, sig: *FuncSig, show_ret: bool, from: ?*cy.Chunk) ![]const u8 {
         var buf = std.Io.Writer.Allocating.init(s.alloc);
         defer buf.deinit();
@@ -9652,7 +9529,6 @@ pub const Sema = struct {
     pub const getRtCompareType = cy.types.getRtCompareType;
     pub const createTypeWithId = cy.types.createTypeWithId;
     pub const createType = cy.types.createType;
-    pub const createTypeCopy = cy.types.createTypeCopy;
     pub const writeTypeName = cy.types.writeTypeName;
 
     pub const newFuncName = cy.sym.newFuncName;
@@ -9689,12 +9565,6 @@ pub const FuncSigKeyContext = struct {
         return a.extern_ == b.extern_ and a.scope_param_idx == b.scope_param_idx;
     }
 };
-
-pub fn sema_unescape_str(c: *cy.Chunk, buf: []u8, literal: []const u8, always_copy: bool, node: *ast.Node) ![]const u8 {
-    return unescapeString(buf, literal, always_copy) catch |err| {
-        return c.reportError("Unescape error: {}", &.{v(err)}, node);
-    };
-}
 
 /// `buf` is assumed to be big enough.
 pub fn unescapeString(buf: []u8, literal: []const u8, always_copy: bool) ![]const u8 {
@@ -9931,13 +9801,6 @@ pub fn getFuncType(c: *cy.Chunk, funcptr_t: *cy.Type) !*cy.Type {
 pub fn getFuncSymType(c: *cy.Chunk, sig: *FuncSig) !*cy.Type {
     const arg = cy.Value.initFuncSig(sig);
     const sym = try cy.template.expand_template(c, c.sema.func_sym_tmpl, &.{c.sema.funcsig_t}, &.{ arg });
-    return sym.getStaticType().?;
-}
-
-pub fn getInitPairType(c: *cy.Chunk, key_t: *cy.Type, val_t: *cy.Type) !*cy.Type {
-    const arg0 = cy.Value.initType(key_t);
-    const arg1 = cy.Value.initType(val_t);
-    const sym = try cy.template.expand_template(c, c.sema.init_pair_tmpl, &.{c.sema.type_t, c.sema.type_t}, &.{ arg0, arg1 });
     return sym.getStaticType().?;
 }
 

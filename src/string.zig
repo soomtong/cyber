@@ -755,7 +755,3 @@ pub fn runeSliceAt(str: []const u8, idx: usize, out_bad_byte: *bool) []const u8 
 }
 
 const ReplacementCharSlice = &.{0xEF, 0xBF, 0xBD};
-
-pub fn getStaticUstringHeader(vm: *cy.VM, start: usize) *align(1) cy.StaticUstringHeader {
-    return @ptrCast(vm.strBuf.ptr + start - 12);
-}

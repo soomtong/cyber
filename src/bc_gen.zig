@@ -3101,7 +3101,6 @@ pub const Proc = struct {
     num_ptr_locals: usize,
 
     /// LLVM
-    // funcRef: if (cy.hasJIT) llvm.ValueRef else void = undefined,
 
     fn init(btype: ProcType, id: usize, chunk_id: u32) Proc {
         return .{

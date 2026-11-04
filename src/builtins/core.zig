@@ -165,8 +165,6 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"str.concat",      zErrFunc(string.concat)},
     .{"str.interpolate", zErrFunc(string.interpolate)},
     .{"str.count",       cFunc(string.count)},
-    // func("str.decode",       String_decode),
-    // func("str.decode2",      String_decode2),
     .{"str.ends_with",   cFunc(string.ends_with)},
     .{"str.index",       zErrFunc(string.index)},
     .{"str.index_byte",  zErrFunc(str_index_byte)},
@@ -199,7 +197,6 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     // func("Vector.+",      arrayConcat),
     // func("Vector.concat", arrayConcat),
     // func("Vector.insert", zErrFunc(arrayInsert)),
-    // func("Vector.repeat", zErrFunc(arrayRepeat)),
     .{"Vector[].ct_repeat", zErrConstEvalFunc(Vector_ct_repeat)},
 
     .{"@result_unwrap",      zErrBuiltinFunc(result_unwrap, null)},
@@ -378,10 +375,6 @@ pub fn cFunc(f: *const fn(t: *cy.Thread) callconv(.c) C.Ret) C.BindFunc {
         .kind = C.BindFuncVm,
         .ptr = @ptrCast(@constCast(f)),
     };
-}
-
-pub fn unsupported(t: *cy.Thread) callconv(.c) Value {
-    return t.ret_panic("Unsupported.");
 }
 
 pub fn zErrFunc(comptime f: fn (t: *cy.Thread) anyerror!C.Ret) C.BindFunc {
@@ -1526,10 +1519,6 @@ pub fn symbol_name(t: *cy.Thread) !C.Ret {
     return C.RetOk;
 }
 
-pub fn readCodepoint(t: *cy.Thread) !Value {
-    return t.ret_panic("Unsupported.");
-}
-
 pub fn trackMainLocal(t: *cy.Thread) !C.Ret {
     _ = t.ret(void);
     const name_s = t.param(cy.heap.Str);
@@ -1680,37 +1669,6 @@ fn arrayInsert(t: *cy.Thread) anyerror!Value {
     @memcpy(buf[idx..idx+insert.len], insert);
     @memcpy(buf[idx+insert.len..], slice[idx..]);
     return Value.initNoCycPtr(new);
-}
-
-fn String_decode(t: *cy.Thread) callconv(.c) Value {
-    t.setSymbol(1, @backingInt(Symbol.utf8));
-    return String_decode2(t);
-}
-
-fn String_decode2(t: *cy.Thread) callconv(.c) Value {
-    const obj = t.getPtr(*cy.heap.Array, 0);
-
-    const encoding = bindings.getBuiltinSymbol(t.getSymbol(1)) orelse {
-        return t.ret_panic("InvalidArgument");
-    };
-    if (encoding != Symbol.utf8) {
-        return t.ret_panic("InvalidArgument");
-    }
-
-    const parent = obj.getParent();
-    const slice = obj.getSlice();
-    if (cy.string.validateUtf8(slice)) |size| {
-        // Since the bytes are validated, just return a slice view of the bytes.
-        if (size == slice.len) {
-            t.heap.retainObject(parent);
-            return t.heap.newAstrSlice(slice, parent) catch fatal();
-        } else {
-            t.heap.retainObject(parent);
-            return t.heap.newUstrSlice(slice, parent) catch fatal();
-        }
-    } else {
-        return t.ret_panic("Unicode");
-    }
 }
 
 fn FuncSig_ret(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
@@ -1958,41 +1916,6 @@ fn str_fmt_bytes(t: *cy.Thread) anyerror!C.Ret {
         }
         ret.* = try t.heap.init_astr(aw.written());
         return C.RetOk;
-    }
-}
-
-fn arrayRepeat(t: *cy.Thread) anyerror!Value {
-    const obj = t.getPtr(*cy.heap.Array, 0);
-    const slice = obj.slice();
-
-    const n = t.getInt(1);
-    if (n < 0) {
-        return t.ret_panic("InvalidArgument");
-    }
-
-    const un: u32 = @intCast(n);
-    const len = un * slice.len;
-    if (un > 1 and len > 0) {
-        const new = try t.heap.allocUnsetArrayObject(len);
-        const buf = new.array.getMutSlice();
-
-        // This is already quite fast since it has good cache locality.
-        // Might be faster if the front of the buffer up to a certain size was used to memcpy instead of just 1 `str`.
-        var i: u32 = 0;
-        var dst: u32 = 0;
-        while (i < un) : (i += 1) {
-            @memcpy(buf[dst..dst + slice.len], slice);
-            dst += @intCast(slice.len);
-        }
-
-        return Value.initNoCycPtr(new);
-    } else {
-        if (un == 0) {
-            return t.heap.allocVector("");
-        } else {
-            t.heap.retainObject(@ptrCast(obj));
-            return Value.initNoCycPtr(obj);
-        }
     }
 }
 

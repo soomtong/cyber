@@ -40,24 +40,9 @@ pub const Module = struct {
         self.overloadedFuncMap.deinit(alloc);
     }
 
-    pub fn dump(self: *const Module, c: *cy.VMcompiler) void {
-        std.debug.print("Module spec={s} ({} syms):\n", .{self.absSpec, self.syms.size});
-        var iter = self.syms.iterator();
-        while (iter.next()) |e| {
-            const sym = e.value_ptr.*;
-            const key = e.key_ptr.*.moduleSymKey;
-            const name = sema.getName(c, key.nameId);
-            std.debug.print("{s}: {}\n", .{name, sym.symT});
-        }
-    }
-
     pub fn getFirstFunc(m: *const Module, name: []const u8) ?*cy.Func {
         const sym = m.symMap.get(name) orelse return null;
         return sym.cast(.func).first;
-    }
-
-    pub fn getFuncById(m: *const Module, id: cy.FuncId) *cy.Func {
-        return m.chunk.funcs.items[id];
     }
 
     pub fn getSym(m: *Module, name: []const u8) ?*cy.Sym {
@@ -148,13 +133,6 @@ pub fn reserveTypeAlias(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: *
     _ = try addUniqueSym(c, mod, name, @ptrCast(sym), @ptrCast(decl));
     return sym;
 } 
-
-pub fn reserveHostObjectType(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: *ast.CustomDecl) !*cy.sym.HostObjectType {
-    const sym = try c.createHostObjectType(parent, name, decl);
-    const mod = parent.getMod().?;
-    _ = try addUniqueSym(c, mod, name, @ptrCast(sym), @ptrCast(decl));
-    return sym;
-}
 
 pub fn reserveFuncTemplateSym(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, callable: bool, decl: *ast.TemplateDecl) !*cy.sym.FuncTemplate {
     const sym = try c.createFuncTemplate(parent, name, callable, decl);
@@ -299,38 +277,6 @@ pub fn reserveVariantFunc(
     }
 }
 
-pub fn reserveExternFunc(
-    c: *cy.Chunk, parent: *cy.Sym, name: []const u8, config: cy.sym.FuncConfig, decl: ?*ast.FuncDecl,
-) !*cy.Func {
-    const mod = parent.getMod().?;
-    const sym = try prepareFuncSym(c, parent, mod, name, decl);
-    const func = try c.createFunc(.extern_, @ptrCast(sym), config, @ptrCast(decl));
-    try c.appendFunc(func);
-    func.data = .{
-        .extern_ = .{ .name_ptr = name.ptr, .name_len = @intCast(name.len), .vm_variadic = false },
-    };
-    sym.addFunc(func);
-    return func;
-}
-
-pub fn reserveHostFunc(
-    c: *cy.Chunk, parent: *cy.Sym, name: []const u8, config: cy.sym.FuncConfig, decl: ?*ast.FuncDecl, deferred: bool,
-) !*cy.Func {
-    const mod = parent.getMod().?;
-    const sym = try prepareFuncSym(c, parent, mod, name, decl);
-    const func = try c.createFunc(.hostFunc, @ptrCast(sym), config, @ptrCast(decl));
-    if (!deferred) {
-        try c.appendFunc(func);
-    } else {
-        try c.deferred_funcs.append(c.alloc, func);
-    }
-    func.data = .{ .hostFunc = .{
-        .ptr = undefined,
-    }};
-    sym.addFunc(func);
-    return func;
-}
-
 pub fn resolveHostFunc(c: *cy.Chunk, func: *cy.Func, sig: *sema.FuncSig, func_ptr: cy.ZHostFn, eval_ptr: ?cy.ZConstEvalFn) !void {
     func.type = .hostFunc;
     try resolveFunc(c, func, sig);
@@ -371,36 +317,6 @@ pub fn reserveTraitFunc(
             .vtable_idx = @intCast(vtable_idx),
         },
     };
-    sym.addFunc(func);
-    return func;
-}
-
-pub fn reserveTemplateFunc(
-    c: *cy.Chunk, parent: *cy.Sym, name: []const u8, config: cy.sym.FuncConfig, node: *ast.FuncDecl, deferred: bool,
-) !*cy.Func {
-    const mod = parent.getMod().?;
-    const sym = try prepareFuncSym(c, parent, mod, name, node);
-    const func = try c.createFunc(.template, @ptrCast(sym), config, @ptrCast(node));
-    const template = try c.alloc.create(cy.sym.FuncTemplate);
-    template.* = .{
-        .head = cy.Sym.init(.func_template, parent, name),
-        .func_params = node.params,
-        .func_ret = node.ret,
-        .params = &.{},
-        .resolved = false,
-        .callable = true,
-        .ct = node.ct,
-        .decl = @ptrCast(node),
-        .variant_cache = .{},
-        .instances = .empty,
-        .mod = undefined,
-    };
-    func.data = .{ .template = template };
-    if (!deferred) {
-        try c.appendFunc(func);
-    } else {
-        try c.deferred_funcs.append(c.alloc, func);
-    }
     sym.addFunc(func);
     return func;
 }

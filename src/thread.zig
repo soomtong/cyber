@@ -342,7 +342,7 @@ pub const Thread = struct {
             ret_[ret_size] = buildHostCallInfo(false);
             ret_[ret_size + 1] = Value{ .retPcPtr = cur_pc };
             ret_[ret_size + 2] = Value{ .retFramePtr = self.c.fp };
-            const ptr: vmc.HostFn = @ptrFromInt(func_ptr.val & ~(@as(u64, 1) << 63));
+            const ptr: vmc.HostFn = @ptrFromInt(@as(usize, @truncate(func_ptr.val & ~(@as(u64, 1) << 63))));
             const res = ptr.?(@ptrCast(self));
             if (res != 0) {
                 return error.Panic;
@@ -359,7 +359,7 @@ pub const Thread = struct {
             ret_[ret_size + 2] = Value{ .retFramePtr = self.c.fp };
 
             // Load context.
-            const ptr: [*]cy.Inst = @ptrFromInt(func_ptr.val);
+            const ptr: [*]cy.Inst = @ptrFromInt(@as(usize, @truncate(func_ptr.val)));
             self.c.pc = ptr;
             self.c.fp = ret_ + ret_size;
 

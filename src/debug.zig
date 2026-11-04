@@ -68,18 +68,6 @@ pub fn getDebugSymByPc(vm: *const cy.VM, pc: *anyopaque) ?cy.DebugSym {
     return res.chunk.buf.debugTable.items[res.idx];
 }
 
-pub fn getDebugSymFromTable(table: []const cy.DebugSym, pc: *anyopaque) ?cy.DebugSym {
-    const idx = indexOfDebugSymFromTable(table, pc) orelse return null;
-    return table[idx];
-}
-
-pub fn indexOfDebugSym(vm: *const cy.VM, pc: usize) ?DebugSymIndex {
-    return getIndexOfDebugSym(vm, pc) orelse {
-        logger.trace("at pc: {}", .{pc});
-        return error.NoDebugSym;
-    };
-}
-
 pub fn getIndexOfDebugSym(vm: *const cy.VM, pc: *anyopaque) ?DebugSymIndex {
     const table_idx = indexOfTableEntry(vm.debug_tables, pc) orelse return null;
     const entry = vm.debug_tables[table_idx];
@@ -164,14 +152,6 @@ pub fn write_object_trace(t: *cy.Thread, w: *std.Io.Writer, obj: *cy.HeapObject)
     } else {
         try w.print("No trace for {*}.", .{obj});
     }
-}
-
-pub fn printTraceAtNode(c: *cy.Chunk, nodeId: cy.NodeId) !void {
-    const token = c.nodes[nodeId].start_token;
-    const pos = c.tokens[token].pos();
-    const w = fmt.lockStderrWriter();
-    defer fmt.unlockPrint();
-    try write_user_error(c.compiler.vm, w, "Trace", "", c.id, pos);
 }
 
 fn getSrcChunk(vm: *cy.VM, chunk: u32, func: u32) u32 {
@@ -449,11 +429,6 @@ pub const StackTrace = struct {
         self.frames = &.{};
     }
 
-    pub fn dump(self: *const StackTrace, vm: *const cy.VM) !void {
-        const w = fmt.lockStderrWriter();
-        defer fmt.unlockPrint();
-        try writeStackFrames(vm, w, self.frames);
-    }
 };
 
 pub fn writeStackFrames(vm: *const cy.VM, w: *std.Io.Writer, frames: []const C.StackFrame) !void {
@@ -776,28 +751,6 @@ pub fn dumpBytecode(vm: *cy.VM, opts: DumpBytecodeOptions) !void {
     }
 
     vm.log(lw.written());
-}
-
-pub fn dumpInst(vm: *cy.VM, code: cy.OpCode, chunk_id: ?usize, pc_off: ?usize, pc: [*]const cy.Inst, c: *cy.Chunk, instIdx: u32, prefix: ?[]const u8) !void {
-    var buf: [1024]u8 = undefined;
-    if (cy.Trace) {
-        const desc = c.buf.instDescs.items[instIdx];
-        if (desc != cy.NullId) {
-            var w: std.Io.Writer = .fixed(&buf);
-
-            const descExtra = c.buf.instDescExtras.items[desc];
-            try w.writeByte('"');
-            try w.writeAll(descExtra.text);
-            try w.writeAll("\" ");
-        }
-
-        // TODO: Dump src code from optional debug entry
-    }
-
-    var w = std.Io.Writer.Allocating.init(vm.alloc);
-    defer w.deinit();
-    try bytecode.write_inst(vm, &w.writer, code, chunk_id, pc_off, pc, .{ .extra = "", .prefix = prefix });
-    vm.log(w.written());
 }
 
 pub fn alloc_value_desc(vm: *cy.VM, val_t: cy.TypeId, val: *cy.Value) ![]const u8 {

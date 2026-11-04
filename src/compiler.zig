@@ -20,7 +20,6 @@ const math_mod = @import("std/math.zig");
 const c_mod = @import("builtins/c.zig");
 const io_mod = @import("std/io.zig");
 const test_mod = @import("std/test.zig");
-const llvm_gen = @import("llvm_gen.zig");
 const cgen = cy.cgen;
 const bcgen = @import("bc_gen.zig");
 const jitgen = @import("jit/gen.zig");
@@ -504,16 +503,11 @@ pub const Compiler = struct {
                     }};
                 },
                 C.BackendTCC, C.BackendCC => {
-                    const enable_dce = false;
-                    if (enable_dce) {
-                        try cy.dce.performDCE(self);
-                    }
                     if (cy.isWasm or !cy.hasCLI) return error.Unsupported;
                     const res = try cgen.gen(self);
                     return .{ .aot = res };
                 },
                 C.BackendLLVM => {
-                    // try llvm_gen.genNativeBinary(self);
                     return error.TODO;
                 },
                 C.BackendVM => {
@@ -1393,18 +1387,6 @@ const Load = struct {
 };
 
 const unexpected = cy.fatal;
-
-pub fn initModuleCompat(comptime name: []const u8, comptime initFn: fn (vm: *Compiler, modId: cy.ModuleId) anyerror!void) cy.ModuleLoaderFunc {
-    return struct {
-        fn initCompat(vm: *cy.UserVM, modId: cy.ModuleId) bool {
-            initFn(vm.internal().compiler, modId) catch |err| {
-                log.tracev("Init module `{s}` failed: {}", .{name, err});
-                return false;
-            };
-            return true;
-        }
-    }.initCompat;
-}
 
 pub fn default_dl_resolver(vm: ?*C.VM, uri: C.Bytes, out: [*c]C.Bytes) callconv(.c) bool {
     const final_uri = C.vm_allocb(vm.?, uri.len);

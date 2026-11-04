@@ -3,15 +3,12 @@ const stdx = @import("stdx");
 const t = stdx.testing;
 const builtin = @import("builtin");
 const cy = @import("cyber.zig");
-const rt = cy.rt;
 const C = @import("capi.zig");
 const fmt = cy.fmt;
 const v = fmt.v;
 const sema = cy.sema;
 const types = cy.types;
 const log = cy.log.scoped(.chunk);
-const llvm = @import("llvm.zig");
-const llvm_gen = @import("llvm_gen.zig");
 const bc = @import("bc_gen.zig");
 const jitgen = @import("jit/gen.zig");
 const X64 = @import("jit/x64.zig");
@@ -184,12 +181,6 @@ pub const Chunk = struct {
     reserved_syms: bool = false,
 
     /// LLVM
-    tempTypeRefs: if (cy.hasJIT) std.ArrayList(llvm.TypeRef) else void,
-    tempValueRefs: if (cy.hasJIT) std.ArrayList(llvm.ValueRef) else void,
-    // mod: if (cy.hasJIT) llvm.ModuleRef else void,
-    builder: if (cy.hasJIT) llvm.BuilderRef else void,
-    ctx: if (cy.hasJIT) llvm.ContextRef else void,
-    llvmFuncs: if (cy.hasJIT) []LLVM_Func else void, // One-to-one with `semaFuncDecls`
     
     user_data: ?*anyopaque,
 
@@ -236,11 +227,6 @@ pub const Chunk = struct {
             .u16_stack = .empty,
             .mainSemaProcId = cy.NullId,
             .fallback_modules = .empty,
-            .tempTypeRefs = undefined,
-            .tempValueRefs = undefined,
-            .builder = undefined,
-            .ctx = undefined,
-            .llvmFuncs = undefined,
             .has_static_init = false,
             .encoder = undefined,
             .indent = 0,
@@ -267,14 +253,6 @@ pub const Chunk = struct {
         self.encoder.c = c;
         self.ir.init(c.alloc);
         try self.parser.init(c.alloc);
-
-        if (cy.hasJIT) {
-            self.tempTypeRefs = .{};
-            self.tempValueRefs = .{};
-            // self.exprResStack = .{};
-            // self.exprStack = .{};
-            self.llvmFuncs = &.{}; 
-        }
     }
 
     // Compile-time values are destructed first since they depend on type syms.
@@ -316,14 +294,6 @@ pub const Chunk = struct {
         self.listDataStack.deinit(self.alloc);
         self.resolve_stack.deinit(self.alloc);
 
-        if (cy.hasJIT) {
-            self.tempTypeRefs.deinit(self.alloc);
-            self.tempValueRefs.deinit(self.alloc);
-            // self.exprResStack.deinit(self.alloc);
-            // self.exprStack.deinit(self.alloc);
-            self.alloc.free(self.llvmFuncs);
-        }
-
         self.fallback_modules.deinit(self.alloc);
 
         for (self.funcs.items) |func| {
@@ -355,10 +325,6 @@ pub const Chunk = struct {
 
         self.alloc.free(self.srcUri);
         self.parser.deinit();
-    }
-
-    pub fn fromC(mod: C.Module) *cy.Chunk {
-        return @ptrCast(@alignCast(mod.ptr));
     }
 
     pub fn updateAstView(self: *cy.Chunk, view: cy.ast.AstView) void {
@@ -405,20 +371,6 @@ pub const Chunk = struct {
         return @intCast(self.semaProcs.items.len);
     }
 
-    pub fn reserveIfTempLocal(self: *Chunk, local: LocalId) !void {
-        if (self.isTempLocal(local)) {
-            try self.setReservedTempLocal(local);
-        }
-    }
-
-    pub fn initGenValue(self: *const Chunk, local: LocalId, vtype: types.TypeId, retained: bool) bc.GenValue {
-        if (self.isTempLocal(local)) {
-            return bc.GenValue.initTempValue(local, vtype, retained);
-        } else {
-            return bc.GenValue.initLocalValue(local, vtype, retained);
-        }
-    }
-
     pub fn get_chunk_by_uri(self: *Chunk, uri: []const u8) !?*cy.Chunk {
         var buf: [1024]u8 = undefined;
         const ruri = try cy.compiler.resolveModuleUriFrom(self, &buf, uri, null);
@@ -444,12 +396,6 @@ pub const Chunk = struct {
         return start;
     }
 
-    pub fn pushEmptyJumpCond(self: *Chunk, reg: bc.Reg, node: *ast.Node) !u32 {
-        const start: u32 = @intCast(self.buf.ops.items.len);
-        try self.buf.pushCode(.jump_t, &.{reg, 0}, node);
-        return start;
-    }
-
     pub fn patchJumpToCurPc(self: *Chunk, jumpPc: u32) void {
         self.buf.ops.items[jumpPc + 1].val = @intCast(self.buf.ops.items.len - jumpPc);
     }
@@ -460,22 +406,6 @@ pub const Chunk = struct {
 
     pub fn patchJumpNotCondToCurPc(self: *Chunk, jumpPc: u32) void {
         self.buf.ops.items[jumpPc + 2].val = @intCast(self.buf.ops.items.len - jumpPc);
-    }
-
-    /// Patches block breaks. For `if` and `match` blocks.
-    /// All other jumps are propagated up the stack by copying to the front.
-    /// Returns the adjusted jumpStackStart for this block.
-    pub fn patchSubBlockBreakJumps(self: *Chunk, jumpStackStart: usize, breakPc: usize) usize {
-        var keepIdx = jumpStackStart;
-        for (self.blockJumpStack.items[jumpStackStart..]) |jump| {
-            if (jump.jumpT == .subBlockBreak) {
-                self.buf.setOpArgU16(jump.pc + 1, @intCast(breakPc - jump.pc));
-            } else {
-                self.blockJumpStack.items[keepIdx] = jump;
-                keepIdx += 1;
-            }
-        }
-        return keepIdx;
     }
 
     pub fn patchBreaks(self: *Chunk, jumpStackStart: usize, block_offset: usize, breakPc: usize) usize {
@@ -540,47 +470,9 @@ pub const Chunk = struct {
         return self.cur_proc.max_regs;
     }
 
-    pub fn blockNumLocals(self: *Chunk) usize {
-        return sema.curBlock(self).locals.items.len + sema.curBlock(self).params.items.len;
-    }
-
-    pub fn genGetVarPtr(self: *const Chunk, id: sema.LocalId) ?*sema.Local {
-        if (id != cy.NullId) {
-            return &self.vars.items[id];
-        } else {
-            return null;
-        }
-    }
-
-    pub fn genGetVar(self: *const Chunk, id: sema.LocalId) ?sema.Local {
-        if (id != cy.NullId) {
-            return self.vars.items[id];
-        } else {
-            return null;
-        }
-    }
-
     pub fn unescapeString(self: *Chunk, literal: []const u8) ![]const u8 {
         try self.tempBufU8.resize(self.alloc, literal.len);
         return cy.sema.unescapeString(self.tempBufU8.items, literal, false);
-    }
-
-    pub fn dumpLocals(self: *const Chunk, sproc: *sema.Proc) !void {
-        if (cy.Trace) {
-            rt.print(self.vm, "Locals:\n");
-            const params = self.getProcParams(sproc);
-            for (params) |svar| {
-                rt.printFmt(self.vm, "{} (param), local: {}, dyn: {}, type: {}\n", &.{
-                    v(svar.name()), v(svar.local), v(svar.decl_t.id() == bt.Dyn), v(svar.decl_t),
-                });
-            }
-            const vars = self.getProcVars(sproc);
-            for (vars) |svar| {
-                rt.printFmt(self.vm, "{}, local: {}, dyn: {}, type: {}\n", &.{
-                    v(svar.name()), v(svar.local), v(svar.decl_t.id() == bt.Dyn), v(svar.decl_t),
-                });
-            }
-        }
     }
 
     pub fn appendContextTrace(self: *Chunk, report: *cy.compiler.Report, msg: []const u8, ctx_n: *ast.Node) !*cy.compiler.Report {
@@ -784,7 +676,6 @@ pub const Chunk = struct {
     pub const appendFunc = cy.module.appendFunc;
     pub const addUserLambda = cy.module.addUserLambda;
     pub const reserveTypeSym = cy.module.reserveTypeSym;
-    pub const reserveDistinctType = cy.module.reserveDistinctType;
     pub const reserveTypeAlias = cy.module.reserveTypeAlias;
     pub const reserve_type_const = cy.module.reserve_type_const;
     pub const reserveFunc = cy.module.reserveFunc;
@@ -812,8 +703,6 @@ pub const Chunk = struct {
     pub const getResolvedSym = cy.module.getResolvedSym;
     pub const getResolvedSymOrFail = cy.module.getResolvedSymOrFail;
 
-    pub const checkOption = sema.checkOption;
-    pub const checkResult = sema.checkResult;
     pub const semaInitExpr = sema.semaInitExpr;
     pub const semaObjectInit2 = sema.semaObjectInit2;
     pub const semaInitStruct = sema.semaInitStruct;
@@ -893,11 +782,6 @@ const ReservedTempLocal = struct {
 };
 
 const LocalId = u8;
-
-pub const LLVM_Func = struct {
-    typeRef: llvm.TypeRef,
-    funcRef: llvm.ValueRef,
-};
 
 pub const TypeDepNode = struct {
     visited: bool,

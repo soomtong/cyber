@@ -130,21 +130,6 @@ fn ensureSymbol(vm: *cy.VM, name: []const u8, sym: Symbol) !void {
 //     return Value.None;
 // }
 
-pub fn byteNot(vm: *cy.VM) callconv(.c) Value {
-    return Value.initMask8(~vm.getByte(0));
-}
-
-pub fn bytePow(vm: *cy.VM) callconv(.c) Value {
-    const right = vm.getByte(1);
-    if (right == 0) return vm.prepPanic("Division by zero.");
-    return Value.initMask8(std.math.powi(i8, vm.getByte(0), right) catch |err| {
-        switch (err) {
-            error.Underflow => return vm.prepPanic("Underflow."),
-            error.Overflow => return vm.prepPanic("Overflow."),
-        }
-    });
-}
-
 pub fn asr(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *cy.sema.ExprResult) !void {
     const x = try c.sema_expr_cstr_template(ctx.args[0], c.sema.int_tmpl);
     const amt = try c.semaExprCstr(ctx.args[1], x.type);
@@ -179,10 +164,6 @@ pub const QuickenType = enum(u8) {
     _,
 };
 
-pub fn nop(vm: *cy.UserVM, _: [*]const Value, _: u8) Value {
-    return vm.returnPanic("Unsupported.");
-}
-
 pub const ModuleBuilder = struct {
     sym: *cy.Sym,
     chunk: *cy.Chunk,
@@ -203,59 +184,4 @@ pub const ModuleBuilder = struct {
         return new;
     }
 
-    pub fn setVar(self: *const ModuleBuilder, name: []const u8, typeId: types.TypeId, val: Value) !void {
-        try self.getMod().setTypedVar(self.compiler, name, typeId, val);
-    }
-
-    pub fn declareFuncSig(self: *const ModuleBuilder, name: [*:0]const u8, params: []const *cy.Type, ret: *cy.Type, ptr: cy.ZHostFuncFn) !void {
-        C.declareFunc(self.sym.toC(), name, @ptrCast(@constCast(params.ptr)), params.len, @ptrCast(ret), @ptrCast(ptr));
-    }
-
-    pub fn ensureMethodGroup(self: *const ModuleBuilder, name: []const u8) !vmc.MethodGroupId {
-        return self.vm.ensureMethodGroup(name);
-    }
-
-    pub fn addOptimizingMethod(
-        self: *const ModuleBuilder, typeId: cy.TypeId, mgId: vmc.MethodGroupId,
-        params: []const types.TypeId, ret: types.TypeId, ptr: cy.QuickenFuncFn,
-    ) !void {
-        const funcSigId = try sema.ensureFuncSig(self.compiler, params, ret);
-        const funcSig = self.compiler.sema.getFuncSig(funcSigId);
-        if (funcSig.isParamsTyped) {
-            return error.Unsupported;
-        }
-        try self.vm.addMethod(typeId, mgId, rt.MethodInit.initHostQuicken(funcSigId, ptr, @intCast(params.len)));
-    }
-
-    pub fn addMethod(
-        self: *const ModuleBuilder, typeId: cy.TypeId, mgId: vmc.MethodGroupId,
-        params: []const types.TypeId, ret: types.TypeId, ptr: cy.ZHostFuncFn,
-    ) !void {
-        const funcSigId = try self.compiler.sema.ensureFuncSig(params, ret);
-        const funcSig = self.compiler.sema.getFuncSig(funcSigId);
-        if (funcSig.reqCallTypeCheck) {
-            try self.vm.addMethod(typeId, mgId, rt.MethodInit.initHostTyped(funcSigId, ptr, @intCast(params.len)));
-        } else {
-            try self.vm.addMethod(typeId, mgId, rt.MethodInit.initHostUntyped(funcSigId, ptr, @intCast(params.len)));
-        }
-    }
-
-    pub fn getMod(self: *const ModuleBuilder) *cy.Module {
-        return self.compiler.sema.getModulePtr(self.modId);
-    }
-
-    pub fn createAndSetTypeObject(self: *const ModuleBuilder, name: []const u8, fields: []const []const u8) !cy.TypeId {
-        const sym = try self.chunk.declareObjectType(self.sym, name, cy.NullId);
-
-        const modFields = try self.compiler.alloc.alloc(cy.sym.FieldInfo, fields.len);
-
-        for (fields, 0..) |field, i| {
-            const id = try self.vm.ensureFieldSym(field);
-            try self.vm.addFieldSym(sym.type, id, @intCast(i), bt.Object);
-            _ = try self.chunk.declareField(@ptrCast(sym), field, @intCast(i), bt.Object, cy.NullId);
-        }
-        sym.fields = modFields.ptr;
-        sym.numFields = @intCast(modFields.len);
-        return sym.type;
-    }
 };

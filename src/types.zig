@@ -313,10 +313,6 @@ pub const Type = extern struct {
         }
     }
 
-    pub fn is_min_resolved(self: *Type) bool {
-        return self.info.shallow_resolved;
-    }
-
     pub fn isResolved(self: *Type) bool {
         return self.info.resolved;
     }
@@ -880,16 +876,6 @@ pub const CUnion = extern struct {
         return self.cases_ptr[idx].sym.?;
     }
 
-    pub fn getCase(self: *CUnion, name: []const u8) ?*cy.sym.UnionCase {
-        const mod = self.base.sym().getMod();
-        if (mod.getSym(name)) |res| {
-            if (res.type == .cunion_case) {
-                return res.cast(.cunion_case);
-            }
-        }
-        return null;
-    }
-
     pub fn fields(self: *CUnion) []const Field {
         return &self.fields_arr;
     }
@@ -1262,59 +1248,6 @@ pub fn getType(s: *cy.Sema, id: TypeId) *cy.Type {
     return s.types.items[id];
 }
 
-/// Assumes `src_t` is fully resolved.
-pub fn createTypeCopy(s: *cy.Sema, id: TypeId, src_t: *cy.Type) !*Type {
-    var new_t: *cy.Type = undefined;
-    switch (src_t.kind()) {
-        .raw => {
-            const impl = src_t.cast(.raw);
-            new_t = try s.createTypeWithId(.raw, id, .{ .bits = impl.bits });
-        },
-        .int => {
-            const impl = src_t.cast(.int);
-            new_t = try s.createTypeWithId(.int, id, .{ .bits = impl.bits });
-        },
-        .pointer => {
-            const impl = src_t.cast(.pointer);
-            new_t = try s.createTypeWithId(.pointer, id, .{ .ref = impl.ref, .child_t = impl.child_t });
-        },
-        .struct_t => {
-            const impl = src_t.cast(.struct_t);
-            new_t = try s.createTypeWithId(.struct_t, id, .{
-                .size = impl.size,
-                .alignment = impl.alignment,
-                .cstruct = impl.cstruct,
-                .opaque_t = impl.opaque_t,
-                .tuple = impl.tuple,
-                .fields_ptr = impl.fields_ptr,
-                .fields_len = impl.fields_len,
-                .fields_owned = false,
-            });
-        },
-        .vector => {
-            const impl = src_t.cast(.vector);
-            new_t = try s.createTypeWithId(.vector, id, .{
-                .n = impl.n,
-                .elem_t = impl.elem_t,
-                .size = impl.size,
-            });
-        },
-        .partial_vector => {
-            const impl = src_t.cast(.partial_vector);
-            new_t = try s.createTypeWithId(.partial_vector, id, .{
-                .n = impl.n,
-                .elem_t = impl.elem_t,
-                .size = impl.size,
-            });
-        },
-        else => {
-            std.debug.panic("TODO: {}", .{src_t.kind()});
-        },
-    }
-    new_t.info.distinct = true;
-    return new_t;
-}
-
 /// Type creation updates the sema type table as well as the runtime type table.
 /// Some helpers at compile-time rely on an updated runtime type table. 
 pub fn createType(s: *cy.Sema, comptime kind: TypeKind, data: TypeImpl(kind)) !*Type {
@@ -1410,36 +1343,6 @@ pub fn getRtCompareType(s: *cy.Sema, type_: *Type) u32 {
     return type_.id();
 }
 
-pub fn isAnyOrDynamic(id: TypeId) bool {
-    return id == bt.Object or id == bt.Dyn;
-}
-
-pub fn isRtTypeCompat(c: *cy.Compiler, shape_t: TypeId, is_ref: bool, cstr_t: TypeId, rec: bool) bool {
-    if (is_ref) {
-        if (cstr_t == bt.Object or cstr_t == bt.Dyn) {
-            return true;
-        }
-        const cstr_te = c.sema.getType(cstr_t);
-        if (cstr_te.kind == .pointer and cstr_te.data.pointer.ref and cstr_te.data.pointer.child_t == shape_t) {
-            return true;
-        } 
-    } else {
-        if (shape_t == cstr_t) {
-            return true;
-        }
-        if (cstr_t == bt.Object or cstr_t == bt.Dyn) {
-            return true;
-        }
-        if (rec) {
-            const cstr_te = c.sema.getType(cstr_t);
-            if (cstr_te.kind == .pointer and cstr_te.data.pointer.ref and cstr_te.data.pointer.child_t == shape_t) {
-                return true;
-            } 
-        }
-    }
-    return false;
-}
-
 pub fn isTypeCompat(c: *cy.Compiler, src_t: *Type, cstr_t: *Type) bool {
     if (src_t == cstr_t) {
         return true;
@@ -1454,27 +1357,6 @@ pub fn isTypeCompat(c: *cy.Compiler, src_t: *Type, cstr_t: *Type) bool {
         return true;
     }
     return false;
-}
-
-/// Check type constraints on target func signature.
-pub fn isFuncSigCompat(c: *cy.Compiler, id: sema.FuncSigId, targetId: sema.FuncSigId) bool {
-    const src = c.sema.getFuncSig(id);
-    const target = c.sema.getFuncSig(targetId);
-
-    // First check params length.
-    if (src.params_len != target.params_len) {
-        return false;
-    }
-
-    // Check each param type. Attempt to satisfy constraints.
-    for (target.params(), src.params()) |cstsymId, typeSymId| {
-        if (!isTypeCompat(c, typeSymId, cstsymId)) {
-            return false;
-        }
-    }
-
-    // Check return type. Source return type is the constraint.
-    return isTypeCompat(c, target.retSymId, src.retSymId);
 }
 
 pub fn toRtConcreteType(type_: *cy.Type) ?*cy.Type {

@@ -516,10 +516,6 @@ pub inline fn retainInc(self: *cy.Heap, val: cy.Value, inc: u32) void {
     }
 }
 
-pub fn releaseOpaque(self: *cy.Heap, obj: *anyopaque) void {
-    releaseObject2(self, @ptrCast(@alignCast(obj)), false, {});
-}
-
 pub fn release_object_opt(self: *cy.Heap, opt: ?*cy.HeapObject) void {
     if (opt) |obj| {
         self.releaseObject(obj);

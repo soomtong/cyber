@@ -1742,3 +1742,34 @@ test "meta constants" {
 export fn cl_strlen(s: [*:0]const u8) usize {
     return std.mem.len(s);
 }
+fn refAllDeclsRecursive(comptime T: type) void {
+    if (!builtin.is_test) return;
+    @setEvalBranchQuota(1_000_000);
+    inline for (comptime std.meta.declarations(T)) |decl_name| {
+        // Translated C headers hold expressions that do not translate, so they are not walked. The copy-and-patch
+        // JIT (`jitgen`) is unsupported dead code that no longer compiles (`docs/decisions/project_direction.md`).
+        if (comptime std.mem.eql(u8, decl_name, "vmc") or std.mem.eql(u8, decl_name, "c") or std.mem.eql(u8, decl_name, "jitgen")) continue;
+        const D = @field(T, decl_name);
+        if (@TypeOf(D) == type) {
+            switch (@typeInfo(D)) {
+                // Walk a container declared here. An alias to a type declared elsewhere (`pub const W = std.Io.Writer`)
+                // has a different type name, and walking std internals is not the point of this test.
+                .@"struct", .@"enum", .@"union", .@"opaque" => if (comptime declaresType(decl_name, @typeName(D))) refAllDeclsRecursive(D),
+                else => {},
+            }
+        }
+        _ = &@field(T, decl_name);
+    }
+}
+
+fn declaresType(decl_name: []const u8, type_name: []const u8) bool {
+    @setEvalBranchQuota(1_000_000);
+    if (std.mem.eql(u8, decl_name, type_name)) return true;
+    return std.mem.endsWith(u8, type_name, decl_name) and type_name[type_name.len - decl_name.len - 1] == '.';
+}
+
+// Zig only analyzes code that something references, so a function nothing calls can keep using removed APIs
+// without failing the build. This references every `pub` declaration reachable from `cy` so that such code fails here.
+test "All declarations compile." {
+    refAllDeclsRecursive(cy);
+}

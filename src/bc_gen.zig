@@ -646,9 +646,11 @@ fn mainBlock(c: *Chunk, stmt: *ir.MainBlock, node: *ast.Node) !void {
     }
 
     try mainEnd(c, node);
+    // Read before `popProc`. Afterwards `cur_proc` still points at the popped slot, which safe builds
+    // overwrite with undefined bytes (a 0xAAAA = 43690-slot main stack).
+    c.buf.mainStackSize = c.getMaxUsedRegisters();
     try popProc(c);
 
-    c.buf.mainStackSize = c.getMaxUsedRegisters();
     c.buf.main_pc = @intCast(main_pc);
 }
 

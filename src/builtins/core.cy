@@ -3937,7 +3937,7 @@ fn (&Vector[]) @copy() -> Self:
     return move new
 
 fn (scope &Vector[]) @index_addr(idx int) -> scope &T:
-    if idx.uge(N):
+    if (as[r64] idx) >= (as[r64] N):
         panic_oob(idx)
     return @scope_ptr_to_borrow('self', as[Ptr[T]] self + idx)
 

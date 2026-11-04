@@ -59,4 +59,15 @@ VM의 `CALL` · `CHK_STK` · `RET`은 이미 가볍다(`src/vm.c:902`, `:917`). 
 
 - 작은 함수(본문이 `return <식>` 하나 등)를 sema 또는 IR 단계에서 인라인. 남은 비용의 대부분은 `@index_addr` ·
   `next` · `append` 호출 자체(호출 · `chk_stk` · 인자 `mov` · `ret`)다. 사용자 코드의 메서드 호출에도 듣는다.
-- `Span.@index_addr`의 포인터 식 panic과 `as[r64] N` 컴파일러 panic의 원인.
+- `Span.@index_addr`의 포인터 식 문제(아래 재검토).
+
+## 재검토 (2026-11-04)
+
+- `Vector.@index_addr`의 `idx.uge(N)` → `(as[r64] idx) >= (as[r64] N)`: 이제 panic이 없다(당시의 "integer does not fit"은
+  `fold_const_int` 이전이거나 아래 Span 변경과 섞인 결과로 보인다). 적용했다. `Int.uge` 인라인 복사가 사라져 덤프 명령 줄 수가
+  벤치마다 −464(약 −4.3%)이고 시간은 같다(for · heap ±0.2%).
+- `Span.@index_addr`의 `as[Ptr[T]] self.base + idx` → `*(as[Ptr[T]] self.base)[idx]`: 적용하지 않는다. 이득이 없고(`Ptr.+`는
+  이제 인라인됨) `zig build test`(Debug, trace 켜짐)의 behavior 테스트 `functions/call_typed_param.cy`에서 `str.len()`이 깨진
+  헤더를 읽어 "integer does not fit in destination type"으로 죽는다. CLI(trace 꺼짐)로 같은 파일을 직접 돌리면 통과한다.
+  `base`가 `&T`(빌림)라 `as[Ptr[T]]` 뒤 `@index_addr` 경로(`sema_ptr_index`)가 `Ptr.+`와 다르게 취급되는 것으로 보이며, 원인은
+  미확인. 재현: 변경을 넣고 `zig build test`.

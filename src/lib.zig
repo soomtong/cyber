@@ -1407,6 +1407,92 @@ test "Generator frames keep locals across yields and free them." {
     , C.defaultEvalConfig(), &res));
 }
 
+fn expectInOrder(report: []const u8, parts: []const []const u8) !void {
+    var start: usize = 0;
+    for (parts) |part| {
+        const idx = std.mem.findPos(u8, report, start, part) orelse {
+            std.debug.print("missing `{s}` after {} in:\n{s}\n", .{part, start, report});
+            return error.TestUnexpectedResult;
+        };
+        start = idx + part.len;
+    }
+}
+
+test "Panics inside generators unwind through the generator frame." {
+    // A running generator frame keeps the `Generator` where other frames keep the caller's fp, after a
+    // ret slot as wide as `?T`. `?int` and `?str` are wider than one register.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm,
+        \\#[generator]
+        \\fn walker() -> int:
+        \\  panic('boom in generator')
+        \\  yield 1
+        \\
+        \\fn drive():
+        \\  g := walker()
+        \\  print(g.next())
+        \\
+        \\drive()
+    , &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try expectInOrder(report, &.{"panic: boom in generator", " walker:", " Generator.next:", " drive:", " main:"});
+    }
+
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm,
+        \\fn fail(n int) -> int:
+        \\  if n == 3:
+        \\    panic('boom at %{n}')
+        \\  return n
+        \\
+        \\#[generator]
+        \\fn walker() -> str:
+        \\  for 0..5 |i|:
+        \\    yield 'v%{fail(i)}'
+        \\
+        \\fn drive():
+        \\  g := walker()
+        \\  while g.next() |v|:
+        \\    _ = v
+        \\
+        \\drive()
+    , &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try expectInOrder(report, &.{"panic: boom at 3", " fail:", " walker:", " Generator.next:", " drive:", " main:"});
+    }
+
+    // Stopping inside a generator body unwinds the same way.
+    C.vm_set_fuel(vm, 10000);
+    try zt.eq(C.ErrorInterrupt, C.vm_eval(vm,
+        \\#[generator]
+        \\fn forever() -> int:
+        \\  i := 0
+        \\  while true:
+        \\    i += 1
+        \\  yield i
+        \\
+        \\g := forever()
+        \\_ = g.next()
+    , &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try expectInOrder(report, &.{"panic: Out of fuel.", " forever:", " Generator.next:", " main:"});
+    }
+    C.vm_set_fuel(vm, 0);
+
+    // The VM is still usable.
+    try zt.eq(C.Success, C.vm_eval(vm, "x := 1", &res));
+}
+
 test "cl_slice_init." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

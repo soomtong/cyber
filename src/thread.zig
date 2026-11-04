@@ -903,23 +903,18 @@ pub const Thread = struct {
                 if (get_ptr_layout(self.c.vm, pc.?)) |layout| {
                     patch_frame_ptrs(self, fp, layout, newStack.ptr);
                 }
-                const base_off = getStackOffset(self.c.stack_ptr, frame.base.?);
+                const prev = frame.prev_context();
+                const prev_fp_off = getStackOffset(self.c.stack_ptr, prev.fp);
+                // Patch where the caller's fp is kept: the frame's slot in the new stack, or `Generator.prev_fp`
+                // for a running generator frame (the `Generator` is on the heap, so it is patched in place).
                 if (frame.frame_type() == .gen) {
-                    // A running generator frame (`GEN_NEXT` / `GEN_END`) keeps the `Generator` in the slot
-                    // that normally holds the ret frame ptr. The consumer's fp is `Generator.prev_fp`.
-                    const base = frame.base.?;
-                    const gen = base[2].asPtr(*vmc.Generator);
-                    const prev_fp_off = getStackOffset(self.c.stack_ptr, @ptrCast(gen.prev_fp));
-                    gen.prev_fp = @ptrCast(newStack.ptr + prev_fp_off);
-                    pc = base[1].retPcPtr - base[0].call_info.call_inst_off;
-                    fp = prev_fp_off;
+                    frame.prev_fp_slot().* = newStack.ptr + prev_fp_off;
                 } else {
-                    const prev = frame.prev_context();
-                    const prev_fp_off = getStackOffset(self.c.stack_ptr, prev.fp);
+                    const base_off = getStackOffset(self.c.stack_ptr, frame.base.?);
                     newStack[base_off + 2].retFramePtr = newStack.ptr + prev_fp_off;
-                    pc = prev.pc;
-                    fp = prev_fp_off;
                 }
+                pc = prev.pc;
+                fp = prev_fp_off;
                 frame = getFrame(self, self.c.stack(), fp, pc);
             }
 
@@ -959,7 +954,8 @@ pub const Thread = struct {
             const frame_t = frame.frame_type();
             logger.tracev("record on pc={*}, fp={}, type={}", .{pc, fp, frame_t});
 
-            if (fp == 0 or frame_t == .vm) {
+            // A running generator body is a VM frame for the trace. `prev_context` follows `Generator.prev_fp`.
+            if (fp == 0 or frame_t == .vm or frame_t == .gen) {
                 try self.compact_trace.append(self.alloc, .{
                     .pc = @ptrCast(pc),
                     .fpOffset = fp,
@@ -1007,32 +1003,22 @@ pub const Thread = struct {
                 // Done, at main block.
                 return PcFpOff{ .pc = pc, .fp = fp };
             }
-            if (frame_t == .vm) {
-                try self.compact_trace.append(self.alloc, .{
-                    .pc = @ptrCast(pc),
-                    .fpOffset = fp,
-                });
-            } else if (frame_t == .host) {
+            if (frame_t == .host) {
                 // Record host frames.
                 try self.compact_trace.append(self.alloc, .{
                     .pc = null,
                     .fpOffset = fp,
                 });
-            } else if (frame_t == .gen) {
+            } else {
+                // A VM function or a running generator body.
                 try self.compact_trace.append(self.alloc, .{
                     .pc = @ptrCast(pc),
                     .fpOffset = fp,
                 });
             }
-            if (frame_t == .gen) {
-                const gen = tstack[fp+3].asPtr(*vmc.Generator);
-                pc = tstack[fp + 2].retPcPtr - tstack[fp + 1].call_info.call_inst_off;
-                fp = getStackOffset(tstack.ptr, @ptrCast(gen.prev_fp));
-            } else {
-                const prev = frame.prev_context();
-                pc = prev.pc;
-                fp = getStackOffset(tstack.ptr, prev.fp);
-            }
+            const prev = frame.prev_context();
+            pc = prev.pc;
+            fp = getStackOffset(tstack.ptr, prev.fp);
         }
     }
 
@@ -1113,11 +1099,19 @@ const FrameInfo = struct {
     pub fn prev_context(self: *const FrameInfo) PcFp {
         const base = self.base.?;
         const ret_pc: ?[*]cy.Inst = base[1].retPcPtr;
-        if (ret_pc) |pc| {
-            return PcFp{ .pc = pc - base[0].call_info.call_inst_off, .fp = base[2].retFramePtr };
-        } else {
-            return PcFp{ .pc = null, .fp = base[2].retFramePtr };
+        const pc: ?[*]cy.Inst = if (ret_pc) |pc| pc - base[0].call_info.call_inst_off else null;
+        return PcFp{ .pc = pc, .fp = self.prev_fp_slot().* };
+    }
+
+    /// Where the caller's fp is kept. A running generator frame (`GEN_NEXT` / `GEN_END`) keeps the
+    /// `Generator` in the slot that normally holds the ret frame ptr, and the caller's fp in `Generator.prev_fp`.
+    pub fn prev_fp_slot(self: *const FrameInfo) *[*]cy.Value {
+        const base = self.base.?;
+        if (base[0].call_info.type == .gen) {
+            const gen = base[2].asPtr(*vmc.Generator);
+            return @ptrCast(&gen.prev_fp);
         }
+        return &base[2].retFramePtr;
     }
 };
 

@@ -201,6 +201,9 @@ pub const VM = struct {
             return;
         }
 
+        // The REPL result shares its heap objects with an abandoned main local, so it is released before the
+        // sweep below frees them.
+        self.dropMainResult(true);
         if (self.config.single_run or self.config.persist_main) {
             // Release ops for the main block were skipped (`sema.shouldGenMainScopeReleaseOps`), so its
             // locals still own heap objects and raw buffers. Sweep them like the panic path does, before
@@ -400,6 +403,16 @@ pub const VM = struct {
         }
     }
 
+    /// Destructs and frees the previous REPL result. `destruct` is false after a panic freed the heap.
+    fn dropMainResult(self: *VM, destruct: bool) void {
+        const res = self.compiler.main_res orelse return;
+        if (res.value.len > 0) {
+            if (destruct and !res.borrowed) self.main_thread.heap.destructValueAt(res.val_t, @ptrCast(res.value.ptr));
+            self.alloc.free(res.value);
+        }
+        self.compiler.main_res = null;
+    }
+
     /// A panic unwinds the main frame and frees the thread's heap, so the tracked values are gone.
     /// Only the bookkeeping is freed here.
     fn dropMainLocalSaves(self: *VM) void {
@@ -414,6 +427,7 @@ pub const VM = struct {
         var tt = cy.debug.timer();
 
         self.config = config;
+        self.dropMainResult(true);
         try self.compiler.reinitPerRun();
 
         var compile_c = C.defaultCompileConfig();
@@ -463,9 +477,19 @@ pub const VM = struct {
 
             const val = self.exec_bytecode(res.vm) catch |err| {
                 if (config.persist_main) self.dropMainLocalSaves();
+                self.dropMainResult(false);
                 return err;
             };
             if (config.persist_main) self.copyMainLocalSaves();
+            if (self.compiler.main_res) |*main_res| {
+                // Copied now, before another eval reuses the stack. The VM owns the copy until the next eval.
+                const stack = self.main_thread.c.stack();
+                main_res.value = try self.alloc.dupe(cy.Value, stack[main_res.stack_off..main_res.stack_off + main_res.reg_size]);
+                return .{
+                    .res = @ptrCast(main_res.value.ptr),
+                    .res_t = main_res.val_t.id(),
+                };
+            }
             return .{
                 .res = @ptrCast(val),
                 .res_t = if (self.compiler.main_func) |main_func| main_func.sig.ret.id() else bt.Void,
@@ -1218,6 +1242,18 @@ fn spawn(args: struct {
 }
 
 /// A main local kept for the next `persist_main` eval (REPL).
+/// See `Compiler.main_res`.
+pub const MainResult = struct {
+    val_t: *cy.Type,
+    /// Register offset from the main thread's stack start.
+    stack_off: usize,
+    reg_size: usize,
+    /// The result is an existing (persisted) local that keeps owning the value, so the copy is only freed.
+    borrowed: bool,
+    /// A copy owned by the VM, made when the eval ends. Empty until then.
+    value: []cy.Value = &.{},
+};
+
 pub const LocalSave = struct {
     name: []const u8,
     val_t: *cy.Type,

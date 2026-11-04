@@ -52,6 +52,10 @@ pub const Compiler = struct {
     // Compile-time heap.
     heap: cy.Heap,
 
+    /// The value of a REPL eval's last top level expression (`sema.semaMainResultStmt`), copied after the run.
+    /// Kept here rather than in `VM`, whose field layout `vm.h` mirrors with measured padding.
+    main_res: ?cy.vm.MainResult = null,
+
     reports: std.ArrayList(Report),
     
     /// Sema model resulting from the sema pass.
@@ -910,6 +914,7 @@ fn loadBuiltinChunk(c: *cy.Chunk) !void {
     c.sema.panic_fn = core.getSym("panic").?.cast(.func).first;
     c.sema.panic_unwrap_error_fn = core.getSym("panic_unwrap_error").?.cast(.func).first;
     c.sema.track_main_local_fn = core.getSym("@trackMainLocal").?.cast(.func).first;
+    c.sema.main_result_fn = core.getSym("@mainResult").?.cast(.func).first;
 
     const float_tmpl = c.sema.float_tmpl;
     const raw_tmpl = core.getSym("Raw").?.cast(.template);

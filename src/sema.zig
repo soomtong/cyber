@@ -341,8 +341,12 @@ fn popLocals2(c: *cy.Chunk, var_start: usize, destruct: bool, node: *ast.Node) !
 
 fn semaExprStmt(c: *cy.Chunk, node: *ast.Node) !void {
     const var_start = c.varStack.items.len;
-    
-    var expr = try c.semaExpr(node, .{});
+    const expr = try c.semaExpr(node, .{});
+    try semaExprStmtEnd(c, expr, var_start, node);
+}
+
+/// The statement part of an expression statement, after the expression itself was analyzed.
+fn semaExprStmtEnd(c: *cy.Chunk, expr: ExprResult, var_start: usize, node: *ast.Node) !void {
     if (expr.resType == .ct_value and expr.data.ct_value.type.id() == bt.Void) {
         return;
     }
@@ -3495,6 +3499,96 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
     }
 }
 
+/// REPL (`persist_main`): the last top level expression statement becomes the eval result (`CLEvalResult`).
+/// The value moves into a hidden local that `@mainResult` reports to the VM, which copies it after the run
+/// (`Compiler.main_res`). Mirrors `localDecl` with an inferred type. An expression without a value keeps the usual
+/// expression statement rules. See `docs/decisions/project_repl_result.md`.
+fn semaMainResultStmt(c: *cy.Chunk, node: *ast.Node) !void {
+    c.curNode = node;
+    c.cur_cont_expr = null;
+    const child = node.cast(.exprStmt).child;
+
+    // Reserved before the expression so that its temporaries are popped without it.
+    const name = "_main_res";
+    const var_idx = try reserveLocalName(c, name, c.sema.void_t, true, true, node);
+    try semaTraceNopFmt(c, "declare: {s} {}", .{name, var_idx}, node);
+    var svar = &c.varStack.items[var_idx];
+    svar.type = .dead;
+    const declare = try c.ir.pushStmt(.declare_local, node, .{
+        .name_ptr = name.ptr,
+        .name_len = @as(u16, @intCast(name.len)),
+        .decl_t = c.sema.void_t,
+        .id = svar.inner.local.id,
+        .init = null,
+    });
+    svar.inner.local.declIrStart = declare;
+
+    var var_start = c.varStack.items.len;
+    var right = try c.semaExpr(child, .{ .assign_to_local = true });
+    const no_value = right.type.id() == bt.Void or right.type.id() == bt.Never or right.type.kind() == .result or
+        (right.resType == .ct_value and right.data.ct_value.type.id() == bt.Void);
+    if (no_value) {
+        // The hidden local stays a void local without an init.
+        return semaExprStmtEnd(c, right, var_start, child);
+    }
+
+    if (right.resType == .value_local) {
+        // An existing local is shown without copying it (its type may not be copyable). The VM only frees
+        // its snapshot: the persisted local keeps owning the value.
+        const local = &c.varStack.items[right.data.value_local];
+        try semaMainResult(c, local.decl_t, local.stack_idx, true, node);
+        try popLocals(c, var_start, node);
+        return;
+    }
+
+    if (right.type.info.borrow_only and right.resType == .value) {
+        if (right.data.value.parent_local) |parent_local| {
+            if (c.varStack.items[parent_local].lifetime.kind == .temp) {
+                return c.reportError("The result can not borrow from a temporary value.", child);
+            }
+        }
+        if (right.data.value.has_aux_local) {
+            var_start += 1;
+        }
+    }
+    right = try semaOwn(c, right, child);
+
+    svar = &c.varStack.items[var_idx];
+    svar.decl_t = right.type;
+    declare.cast(.declare_local).decl_t = right.type;
+    svar.type = .local;
+    if (var_start == c.varStack.items.len) {
+        declare.cast(.declare_local).init = right.ir;
+    } else {
+        _ = try c.ir.pushStmt(.set_local, node, .{
+            .id = @intCast(svar.inner.local.id),
+            .right = right.ir,
+        });
+    }
+
+    try semaMainResult(c, svar.decl_t, svar.stack_idx, false, node);
+
+    try popLocals(c, var_start, node);
+    if (cy.Trace) {
+        try check_locals(c, var_start, node);
+    }
+}
+
+/// `@mainResult(type_id, addr, borrowed)`: tells the VM where the eval result lives.
+fn semaMainResult(c: *cy.Chunk, val_t: *cy.Type, stack_idx: u32, borrowed: bool, node: *ast.Node) !void {
+    const type_id = try c.semaConst(val_t.id(), c.sema.i64_t, node);
+    const local_ref = try semaLocal(c, stack_idx, node);
+    const addr = try semaAddressOf(c, local_ref, c.sema.ptr_void_t, node);
+    const borrowed_v = try c.semaConst(@intFromBool(borrowed), c.sema.bool_t, node);
+    const args = [_]sema_func.Argument{
+        sema_func.Argument.initPreResolved(node, type_id),
+        sema_func.Argument.initPreResolved(node, addr),
+        sema_func.Argument.initPreResolved(node, borrowed_v),
+    };
+    const call = try c.semaCallFunc2(c.sema.main_result_fn, &args, &.{}, node);
+    _ = try declareHiddenLocal(c, "@res", c.sema.void_t, call, node);
+}
+
 fn semaTrackMainLocal(c: *cy.Chunk, local: *Local, node: *ast.Node) !void {
     const name = try c.semaRawString(local.name(), node);
     const type_id = try c.semaConst(local.decl_t.id(), c.sema.i64_t, node);
@@ -4552,7 +4646,14 @@ pub fn sema_program(c: *cy.Chunk, opt_main_func: ?*cy.Func) !*ir.Stmt {
 
         try sema_program_deinit(c);
     } else {
-        try semaStmts(c, c.ast.root.?.stmts.slice());
+        const stmts = c.ast.root.?.stmts.slice();
+        if (c.vm.config.persist_main and stmts.len > 0 and stmts[stmts.len - 1].type() == .exprStmt) {
+            // REPL: the last expression's value is the eval result.
+            try semaStmts(c, stmts[0 .. stmts.len - 1]);
+            try semaMainResultStmt(c, stmts[stmts.len - 1]);
+        } else {
+            try semaStmts(c, stmts);
+        }
 
         if (c.block().endReachable) {
             try sema_program_deinit(c);
@@ -9296,6 +9397,7 @@ pub const Sema = struct {
     panic_fn: *cy.Func = undefined,
     panic_unwrap_error_fn: *cy.Func = undefined,
     track_main_local_fn: *cy.Func = undefined,
+    main_result_fn: *cy.Func = undefined,
     to_print_string_fn: *cy.Func = undefined,
     access_fn: *cy.Func = undefined,
     builtin_sig: *FuncSig = undefined,

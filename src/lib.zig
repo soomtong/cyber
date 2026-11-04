@@ -855,6 +855,42 @@ test "persist_main keeps top level funcs across evals." {
     try zt.eq(123, @as(*i64, @ptrCast(res.res)).*);
 }
 
+test "persist_main returns the last top level expression as the eval result." {
+    // Leak-checking allocator: the VM owns a copy of each result until the next eval or deinit.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "1 + 2", config, &res));
+    try zt.eq(@as(C.TypeId, @intCast(C.TypeI64)), res.res_t);
+    try zt.eq(3, @as(*i64, @ptrCast(res.res)).*);
+
+    // A local as the result stays usable afterwards.
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "s := 'abc' + 'd'\ns", config, &res));
+    try zt.eq(@as(C.TypeId, @intCast(C.TypeStr)), res.res_t);
+    try zt.eqStr("abcd", C.str_bytes(@as(*C.str, @ptrCast(res.res)).*));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "s + '!'", config, &res));
+    try zt.eqStr("abcd!", C.str_bytes(@as(*C.str, @ptrCast(res.res)).*));
+
+    // A statement without a value gives no result.
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "_ = s.len()", config, &res));
+    try zt.eq(@as(C.TypeId, @intCast(C.TypeVoid)), res.res_t);
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "x := 1", config, &res));
+    try zt.eq(@as(C.TypeId, @intCast(C.TypeVoid)), res.res_t);
+
+    // The previous result is released by the next eval and the local is intact.
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use test\ntest.eq('abcd', s)\ns.len() + x", config, &res));
+    try zt.eq(5, @as(*i64, @ptrCast(res.res)).*);
+
+    // A local that can not be copied is shown as it is and keeps its value.
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "m := Map[str, int]{}\nm['a'] = 1\nm", config, &res));
+    try zt.eq(true, res.res_t != @as(C.TypeId, @intCast(C.TypeVoid)));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "m['a'] + 1", config, &res));
+    try zt.eq(2, @as(*i64, @ptrCast(res.res)).*);
+}
+
 test "persist_main keeps main locals across evals." {
     // Leak-checking allocator: restored values are moved, not copied, and a panic drops the saves.
     const vm = C.vm_initx(zt.alloc);

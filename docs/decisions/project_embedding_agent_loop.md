@@ -120,7 +120,8 @@
   (`REPL.new()`가 `VM`을 담은 지역 `ctx`를 반환하면서 `vm_deinit`이 실행됨). 둘을 고친 뒤 REPL은 시작하고 표현식 ·
   함수 호출을 평가하고, 지역 변수 이월(위)까지 넣은 뒤에는 변수도 이어진다. `cy.cy`의 `TypeVoid`가 0으로 잘못 적혀
   있어(`TYPE_VOID`는 1) void 결과마다 빈 줄을 찍던 것도 고쳤다. 맨 이름(`x`)만 입력하는 것은 언어 규칙상 컴파일 에러라
-  REPL이 값을 바로 보여 주지는 않는다(`print(x)`를 써야 함).
+  REPL이 값을 바로 보여 주지 않았는데, 2026-11-04에 `persist_main` 모드의 마지막 맨 표현식을 eval 결과로 돌려주게 했다
+  (`docs/decisions/project_repl_result.md`). `cl_vm_evalx` 호출자도 `CLEvalResult.res` · `res_t`로 받는다.
 - REPL 입력 끝(EOF) 처리(2026-11-01 고침). Ctrl-D나 파이프로 넣은 stdin이 끝나면 linenoise가 `null`을 돌려주고
   `replReadLine`(`src/cli.zig`)이 `error.EndOfStream`을 올려 `panic: EndOfStream`으로 끝났다. 이제 EOF는 `.exit`과 같게
   처리해 종료 코드 0으로 끝난다(`repl_end_of_input`). REPL 스크립트(`cy.cy`의 `ReadLineFn`)의 타입은 바꾸지 않았다.

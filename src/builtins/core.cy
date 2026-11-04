@@ -4318,6 +4318,9 @@ fn (&PtrSpan[]) set_backwards(o Self):
 -- For REPL.
 #[bind] fn @trackMainLocal(name str, type_id int, addr Ptr[void])
 
+--| REPL: reports the hidden local that holds the eval result.
+#[bind] fn @mainResult(type_id int, addr Ptr[void], borrowed bool)
+
 type SystemKind enum:
     case linux
     case macos

@@ -113,6 +113,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"@notifyFutureComplete", zErrFunc(notifyFutureComplete)},
     .{"@await_",        zErrBuiltinFunc(await_, null)},
     .{"@trackMainLocal", zErrFunc(trackMainLocal)},
+    .{"@mainResult",     zErrFunc(mainResult)},
     .{"@compute_int_max", zErrConstEvalFunc(compute_int_max)},
     .{"@compute_int_min", zErrConstEvalFunc(compute_int_min)},
     .{"@ptr_init",      zErrBuiltinFunc(ptr_init, null)},
@@ -1517,6 +1518,22 @@ pub fn symbol_name(t: *cy.Thread) !C.Ret {
     const ret = t.ret(cy.heap.Str);
     const sym = t.param(u64);
     ret.* = try t.heap.init_str(t.heap.getSymbolName(sym));
+    return C.RetOk;
+}
+
+/// REPL: records where the hidden `_main_res` local lives so `VM.eval` can copy it after the run.
+pub fn mainResult(t: *cy.Thread) !C.Ret {
+    _ = t.ret(void);
+    const type_id = t.param(i64);
+    const val = t.param([*]Value);
+    const borrowed = t.param(bool);
+    const val_t = t.heap.getType(@intCast(type_id));
+    t.c.vm.compiler.main_res = .{
+        .val_t = val_t,
+        .stack_off = @divExact(@intFromPtr(val) - @intFromPtr(t.c.stack_ptr), @sizeOf(Value)),
+        .reg_size = (val_t.size() + 7) >> 3,
+        .borrowed = borrowed,
+    };
     return C.RetOk;
 }
 

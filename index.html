@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.2-dev 646-3aa5b40</div>
+    <div class="sub-title">v0.4.2-dev 653-6f46a8a</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1610,6 +1610,20 @@ points := 123
 title := 'Scoreboard: %{name} %{points}'
 </code></pre>
 <p>String templates can not contain nested string templates.</p>
+<p><code>to_print_string</code> renders a struct as a record literal with its type name, a choice as its case with the payload, and a slice or vector as its elements. A string nested in one of those keeps its quotes:</p>
+<pre><code class="language-cy">type Point:
+    x int
+    y int
+type Shape enum:
+    case circle int
+    case empty
+print(Point{x=1, y=2})              --> Point{x=1, y=2}
+print(Shape.circle(5))              --> Shape.circle(5)
+print(Shape.empty)                  --> Shape.empty
+print([]str{'a', 'b'})              --> {'a', 'b'}
+print('%{[]Point{Point{x=1, y=2}}}') --> {Point{x=1, y=2}}
+</code></pre>
+<p>A reference prints its type name (<code>^Point</code>) and a <code>Ptr</code> prints its address.</p>
 <a href="#basic-types">^topic</a>
 <h3 id="string-formatting">String formatting. <a href="#string-formatting">#</a></h3>
 <p>Formatting replaces <code>{}</code> placeholders with values converted to strings:</p>
@@ -3576,6 +3590,12 @@ print(gen)
     --> 123
     --> 456
 </code></pre>
+<p>A generator can also be iterated with <code>for</code>, which resumes it until it is done:</p>
+<pre><code class="language-cy">for iterate() |res|:
+    print(res)
+    --> 123
+    --> 456
+</code></pre>
 <p>The current state of a generator can be obtained with <code>Generator.status</code>:</p>
 <pre><code class="language-cy">gen := iterate()
 print(gen.status())
@@ -4413,6 +4433,14 @@ cyber --help
     | 
 hello!
 </code></pre>
+<p>An attribute line such as <code>#[generator]</code> is held until the declaration it annotates is complete. A one line declaration after an attribute is submitted with an empty input:</p>
+<pre><code class="language-bash">> #[generator]
+| fn gen() -> int:
+    | yield 1
+    | 
+> gen().next().?
+`int` 1
+</code></pre>
 <p>Top level declarations such as imports, types, and functions can be referenced in subsequent evals:</p>
 <pre><code class="language-bash">> use math
 > math.random()
@@ -4424,6 +4452,16 @@ hello!
 > f = Foo{a=123}
 > f.a
 `int` 123
+</code></pre>
+<p>Records, slices, maps and optionals are shown with their contents. Nesting stops after a few levels and long containers are cut short:</p>
+<pre><code class="language-bash">> f
+`Foo` {a=123}
+> []str{'a', 'b'}
+`[]str` {'a', 'b'}
+> Map[str, int]{a=1}
+`Map[str, int]` {'a': 1}
+> ?int(none)
+`?int` none
 </code></pre>
 <a href="#cli">^topic</a>
 <h2 id="jit-compiler">JIT compiler. <a href="#jit-compiler">#</a></h2>

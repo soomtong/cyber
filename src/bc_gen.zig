@@ -2546,7 +2546,8 @@ pub fn beginCall(c: *Chunk, cstr: Cstr, ret_t: *cy.Type, hasCalleeValue: bool, n
 
     // Optimization: Check to use dst cstr as ret.
     if (cstr.type == .tempReg or cstr.type == .localReg) {
-        if (cstr.data.slot.dst == c.cur_proc.reg_end - ret_reg_size) {
+        // A generator call reserves its `?T` resume slot, which can be wider than the frame below it.
+        if (c.cur_proc.reg_end >= ret_reg_size and cstr.data.slot.dst == c.cur_proc.reg_end - ret_reg_size) {
             if (cstr.data.slot.dst != 0) {
                 if (cstr.type == .tempReg) {
                     ret = GenValue.initTemp(cstr.data.slot.dst);

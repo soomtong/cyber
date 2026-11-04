@@ -3962,6 +3962,16 @@ When the first input ends with `:`, the REPL will automatically indent the next 
 hello!
 ```
 
+An attribute line such as `#[generator]` is held until the declaration it annotates is complete. A one line declaration after an attribute is submitted with an empty input:
+```bash
+> #[generator]
+| fn gen() -> int:
+    | yield 1
+    | 
+> gen().next().?
+`int` 1
+```
+
 Top level declarations such as imports, types, and functions can be referenced in subsequent evals:
 ```bash
 > use math

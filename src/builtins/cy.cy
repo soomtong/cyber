@@ -1343,6 +1343,9 @@ fn (&REPL) print_intro():
 
 type ReadLineFn = fn(prefix str) -> Future[str]
 
+--| Reads lines until a complete input is ready.
+--| A line ending with `:` opens a block; an empty line closes one.
+--| An attribute line (`#[...]`) is held until the declaration it annotates is complete.
 fn (&REPL) read(read_line ReadLineFn) -> ?str:
     while:
         prefix := self.prefix()
@@ -1352,8 +1355,12 @@ fn (&REPL) read(read_line ReadLineFn) -> ?str:
         if input == '.exit':
             return none
 
+        if input.starts_with('#['):
+            self.append_line(input)
+            continue
+
         if input.ends_with(':'):
-            self.input_buffer += input
+            self.append_line(input)
             self.indent += 1
             continue
 
@@ -1361,19 +1368,23 @@ fn (&REPL) read(read_line ReadLineFn) -> ?str:
             return input
 
         if input.len() == 0:
-            self.indent -= 1
+            if self.indent > 0:
+                self.indent -= 1
             if self.indent > 0:
                 continue
-            else:
-                -- Build input and submit.
-                input = self.input_buffer
-                self.input_buffer = ''
-                return input
+            -- Build input and submit.
+            input = self.input_buffer
+            self.input_buffer = ''
+            return input
         else:
-            self.input_buffer += "\n"
-            self.input_buffer += ' '.repeat(self.indent * 4)
-            self.input_buffer += input
+            self.append_line(input)
             continue
+
+fn (&REPL) append_line(line str):
+    if self.input_buffer.len() > 0:
+        self.input_buffer += "\n"
+        self.input_buffer += ' '.repeat(self.indent * 4)
+    self.input_buffer += line
 
 fn (&REPL) eval_print(code str):
     res := self.vm.eval('eval', code, { persist_main=true })
@@ -1395,7 +1406,7 @@ fn (&REPL) eval_print(code str):
         print(dump)
 
 fn (&REPL) prefix() -> str:
-    head := if (self.indent == 0) '> ' else '| '
+    head := if (self.indent == 0 and self.input_buffer.len() == 0) '> ' else '| '
     s := ' '.repeat(self.indent * 4)
     return s + head
 

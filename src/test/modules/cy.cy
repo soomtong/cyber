@@ -72,4 +72,45 @@ stmts = parseStmts("type foo enum:\n  case a int")
 t.eq(cy.Node.Tag.enum_decl, meta.choice_tag(stmts[0].*))
 t.eq('foo', stmts[0].!enum_decl.name.name())
 
+-- REPL.read()
+-- Lines are served from a script; `.exit` ends the session.
+global repl_lines []str = {}
+global repl_pos int = 0
+global repl_prefixes []str = {}
+fn repl_read(prefix str) -> Future[str]:
+    repl_prefixes = repl_prefixes + prefix
+    line := repl_lines[repl_pos]
+    repl_pos += 1
+    return Future.complete(line)
+
+repl := cy.REPL.new()
+
+-- A plain line is submitted as is.
+repl_lines = []str{'a := 1', '.exit'}
+repl_pos = 0
+t.eq('a := 1', repl.read(repl_read).?)
+t.eq(?str(none), repl.read(repl_read))
+
+-- A block is submitted on the empty line that closes it. Nested blocks keep their own line and indentation.
+repl_lines = []str{'fn f():', 'if true:', 'print(1)', '', '', '.exit'}
+repl_pos = 0
+repl_prefixes = []str{}
+t.eq("fn f():\n    if true:\n        print(1)", repl.read(repl_read).?)
+t.eq(?str(none), repl.read(repl_read))
+t.eq_slice([]str{'> ', '    | ', '        | ', '        | ', '    | ', '> '}, repl_prefixes)
+
+-- An attribute line is held until the declaration it annotates is complete.
+repl_lines = []str{'#[generator]', 'fn g() -> int:', 'yield 1', '', '.exit'}
+repl_pos = 0
+repl_prefixes = []str{}
+t.eq("#[generator]\nfn g() -> int:\n    yield 1", repl.read(repl_read).?)
+t.eq(?str(none), repl.read(repl_read))
+t.eq_slice([]str{'> ', '| ', '    | ', '    | ', '> '}, repl_prefixes)
+
+-- An attribute on a one line declaration is submitted by an empty line.
+repl_lines = []str{'#[bind] fn foo() -> int', '', '.exit'}
+repl_pos = 0
+t.eq("#[bind] fn foo() -> int", repl.read(repl_read).?)
+t.eq(?str(none), repl.read(repl_read))
+
 --cytest: pass

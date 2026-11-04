@@ -187,23 +187,28 @@ fn createTypeType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Ty
 }
 
 pub fn stack_trace(t: *cy.Thread) anyerror!C.Ret {
-    // Append frames from current call-site.
+    // Record frames from the current call-site, innermost first.
+    t.compact_trace.clearRetainingCapacity();
     try t.recordCurFrames();
 
-    // Remove top two frames since it contains the `stackTrace` call.
-    _ = t.compact_trace.pop();
-    _ = t.compact_trace.pop();
+    // Drop the innermost frame, the host frame of this `stack_trace` call. The outermost frames (`main` and
+    // its callees) stay. Popping from the end used to drop those instead.
+    if (t.compact_trace.items.len > 0 and t.compact_trace.items[0].pc == null) {
+        _ = t.compact_trace.orderedRemove(0);
+    }
 
-    const trace = try cy.debug.allocStackTrace(t.c.vm, t.c.stack(), t.compact_trace.items);
-    defer t.alloc.free(trace);
+    // Each frame owns its name, so free them like the panic path does.
+    var trace = cy.StackTrace{ .frames = try cy.debug.allocStackTrace(t.c.vm, t.c.stack(), t.compact_trace.items) };
+    defer trace.deinit(t.alloc);
 
     var buf = std.Io.Writer.Allocating.init(t.alloc);
     defer buf.deinit();
 
-    try cy.debug.writeStackFrames(t.c.vm, &buf.writer, trace);
+    try cy.debug.writeStackFrames(t.c.vm, &buf.writer, trace.frames);
 
+    // `init_str` copies the bytes.
     const ret = t.ret(cy.heap.Str);
-    ret.* = try t.heap.init_str(try buf.toOwnedSlice());
+    ret.* = try t.heap.init_str(buf.written());
     return C.RetOk;
 }
 

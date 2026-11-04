@@ -80,3 +80,30 @@
 - 프레임은 `next()`마다 다른 위치로 옮겨 다닌다. 제너레이터 자기 프레임 안을 가리키는 빌림(`&local`)을 `yield` 너머로 들고 가면
   여전히 무효다. sema가 막는 규칙은 없다(학습 문서 실습 8).
 - `unwindStack`의 `.gen` 분기는 ret 슬롯 1개를 가정한다(학습 문서 2.5 (1)). 이번 수정 범위 밖이다.
+
+## 제너레이터 프레임을 지나는 언와인드 · 스택 트레이스 수정 (2026-11-04)
+
+`docs/study/07-coroutines-concurrency.md` 2.5의 세 결함. 실행 중인 제너레이터 프레임(`GEN_NEXT` · `GEN_END`)은 다른 프레임이
+호출자 fp를 두는 `base[2]`에 `Generator*`를 두고, 호출자 fp는 `Generator.prev_fp`에 있다. 이 프레임을 이해하는 코드가 흩어져
+있었다.
+
+1. `unwindStack`의 `.gen` 분기가 `fp+1..fp+3`을 하드코딩해 ret 슬롯 1개를 가정했다. `?int`(2슬롯) · `?str` 제너레이터 안의 panic이
+   `incorrect alignment`로 호스트를 abort시켰다(master에서 재현). fuel · interrupt 중단도 같은 경로라 같이 죽었다.
+2. `gen_next` · `gen_end`에 debug sym이 없어 릴리스 빌드가 `unexpected 4`만 냈다. 프레임 보존 수정(위)에서 `pushFCode`로 바꿔
+   이미 고쳐져 있었다.
+3. `recordCurFrames`(`meta.stack_trace()`)에는 `.gen` 분기가 없어 `Generator*`를 fp로 읽고 `integer overflow`로 abort했다.
+
+결정: 이전 fp를 읽는 곳을 `FrameInfo.prev_context()` 하나로 모았다. `prev_fp_slot()`이 프레임 종류에 따라 `base[2]` 또는
+`Generator.prev_fp`를 돌려준다. `unwindStack`과 `recordCurFrames`는 제너레이터 프레임을 VM 프레임처럼 기록하고,
+`growStackPrecise`는 같은 슬롯을 새 스택으로 고친다(제너레이터는 힙에 있으므로 제자리에서).
+
+같이 고친 것: `meta.stack_trace()`(F-31)가 자기 프레임을 지운다며 `pop()`을 두 번 불러 가장 바깥 프레임 둘(main과 그 호출)을
+지웠다. 바이트코드 인라인으로 프레임이 합쳐지면 빈 문자열이 됐다. 이제 기록 전에 버퍼를 비우고 가장 안쪽 호스트 프레임
+(`stack_trace` 자신)만 뺀다. 프레임 이름과 `toOwnedSlice` 결과가 매번 새던 것도 `StackTrace.deinit`과 `buf.written()`으로 고쳤다.
+
+테스트(lib, 누수 검사 allocator): "Panics inside generators unwind through the generator frame."(`?int` 본문 panic, `?str`
+제너레이터가 부른 함수의 panic, 본문 안 fuel 중단, 이후 VM 재사용), "stack_trace() lists the frames from the caller to main."
+(인라인된 호출, 제너레이터 안). 기대 트레이스에 `core.cy` 줄 번호가 들어가지 않도록 behavior 테스트 대신 프레임 이름 순서를 본다.
+`thread.zig` 수정을 빼면 두 테스트가 abort하고, `meta.zig` 수정을 빼면 두 번째가 실패한다.
+
+남은 것: F-31의 다른 절반(`dump_frame`이 `chk_stk`의 `stack_size`를 `+3`에서 읽음)은 손대지 않았다.

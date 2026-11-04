@@ -36,7 +36,7 @@ tags:
 | --- | --- | --- | --- | --- | --- |
 | F-01 | 제너레이터 본문의 지역 변수가 yield를 넘어 보존되지 않는다. `i := 10; yield i; i += 1; yield i; i += 1; yield i`가 10, 11, 11을 낸다. `for 0..3 \|i\|`는 소비 측에서 다른 호출이 끼면 무한 루프 | `bc_gen.zig:2345`(ret_gen), `vm.c:1415`(RET_Y에 되돌려 저장 없음), `thread.zig:17` | 메인 재현 + [07 §2.4](07-coroutines-concurrency.md) | 치명 | **2026-11-04 수정**(안 A + 재개 시 스택 검사, `project_coroutines.md`의 "제너레이터 프레임 보존 수정") |
 | F-02 | yield를 넘는 관리 타입 지역(str 등)이 있으면 segfault | F-01과 같은 원인 | 챕터 재현 [07 실습 4](07-coroutines-concurrency.md) | 치명 | F-01과 함께 |
-| F-03 | 제너레이터 안에서 panic이 나면 언와인드가 죽고 호스트 프로세스가 abort한다. `meta.stack_trace()`도 같다 | `thread.zig:1006~1009`(gen 분기가 반환 슬롯 1개를 가정), `recordCurFrames` | 메인 재현(ReleaseSafe CLI: `integer does not fit in destination type`) + [07 §2.5](07-coroutines-concurrency.md). 트레이스 빌드에서는 메시지가 `incorrect alignment`로 다르다 | 치명 | gen 프레임의 ret_size를 CALL 정보에서 읽도록 |
+| F-03 | 제너레이터 안에서 panic이 나면 언와인드가 죽고 호스트 프로세스가 abort한다. `meta.stack_trace()`도 같다 | `thread.zig:1006~1009`(gen 분기가 반환 슬롯 1개를 가정), `recordCurFrames` | 메인 재현(ReleaseSafe CLI: `integer does not fit in destination type`) + [07 §2.5](07-coroutines-concurrency.md). 트레이스 빌드에서는 메시지가 `incorrect alignment`로 다르다 | 치명 | **2026-11-04 수정**(`FrameInfo.prev_context()`가 `Generator.prev_fp`를 따라감) |
 | F-04 | 첫 eval이 컴파일에 실패하면 다음 eval에서 SIGSEGV(구문 오류) 또는 `@program_init has already been declared`(의미 오류). 우회: 빈 소스를 먼저 eval하거나 실패 뒤 `cl_vm_reset` | `compiler.zig:310`(`cont`는 첫 성공 뒤에만 true) 근처로 추정 | 챕터 재현 [08 §7.3](08-embedding-builtins-tests.md). 원인은 코드 판독 | 치명 | C 호스트 최소 재현을 `lib.zig` 테스트로 고정 |
 | F-05 | `cl_vm_validate`/`cl_vm_compile`이 VM을 리셋해 `persist_main` 변수를 지운다. validate가 구문 오류로 실패하면 이후 eval이 깨지고 요약 조회가 SIGBUS | `lib.zig`의 resetVM 호출 | 챕터 재현 [08 §7.3](08-embedding-builtins-tests.md) | 높음 | 검증용 VM을 따로 두거나 리셋하지 않게 |
 | F-06 | 스크립트가 `use c` 없이 `p := as[Ptr[int]] 8; print(p.*)`로 임의 주소를 역참조해 프로세스를 죽인다 | `as[Ptr[T]]` 캐스트 sema | 메인 재현(`Segmentation fault at address 0x8`) + [08 §7.4](08-embedding-builtins-tests.md) | 치명 | 로더 허용 목록으로는 막을 수 없다. 캐스트 자체를 막는 컴파일 옵션이 필요 |
@@ -46,7 +46,7 @@ tags:
 | F-10 | 스택 포인터 패치 구멍. 스택이 재할당될 때 main 프레임의 `&x`, `call_ptr`/`call_union`로 부른 호출 중의 포인터는 갱신되지 않아 쓰레기를 읽는다 | `thread.zig:890`(init 프레임 미패치), `bc_gen.zig:3127`(ptr_table은 call/call_host만) | 챕터 재현 [04 §7](04-bytecode-gen.md), [05 §7](05-vm-runtime.md) | 치명 | 깊은 재귀 + 빌림 조합에서 발생 |
 | F-11 | `g := math.sqrt; g(16.0)`처럼 호스트 함수를 함수 값으로 쓰면 segfault. `addr \| (1<<63)`가 정의되지 않은 시프트라 컴파일러가 대입을 지운다 | `vm.c:1718`(FN_HOST) | 챕터 재현 [05 §5 실습 6](05-vm-runtime.md) | 높음 | 시프트를 `(u64)1 << 63`으로 |
 | F-12 | `#[generator]` 밖에서 `yield`를 쓰면 컴파일러가 segfault | `sema.zig:711` | 챕터 재현 [07 §7.1](07-coroutines-concurrency.md) | 높음 | 사용자 오류로 |
-| F-13 | 끝난 제너레이터에 `next()`를 한 번 더 부르면 릴리스 CLI가 `unexpected 4`만 찍는다. `gen_next`/`gen_end`에 debug sym이 없다(추정) | `bc_gen.zig:720, 733` | 챕터 재현 [07 §2.5](07-coroutines-concurrency.md) | 중간 | `pushFCode`로 |
+| F-13 | 끝난 제너레이터에 `next()`를 한 번 더 부르면 릴리스 CLI가 `unexpected 4`만 찍는다. `gen_next`/`gen_end`에 debug sym이 없다(추정) | `bc_gen.zig:720, 733` | 챕터 재현 [07 §2.5](07-coroutines-concurrency.md) | 중간 | **2026-11-04 수정**(`pushFCode`로) |
 | F-14 | 빌림 `&int` 매개변수를 받는 제너레이터는 힙 스냅샷에 스택 주소를 담아 use-after-return이 된다. 컴파일 에러가 없다 | sema의 `semaLift` 우회 | 챕터 재현 [07 실습 8](07-coroutines-concurrency.md) | 높음 | borrow 매개변수 거부 |
 
 ## B. 조용히 틀린 결과를 내는 것
@@ -64,7 +64,7 @@ tags:
 | F-28 | `type X const:`의 결과 타입 이름이 덮어써진다(`IntBox`가 `Pick[int]`로 개명). `const` 매개변수로 `bool`, `EvalStr`, enum을 쓰는 타입 템플릿은 컴파일러 패닉 | `sema_type.zig:27~30`, `template.zig` | 챕터 재현 [02 §5](02-symbols-and-types.md) | 중간 | |
 | F-29 | 정상 종료 시 전역 `@deinit`이 main 지역보다 먼저 돈다. `single_run`/panic의 `freeHeapPages` 스윕은 `@deinit`을 한 번도 돌리지 않는다 | 종료 경로 | 챕터 재현 [06 §7.1](06-memory-ownership.md) | 중간 | 종료 시 정리 코드가 생기면 계약 재검토 |
 | F-30 | `-` 가시성이 `fn`, 필드, 변수에서 강제되지 않는다(`use *`에서 `-type` 별칭을 거르는 것이 전부) | `module.zig` | 챕터 재현 [02 §5](02-symbols-and-types.md) | 중간 | 문서와 일치시키거나 문서를 고친다 |
-| F-31 | `meta.stack_trace()`가 `pop()`을 두 번 불러 가장 바깥 프레임 두 개를 지운다. `dump_frame`은 `chk_stk`의 `stack_size`를 `+3`에서 읽는다(정답은 `+2`) | `meta.zig:194~195`, `debug.zig:59` | 챕터 재현 [04](04-bytecode-gen.md), [05](05-vm-runtime.md) | 낮음 | |
+| F-31 | `meta.stack_trace()`가 `pop()`을 두 번 불러 가장 바깥 프레임 두 개를 지운다. `dump_frame`은 `chk_stk`의 `stack_size`를 `+3`에서 읽는다(정답은 `+2`) | `meta.zig:194~195`, `debug.zig:59` | 챕터 재현 [04](04-bytecode-gen.md), [05](05-vm-runtime.md) | 낮음 | `stack_trace` 쪽 **2026-11-04 수정**(가장 안쪽 호스트 프레임만 뺌). `dump_frame`은 남음 |
 | F-32 | `try ... else err:`는 파서를 통과하지만 sema가 항상 `Unsupported statement: tryStmt`로 거부한다. 문서의 `catch err:`는 파서 단계에서 거부된다 | `sema.zig`, `docs.md:2667` | 챕터 재현 [03 §7.2](03-sema-and-ir.md) | 중간 | Unwrap block 구현(로드맵 1순위)과 묶는다 |
 | F-33 | `cyber -cc`, `-tcc`가 sema 단계에서 `Expected function implementation.`으로 실패한다. `cyber fmt`는 `TODO: Embed src/tools/fmt.cy` panic(종료 134) | `sema.zig:2870`, `main.zig:121` | 챕터 재현 [03](03-sema-and-ir.md), [08](08-embedding-builtins-tests.md) | 낮음 | 용도 범위 밖. 도움말에서 숨길지 결정 |
 

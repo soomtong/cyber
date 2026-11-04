@@ -1493,6 +1493,47 @@ test "Panics inside generators unwind through the generator frame." {
     try zt.eq(C.Success, C.vm_eval(vm, "x := 1", &res));
 }
 
+test "stack_trace() lists the frames from the caller to main." {
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "t",
+        \\use meta
+        \\use test
+        \\
+        \\fn pos(s str, part str) -> int:
+        \\  return s.index(part) ?else -1
+        \\
+        \\fn expect_in_order(s str, a str, b str, c str):
+        \\  test.eq(true, pos(s, a) >= 0)
+        \\  test.eq(true, pos(s, a) < pos(s, b))
+        \\  test.eq(true, pos(s, b) < pos(s, c))
+        \\
+        \\fn show() -> str:
+        \\  return meta.stack_trace()
+        \\
+        \\fn mid() -> str:
+        \\  return show()
+        \\
+        \\-- The host frame of `stack_trace` is dropped, and the outer frames stay.
+        \\t1 := mid()
+        \\test.eq(-1, pos(t1, '<host>'))
+        \\expect_in_order(t1, ' show:', ' mid:', ' main:')
+        \\
+        \\-- Through a running generator frame (`?int` ret slot).
+        \\#[generator]
+        \\fn walker() -> int:
+        \\  t := show()
+        \\  expect_in_order(t, ' show:', ' walker:', ' Generator.next:')
+        \\  test.eq(true, pos(t, ' Generator.next:') < pos(t, ' main:'))
+        \\  yield 1
+        \\
+        \\g := walker()
+        \\test.eq(1, g.next().?)
+    , C.defaultEvalConfig(), &res));
+}
+
 test "cl_slice_init." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

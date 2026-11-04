@@ -663,6 +663,22 @@ title := 'Scoreboard: %{name} %{points}'
 ```
 String templates can not contain nested string templates.
 
+`to_print_string` renders a struct as a record literal with its type name, a choice as its case with the payload, and a slice or vector as its elements. A string nested in one of those keeps its quotes:
+```cy
+type Point:
+    x int
+    y int
+type Shape enum:
+    case circle int
+    case empty
+print(Point{x=1, y=2})              --> Point{x=1, y=2}
+print(Shape.circle(5))              --> Shape.circle(5)
+print(Shape.empty)                  --> Shape.empty
+print([]str{'a', 'b'})              --> {'a', 'b'}
+print('%{[]Point{Point{x=1, y=2}}}') --> {Point{x=1, y=2}}
+```
+A reference prints its type name (`^Point`) and a `Ptr` prints its address.
+
 ### String formatting.
 Formatting replaces `{}` placeholders with values converted to strings:
 ```cy

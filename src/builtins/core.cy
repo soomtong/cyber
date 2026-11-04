@@ -194,6 +194,11 @@ fn to_print_string(x %T) -> str:
         return str(x)
     #else T == str:
         return x
+    #else type.is_instance_of(T, Slice):
+        parts := []str{}
+        for x |elem|:
+            parts += to_elem_string(elem)
+        return '{' + parts.join(', ') + '}'
     #else:
         #switch type.info(T):
             #case .enum:
@@ -204,7 +209,25 @@ fn to_print_string(x %T) -> str:
                 else:
                     return 'none'
             #case .choice:
-                return type.name(T) + '@' + meta.enum_name(meta.choice_tag(x)) + '{}'
+                out := type.name(T) + '.'
+                switch meta.choice_tag(x):
+                    #for meta.enum_values(T.Tag) |Tag|:
+                        case Tag:
+                            out += #{meta.enum_case(Tag).name}
+                            #if meta.CasePayload[T, Tag] != void:
+                                out += '(' + to_elem_string(meta.access_choice_case(x, Tag)) + ')'
+                return out
+            #case .struct |info|:
+                parts := []str{}
+                #for 0..info.fields.len() |i|:
+                    #field := info.fields[i]
+                    parts += #{field.name} + '=' + to_elem_string(meta.access(x, #{field.name}))
+                return type.name(T) + '{' + parts.join(', ') + '}'
+            #case .vector |info|:
+                parts := []str{}
+                for 0..#{info.len} |i|:
+                    parts += to_elem_string(x[i])
+                return '{' + parts.join(', ') + '}'
             #case .ptr |ptr|:
                 return '@' + (as[r64] x).fmt()
             #case .func |func|:
@@ -214,6 +237,20 @@ fn to_print_string(x %T) -> str:
                     return type.name(T)
             #else:
                 return type.name(T)
+
+--| Like `to_print_string` but a string nested in a record, choice or sequence keeps its quotes.
+-fn to_elem_string(x %T) -> str:
+    #if T == str:
+        return "'" + x + "'"
+    #else:
+        #switch type.info(T):
+            #case .option:
+                if x |payload|:
+                    return to_elem_string(payload)
+                else:
+                    return 'none'
+            #else:
+                return to_print_string(x)
 
 #[bind] fn @compute_int_max(%T type) -> T
 #[bind] fn @compute_int_min(%T type) -> T

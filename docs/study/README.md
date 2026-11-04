@@ -69,7 +69,7 @@ tags:
 | 6 오후 | [07 코루틴과 동시성](07-coroutines-concurrency.md) | 설계 변화, 제너레이터 해부, Thread/Future | 새 디자인의 장단점은 무엇이고 지금 무엇이 깨져 있는가 | 4h |
 | 7 오전 | [08 임베딩, 내장 라이브러리, 테스트](08-embedding-builtins-tests.md) | libcyber, `#[bind]`, `core.cy`, 로더, FFI, 테스트 | 호스트는 어떻게 VM을 만들고 도구를 노출하는가 | 4h |
 | 7 오후 | [09 에이전트 루프와 로드맵](09-agent-loop-and-roadmap.md) | 오늘 되는 것/안 되는 것, 선택지, 흡수 계획 | 이 런타임을 에이전트에 어떻게 쓰고 무엇부터 고칠까 | 3~4h |
-| 부록 | [10 이슈 종합표](10-findings-register.md), [용어집](00-glossary.md) | | | 참조용 |
+| 부록 | [10 이슈 종합표](10-findings-register.md), [용어집](00-glossary.md), [약어집](00-abbreviations.md) | | | 참조용 |
 
 일정은 하루 4시간 안팎을 가정했다. 4일차(바이트코드)와 5일차(VM)는 사용자가 가장 낯설다고 밝힌 영역이라 가장 길게 잡았다. 시간이 모자라면 03장 2.7절(컴파일타임 평가)과 08장 3.6, 3.7절(std/FFI, 빌드/CI)은 건너뛰어도 흐름이 끊기지 않는다.
 

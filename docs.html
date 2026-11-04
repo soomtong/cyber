@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.2-dev 625-fe8637f</div>
+    <div class="sub-title">v0.4.2-dev 630-e4c0347</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1558,6 +1558,16 @@ line %{title}
 <p>The following escape sequences are supported in string literals:</p>
 <table><thead><tr><th>Sequence</th><th>Code</th><th>Character</th></tr></thead><tbody><tr><td><code>\0</code></td><td>0x00</td><td>Null</td></tr><tr><td><code>\a</code></td><td>0x07</td><td>Terminal bell</td></tr><tr><td><code>\b</code></td><td>0x08</td><td>Backspace</td></tr><tr><td><code>\e</code></td><td>0x1b</td><td>Escape</td></tr><tr><td><code>\n</code></td><td>0x0a</td><td>Line feed</td></tr><tr><td><code>\r</code></td><td>0x0d</td><td>Carriage return</td></tr><tr><td><code>\t</code></td><td>0x09</td><td>Horizontal tab</td></tr><tr><td><code>\"</code></td><td>0x22</td><td>Double quote</td></tr><tr><td><code>\\</code></td><td>0x5c</td><td>Backslash</td></tr><tr><td><code>\x??</code></td><td>--</td><td>Hexidecimal number</td></tr></tbody></table><p>Example:</p>
 <pre><code class="language-cy">print('\xF0\x9F\x90\xB6')    --> 🐶
+</code></pre>
+<a href="#basic-types">^topic</a>
+<h3 id="strings-from-bytes">Strings from bytes. <a href="#strings-from-bytes">#</a></h3>
+<p><code>str(bytes)</code> copies a <code>[]byte</code> or <code>PtrSpan[byte]</code> into a string without checking the encoding.
+<code>str.from_utf8(bytes)</code> checks that the bytes are valid UTF-8 and returns <code>error.Unicode</code> otherwise,
+so it is the one to use for bytes that come from outside the program:</p>
+<pre><code class="language-cy">data := os.read_file('notes.txt')!
+text := str.from_utf8(data) !else ''
+if str.is_utf8(data.span()):
+    print('valid')
 </code></pre>
 <a href="#basic-types">^topic</a>
 <h3 id="string-indexing">String indexing. <a href="#string-indexing">#</a></h3>

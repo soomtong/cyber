@@ -1419,6 +1419,9 @@ beginSwitch:
         if (pc[3] == 1) {
             gen->done = true;
         } else {
+            // The frame runs on the consumer's stack and the next resume can be from another call site,
+            // so save it back to the heap. `GEN_NEXT` and `GEN_END` restore it from there.
+            memcpy(gen->frame_ptr, stack + ret_size + CALL_ARG_START, gen->frame_len * sizeof(Value));
             gen->resume_pc = pc + pc[2];
             if (pc[2] == 4) {
                 // If resume pc is the next inst, then there is no deinit pc.
@@ -1445,6 +1448,11 @@ beginSwitch:
         }
 
         Value* base_ptr = stack + base;
+        // Resuming skips the generator's `CHK_STK`, so check room for its frame here.
+        // The stack grows and this inst runs again.
+        if (base_ptr + CALL_ARG_START + gen->frame_len >= t->c.stack_end) {
+            RETURN(RES_STACK_OVERFLOW);
+        }
         base_ptr[0] = buildGenCallInfo(true, 4, 128);
         base_ptr[1] = (u64)(pc + 4);
         base_ptr[2] = (u64)gen;
@@ -1478,6 +1486,9 @@ beginSwitch:
         }
 
         Value* base_ptr = stack + base;
+        if (base_ptr + CALL_ARG_START + gen->frame_len >= t->c.stack_end) {
+            RETURN(RES_STACK_OVERFLOW);
+        }
         base_ptr[0] = buildGenCallInfo(true, 4, 128);
         base_ptr[1] = (u64)(pc + 4);
         base_ptr[2] = (u64)gen;

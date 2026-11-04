@@ -1360,6 +1360,53 @@ test "single_run frees big heap objects at deinit." {
     , config, &res));
 }
 
+test "Generator frames keep locals across yields and free them." {
+    // Leak-checking allocator: managed locals live in the generator's saved frame between resumes,
+    // a yielded local is handed out as a copy, and dropping a paused generator destructs its saved locals.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "t",
+        \\use test
+        \\
+        \\fn deep(n int) -> int:
+        \\  if n == 0:
+        \\    return 0
+        \\  return 1 + deep(n - 1)
+        \\
+        \\#[generator]
+        \\fn words(n int) -> str:
+        \\  s := 'w-padding-padding-padding-padding'
+        \\  for 0..n |i|:
+        \\    s = s + '-%{i}'
+        \\    yield s
+        \\  return s + '-end'
+        \\
+        \\g := words(2)
+        \\test.eq('w-padding-padding-padding-padding-0', g.next().?)
+        \\_ = deep(50)
+        \\test.eq('w-padding-padding-padding-padding-0-1', g.next().?)
+        \\test.eq('w-padding-padding-padding-padding-0-1-end', g.next().?)
+        \\
+        \\fn drop_paused():
+        \\  d := words(5)
+        \\  _ = d.next()
+        \\  _ = deep(50)
+        \\  _ = d.next()
+        \\drop_paused()
+        \\
+        \\type WordsFn = fn(int) -> str
+        \\fn resume_deep(gen ^Generator[WordsFn], n int) -> str:
+        \\  if n == 0:
+        \\    return gen.next().?
+        \\  return resume_deep(gen, n - 1)
+        \\r := words(2)
+        \\test.eq('w-padding-padding-padding-padding-0', resume_deep(r, 3000))
+        \\test.eq('w-padding-padding-padding-padding-0-1', resume_deep(r, 6000))
+    , C.defaultEvalConfig(), &res));
+}
+
 test "cl_slice_init." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

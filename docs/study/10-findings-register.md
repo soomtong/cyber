@@ -34,7 +34,7 @@ tags:
 
 | ID | 증상 | 위치 | 검증 | 영향 | 첫 걸음 |
 | --- | --- | --- | --- | --- | --- |
-| F-01 | 제너레이터 본문의 지역 변수가 yield를 넘어 보존되지 않는다. `i := 10; yield i; i += 1; yield i; i += 1; yield i`가 10, 11, 11을 낸다. `for 0..3 \|i\|`는 소비 측에서 다른 호출이 끼면 무한 루프 | `bc_gen.zig:2345`(ret_gen), `vm.c:1415`(RET_Y에 되돌려 저장 없음), `thread.zig:17` | 메인 재현 + [07 §2.4](07-coroutines-concurrency.md) | 치명 | 회귀 테스트 먼저(07 §6.5), 이어서 안 C 가드 후 안 A |
+| F-01 | 제너레이터 본문의 지역 변수가 yield를 넘어 보존되지 않는다. `i := 10; yield i; i += 1; yield i; i += 1; yield i`가 10, 11, 11을 낸다. `for 0..3 \|i\|`는 소비 측에서 다른 호출이 끼면 무한 루프 | `bc_gen.zig:2345`(ret_gen), `vm.c:1415`(RET_Y에 되돌려 저장 없음), `thread.zig:17` | 메인 재현 + [07 §2.4](07-coroutines-concurrency.md) | 치명 | **2026-11-04 수정**(안 A + 재개 시 스택 검사, `project_coroutines.md`의 "제너레이터 프레임 보존 수정") |
 | F-02 | yield를 넘는 관리 타입 지역(str 등)이 있으면 segfault | F-01과 같은 원인 | 챕터 재현 [07 실습 4](07-coroutines-concurrency.md) | 치명 | F-01과 함께 |
 | F-03 | 제너레이터 안에서 panic이 나면 언와인드가 죽고 호스트 프로세스가 abort한다. `meta.stack_trace()`도 같다 | `thread.zig:1006~1009`(gen 분기가 반환 슬롯 1개를 가정), `recordCurFrames` | 메인 재현(ReleaseSafe CLI: `integer does not fit in destination type`) + [07 §2.5](07-coroutines-concurrency.md). 트레이스 빌드에서는 메시지가 `incorrect alignment`로 다르다 | 치명 | gen 프레임의 ret_size를 CALL 정보에서 읽도록 |
 | F-04 | 첫 eval이 컴파일에 실패하면 다음 eval에서 SIGSEGV(구문 오류) 또는 `@program_init has already been declared`(의미 오류). 우회: 빈 소스를 먼저 eval하거나 실패 뒤 `cl_vm_reset` | `compiler.zig:310`(`cont`는 첫 성공 뒤에만 true) 근처로 추정 | 챕터 재현 [08 §7.3](08-embedding-builtins-tests.md). 원인은 코드 판독 | 치명 | C 호스트 최소 재현을 `lib.zig` 테스트로 고정 |

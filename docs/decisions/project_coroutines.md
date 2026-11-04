@@ -43,3 +43,40 @@
 - upstream이 비활성이므로 비어 있는 부분(스택형 `Fiber`, 제너레이터 reset, 속성 문법 정리)은 필요해지면 이 fork가 직접
   설계하고 구현한다. 에이전트 루프(`docs/decisions/project_embedding_agent_loop.md`)에서 실행 중단 · 재개가 필요해지면
   스택형 Fiber 또는 VM 체크 포인트가 첫 후보다. 그때 이 문서의 해석을 출발점으로 삼고, 결정은 여기에 덧붙인다.
+
+## 제너레이터 프레임 보존 수정 (2026-11-04)
+
+`docs/study/07-coroutines-concurrency.md` 2.4의 "본문 지역 변수가 `yield`를 넘어 보존되지 않는다"를 고쳤다. 같은 경로에서
+드러난 결함도 함께 고쳤다(2~8번).
+
+1. 프레임 저장 범위. `ret_gen`은 내보낼 때의 `reg_end`(매개변수 끝)까지만 힙에 복제했다. 본문 지역 · 루프 상태 · 임시값은
+   소비자 스택에만 살아서, `next()` 사이에 호출이 있거나 다른 호출 지점에서 `next()`하면 값이 바뀌었다(관리 타입이면 segfault).
+   이제 `genFuncBlock`이 `chk_stk`처럼 본문 생성 뒤 최대 레지스터 수로 `ret_gen`의 끝을 되채운다(`Proc.ret_gen_pc`).
+2. 복원만 있고 저장이 없었다. `GEN_NEXT` · `GEN_END`는 힙 → 스택 복사만 했다. `RET_Y`가 멈출 때마다 프레임을 힙으로 되돌려
+   쓴다. 비용은 `yield`마다 프레임 크기만큼의 복사다.
+3. 재개 시 스택 검사. 재개는 제너레이터의 `CHK_STK`를 건너뛰므로 프레임을 소비자 스택 끝 너머에 쓸 수 있었다. `GEN_NEXT` ·
+   `GEN_END`가 자리를 확인하고 `RES_STACK_OVERFLOW`를 돌려준다. `growStackPrecise`는 `chk_stk` 외에 이 두 명령에서 멈춘 경우를
+   받는다(`fp`를 되돌리지 않음). 소비자 프레임의 스택 포인터를 고치도록 두 명령 지점에도 포인터 레이아웃을 남긴다.
+4. 실행 중인 제너레이터 프레임을 지나는 스택 성장. 복사 경로가 프레임 `base[2]`를 ret fp로 읽었는데 제너레이터 프레임에서는
+   그 자리가 `Generator*`다. 제너레이터 본문에서 깊은 호출을 하면 `integer overflow`로 죽었다(master에서 재현). 이제
+   `Generator.prev_fp`를 따라가고 그것을 새 스택으로 고친다.
+5. `yield` · 제너레이터 `return`이 값을 복사하지 않았다. 살아 있는 관리 지역(`yield s`)을 비트 복사로 넘겨, 소비자가 해제한 버퍼를
+   제너레이터가 다시 읽고 다시 해제했다. 일반 `return`처럼 `semaOwn`을 거친다.
+6. `?T`가 넓은 제너레이터 호출의 컴파일 실패. `beginCall`의 `reg_end - ret_reg_size`가 언더플로해, safe 빌드에서
+   `-> str` 제너레이터를 지역에 받는 코드가 컴파일 중 panic했다(ReleaseFast는 감싸져 우연히 동작).
+7. `mainBlock`이 `popProc` 뒤에 `getMaxUsedRegisters()`를 읽었다. Debug · ReleaseSafe에서는 지워진 슬롯(0xAA)을 읽어 main 스택이
+   항상 43690 슬롯으로 시작했고, 그 때문에 safe 빌드에서는 얕은 스택 성장 경로가 테스트되지 않았다. 순서를 바꿨다.
+8. 프레임 버퍼 해제. 프레임 버퍼를 `heap.alloc.dupe`로 따로 잡아 `Generator.deinit`만 풀었다. panic · `single_run` 힙 스윕은
+   소멸자를 건너뛰므로 매개변수 있는 제너레이터의 버퍼가 샜다(1번 뒤로는 모든 제너레이터). lib "single_run frees big heap
+   objects at deinit."이 누수 10건으로 잡았다. 이제 `heap.new_byte_buffer`로 잡아 `freeAllBuffers`가 스윕 때 함께 푼다.
+   레지스트리가 주소를 키로 쓰므로 빈 프레임도 한 슬롯을 잡는다.
+
+테스트: `src/test/concurrency/generator.cy`(지역 · 루프 상태 · 호출 지점 · 관리 지역 복사 · 버림 · 깊은 재개 · 중첩 제너레이터 성장 ·
+넓은 프레임을 깊이마다 재개해 `next()`가 스택 끝에 닿게 하는 경우), lib "Generator frames keep locals across yields and free them."
+(누수 검사 allocator). 수정 전 master에서 behavior 테스트는 `Expected 12, found 11`로 실패하고, 4번 수정을 빼면 중첩 제너레이터와
+깊이 sweep이 실패한다.
+
+남은 것:
+- 프레임은 `next()`마다 다른 위치로 옮겨 다닌다. 제너레이터 자기 프레임 안을 가리키는 빌림(`&local`)을 `yield` 너머로 들고 가면
+  여전히 무효다. sema가 막는 규칙은 없다(학습 문서 실습 8).
+- `unwindStack`의 `.gen` 분기는 ret 슬롯 1개를 가정한다(학습 문서 2.5 (1)). 이번 수정 범위 밖이다.

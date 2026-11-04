@@ -71,7 +71,7 @@
 
 | 모델 | 함정 | 출처 |
 | --- | --- | --- |
-| Generator | 본문 지역 변수가 `yield`를 넘어 보존되지 않음(매개변수만 힙 스냅샷). 루프 카운터 오염, 관리 타입이면 segfault 가능 | 학습 문서 2.4 |
+| Generator | (2026-11-04 수정) 본문 지역 변수가 `yield`를 넘어 보존되지 않던 문제. 지금은 프레임 전체가 저장된다. 자기 프레임을 가리키는 빌림을 `yield` 너머로 들고 가는 것은 여전히 무효 | 학습 문서 2.4, `project_coroutines.md` |
 | Generator | 호출 깊이 중간 yield 불가, `yield*` 위임 TODO, `next(arg)`로 값 되받기 없음 | 2.4, 6.2 |
 | Thread | 보낼 수 있는 타입이 `int` 계열과 `str`뿐. 연달아 spawn하면 직렬화될 수 있음 | 2.6 |
 | Future | main 스레드 `await`는 spin, 비-main 스레드 `await`는 `@panic("TODO")`로 호스트 abort | 2.6 |
@@ -114,7 +114,7 @@ Lua·Go·Java Loom이 stackful을 택한 것은 그 전제를 버렸기 때문�
 | Q6 | 스크립트 자신 |
 
 **맞는 모델: generator + spawn/Future. Fiber는 필요 없다.** 0.4의 분리가 이 용도에는 오히려 잘 맞는다.
-단, generator 지역 변수 버그가 고쳐지기 전까지는 **상태를 힙 객체(매개변수)에 두는 패턴**만 쓴다. 재귀 순회는 stackless의 약점이라
+generator 지역 변수 버그는 2026-11-04에 고쳐졌으므로 지역 변수와 루프 상태를 그대로 쓸 수 있다. 자기 지역을 가리키는 빌림만 `yield` 너머로 들고 가지 않는다. 재귀 순회는 stackless의 약점이라
 generator 안에서 재귀 호출을 yield로 이을 수 없으므로(`yield*` 미구현) 명시적 스택(리스트)으로 평탄화한다.
 
 ### 4.2 용도 B: TARS 에이전트 루프 (CodeAct)
@@ -177,7 +177,7 @@ generator 안에서 재귀 호출을 yield로 이을 수 없으므로(`yield*` �
 | 전환 비용 | O(1) 포인터 교환 | `next()` ~30 ns | spawn+await ~2 µs | VM 재진입 |
 | 정적 타입 적합 | × (`dyn`) | ○ | ○ | ○ |
 | 호스트가 재개 | 미확인 | × | × | ○ |
-| 구현 상태 | 삭제 | 지역 보존 버그 | 비-main await abort | 미구현(경로는 있음) |
+| 구현 상태 | 삭제 | 동작(지역 보존은 2026-11-04 수정) | 비-main await abort | 미구현(경로는 있음) |
 
 ---
 
@@ -215,7 +215,7 @@ while gen.next() |v|:
     print(v)         -- 0 1 2
 ~~~
 
-지역 변수로 쓰면 학습 문서 2.4의 버그에 걸린다.
+아래처럼 지역 변수로 쓰는 것은 2026-11-04 수정 전에는 학습 문서 2.4의 버그에 걸렸다. 지금은 10, 11을 낸다.
 
 ~~~cy
 #[generator]
@@ -301,7 +301,7 @@ f.resume()     -- two
 ### 7.3 현재 상황 요약
 
 - upstream은 2025-11 이후 멈춰 있고 교체가 끝나지 않았다.
-- 이 fork는 generator · Future 쪽 누수와 interrupt 전파를 고쳤다. generator 지역 보존 버그와 비-main await는 남아 있다.
+- 이 fork는 generator · Future 쪽 누수와 interrupt 전파를 고쳤다. generator 지역 보존 버그는 2026-11-04에 고쳤다. 비-main await는 남아 있다.
 - 호스트 경계 대기 수단은 없다. `RES_AWAIT` → `CL_AWAIT` 경로만 끝까지 이어져 있고 만드는 곳이 없다.
 
 ---

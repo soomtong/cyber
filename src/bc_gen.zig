@@ -710,6 +710,12 @@ pub fn genFuncBlock(c: *Chunk, stmt: *ir.FuncBlock, node: *ast.Node) !void {
     const stack_size = c.getMaxUsedRegisters();
     c.buf.ops.items[chk_stk_pc + 2].val = stack_size;
 
+    // The generator's heap frame must cover every register the body uses, not just the params that were
+    // reserved when `ret_gen` was emitted. Locals, loop state and temps live across `yield`.
+    if (c.cur_proc.ret_gen_pc) |ret_gen_pc| {
+        c.buf.ops.items[ret_gen_pc + 3].val = stack_size;
+    }
+
     if (func.type != .extern_) {
         c.compiler.genSymMap.getPtr(func).?.func.end_pc = @intCast(c.buf.ops.items.len);
     }
@@ -740,7 +746,9 @@ fn gen_gen_next(c: *Chunk, expr: *ir.GenNext, cstr: Cstr, node: *ast.Node) !GenV
     // Assumes expr.base.type is the option next type.
     const inst = try beginCall(c, cstr, expr.base.type, false, node);
     const gen = try genExpr(c, expr.gen, Cstr.localOrTemp());
-    try c.pushCode(.gen_next, &.{inst.ret.reg, inst.base, gen.reg}, node);
+    const pc = c.buf.ops.items.len;
+    try c.pushFCode(.gen_next, &.{inst.ret.reg, inst.base, gen.reg}, node);
+    try push_site_ptr_layout(c, pc);
     try pop_temp_value(c, gen, node);
     return endCall(c, inst, expr.base.type, node);
 }
@@ -753,7 +761,9 @@ fn gen_gen_end(c: *Chunk, expr: *ir.GenEnd, cstr: Cstr, node: *ast.Node) !GenVal
 
     const gen = try genExpr(c, expr.gen, Cstr.localOrTemp());
     const ret = c.cur_proc.reg_end;
-    try c.pushCode(.gen_end, &.{ret, @intCast(ret + next_t.reg_size()), gen.reg}, node);
+    const pc = c.buf.ops.items.len;
+    try c.pushFCode(.gen_end, &.{ret, @intCast(ret + next_t.reg_size()), gen.reg}, node);
+    try push_site_ptr_layout(c, pc);
     try pop_temp_value(c, gen, node);
     return GenValue.discard();
 }
@@ -2487,6 +2497,9 @@ fn gen_ret_gen(c: *Chunk, stmt: *ir.ReturnGen, node: *ast.Node) !void {
     // `gen_t` is the returned `^Generator`. The heap object is the boxed `Generator`, so its type id is the
     // child's like any other box. The panic sweep and `@getDeinitObject` read the size and dtor from it.
     const box_t = stmt.gen_t.cast(.pointer).child_t;
+    // The frame end (`reg_end`) is a placeholder. `genFuncBlock` patches it with the final frame size.
+    std.debug.assert(c.cur_proc.ret_gen_pc == null);
+    c.cur_proc.ret_gen_pc = pc;
     try c.pushFCode(.ret_gen, &.{ @intCast(box_t.id()), @intCast(reg_size), c.cur_proc.reg_end, 0 }, node);
     try genStmts(c, stmt.deinit_head);
     c.buf.ops.items[pc + 4].val = @intCast(c.buf.ops.items.len - pc);
@@ -3103,6 +3116,9 @@ pub const Proc = struct {
     // Alive pointer locals.
     num_ptr_locals: usize,
 
+    /// Pc of the generator function's `ret_gen`. Its frame end operand is patched with the final frame size.
+    ret_gen_pc: ?usize = null,
+
     /// LLVM
 
     fn init(btype: ProcType, id: usize, chunk_id: u32) Proc {
@@ -3274,12 +3290,18 @@ fn pushCall(c: *cy.Chunk, base: Reg, func: *cy.Func, node: *ast.Node) !void {
         else => {
             std.debug.panic("Unexpected: {}", .{func.type});
         },
-    } 
+    }
 
+    try push_site_ptr_layout(c, start);
+}
+
+/// Records the current proc's live pointer locals at a site that can be suspended under a callee frame
+/// (calls, `gen_next`, `gen_end`). Growing the stack patches the frame's stack pointers from this layout.
+fn push_site_ptr_layout(c: *cy.Chunk, pc: usize) !void {
     if (c.cur_proc.num_ptr_locals > 0) {
         const layout = try get_uniq_ptr_layout(c, c.buf.ptr_layout_builder.items);
         try c.buf.ptr_table.append(c.alloc, .{
-            .pc = @intCast(start),
+            .pc = @intCast(pc),
             .layout = @intCast(layout),
         });
     }

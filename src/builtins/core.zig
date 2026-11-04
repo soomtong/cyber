@@ -1953,8 +1953,8 @@ pub fn Generator_deinit(t: *cy.Thread) !C.Ret {
     const gen = t.param(*vmc.Generator);
     std.debug.assert(getGeneratorStatus(t, gen) == .done);
 
-    const frame = @as([*]Value, @ptrCast(gen.frame_ptr))[0..gen.frame_len];
-    t.heap.alloc.free(frame);
+    // Allocated with `new_byte_buffer` in `thread.ret_generator`.
+    t.heap.free_byte_buffer(@ptrCast(@alignCast(gen.frame_ptr)));
 
     return C.RetOk;
 }

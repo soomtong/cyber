@@ -15,13 +15,17 @@ pub const CalleeStart: u8 = vmc.CALLEE_START;
 
 /// Inits `Generator` in the return registers.
 pub fn ret_generator(heap: *cy.Heap, type_id: cy.TypeId, ret_size: u16, frame: []cy.Value, resume_pc: ?*cy.Inst, deinit_pc: ?*cy.Inst) !void {
-    // Only persists the locals. Assumes generator is 1 reg return.
+    // Persists the frame after the ret slots and call info: params, locals and temps (`RET_Y` saves it again).
     const locals = frame[ret_size + 4..];
     const obj: *vmc.Generator = @ptrCast(try heap.new_object_undef(type_id, @sizeOf(vmc.Generator)));
-    const locals_dup = try heap.alloc.dupe(cy.Value, locals);
+    // A registered buffer so the panic and `single_run` heap sweeps (which skip `Generator.deinit`) free it.
+    // At least one slot so every generator has its own address in the registry.
+    const buf = try heap.new_byte_buffer(@max(locals.len, 1) * @sizeOf(cy.Value));
+    const frame_buf = @as([*]cy.Value, @ptrCast(buf))[0..locals.len];
+    @memcpy(frame_buf, locals);
     obj.* = .{
-        .frame_ptr = @ptrCast(locals_dup.ptr),
-        .frame_len = @intCast(locals_dup.len),
+        .frame_ptr = @ptrCast(frame_buf.ptr),
+        .frame_len = @intCast(locals.len),
         .resume_pc = @ptrCast(resume_pc),
         .deinit_pc = @ptrCast(deinit_pc),
         .prev_fp = undefined,
@@ -866,16 +870,23 @@ pub const Thread = struct {
     }
 
     fn growStackPrecise(self: *Thread, newCap: usize) !void {
+        // The overflow is reported by a `CHK_STK` (function entry) or by `GEN_NEXT` / `GEN_END`
+        // (resuming a generator frame). `CHK_STK` has already moved `fp` down to the ret slots and runs
+        // again after the growth, so `fp` is reverted to the frame base. The generator insts leave `fp` alone.
+        const at_chk_stk = switch (self.c.pc[0].opcode()) {
+            .chk_stk => true,
+            .gen_next, .gen_end => false,
+            else => unreachable,
+        };
         if (self.alloc.resize(self.c.stack(), newCap)) {
             self.c.stack_len = newCap;
             self.c.stack_end = self.c.stack_ptr + newCap;
             // `alloc.resize` has pointer stability. No more work left.
 
-            // Revert to frame base ptr.
-            // This assumes that pc is at a `CHK_STK` inst which will set the ret frame ptr.
-            std.debug.assert(self.c.pc[0].opcode() == .chk_stk);
-            const ret_size = @as(*const align(1) u16, @ptrCast(self.c.pc + 1)).*;
-            self.c.fp += ret_size;
+            if (at_chk_stk) {
+                const ret_size = @as(*const align(1) u16, @ptrCast(self.c.pc + 1)).*;
+                self.c.fp += ret_size;
+            }
         } else {
             const newStack = try self.alloc.alloc(Value, newCap);
 
@@ -885,28 +896,38 @@ pub const Thread = struct {
             // Patch frame ptrs and ptr values.
             var pc: ?[*]cy.Inst = self.c.pc;
             var fp = getStackOffset(self.c.stack_ptr, self.c.fp);
+            const top_fp_off = fp;
             var frame = getFrame(self, self.c.stack(), fp, pc);
             const top_base_off = getStackOffset(self.c.stack_ptr, frame.base.?);
             while (frame.frame_type() != .init) {
                 if (get_ptr_layout(self.c.vm, pc.?)) |layout| {
                     patch_frame_ptrs(self, fp, layout, newStack.ptr);
                 }
-                const prev = frame.prev_context();
                 const base_off = getStackOffset(self.c.stack_ptr, frame.base.?);
-                const prev_fp_off = getStackOffset(self.c.stack_ptr, prev.fp);
-                newStack[base_off + 2].retFramePtr = newStack.ptr + prev_fp_off;
-                pc = prev.pc;
-                fp = prev_fp_off;
+                if (frame.frame_type() == .gen) {
+                    // A running generator frame (`GEN_NEXT` / `GEN_END`) keeps the `Generator` in the slot
+                    // that normally holds the ret frame ptr. The consumer's fp is `Generator.prev_fp`.
+                    const base = frame.base.?;
+                    const gen = base[2].asPtr(*vmc.Generator);
+                    const prev_fp_off = getStackOffset(self.c.stack_ptr, @ptrCast(gen.prev_fp));
+                    gen.prev_fp = @ptrCast(newStack.ptr + prev_fp_off);
+                    pc = base[1].retPcPtr - base[0].call_info.call_inst_off;
+                    fp = prev_fp_off;
+                } else {
+                    const prev = frame.prev_context();
+                    const prev_fp_off = getStackOffset(self.c.stack_ptr, prev.fp);
+                    newStack[base_off + 2].retFramePtr = newStack.ptr + prev_fp_off;
+                    pc = prev.pc;
+                    fp = prev_fp_off;
+                }
                 frame = getFrame(self, self.c.stack(), fp, pc);
             }
 
             // Free old stack.
             self.alloc.free(self.c.stack());
 
-            // Update to new frame base ptr.
-            // This assumes that pc is at a `CHK_STK` inst which will set the ret frame ptr.
-            std.debug.assert(self.c.pc[0].opcode() == .chk_stk);
-            self.c.fp = newStack.ptr + top_base_off;
+            // `CHK_STK` runs again from the frame base. The generator insts run again from the same fp.
+            self.c.fp = newStack.ptr + if (at_chk_stk) top_base_off else top_fp_off;
             self.c.stack_ptr = newStack.ptr;
             self.c.stack_len = newStack.len;
             self.c.stack_end = self.c.stack_ptr + newCap;

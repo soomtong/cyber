@@ -105,7 +105,7 @@ Future를 "대기의 공통 인터페이스"로 정하면 두 모델과 Thread�
 
 | 상황 | 규칙 | 근거/위험 |
 | --- | --- | --- |
-| fiber 안에서 `gen.next()` | 허용. generator 프레임은 소비자 스택, 즉 fiber 스택 위에 복사된다 | generator 지역 보존 버그(학습 문서 2.4)를 먼저 고쳐야 한다. 고치는 방향은 `RET_Y`에서 프레임을 힙에 다시 저장하는 것이다 |
+| fiber 안에서 `gen.next()` | 허용. generator 프레임은 소비자 스택, 즉 fiber 스택 위에 복사된다 | generator 지역 보존 버그(학습 문서 2.4)는 2026-11-04에 `RET_Y`가 프레임을 힙에 되저장하도록 고쳤다 |
 | generator 본문에서 `Fiber.yield()` 또는 `await()` | 허용. fiber 전체가 멈추고 generator는 `running`으로 남는다 | 프레임이 fiber 스택에 있는 채로 멈추므로 안전하다 |
 | 멈춘(`running`) generator를 다른 fiber가 `next()` | **panic: "Generator is already running."** | 재진입 검사가 필요하다(Python의 `ValueError: generator already executing`와 같음) |
 | `#[generator]` 함수를 `Fiber(gen_fn, ...)`의 진입점으로 | 컴파일 에러 | 역할 규칙 위반 |
@@ -205,7 +205,7 @@ while (r == CL_AWAIT) {
 
 | 단계 | 내용 | 바로 얻는 것 | 선행 조건 |
 | --- | --- | --- | --- |
-| 0 | generator 지역 보존 수정(`RET_Y`에서 프레임 저장), `.gen` 트레이스 결함 3개 수정 | 지금 있는 stackless가 믿을 만해짐 | 없음 |
+| 0 | generator 지역 보존 수정(`RET_Y`에서 프레임 저장, 2026-11-04 완료), `.gen` 트레이스 결함 3개 수정 | 지금 있는 stackless가 믿을 만해짐 | 없음 |
 | 1 | 루트 맥락 중단 · 재개(`CL_AWAIT`, `cl_vm_resume`, 호스트 Future C API) | 에이전트 루프의 색 없는 도구 대기 | 0 권장 |
 | 2 | `Fiber` 타입: 스택 교체, 성장, 트레이스의 fiber 경계, 빌림 sema 규칙 | 같은 힙에서 여러 실행 맥락 | 1 |
 | 3 | fiber 안의 `Future.await()`를 yield로, 비-main 스레드 await를 같은 경로로 | `@panic("TODO")` 제거, 스레드마다 협력 스케줄링 | 2 |
@@ -223,7 +223,7 @@ while (r == CL_AWAIT) {
 - 원리적인 통합은 effect handler(OCaml 5, Koka, Unison)다. generator · async · fiber가 모두 effect 하나로 표현된다.
   Cyber에 이것을 넣는 일은 타입 시스템 수준의 결정이라 이 문서의 범위 밖이다. 다만 3.2의 "fiber는 값을 싣지 않는다" 규칙은
   나중에 effect를 도입할 때 막히지 않는 방향이다.
-- 이 저장소의 현재 상태: generator는 구현됐지만 지역 보존 버그가 있다. Fiber는 문서에만 있다.
+- 이 저장소의 현재 상태: generator는 구현됐고 지역 보존 버그는 2026-11-04에 고쳤다. Fiber는 문서에만 있다.
   `CL_AWAIT` 경로는 ABI까지 이어져 있지만 만드는 곳이 없다. C AOT 백엔드는 둘 다 지원하지 않는다.
 
 ## 8. 결론

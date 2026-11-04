@@ -4361,6 +4361,14 @@ fn @gen_end(gen Generator[%FnPtr])
 fn (&Generator[]) next() -> ?(type.fn_ret(FnPtr)):
     return @gen_next(self.*)
 
+--| Returns an iterator so a generator can be used in a `for` loop.
+--| The generator keeps its own position, so the iterator state is unused.
+fn (&Generator[]) iterator() -> int:
+    return 0
+
+fn (&Generator[]) next(idx &int) -> ?(type.fn_ret(FnPtr)):
+    return @gen_next(self.*)
+
 #[bind]
 fn @gen_next(gen Generator[%FnPtr]) -> ?(type.fn_ret(FnPtr))
 

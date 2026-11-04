@@ -114,3 +114,18 @@
 실행 시 segfault했다(REPL에서 `#[generator]` 줄이 따로 제출돼 속성 없는 `fn gen(): yield 1`이 만들어지면서 발견). 이제 sema가
 "`yield` is only allowed in a `#[generator]` function."으로 거절한다. 테스트 `src/test/concurrency/yield_outside_generator_error.cy`.
 REPL에서는 속성 줄이 `:`로 끝나지 않아 블록으로 묶이지 않으므로 제너레이터 선언은 파일로 넣어야 한다(남은 과제).
+
+## 제너레이터의 `for` 순회 (2026-11-04)
+
+`for g() |v|:`는 `^Generator[...]`에 `iterator`가 없어 컴파일 오류였다(REPL 속성 줄 작업 중 발견). `for`의 순회 규약은
+`iterator()`가 상태 값을 돌려주고 `next(idx &state) -> ?T`가 다음 값을 주는 것이라, `Generator`에 `iterator() -> int`(항상 0,
+위치는 제너레이터 자신이 가짐)와 `next(idx &int)` overload를 더했다. 소진된 뒤 `status()`는 `done`이고, 이미 `next()`로 일부
+진행한 제너레이터는 멈춘 곳부터 이어서 돈다.
+
+같이 드러난 sema 버그: `for_iter_stmt`가 ref pointer(`^T`) iterable을 숨은 지역 `_iterable`에 넣을 때 `semaOwn`을 거치지 않아,
+기존 지역(`for gen |v|`)을 돌리면 루프 끝에서 숨은 지역과 원래 지역이 둘 다 해제해 이중 해제가 났다(소진 뒤 `status()`가 해제된
+메모리를 읽어 `paused`, 다음 `next()`는 segfault). 지금까지 `^T` 중 `iterator`를 가진 타입이 없어 드러나지 않았다. ref pointer면
+`semaOwn`(retain)하도록 고쳤다(`sema.zig` `.for_iter_stmt`). 임시값(`for g() |v|`)은 이미 owned라 복사가 없다.
+
+`^ArrayStore`는 여전히 `iterator`가 없어 `for`로 돌 수 없다. 별개 과제.
+테스트는 `concurrency/generator.cy` 끝의 `for` 절 5개.

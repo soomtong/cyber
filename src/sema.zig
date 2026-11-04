@@ -467,7 +467,10 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
                 const iterable_n: *ast.Node = @ptrCast(stmt.iterable);
                 const iterable_init = try c.semaExpr(stmt.iterable, .{});
                 var iterable_expr = iterable_init;
-                if (!iterable_init.type.isRefPointer()) {
+                if (iterable_init.type.isRefPointer()) {
+                    // The hidden local releases the ref at the end of the loop, so an existing local must be retained.
+                    iterable_expr = try semaOwn(c, iterable_expr, iterable_n);
+                } else {
                     iterable_expr = try semaBorrow(c, iterable_expr, node);
                 }
                 const iterable_v = try declareHiddenLocal(c, "_iterable", iterable_expr.type, iterable_expr, iterable_n);

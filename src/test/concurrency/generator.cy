@@ -222,6 +222,48 @@ test.eq(8000, gen11.next().?)
 test.eq(24000, gen11.next().?)
 test.eq(?int(none), gen11.next())
 
+-- `for` iterates a generator until it is done.
+#[generator]
+fn count_gen(n int) -> int:
+    for 0..n |i|:
+        yield i * 10
+for_total := 0
+for count_gen(3) |v|:
+    for_total += v
+test.eq(30, for_total)
+
+-- `for` with the index variable.
+for_total = 0
+for count_gen(3) |i, v|:
+    for_total += i + v
+test.eq(33, for_total)
+
+-- `for` over a generator local retains it: the local is still valid after the loop and the generator is done.
+gen12 := count_gen(2)
+for_total = 0
+for gen12 |v|:
+    for_total += v
+test.eq(10, for_total)
+test.eq(gen12.status(), .done)
+
+-- `for` resumes a generator from where it stopped.
+gen13 := count_gen(4)
+test.eq(0, gen13.next().?)
+for_total = 0
+for gen13 |v|:
+    for_total += v
+test.eq(60, for_total)
+
+-- `for` over a generator of managed values.
+#[generator]
+fn str_gen() -> str:
+    yield 'a'
+    yield 'bc'
+joined := ''
+for str_gen() |s|:
+    joined += s
+test.eq('abc', joined)
+
 -- -- coinit lambda
 -- foof := (list []Object):
 --     list.append(123)

@@ -2971,6 +2971,14 @@ while gen.next() |res|:
     --> 456
 ```
 
+A generator can also be iterated with `for`, which resumes it until it is done:
+```cy
+for iterate() |res|:
+    print(res)
+    --> 123
+    --> 456
+```
+
 The current state of a generator can be obtained with `Generator.status`:
 ```cy
 gen := iterate()

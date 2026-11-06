@@ -173,4 +173,17 @@ for m5 |e|:
     cnt += 1
 t.eq(200, cnt)
 
+-- keys()
+km := Map[str, int]{a=1, b=2, c=3}
+keys := km.keys()
+t.eq(3, keys.len())
+t.eq(true, keys.contains('a'))
+t.eq(true, keys.contains('b'))
+t.eq(true, keys.contains('c'))
+t.eq(false, keys.contains('d'))
+km_int := Map[int, str]{}
+t.eq(0, km_int.keys().len())
+km_int[7] = 'x'
+t.eq(0, km_int.keys().index(7).?)
+
 --cytest: pass

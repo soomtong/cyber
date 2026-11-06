@@ -183,4 +183,10 @@ t.eqNear(0.1, m.frac(40000000.1))
 t.eqNear(0.01, m.frac(40000000.01))
 t.eqNear(0.001, m.frac(40000000.001))
 
+-- Host function as a value.
+sqrt_fn := m.sqrt
+t.eq(4.0, sqrt_fn(16.0))
+abs_fn := m.abs
+t.eq(2.5, abs_fn(-2.5))
+
 --cytest: pass

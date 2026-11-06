@@ -119,4 +119,26 @@ vec2 := [4]byte{0x49, 0x96, 0x02, 0xD2}
 t.eq(r32(0x499602D2), r32.decode(&vec2, .big))
 t.eq(r32(0xD2029649), r32.decode(&vec2, .little))
 
+-- parse()
+t.eq(42, int.parse('42') !else 999)
+t.eq(-5, int.parse('-5') !else 999)
+t.eq(5, int.parse('+5') !else 999)
+t.eq(0, int.parse('-0') !else 999)
+t.eq(-128, i8.parse('-128') !else 99)
+t.eq(9223372036854775807, i64.parse('9223372036854775807') !else 99)
+fn parse_err(s str) -> error:
+    v := int.parse(s) !else |err|:
+        return err
+    t.eq(0, v)
+    return error.None
+t.eq(error.InvalidCharacter, parse_err(''))
+t.eq(error.InvalidCharacter, parse_err('-'))
+t.eq(error.InvalidCharacter, parse_err('+'))
+t.eq(error.InvalidCharacter, parse_err('abc'))
+t.eq(error.InvalidCharacter, parse_err('1-2'))
+t.eq(error.InvalidCharacter, parse_err('12a'))
+t.eq(-7, int('-7'))
+t.eq(0, int(''))
+t.eq(0, int('abc'))
+
 --cytest: pass

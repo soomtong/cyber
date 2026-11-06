@@ -557,22 +557,25 @@ fn Int[] :: unsigned(x %T) -> Self:
 
 fn Int[] :: parse(s str) -> !Self:
     slen := s.len()
-    if slen == 0:
-        return 0
+    start := 0
+    neg := false
+    if slen > 0:
+        if s[0] == '-':
+            neg = true
+            start = 1
+        else s[0] == '+':
+            start = 1
+    if start == slen:
+        return error.InvalidCharacter
 
     res := Self(0)
-    exp := Self(0)
-    for slen-1..>=0 |i|:
+    for start..slen |i|:
         ch := s[i]
-        if ch == '-':
-            res = -res
-            if i != 0:
-                return error.InvalidCharacter
         if !str.is_ascii_digit(ch):
             return error.InvalidCharacter
-        digit := Self(ch - '0')
-        res += digit * 10**exp
-        exp += 1
+        res = res * 10 + Self(ch - '0')
+    if neg:
+        res = -res
     return res
 
 #[reserve] fn (Int[]) `~`() -> Self
@@ -1384,7 +1387,7 @@ fn (&Slice[]) clone_on_resize(new_cap int) -> Self:
 
 --| Returns the first index of `needle` in the array or `none` if not found.
 fn (&Slice[]) index(needle T) -> ?int:
-    return self[..].index(needle)
+    return self.span().index(needle)
 
 --| Inserts a value at index `idx`.
 fn (&Slice[]) insert(idx int, val T) -> Self:
@@ -2465,9 +2468,9 @@ fn (&HashMap[]) iterator() -> int:
 
 fn (&HashMap[]) keys() -> []K:
     res := []K{}
-    iter := @iterator()
-    while @next(&iter) |e|:
-        res << e.key
+    iter := self.iterator()
+    while self.next(&iter) |e|:
+        res = res.append(e.key)
     return res
 
 fn (&HashMap[]) next(idx &int) -> ?MapEntry[K, V]:

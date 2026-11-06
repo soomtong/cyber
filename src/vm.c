@@ -1701,7 +1701,7 @@ beginSwitch:
     }
     CASE(FN_HOST): {
         u64 addr = READ_U48(2);
-        stack[pc[1]] = addr | (1<<63);
+        stack[pc[1]] = addr | ((u64)1 << 63);
         pc += 5;
         NEXT();
     }

@@ -191,4 +191,11 @@ grow_arr := Array[str]{}
 for 0..100 |i|:
     grow_arr.append(str(i))
 
+-- index() and contains().
+idx_arr := Array[int]{3, 1, 2}
+t.eq(1, idx_arr.index(1).?)
+t.eq(true, idx_arr.index(9) == none)
+t.eq(true, idx_arr.contains(2))
+t.eq(false, idx_arr.contains(9))
+
 --cytest: pass

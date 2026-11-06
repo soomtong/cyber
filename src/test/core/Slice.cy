@@ -191,4 +191,15 @@ grow_arr := []str{}
 for 0..100 |i|:
     grow_arr = grow_arr + str(i)
 
+-- index() and contains() on a slice and a sub-slice.
+idx_arr := []int{3, 1, 2}
+t.eq(1, idx_arr.index(1).?)
+t.eq(true, idx_arr.index(9) == none)
+t.eq(true, idx_arr.contains(2))
+t.eq(false, idx_arr.contains(9))
+t.eq(0, idx_arr[2..].index(2).?)
+idx_strs := []str{'a', 'bb', 'ccc'}
+t.eq(2, idx_strs.index('ccc').?)
+t.eq(true, idx_strs.index('d') == none)
+
 --cytest: pass

@@ -438,23 +438,7 @@ pub const VM = struct {
         const res = try self.compiler.compile(src_uri, src, compile_c);
         tt.endPrintVerbose("compile");
 
-        if (config.backend == C.BackendJIT) {
-            const jitRes = res.jit.buf;
-            try self.main_thread.stackEnsureTotalCapacity(res.jit.mainStackSize);
-            self.main_thread.c.fp = @ptrCast(self.main_thread.c.stack_ptr);
-
-            const main: *const fn(*VM, [*]Value) callconv(.c) void = @ptrCast(@alignCast(jitRes.buf.items.ptr + jitRes.mainPc));
-            // @breakpoint();
-
-            // const bytes = jitRes.buf.items[jitRes.mainPc..jitRes.mainPc+12*4];
-            // logger.tracev("main start {}: {}", .{jitRes.mainPc, std.fmt.fmtSliceHexLower(bytes)});
-
-            main(self, @ptrCast(self.main_thread.c.fp));
-            return .{
-                .res = null,
-                .res_t = bt.Void,
-            };
-        } else if (config.backend == C.BackendVM) {
+        if (config.backend == C.BackendVM) {
             if (C.verbose()) {
                 try debug.dumpBytecode(self, .{});
             }

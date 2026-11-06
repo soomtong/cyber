@@ -99,7 +99,6 @@ typedef struct IndexSlice {
 
 #define FRAME_VM 0
 #define FRAME_HOST 1
-#define FRAME_JIT 3
 
 // [Construct values]
 #define VALUE_FLOAT(n) ((ValueUnion){ .d = n }.u)
@@ -193,7 +192,6 @@ typedef enum {
     CodeCALL,
     CodeCALL_HOST,
     CodeCALL_TRAIT,
-    CodeENTER_JIT,
     CodeRET_0,
     CodeRET,
     CodeRET_N,
@@ -915,8 +913,6 @@ typedef struct PcFpResult {
     Value* fp;
     ResultCode code;
 } PcFpResult;
-
-typedef PcFpResult (*JitEntry)(ZThread* t, Value* fp) __attribute__((preserve_none));
 
 typedef uint8_t (*HostFn)(ZThread* t);
 

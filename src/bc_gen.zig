@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const cy = @import("cyber.zig");
-const jitgen = @import("jit/gen.zig");
 const log = cy.log.scoped(.bc_gen);
 const ir = cy.ir;
 const sema = cy.sema;
@@ -176,25 +175,6 @@ pub fn genAll(c: *cy.Compiler) !void {
                 else => {},
             }
         }
-    }
-
-    // Perform JIT gen after BC gen.
-    var jit_gen = false;
-    for (c.newChunks()) |chunk| {
-        if (chunk.jit_funcs.items.len > 0) {
-            for (chunk.buf.labels.items) |bc_pc| {
-                // Updated with jit buffer pos during `gen_funcs`.
-                try c.jitBuf.labels.putNoClobber(c.alloc, .{.chunk = chunk, .bc_pc=bc_pc}, 0);
-            }
-
-            jit_gen = true;
-            try jitgen.gen_funcs(chunk, chunk.jit_funcs.items);
-        }
-    }
-
-    if (jit_gen) {
-        try jitgen.relocate(&c.jitBuf);
-        try c.jitBuf.set_executable();
     }
 
     // Update runtime type info.
@@ -668,17 +648,6 @@ pub fn genFuncBlock(c: *Chunk, stmt: *ir.FuncBlock, node: *ast.Node) !void {
 
     const pc = c.buf.ops.items.len;
     try c.buf.markers.put(c.alloc, @intCast(pc), func);
-
-    if (func.info.jit) {
-        // Pushed before the function's proc, so there is no `cur_proc` to take a debug sym from.
-        try c.buf.pushOpSlice(.enter_jit, &.{0, 0, 0});
-        try c.compiler.jitBuf.relocs.append(c.alloc, .{ .type = .jit_entry, .data = .{ .jit_entry = .{
-            .chunk = c,
-            .bc_pc = @intCast(pc + 1),
-            .func = func,
-        }}});
-        try c.jit_funcs.append(c.alloc, func);
-    }
 
     var id: u32 = undefined;
     if (func.type == .extern_) {
@@ -1583,7 +1552,7 @@ fn can_inline(func: *cy.Func) bool {
 /// Returns the body's IR node count when `func` can be inlined.
 fn check_inline(func: *cy.Func) ?u32 {
     if (func.type != .userFunc) return null;
-    if (func.info.generator or func.info.jit or func.info.extern_) return null;
+    if (func.info.generator or func.info.extern_) return null;
     // A function that does not return runs at most once per call site, so the call is not worth removing.
     if (func.sig.ret.id() == bt.Never) return null;
     if (func.sig.params_len > inline_max_params) return null;
@@ -2525,7 +2494,7 @@ fn gen_ret_expr(c: *Chunk, stmt: *ir.ReturnExpr, node: *ast.Node) !void {
 }
 
 pub fn reserveMainRegs(c: *Chunk) !void {
-    // Reserve the first slot for BC main frame check and the JIT return addr.
+    // Reserve the first slot for the BC main frame check.
     c.cur_proc.reg_end += 1;
 
     c.buf.ptr_layout_builder.clearRetainingCapacity();

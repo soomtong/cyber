@@ -12,7 +12,6 @@ const log = std.log.scoped(.setup);
 
 pub fn fromTestBackend(backend: @TypeOf(test_config.test_backend)) c.Backend {
     return switch (backend) {
-        .jit => c.BackendJIT,
         .vm => c.BackendVM,
         .tcc => c.BackendTCC,
         .cc => c.BackendCC,

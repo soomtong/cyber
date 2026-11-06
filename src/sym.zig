@@ -906,15 +906,13 @@ const FuncInfo = packed struct {
     /// When > 0, indicates to the applicable backend that calls to this function can be replaced with an intrinsic.
     gen_intrinsic: u2 = 0,
 
-    jit: bool = false,
-
     /// Bytecode inline candidacy cache: 0 unknown, 1 inlinable, 2 not inlinable.
     bc_inline: u2 = 0,
 
     /// Some call site is inside a loop. bc_gen then treats the sites in this function's body as hot.
     bc_hot: bool = false,
 
-    padding: u2 = undefined,
+    padding: u3 = undefined,
 };
 
 pub const FuncConfig = struct {

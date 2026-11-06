@@ -163,7 +163,6 @@ pub const AttributeType = enum(u8) {
     unsafe,
     consteval,
     reserve,
-    jit,
     /// Bytecode inlining with a larger size limit. See `bc_gen.has_inline_attr`.
     inline_,
 };

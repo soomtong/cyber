@@ -408,11 +408,6 @@ static Value buildGenCallInfo(bool cont, u8 call_inst_off, u8 stack_size) {
     pc += 4; \
     NEXT();
 
-__attribute__((naked))
-void i2c();
-
-typedef PcFpResult (*i2c_ptr)(ZThread* t, Value* fp, u64 jit_ptr) __attribute__((preserve_none));
-
 ResultCode execBytecode(ZThread* t) {
     #define READ_U32(offset) ((uint32_t)pc[offset] | ((uint32_t)pc[offset+1] << 16))
     #define READ_U48(offset) ((uint64_t)pc[offset] | ((uint64_t)pc[offset+1] << 16) | ((uint64_t)pc[offset+2] << 32))
@@ -477,7 +472,6 @@ ResultCode execBytecode(ZThread* t) {
         JENTRY(CALL),
         JENTRY(CALL_HOST),
         JENTRY(CALL_TRAIT),
-        JENTRY(ENTER_JIT),
         JENTRY(RET_0),
         JENTRY(RET),
         JENTRY(RET_N),
@@ -971,34 +965,6 @@ beginSwitch:
         }
         pc = res.pc;
         stack = res.fp;
-        NEXT();
-    }
-    CASE(ENTER_JIT): {
-        JitEntry entry = (JitEntry)READ_U48(1);
-        // Save the BC caller return pc so that the jit entry can save the VM return address.
-        Inst* return_pc = (Inst*)stack[1];
-        Value* return_fp = (Value*)stack[2];
-
-        // VM: Subtract CHK_STK's ret_size from base. 
-        stack -= pc[5];
-
-        // __builtin_debugtrap();
-        // __builtin___clear_cache((char*)entry, ((char*)entry) + 4096);
-#ifdef __x86_64__
-        i2c_ptr ptr;
-        __asm__ volatile ("": "=r"(ptr): "0"(i2c)); // Make sure i2c is reinterpreted as opaque function.
-        PcFpResult res = ptr(t, stack, (u64)entry);
-#else
-        PcFpResult res = entry(t, stack);
-#endif
-
-        // TODO: Handle stack overflow and JIT -> VM re-entry.
-        // stack = res.fp;
-        // if (res.code != RES_SUCCESS) {
-        //     RETURN(res.code);
-        // }
-        pc = return_pc;
-        stack = return_fp;
         NEXT();
     }
     CASE(RET_0): {
@@ -1782,43 +1748,6 @@ beginSwitch:
 #if CGOTO
 #else
     }
-#endif
-}
-
-// VM -> JIT adapter.
-// Lets JIT functions use branching without stack side effects (call, ret).
-// Reinterpreted as `PcFpResult (ZThread* t, Value* fp, u64 jit_ptr) __attribute__((preserve_none))
-__attribute__((naked))
-void i2c() {
-#ifdef __x86_64__
-#ifdef _WIN32
-    // Keep rsp 16-byte aligned.
-    // Rip offset = (pushq) 1*2 + (jmp) 3
-    __asm__ volatile (
-        "leaq 5(%%rip), %%rax\n"
-        "pushq %%rax\n"
-        "pushq %%rax\n"
-        "jmp *%%r15\n"  // jit_ptr
-        "popq %%rax\n"
-        "popq %%rax\n"
-        "ret\n"
-        :
-        :
-        :
-    );
-#else
-    // Rip offset = (pushq) 1 + (jmp) 3
-    __asm__ volatile (
-        "leaq 4(%%rip), %%rax\n"
-        "pushq %%rax\n"
-        "jmp *%%r15\n"  // jit_ptr
-        "popq %%rax\n"
-        "ret\n"
-        :
-        :
-        :
-    );
-#endif
 #endif
 }
 

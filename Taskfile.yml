@@ -8,7 +8,7 @@
 #   task build OPT=ReleaseSafe          # optimize mode: Debug, ReleaseSafe, ReleaseFast, ReleaseSmall
 #   task build TARGET=aarch64-linux-gnu # cross compile (adds -Dcpu=baseline like CI)
 #   task test FILTER=switch             # only tests whose name contains the filter
-#   task test:behavior BACKEND=tcc      # compiler backend for behavior tests: vm, jit, tcc, cc
+#   task test:behavior BACKEND=tcc      # compiler backend for behavior tests: vm, tcc, cc
 #   task build -- -Dmalloc=mimalloc     # any extra `zig build` flags after `--`
 
 version: '3'
@@ -136,7 +136,7 @@ tasks:
         vars: { OPT: ReleaseSafe, TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '{{.CLI_ARGS}}' }
 
   test:behavior:
-    desc: 'Run the behavior tests (src/test/**.cy scripts). BACKEND=vm|jit|tcc|cc picks the compiler.'
+    desc: 'Run the behavior tests (src/test/**.cy scripts). BACKEND=vm|tcc|cc picks the compiler.'
     cmds:
       - task: zig:build
         vars: { STEP: behavior-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '{{.CLI_ARGS}}' }

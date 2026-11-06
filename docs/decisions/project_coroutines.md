@@ -31,7 +31,7 @@
 ## `#[generator]` 표기에 대한 평가
 
 - `#[...]` 속성은 언어 안에 이미 자리 잡았다. 현재 `extern` · `bind` · `reserve` · `cond` · `generator` · `unsafe` ·
-  `consteval` · `jit` 여덟 개이고 `src/parser.zig`의 `attributes` 고정 목록으로 검사한다. Rust와 같은 모양이다.
+  `consteval` · `call` · `inline` 아홉 개이고(`jit`는 2026-11-06 삭제) `src/parser.zig`의 `attributes` 고정 목록으로 검사한다. Rust와 같은 모양이다.
 - 다만 다른 속성은 선언의 메타데이터인데 `#[generator]`는 호출 결과 타입을 `int`에서 `Generator[fn() -> int]`로 바꾼다.
   시그니처의 `-> int`만 보고 반환 타입을 오해할 수 있다. JS는 `function*`로 선언에 표시하고 Python은 `yield`로 추론한다.
   의미상으로는 `gen fn` 같은 선언 키워드나 `yield` 기반 추론이 더 가깝다.

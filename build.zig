@@ -19,7 +19,6 @@ var log_mem: bool = undefined;
 var no_cache: bool = undefined;
 var optFFI: ?bool = undefined;
 var optStatic: ?bool = undefined;
-var optJIT: ?bool = undefined;
 var strip: bool = undefined;
 var threads: bool = undefined;
 
@@ -48,7 +47,6 @@ pub fn build(b: *std.Build) !void {
     optFFI = b.option(bool, "ffi", "Override default FFI: true, false");
     optStatic = b.option(bool, "static", "Override default lib build type: true=static, false=dynamic");
     trace = b.option(bool, "trace", "Enable tracing features.") orelse (optimize == .debug);
-    optJIT = b.option(bool, "jit", "Build with JIT.");
     log_mem = b.option(bool, "log-mem", "Log memory traces.") orelse false;
     no_cache = b.option(bool, "no-cache", "Disable caching when running tests.") orelse false;
     dev = b.option(bool, "dev", "Marks version as dev.") orelse true;
@@ -343,7 +341,6 @@ pub const Options = struct {
     cyc: bool,
     ffi: bool,
     cli: bool,
-    jit: bool,
 
     fn applyOverrides(self: *Options) void {
         if (optFFI) |ffi| {
@@ -351,9 +348,6 @@ pub const Options = struct {
         }
         if (optStatic) |static| {
             self.static = static;
-        }
-        if (optJIT) |jit| {
-            self.jit = jit;
         }
     }
 };
@@ -371,7 +365,6 @@ fn getDefaultOptions() Options {
         // bindings go through the no-FFI path there.
         .ffi = !target.cpu.arch.isWasm() and !target.abi.isMusl(),
         .cli = !target.cpu.arch.isWasm(),
-        .jit = false,
     };
 }
 
@@ -452,7 +445,6 @@ fn create_lib_config(b: *std.Build, opts: Options) !*std.Build.Module {
     options.addOption(bool, "cyc", opts.cyc);
     options.addOption(bool, "ffi", opts.ffi);
     options.addOption(bool, "cli", opts.cli);
-    options.addOption(bool, "jit", opts.jit);
     options.addOption(bool, "threads", threads);
     return options.createModule();
 }

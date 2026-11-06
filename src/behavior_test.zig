@@ -121,10 +121,6 @@ fn test_functions(run: *Runner) void {
     run.case("functions/func_type_error.cy");
     run.case("functions/func_union_type.cy");
     run.case("functions/func_union_type_error.cy");
-    // The JIT has no wasm backend (jit/gen.zig gen_funcs).
-    if (test_config.test_backend == .vm and !builtin.target.cpu.arch.isWasm()) {
-        run.case("functions/jit_func.cy");
-    }
     run.case("functions/lambda.cy");
     run.case("functions/lambda_incompat_arg_error.cy");
     run.case("functions/main_func_overload_error.cy");
@@ -493,8 +489,6 @@ test "Compile." {
         try compileCase("tools/md4c.cy");
         try compileCase("tools/cbindgen.cy");
         try compileCase("../docs/gen-docs.cy");
-        // try compileCase("jit/gen-stencils-a64.cy"); TODO: Re-enable.
-        // try compileCase("jit/gen-stencils-x64.cy");
     }
 
     // benchmarks.

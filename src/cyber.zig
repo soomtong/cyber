@@ -27,7 +27,6 @@ pub const Instance = template.Instance;
 pub const ir = @import("ir.zig");
 
 pub const cgen = @import("cgen.zig");
-pub const jitgen = @import("jit/gen.zig");
 
 pub const types = @import("types.zig");
 pub const TypeId = types.TypeId;
@@ -101,7 +100,6 @@ pub const is32Bit = build_config.is32Bit;
 pub const hasStdFiles = !isWasm;
 pub const hasCYC = build_config.cyc;
 pub const hasFFI = build_config.ffi;
-pub const hasJIT = build_config.jit;
 pub const hasCLI = build_config.cli;
 
 const build_config = @import("build_config");

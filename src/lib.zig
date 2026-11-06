@@ -2048,9 +2048,8 @@ fn refAllDeclsRecursive(comptime T: type) void {
     if (!builtin.is_test) return;
     @setEvalBranchQuota(1_000_000);
     inline for (comptime std.meta.declarations(T)) |decl_name| {
-        // Translated C headers hold expressions that do not translate, so they are not walked. The copy-and-patch
-        // JIT (`jitgen`) is unsupported dead code that no longer compiles (`docs/decisions/project_direction.md`).
-        if (comptime std.mem.eql(u8, decl_name, "vmc") or std.mem.eql(u8, decl_name, "c") or std.mem.eql(u8, decl_name, "jitgen")) continue;
+        // Translated C headers hold expressions that do not translate, so they are not walked.
+        if (comptime std.mem.eql(u8, decl_name, "vmc") or std.mem.eql(u8, decl_name, "c")) continue;
         const D = @field(T, decl_name);
         if (@TypeOf(D) == type) {
             switch (@typeInfo(D)) {

@@ -28,7 +28,7 @@ caller의 proc 안에서 그대로 생성한다.
 
 ## 1단계 대상 조건 (보수적인 허용 목록)
 
-- `func.type == .userFunc`, generator · jit · lambda 아님, 매개변수 8개 이하.
+- `func.type == .userFunc`, generator · lambda 아님(jit 속성은 2026-11-06 삭제), 매개변수 8개 이하.
 - 문장: `declare_local`, `set_local`, `set_ret`, `set_field`, `set_deref`, `set_global`, `ret`, `ret_expr`, `if_block`,
   `block`, `discard`, `nop_label`, `pop_locals`, `release`, `trap`. 루프 · switch · try · yield · await · captured는 거부.
   `trap`은 사용자 함수 끝(마지막 `return` 뒤)에 붙는 도달 불가 표시라 인라인 중에는 생성하지 않고, `return` 뒤에 `trap`만

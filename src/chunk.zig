@@ -10,8 +10,6 @@ const sema = cy.sema;
 const types = cy.types;
 const log = cy.log.scoped(.chunk);
 const bc = @import("bc_gen.zig");
-const jitgen = @import("jit/gen.zig");
-const X64 = @import("jit/x64.zig");
 const ast = cy.ast;
 const bt = cy.types.BuiltinTypes;
 
@@ -150,8 +148,6 @@ pub const Chunk = struct {
     relocations: std.ArrayList(bc.Relocation),
     rt_relocations: std.ArrayList(bc.Relocation),
 
-    jit_funcs: std.ArrayList(*cy.Func),
-
     cur_proc: *bc.Proc,
 
     // TODO: inline the active `Proc`.
@@ -160,7 +156,6 @@ pub const Chunk = struct {
     temp_access_path: VarAccessPath,
 
     buf: cy.ByteCodeBuffer,
-    jit: *jitgen.CodeBuffer,
 
     /// This chunk's sym.
     sym: *cy.sym.Chunk,
@@ -220,7 +215,6 @@ pub const Chunk = struct {
             .listDataStack = .empty,
             .cur_proc = undefined,
             .buf = cy.ByteCodeBuffer.init(c.alloc, c.vm),
-            .jit = undefined,
             .curNode = null,
             .cur_cont_expr = null,
             .tempBufU8 = .empty,
@@ -248,7 +242,6 @@ pub const Chunk = struct {
             .bc_local_map = .empty,
             .relocations = .empty,
             .rt_relocations = .empty,
-            .jit_funcs = .empty,
         };
         self.encoder.c = c;
         self.ir.init(c.alloc);
@@ -321,7 +314,6 @@ pub const Chunk = struct {
         self.bc_local_map.deinit(self.alloc);
         self.relocations.deinit(self.alloc);
         self.rt_relocations.deinit(self.alloc);
-        self.jit_funcs.deinit(self.alloc);
 
         self.alloc.free(self.srcUri);
         self.parser.deinit();

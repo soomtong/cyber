@@ -22,9 +22,6 @@ const io_mod = @import("std/io.zig");
 const test_mod = @import("std/test.zig");
 const cgen = cy.cgen;
 const bcgen = @import("bc_gen.zig");
-const jitgen = @import("jit/gen.zig");
-const assm = @import("jit/assembler.zig");
-const A64 = @import("jit/a64.zig");
 const bindings = cy.bindings;
 const module = cy.module;
 const ast = cy.ast;
@@ -46,8 +43,6 @@ pub const Compiler = struct {
 
     // For BC codegen.
     debug_tables: std.ArrayList(cy.DebugTableEntry),
-
-    jitBuf: jitgen.CodeBuffer,
 
     // Compile-time heap.
     heap: cy.Heap,
@@ -123,7 +118,6 @@ pub const Compiler = struct {
             .alloc = vm.alloc,
             .vm = vm,
             .heap = try cy.Heap.init(vm, null, vm.alloc, undefined),
-            .jitBuf = jitgen.CodeBuffer.init(vm.alloc),
             .reports = .empty,
             .sema = try sema.Sema.init(vm.alloc, self),
             .loader = default_loader,
@@ -165,12 +159,6 @@ pub const Compiler = struct {
         self.clearReports();
         if (!reset) {
             self.reports.deinit(self.alloc);
-        }
-
-        if (reset) {
-            self.jitBuf.clear();
-        } else {
-            self.jitBuf.deinit();
         }
 
         if (reset) {
@@ -286,7 +274,7 @@ pub const Compiler = struct {
         self.chunk_start = @intCast(self.chunks.items.len);
         self.type_start = @intCast(self.sema.types.items.len);
 
-        // The copy-and-patch JIT (`src/jit/`) is not maintained. See docs/decisions/project_direction.md.
+        // The copy-and-patch JIT was removed. See docs/decisions/project_direction.md.
         if (config.backend == C.BackendJIT) {
             _ = try self.addReportFmt(.compile_err, "The JIT backend is not supported. Use the bytecode VM (default) or the C backend (-tcc, -cc).", &.{}, null, 0);
             return error.CompileError;
@@ -495,17 +483,6 @@ pub const Compiler = struct {
             log.tracev("Perform codegen.", .{});
 
             switch (self.config.backend) {
-                C.BackendJIT => {
-                    if (cy.isWasm) return error.Unsupported;
-                    {
-                        return error.Unsupported;
-                    }
-                    try jitgen.gen(self);
-                    return .{ .jit = .{
-                        .mainStackSize = self.buf.mainStackSize,
-                        .buf = self.jitBuf,
-                    }};
-                },
                 C.BackendTCC, C.BackendCC => {
                     if (cy.isWasm or !cy.hasCLI) return error.Unsupported;
                     const res = try cgen.gen(self);
@@ -1375,10 +1352,6 @@ fn resolveChunkSyms(c: *cy.Chunk) !void {
 
 pub const CompileResult = union {
     vm: *cy.ByteCodeBuffer,
-    jit: struct {
-        mainStackSize: u32,
-        buf: jitgen.CodeBuffer,
-    },
     aot: AotCompileResult,
 };
 

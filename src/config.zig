@@ -7,7 +7,6 @@ pub const Engine = enum {
 
 pub const TestBackend = enum {
     vm,
-    jit,
     tcc,
     cc,
 };

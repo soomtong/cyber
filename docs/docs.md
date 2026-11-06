@@ -4059,7 +4059,7 @@ Records, slices, maps and optionals are shown with their contents. Nesting stops
 ## JIT compiler.
 The JIT compiler is not supported. Passing `-jit` (or `CL_JIT` through the embedding API) fails with a compile error. Use the default bytecode VM, or the C backend (`-tcc`, `-cc`) for native performance.
 
-The JIT was an experiment that stitched together pregenerated machine code targeting the same runtime stack slots used by the VM, a technique known as `copy-and-patch`. Its code generator has not kept up with the current IR and bytecode.
+The JIT was an experiment that stitched together pregenerated machine code targeting the same runtime stack slots used by the VM, a technique known as `copy-and-patch`. Its code generator did not keep up with the current IR and bytecode, and the code was removed.
 
 ## C backend.
 The C backend generates a static binary from Cyber source code by transpiling to C code and relying on a local C compiler.

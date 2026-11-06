@@ -79,4 +79,5 @@
   `ByteCodeBuffer.clear`(없는 `unwind_*` 필드), `bounded_array`의 옛 `Writer`, `String_decode` · `String_decode2`(바인딩
   안 된 `str.decode` 구현, 되살리려면 새로 짜야 함). 오류 행이 함수 안이 아니라 그 아래 별칭 행(`pub const x = module.x;`)인
   경우가 있어 감싸는 함수를 기계적으로 지우면 안 된다(`Chunk.findResolvedType`를 그렇게 잘못 지웠다가 복원, `meta.type.field`가 씀).
-  복사-패치 JIT(`src/jit/`, `Compiler.jitBuf`, `FuncInfo.jit`, `-Djit`)는 남아 있고 테스트에서 제외했다. 지울지는 사용자 결정.
+  복사-패치 JIT(`src/jit/`, `Compiler.jitBuf`, `FuncInfo.jit`, `-Djit`)는 남겨 테스트에서 제외했다가 2026-11-06 지웠다
+  (`project_direction.md`).

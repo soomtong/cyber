@@ -2838,9 +2838,6 @@ pub fn ensure_resolved_func(c: *cy.Chunk, func: *cy.Func, resolve_new_types: boo
                 try c.resolveFunc(func, sig);
                 return;
             },
-            .jit => {
-                func.info.jit = true;
-            },
             else => {},
         }
     }

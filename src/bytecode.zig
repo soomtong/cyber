@@ -70,10 +70,6 @@ pub const ByteCodeBuffer = struct {
 
     markers: std.AutoHashMapUnmanaged(u32, *cy.Func),
 
-    /// JIT requires BC label locations to know how to map jumps.
-    /// Only labels for backward jumps. (loops).
-    labels: std.ArrayList(u32),
-
     /// The required stack size for the main frame.
     mainStackSize: u32,
 
@@ -99,7 +95,6 @@ pub const ByteCodeBuffer = struct {
             .ptr_layout_builder = .empty,
             .inline_sites = .empty,
             .markers = .empty,
-            .labels = .empty,
         };
         return new;
     }
@@ -129,15 +124,10 @@ pub const ByteCodeBuffer = struct {
         self.ptr_layout_builder.deinit(self.alloc);
         self.inline_sites.deinit(self.alloc);
         self.markers.deinit(self.alloc);
-        self.labels.deinit(self.alloc);
     }
 
     pub inline fn len(self: *ByteCodeBuffer) usize {
         return self.ops.items.len;
-    }
-
-    pub fn push_label(self: *ByteCodeBuffer) !void {
-        try self.labels.append(self.alloc, @intCast(self.len()));
     }
 
     const ConstString = struct {
@@ -939,7 +929,6 @@ pub fn getInstLenAt(pc: [*]const Inst) u8 {
         .nop32 => {
             return 3;
         },
-        .enter_jit,
         .ret_y,
         .captured,
         // .list,
@@ -1091,7 +1080,6 @@ pub const OpCode = enum(u8) {
     call = vmc.CodeCALL,
     call_host = vmc.CodeCALL_HOST,
     call_trait = vmc.CodeCALL_TRAIT,
-    enter_jit = vmc.CodeENTER_JIT,
     ret_0 = vmc.CodeRET_0,
     ret = vmc.CodeRET,
     ret_n = vmc.CodeRET_N,
@@ -1216,7 +1204,7 @@ pub const OpCode = enum(u8) {
 };
 
 test "bytecode internals." {
-    try t.eq(132, std.enums.values(OpCode).len);
+    try t.eq(131, std.enums.values(OpCode).len);
     try t.eq(@sizeOf(Inst), 2);
     try t.eq(@sizeOf(DebugSym), 16);
 }

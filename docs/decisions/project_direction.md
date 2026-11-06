@@ -16,7 +16,7 @@
 - 기본 백엔드는 바이트코드 VM이다. 네이티브가 필요하면 TCC/C AOT(`-Dtest-backend=tcc|cc`)로 충분하다.
 - LLVM 백엔드(`src/llvm.zig` · `src/llvm_gen.zig`, `-Djit`)는 켜지 않는다. upstream도 2025-11 이후
   손대지 않은 미완성 경로다. Zig 0.17 업그레이드의 남은 항목 7(LLVM-C 번역 모듈)은 이 이유로 닫았다.
-  코드는 `cy.hasJIT` 뒤에 있어 빌드에 영향이 없으므로 지우지 않고 둔다.
+  당시에는 `cy.hasJIT` 뒤에 있어 빌드에 영향이 없으므로 두었고, 2026-11-04 죽은 코드 정리에서 파일을 지웠다.
 - 복사-패치 JIT(`src/jit/`, CLI `-jit`)는 LLVM 백엔드와 다른 경로다. 2026-11-01 확인 결과 세 겹으로 동작하지 않는다.
   1. `src/compiler.zig`의 `C.BackendJIT` 분기가 `jitgen.gen` 앞에서 무조건 `error.Unsupported`를 돌려준다(upstream
      `f401a101`, 2024-07-10 "Refactor to `Slot`"부터).
@@ -30,6 +30,14 @@
   컴파일 오류로 거절한다(CLI `-jit`과 임베딩 API `CL_JIT` 공통, lib 테스트 "JIT backend is rejected with a clear
   compile error."). `cyber help`에서 `-jit`를 뺐고 `docs/docs.md`의 JIT 절은 지원하지 않는다고 고쳤다. `CL_JIT`
   enum 값은 ABI 호환을 위해 남긴다.
+  2026-11-06 결정(사용자 지시): 잔재를 모두 지운다. `src/jit/` 11개 파일(gen · 어셈블러 · 스텐실 · 생성 스크립트),
+  `Compiler.jitBuf` · `CompileResult.jit`, `Chunk.jit_funcs` · `Chunk.jit`, `bc_gen`의 JIT 생성 단계와 `func.info.jit`
+  분기, `FuncInfo.jit`(packed라 `padding`을 u3으로 늘려 크기 유지), `#[jit]` 속성(parser · ast · sema, 테스트
+  `functions/jit_func.cy`), `ByteCodeBuffer.labels`(JIT만 쓰던 역방향 점프 표), `enter_jit` opcode(`vm.h` enum ·
+  `vm.c` `JENTRY` · `CASE`, `FRAME_JIT`, `JitEntry`, x86_64 `i2c` naked 어댑터, opcode 수 132 → 131), `-Djit` 빌드 옵션과
+  `cy.hasJIT`, `TestBackend.jit`, lib-test `All declarations compile.`의 `jitgen` 예외. 남긴 것: `CL_JIT` enum 값과
+  `cy.Backend.jit`(ABI), CLI `-jit`과 `Compiler.compile()`의 거절 오류, 그 lib 테스트. `docs/docs.md` JIT 절은
+  코드가 제거됐다고 한 문장 고쳤다.
 
 ## 따라오는 우선순위
 

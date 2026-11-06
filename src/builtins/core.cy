@@ -2839,8 +2839,10 @@ fn @copy(src Ptr[%T]) -> T:
                         return meta.init_choice(T, Tag, payload.*)
 
         #case .ref_trait:
-            trait_s := as[Ptr[TraitStruct]] src
-            return @unsafeCast(T, @copyStruct(TraitStruct, trait_s))
+            -- The copy shares the impl object, so it needs its own reference.
+            trait_s := (as[Ptr[TraitStruct]] src).*
+            @retain(as trait_s.impl)
+            return @unsafeCast(T, trait_s)
 
         #case .borrow_trait:
             trait_s := as[Ptr[TraitStruct]] src

@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.2-dev 658-7e7268b</div>
+    <div class="sub-title">v0.4.2-dev 659-1a1bdf6</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -4195,8 +4195,9 @@ When compiled AOT, the libraries can be linked statically.</p>
 An example can be found in <a href="https://github.com/fubark/cyber/blob/master/examples/ffi.cy" title="">ffi.cy</a>.</p>
 <p><code>#extern</code> bindings are resolved from a dynamic library upon program startup.</p>
 <p><code>c.bind_lib</code> tells the compiler where to look for the dynamic library. The extern declarations in the same module are then resolved at runtime:</p>
-<pre><code class="language-cy">#c.bind_lib('mylib.dylib')
+<pre><code class="language-cy">#c.bind_lib('./mylib.dylib')
 </code></pre>
+<p>A path with a directory component is opened as is. A bare file name is searched by the system loader (<code>LD_LIBRARY_PATH</code>, the directory of the <code>cyber</code> executable, then the system library paths), so use an explicit path like <code>./mylib.so</code> to load a library from the current directory.</p>
 <p>A module can be configured to use static binding when building an executable or a runtime binding for faster iterations. The same <code>#extern</code> declarations are reused in both cases:</p>
 <pre><code class="language-cy">#if meta.is_vm_target():
     #c.bind_lib('mylib.dylib')

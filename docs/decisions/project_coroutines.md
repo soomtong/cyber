@@ -106,7 +106,7 @@
 (인라인된 호출, 제너레이터 안). 기대 트레이스에 `core.cy` 줄 번호가 들어가지 않도록 behavior 테스트 대신 프레임 이름 순서를 본다.
 `thread.zig` 수정을 빼면 두 테스트가 abort하고, `meta.zig` 수정을 빼면 두 번째가 실패한다.
 
-남은 것: F-31의 다른 절반(`dump_frame`이 `chk_stk`의 `stack_size`를 `+3`에서 읽음)은 손대지 않았다.
+남은 것: F-31의 다른 절반(`dump_frame`이 `chk_stk`의 `stack_size`를 `+3`에서 읽음)은 손대지 않았다. 2026-11-06에 `+2`로 고쳤다(`debug.zig` `get_pc_func_metadata`).
 
 ## 일반 함수 안의 `yield` (2026-11-04)
 

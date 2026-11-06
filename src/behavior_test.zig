@@ -205,6 +205,7 @@ fn test_types(run: *Runner) void {
     run.case("types/func_return_type_error.cy");
     run.case("types/func_param_type_undeclared_error.cy");
     run.case("types/method_implicit_self_assign_error.cy");
+    run.case("types/method_mut_self_array_field.cy");
     run.case("types/method_shadow_member.cy");
     run.case("types/objects.cy");
     run.case("types/object_downcast_panic.cy");

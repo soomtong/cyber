@@ -3716,8 +3716,9 @@ An example can be found in [ffi.cy](https://github.com/fubark/cyber/blob/master/
 
 `c.bind_lib` tells the compiler where to look for the dynamic library. The extern declarations in the same module are then resolved at runtime:
 ```cy
-#c.bind_lib('mylib.dylib')
+#c.bind_lib('./mylib.dylib')
 ```
+A path with a directory component is opened as is. A bare file name is searched by the system loader (`LD_LIBRARY_PATH`, the directory of the `cyber` executable, then the system library paths), so use an explicit path like `./mylib.so` to load a library from the current directory.
 
 A module can be configured to use static binding when building an executable or a runtime binding for faster iterations. The same `#extern` declarations are reused in both cases:
 ```cy

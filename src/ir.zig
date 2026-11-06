@@ -477,6 +477,9 @@ pub const FuncBlock = extern struct {
     bc_inline_cost: u32 = 0,
     /// The function has `#[inline]`, so every site is treated as hot.
     bc_inline_attr: bool = false,
+    /// Bit `i`: param `i` is assigned or has its address taken in the body, so an inlined call can not
+    /// bind it to the caller local whose address is passed (`bc_gen.gen_inline_call`).
+    bc_param_pinned: u32 = 0,
 
     /// Mark a func block to skip generation.
     /// Useful for removing temporary compile-time functions.

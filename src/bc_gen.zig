@@ -833,6 +833,12 @@ fn genAddressOfField(c: *cy.Chunk, data: *ir.Field, cstr: Cstr, node: *ast.Node)
 
     const dst = try bc.selectReg(c, c.sema.ptr_void_t, cstr, node);
 
+    // A register-aligned field of a local record starts at one of the local's registers.
+    if (local_field_base(c, rec.rec, rec.off + offset)) |reg| {
+        try push_addr(c, dst.reg, reg, node);
+        return dst;
+    }
+
     const rec_t = rec.rec.type;
 
     var recv: GenValue = undefined;
@@ -851,6 +857,24 @@ fn genAddressOfField(c: *cy.Chunk, data: *ir.Field, cstr: Cstr, node: *ast.Node)
 }
 
 fn gen_deref(c: *Chunk, expr: *ir.Deref, cstr: Cstr, node: *ast.Node) !GenValue {
+    // `(&x).*` of a value local is `x`.
+    if (expr.expr.code == .address_of) {
+        const inner = expr.expr.cast(.address_of).expr;
+        if (inner.code == .local and !inner.type.isRefLike() and inner.type == expr.base.type) {
+            return gen_local(c, inner.cast(.local), cstr, node);
+        }
+    }
+    // `p.*` of a pointer param bound to a caller local is that local.
+    if (addr_of_local_value(c, expr.expr, expr.base.type)) |src| {
+        if (cstr.type == .simple) {
+            return GenValue.initLocal(src);
+        }
+        const dst = try bc.selectReg(c, expr.base.type, cstr, node);
+        if (dst.type != .discard) {
+            try push_mov(c, dst.reg, src, @intCast(expr.base.type.reg_size()), node);
+        }
+        return dst;
+    }
     const dst = try bc.selectReg(c, expr.base.type, cstr, node);
     const srcv = try genExpr(c, expr.expr, Cstr.localOrTemp());
     try push_load(c, dst.reg, srcv.reg, 0, expr.base.type, node);
@@ -898,6 +922,18 @@ fn gen_field(c: *Chunk, expr: *ir.Field, cstr: Cstr, node: *ast.Node) !GenValue 
     const offset = expr.rec.type.pointeeOrSelf().fields().?[expr.idx].offset;
     const rec = fold_rec_offset(expr.rec);
 
+    // A field of a local record is already in the local's registers.
+    if (local_field_reg(c, rec.rec, rec.off + offset, ret_t)) |src| {
+        if (cstr.type == .simple) {
+            return GenValue.initLocal(src);
+        }
+        const dst = try bc.selectReg(c, ret_t, cstr, node);
+        if (dst.type != .discard) {
+            try push_mov(c, dst.reg, src, @intCast(ret_t.reg_size()), node);
+        }
+        return dst;
+    }
+
     const dst = try bc.selectReg(c, expr.base.type, cstr, node);
 
     const temp_start = c.cur_proc.reg_end;
@@ -912,12 +948,40 @@ fn gen_field(c: *Chunk, expr: *ir.Field, cstr: Cstr, node: *ast.Node) !GenValue 
     return dst;
 }
 
+/// A value-typed local keeps its record in registers with the record's memory layout, so a field
+/// that covers whole registers (8-byte aligned, a multiple of 8 bytes) is the register at
+/// `base + offset / 8`. Reading or writing that register is the same as going through `addr`.
+fn local_field_reg(c: *Chunk, rec: *ir.Expr, offset: usize, field_t: *cy.Type) ?Reg {
+    const size = field_t.size();
+    if (size == 0 or size % 8 != 0) return null;
+    return local_field_base(c, rec, offset);
+}
+
+/// The register at byte `offset` of a record that lives in registers, when `offset` is register-aligned:
+/// a value-typed local, or a pointer param bound to the address of a caller local (`LocalSlot.addr_of`).
+fn local_field_base(c: *Chunk, rec: *ir.Expr, offset: usize) ?Reg {
+    if (rec.code != .local or offset % 8 != 0) return null;
+    const slot = local_slot(c, rec.cast(.local).id);
+    if (slot.kind == .reg and rec.type.isRefLike()) return null;
+    return slot.reg + @as(Reg, @intCast(offset / 8));
+}
+
+/// The caller local a pointer local is bound to, when the whole local can stand in for `*ptr` of `val_t`.
+fn addr_of_local_value(c: *Chunk, ptr: *ir.Expr, val_t: *cy.Type) ?Reg {
+    if (ptr.code != .local) return null;
+    const slot = local_slot(c, ptr.cast(.local).id);
+    if (slot.kind != .addr_of) return null;
+    const size = val_t.size();
+    if (size == 0 or size % 8 != 0) return null;
+    return slot.reg;
+}
+
 fn gen_lift(c: *Chunk, expr: *ir.Lift, cstr: Cstr, node: *ast.Node) !GenValue {
     const dst = try bc.selectReg(c, expr.base.type, cstr, node);
     if (expr.child.code == .init) {
         const child_t = expr.child.type;
         try push_new(c, dst.reg, child_t, @intCast(child_t.size()), node);
-        try gen_init_to(c, dst.reg, expr.child.cast(.init), node);
+        try gen_init_to(c, dst.reg, expr.child.cast(.init), 0, 0, node);
         return dst;
     } else {
         const src = try genExpr(c, expr.child, Cstr.localOrTemp());
@@ -935,14 +999,16 @@ fn gen_init_case(c: *Chunk, expr: *ir.InitCase, cstr: Cstr, node: *ast.Node) !Ge
     return genExpr(c, expr.child, cstr);
 }
 
-fn gen_init_to(c: *Chunk, dst_ptr: Reg, expr: *ir.Init, node: *ast.Node) !void {
+/// Stores the fields through `dst_ptr`. `avoid_start..avoid_end` are the destination registers when the
+/// destination is a local; a field value living there is copied out before any field is written.
+fn gen_init_to(c: *Chunk, dst_ptr: Reg, expr: *ir.Init, avoid_start: u16, avoid_end: u16, node: *ast.Node) !void {
     const temp_start = c.cur_proc.reg_end;
     const arg_start = c.u16_stack.items.len;
     defer c.u16_stack.items.len = arg_start;
     const args = expr.args[0..expr.nargs];
     for (args) |arg_expr| {
-        const arg = try genExpr(c, arg_expr, Cstr.localOrTemp());
-        try c.u16_stack.append(c.alloc, arg.reg);
+        const arg = try gen_init_arg(c, arg_expr, avoid_start, avoid_end, node);
+        try c.u16_stack.append(c.alloc, arg);
     }
     const regs = c.u16_stack.items[arg_start..];
 
@@ -1011,14 +1077,141 @@ fn gen_init(c: *Chunk, expr: *ir.Init, cstr: Cstr, node: *ast.Node) !GenValue {
 
     const temp_start = c.cur_proc.reg_end;
 
+    if (dst.type != .discard and try gen_init_regs(c, dst, expr, node)) {
+        try pop_regs(c, temp_start, node);
+        return dst;
+    }
+
     // Reserve reg for dst addr.
     const dst_ptr = try reserve_reg(c, c.sema.ptr_void_t);
     try push_addr(c, dst_ptr, dst.reg, node);
 
-    try gen_init_to(c, dst_ptr, expr, node);
+    const dst_end: u16 = @as(u16, dst.reg) + @as(u16, @intCast(expr.base.type.reg_size()));
+    try gen_init_to(c, dst_ptr, expr, dst.reg, dst_end, node);
 
     try pop_regs(c, temp_start, node);
     return dst;
+}
+
+/// Writes an `init` whose fields all cover whole registers straight into the destination registers
+/// instead of through its address. Returns false when a field is packed or the type is not handled.
+fn gen_init_regs(c: *Chunk, dst: GenValue, expr: *ir.Init, node: *ast.Node) !bool {
+    var field_buf: [2]cy.types.Field = undefined;
+    const fields = init_fields(expr, &field_buf) orelse return false;
+    const args = expr.args[0..expr.nargs];
+    if (fields.len != args.len) return false;
+    for (fields) |field| {
+        const size = field.type.size();
+        if (size == 0 or size % 8 != 0 or field.offset % 8 != 0) return false;
+    }
+
+    // A temp can not be named by the field expressions. A local can (`p = {x=p.y, y=p.x}`), so its
+    // fields are evaluated first unless every one is a constant or a local outside the destination.
+    const dst_end: u16 = @as(u16, dst.reg) + @as(u16, @intCast(expr.base.type.reg_size()));
+    var direct = dst.type == .temp;
+    if (!direct) {
+        direct = true;
+        for (args) |arg| {
+            if (!init_arg_is_simple(c, arg, dst.reg, dst_end)) {
+                direct = false;
+                break;
+            }
+        }
+    }
+    if (direct) {
+        for (fields, args) |field, arg| {
+            const reg = dst.reg + @as(Reg, @intCast(field.offset / 8));
+            _ = try genExpr(c, arg, Cstr.toTemp(reg));
+        }
+        return true;
+    }
+
+    const arg_start = c.u16_stack.items.len;
+    defer c.u16_stack.items.len = arg_start;
+    for (args) |arg| {
+        const reg = try gen_init_arg(c, arg, dst.reg, dst_end, node);
+        try c.u16_stack.append(c.alloc, reg);
+    }
+    const regs = c.u16_stack.items[arg_start..];
+    for (fields, regs) |field, src| {
+        const reg = dst.reg + @as(Reg, @intCast(field.offset / 8));
+        try push_mov(c, reg, @intCast(src), @intCast(field.type.reg_size()), node);
+    }
+    return true;
+}
+
+/// The fields an `init` writes, in the order of its args. The payload of an option · choice · result
+/// is a field at offset 8.
+fn init_fields(expr: *ir.Init, buf: *[2]cy.types.Field) ?[]const cy.types.Field {
+    const args = expr.args[0..expr.nargs];
+    switch (expr.base.type.kind()) {
+        .option => {
+            const option_t = expr.base.type.cast(.option);
+            buf.* = .{
+                option_t.fields()[0],
+                .{ .sym = undefined, .type = args[1].type, .offset = 8 },
+            };
+            return buf;
+        },
+        .choice => {
+            const choice_t = expr.base.type.cast(.choice);
+            std.debug.assert(args[1].code == .init_case);
+            buf.* = .{
+                choice_t.fields()[0],
+                .{ .sym = undefined, .type = args[1].cast(.init_case).child.type, .offset = 8 },
+            };
+            return buf;
+        },
+        .result => {
+            const res_t = expr.base.type.cast(.result);
+            std.debug.assert(args[1].code == .init_case);
+            buf.* = .{
+                res_t.fields()[0],
+                .{ .sym = undefined, .type = args[1].cast(.init_case).child.type, .offset = 8 },
+            };
+            return buf;
+        },
+        .c_union => {
+            std.debug.assert(args[0].code == .init_case);
+            buf[0] = .{ .sym = undefined, .type = args[0].cast(.init_case).child.type, .offset = 0 };
+            return buf[0..1];
+        },
+        .struct_t => {
+            return expr.base.type.cast(.struct_t).fields();
+        },
+        else => return null,
+    }
+}
+
+/// A constant or a local outside `dst..dst_end`: evaluating it can not observe an earlier field write.
+fn init_arg_is_simple(c: *Chunk, arg: *ir.Expr, dst: Reg, dst_end: u16) bool {
+    switch (arg.code) {
+        .const8, .const16, .const32, .const64, .truev, .falsev, .voidv => return true,
+        .init_case => return init_arg_is_simple(c, arg.cast(.init_case).child, dst, dst_end),
+        .local => {
+            const slot = local_slot(c, arg.cast(.local).id);
+            // A pointer param bound to a caller local materializes as `addr`, which reads no register.
+            if (slot.kind == .addr_of) return true;
+            const end: u16 = @as(u16, slot.reg) + @as(u16, @intCast(arg.type.reg_size()));
+            return end <= dst or slot.reg >= dst_end;
+        },
+        else => return false,
+    }
+}
+
+/// Evaluates an `init` field. A local inside the destination registers is copied first so that a
+/// field written before it can not change it.
+fn gen_init_arg(c: *Chunk, arg: *ir.Expr, avoid_start: u16, avoid_end: u16, node: *ast.Node) !Reg {
+    const argv = try genExpr(c, arg, Cstr.localOrTemp());
+    if (argv.type == .local) {
+        const end: u16 = @as(u16, argv.reg) + @as(u16, @intCast(arg.type.reg_size()));
+        if (argv.reg < avoid_end and end > avoid_start) {
+            const temp = try reserve_reg(c, arg.type);
+            try push_mov(c, temp, argv.reg, @intCast(arg.type.reg_size()), node);
+            return temp;
+        }
+    }
+    return argv.reg;
 }
 
 fn gen_init_zero(c: *Chunk, expr: *ir.InitZero, cstr: Cstr, node: *ast.Node) !GenValue {
@@ -1051,6 +1244,11 @@ fn inline_block_base(c: *Chunk) u32 {
 }
 
 fn gen_set_deref(c: *Chunk, stmt: *ir.SetDeref, node: *ast.Node) !void {
+    // `p.* = v` of a pointer param bound to a caller local assigns that local.
+    if (addr_of_local_value(c, stmt.ptr, stmt.right.type)) |dst| {
+        _ = try genExpr(c, stmt.right, Cstr.toLocal(dst));
+        return;
+    }
     const ptrv = try genExpr(c, stmt.ptr, Cstr.localOrTemp());
     const rightv = try genExpr(c, stmt.right, Cstr.localOrTemp());
     const right_t = stmt.right.type;
@@ -1069,6 +1267,12 @@ fn gen_set_field(c: *Chunk, stmt: *ir.SetField, node: *ast.Node) !void {
 
     const offset = fieldData.rec.type.pointeeOrSelf().fields().?[fieldData.idx].offset;
     const rec = fold_rec_offset(fieldData.rec);
+
+    // A field of a local record is one of the local's registers, assigned like a local.
+    if (local_field_reg(c, rec.rec, rec.off + offset, val_t)) |dst| {
+        _ = try genExpr(c, stmt.right, Cstr.toLocal(dst));
+        return;
+    }
 
     const temp_start = c.cur_proc.reg_end;
     var dst_ptr: GenValue = undefined;
@@ -1518,6 +1722,12 @@ fn inline_cost_fits(c: *Chunk, func: *cy.Func) ?u32 {
 const InlineCount = struct {
     n: u32,
     limit: u32,
+    /// Params assigned or address-taken in the body (`ir.FuncBlock.bc_param_pinned`).
+    pinned: u32 = 0,
+
+    fn pin_local(self: *InlineCount, id: u8) void {
+        if (id < 32) self.pinned |= @as(u32, 1) << @intCast(id);
+    }
 };
 
 /// `#[inline]` raises the node limit for a hot function that is too big for the default limit.
@@ -1538,19 +1748,20 @@ fn can_inline(func: *cy.Func) bool {
         2 => return false,
         else => {},
     }
-    if (check_inline(func)) |cost| {
+    if (check_inline(func)) |count| {
         func.info.bc_inline = 1;
         const block = func.data.userFunc.loc.cast(.funcBlock);
-        block.bc_inline_cost = cost;
+        block.bc_inline_cost = count.n;
         block.bc_inline_attr = has_inline_attr(func);
+        block.bc_param_pinned = count.pinned;
         return true;
     }
     func.info.bc_inline = 2;
     return false;
 }
 
-/// Returns the body's IR node count when `func` can be inlined.
-fn check_inline(func: *cy.Func) ?u32 {
+/// Returns the body's IR node count (and pinned params) when `func` can be inlined.
+fn check_inline(func: *cy.Func) ?InlineCount {
     if (func.type != .userFunc) return null;
     if (func.info.generator or func.info.extern_) return null;
     // A function that does not return runs at most once per call site, so the call is not worth removing.
@@ -1565,7 +1776,7 @@ fn check_inline(func: *cy.Func) ?u32 {
         .limit = if (has_inline_attr(func)) inline_max_nodes_attr else inline_max_nodes,
     };
     if (!check_inline_stmts(block.bodyHead, &count)) return null;
-    return count.n;
+    return count;
 }
 
 fn check_inline_stmts(head: ?*ir.Stmt, count: *InlineCount) bool {
@@ -1580,7 +1791,11 @@ fn check_inline_stmts(head: ?*ir.Stmt, count: *InlineCount) bool {
                     if (!check_inline_expr(init, count)) return false;
                 }
             },
-            .set_local => if (!check_inline_expr(stmt.cast(.set_local).right, count)) return false,
+            .set_local => {
+                const data = stmt.cast(.set_local);
+                count.pin_local(data.id);
+                if (!check_inline_expr(data.right, count)) return false;
+            },
             .set_ret => if (!check_inline_expr(stmt.cast(.set_ret).right, count)) return false,
             .set_global => if (!check_inline_expr(stmt.cast(.set_global).expr, count)) return false,
             .set_field => {
@@ -1670,7 +1885,11 @@ fn check_inline_expr(expr: *ir.Expr, count: *InlineCount) bool {
             return check_inline_expr(expr.cast(.cast).expr, count);
         },
         .bitcast => return check_inline_expr(expr.cast(.bitcast).expr, count),
-        .address_of => return check_inline_expr(expr.cast(.address_of).expr, count),
+        .address_of => {
+            const inner = expr.cast(.address_of).expr;
+            if (inner.code == .local) count.pin_local(inner.cast(.local).id);
+            return check_inline_expr(inner, count);
+        },
         .deref => return check_inline_expr(expr.cast(.deref).expr, count),
         .trunc => return check_inline_expr(expr.cast(.trunc).expr, count),
         .retain => return check_inline_expr(expr.cast(.retain).expr, count),
@@ -1717,6 +1936,25 @@ fn is_top_level_stmt(head: ?*ir.Stmt, target: *ir.Stmt) bool {
     return false;
 }
 
+/// The caller local behind a pointer arg: `&local`, or a pointer param that is itself bound to one.
+fn addr_of_local_arg(c: *Chunk, arg: *ir.Expr) ?Reg {
+    switch (arg.code) {
+        .address_of => {
+            const inner = arg.cast(.address_of).expr;
+            if (inner.code != .local) return null;
+            const slot = local_slot(c, inner.cast(.local).id);
+            if (slot.kind != .reg) return null;
+            return slot.reg;
+        },
+        .local => {
+            const slot = local_slot(c, arg.cast(.local).id);
+            if (slot.kind != .addr_of) return null;
+            return slot.reg;
+        },
+        else => return null,
+    }
+}
+
 /// Generates the callee's IR body in the caller's proc instead of a `call`.
 /// Args are evaluated into temps like a call, and the callee's param locals are bound to them.
 fn gen_inline_call(c: *Chunk, expr: *ir.Call, cost: u32, cstr: Cstr, node: *ast.Node) !GenValue {
@@ -1740,17 +1978,26 @@ fn gen_inline_call(c: *Chunk, expr: *ir.Call, cost: u32, cstr: Cstr, node: *ast.
     const saved_local_len = c.bc_local_map.items.len;
 
     const args = expr.args[0..expr.numArgs];
-    var arg_regs: [inline_max_params]Reg = undefined;
+    var arg_slots: [inline_max_params]LocalSlot = undefined;
     for (args, 0..) |arg, i| {
+        // `&local` binds the param to the local itself when the body never assigns the param or takes
+        // its address, so field and deref accesses in the body read the local's registers.
+        const pinned = i >= 32 or (block.bc_param_pinned >> @intCast(i)) & 1 != 0;
+        if (!pinned) {
+            if (addr_of_local_arg(c, arg)) |reg| {
+                arg_slots[i] = .{ .reg = reg, .kind = .addr_of };
+                continue;
+            }
+        }
         const temp = try reserve_reg(c, arg.type);
         _ = try genExpr(c, arg, Cstr.toTemp(temp));
-        arg_regs[i] = temp;
+        arg_slots[i] = .{ .reg = temp, .kind = .reg };
     }
 
     // Bind callee param locals to the arg temps.
     c.inline_local_base = c.bc_local_map.items.len;
-    for (arg_regs[0..args.len]) |reg| {
-        try c.bc_local_map.append(c.alloc, reg);
+    for (arg_slots[0..args.len]) |slot| {
+        try c.bc_local_map.append(c.alloc, slot);
     }
 
     const frame_id: u32 = @intCast(c.funcs_debug.items.len);
@@ -2183,12 +2430,33 @@ fn gen_captured(c: *Chunk, expr: *ir.Captured, cstr: Cstr, node: *ast.Node) !Gen
     return dst;
 }
 
-pub fn toLocalReg(c: *Chunk, ir_id: u8) Reg {
+/// Where an IR local lives while a proc is generated.
+pub const LocalSlot = struct {
+    reg: Reg,
+    kind: enum(u8) {
+        /// `reg` holds the local.
+        reg,
+        /// A pointer param of an inlined callee whose arg was `&local`: `reg` is that caller local.
+        /// Field · deref accesses read its registers, and the pointer itself is materialized with `addr`
+        /// only when the param is used as a value.
+        addr_of,
+    },
+};
+
+pub fn local_slot(c: *Chunk, ir_id: u8) LocalSlot {
     const idx = c.inline_local_base + ir_id;
     if (idx >= c.bc_local_map.items.len) {
         std.debug.panic("expected mapping to IR local `{}`.", .{ir_id});
     }
     return c.bc_local_map.items.ptr[idx];
+}
+
+pub fn toLocalReg(c: *Chunk, ir_id: u8) Reg {
+    const slot = local_slot(c, ir_id);
+    if (slot.kind != .reg) {
+        std.debug.panic("IR local `{}` is bound to the address of a caller local.", .{ir_id});
+    }
+    return slot.reg;
 }
 
 fn push_load_32(c: *cy.Chunk, dst: Reg, src: Reg, src_off: u16, debugNode: *ast.Node) !void {
@@ -2239,7 +2507,16 @@ fn push_load(c: *cy.Chunk, dst: Reg, src_ptr: Reg, src_off: u16, src_t: *cy.Type
 }
 
 fn gen_local(c: *Chunk, expr: *ir.Local, cstr: Cstr, node: *ast.Node) !GenValue {
-    const reg = toLocalReg(c, expr.id);
+    const slot = local_slot(c, expr.id);
+    if (slot.kind == .addr_of) {
+        // The pointer param used as a value: the address of the caller local it is bound to.
+        const dst = try selectReg(c, expr.base.type, cstr, node);
+        if (dst.type != .discard) {
+            try push_addr(c, dst.reg, slot.reg, node);
+        }
+        return dst;
+    }
+    const reg = slot.reg;
     if (cstr.type == .simple) {
         return GenValue.initLocal(reg);
     } else {
@@ -2331,7 +2608,7 @@ fn reserve_local(c: *Chunk, local_id_: usize, local_t: *cy.Type, node: *ast.Node
     std.debug.assert(local_id == c.bc_local_map.items.len);
 
     const reg = try reserve_reg(c, local_t);
-    try c.bc_local_map.append(c.alloc, reg);
+    try c.bc_local_map.append(c.alloc, .{ .reg = reg, .kind = .reg });
     return reg;
 }
 
@@ -2735,8 +3012,8 @@ fn gen_try_stmt(c: *cy.Chunk, stmt: *ir.TryStmt, node: *ast.Node) !void {
 
 fn gen_if_block(c: *cy.Chunk, stmt: *ir.IfBlock, node: *ast.Node) !void {
     const cond_n = stmt.cond_expr.node;
-    const condv = try genExpr(c, stmt.cond_expr, Cstr.localOrTemp());
-    const jump_miss = try c.pushEmptyJumpNotCond(condv.reg, node);
+    var condv: GenValue = undefined;
+    const jump_miss = try push_cond_miss_jump(c, stmt.cond_expr, &condv, node);
 
     try pushBlock(c, node);
     try genStmts(c, stmt.body_head);
@@ -2745,6 +3022,20 @@ fn gen_if_block(c: *cy.Chunk, stmt: *ir.IfBlock, node: *ast.Node) !void {
     c.patchJumpNotCondToCurPc(jump_miss);
 
     try pop_temp_value(c, condv, cond_n);
+}
+
+/// Jumps past a block when `cond` is false. `!x` (what `while opt |v|`, `for` iteration and `and`
+/// lower to) tests `x` with `jump_t` instead of negating it first.
+fn push_cond_miss_jump(c: *cy.Chunk, cond: *ir.Expr, condv: *GenValue, node: *ast.Node) !u32 {
+    if (cond.code == .unary_op) {
+        const un = cond.cast(.unary_op);
+        if (un.op == .lnot) {
+            condv.* = try genExpr(c, un.expr, Cstr.localOrTemp());
+            return c.pushEmptyJumpCond(condv.reg, node);
+        }
+    }
+    condv.* = try genExpr(c, cond, Cstr.localOrTemp());
+    return c.pushEmptyJumpNotCond(condv.reg, node);
 }
 
 fn elseBlocks(c: *cy.Chunk, else_head: ?*ir.Expr) !void {
@@ -2953,7 +3244,7 @@ fn gen_lambda(c: *Chunk, expr: *ir.Lambda, cstr: Cstr, node: *ast.Node) !GenValu
 fn gen_pop_locals(c: *Chunk, stmt: *ir.PopLocals, node: *ast.Node) !void {
     _ = node;
     const local_end = c.inline_local_base + stmt.local_end;
-    const reg_start = c.bc_local_map.items[local_end];
+    const reg_start = toLocalReg(c, @intCast(stmt.local_end));
     c.bc_local_map.items.len = local_end;
 
     var num_ptr_locals: usize = 0;

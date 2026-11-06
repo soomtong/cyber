@@ -851,8 +851,8 @@ beginSwitch:
         NEXT();
     }
     CASE(JUMP_T): {
-        if (!*(bool*)&stack[pc[1]]) {
-            pc += (uintptr_t)(int16_t)pc[2];
+        if (*(bool*)&stack[pc[1]]) {
+            pc += pc[2];
         } else {
             pc += 3;
         }

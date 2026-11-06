@@ -135,7 +135,7 @@ pub const Chunk = struct {
     blockJumpStack: std.ArrayList(BlockJump),
 
     /// Maps ir local to bc reg.
-    bc_local_map: std.ArrayList(bc.Reg),
+    bc_local_map: std.ArrayList(bc.LocalSlot),
 
     /// Set while generating an inlined callee body. See `bc_gen.gen_inline_call`.
     inline_ctx: ?*bc.InlineCtx = null,
@@ -372,6 +372,13 @@ pub const Chunk = struct {
     pub fn pushEmptyJumpNotCond(self: *Chunk, reg: bc.Reg, node: *ast.Node) !u32 {
         const start: u32 = @intCast(self.buf.ops.items.len);
         try self.pushCode(.jump_f, &.{reg, 0}, node);
+        return start;
+    }
+
+    /// `jump_t` with the same operand layout as `jump_f`, so `patchJumpNotCondToCurPc` patches both.
+    pub fn pushEmptyJumpCond(self: *Chunk, reg: bc.Reg, node: *ast.Node) !u32 {
+        const start: u32 = @intCast(self.buf.ops.items.len);
+        try self.pushCode(.jump_t, &.{reg, 0}, node);
         return start;
     }
 

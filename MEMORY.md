@@ -1,6 +1,7 @@
 # MEMORY
 
 - [Zig 0.17 업그레이드](docs/decisions/project_zig_017_upgrade.md) — 검증 환경(0.15.2는 Linux 컨테이너에서만), Io · env · args 규칙, `vm.h` 모드별 padding, out 파라미터와 ReleaseFast UB, 미참조 코드는 분석되지 않아 삭제된 std API가 숨음(2026-11-03 정리, AVX2 분기는 `-Dcpu=x86_64_v3`로 확인), musl 정적 타깃은 self dlopen 불가라 기본 `ffi` 끔(2026-11-04, lib_test · behavior_test 통과), lib-test `All declarations compile.`이 모든 pub 선언을 재귀 참조해 죽은 코드가 빌드를 깨게 함(2026-11-04, 죽은 함수 약 70개 · fiber · dce · llvm 파일 삭제, JIT는 제외)
+- [`.zig-cache/o` 부분 정리 금지](docs/decisions/project_zig_cache_prune.md) — Zig는 cache hit 때 `o/<digest>` 존재를 확인하지 않아 산출물만 지우면 `failed to open object ... FileNotFound`, 만드는 단계의 매니페스트는 출력 경로를 담지 않아 `h/` 정리로도 못 고침, 디스크는 `task clean`으로만(2026-11-06)
 - [fork 릴리스와 CI](docs/decisions/project_fork_release_ci.md) — origin 태그 필요(0.3), 태그 push 릴리스, 번들에 src/ 포함, install.sh는 lib/cyber + 심링크, msvc malloc · macOS x86_64 INODE64 · wasm32 Value ABI
 - [fork의 용도와 방향](docs/decisions/project_direction.md) — Python · Perl · Shell 대용 스크립트 CLI, 네이티브 바이너리 불필요(TCC/C AOT로 충분), LLVM 백엔드 닫음, 복사-패치 JIT(`-jit` · `CL_JIT`)는 지원 안 함, `compile()`에서 명시적 오류로 거절 · 도움말에서 뺌, 잔재(`src/jit/` · `jitBuf` · `#[jit]` · `enter_jit` opcode · `-Djit`)는 2026-11-06 삭제하고 `CL_JIT` enum · `-jit` 거절만 남김, TARS 에이전트 루프(CodeAct) 언어 후보
 - [libcyber 임베딩 검토](docs/decisions/project_embedding_agent_loop.md) — 라이브러리 모듈 구성(os 없음, c 남음), 호스트 도구 바인딩 패턴, 외부 중단 수단 없음, persist_main 지역 변수 이월(2026-11-01 구현, panic이면 초기화), 반복 eval 버그 수정 기록, CLI REPL 시작 실패, 호스트 함수는 값 매개변수를 소유(해제 필요)

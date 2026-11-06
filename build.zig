@@ -111,12 +111,12 @@ pub fn build(b: *std.Build) !void {
         exe.root_module.strip = strip;
         exe.root_module.addIncludePath(b.path("src"));
 
-        // Allow dynamic libraries to be loaded by filename in the cwd.
+        // Allow dynamic libraries to be loaded by filename next to the executable.
+        // The rpath must not contain an empty entry (a leading `:`), since glibc
+        // treats it as the current working directory and would search it before
+        // the system paths.
         if (target.os.tag == .linux) {
-            exe.root_module.addRPath(.{ .cwd_relative = ":$ORIGIN" });
-            if (target.cpu.arch == .x86_64) {
-                exe.root_module.addRPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
-            }
+            exe.root_module.addRPath(.{ .cwd_relative = "$ORIGIN" });
         } else if (target.os.tag == .macos) {
             exe.root_module.addRPath(.{ .cwd_relative = "@loader_path" });
         }

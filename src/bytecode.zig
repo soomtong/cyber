@@ -288,7 +288,14 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
             try w.print("ret %0..%{}", .{ret_size});
         },
         .or_,
+        .and_,
+        .xor,
         .lsl,
+        .lsr,
+        .ult,
+        .ugt,
+        .ule,
+        .uge,
         .feq,
         .feq32,
         .lt,
@@ -322,7 +329,14 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
             const rhs = pc[3].val;
             const op: []const u8 = switch (code) {
                 .or_ => "||",
+                .and_ => "&&",
+                .xor => "^",
                 .lsl => "<<",
+                .lsr => ">>",
+                .ult => "u<",
+                .ugt => "u>",
+                .ule => "u<=",
+                .uge => "u>=",
                 .feq32,
                 .feq => "=",
                 .lt,
@@ -554,8 +568,8 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
             }
         },
         .is_zero => {
-            const dst = @as(*const align(1) u16, @ptrCast(pc + 1)).*;
-            const val = @as(*const align(1) u16, @ptrCast(pc + 3)).*;
+            const dst = pc[1].val;
+            const val = pc[2].val;
             try w.print("%{} = (%{} == 0)", .{dst, val});
         },
         // .list => {

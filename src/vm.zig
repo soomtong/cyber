@@ -33,9 +33,6 @@ const trace_panic_at_event: u64 = 0;
 const trace_track_object_event: u64 = 0;
 
 const VMC = extern struct {
-    consts_ptr: [*]Value,
-    consts_len: usize,
-
     rw_lock: cy.sync.RWLock,
 
     types_ptr: [*]vmc.TypeInfo,
@@ -142,8 +139,6 @@ pub const VM = struct {
             .globals = .empty,
             .shared_states = .empty,
             .c = .{
-                .consts_ptr = undefined,
-                .consts_len = 0,
                 .types_ptr = undefined,
                 .types_len = 0,
                 .rw_lock = .{},
@@ -557,9 +552,6 @@ pub const VM = struct {
 
         try self.main_thread.stackEnsureTotalCapacity(buf.mainStackSize);
         self.main_thread.c.fp = @ptrCast(self.main_thread.c.stack_ptr);
-
-        self.c.consts_ptr = @ptrCast(buf.consts.items.ptr);
-        self.c.consts_len = buf.consts.items.len;
     }
 
     pub fn exec_bytecode(self: *VM, buf: *cy.ByteCodeBuffer) !*Value {

@@ -34,16 +34,9 @@ pub const ByteCodeBuffer = struct {
 
     /// TODO: Rename to `insts`.
     ops: std.ArrayList(Inst),
-    consts: std.ArrayList(cy.Value),
 
     /// TODO: Rename to `ops`.
     opcodes: std.ArrayList(OpCode),
-
-    /// Whether a const is boxed.
-    consts_boxed: std.ArrayList(bool),
-
-    /// Const map for deduping.
-    constMap: std.AutoHashMapUnmanaged(u64, u32),
 
     /// Zero delimited. slice -> isAscii.
     const_string_map: std.StringHashMapUnmanaged(bool),
@@ -83,9 +76,6 @@ pub const ByteCodeBuffer = struct {
             .ops = .empty,
             .opcodes = .empty,
             .vm = vm,
-            .consts = .empty,
-            .consts_boxed = .empty,
-            .constMap = .empty,
             .debugTable = .empty,
             .func_table = .empty,
             .const_string_map = .empty,
@@ -102,9 +92,6 @@ pub const ByteCodeBuffer = struct {
     pub fn deinit(self: *ByteCodeBuffer) void {
         self.ops.deinit(self.alloc);
         self.opcodes.deinit(self.alloc);
-        self.consts.deinit(self.alloc);
-        self.consts_boxed.deinit(self.alloc);
-        self.constMap.deinit(self.alloc);
         {
             var iter = self.const_string_map.iterator();
             while (iter.next()) |e| {
@@ -145,22 +132,6 @@ pub const ByteCodeBuffer = struct {
             .slice = @ptrCast(res.key_ptr.*),
             .ascii = res.value_ptr.*,
         };
-    }
-
-    pub fn getOrPushConst(self: *ByteCodeBuffer, boxed: bool, val: cy.Value) !u32 {
-        const res = try self.constMap.getOrPut(self.alloc, val.val);
-        if (res.found_existing) {
-            return res.value_ptr.*;
-        } else {
-            const idx: u32 = @intCast(self.consts.items.len);
-            try self.consts_boxed.resize(self.alloc, self.consts.items.len + 1);
-            try self.consts.resize(self.alloc, self.consts.items.len + 1);
-            self.consts.items[idx] = val;
-            self.consts_boxed.items[idx] = boxed;
-            res.key_ptr.* = val.val;
-            res.value_ptr.* = idx;
-            return idx;
-        }
     }
 
     pub fn pushFailableDebugSym(self: *ByteCodeBuffer, pc: usize, file: u32, loc: u32, frameLoc: u32) !void {
@@ -1057,7 +1028,7 @@ pub fn getInstLenAt(pc: [*]const Inst) u8 {
 }
 
 pub const OpCode = enum(u8) {
-    /// Copies a constant value from `consts` to a dst local.
+    /// Copies a 64-bit constant to a dst local.
     const_64 = vmc.CodeCONST_64,
     const_str = vmc.CodeCONST_STR,
     const_16s = vmc.CodeCONST_16S,

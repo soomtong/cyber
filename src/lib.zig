@@ -714,7 +714,6 @@ test "Constants." {
     try zt.eq(C.TypeI64, bt.I64);
     try zt.eq(C.TypeF64, bt.F64);
     try zt.eq(C.TypeStr, bt.Str);
-    // try zt.eq(C.TypeFiber, bt.Fiber);
     try zt.eq(C.TypeType, bt.Type);
     try zt.eq(C.TypeFuncSig, bt.FuncSig);
     try zt.eq(C.TypeCode, bt.Code);

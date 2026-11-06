@@ -355,7 +355,6 @@ typedef union ValueUnion {
     uint64_t u;
     float f;
 } ValueUnion;
-typedef uint64_t Const;
 
 typedef u32 FuncId;
 typedef u32 NodeId;
@@ -722,10 +721,6 @@ typedef struct TypeInfo {
 
 typedef struct ZVM ZVM;
 typedef struct VM {
-    // Not protected for incremental compilation.
-    Const* consts_ptr;
-    size_t consts_len;
-
     u8 rw_lock;
 
     // Trace mode type info. Protected by `rw_lock`.
@@ -835,41 +830,6 @@ typedef struct ZVM {
 #endif
     VM c;
 } ZVM;
-
-typedef struct Fiber {
-    struct Fiber* prevFiber;
-    Value* stackPtr;
-    uint32_t stackLen;
-
-    /// If pc == NULL, the fiber is done.
-    Inst* pc;
-    uint32_t stackOffset;
-
-    uint32_t throwTraceCap;
-    CompactFrame* throwTracePtr;
-    uint32_t throwTraceLen;
-
-    /// Points to the first inst of the fiber.
-    /// This is used to find end locals pc if any.
-    uint32_t initialPcOffset;
-
-    /// When panic is triggered again during a panic unwinding, the fiber will perform an abort instead.
-    bool unwinding;
-
-    /// Where coyield and coreturn should copy the return value to.
-    /// If this is the NullByteId, no value is copied and instead released.
-    u8 parentDstLocal;
-
-    u8 argStart;
-    u8 numArgs;
-    u8 stack_size;
-} Fiber;
-
-typedef struct FiberObject {
-    u32 meta;
-    u32 rc;
-    Fiber fiber;
-} FiberObject;
 
 typedef int ResultCode;
 

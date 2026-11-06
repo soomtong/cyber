@@ -3069,54 +3069,6 @@ fn push_cond_miss_jump(c: *cy.Chunk, cond: *ir.Expr, condv: *GenValue, node: *as
     return c.pushEmptyJumpNotCond(condv.reg, node);
 }
 
-fn elseBlocks(c: *cy.Chunk, else_head: ?*ir.Expr) !void {
-    const bodyEndJumpsStart = c.listDataStack.items.len;
-    defer c.listDataStack.items.len = bodyEndJumpsStart;
-
-    var else_opt = else_head;
-    while (else_opt) |else_block| {
-        const else_nid = else_block.node;
-        const else_b = else_block.cast(.else_block);
-
-        if (else_b.cond_expr != null) {
-            if (else_b.cond_head != null) {
-                try pushBlock(c, else_nid);
-                try genStmts(c, else_b.cond_head);
-                try popBlock(c);
-            }
-
-            const condNodeId = else_b.cond_expr.?.node;
-            const condv = try genExpr(c, else_b.cond_expr.?, Cstr.localOrTemp);
-
-            const jump_miss = try c.pushEmptyJumpNotCond(condv.reg);
-
-            try pushBlock(c, else_nid);
-            try genStmts(c, else_b.body_head);
-            try popBlock(c);
-
-            if (else_b.else_block != null) {
-                const jump_end = try c.pushEmptyJump();
-                try c.listDataStack.append(c.alloc, .{ .pc = jump_end });
-            }
-
-            c.patchJumpNotCondToCurPc(jump_miss);
-
-            try pop_temp_value(c, condv, condNodeId);
-        } else {
-            try pushBlock(c, else_nid);
-            try genStmts(c, else_b.body_head);
-            try popBlock(c);
-        }
-        else_opt = else_b.else_block;
-    }
-
-    // Jump here from all body ends.
-    const bodyEndJumps = c.listDataStack.items[bodyEndJumpsStart..];
-    for (bodyEndJumps) |jump| {
-        c.patchJumpToCurPc(jump.pc);
-    }
-}
-
 fn gen_switch_stmt(c: *Chunk, stmt: *ir.SwitchStmt, node: *ast.Node) !void {
     const childBreakJumpsStart: u32 = @intCast(c.blockJumpStack.items.len);
     _ = childBreakJumpsStart;
@@ -3443,7 +3395,6 @@ const LocalId = u8;
 
 const GenValueType = enum {
     discard,
-    constant,
     local,
     temp,
 };
@@ -3454,21 +3405,6 @@ pub const GenValue = struct {
 
     /// Where the value was generated to.
     reg: Reg = undefined,
-
-    data: union {
-        constant: struct {
-            val: cy.Value,
-        },
-    } = undefined,
-
-    pub fn initConstant(val: cy.Value) GenValue {
-        return .{ .type = .constant, 
-            .reg = undefined, 
-            .data = .{ .constant = .{
-                .val = val,
-            }
-        }};
-    }
 
     fn discard() GenValue {
         return .{
@@ -3536,7 +3472,6 @@ fn genConstInt(c: *Chunk, val: i64, dst: GenValue, node: *ast.Node) !void {
         try c.pushCode2(.const_16s, dst.isTemp(), &.{ dst.reg, @bitCast(@as(i16, @intCast(val))) }, node);
         return;
     }
-    // const idx = try c.buf.getOrPushConst(false, cy.Value.initInt(@intCast(val)));
     try genConst64_(c, @bitCast(val), dst.reg, node);
 }
 
@@ -3678,41 +3613,6 @@ fn push_new_init(c: *cy.Chunk, dst: Reg, type_: *cy.Type, val_size: u16, fields:
     }
 }
 
-/// Selecting for a non local inst with a dst operand.
-/// A required dst can not be retained or a temp register is allocated and `requiresCopyRelease` will be set true.
-///
-/// Handles the case where the inst depends and assigns to the same local:
-/// > let node = [Node ...]
-/// > node = node.val
-/// `node` rec gets +1 retain and saves to temp since the `node` cstr has `releaseDst=true`.
-pub fn selectForDstInst(c: *cy.Chunk, cstr: Cstr, node: *ast.Node) !DstInst {
-    switch (cstr.type) {
-        .captured => {
-            return .{
-                .dst = try bc.reserveTemp(c, cstr.data.captured.is_stack_ptr),
-                .cstr = cstr,
-                .node = node,
-            };
-        },
-        .localReg,
-        .tempReg => {
-            return .{
-                .dst = cstr.data.slot.dst,
-                .cstr = cstr,
-                .node = node,
-            };
-        },
-        .simple => {
-            return .{
-                .dst = try bc.reserveTemp(c, cstr.data.simple.is_stack_ptr),
-                .cstr = cstr,
-                .node = node,
-            };
-        },
-        .none => return error.Unsupported,
-    }
-}
-
 pub fn selectReg(c: *Chunk, val_t: *cy.Type, cstr: Cstr, node: *ast.Node) !GenValue {
     _ = node;
     switch (cstr.type) {
@@ -3735,20 +3635,6 @@ pub fn selectReg(c: *Chunk, val_t: *cy.Type, cstr: Cstr, node: *ast.Node) !GenVa
     }
 }
 
-pub const DstInst = struct {
-    dst: Reg,
-    cstr: Cstr,
-    node: *ast.Node,
-};
-
-pub const NoErrInst = struct {
-    dst: Reg,
-    requiresPreRelease: bool,
-    cstr: Cstr,
-    has_final_dst: bool,
-    node: *ast.Node,
-};
-
 const CstrType = enum(u8) {
     /// 1. Prefers local register first.
     /// 2. Allocates the next temp.
@@ -3764,9 +3650,6 @@ const CstrType = enum(u8) {
     captured,
 
     discard,
-
-    /// No register selection.
-    none,
 };
 
 /// Constraints on where a value should go to.
@@ -3803,10 +3686,6 @@ pub const Cstr = struct {
     /// TODO: provide hint whether the allocated reill be used or not.
     /// e.g. For expr statements, the top level expr reg isn't used.
     /// If it's not used and the current expr does not produce side-effects, it can omit generating its code.
-
-    pub const none = Cstr{
-        .type = .none,
-    };
 
     pub fn localOrTemp() Cstr {
         return .{

@@ -57,7 +57,6 @@ pub const StmtCode = enum(u8) {
     continue_,
     trap,
 
-    set,
     set_local,
     set_ret,
     setCaptured,
@@ -174,7 +173,6 @@ pub const ExprCode = enum(u8) {
     gen_next,
     gen_end,
 
-    mainEnd,
     unwrap_addr,
     unwrap_nz,
     trait,

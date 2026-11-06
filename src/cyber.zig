@@ -74,7 +74,6 @@ pub const Thread = thread.Thread;
 pub const worker = @import("worker.zig");
 
 pub const vmc = @import("vmc");
-pub const Fiber = vmc.Fiber;
 
 pub const BoundedArray = @import("bounded_array.zig").BoundedArray;
 

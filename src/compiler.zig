@@ -532,19 +532,6 @@ pub const Compiler = struct {
     }
 };
 
-fn resolveCopyCtor(c: *Compiler, type_: *cy.Type, tmpl: *cy.sym.FuncTemplate) !void {
-    const func = try resolveFuncTemplate(c, type_, tmpl);
-    type_.copy_ctor = func;
-}
-
-fn resolveFuncTemplate(c: *Compiler, type_: *cy.Type, tmpl: *cy.sym.FuncTemplate) !*cy.Func {
-    const param = cy.Value.initType(type_);
-    const func = try cy.generics.expandFuncTemplate(c.builtins_chunk, tmpl, &.{c.sema.type_t}, &.{param});
-    try sema.resolveFunc(c.builtins_chunk, func);
-    try sema.semaFuncBody(c.builtins_chunk, func);
-    return func;
-}
-
 const ReportType = enum(u8) {
     token_err,
     parse_err,

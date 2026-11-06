@@ -141,4 +141,14 @@ t.eq(-7, int('-7'))
 t.eq(0, int(''))
 t.eq(0, int('abc'))
 
+-- 64-bit literals. A plain decimal must fit in i64 (F-76); bit patterns use `u`, hex or an `r64` target.
+t.eq(9223372036854775807, 9223372036854775807)
+t.eq(-9223372036854775808, -9223372036854775808)
+t.eq(-1, 18446744073709551615u)
+t.eq(-1, 0xffffffffffffffff)
+var full r64 = 18446744073709551615
+t.eq(r64(0xffffffffffffffff), full)
+var top i64 = 9223372036854775807
+t.eq(9223372036854775807, top)
+
 --cytest: pass

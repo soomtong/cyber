@@ -480,6 +480,13 @@ a = 0o17      -- Octal.
 a = 0b1010    -- Binary.
 ```
 
+A decimal literal must fit in the target integer type. Without a target type that is `int` (64-bit signed), so `9223372036854775808` is a compile error instead of wrapping around. Hexadecimal, octal and binary literals, and decimals with a `u` suffix, are 64-bit patterns:
+```cy
+a := 0xFFFFFFFFFFFFFFFF      -- -1
+a = 18446744073709551615u    -- -1
+var b r64 = 18446744073709551615
+```
+
 String literals evaluate as their UTF-8 codepoint if the target integer type is big enough:
 ```cy
 -- Success.

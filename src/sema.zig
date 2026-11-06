@@ -6459,9 +6459,10 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
             return c.semaConst(@bitCast(val), c.sema.f64_t, node);
         },
         .dec_u => {
+            // `123u`: an unsigned decimal, stored as its 64-bit pattern.
             const literal = node.cast(.dec_u).asDecU();
-            const val = try std.fmt.parseInt(u64, literal, 10);
-            return c.semaConst(@bitCast(val), c.sema.i64_t, node);
+            const val = try semaParseInt(c, u64, literal, 10, node);
+            return c.semaConst(val, c.sema.i64_t, node);
         },
         .decLit => {
             const literal = node.cast(.decLit).value.slice();
@@ -6470,8 +6471,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                     return res;
                 }
             }
-            const val = try semaParseInt(c, u64, literal, 10, node);
-            return c.semaConst(val, c.sema.i64_t, node);
+            // A plain decimal is an `int`, so it must fit in i64. Larger bit patterns need `u`, hex or `r64`.
+            const val = try semaParseInt(c, i64, literal, 10, node);
+            return c.semaConst(@bitCast(val), c.sema.i64_t, node);
         },
         .binLit => {
             const literal = node.cast(.binLit).asBin();
@@ -6480,7 +6482,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                     return res;
                 }
             }
-            const val = try std.fmt.parseInt(u64, literal, 2);
+            const val = try semaParseInt(c, u64, literal, 2, node);
             return c.semaConst(val, c.sema.i64_t, node);
         },
         .octLit => {
@@ -6490,7 +6492,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                     return res;
                 }
             }
-            const val = try std.fmt.parseInt(u64, literal, 8);
+            const val = try semaParseInt(c, u64, literal, 8, node);
             return c.semaConst(val, c.sema.i64_t, node);
         },
         .hexLit => {
@@ -6500,7 +6502,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                     return res;
                 }
             }
-            const val = try std.fmt.parseInt(u64, literal, 16);
+            const val = try semaParseInt(c, u64, literal, 16, node);
             return c.semaConst(val, c.sema.i64_t, node);
         },
         .ident => {
@@ -8049,10 +8051,10 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: Cstr) !ExprResult {
                         return c.semaConst8(@truncate(val), c.sema.i8_t, node);
                     }
                 }
-                var val: i64 = @bitCast(try std.fmt.parseInt(u64, literal, 10));
+                var val: i64 = @bitCast(try semaParseInt(c, u64, literal, 10, @ptrCast(unary.child)));
                 if (val != std.math.minInt(i64)) {
                     if (val < 0) {
-                        return c.reportError("Invalid `int` literal.", @ptrCast(unary.child));
+                        return c.reportError("Integer literal does not fit the target type.", @ptrCast(unary.child));
                     } else {
                         val = -val;
                     }
@@ -10484,6 +10486,14 @@ fn semaInferSignedLit(c: *cy.Chunk, literal: []const u8, target_t: *cy.Type, bas
             const val = try semaParseInt(c, i32, literal, base, node);
             return try c.semaConst32(@bitCast(val), target_t, node);
         },
+        bt.R64 => {
+            const val = try semaParseInt(c, u64, literal, base, node);
+            return try c.semaConst(val, target_t, node);
+        },
+        bt.I64 => {
+            const val = try semaParseInt(c, i64, literal, base, node);
+            return try c.semaConst(@bitCast(val), target_t, node);
+        },
         else => {
             if (target_t.kind() == .option) {
                 return semaInferSignedLit(c, literal, target_t.cast(.option).child_t, base, node);
@@ -10553,7 +10563,7 @@ pub fn semaParseInt(c: *cy.Chunk, comptime T: type, literal: []const u8, base: u
     return std.fmt.parseInt(T, literal, base) catch |err| {
         switch (err) {
             error.Overflow => {
-                return c.reportError("Parsing decimal literal overflows integer type.", node);
+                return c.reportError("Integer literal does not fit the target type.", node);
             },
             error.InvalidCharacter => {
                 return c.reportError("Parsed invalid character.", node);

@@ -105,6 +105,13 @@ test.eq(37, s.x)
 test.eq(59, s.y)
 test.eq(22, v.x)
 
+-- An `init` with expression fields into a local being declared writes them directly too.
+d := Vec{x=v.y + 1, y=v.x * 2}
+test.eq(38, d.x)
+test.eq(44, d.y)
+test.eq(22, v.x)
+test.eq(37, v.y)
+
 -- The param used as a pointer value.
 n := 1
 q := id_ptr(*n)

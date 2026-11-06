@@ -73,7 +73,7 @@ append 루프는 17 → 13개(`lt` · `jump_f` · each 지역 `mov` · 인자 `m
 - `src/test/functions/inline_addr_param.cy`(behavior_test 등록): 값 지역 · 중첩 필드 읽기 · 쓰기, 필드 교환 init, `&지역` 인자로 묶인
   매개변수의 읽기 · 쓰기 · 중첩 인라인 전달, 매개변수를 값으로 돌려주기(`id_ptr`), 재대입되는 매개변수(`pick`), `&param`(`through`),
   `while` 안 `?int` 결과, 1바이트 필드. 2단계: 인라인된 `return {…}`을 임시(rvalue `swap(&v).x` · `rot(&v).sum()` · 더하기의 오른쪽 ·
-  선언 지역 `s := rot(&v)`)로 받는 경우와 지역 재대입 `v = swap(&v)`가 함께 있음.
+  선언 지역 `s := rot(&v)`)로 받는 경우, 선언 지역의 식 인자 `init`(`d := Vec{x=v.y + 1, ...}`), 지역 재대입 `v = swap(&v)`가 함께 있음.
 - 커밋 전 검증 12단계(네이티브 `zig build test` Debug · ReleaseFast · ReleaseSafe · `-Dtrace=false`, lib-test Debug · ReleaseSafe,
   standalone ReleaseFast, wasm32 behavior · cli · lib · trace) 모두 exit 0.
 
@@ -97,12 +97,19 @@ bc_gen에서 `.localReg`와 `.tempReg`의 차이는 돌려주는 GenValue 종류
 
 `Array.ensure_cap`의 인라인된 `@slice` 반환에서 `mov` 둘이 빠지고 임시 둘이 줄어 프레임이 25 → 24.
 
+### 선언 지역 목적지
+
+`gen_declare_local`의 init은 `Cstr.toLocal(reg)`로 와서 `gen_init_regs`가 재대입과 같은 지역 규칙을 적용했다. 선언되는 지역은 init 식이
+이름할 수 없으므로(sema가 선언 앞 사용을 막고, 가리는 바깥 지역은 다른 레지스터) 임시와 같다. `Cstr.slot.fresh`(`Cstr.toFreshLocal`)를 두고
+`gen_declare_local`이 그것으로 생성, `gen_init_regs`는 `fresh`면 직접 쓰고, `InlineCtx.ret_is_temp`도 `fresh`를 포함한다
+(`s := f(&v)`의 인라인 반환). `has_aux_local` 선언(`sp := [&]int{...}`)은 `set_local`로 가므로 그대로 보수 경로다.
+덤프 `mov` −41 · `mov_3` −10(for), retain · release 수 동일. for 37.4 · heap 29.9 · fib 28.9 · fiber 37.1 · alloc 605 ms(623에서 −3%),
+덤프 명령 줄 for 9177 · heap 9702 · fib 8867 · alloc 9956 · fiber 9390.
+
 ## 남은 것
 
 - `for arr` 루프의 `mov %12 = %7`(`i := idx.*`) · `mov %12 = %10`(unwrap 캡처 지역)은 선언 지역을 소스 레지스터의 별칭으로 두면
   없어지지만, 원본이 별칭 수명 안에 바뀌지 않는다는 보장이 sema에 있어야 한다.
 - 인라인 인자가 평범한 `.local`일 때의 복사 `mov`(`self` 빌림 지역 · 루프 변수): 본문이 매개변수에 대입하지 않고 호출자 지역이 본문 중에
   바뀌지 않을 때만 직접 묶을 수 있다. 후자를 보장하기 어려워 보류.
-- 선언 지역을 목적지로 하는 `init`(`sp := buf.@slice(...)` 같은 `declare_local`)은 선언되는 지역을 인자가 이름할 수 없으므로 임시처럼
-  직접 생성해도 되지만, `gen_init_regs`는 선언과 재대입을 구분하지 못해 보수 경로를 탄다. `ensure_cap`의 `mov %10 = %15` · `mov %11 = %16`.
 - 루프 불변 상수(`const_64` 마스크)와 `and_`.

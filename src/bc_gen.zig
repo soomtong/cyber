@@ -1077,7 +1077,7 @@ fn gen_init(c: *Chunk, expr: *ir.Init, cstr: Cstr, node: *ast.Node) !GenValue {
 
     const temp_start = c.cur_proc.reg_end;
 
-    if (dst.type != .discard and try gen_init_regs(c, dst, expr, node)) {
+    if (dst.type != .discard and try gen_init_regs(c, dst, cstr_is_fresh(cstr), expr, node)) {
         try pop_regs(c, temp_start, node);
         return dst;
     }
@@ -1095,7 +1095,7 @@ fn gen_init(c: *Chunk, expr: *ir.Init, cstr: Cstr, node: *ast.Node) !GenValue {
 
 /// Writes an `init` whose fields all cover whole registers straight into the destination registers
 /// instead of through its address. Returns false when a field is packed or the type is not handled.
-fn gen_init_regs(c: *Chunk, dst: GenValue, expr: *ir.Init, node: *ast.Node) !bool {
+fn gen_init_regs(c: *Chunk, dst: GenValue, fresh: bool, expr: *ir.Init, node: *ast.Node) !bool {
     var field_buf: [2]cy.types.Field = undefined;
     const fields = init_fields(expr, &field_buf) orelse return false;
     const args = expr.args[0..expr.nargs];
@@ -1105,10 +1105,11 @@ fn gen_init_regs(c: *Chunk, dst: GenValue, expr: *ir.Init, node: *ast.Node) !boo
         if (size == 0 or size % 8 != 0 or field.offset % 8 != 0) return false;
     }
 
-    // A temp can not be named by the field expressions. A local can (`p = {x=p.y, y=p.x}`), so its
-    // fields are evaluated first unless every one is a constant or a local outside the destination.
+    // A temp or a local being declared can not be named by the field expressions. Another local can
+    // (`p = {x=p.y, y=p.x}`), so its fields are evaluated first unless every one is a constant or a
+    // local outside the destination.
     const dst_end: u16 = @as(u16, dst.reg) + @as(u16, @intCast(expr.base.type.reg_size()));
-    var direct = dst.type == .temp;
+    var direct = dst.type == .temp or fresh;
     if (!direct) {
         direct = true;
         for (args) |arg| {
@@ -1181,6 +1182,11 @@ fn init_fields(expr: *ir.Init, buf: *[2]cy.types.Field) ?[]const cy.types.Field 
         },
         else => return null,
     }
+}
+
+/// A destination the expression being generated can not name: a temp, or a local being declared.
+fn cstr_is_fresh(cstr: Cstr) bool {
+    return cstr.type == .tempReg or (cstr.type == .localReg and cstr.data.slot.fresh);
 }
 
 /// A constant or a local outside `dst..dst_end`: evaluating it can not observe an earlier field write.
@@ -1676,9 +1682,10 @@ pub const InlineCtx = struct {
     /// Callee's index into `Chunk.funcs_debug`.
     frame_id: u32,
     ret_reg: Reg,
-    /// `ret_reg` is a temp the body can not name: a fresh one, or the caller's temp destination.
-    /// A `return {…}` then writes its fields straight into it. A local destination may be read by
-    /// the body (`p = f(&p)`), so it keeps the local rules of `gen_init_regs`.
+    /// `ret_reg` is a register the body can not name: a fresh temp, the caller's temp destination,
+    /// or a local being declared. A `return {…}` then writes its fields straight into it. Another
+    /// local destination may be read by the body (`p = f(&p)`), so it keeps the local rules of
+    /// `gen_init_regs`.
     ret_is_temp: bool,
     /// The callee's top level body. A trailing `ret_expr` there needs no jump.
     body_head: ?*ir.Stmt,
@@ -2036,7 +2043,7 @@ fn gen_inline_call(c: *Chunk, expr: *ir.Call, cost: u32, cstr: Cstr, node: *ast.
         .src_chunk = func.decl.?.src(),
         .frame_id = frame_id,
         .ret_reg = ret_reg,
-        .ret_is_temp = cstr.type != .localReg,
+        .ret_is_temp = cstr.type != .localReg or cstr.data.slot.fresh,
         .body_head = block.bodyHead,
         .end_jumps = .empty,
     };
@@ -2689,8 +2696,7 @@ fn gen_declare_local(c: *Chunk, stmt: *ir.DeclareLocal, node: *ast.Node) !void {
     log.tracev("declare local {} -> %{}, type: {s}", .{stmt.id, reg, stmt.decl_t.name()});
 
     if (stmt.init) |init| {
-        const cstr = Cstr.toLocal(reg);
-        _ = try genExpr(c, init, cstr);
+        _ = try genExpr(c, init, Cstr.toFreshLocal(reg));
     }
 }
 
@@ -3764,6 +3770,9 @@ pub const Cstr = struct {
         },
         slot: struct {
             dst: Reg,
+            /// A local being declared: nothing in the init expression can name it, so an `init` writes
+            /// its fields straight into it like a temp.
+            fresh: bool = false,
         },
         varSym: struct {
             // Runtime id.
@@ -3809,6 +3818,13 @@ pub const Cstr = struct {
     pub fn toTemp(reg: Reg) Cstr {
         return .{ .type = .tempReg, .data = .{ .slot = .{
             .dst = reg,
+        }}};
+    }
+
+    pub fn toFreshLocal(reg: Reg) Cstr {
+        return .{ .type = .localReg, .data = .{ .slot = .{
+            .dst = reg,
+            .fresh = true,
         }}};
     }
 

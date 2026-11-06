@@ -663,6 +663,12 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
             const right_amt: i16 = @bitCast(pc[3].val);
             try w.print("%{} = %{} + {}", .{dst, left, right_amt});
         },
+        .and_64 => {
+            const dst = pc[1].val;
+            const src = pc[2].val;
+            const val = @as(*const align (2) u64, @ptrCast(pc + 3)).*;
+            try w.print("%{} = %{} && {}", .{dst, src, val});
+        },
         .load_n => {
             const dst = pc[1].val;
             const src_ptr = pc[2].val;
@@ -1039,6 +1045,7 @@ pub fn getInstLenAt(pc: [*]const Inst) u8 {
         .const_64 => {
             return 6;
         },
+        .and_64,
         .const_str => {
             return 7;
         },
@@ -1173,6 +1180,7 @@ pub const OpCode = enum(u8) {
     captured = vmc.CodeCaptured,
 
     and_ = vmc.CodeAND,
+    and_64 = vmc.CodeAnd64,
     or_ = vmc.CodeOR,
     xor = vmc.CodeXOR,
     not = vmc.CodeNOT,
@@ -1218,7 +1226,7 @@ pub const OpCode = enum(u8) {
 };
 
 test "bytecode internals." {
-    try t.eq(131, std.enums.values(OpCode).len);
+    try t.eq(132, std.enums.values(OpCode).len);
     try t.eq(@sizeOf(Inst), 2);
     try t.eq(@sizeOf(DebugSym), 16);
 }

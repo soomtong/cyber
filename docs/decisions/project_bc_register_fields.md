@@ -106,10 +106,19 @@ bc_gen에서 `.localReg`와 `.tempReg`의 차이는 돌려주는 GenValue 종류
 덤프 `mov` −41 · `mov_3` −10(for), retain · release 수 동일. for 37.4 · heap 29.9 · fib 28.9 · fiber 37.1 · alloc 605 ms(623에서 −3%),
 덤프 명령 줄 for 9177 · heap 9702 · fib 8867 · alloc 9956 · fiber 9390.
 
+## 3단계: `and_64` 명령 (2026-11-06)
+
+`Array.cap()`의 `self.header && ~(3 << 62)`는 루프마다 `const_64`(6슬롯) + `and_`로 두 번 디스패치한다. 상수가 i16에 들어가지 않아
+`add_i16` 같은 작은 즉시값 명령으로는 안 되고, 단일 패스 bc_gen에 루프 불변 상수를 끌어올리는 자리가 없다. 대신 `and_64 dst, src, imm64`
+(7슬롯, `READ_U64(3)`) 하나로 합친다. `gen_and`가 오른쪽 피연산자가 `.const64`일 때만 내고 아니면 `genBinOp2(.and_)`.
+`vm.h` `CodeAnd64`는 `CodeAND` 바로 뒤, `vm.c` `JENTRY` 표의 같은 위치, `bytecode.zig` enum · 길이 7 · 덤프 · opcode 수 131 → 132.
+
+A/B(같은 시각에 두 바이너리를 번갈아, hyperfine 10회): for 39.0 → 38.1 ms(−2.3%), alloc · fiber · heap은 ±1%. 정적 덤프에서 `and_64`는
+for 12 · alloc 19 · heap 13곳, 명령 줄 for 9177 → 9165. append 루프는 13 → 12개 디스패치. `hash && mask`처럼 마스크가 변수인 Map 탐사는 해당 없음.
+
 ## 남은 것
 
 - `for arr` 루프의 `mov %12 = %7`(`i := idx.*`) · `mov %12 = %10`(unwrap 캡처 지역)은 선언 지역을 소스 레지스터의 별칭으로 두면
   없어지지만, 원본이 별칭 수명 안에 바뀌지 않는다는 보장이 sema에 있어야 한다.
 - 인라인 인자가 평범한 `.local`일 때의 복사 `mov`(`self` 빌림 지역 · 루프 변수): 본문이 매개변수에 대입하지 않고 호출자 지역이 본문 중에
   바뀌지 않을 때만 직접 묶을 수 있다. 후자를 보장하기 어려워 보류.
-- 루프 불변 상수(`const_64` 마스크)와 `and_`.

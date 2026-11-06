@@ -267,6 +267,7 @@ typedef enum {
     CodeCast,
     CodeCastAbstract,
     CodeAND,
+    CodeAnd64,
     CodeOR,
     CodeXOR,
     CodeNOT,

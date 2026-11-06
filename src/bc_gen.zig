@@ -498,7 +498,7 @@ fn genExpr(c: *Chunk, expr: *ir.Expr, cstr: Cstr) anyerror!GenValue {
     const res = try switch (expr.code) {
         .add                => gen_add(c, expr.cast(.add), cstr, node),
         .address_of         => gen_addr_of(c, expr.cast(.address_of), cstr, node),
-        .and_op             => genBinOp2(c, expr.cast(.and_op), .and_, cstr, node),
+        .and_op             => gen_and(c, expr.cast(.and_op), cstr, node),
         .binary_op          => genBinOp(c, expr.cast(.binary_op), cstr, node),
         .bitcast            => gen_bitcast(c, expr.cast(.bitcast), cstr, node),
         .call               => gen_call(c, expr.cast(.call), cstr, node),
@@ -2371,6 +2371,21 @@ fn gen_add(c: *Chunk, expr: *ir.BinOp2, cstr: Cstr, node: *ast.Node) !GenValue {
         }
     }
     return genBinOp2(c, expr, .add, cstr, node);
+}
+
+/// `a && k` with a constant `k` becomes one `and_64` with the constant inline (`Array.cap` mask in loops).
+fn gen_and(c: *Chunk, expr: *ir.BinOp2, cstr: Cstr, node: *ast.Node) !GenValue {
+    if (expr.right.code == .const64) {
+        const k = expr.right.cast(.const64).val;
+        const dst = try bc.selectReg(c, expr.base.type, cstr, node);
+        const leftv = try genExpr(c, expr.left, Cstr.localOrTemp());
+        const pc = c.buf.len();
+        try c.pushCode2(.and_64, dst.isTemp(), &.{ dst.reg, leftv.reg, 0, 0, 0, 0 }, node);
+        c.buf.setOpArgU64(pc + 3, k);
+        try pop_temp_value(c, leftv, node);
+        return dst;
+    }
+    return genBinOp2(c, expr, .and_, cstr, node);
 }
 
 fn genBinOp2(c: *Chunk, expr: *ir.BinOp2, op: cy.OpCode, cstr: Cstr, node: *ast.Node) !GenValue {

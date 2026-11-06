@@ -55,6 +55,12 @@ t.eq(3 >= 2, true)
 t.eq(4 && 2, 0)
 t.eq(4 && 4, 4)
 t.eq(7 && 2, 2)
+-- A constant right operand that does not fit i16 (`and_64`).
+big := -1
+t.eq(big && ~(3 << 62), 4611686018427387903)
+t.eq(big && 0xFF00, 0xFF00)
+t.eq(0xF0F0 && ~0xFF00, 0xF0)
+t.eq(big && 0, 0)
 
 -- Bitwise or.
 t.eq(4 || 2, 6)

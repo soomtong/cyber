@@ -544,6 +544,7 @@ ResultCode execBytecode(ZThread* t) {
         JENTRY(Cast),
         JENTRY(CastAbstract),
         JENTRY(AND),
+        JENTRY(And64),
         JENTRY(OR),
         JENTRY(XOR),
         JENTRY(NOT),
@@ -1535,6 +1536,14 @@ beginSwitch:
     }
     CASE(AND): {
         INTEGER_BINOP(stack[dst] = BITCAST(u64, left & right))
+    }
+    CASE(And64): {
+        // dst = src & imm64. A constant mask (`Array.cap`) without a `const_64`.
+        u16 dst = pc[1];
+        u64 src = stack[pc[2]];
+        stack[dst] = src & READ_U64(3);
+        pc += 7;
+        NEXT();
     }
     CASE(OR): {
         INTEGER_BINOP(stack[dst] = BITCAST(u64, left | right))

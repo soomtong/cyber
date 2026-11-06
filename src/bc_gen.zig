@@ -1676,6 +1676,10 @@ pub const InlineCtx = struct {
     /// Callee's index into `Chunk.funcs_debug`.
     frame_id: u32,
     ret_reg: Reg,
+    /// `ret_reg` is a temp the body can not name: a fresh one, or the caller's temp destination.
+    /// A `return {…}` then writes its fields straight into it. A local destination may be read by
+    /// the body (`p = f(&p)`), so it keeps the local rules of `gen_init_regs`.
+    ret_is_temp: bool,
     /// The callee's top level body. A trailing `ret_expr` there needs no jump.
     body_head: ?*ir.Stmt,
     /// `jump` insts that go to the end of the inlined body.
@@ -2032,6 +2036,7 @@ fn gen_inline_call(c: *Chunk, expr: *ir.Call, cost: u32, cstr: Cstr, node: *ast.
         .src_chunk = func.decl.?.src(),
         .frame_id = frame_id,
         .ret_reg = ret_reg,
+        .ret_is_temp = cstr.type != .localReg,
         .body_head = block.bodyHead,
         .end_jumps = .empty,
     };
@@ -2700,8 +2705,13 @@ fn gen_set_captured(c: *Chunk, stmt: *ir.SetGeneric, node: *ast.Node) !void {
 
 fn gen_set_ret(c: *Chunk, stmt: *ir.SetReturn, node: *ast.Node) !void {
     _ = node;
-    const dst = if (c.inline_ctx) |ctx| Cstr.toLocal(ctx.ret_reg) else Cstr.toLocal(0);
+    const dst = if (c.inline_ctx) |ctx| inline_ret_cstr(ctx) else Cstr.toLocal(0);
     _ = try genExpr(c, stmt.right, dst);
+}
+
+/// Destination of an inlined body's return value.
+fn inline_ret_cstr(ctx: *InlineCtx) Cstr {
+    return if (ctx.ret_is_temp) Cstr.toTemp(ctx.ret_reg) else Cstr.toLocal(ctx.ret_reg);
 }
 
 fn gen_set_local(c: *Chunk, stmt: *ir.SetLocal, node: *ast.Node) !void {
@@ -2753,7 +2763,7 @@ fn gen_ret_gen(c: *Chunk, stmt: *ir.ReturnGen, node: *ast.Node) !void {
 
 fn gen_ret_expr(c: *Chunk, stmt: *ir.ReturnExpr, node: *ast.Node) !void {
     if (c.inline_ctx) |ctx| {
-        _ = try genExpr(c, stmt.expr, Cstr.toLocal(ctx.ret_reg));
+        _ = try genExpr(c, stmt.expr, inline_ret_cstr(ctx));
         try inline_ret_jump(c, ctx, &stmt.base, node);
         return;
     }

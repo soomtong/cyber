@@ -96,6 +96,15 @@ v = rot(&v)
 test.eq(22, v.x)
 test.eq(37, v.y)
 
+-- An inlined `return {…}` into a temp (an rvalue, a declared local) writes its fields directly.
+test.eq(37, swap(&v).x)
+test.eq(96, rot(&v).sum())
+test.eq(59, 22 + swap(&v).x)
+s := rot(&v)
+test.eq(37, s.x)
+test.eq(59, s.y)
+test.eq(22, v.x)
+
 -- The param used as a pointer value.
 n := 1
 q := id_ptr(*n)

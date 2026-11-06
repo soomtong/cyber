@@ -72,9 +72,30 @@ append 루프는 17 → 13개(`lt` · `jump_f` · each 지역 `mov` · 인자 `m
 
 - `src/test/functions/inline_addr_param.cy`(behavior_test 등록): 값 지역 · 중첩 필드 읽기 · 쓰기, 필드 교환 init, `&지역` 인자로 묶인
   매개변수의 읽기 · 쓰기 · 중첩 인라인 전달, 매개변수를 값으로 돌려주기(`id_ptr`), 재대입되는 매개변수(`pick`), `&param`(`through`),
-  `while` 안 `?int` 결과, 1바이트 필드.
+  `while` 안 `?int` 결과, 1바이트 필드. 2단계: 인라인된 `return {…}`을 임시(rvalue `swap(&v).x` · `rot(&v).sum()` · 더하기의 오른쪽 ·
+  선언 지역 `s := rot(&v)`)로 받는 경우와 지역 재대입 `v = swap(&v)`가 함께 있음.
 - 커밋 전 검증 12단계(네이티브 `zig build test` Debug · ReleaseFast · ReleaseSafe · `-Dtrace=false`, lib-test Debug · ReleaseSafe,
   standalone ReleaseFast, wasm32 behavior · cli · lib · trace) 모두 exit 0.
+
+## 2단계: 인라인 반환의 임시 목적지 (2026-11-06)
+
+`gen_ret_expr` · `gen_set_ret`는 인라인 본문 안에서 반환식을 항상 `Cstr.toLocal(ctx.ret_reg)`로 생성했다. `ret_reg`가 `gen_inline_call`이
+새로 잡은 임시거나 호출자가 준 임시 목적지(`.tempReg`)여도 `gen_init_regs`는 지역 규칙(모든 인자가 상수 · 목적지 밖 지역일 때만 직접)을
+적용해 `{ptr, length}`처럼 식 인자가 있는 반환은 인자를 임시에 먼저 평가하고 `mov`로 옮겼다.
+
+`InlineCtx.ret_is_temp`(`cstr.type != .localReg`)를 두고 `inline_ret_cstr`가 임시면 `Cstr.toTemp(ret_reg)`를 준다. 임시는 본문이 이름할 수
+없다. 새 임시는 인자 임시 · 본문 지역보다 아래에 있고, 호출자의 임시는 호출자 지역이 아니므로 `.addr_of`로 묶인 매개변수도 닿지 않는다.
+목적지가 호출자 지역(`.localReg`)이면 `p = f(&p)`에서 본문이 `self.b`로 목적지를 읽을 수 있으므로 지역 규칙을 그대로 둔다.
+bc_gen에서 `.localReg`와 `.tempReg`의 차이는 돌려주는 GenValue 종류와 이 `init` 규칙뿐이라 다른 식에는 영향이 없다.
+
+| 벤치 | 전 | 후 |
+|---|---|---|
+| for | 39.1 ms | 37.6 ms (−4%) |
+| heap · fiber | 30.3 · 38.6 ms | 30.1 · 37.5 ms |
+| fib | 28.7 ms | 29.1 ms (잡음) |
+| 덤프 명령 줄(for · heap · fib · alloc · fiber) | 9259 · 9785 · 8941 · 10044 · 9472 | 9228 · 9754 · 8912 · 10009 · 9441 |
+
+`Array.ensure_cap`의 인라인된 `@slice` 반환에서 `mov` 둘이 빠지고 임시 둘이 줄어 프레임이 25 → 24.
 
 ## 남은 것
 
@@ -82,6 +103,6 @@ append 루프는 17 → 13개(`lt` · `jump_f` · each 지역 `mov` · 인자 `m
   없어지지만, 원본이 별칭 수명 안에 바뀌지 않는다는 보장이 sema에 있어야 한다.
 - 인라인 인자가 평범한 `.local`일 때의 복사 `mov`(`self` 빌림 지역 · 루프 변수): 본문이 매개변수에 대입하지 않고 호출자 지역이 본문 중에
   바뀌지 않을 때만 직접 묶을 수 있다. 후자를 보장하기 어려워 보류.
-- `return {…}`이 `Cstr.toLocal(ret_reg)`로 오면 ret_reg가 새 임시여도 보수 경로를 탄다. `InlineCtx`에 ret_reg가 임시인지 들고 가면
-  `Ptr.@slice`의 `{ptr, length}` 같은 반환에서 `mov` 둘이 준다.
+- 선언 지역을 목적지로 하는 `init`(`sp := buf.@slice(...)` 같은 `declare_local`)은 선언되는 지역을 인자가 이름할 수 없으므로 임시처럼
+  직접 생성해도 되지만, `gen_init_regs`는 선언과 재대입을 구분하지 못해 보수 경로를 탄다. `ensure_cap`의 `mov %10 = %15` · `mov %11 = %16`.
 - 루프 불변 상수(`const_64` 마스크)와 `and_`.

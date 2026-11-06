@@ -55,6 +55,9 @@
   `build-601-e6401ce`, 에셋 14개. 받은 macOS arm64 번들로 `version` · 스크립트 실행 · `-jit` 오류를 확인했다.
 - 같은 날 REPL EOF 수정(`a2c586c2`)으로 0.4.2를 한 번 더 찍었다. `build-605-a2c586c`, 에셋 14개, 릴리스 본문은 사용자가
   고친 버전을 그대로 다시 올림. 받은 macOS arm64 번들로 `version`, `printf 'print(1)\n' | cyber`(종료 코드 0), `-jit` 오류 확인.
+- 0.4.3은 2026-11-06에 `a26645f1`(버전 올림 + `docs/releases/0.4.3.md`)로 찍었다. master push → Latest Build 성공 확인 → annotated 태그 push →
+  릴리스 run 성공(`build-668-a26645f`, 에셋 14개) → `gh release edit 0.4.3 --notes-file --latest`로 본문 업로드 → `install.sh 0.4.3`로
+  macOS arm64 번들 설치 · `cyber version` 확인. 성능 표는 0.4.2 태그 커밋을 worktree에서 ReleaseSafe로 빌드해 같은 시각에 번갈아 쟀다.
 - 번들의 `src/`는 타깃별로 다르다. `build.zig`의 `cli` 스텝이 공통 10개에 macOS(`os.macos.cy`,
   `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
   더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.

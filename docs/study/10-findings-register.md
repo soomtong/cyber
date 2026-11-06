@@ -46,7 +46,7 @@ tags:
 | F-08 | 컴파일러의 `std.debug.panic` 경로가 호스트를 abort시킨다. 알려진 사례: 한 함수에 지역 변수 257개(256개는 통과) | `sema.zig:3416`(`LocalVarS.id`가 u8, 현재 `sema.zig:50` 선언 · `@intCast`는 3312 · 3385) | 메인 재현(`integer does not fit in destination type`) + [03 §7](03-sema-and-ir.md) | 치명 | 한계 검사를 사용자 오류로 바꾼다 |
 | F-09 | 같은 계열의 다른 한계: 루프 본문 `s += 1` 9000줄 이상, if 본문 17000줄 이상, 점프 오프셋 `int16_t`(앞 점프가 32767단위를 넘으면 런타임 크래시) | `bc_gen.zig`의 점프 패치, `vm.c:867`(현재 861, 여전히 `int16_t`) | 챕터 재현 [04 §5](04-bytecode-gen.md), [05 §5 실습 6](05-vm-runtime.md) | 높음 | LLM이 긴 스크립트를 생성할 때 닿는다 |
 | F-10 | 스택 포인터 패치 구멍. 스택이 재할당될 때 main 프레임의 `&x`, `call_ptr`/`call_union`로 부른 호출 중의 포인터는 갱신되지 않아 쓰레기를 읽는다 | `thread.zig:890`(init 프레임 미패치, 현재 902), `bc_gen.zig:3127`(ptr_table은 call/call_host만, `call_ptr` · `call_union`은 현재 2125 · 2151) | 챕터 재현 [04 §7](04-bytecode-gen.md), [05 §7](05-vm-runtime.md) | 치명 | 깊은 재귀 + 빌림 조합에서 발생. `a2236c78`이 `gen_next` · `gen_end` 지점에 ptr layout을 더하고 걷기가 `Generator.prev_fp`를 따르게 했지만 두 구멍은 그대로 |
-| F-11 | `g := math.sqrt; g(16.0)`처럼 호스트 함수를 함수 값으로 쓰면 segfault. `addr \| (1<<63)`가 정의되지 않은 시프트라 컴파일러가 대입을 지운다 | `vm.c:1718`(FN_HOST, 현재 1695) | 챕터 재현 [05 §5 실습 6](05-vm-runtime.md) | 높음 | 시프트를 `(u64)1 << 63`으로 |
+| F-11 | `g := math.sqrt; g(16.0)`처럼 호스트 함수를 함수 값으로 쓰면 segfault. `addr \| (1<<63)`가 정의되지 않은 시프트라 컴파일러가 대입을 지운다 | `vm.c:1718`(FN_HOST, 현재 1695) | 챕터 재현 [05 §5 실습 6](05-vm-runtime.md) | 높음 | 2026-11-06 수정 `dfaab96a`(`vm.c` `FN_HOST`가 `(u64)1 << 63`, 현재 1704). `g := math.sqrt; g(16.0)`이 `4`. 테스트 `modules/math.cy` |
 | F-12 | `#[generator]` 밖에서 `yield`를 쓰면 컴파일러가 segfault | `sema.zig:711`(현재 724) | 챕터 재현 [07 §7.1](07-coroutines-concurrency.md) | 높음 | 2026-11-04 수정 `3aa5b400`(컴파일 오류, 테스트 `concurrency/yield_outside_generator_error.cy`) |
 | F-13 | 끝난 제너레이터에 `next()`를 한 번 더 부르면 릴리스 CLI가 `unexpected 4`만 찍는다. `gen_next`/`gen_end`에 debug sym이 없다(추정) | `bc_gen.zig:720, 733` | 챕터 재현 [07 §2.5](07-coroutines-concurrency.md) | 중간 | 2026-11-04 수정 `a2236c78`(`pushFCode`로, 현재 `bc_gen.zig:719` · `734`). `panic: Generator is already done.`을 찍는다 |
 | F-14 | 빌림 `&int` 매개변수를 받는 제너레이터는 힙 스냅샷에 스택 주소를 담아 use-after-return이 된다. 컴파일 에러가 없다 | sema의 `semaLift` 우회 | 챕터 재현 [07 실습 8](07-coroutines-concurrency.md) | 높음 | borrow 매개변수 거부 |
@@ -107,9 +107,9 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 
 | ID | 증상 | 위치 | 검증 | 영향 | 첫 걸음 |
 | --- | --- | --- | --- | --- | --- |
-| F-70 | `[]T.index(needle)`이 끝나지 않는다. `xs := []int{3, 1, 2}; print(xs.index(1))`가 무한 대기. `self[..]`가 다시 Slice를 돌려줘 자기 자신을 부른다. `contains`는 정상 | `core.cy:1293-1294`(현재 1386~1387) | 메인 재현(4초 타임아웃) + [00 §7.3](00-language-tour.md) | 높음 | 첫 기여로 적당(수정이 작음) |
-| F-71 | `int.parse('-5')`가 `error.InvalidCharacter`. `-`를 만나 부호를 뒤집은 뒤 `else` 없이 숫자 검사로 떨어진다. `int.parse('')`은 에러 대신 `0`, `int('abc')`는 오류 없이 `0` | `core.cy:476-482`, `:417`(현재 558~575, `int(str)`은 510) | 메인 재현(`-5`와 빈 문자열) + [00 §7.3](00-language-tour.md)(`int('abc')`는 챕터 재현) | 높음 | 첫 기여로 적당 |
-| F-72 | `Map.keys()`를 부르면 컴파일 에러(`Undeclared variable @iterator`). 옛 문법 `@iterator()`/`@next(&iter)`가 남았다 | `core.cy:2362-2367`(현재 2466~2471) | 메인 재현 | 중간 | 새 반복자 문법으로 이식 |
+| F-70 | `[]T.index(needle)`이 끝나지 않는다. `xs := []int{3, 1, 2}; print(xs.index(1))`가 무한 대기. `self[..]`가 다시 Slice를 돌려줘 자기 자신을 부른다. `contains`는 정상 | `core.cy:1293-1294`(현재 1386~1387) | 메인 재현(4초 타임아웃) + [00 §7.3](00-language-tour.md) | 높음 | 2026-11-06 수정 `dfaab96a`(`contains`처럼 `self.span().index`로, 현재 1386~1387). 테스트 `core/Slice.cy` · `core/Array.cy` |
+| F-71 | `int.parse('-5')`가 `error.InvalidCharacter`. `-`를 만나 부호를 뒤집은 뒤 `else` 없이 숫자 검사로 떨어진다. `int.parse('')`은 에러 대신 `0`, `int('abc')`는 오류 없이 `0` | `core.cy:476-482`, `:417`(현재 558~575, `int(str)`은 510) | 메인 재현(`-5`와 빈 문자열) + [00 §7.3](00-language-tour.md)(`int('abc')`는 챕터 재현) | 높음 | 2026-11-06 수정 `dfaab96a`(앞에서부터 읽고 `-` · `+` 접두는 첫 글자만, 빈 문자열 · 부호만 · 숫자 아닌 글자는 `error.InvalidCharacter`, 현재 558~578). `int('abc')` · `int('')`이 `0`인 것은 `@init`의 `!else 0`이라 그대로. 테스트 `core/ints.cy` |
+| F-72 | `Map.keys()`를 부르면 컴파일 에러(`Undeclared variable @iterator`). 옛 문법 `@iterator()`/`@next(&iter)`가 남았다 | `core.cy:2362-2367`(현재 2466~2471) | 메인 재현 | 중간 | 2026-11-06 수정 `dfaab96a`(`self.iterator()` · `self.next(&iter)`, `<<`가 없어 `res = res.append(e.key)`, 현재 2466~2471). 테스트 `core/Map.cy` |
 | F-73 | `&&` 수신자 메서드에서 구조체의 `Array` 필드를 바꾸면 틀린 결과가 나온다. `fn (&&D) push(x int): self.items << x`를 세 번 부르면 3이 아니라 1. 필드 앞에 다른 필드가 있으면 segfault. 에러 없이 틀린 답이 나온다 | 원인 후보: bc_gen의 "빌림 매개변수를 거친 필드 주소 취하기"(`addr %7 = *%4`가 포인터 슬롯의 주소를 필드 시작으로 쓴다). 추정 | 메인 재현(`1`) + [00 §7.3](00-language-tour.md) | 치명 | 2026-11-06 `db9f636d`에서 재현되지 않는다(메인 재현: 3을 내고, 앞에 `n int` 필드를 두어도 3 · 7). 고친 커밋은 특정하지 못했다(후보 `d99a8aa9` 역참조 addressable, `38272a0c` 레지스터 필드 접근). 덤프에는 여전히 `addr %7 = *%4`가 보이므로 원래 진단이 틀렸을 수 있다. 회귀 테스트 `types/method_mut_self_array_field.cy`로 고정(2026-11-06) |
 | F-74 | `^Dyn[Trait]` 값을 `[]T`/`Array`/`ArrayStore`에 넣으면 죽는다(`xs += d`). ReleaseSafe는 `integer overflow`, 트레이스 빌드는 `Double free` | `@copy` 경로(추정) | 챕터 재현 [00 §7.3](00-language-tour.md) | 높음 | |
 | F-76 | 64비트를 넘는 정수 리터럴이 에러 없이 wrap된다. `9223372036854775808`이 `-9223372036854775808`, `18446744073709551615`가 `-1`로 출력된다. 모델이 큰 수(ID, 타임스탬프 나노초 등)를 쓰면 조용히 틀린 값이 된다 | 정수 리터럴 처리(현재 `sema.zig:6463` `.dec_u`가 u64로 파싱해 i64로 `@bitCast`) | 메인 재현 + [00 §7.3](00-language-tour.md) | 높음 | 범위 검사를 추가해 컴파일 에러로 |
@@ -121,10 +121,10 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 
 에이전트 루프 용도에서 먼저 막아야 하는 순서(제안이다. 공식 로드맵은 [09장](09-agent-loop-and-roadmap.md)).
 
-1. 호스트가 죽는 경로: F-04, F-06, F-08, F-09, F-10, F-11, F-40 (F-03 · F-12는 수정됨)
+1. 호스트가 죽는 경로: F-04, F-06, F-08, F-09, F-10, F-40 (F-03 · F-11 · F-12는 수정됨)
 2. 조용한 오답: F-20, F-21, F-22, F-23, F-24 (F-01은 수정됨, F-73은 재현 안 됨 · 미확정)
 3. 상태가 깨지는 경로: F-05, F-07, F-14, F-25, F-26
-4. 표준 라이브러리와 리터럴에서 LLM 스크립트가 바로 닿는 곳: F-70, F-71, F-72, F-74, F-76
+4. 표준 라이브러리와 리터럴에서 LLM 스크립트가 바로 닿는 곳: F-74, F-76 (F-70 · F-71 · F-72는 수정됨)
 5. 정리: F-50~F-54, F-60~F-66, F-77, F-78 (F-61 · F-62 · F-64는 일부 정리, F-63 · F-75는 수정됨)
 
 F-20(cte)은 "컴파일은 되고 실행도 되는데 답이 틀리는" 종류라서, 에이전트가 쓴 스크립트의 결과를 신뢰하는 모든 설계에 직접 위험하다.

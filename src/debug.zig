@@ -56,7 +56,7 @@ pub fn get_pc_func_metadata(vm: *const cy.VM, pc: [*]cy.Inst) FuncMetadata {
     const metadata_pc = entry.chunk.buf.ops.items.ptr + func_table[idx-1];
 
     const ret_size = @as(*const align(1) u16, @ptrCast(metadata_pc + 1)).*;
-    const stack_size = @as(*const align(1) u16, @ptrCast(metadata_pc + 3)).*;
+    const stack_size = @as(*const align(1) u16, @ptrCast(metadata_pc + 2)).*;
     return .{
         .ret_size = ret_size,
         .stack_size = stack_size,

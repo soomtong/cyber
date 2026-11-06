@@ -447,7 +447,7 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
         },
         .call_trait => {
             const base = pc[1].val;
-            const vtable_idx = @as(*const align(1) u16, @ptrCast(pc + 3)).*;
+            const vtable_idx = pc[2].val;
             try w.print("?..%{} = %{}.vtable[{}](%{}..)", .{
                 base, base + 3, vtable_idx, base + 4,
             });
@@ -584,21 +584,21 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
         //     _ = try fmt.printCount(w, "%{} = new Map", &.{ v(dst) });
         // },
         .trait => {
-            const src = pc[1].val;
-            const type_id = @as(*const align(1) u16, @ptrCast(pc + 2)).*;
-            const vtable = @as(*const align(1) u16, @ptrCast(pc + 4)).*;
-            const dst = pc[6].val;
+            const dst = pc[1].val;
+            const src = pc[2].val;
+            const type_id = pc[3].val;
+            const vtable = pc[4].val;
 
             try w.print("%{} = trait(type={}, vtable={}, %{})", .{
                 dst, type_id, vtable, src,
             });
         },
         .new => {
-            const dst = @as(*const align(1) u16, @ptrCast(pc + 1)).*;
-            const type_id = @as(*const align(1) u16, @ptrCast(pc + 3)).*;
+            const dst = pc[1].val;
+            const type_id = pc[2].val;
             const name = try vm.sema.allocTypeName(vm.sema.types.items[type_id]);
             defer vm.alloc.free(name);
-            const size = @as(*const align(1) u16, @ptrCast(pc + 5)).*;
+            const size = pc[3].val;
             try w.print("%{} = {s}{{size={}}}", .{
                 dst, name, size,
             });
@@ -609,8 +609,8 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
         },
         .release_opt,
         .release => {
-            const reg = @as(*const align(1) u16, @ptrCast(pc + 1)).*;
-            const jump = @as(*const align(1) i16, @ptrCast(pc + 3)).*;
+            const reg = pc[1].val;
+            const jump = @as(i16, @bitCast(pc[2].val));
             try w.print("%{}.rc -= 1; jmp {}", .{reg, jump});
         },
         .dtor_str => {
@@ -703,9 +703,9 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
                 .{type_id, ret_size+4, reg_end, resume_off, ret_size});
         },
         .gen_next => {
-            const ret = @as(*const align(1) u16, @ptrCast(pc + 1)).*;
-            const base = @as(*const align(1) u16, @ptrCast(pc + 3)).*;
-            const gen = @as(*const align(1) u16, @ptrCast(pc + 5)).*;
+            const ret = pc[1].val;
+            const base = pc[2].val;
+            const gen = pc[3].val;
             try w.print("%{}..%{} = next(%{})", .{ret, base, gen });
         },
         .ret_y => {
@@ -733,37 +733,37 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
             try w.print("%{} = cast(type={}, %{})", .{dst, expTypeId, child});
         },
         .memsetz => {
-            const dst_ptr = @as(*const align(1) u16, @ptrCast(pc + 1)).*;
-            const offset = @as(*const align(1) u16, @ptrCast(pc + 3)).*;
-            const len = @as(*const align(1) u16, @ptrCast(pc + 5)).*;
+            const dst_ptr = pc[1].val;
+            const offset = pc[2].val;
+            const len = pc[3].val;
             try w.print("[%{}+{}..{}] = 0", .{dst_ptr, offset, offset+len});
         },
         .lnot => {
-            const dst = @as(*const align(1) u16, @ptrCast(pc + 1)).*;
-            const cond = @as(*const align(1) u16, @ptrCast(pc + 3)).*;
+            const dst = pc[1].val;
+            const cond = pc[2].val;
             try w.print("%{} = !%{}", .{dst, cond});
         },
         .sext => {
-            const dst = @as(*const align(1) u16, @ptrCast(pc + 1)).*;
-            const src = @as(*const align(1) u16, @ptrCast(pc + 3)).*;
-            const bits = pc[5].val;
+            const dst = pc[1].val;
+            const src = pc[2].val;
+            const bits = pc[3].val;
             try w.print("%{} = sext({}, %{})", .{dst, bits, src});
         },
         .zext => {
-            const dst = @as(*const align(1) u16, @ptrCast(pc + 1)).*;
-            const src = @as(*const align(1) u16, @ptrCast(pc + 3)).*;
-            const bits = pc[5].val;
+            const dst = pc[1].val;
+            const src = pc[2].val;
+            const bits = pc[3].val;
             try w.print("%{} = zext({}, %{})", .{dst, bits, src});
         },
         .fn_union => {
-            const dst = @as(*const align(1) u16, @ptrCast(pc + 1)).*;
-            const src = @as(*const align(1) u16, @ptrCast(pc + 3)).*;
-            const type_id = @as(*const align(1) u16, @ptrCast(pc + 5)).*;
+            const dst = pc[1].val;
+            const src = pc[2].val;
+            const type_id = pc[3].val;
             try w.print("%{} = fnunion(%{}, type={})", .{dst, src, type_id});
         },
         .unwrap_nz => {
-            const dst = @as(*const align(1) u16, @ptrCast(pc + 1)).*;
-            const src = @as(*const align(1) u16, @ptrCast(pc + 3)).*;
+            const dst = pc[1].val;
+            const src = pc[2].val;
             try w.print("%{} = %{}.?", .{dst, src});
         },
         .unwrap_addr => {

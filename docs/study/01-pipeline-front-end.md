@@ -779,7 +779,7 @@ print(x)
 1. 오류 복구가 없다. 파서/토크나이저는 첫 오류에서 멈추고, 컴파일 오류 요약 API도 첫 보고서만 낸다(`lib.zig:463-469`). 오류 3개 파일이 1개만 보고하는 것을 5.2절에서 확인했다.
 2. 열은 바이트 기준이고 캐럿 정렬도 바이트 수를 쓴다(5.2절의 한글 예). `computeLinePos`는 오류마다 소스를 처음부터 훑는다(`ast.zig:1905`).
 3. 토큰 시작 위치는 24비트다(`tokenizer.zig:176,193`). 16 MiB 이상 소스에서 위치가 잘릴 가능성이 있다(추정).
-4. `compiler.zig:560-571`의 `resolveCopyCtor`/`resolveFuncTemplate`는 호출하는 곳이 없고 존재하지 않는 `cy.generics`를 참조하는 죽은 코드다(Zig는 쓰이지 않는 함수를 컴파일하지 않아 빌드가 통과한다).
+4. `compiler.zig:560-571`의 `resolveCopyCtor`/`resolveFuncTemplate`는 호출하는 곳이 없고 존재하지 않는 `cy.generics`를 참조하는 죽은 코드다(Zig는 쓰이지 않는 함수를 컴파일하지 않아 빌드가 통과한다). 2026-11-06에 삭제했다(F-61).
 5. `compileInner`의 TODO(322-324)가 말하듯 "타입/시그니처 패스"와 "함수 본문 패스"를 나누는 일은 아직 되어 있지 않다. 같은 `loadChunk` 안에서 심볼 예약과 시그니처 해석이 섞인다.
 6. `src/tokenizer.cy`가 `colon_equal` 뒤 `advance()`를 빠뜨려 `=` 토큰을 중복 내보낸다(`tokenizer.cy:408-409`). 테스트가 토큰 내용을 검증하지 않아 통과한다.
 7. `cy.cy`의 `Node` 선택 타입 순서가 `ast.NodeType`과 어긋나면 `cy.parse`가 조용히 잘못된 태그를 읽는다. 둘을 비교하는 테스트는 보이지 않았다(미확인: `rg`로 `NodeType`과 `cy.cy` 비교 코드를 찾지 못함). `Node.pos()`는 `var_decl` 등에서 `TODO pos` 패닉이 난다.

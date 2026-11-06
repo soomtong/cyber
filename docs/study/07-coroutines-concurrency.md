@@ -200,7 +200,7 @@ $ rg -n 'Fiber' src/types.zig
 - `src/cyber.zig` 의 `pub const xxx = @import(...)` 목록에 `fiber.zig` 가 없다. 그래서 `src/vm.zig:644` 의 `cy.fiber.getStackOffset(...)` 와 `src/vm.zig:833` 의 `bt.Fiber` 는 호출/해석되지 않는다.
   `src/types.zig` 에는 `Fiber` 선언이 없으므로 `bt.Fiber` 는 존재하지 않는 심볼이고, 644행이 쓰는 `self.c.stack` 도 지금의 `ThreadC`(`stack_ptr` / `stack_len`)에는 없는 필드다.
   Zig 는 쓰이지 않는 함수 본문을 분석하지 않아서 컴파일이 통과한다(lazy analysis).
-- `src/vm.h:840~873` 에는 `Fiber` / `FiberObject` 구조체가 남아 있지만 `src/vm.c` 의 어떤 명령어도 쓰지 않는다. `src/fiber.zig:43~60` 은 이 구조체에 없는 필드(`typeId`, `rc`, `pcOffset`, `panicPayload`, `tryStack*`)를 참조하므로 import 해도 컴파일되지 않는다. 구조체만 정리되고 파일은 방치된 상태다.
+- `src/vm.h:840~873` 에는 `Fiber` / `FiberObject` 구조체가 남아 있지만 `src/vm.c` 의 어떤 명령어도 쓰지 않는다. `src/fiber.zig:43~60` 은 이 구조체에 없는 필드(`typeId`, `rc`, `pcOffset`, `panicPayload`, `tryStack*`)를 참조하므로 import 해도 컴파일되지 않는다. 구조체만 정리되고 파일은 방치된 상태였다. `fiber.zig` 는 2026-11-04, `vm.h` 의 구조체는 2026-11-06 에 삭제했다(F-61).
 - `docs/docs.md:2787` 의 "Fibers." 절(`Fiber(fn, args)`, `f.resume()`, `Fiber.yield()`)은 본문에 `*TODO*` 가 붙은 설계 문서이고 소스 어디에도 `type Fiber` 가 없다.
 - `src/heap.zig:876~884` 의 `AsyncTaskType` 주석("Invoke callback on a new fiber", "Resumes a fiber")도 옛 모델의 흔적이다.
 

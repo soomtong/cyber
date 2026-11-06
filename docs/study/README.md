@@ -153,7 +153,7 @@ perl -e 'alarm 5; exec @ARGV' ./zig-out/bin/cyber file.cy
 | 임베딩 | `lib.zig`, `capi.zig`, `include/cyber.h` | 1.6K, 0.4K, 0.6K | libcyber 구현과 C API | 08 |
 | 내장 | `builtins/core.cy`, `core.zig`, `meta.zig`, `std/*` | 4.4K, 2.3K, 1.2K | 표준 타입과 호스트 함수 | 08 |
 | 테스트 | `src/test/**/*.cy`, `behavior_test.zig`, `test/setup.zig` | 303개 .cy | 동작 명세 | 08 |
-| 죽은 코드, 범위 밖 | `fiber.zig`, `map.zig`, `jit/`, `llvm_gen.zig`(죽은 코드). `cgen.zig`(C 백엔드, 미완이며 `-cc`/`-tcc`는 실패. fork 방침상 범위 밖) | | 읽을 필요 없음 | 03, 05, 06, 07 |
+| 죽은 코드, 범위 밖 | `fiber.zig`, `map.zig`, `jit/`, `llvm_gen.zig`(죽은 코드, 2026-11-04 ~ 06에 모두 삭제됨). `cgen.zig`(C 백엔드, 미완이며 `-cc`/`-tcc`는 실패. fork 방침상 범위 밖) | | 읽을 필요 없음 | 03, 05, 06, 07 |
 
 ## 6. 기존 문서와의 관계
 

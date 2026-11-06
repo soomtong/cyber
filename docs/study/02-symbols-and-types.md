@@ -1245,7 +1245,7 @@ history 문서의 표대로 `my -> let -> dyn`, `import -> use`, `func -> fn`, `
 | src/chunk.zig:805 | `reserveDistinctType` 별칭 (module.zig 에 없음) |
 | src/types.zig:316~318, 1314, 1405~1508 | `is_min_resolved`(없는 `shallow_resolved`), `createTypeCopy` 의 `info.distinct`, `isAnyOrDynamic` 등 0.3 잔재 |
 | src/sema.zig:2000, 5153 | `semaAccessChoicePayload`(호출 없음), `checkTypeCstr2`(없는 `bt.Dyn`) |
-| src/compiler.zig:560~571 | `resolveCopyCtor`/`resolveFuncTemplate`(없는 `cy.generics`) |
+| src/compiler.zig:560~571 | `resolveCopyCtor`/`resolveFuncTemplate`(없는 `cy.generics`). 2026-11-06 삭제(F-61) |
 | src/sym.zig | `SymType.ct_value`, `module_alias` 는 생성 지점이 없음 |
 | src/types.zig `TypeKind.bare` | 어디서도 만들지 않고 bc_gen 에서 만나면 `error.Unexpected` |
 

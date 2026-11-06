@@ -214,7 +214,7 @@ main 에는 `nop32` 헤더도 `chk_stk` 도 없다. 프레임은 VM 이 스택 �
 | `release` | `gen_release` `:581` | `release` + 소멸자 `call` (`pushRelease` `:3040`) |
 | `break_` / `continue_` | `:1034`, `:1039` | 빈 `jump` + `blockJumpStack` 기록 |
 
-`genStmt` 와 `genExpr` 의 `else => error.TODO` 분기에 걸리는 IR 코드는 bc_gen 이 지원하지 않는 것이다. `elseBlocks`(`:2618`) 같은 함수는 지금 IR 에 대응하는 노드가 없는 옛 코드로 보인다(추정: 호출처가 없고, 인자 개수가 호출 가능한 모양이 아니라서 컴파일되지 않는 코드이며 Zig 가 호출되지 않는 함수를 분석하지 않아 통과된다). if / else 사슬은 sema 가 `if_block` 여러 개와 `break` 로 풀어 놓는다(2.8절).
+`genStmt` 와 `genExpr` 의 `else => error.TODO` 분기에 걸리는 IR 코드는 bc_gen 이 지원하지 않는 것이다. `elseBlocks`(`:2618`) 같은 함수는 지금 IR 에 대응하는 노드가 없는 옛 코드로 보인다(추정: 호출처가 없고, 인자 개수가 호출 가능한 모양이 아니라서 컴파일되지 않는 코드이며 Zig 가 호출되지 않는 함수를 분석하지 않아 통과된다. 2026-11-06 에 삭제, F-61). if / else 사슬은 sema 가 `if_block` 여러 개와 `break` 로 풀어 놓는다(2.8절).
 
 ### 2.5 레지스터 할당: 슬롯 번호를 누가, 언제 정하는가
 
@@ -485,7 +485,7 @@ else: Z                        if_block(B) { Y; break outer }   }               
 
 #### 상수와 문자열
 
-- 정수와 실수 상수는 명령어 안의 즉치다(`const_16s`, `const_16`, `const_32`, `const_64`). 별도의 상수 풀 `ByteCodeBuffer.consts` 와 중복 제거 맵 `constMap`, `getOrPushConst`(`bytecode.zig:182`)가 정의되어 있지만 호출하는 곳이 없다(`genConstInt` 안의 호출은 주석 처리, `bc_gen.zig:3080`). 풀 방식에서 즉치 방식으로 옮겨 간 흔적으로 보인다(추정).
+- 정수와 실수 상수는 명령어 안의 즉치다(`const_16s`, `const_16`, `const_32`, `const_64`). 별도의 상수 풀 `ByteCodeBuffer.consts` 와 중복 제거 맵 `constMap`, `getOrPushConst`(`bytecode.zig:182`)가 정의되어 있지만 호출하는 곳이 없다(`genConstInt` 안의 호출은 주석 처리, `bc_gen.zig:3080`). 풀 방식에서 즉치 방식으로 옮겨 간 흔적으로 보인다(추정). 상수 풀과 `VM.consts_ptr`/`consts_len` 은 2026-11-06 에 삭제했다(F-61).
 - 문자열 리터럴은 `getOrPushConstString`(`bytecode.zig:170`)이 `const_string_map`(내용 → ASCII 여부)으로 중복을 제거한다. 처음 보는 내용이면 0으로 끝나는 복사본을 할당해 맵의 키로 두고, ASCII 여부는 `cy.string.isAstring` 으로 계산한다. 같은 리터럴은 같은 포인터를 가리킨다.
 - `pushConstString`(`bc_gen.zig:1270`)이 그 포인터(하위 48비트)와 길이(상위 16비트)를 u64 하나로 합쳐 `const_str` 의 피연산자에 쓰고, 마지막 유닛에 ASCII 비트를 둔다. VM 의 `CONST_STR`(`vm.c:624`)은 이것으로 `buf = NULL` 인 정적 `String` 을 만든다(`static_str`, `vm.c:265`). `buf` 가 없으므로 해제할 소유 버퍼가 없고, 길이의 최상위 비트가 ASCII 힌트다. 길이를 16비트에 담기 때문에 65536 바이트 이상의 리터럴이 잘린다(7.2절). C 문자열 포인터 타입의 리터럴은 `const_64` 에 복사본의 주소를 담는다(`pushConstStrZPtr`, `:1265`).
 - 디버그 라벨 `nops` 도 같은 맵을 쓴다(`genNopLabel2`, `:604`).
@@ -1389,7 +1389,7 @@ print(via_union(rec, &x))
 
 - `write_inst` 의 어긋남은 3.3절. `get_pc_func_metadata` 의 `stack_size` 도 같은 원인이다(`debug.zig:59`, 5.5절).
 - `ByteCodeBuffer.clear()`(`bytecode.zig:135`)는 존재하지 않는 필드(`unwind_table` 등)를 참조한다. 호출처가 없어 컴파일되지 않을 뿐이다.
-- 쓰이지 않는 것: `consts` / `getOrPushConst`(호출 없음, 주석뿐), `labels` / `push_label`(호출 없음), `markers`(덤프 전용), `elseBlocks`, `selectForDstInst`, `DstInst`, `NoErrInst`, `Cstr.none`, `GenValue.constant`, `Cstr.captured` 경로. JIT 쪽 `enter_jit` 는 VM 이 `pc[5]` 를 읽는데 생성기는 3개 피연산자(길이 4)만 낸다(죽은 코드).
+- 쓰이지 않는 것(2026-11-06 기준 `consts` / `getOrPushConst` · `labels` / `push_label` · `elseBlocks` · `selectForDstInst` · `DstInst` · `NoErrInst` · `Cstr.none` · `GenValue.constant` 는 삭제됨, F-61): `markers`(덤프 전용), `Cstr.captured` 경로. JIT 쪽 `enter_jit` 는 VM 이 `pc[5]` 를 읽는데 생성기는 3개 피연산자(길이 4)만 낸다(죽은 코드).
 - `bc_gen.zig:1463` 의 "Registers are u8 indexed by the VM" 주석은 코드와 맞지 않는다(2.6절).
 
 ### 7.5 문서와 코드의 차이

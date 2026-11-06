@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.3-dev 669-537bf95</div>
+    <div class="sub-title">v0.4.3-dev 679-85b5d21</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1481,6 +1481,11 @@ It's encoded as 64-bit two's complement and represents integers in the range -(2
 <pre><code class="language-cy">a := 0xFF     -- Hexidecimal.
 a = 0o17      -- Octal.
 a = 0b1010    -- Binary.
+</code></pre>
+<p>A decimal literal must fit in the target integer type. Without a target type that is <code>int</code> (64-bit signed), so <code>9223372036854775808</code> is a compile error instead of wrapping around. Hexadecimal, octal and binary literals, and decimals with a <code>u</code> suffix, are 64-bit patterns:</p>
+<pre><code class="language-cy">a := 0xFFFFFFFFFFFFFFFF      -- -1
+a = 18446744073709551615u    -- -1
+var b r64 = 18446744073709551615
 </code></pre>
 <p>String literals evaluate as their UTF-8 codepoint if the target integer type is big enough:</p>
 <pre><code class="language-cy">-- Success.

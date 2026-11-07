@@ -752,7 +752,7 @@ fn main():
     print('ok')
 ```
 
-출력은 ``CompileError: Expected type `int`, got `str`.`` 이고 위치는 `lazy1.cy:2:12` 다. 호출이 없어도 일반 함수 본문은 검사된다. 반면 템플릿 메서드는 쓰기 전까지 검사되지 않는다.
+출력은 "CompileError: Expected type `int`, got `str`." 이고 위치는 `lazy1.cy:2:12` 다. 호출이 없어도 일반 함수 본문은 검사된다. 반면 템플릿 메서드는 쓰기 전까지 검사되지 않는다.
 
 ```
 type Bad[T Any]:            -- lazy2~4 가 공유하는 선언
@@ -765,7 +765,7 @@ fn (&Bad[]) m() -> int:
 |---|---|---|
 | lazy2.cy | `print('ok-unused-template')` (템플릿을 안 씀) | 정상 실행 |
 | lazy3.cy | `b := Bad[int]{v=1}` 후 `b.v` 만 출력 (`m` 호출 없음) | `ok-instantiated-no-call 1` |
-| lazy4.cy | `b := Bad[int]{v=1}` 후 `print(b.m())` | ``CompileError: Expected type `int`, got `str`.`` |
+| lazy4.cy | `b := Bad[int]{v=1}` 후 `print(b.m())` | "CompileError: Expected type `int`, got `str`." |
 
 템플릿 인스턴스의 메서드 본문은 접근하는 순간 비로소 해석된다는 2.6절의 주장이 이 세 줄로 확인된다. 참고로 `return 'x'` 처럼 한 글자 문자열은 룬 리터럴이라 `int` 로 받아져 오류가 나지 않았다(lazy4 에서 `120` 이 출력됨). 오류 재현에는 두 글자 이상을 써야 한다.
 

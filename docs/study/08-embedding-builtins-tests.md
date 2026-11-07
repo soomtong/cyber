@@ -188,7 +188,7 @@ persist_main 의 지역 변수 이월은 REPL 을 위해 e541090a 에서 들어�
 이 흐름에서 읽어야 할 설계 결정이 넷이다.
 
 1. 이름은 "선언된 청크"의 표에서 찾는다. `src_c = c.compiler.chunks.items[func.src()]`(sema.zig:2981)이므로 호스트 표는 모듈마다 따로다. main 청크의 표는 비어 있다(소스를 직접
-   받는 eval 은 loader 를 거치지 않고, 파일 실행은 CLI loader 가 내장 모듈 이름에만 표를 채운다). 신뢰할 수 없는 스크립트가 `#[bind] fn foo()` 를 써도 ``Host func `foo` failed to load.`` 컴파일 에러가 날 뿐이다(실험: `#[bind] fn foo(a int) -> int` 만 든
+   받는 eval 은 loader 를 거치지 않고, 파일 실행은 CLI loader 가 내장 모듈 이름에만 표를 채운다). 신뢰할 수 없는 스크립트가 `#[bind] fn foo()` 를 써도 "Host func `foo` failed to load." 컴파일 에러가 날 뿐이다(실험: `#[bind] fn foo(a int) -> int` 만 든
    파일을 CLI 로 실행). 단, 호스트가 `cl_mod_set_fallback_func` 를 켠 모듈은 모든 미등록 이름이 그 함수로 간다(sema.zig:2992).
 2. 이름 규칙. `#[bind='name']` 처럼 문자열이 있으면 그 이름, 없으면 `writeFuncName`(src/sym.zig:1472)이 만든 한정 이름이다. 예를 들어 `fn (&str) len()` 은 `str.len`,
    템플릿 타입의 메서드는 `Generator[].status`, 호스트 모듈의 자유 함수는 그냥 `tool`, 타입 생성자는 `MyNode.@init`(examples/libcyber/bind_module.c:68-70).

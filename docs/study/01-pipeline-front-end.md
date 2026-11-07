@@ -636,7 +636,7 @@ exprStmt
 
 ### 5.4 토큰 훑어보기: `src/tokenizer.cy`
 
-저장소의 `src/tokenizer.cy`를 복사해 맨 위의 `src := ```...``` ` 블록을 관찰하고 싶은 소스로 바꾸면 Cyber 포팅 토크나이저로 토큰열을 얻는다. 아래는 `fn add(a, b int) -> int:` 소스로 얻은 결과를 한 줄로 이은 것이다(`토큰, 시작 위치` 형식).
+저장소의 `src/tokenizer.cy`를 복사해 맨 위의 ` src := ... ` 블록을 관찰하고 싶은 소스로 바꾸면 Cyber 포팅 토크나이저로 토큰열을 얻는다. 아래는 `fn add(a, b int) -> int:` 소스로 얻은 결과를 한 줄로 이은 것이다(`토큰, 시작 위치` 형식).
 
 ```
 fn_k, 0  ident, 3  left_paren, 6  ident, 7  comma, 8  ident, 10  ident, 12  right_paren, 15

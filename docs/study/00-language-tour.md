@@ -338,7 +338,7 @@ print(float('1.5') * 2)
 3
 ```
 
-단일 문자 문자열 리터럴은 정수 자리에서 코드포인트로 취급된다. `fn f(a int)`에 `f('s')`를 넘기면 115가 들어간다(`docs.md:483-493`의 규칙). 두 글자 이상이면 `Expected argument `int`, found `str``.
+단일 문자 문자열 리터럴은 정수 자리에서 코드포인트로 취급된다. `fn f(a int)`에 `f('s')`를 넘기면 115가 들어간다(`docs.md:483-493`의 규칙). 두 글자 이상이면 "Expected argument `int`, found `str`".
 
 ### 3.5 문자열
 
@@ -407,7 +407,7 @@ a\b
 ```
 
 - `s[0] = 'x'` 같은 인덱스 대입은 `Unsupported type `str` for index assignment.`다. 불변이다.
-- `str`끼리의 `<`, `>`는 없다(`Can not find the symbol `<` in `str``). 비교는 `a.less(b)` 또는 `a.compare(b)`다(`core.cy:3543,3739`). 동등 비교 `==`는 된다.
+- `str`끼리의 `<`, `>`는 없다("Can not find the symbol `<` in `str`"). 비교는 `a.less(b)` 또는 `a.compare(b)`다(`core.cy:3543,3739`). 동등 비교 `==`는 된다.
 - 문자열 반복은 `'ab'`에 별표 두 개 연산자와 정수를 쓰는 형태도 있지만(`core.cy:3361`), 읽기 좋은 `repeat(n)`을 권한다.
 - 숫자 변환은 `int('123')`, `float('1.5')`. `int('abc')`는 에러가 아니라 `0`이다(7절).
 
@@ -418,7 +418,7 @@ a\b
 - `while`: 무한(`while:`), 조건(`while cond:`), 언랩(`while it.next() |v|:`).
 - `for`: 범위 `a..b`(끝 제외), `a..=b`(끝 포함), 내림 `a..>b`, `a..>=b`. `|i|`로 카운터를 캡처한다. 컬렉션은 `for xs |x|:` 또는 `for xs |i, x|:`.
 - `switch`: `case a, b:`, 범위 `case 1..9:`(끝 포함), `=>`로 식 형태. 정수/문자열에는 `else`가 필요하고, enum/choice는 모든 case를 다루면 `else`가 필요 없다.
-- 조건은 반드시 `bool`이다. `if x:`에 int를 쓰면 `Expected type `bool`, got `int``.
+- 조건은 반드시 `bool`이다. `if x:`에 int를 쓰면 "Expected type `bool`, got `int`".
 
 ```cy
 a := 10
@@ -495,7 +495,7 @@ range
 - `fn 이름(매개변수 타입) -> 반환타입:`. 같은 타입의 매개변수는 `a, b int`처럼 묶는다. 반환 타입을 생략하면 `void`다.
 - 매개변수 이름 뒤에 타입이 온다(Go/Zig 식, TS와 순서는 같고 `:`만 없다).
 - 오버로딩이 된다(인자 타입 시그니처로 구분).
-- 값을 반환하는 함수의 결과를 그냥 버리는 호출문은 에러다. `Expected assignment to a variable or placeholder for `int`.` 버리려면 `_ = f()`.
+- 값을 반환하는 함수의 결과를 그냥 버리는 호출문은 에러다. "Expected assignment to a variable or placeholder for `int`." 버리려면 `_ = f()`.
 - 함수는 값이다: `f := add`. 람다는 `fn(a, b int) -> int:` 블록 또는 목표 타입이 있는 곳의 `|a, b| 식`이다. 함수 포인터 타입은 `type BinFn = fn(int, int) -> int`처럼 별칭으로 선언한다.
 - 클로저가 캡처할 수 있는 것은 참조 타입(`^T`, `&T`) 변수뿐이다. 나머지는 컴파일 에러다. 클로저를 값으로 반환하거나 저장하려면 타입을 `Func[FnType]`으로 쓴다(`src/test/functions/call_closure.cy`).
 
@@ -566,7 +566,7 @@ print(a())
 3
 ```
 
-지역 변수를 그대로(`n := 0`) 캡처하면 문서(`docs.md:2032`의 pinned closure)와 달리 `CompileError: Can only capture variables declared with the reference types `^T` or `&T`.`로 거부된다.
+지역 변수를 그대로(`n := 0`) 캡처하면 문서(`docs.md:2032`의 pinned closure)와 달리 "CompileError: Can only capture variables declared with the reference types `^T` or `&T`."로 거부된다.
 
 ### 3.8 컬렉션: `[]T`, `Array[T]`, `Map`, `[N]T`, 튜플
 
@@ -633,7 +633,7 @@ none
 
 ### 3.9 struct와 메서드
 
-`type 이름:` 아래에 `필드 타입`을 쓰면 struct다. 기본값은 컴파일 타임 상수만 허용된다. 초기화는 `이름{필드=값}`이며, 기본값이 없는 필드를 빠뜨리면 `Initialization requires the field `b``다. 메서드는 `fn (&Type) 이름():`로 선언하고 본문에서 `self`를 쓴다. 수신자가 `&`면 읽기 빌림, `&&`면 배타적(수정) 빌림이다. 호출할 때는 `v.scale(2)`처럼 JS와 똑같이 쓴다. 정적 함수는 `fn Vec2 :: origin()`, 연산자 오버로딩은 백틱 이름 `` `+` ``이다.
+`type 이름:` 아래에 `필드 타입`을 쓰면 struct다. 기본값은 컴파일 타임 상수만 허용된다. 초기화는 `이름{필드=값}`이며, 기본값이 없는 필드를 빠뜨리면 "Initialization requires the field `b`"다. 메서드는 `fn (&Type) 이름():`로 선언하고 본문에서 `self`를 쓴다. 수신자가 `&`면 읽기 빌림, `&&`면 배타적(수정) 빌림이다. 호출할 때는 `v.scale(2)`처럼 JS와 똑같이 쓴다. 정적 함수는 `fn Vec2 :: origin()`, 연산자 오버로딩은 백틱 이름 `` `+` ``이다.
 
 ```cy
 type Vec2:
@@ -734,8 +734,8 @@ b
 
 - `if opt |v|:` / `while it.next() |v|:`: 값이 있을 때만 블록 실행
 - `opt ?else 기본값`: 기본값 대체
-- `opt.?`: 없으면 패닉 (`panic: Expected active choice tag `1`, found `0`.`. 문서의 "Option is empty."와 메시지가 다르다)
-- `none`은 목표 타입이 있어야 한다. `tn(none)` 같은 곳에서는 `Could not determine optional type for `none`.`이다.
+- `opt.?`: 없으면 패닉 ("panic: Expected active choice tag `1`, found `0`.". 문서의 "Option is empty."와 메시지가 다르다)
+- `none`은 목표 타입이 있어야 한다. `tn(none)` 같은 곳에서는 "Could not determine optional type for `none`."이다.
 
 ```cy
 fn find(xs []int, t int) -> ?int:
@@ -875,11 +875,11 @@ end of main
 release C
 ```
 
-`b := move a` 뒤에 `print(a)`를 쓰면 ``CompileError: `a` is no longer alive in this scope.``다.
+`b := move a` 뒤에 `print(a)`를 쓰면 "CompileError: `a` is no longer alive in this scope."다.
 
 ### 3.14 템플릿(제네릭)과 컴파일 타임 분기
 
-- `fn add[T Any](a T, b T) -> T`: 명시적 템플릿. `add[int](1, 2)`처럼 대괄호로 확장한다. 인자만으로는 추론되지 않아 `add(1, 2)`는 `Unsupported call from symbol: `func_template``.
+- `fn add[T Any](a T, b T) -> T`: 명시적 템플릿. `add[int](1, 2)`처럼 대괄호로 확장한다. 인자만으로는 추론되지 않아 `add(1, 2)`는 "Unsupported call from symbol: `func_template`".
 - `fn largest(a %T, b T) -> T`: `%T`가 인자 타입에서 추론되는 템플릿 매개변수다. `[]%T`처럼 안쪽 타입도 추론된다.
 - `fn zero(%T type) -> T`: 타입을 값처럼 받는 제네릭 함수.
 - `type Box[T Any]:`: 타입 템플릿. 같은 인자로 확장하면 같은 타입이 나온다(memoized).
@@ -937,7 +937,7 @@ other: float
 - `use math`: 내장/표준 모듈(`math`, `os`, `io`, `test`, `meta`, `cy`...). 이름이 그대로 로컬 이름이 된다.
 - `use g 'geometry.cy'`: 상대 경로 파일. 로컬 이름을 앞에 쓰고 경로는 문자열이다. URL도 가능하다(`docs.md:3279`).
 - `use * 'x.cy'`: 모든 심볼을 현재 네임스페이스에 가져온다(실험적).
-- 가져온 모듈에는 최상위 문장이 있을 수 없다(선언만). 진입 파일은 최상위 문장을 쓰거나 `fn main()`을 선언한다. 둘을 섞으면 `Body statement is not allowed when main function is declared.`다(`src/test/functions/main_func_top_stmt_error.cy`).
+- 가져온 모듈에는 최상위 문장이 있을 수 없다(선언만). 진입 파일은 최상위 문장을 쓰거나 `fn main()`을 선언한다. 둘을 섞으면 "Body statement is not allowed when main function is declared."다(`src/test/functions/main_func_top_stmt_error.cy`).
 - `os.args()`는 `[]str`이며 0번이 스크립트 경로다. `cyber main5.cy a b`이면 `{main5.cy, a, b}`다.
 
 ```bash
@@ -1378,7 +1378,7 @@ print(total)
 | `Can not find the symbol `&&` for `bool`.` | JS의 `&&` | `and` (`&&`는 비트 AND) |
 | `Expected type `bool`, got `int`.` | `if x:` (truthy) | `if x != 0:` |
 | `Return statement is not allowed in the main block.` | 최상위에서 `return` | `fn main():` 로 감싼다 |
-| `Unsupported call from symbol: `func_template``. | `fn f[T Any]`를 `f(x)`로 호출 | `f[int](x)` 또는 `fn f(x %T)` |
+| "Unsupported call from symbol: `func_template`". | `fn f[T Any]`를 `f(x)`로 호출 | `f[int](x)` 또는 `fn f(x %T)` |
 | `Could not determine optional type for `none`.` | 목표 타입 없는 `none` | `var a ?int = none` |
 | `Field `len` does not exist in `[]int`.` | `xs.len` (속성 아님) | `xs.len()` |
 | `Can not find the symbol `+` for `?int`.` | Option 을 풀지 않고 산술 | `x.?`, `if x \|v\|`, `?else` |
@@ -1405,7 +1405,7 @@ print(total)
 
 1. `[]T.index(needle)`이 끝나지 않는다. `xs := []int{3, 1, 2}; print(xs.index(1))`가 무한 대기(10초 타임아웃에서 종료 코드 142). `core.cy:1293-1294`가 `return self[..].index(needle)`인데 Slice의 `self[..]`는 다시 Slice를 돌려줘 자기 자신을 호출한다(`cyber compile`에서 `fn []int.index`가 `Slice.index`를 call). `contains`는 정상이다.
 2. `int.parse('-5')`가 `error.InvalidCharacter`다. `core.cy:476-482`에서 `-`를 만나 `res = -res`를 한 뒤 `else` 없이 숫자 검사로 떨어진다. `int.parse('')`은 `0`이고 `int('abc')`는 오류 없이 `0`(`core.cy:417`).
-3. `Map.keys()`는 호출하면 컴파일 에러다(`Undeclared variable `@iterator``). `core.cy:2362-2367`이 옛 문법 `@iterator()`/`@next(&iter)`를 쓴다.
+3. `Map.keys()`는 호출하면 컴파일 에러다("Undeclared variable `@iterator`"). `core.cy:2362-2367`이 옛 문법 `@iterator()`/`@next(&iter)`를 쓴다.
 4. 구조체의 `Array` 필드를 `&&` 수신자 메서드에서 변경하면 결과가 틀리거나 죽는다. 재현:
 
 ```cy

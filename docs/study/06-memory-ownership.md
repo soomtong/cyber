@@ -164,7 +164,7 @@ array : arr2[0]=100 (arr 는 더 이상 쓸 수 없다)
 
 `core.cy`의 주석(758~761줄)은 "모든 멤버가 `Copyable`이거나 `@copy`가 구현되면 `Copyable`"이라고 쓰지만, 코드는 다르다.
 `resolve_type_info`는 멤버 중 `no_copy`가 있으면 `@copy`가 있어도 `no_copy = true`로 만든다. 실험에서 `Array`를 멤버로 가진 구조체에 `@copy`를 달아도
-``Cannot copy `Buf`, type member implements `NoCopy`.``가 났다(7절 목록에 정리).
+"Cannot copy `Buf`, type member implements `NoCopy`."가 났다(7절 목록에 정리).
 
 #### 사용자 `@copy`와 `@deinit`이 도는 순간
 
@@ -229,10 +229,10 @@ a
 - `&x`는 값의 주소를 빌린다. 스택의 지역이면 스택 슬롯 주소, 필드나 원소이면 그 내부 주소다(`.addr: %2 = *%1` 형태의 명령). 소유자는 여전히 `x`다.
 - `&T`는 읽기/쓰기가 모두 된다. 같은 값에 대한 `&` 두 개로 번갈아 쓰기를 해도 컴파일된다(실습 5).
 - `&&T`(배타적 빌림)는 크기를 바꾸는 연산을 위한 것이다. `Array`의 `append`, `insert`, `clear` 등이 `fn (&&Array[]) append(...)`로 선언되어 있고(`core.cy:1784`),
-  `a.append(4)`처럼 부르면 컴파일러가 자동으로 `&&a`를 얻는다. 에러 메시지에서는 `&&T`가 `&>T`로 인쇄된다(``Expected type `&>Array[int]`. Found `^Array[int]`.``).
+  `a.append(4)`처럼 부르면 컴파일러가 자동으로 `&&a`를 얻는다. 에러 메시지에서는 `&&T`가 `&>T`로 인쇄된다("Expected type `&>Array[int]`. Found `^Array[int]`.").
 - 빌림을 반환하려면 반환 타입 앞에 `scope`를 쓰고, 정확히 하나의 매개변수에도 `scope`를 붙여 "반환값은 그 인자와 같은 수명"이라고 묶어야 한다.
-  어기면 ``Returning a borrow requires a `scope` modifier.``, ``Missing `scope` parameter.``, ``Expected only one parameter with the `scope` modifier.`` 중 하나다.
-- 빌림은 `^`로 올릴 수 없다: ``Cannot lift the borrow type `&int`.``
+  어기면 "Returning a borrow requires a `scope` modifier.", "Missing `scope` parameter.", "Expected only one parameter with the `scope` modifier." 중 하나다.
+- 빌림은 `^`로 올릴 수 없다: "Cannot lift the borrow type `&int`."
 
 실제 검사가 문서의 설명만큼 엄격하지는 않다. 구현은 2.3절 "빌림 검사"에, 실험 결과는 실습 5에 있다.
 
@@ -425,10 +425,10 @@ pub fn ownOrManageArg(c: *cy.Chunk, arg: sema.ExprResult, node: *ast.Node) !sema
 #### 규칙 7: 빌림 검사
 
 - `&x`(`semaBorrow`, 8779)는 `x`를 addressable로 만들고(임시이면 `_temp`) 빌림 타입의 `address_of` IR을 낸다. 그리고 소유 지역의 `active_borrows`를 1 올리고 결과에 `parent_local`(소유 지역)을 기록한다.
-- `&&x` 또는 `&&` 수신자(`sema_ex_borrow2`, 8750)는 소유 지역의 `active_borrows > 0`이면 ``Expected exclusive access. There is another active borrow to `a`.``로 거부한다.
+- `&&x` 또는 `&&` 수신자(`sema_ex_borrow2`, 8750)는 소유 지역의 `active_borrows > 0`이면 "Expected exclusive access. There is another active borrow to `a`."로 거부한다.
 - 호출 결과의 수명: 시그니처에 `scope` 매개변수가 있으면 `matchFuncSig`(`sema_func.zig:504`)가 그 인자의 `parent_local`을 호출 결과의 `parent_local`로 이어 준다.
-  `localDecl`(3495)은 빌림 값이 `temp` 수명 지역에 매여 있으면 ``Cannot assign to local `b` with a value that has a shorter lifetime.``로 거부한다(`foo(&123)`처럼 `&123`이 임시 지역을 만드는 경우).
-  `semaReturnExpr`(829)는 `scope` 함수가 반환하는 빌림의 `parent_local`이 `scope` 매개변수인지 확인한다(``Expected to return a borrow from the same scope as `c`.``).
+  `localDecl`(3495)은 빌림 값이 `temp` 수명 지역에 매여 있으면 "Cannot assign to local `b` with a value that has a shorter lifetime."로 거부한다(`foo(&123)`처럼 `&123`이 임시 지역을 만드는 경우).
+  `semaReturnExpr`(829)는 `scope` 함수가 반환하는 빌림의 `parent_local`이 `scope` 매개변수인지 확인한다("Expected to return a borrow from the same scope as `c`.").
 
 실제로 돌려 보면 이 검사는 Rust의 NLL(마지막 사용까지만 빌림이 산다)과 다르다. `popLocals2`(322)에는 빌림을 쥔 지역이 사라질 때 `active_borrows`를 줄이는 코드가 있지만,
 `Local.parent_local`(120)은 선언 때 `cy.NullId`(4926)로만 초기화되고 다른 곳에서 대입되지 않아 이 감소는 실행되지 않는다. 그래서 같은 변수에 한 번이라도 명시적 `&`를 취하면,
@@ -642,7 +642,7 @@ Slice[T] (32바이트)                                   버퍼 (^RawBuffer[byte
 원소를 복사한 뒤 옛 원소를 `@destruct`한다(TODO 주석이 인정하는 비효율). `append(val T)`(1784)도 `@ptr_init(*self.buf[self.length], val)`로 `val`을 복사한다(`move val`이 아님).
 `@deinit`이 부수효과를 가진 원소(파일 닫기 등)에서 이것이 어떻게 보이는지는 실습 6에 있다. 실험 결과를 먼저 말하면 `Array[Res]`(`@deinit`이 출력) 한 원소마다 `@deinit`이 세 번 돈다.
 임시 값 정리, 성장 때의 옛 복사본 정리, 최종 정리다. `with NoCopy`인 원소 타입은 아예 `append`할 수 없다(`Cannot copy ...` 에러가 `core.cy:1787`을 가리킨다). 즉 "`@deinit`에 의미가 있는 타입"은
-`Array`에 안전하게 담을 수 없다. `Array.clone()`(1808)은 존재하지 않는 `cap` 필드를 써서 컴파일되지 않는다(``Field `cap` does not exist in `Array`.``, 호출한 적이 없어 드러나지 않았다).
+`Array`에 안전하게 담을 수 없다. `Array.clone()`(1808)은 존재하지 않는 `cap` 필드를 써서 컴파일되지 않는다("Field `cap` does not exist in `Array`.", 호출한 적이 없어 드러나지 않았다).
 
 `ArrayStore[T]`(1566)는 `&` 수신자만 쓰는 같은 모양의 컨테이너로 제너레이터 테스트가 쓴다. `append(slice [&]T)`(1619)는 같은 세 줄이 두 번 복붙되어 있어서 `s := ArrayStore[int]{1, 2}; s.append(other[..])`의
 길이가 4가 아니라 6이 된다(실행 확인: 1, 2, 10, 20, 10, 20).

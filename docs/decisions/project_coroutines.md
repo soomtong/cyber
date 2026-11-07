@@ -129,3 +129,31 @@ REPL에서는 속성 줄이 `:`로 끝나지 않아 블록으로 묶이지 않�
 
 `^ArrayStore`도 같은 이유로 `for`가 안 되던 것을 `iterator()` · `next(idx &int)`를 더해 돌게 했다(테스트 `core/ArrayStore.cy`).
 테스트는 `concurrency/generator.cy` 끝의 `for` 절 5개.
+
+## 설계 결정 (2026-11-07)
+
+`docs/specs/2026-11-03-generator-and-fiber-coexistence.md`를 검토해 다음을 결정했다. 구현은 아직 없고, 스펙 문서 5절의 코드가
+결정된 문법이다.
+
+1. 공존 방식은 역할 분리 병존이다. generator는 값을 내고, fiber는 기다린다. 둘 다 언어 내장 타입(`Generator`, `Fiber`)이다.
+2. 새 키워드 세 개: `generator` · `fiber` · `suspend`. upstream이 0.3의 `coinit` · `coresume` · `coyield`를 지운 자리에
+   역할이 분명한 셋이 들어간다. 저장소 내 식별자 사용은 셋 모두 0건이다.
+   - `generator f(...) -> T:`가 `#[generator]` 속성을 대체한다. 속성은 키워드 도입과 함께 제거한다(테스트 · 예제 · 문서 24곳).
+     `iter` · `gen`은 변수명으로 이미 쓰여(13건) 기각했다.
+   - `fiber f(args)`가 `Fiber(f, {args})` 생성자를 대체한다. Go의 `go f(x)`와 같은 "키워드 + 호출식"이다. 인자는 지금 평가하고
+     호출은 첫 `resume()`에서 한다. 블록이 필요하면 `fiber:` 뒤에 본문을 둔다(트레일링 블록 람다와 같은 파싱, `^T`만 캡처).
+   - `suspend`가 `Fiber.yield()`를 대체한다. 값을 싣지 않는 문장이다. 원칙: 수신자가 있는 조작은 메서드(`f.resume()`, `g.next()`),
+     현재 실행 맥락을 멈추는 조작은 키워드(`return` · `yield` · `suspend`). `pause`는 식별자 충돌 가능성으로, 값 없는 `yield`는
+     generator 본문 안에서의 혼동으로 기각했다.
+3. 상태 enum의 `.paused`를 `.suspended`로 바꾼다. `GeneratorStatus`와 새 `FiberStatus` 모두 `.suspended` · `.running` · `.done`이다.
+   `suspend` → `.suspended` → `resume()`이 한 어휘가 된다(Lua의 `suspended` · `running` · `dead`와 같은 꼴).
+4. `f.resume()`은 `FiberStatus`(`.suspended` 또는 `.done`)를 돌려준다. 끝난 fiber의 `resume()`은 panic 없이 `.done`이다.
+   fiber 진입 함수는 `void`만 반환한다. 결과는 `^T` · Future · 채널로 전달한다.
+5. 위임 문법(`yield*`)은 두지 않는다. `for inner() |v|: yield v` 두 줄을 이디엄으로 삼는다. 필요해지면 `yield from`을 검토한다.
+6. Future를 공통 대기 인터페이스로 삼는다. `await()`의 정의는 "완료될 때까지 현재 실행 맥락을 멈춘다" 하나이고, 멈추는 방법
+   (fiber 양보 · 루트 spin · 호스트 `CL_AWAIT`)만 런타임이 고른다. 완료된 Future의 빠른 경로는 지금 비용과 같아야 하고,
+   fiber 멈춤에 힙 할당이 없어야 한다.
+7. `spawn(fn, {args})`는 이번에 바꾸지 않는다. fiber 구현에서 호출식을 함수와 인자로 분해하는 코드가 생기면 `spawn f(args)`로
+   맞추는 일을 후속 작업으로 둔다.
+
+순서는 스펙 6절의 로드맵을 따른다. 단계 1.5(키워드 치환과 enum 개명)는 런타임 변경이 없어 먼저 할 수 있다.

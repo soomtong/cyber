@@ -28,16 +28,21 @@ pub const Module = struct {
     /// This should only be populated for a function sym once it's overloaded.
     overloadedFuncMap: std.HashMapUnmanaged(ModFuncKey, *cy.Func, cy.hash.KeyU128Context, 80),
 
+    /// Sym+params-only funcSig to func sym. Overloads must differ in their parameters, not only in the return type (F-21).
+    overloadedParamsMap: std.HashMapUnmanaged(ModFuncKey, *cy.Func, cy.hash.KeyU128Context, 80),
+
     pub fn init() Module {
         return .{
             .symMap = .empty,
             .overloadedFuncMap = .empty,
+            .overloadedParamsMap = .empty,
         };
     }
 
     pub fn deinit(self: *Module, alloc: std.mem.Allocator) void {
         self.symMap.deinit(alloc);
         self.overloadedFuncMap.deinit(alloc);
+        self.overloadedParamsMap.deinit(alloc);
     }
 
     pub fn getFirstFunc(m: *const Module, name: []const u8) ?*cy.Func {
@@ -397,6 +402,15 @@ pub fn resolveFunc(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig) !void {
         if (sym.numFuncs > 1) {
             const key = ModFuncKey.initModFuncKey(sym, sig);
             try mod.overloadedFuncMap.putNoClobber(c.alloc, key, func);
+
+            // Overloads that differ only in the return type can not be told apart at a call site.
+            const params_sig = try c.sema.ensureFuncSig2(sig.params(), c.sema.void_t, sig.extern_, if (sig.scope_param_idx == cy.NullU8) null else sig.scope_param_idx);
+            const params_key = ModFuncKey.initModFuncKey(sym, params_sig);
+            const params_res = try mod.overloadedParamsMap.getOrPut(c.alloc, params_key);
+            if (params_res.found_existing) {
+                return c.reportErrorFmt("`{}` has already been declared with the same parameters. Overloads must differ in their parameter types, not only in the return type.", &.{v(func.name())}, @ptrCast(func.decl));
+            }
+            params_res.value_ptr.* = func;
         }
     }
     resolveFuncInfo(c, func, sig);

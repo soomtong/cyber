@@ -92,6 +92,8 @@ fn test_functions(run: *Runner) void {
     run.case("functions/call_excess_args_error.cy");
     run.case("functions/call_excess_args_overloaded_error.cy");
     run.case("functions/call_overload_incompat_arg_error.cy");
+    run.case("functions/call_overload_exact.cy");
+    run.case("functions/call_overload_ret_only_error.cy");
     run.case("functions/call_float_param_error.cy");
     run.case("functions/call_method_missing_error.cy");
     run.case("functions/call_method_sig_error.cy");

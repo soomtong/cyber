@@ -385,7 +385,7 @@ pub fn matchFuncRt(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument,
         else => {
             const args = try c.ir.allocArray(*ir.Expr, pre_args.len + end_args.len);
             const nargs = args.len;
-            const res = (try matchFuncSig(c, func.sig, pre_args, end_args, args, false, &match_err)) orelse {
+            const res = (try matchFuncSig(c, func.sig, pre_args, end_args, args, false, false, &match_err)) orelse {
                 return reportCallFuncMismatch2(c, pre_args, end_args, func, match_err, node);
             };
             var final_func = func;
@@ -502,8 +502,10 @@ const MatchFuncSigResult = struct {
     ret_parent_scope_local: ?u32,
 };
 
+/// `exact` disables implicit conversions so an argument only matches a parameter of the same type.
+/// It is the first pass of overload resolution (F-21).
 pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, end_args: []const *ast.Node,
-    args: []*ir.Expr, overloaded: bool, match_err: *FuncMatchError) !?MatchFuncSigResult {
+    args: []*ir.Expr, overloaded: bool, exact: bool, match_err: *FuncMatchError) !?MatchFuncSigResult {
 
     const params = sig.params();
     const nargs = pre_args.len + end_args.len;
@@ -541,7 +543,7 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         }
 
         var match: bool = undefined;
-        const arg_res = try matchArg(c, arg, param, overloaded, &match);
+        const arg_res = try matchArg(c, arg, param, overloaded, exact, &match);
         if (!match) {
             match_err.* = FuncMatchError.init(param, arg_idx + 1, arg_res.type);
             return null;
@@ -609,6 +611,22 @@ pub fn matchFuncSym(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const A
     // if == nargs, there is not enough arguments.
     var best_match_err = FuncMatchError.init(undefined, 0, undefined);
 
+    // First pass: a candidate whose parameter types match the arguments without implicit conversions wins,
+    // regardless of declaration order. Otherwise fall back to the first candidate that matches with conversions (F-21).
+    if (!req_value and func_sym.numFuncs > 1) {
+        var next_exact: ?*cy.Func = func_sym.first;
+        while (next_exact) |func| {
+            next_exact = func.next;
+            if (func.info.const_eval_only) {
+                continue;
+            }
+            var match_err: FuncMatchError = undefined;
+            if (try matchRtOverload(c, func, pre_args, end_args, loc, true, &match_err, node)) |res| {
+                return res;
+            }
+        }
+    }
+
     var next: ?*cy.Func = func_sym.first;
     while (next) |func| {
         var match_err: FuncMatchError = undefined;
@@ -628,37 +646,9 @@ pub fn matchFuncSym(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const A
             }
             next = func.next;
         } else {
-            // Save last statement to clear any that were added on a mismatch.
-            const start_stmt = c.ir.curBlock().last;
-            const var_start = c.varStack.items.len;
-
-            if (try matchOverloadedFunc(c, func, pre_args, end_args, loc, &match_err, node)) |res| {
-                const sig = try c.sema.allocFuncSigStr(func.sig, true, null);
-                defer c.alloc.free(sig);
-                return .{
-                    .func = res.func,
-                    .kind = .rt,
-                    .data = .{ .rt = .{
-                        .args = loc.ptr,
-                        .nargs = @intCast(res.nargs),
-                        .ret_parent_scope_local = res.ret_parent_scope_local,
-                    }},
-                };
+            if (try matchRtOverload(c, func, pre_args, end_args, loc, false, &match_err, node)) |res| {
+                return res;
             }
-
-            // Discard any locals created during matching.
-            if (var_start < c.varStack.items.len) {
-                c.varStack.items.len = var_start;
-            }
-
-            if (start_stmt != null) {
-                // TODO: Also remove the statements and expressions generated.
-                start_stmt.?.next = null;
-                c.ir.curBlock().last = start_stmt.?;
-            } else {
-                c.ir.curBlock().last = null;
-            }
-
             if (match_err.arg > best_match_err.arg) {
                 best_func = func;
                 best_match_err = match_err;
@@ -668,6 +658,41 @@ pub fn matchFuncSym(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const A
     }
 
     return reportCallFuncMismatch2(c, pre_args, end_args, best_func, best_match_err, node);
+}
+
+/// Tries one runtime overload candidate. On a mismatch the locals and statements generated while matching are discarded.
+fn matchRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end_args: []const *ast.Node,
+    loc: []*ir.Expr, exact: bool, match_err: *FuncMatchError, node: *ast.Node) !?FuncSymResult {
+
+    // Save last statement to clear any that were added on a mismatch.
+    const start_stmt = c.ir.curBlock().last;
+    const var_start = c.varStack.items.len;
+
+    if (try matchOverloadedFunc(c, func, pre_args, end_args, loc, exact, match_err, node)) |res| {
+        return .{
+            .func = res.func,
+            .kind = .rt,
+            .data = .{ .rt = .{
+                .args = loc.ptr,
+                .nargs = @intCast(res.nargs),
+                .ret_parent_scope_local = res.ret_parent_scope_local,
+            }},
+        };
+    }
+
+    // Discard any locals created during matching.
+    if (var_start < c.varStack.items.len) {
+        c.varStack.items.len = var_start;
+    }
+
+    if (start_stmt != null) {
+        // TODO: Also remove the statements and expressions generated.
+        start_stmt.?.next = null;
+        c.ir.curBlock().last = start_stmt.?;
+    } else {
+        c.ir.curBlock().last = null;
+    }
+    return null;
 }
 
 pub fn matchFuncCt(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end_args: []const *ast.Node, cstr: cte.CallCstr, node: *ast.Node) !FuncResult {
@@ -793,9 +818,14 @@ const MatchOverloadedFuncResult = struct {
 };
 
 fn matchOverloadedFunc(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument,
-    end_args: []const *ast.Node, args: []*ir.Expr, match_err: *FuncMatchError, node: *ast.Node) !?MatchOverloadedFuncResult {
+    end_args: []const *ast.Node, args: []*ir.Expr, exact: bool, match_err: *FuncMatchError, node: *ast.Node) !?MatchOverloadedFuncResult {
 
     if (func.type == .generic) {
+        if (exact) {
+            // Generic candidates are only considered in the second pass.
+            match_err.* = FuncMatchError.init(undefined, 0, undefined);
+            return null;
+        }
         const res = (try matchGenericFuncRt(c, func, pre_args, end_args, args, true, match_err, node)) orelse {
             return null;
         };
@@ -805,7 +835,7 @@ fn matchOverloadedFunc(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument,
             .ret_parent_scope_local = null,
         };
     } else {
-        const res = (try matchFuncSig(c, func.sig, pre_args, end_args, args, true, match_err)) orelse {
+        const res = (try matchFuncSig(c, func.sig, pre_args, end_args, args, true, exact, match_err)) orelse {
             return null;
         };
         return .{
@@ -834,7 +864,7 @@ pub fn ownOrManageArg(c: *cy.Chunk, arg: sema.ExprResult, node: *ast.Node) !sema
     }
 }
 
-fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.FuncParam, overloaded: bool) !sema.ExprResult {
+fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.FuncParam, overloaded: bool, fit_target: bool) !sema.ExprResult {
     if (arg.resolve_t == .rt) {
         return arg.res.rt;
     }
@@ -845,7 +875,7 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
                 var res = try c.semaExpr(node, .{
                     .target_t = target_t,
                     .reqTypeCstr = false,
-                    .fit_target = true,
+                    .fit_target = fit_target,
                     .return_infer_error = overloaded,
                 });
                 if (res.resType == .infer_error) {
@@ -1126,7 +1156,7 @@ fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template
             target = param;
         }
     }
-    var res = try resolveRtArg(c, arg, arg.node, target, false);
+    var res = try resolveRtArg(c, arg, arg.node, target, false, true);
     if (!sema_func) {
         res = try ownOrManageArg(c, res, arg.node);
     }
@@ -1258,8 +1288,13 @@ fn matchArgCt(c: *cy.Chunk, arg: *ast.Node, param: sema.FuncParam, req_value: bo
     return ct_value;
 }
 
-fn matchArg(c: *cy.Chunk, arg: Argument, param: sema.FuncParam, overloaded: bool, out_match: *bool) !sema.ExprResult {
-    var res = try resolveRtArg(c, arg, arg.node, param, overloaded);
+fn matchArg(c: *cy.Chunk, arg: Argument, param: sema.FuncParam, overloaded: bool, exact: bool, out_match: *bool) !sema.ExprResult {
+    if (exact and arg.type == .standard and !int_literal_fits_exact(arg.node, param.get_type())) {
+        // An integer literal is an exact match only for integer parameters. It still fits `float` in the second pass.
+        out_match.* = false;
+        return sema.ExprResult.initVoid(c.sema.i64_t);
+    }
+    var res = try resolveRtArg(c, arg, arg.node, param, overloaded, !exact);
     res = try ownOrManageArg(c, res, arg.node);
 
     const ct_compat = cy.types.isTypeCompat(c.compiler, res.type, param.get_type());
@@ -1271,6 +1306,15 @@ fn matchArg(c: *cy.Chunk, arg: Argument, param: sema.FuncParam, overloaded: bool
 
     out_match.* = true;
     return res;
+}
+
+fn int_literal_fits_exact(node: *ast.Node, param_t: *cy.Type) bool {
+    switch (node.type()) {
+        .decLit, .binLit, .octLit, .hexLit => {
+            return param_t.kind() == .int or param_t.kind() == .raw;
+        },
+        else => return true,
+    }
 }
 
 pub fn reportCallFuncMismatch2(c: *cy.Chunk, pre_args: []const Argument, end_args: []const *ast.Node, func: *cy.Func, match_err: FuncMatchError, node: *ast.Node) anyerror {

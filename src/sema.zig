@@ -6195,7 +6195,7 @@ pub fn semaCallValue(c: *cy.Chunk, callee: ExprResult, callee_n: *ast.Node, args
 pub fn semaCallPtr(c: *cy.Chunk, func: ExprResult, sig: *FuncSig, args: []*ast.Node, node: *ast.Node) !ExprResult {
     const ir_args = try c.ir.allocArray(*ir.Expr, args.len);
     var match_err: sema_func.FuncMatchError = undefined;
-    _ = (try sema_func.matchFuncSig(c, sig, &.{}, args, ir_args, false, &match_err)) orelse {
+    _ = (try sema_func.matchFuncSig(c, sig, &.{}, args, ir_args, false, false, &match_err)) orelse {
         return sema_func.reportCallFuncMismatch(c, &.{}, args, "", sig, match_err, node);
     };
     if (sig.extern_) {
@@ -6214,7 +6214,7 @@ pub fn semaCallUnion(c: *cy.Chunk, func: ExprResult, func_n: *ast.Node, sig: *Fu
 
     const ir_args = try c.ir.allocArray(*ir.Expr, args.len);
     var match_err: sema_func.FuncMatchError = undefined;
-    _ = (try sema_func.matchFuncSig(c, sig, &.{}, args, ir_args, false, &match_err)) orelse {
+    _ = (try sema_func.matchFuncSig(c, sig, &.{}, args, ir_args, false, false, &match_err)) orelse {
         return sema_func.reportCallFuncMismatch(c, &.{}, args, "", sig, match_err, node);
     };
     const loc = try c.ir.newExpr(.call_union, sig.ret, node, .{

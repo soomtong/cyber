@@ -397,12 +397,36 @@ const RecOp = struct {
     op: ast.BinaryExprOp,
 };
 
-fn eval_assign_right(c: *cy.Chunk, right: *ast.Node, rec_op_opt: ?RecOp) !TypeValue {
-    if (rec_op_opt) |rec_op| {
-        return eval_bin_expr(c, rec_op.left, rec_op.op, right, rec_op.node);
-    } else {
-        return eval(c, right);
+/// Evaluates the right side of an assignment and checks it against the destination type.
+/// For a compound assignment (`+=` etc.) the right side is `left op right`, same as sema does for the runtime path.
+fn eval_assign_right(c: *cy.Chunk, right: *ast.Node, rec_op_opt: ?RecOp, target_t: *cy.Type) !TypeValue {
+    const rec_op = rec_op_opt orelse {
+        return evalCheck(c, right, target_t);
+    };
+    const res = try eval_bin_expr(c, rec_op.left, rec_op.op, right, rec_op.node);
+    if (res.type.id() == target_t.id()) {
+        return res;
     }
+    if (try evalFitTarget(c, res, target_t, rec_op.node)) |new| {
+        c.heap.destructValue(res);
+        return TypeValue.init(target_t, new);
+    }
+    defer c.heap.destructValue(res);
+    const exp_name = try c.sema.allocTypeName(target_t);
+    defer c.alloc.free(exp_name);
+    const act_name = try c.sema.allocTypeName(res.type);
+    defer c.alloc.free(act_name);
+    return c.reportErrorFmt("Expected type `{}`. Found `{}`.", &.{v(exp_name), v(act_name)}, rec_op.node);
+}
+
+/// Checks a compile-time vector index and returns the element address.
+fn ct_vector_elem_ptr(c: *cy.Chunk, ct_var: *sema.CtParam, vector_t: *cy.types.Vector, idx_n: *ast.Node) ![*]u8 {
+    const idx_val = try evalCheck(c, idx_n, c.sema.i64_t);
+    const idx = idx_val.value.asInt();
+    if (idx < 0 or idx >= vector_t.n) {
+        return c.reportErrorFmt("Index out of bounds. Index `{}` is not in range `0..{}`.", &.{v(idx), v(vector_t.n)}, idx_n);
+    }
+    return ct_var.value.asPtr([*]u8) + @as(usize, @intCast(idx))*vector_t.elem_t.size();
 }
 
 fn eval_assign(c: *cy.Chunk, left_n: *ast.Node, right_n: *ast.Node, op_opt: ?ast.BinaryExprOp, node: *ast.Node) !void {
@@ -420,7 +444,7 @@ fn eval_assign(c: *cy.Chunk, left_n: *ast.Node, right_n: *ast.Node, op_opt: ?ast
                 },
                 .ct_var => |ct_var| {
                     const var_t = ct_var.getType();
-                    const right = try evalCheck(c, right_n, var_t);
+                    const right = try eval_assign_right(c, right_n, rec_op, var_t);
                     c.heap.destructValue2(var_t, ct_var.value);
                     ct_var.* = sema.CtParam.initVar(right);
                 },
@@ -433,11 +457,11 @@ fn eval_assign(c: *cy.Chunk, left_n: *ast.Node, right_n: *ast.Node, op_opt: ?ast
             const deref = left_n.cast(.deref);
             const rec = try eval(c, deref.left);
             defer c.heap.destructValue(rec);
-            const right = try eval_assign_right(c, right_n, rec_op);
 
             const child_t = rec.type.getRefLikeChild() orelse {
                 return c.reportError("Expected reference type.", left_n);
             };
+            const right = try eval_assign_right(c, right_n, rec_op, child_t);
 
             const dst = rec.value.asBytes();
             c.heap.destructValueAt(child_t, dst);
@@ -454,12 +478,10 @@ fn eval_assign(c: *cy.Chunk, left_n: *ast.Node, right_n: *ast.Node, op_opt: ?ast
                     const rec_t = rec.data.ct_var.getType();
                     if (rec_t.kind() == .vector) {
                         const vector_t = rec_t.cast(.vector);
-                        const idx_val = try evalCheck(c, index_expr.args.ptr[0], c.sema.i64_t);
-                        const idx: usize = @intCast(idx_val.value.asInt());
+                        const dst = try ct_vector_elem_ptr(c, rec.data.ct_var, vector_t, index_expr.args.ptr[0]);
 
-                        const right = try evalCheck(c, right_n, vector_t.elem_t);
+                        const right = try eval_assign_right(c, right_n, rec_op, vector_t.elem_t);
 
-                        const dst = rec.data.ct_var.value.asPtr([*]u8) + idx*vector_t.elem_t.size();
                         c.heap.destructValueAt(vector_t.elem_t, dst);
                         c.heap.moveValueTo(vector_t.elem_t, dst, right.value);
                     } else {
@@ -1752,7 +1774,14 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
 
             switch (rec_expr.kind) {
                 .ct_var => {
-                    return c.reportErrorFmt("TODO ct_var", &.{}, index_expr.left);
+                    const rec_t = rec_expr.data.ct_var.getType();
+                    if (rec_t.kind() == .vector) {
+                        const vector_t = rec_t.cast(.vector);
+                        const src = try ct_vector_elem_ptr(c, rec_expr.data.ct_var, vector_t, index_expr.args.ptr[0]);
+                        const res = try c.heap.copyValue3(vector_t.elem_t, src);
+                        return Expr.initValue2(vector_t.elem_t, res);
+                    }
+                    return c.reportErrorFmt("Unsupported {}", &.{v(rec_t.name())}, index_expr.left);
                 },
                 .value => {
                     const rec = rec_expr.data.value;

@@ -294,6 +294,8 @@ fn test_meta(run: *Runner) void {
     run.case("meta/ct_eval_loop.cy");
     run.case("meta/type_const.cy");
     run.case("meta/ct_if.cy");
+    run.case("meta/ct_op_assign.cy");
+    run.case("meta/ct_vector_index_error.cy");
     run.case("meta/get_panic.cy"); 
     run.case("meta/get_set.cy"); 
     run.case("meta/init_record.cy"); 

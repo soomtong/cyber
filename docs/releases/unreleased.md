@@ -63,6 +63,12 @@
 - 오버로드가 선언 순서대로 처음 맞는 후보를 골라 `fn show(x float)`을 `fn show(x int)`보다 먼저 선언하면 `int` 변수 · 정수 리터럴도
   `float` 쪽으로 갔다. 이제 암시적 변환 없이 타입이 그대로 맞는 후보를 먼저 고른다(`cf4aa84a`, F-21). 매개변수가 같고 반환 타입만 다른
   오버로드는 컴파일 오류다. 아래 "언어" 절.
+- `spawn`한 스레드 안에서 `Future.await()`를 부르면 Zig `@panic("TODO")`로 호스트 프로세스가 죽었다(`exit=134`). 이제 main과 같이
+  완료될 때까지 블록하며, 기다리는 스레드(main 포함)는 큐에 쌓인 스레드 작업을 직접 실행해 worker 풀이 가득 차도 교착하지 않는다
+  (CPU 1개라 worker가 없는 환경의 `spawn(...).await()`도 이제 진행한다). spawn된 스레드가 panic하면 기다리던 쪽의 panic이
+  `Spawned thread did not finish.` 대신 `Spawned thread panicked: <메시지>`로 원래 메시지를 담는다. VM을 해제하면 worker 스레드도
+  멈추고 join한다(이전에는 해제된 VM의 풀 위에서 잠든 채 남았다)(`56af553f`, F-07,
+  `docs/decisions/project_spawn_nested_await.md`). `docs/docs.md` Future await 절에 적혀 있다.
 
 ## 언어와 표준 라이브러리
 

@@ -2951,7 +2951,9 @@ print(f.get().?)
 ### Future `await`.
 `Future.await()` asynchronously waits for a `Future` to complete.
 
-`await` suspends the current thread so that the scheduler can resume other threads that are in a ready state.
+`await` blocks the current thread until the `Future` completes. It can be called from the main thread and from spawned threads. While a thread waits, it runs other spawned threads that are still queued, so waiting on nested `spawn` calls does not deadlock the worker pool.
+
+If the spawned thread panicked, `await` panics with `Spawned thread panicked: <message>`. If the spawned thread was interrupted or ran out of fuel, the waiting thread is interrupted too.
 
 When `await` resumes, the expression evaluates to the completed value of the `Future`:
 ```cy

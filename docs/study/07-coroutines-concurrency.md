@@ -28,7 +28,7 @@ tags:
 - [ ] `#[generator]` 가 sema 에서 시그니처를 바꾸고, IR(`ret_gen`, `yield`, `gen_next`, `gen_end`)과 명령어(`RET_GEN`, `RET_Y`, `GEN_NEXT`, `GEN_END`)로 내려가는 경로를 따라갈 수 있다.
 - [ ] 제너레이터의 프레임이 `next()` 마다 소비자 스택으로 복사되는 방식을 그림으로 그리고, 지역 변수가 사라지는 이유를 덤프 한 장으로 증명할 수 있다.
 - [ ] 이 문제가 단위 테스트, 벤치, 예제에서 왜 보이지 않는지, 어떤 패턴이 안전한지 말할 수 있다.
-- [ ] `spawn` / `Future.await` / `Thread` 의 격리 모델과 현재 미완 지점(비-main await, 스케줄링, 패닉 전달)을 안다.
+- [ ] `spawn` / `Future.await` / `Thread` 의 격리 모델과 현재 미완 지점(스케줄링, 전송 타입)을 안다. 비-main await 와 패닉 메시지 전달은 2026-11-08 에 고쳐졌다(아래 2.6).
 - [ ] 0.3 fiber, 0.4 generator, 0.4 Thread 를 메모리, 전환 비용, 호출 깊이, 색, 빌림, 임베딩 축으로 비교하고 에이전트 루프에 무엇이 모자란지 정리할 수 있다.
 - [ ] 이 fork 에서 고칠 수 있는 설계안 2~3개와 건드릴 파일을 말할 수 있다(제안일 뿐 구현은 이 문서의 범위가 아니다).
 
@@ -750,7 +750,9 @@ $ cyber t3.cy     (Array[int])    CompileError: Cannot copy `Array[int]`, type i
 
 `docs/docs.md:2765~2785` 의 `Sendable` 목록(`byte`, `bool`, `[]T`, `Array[T]`, `Map` ...)과 `Sendable` 라는 trait 은 소스에 없다(`rg Sendable src` 결과 없음).
 
-#### await: main 스레드에서는 spin, 그 밖에서는 abort
+#### await: 어느 스레드에서나 spin 으로 블록 (2026-11-08 이전에는 비-main 이 abort)
+
+아래 코드는 2026-11-08 수정 전(F-07) 의 모양이다. 수정 후의 동작은 이 절 끝에 있다.
 
 ```zig
 // src/vm.zig:981~1000 (요약)
@@ -779,7 +781,11 @@ fn zAwait(t: *cy.Thread, fut_value_bits: u64) callconv(.c) vmc.ResultCode {
 
 1. 로컬 future(`shared_state == null`, `Future.complete(v)` 나 `FutureResolver`): 완료됐으면 즉시 성공, 아니면 `panic: Local future will never complete.`(`vm.zig:1029~1033`, 실습 5 의 fu2). 같은 스레드에서 아무도 완료시킬 수 없기 때문이다.
 2. 공유 future 를 main 스레드가 await: 위 spin 루프. 이 루프는 스크립트 안의 역방향 점프나 CALL 이 아니라 호스트 코드 안이라 `CHECKPOINT()` 를 지나지 않는다. 그래서 `interrupt` 플래그를 루프 안에서 직접 읽는다(`project_vm_interrupt.md` 의 spawn 절).
-3. 공유 future 를 비-main 스레드가 await: `@panic("TODO")`. 이것은 Zig 의 `@panic` 이라 해당 스크립트 오류가 아니라 호스트 프로세스 abort 다. 실습 5 의 t7.cy(스레드 안에서 `spawn(...).await()`)가 `exit=134` 로 확인한다.
+3. 공유 future 를 비-main 스레드가 await: 수정 전에는 `@panic("TODO")`. 이것은 Zig 의 `@panic` 이라 해당 스크립트 오류가 아니라 호스트 프로세스 abort 였다. 실습 5 의 t7.cy(스레드 안에서 `spawn(...).await()`)가 `exit=134` 로 확인했다.
+
+2026-11-08 수정(`56af553f`, F-07, `docs/decisions/project_spawn_nested_await.md`) 뒤의 `zAwait` 는 main 과 비-main 을 가르지 않는다. 어느 스레드든 상태가 2 가 될 때까지 같은 루프를 돌고, 3 이면 panic, 4 이면 interrupt 다. 한 가지가 더해졌다. 기다리는 스레드는 매 바퀴 worker 풀의 큐에서 작업을 하나 꺼내 자기 OS 스레드에서 실행한다(`Pool.run_queued_task`, `worker.zig`). 풀이 `CPU 수 - 1` 개로 고정이라 그냥 블록하면 풀 크기만큼의 스레드가 각자 자식을 기다리는 순간 자식이 큐에서 영영 안 꺼내져 교착하기 때문이다. main 도 같은 방식으로 돕는다. t7.cy 는 `41`, 깊이 30 · 200 의 await 체인은 `30` · `200` 을 찍는다.
+
+스레드 panic 의 메시지도 같이 고쳐졌다(아래 표 10번). worker 가 스레드를 해제하기 전에 메시지를 공유 상태(`sync.zig` `FutureSyncState`, 이제 `state` 바이트와 메시지 포인터를 가진 구조체)에 복사해 두고 3 으로 바꾸면, 기다리던 쪽이 `Spawned thread panicked: boom` 으로 panic 한다. 중첩이면 `Spawned thread panicked: Spawned thread panicked: boom` 처럼 겹친다.
 
 `AWAIT` 명령어는 `RES_AWAIT` 를 받으면 VM 루프를 빠져나가게 만들어져 있다(`vm.c:1499~1502`, `thread.zig:483~485` 의 `error.Await`, `lib.zig:240` 의 `CL_AWAIT`, `include/cyber.h:42`). 그러나 지금은 `RES_AWAIT` 를 돌려주는 곳이 없다(`vm.zig:1025` 주석 처리).
 continuation 큐(`vm.task_nodes`, `FutureValue.cont_head`, `completeFuture`)도 마찬가지다. `completeFuture`(`core.zig:1437~1446`)는 대기 노드를 `.dead` 로 표시만 하고 ready 큐에 넣는 줄은 주석이다. `cl_run_ready_tasks`(`lib.zig:289~`, `include/cyber.h:404`)도 주석이다.
@@ -1136,8 +1142,10 @@ fu3.cy   r.complete(1); r.complete(2)
 t2.cy    spawn(half, {3.0}).await()      -> CompileError: Expected sendable: float
 t4.cy    spawn(boom, {1}).await()  (boom 은 panic('boom in thread'))
          -> panic: Spawned thread did not finish.      <- 'boom in thread' 메시지는 사라진다
+            (2026-11-08 부터 panic: Spawned thread panicked: boom in thread)
 t7.cy    fn mid(): return spawn(leaf, {}).await() + 1 ; print(spawn(mid, {}).await())
          -> thread 55141545 panic: TODO / exit=134      <- 호스트 프로세스 abort
+            (2026-11-08 부터 정상 실행. 2.6)
 fu1.cy   Future.complete(100).get()      -> CompileError: Can not find the symbol `get` in `Future[int]`.
 fu4.cy   use aio                          -> CompileError: Import path does not exist: .../aio
 ```
@@ -1342,7 +1350,7 @@ upstream 은 "코루틴"을 둘로 갈랐다. 값을 조금씩 내는 쪽은 sta
 | 메모리 | `Fiber` 88바이트 + 별도 스택 최소 16슬롯(128바이트). 둘 다 따로 할당 (`0.3:src/fiber.zig`, `0.3:src/bc_gen.zig:377`) | 객체 48바이트 + 매개변수 스냅샷. 100만 개 RSS 증가 약 146바이트/개 (실측, 실습 6) | Thread 구조체 + 힙 + 스택 511슬롯(4KB) (`thread.zig:256`). 워커 OS 스레드는 최대 CPU 수 - 1 개, 스택 16MB (`worker.zig:76`) |
 | 컨텍스트 전환 | 스택/pc 포인터 교환 O(1) (`zPushFiber` / `zPopFiber`). 수치는 미측정 | `next()` 한 번 약 30 ns (실측, 힙 접근 포함). 복사량은 O(스냅샷 크기) | spawn + await 한 번 약 1.8~2.1 µs (실측). 이후는 OS 스케줄 |
 | 호출 깊이 중간에서 yield | 가능 (`0.3:test/fiber_test.cy` 의 "yield in nested function") | 불가. `#[generator]` 본문에서만. 위임(`yield*`)은 `generator.cy` 에 주석 처리된 TODO | 해당 없음 (멈춤이 아니라 병렬 실행) |
-| 함수 색 | 없음 | 있음 (속성이 반환 타입을 바꾸고, 호출자는 `next()` 로 구동해야 함) | `await` 는 colorless. 단 비-main 스레드에서는 abort |
+| 함수 색 | 없음 | 있음 (속성이 반환 타입을 바꾸고, 호출자는 `next()` 로 구동해야 함) | `await` 는 colorless. 어느 스레드에서나 블록 (비-main abort 는 2026-11-08 수정) |
 | 소유권 / 빌림 | 스택이 fiber 에 고정되고 성장 때만 이동. 0.3 에는 빌림 개념이 없었다 | 프레임이 `next()` 마다 소비자 스택 위치로 옮겨 다니고 스냅샷은 힙에 있다. 스택 주소를 담은 값이 무효화되고, 빌림 매개변수가 `semaLift` 검사를 우회한다 (br2) | 격리. 인자/결과는 `@send` 로 복사. 빌림은 전송 불가 (문서) |
 | 호스트 경계(임베딩, 에이전트) | 호스트 함수 안 yield 는 0.3 소스에서 확인하지 못함(미확인). VM 스택 전체가 보존되므로 호스트 경계 재개에 가장 가까운 모델 | 호스트 함수/중첩 호출 안에서 불가. 지역 소실 버그로 "요청 스트림" 패턴도 제한 | interrupt / fuel 은 전파됨. 호스트가 future 를 만들거나 완료시킬 C API 없음. 호스트 함수 안에서 대기 중이면 못 끊음 |
 | 디버깅 / 스택 트레이스 | fiber 마다 일반 프레임 체인 | 트레이스 코드에 결함 3개 (2.5). 릴리스 빌드에서는 `unexpected 4` | 스레드 패닉의 원래 메시지가 사라지고 await 지점의 일반 패닉만 보임 |
@@ -1353,7 +1361,7 @@ upstream 은 "코루틴"을 둘로 갈랐다. 값을 조금씩 내는 쪽은 sta
 - generator 의 장점: 가볍다(객체 하나 + 인자 스냅샷). 스택을 따로 관리하지 않으니 스택 성장/패치 문제가 없고, 시그니처만으로 값 타입이 결정되어 정적 타입과 어울린다.
 - generator 의 단점: 호출 중간 yield 불가(재귀 순회, 헬퍼 함수 안 yield 불가), 색이 생김, 값을 되받는 yield 가 없음(`next(arg)` 불가), 그리고 지금은 프레임 보존이 구현되지 않았다.
 - Thread 의 장점: 격리가 강하다. 참조 카운트를 스레드 간에 공유하지 않으므로 데이터 레이스 걱정이 없고, 패닉이 스레드 단위로 끝난다.
-- Thread 의 단점: 통신이 전부 복사이고 지원 타입이 `int`/`str` 뿐이다. 협력 스케줄링이 없다(비-main await abort, continuation 미구현). 한 스크립트 안에서 "잠깐 멈췄다 이어서"를 값싸게 할 수단이 아니다.
+- Thread 의 단점: 통신이 전부 복사이고 지원 타입이 `int`/`str` 뿐이다. 협력 스케줄링이 없다(await 는 어느 스레드에서나 바쁜 대기, continuation 미구현). 한 스크립트 안에서 "잠깐 멈췄다 이어서"를 값싸게 할 수단이 아니다.
 - 사라진 것: 같은 힙을 공유하는 stackful 코루틴. 에이전트 루프가 가장 필요로 하는 모양이다.
 
 ### 6.3 다른 언어와의 비교 (일반 지식, 이 저장소의 사실이 아님)
@@ -1477,7 +1485,7 @@ CodeAct 루프의 이상적인 모양은 이렇다. 스크립트가 `r := tool('
 - upstream 은 정적 타입 전환과 함께 "yield 가 반환 타입을 갖는 코루틴"만 남기고 나머지를 Thread 로 보냈다. 이 판단 자체는 일관되지만, generator 의 프레임 모델이 완성되지 않은 채 멈췄다.
   `ret_generator` 의 주석("Only persists the locals", "Assumes generator is 1 reg return")과 `core.cy` 의 "store the generator handle in frame[3]" 은 같은 가정에서 나온다. 반환 슬롯은 1개이고 지역은 어딘가에 보존된다는 가정이다. 둘 다 `?int` 에서 깨진다.
 - 이 fork 가 코루틴 계층에서 먼저 해야 할 일은 새 기능이 아니라 안전이다. 우선순위(제안): (1) generator 지역 보존(6.5), (2) `unwindStack` / `recordCurFrames` / debug sym 의 gen 프레임 처리, (3) `yield` 가 `#[generator]` 밖에서 컴파일러를 죽이는 문제, (4) 비-main `await` 의 `@panic("TODO")`.
-  (4)는 임베딩에서 스크립트 한 줄로 호스트를 죽이는 경로라 에이전트 루프에 가장 직접적이다.
+  (4)는 임베딩에서 스크립트 한 줄로 호스트를 죽이는 경로라 에이전트 루프에 가장 직접적이었고 2026-11-08 에 고쳐졌다(2.6).
 - 에이전트 루프에 필요한 "호스트에서 멈추고 재개"는 길 2(VM 루프 탈출)가 가장 싸다. `Fiber` 는 그 위에서 같은 힙의 여러 실행 맥락이 정말 필요해질 때 검토해도 늦지 않다. 이는 판단이 아니라 6.4 의 변경 크기 비교다.
 - 문서와 코드가 어긋나는 곳이 많다(7.2). 이 영역은 문서를 믿지 말고 `rg` 로 소스 존재 여부부터 확인하는 습관이 필요하다.
 
@@ -1494,9 +1502,9 @@ CodeAct 루프의 이상적인 모양은 이렇다. 스크립트가 `r := tool('
 | 5 | `gen_next` / `gen_end` 에 debug sym 이 없음 (`bc_gen.zig:720, 733`) | 릴리스에서 generator 관련 panic 이 `unexpected 4`(`CL_ERROR_UNKNOWN`) | 실습 7 (st3, dn1) | 증상 재현, 원인은 추정 |
 | 6 | `recordCurFrames` 에 `.gen` 분기 없음 (`thread.zig:930`) | generator 안에서 `meta.stack_trace()` 가 호스트 abort | `stt1.cy` (exit 134) | 실행으로 재현 |
 | 7 | `yield` 를 `#[generator]` 없이 쓰면 sema 가 `.cast(.pointer)` 에서 죽음 (`sema.zig:711`) | 컴파일러 segfault / 임베딩 시 호스트 abort | 실습 7 (y4) | 실행으로 재현 |
-| 8 | 비-main 스레드의 `Future.await` 가 `@panic("TODO")` (`vm.zig:1026`) | 스크립트가 호스트를 abort (exit 134) | 실습 5 (t7) | 실행으로 재현 |
+| 8 | 비-main 스레드의 `Future.await` 가 `@panic("TODO")` (`vm.zig:1026`) | 스크립트가 호스트를 abort (exit 134) | 실습 5 (t7) | 실행으로 재현. 2026-11-08 수정 `56af553f` (F-07, 2.6) |
 | 9 | 연달아 `spawn` 하면 한 워커에 쌓여 직렬 실행될 수 있음 (`worker.zig:69~72`) | 병렬성 저하 | 실습 5 (sp4) | 증상 재현, 원인은 추정 |
-| 10 | 스레드 패닉의 원래 메시지가 소실됨 (`worker.zig:153~163`) | 디버깅 곤란 | 실습 5 (t4) | 실행으로 재현 |
+| 10 | 스레드 패닉의 원래 메시지가 소실됨 (`worker.zig:153~163`) | 디버깅 곤란 | 실습 5 (t4) | 실행으로 재현. 2026-11-08 수정 `56af553f` (`Spawned thread panicked: <msg>`) |
 | 11 | `bytecode.zig:717~722` 의 `gen_next` 덤프가 피연산자를 `pc+3`, `pc+5` 에서 읽음 (VM 은 `pc[2]`, `pc[3]`) | 덤프의 둘째/셋째 숫자가 틀림 | `cyber compile` 로 `Generator.next` 보기 | 코드와 덤프 비교로 확인 |
 | 12 | `GEN_NEXT` 에 `CHK_STK` 류 스택 여유 검사가 없음 (`vm.c:1434~1459`) | `next()` 를 스택 끝 근처에서 부르면 제너레이터 프레임이 스택 밖을 쓸 수 있음 | 재현 안 함 | 미확인 (코드 읽기) |
 | 13 | `yield` 만 쓰는 형태는 sema 에서 "TODO" (`sema.zig:748`). 파서는 다음 줄 내용을 식으로 읽어 ParseError 를 내는 경우가 있음 (y2.cy) | 값 없는 yield 불가 | y2.cy | 관찰 |
@@ -1514,7 +1522,7 @@ CodeAct 루프의 이상적인 모양은 이렇다. 스크립트가 `r := tool('
 | `docs/docs.md:2787` Fibers (`Fiber(fn, args)`, `f.resume()`) | `type Fiber` 선언 없음. `rg 'type Fiber' src` 결과 없음 |
 | `docs/docs.md:2765~2785` Sendable: `byte`, `bool`, `[]T`, `Array`, `Map`, 합성 타입 | `int` 계열과 `@send` 가 있는 struct(`str`)만. `float`, `bool`, `byte` 는 "Expected sendable", `Array[int]` 는 `NoCopy` 오류 (실습 5). `Sendable` trait 없음 |
 | `docs/docs.md:2745` spawn: "`Result[Future[T]]` ... 디스패치 못 하면 panic" | `fn spawn(...) -> Future[Sig.ret()]` (`core.cy:4381`) |
-| `docs/docs.md:2876` Future await: "현재 스레드를 중단하고 스케줄러가 다른 스레드를 재개" | main 스레드는 spin 으로 블록, 비-main 은 `@panic("TODO")` (2.6) |
+| `docs/docs.md:2876` Future await: "현재 스레드를 중단하고 스케줄러가 다른 스레드를 재개" | 어느 스레드든 spin 으로 블록하며 큐의 작업을 돕는다. 비-main 의 `@panic("TODO")` 는 2026-11-08 수정 (2.6). 매뉴얼은 같은 날 고쳤다 |
 | `docs/docs.md` Futures: `f.get().?`, `use aio`, `aio.delay` | `Future.get` 없음, `aio` 모듈 없음 (실습 5). `docs/history/coroutines_concurrency.md` 의 "f.get()" 도 같다 |
 | `docs/docs.md` Future chains(`then_spawn`), Channels, Shared memory, OS threads, `await` union, Gas mileage | 전부 TBD 이거나 소스 없음 |
 | `docs/docs.md` 람다 `spawn(\|_\| -> int, {})`, `FutureResolver(int)` 문법 | `FutureResolver.new(int)` 만 동작 (`src/test/memory/future_resolver.cy`). 람다 spawn 은 TBD |
@@ -1536,7 +1544,7 @@ CodeAct 루프의 이상적인 모양은 이렇다. 스크립트가 `r := tool('
 
 - 스택형 `Fiber`: 문서만 있다. 에이전트 루프에 중단/재개가 필요해지면 길 2 또는 길 3 을 이 fork 가 설계해야 한다.
 - generator reset, 값을 되받는 yield, 위임(`yield*`): 없다.
-- 비-main await, continuation 큐, `cl_run_ready_tasks`: 주석 처리 또는 `@panic("TODO")`.
+- continuation 큐, `cl_run_ready_tasks`: 주석 처리. 비-main await 는 2026-11-08 부터 블록한다(2.6).
 - 패닉한 자식 스레드 상태 조회, Channels, Shared memory, OS threads: TBD.
 
 ## 8. 이해도 확인 Q&A
@@ -1564,7 +1572,7 @@ A: `.gen` 분기가 호출 정보를 `fp+1`, 돌아올 pc 를 `fp+2`, gen 핸들
 
 ### Q5. "await 는 colorless" 라는 말은 무슨 뜻이고, 지금 구현에서 지켜지는가?
 
-A: `await()` 가 메서드라서 `async` 같은 함수 표식 없이 어느 함수에서나 부를 수 있다는 뜻이다(`docs/history` 의 "colorless 유지"). 문법상은 지켜진다. 그러나 동작상은 main 스레드에서만 의미가 있다. 공유 future 를 비-main 스레드가 await 하면 `@panic("TODO")` 로 호스트가 죽는다(t7). 색을 없앤 대가를 아직 치르지 않은 셈이다.
+A: `await()` 가 메서드라서 `async` 같은 함수 표식 없이 어느 함수에서나 부를 수 있다는 뜻이다(`docs/history` 의 "colorless 유지"). 문법상은 지켜진다. 동작상으로도 2026-11-08 부터는 어느 스레드에서나 블록한다(그 전에는 비-main 스레드의 await 가 `@panic("TODO")` 로 호스트를 죽였다. t7). 다만 블록하는 동안 그 스레드는 큐의 다른 작업을 돕는 것 말고는 바쁜 대기다.
 JS 의 `await` 가 이벤트 루프에 제어를 돌려주는 것과 달리, Cyber 의 main `await` 는 호스트 스레드를 spin 으로 붙잡는다(2.6). "colorless" 가 "블록하지 않음"을 뜻하지 않는다는 점에 주의한다.
 
 ### Q6. 에이전트 루프에서 도구 호출을 기다리려면 스택형 Fiber 가 반드시 필요한가?

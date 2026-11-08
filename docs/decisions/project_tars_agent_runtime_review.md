@@ -32,7 +32,7 @@
 현재 런타임에는 호스트 함수 안에서 실행을 멈추고 임의 시간 뒤 재개하는 수단이 없다. 세 가지 사실.
 
 1. 제너레이터는 stackless다. `yield`는 `#[generator]` 함수 본문에서만 쓸 수 있고, 호스트 함수나 중첩 호출 안에서는 불가능하다.
-2. `Future.await()`는 main 스레드에서 spin-wait로 블록한다(`src/vm.zig`의 `zAwait`). 비-main 스레드의 await는 `@panic("TODO")`이고,
+2. `Future.await()`는 main 스레드에서 spin-wait로 블록한다(`src/vm.zig`의 `zAwait`). 비-main 스레드의 await는 `@panic("TODO")`였고(2026-11-08 F-07 수정으로 지금은 main과 같이 블록),
    continuation 큐(`FutureValue.cont_head`)와 `cl_run_ready_tasks`는 주석 처리돼 있다.
 3. 초안 §7의 첫 질문 "호스트 함수 안에서 coyield할 수 있는가"의 답은 "불가. 스크립트 레벨에서도 제너레이터 본문에서만"이다.
 

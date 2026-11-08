@@ -64,7 +64,8 @@ interrupt도 받지 않았고, 메인은 `zAwait`의 spin 루프에 갇혀 검�
 - `zAwait`의 spin은 플래그를 확인해 `RES_INTERRUPT`를 돌려준다. `AWAIT` 명령은 원래 `RES_AWAIT` 말고는 결과를 무시했다.
   이제 오류면 pc를 `AWAIT`로 되돌려 반환하고, 트레이스용으로 `await_op`을 `pushFCode`로 내보낸다.
 - 작업 스레드가 실패하면 프로세스를 죽이지 않고 future 상태를 바꾼다. 4는 멈춤(interrupt, fuel)이라 메인의 await는
-  `CL_ERROR_INTERRUPT`, 3은 그 밖의 panic이라 "Spawned thread did not finish." panic이 된다.
+  `CL_ERROR_INTERRUPT`, 3은 그 밖의 panic이라 "Spawned thread did not finish." panic이 된다(2026-11-08부터 메시지가 있으면
+  "Spawned thread panicked: <메시지>", 비-main 스레드의 await도 같은 루프. `project_spawn_nested_await.md`).
 - 메인이 panic이나 중단으로 힙을 스윕하기 전에 `VM.stopSpawnedThreads`가 플래그 2를 세우고 worker 풀이 빌 때까지
   기다린다(`Pool.wait_idle`). 작업 스레드가 메인 힙의 `FutureValue`에 쓰는 것과 스윕이 겹치지 않게 하려는 것이다.
 - 처리한 요청은 지운다. 남겨 두면 eval 밖에서 호스트가 VM 함수를 다시 부를 때 곧바로 멈춘다.

@@ -107,6 +107,10 @@ pub const Compiler = struct {
     /// The previous compile failed. Its main chunk's own declarations are not carried over by `persist_main`.
     last_compile_failed: bool,
 
+    /// The previous compile was a `VM.validate`: its main chunk was never run. Like a failed compile, its own
+    /// declarations are not carried over by `persist_main` (F-05).
+    main_discarded: bool,
+
     chunk_start: u32,
     type_start: u32,
 
@@ -144,6 +148,7 @@ pub const Compiler = struct {
             .cont = false,
             .first_compile_failed = false,
             .last_compile_failed = false,
+            .main_discarded = false,
             .chunk_start = 0,
             .type_start = 0,
             .find_type_cache = .empty,
@@ -289,6 +294,8 @@ pub const Compiler = struct {
         }
 
         const first_compile = !self.cont;
+        // `VM.validate` sets this again after the compile.
+        defer self.main_discarded = false;
         const res = self.compileInner(uri, src, config) catch |err| {
             self.last_compile_failed = true;
             // A failed first compile leaves core types, the core chunk and a main chunk half built while `cont`
@@ -367,8 +374,9 @@ pub const Compiler = struct {
                     const sym = e.value_ptr.*;
 
                     // A failed eval contributes nothing of its own: its functions have no bytecode and its types may
-                    // be half resolved. The aliases it inherited from earlier evals are still carried over.
-                    if (self.last_compile_failed and sym.type != .use_alias) {
+                    // be half resolved. Neither does a validated source, which never ran (F-05). In both cases the
+                    // aliases inherited from earlier evals are still carried over.
+                    if ((self.last_compile_failed or self.main_discarded) and sym.type != .use_alias) {
                         continue;
                     }
 
@@ -720,7 +728,13 @@ fn emit_program_init_func(c: *cy.Chunk, start: *cy.Func) !void {
     _ = try sema.pushFuncProc(c, start);
 
     var has_extern_func = false;
-    for (c.compiler.newChunks()) |chunk| {
+    for (c.compiler.chunks.items, 0..) |chunk, id| {
+        // Besides the chunks of this compile, a chunk compiled earlier by `VM.validate` is initialized here
+        // if no program has run since (F-05). Its `@init` already exists and has bytecode.
+        const pending = id < c.compiler.chunk_start;
+        if (pending and !chunk_init_pending(chunk)) {
+            continue;
+        }
         if (chunk.has_extern_func) {
             has_extern_func = true;
         }
@@ -728,7 +742,10 @@ fn emit_program_init_func(c: *cy.Chunk, start: *cy.Func) !void {
             continue;
         }
 
-        const init = try reserve_hidden_func(chunk, "@init");
+        const init = if (pending)
+            chunk.sym.getMod().getSym("@init").?.cast(.func).first
+        else
+            try reserve_hidden_func(chunk, "@init");
 
         const call = try sema.sema_call_ir(c, init, &.{}, c.ast.null_node);
         try sema.sema_discard(c, call, c.ast.null_node);
@@ -742,6 +759,12 @@ fn emit_program_init_func(c: *cy.Chunk, start: *cy.Func) !void {
 
     try sema.procPrologue(c);
     try sema.popFuncBlock(c);
+}
+
+/// A chunk from an earlier compile whose code was generated but whose `@init` never ran: it was loaded by a
+/// `VM.validate`, or by evals since then that did not run either. `VM.eval` marks chunks after a program ran.
+fn chunk_init_pending(chunk: *cy.Chunk) bool {
+    return chunk.rt_ready and !chunk.rt_inited;
 }
 
 fn reserve_hidden_func(c: *cy.Chunk, name: []const u8) !*cy.Func {
@@ -825,12 +848,20 @@ fn emit_program_deinit_func(c: *cy.Chunk, end_fn: *cy.Func) !void {
     defer sema.popResolveContext(c);
 
     _ = try sema.pushFuncProc(c, end_fn);
-    for (c.compiler.newChunks()) |chunk| {
+    for (c.compiler.chunks.items, 0..) |chunk, id| {
+        // Same chunks as `emit_program_init_func`.
+        const pending = id < c.compiler.chunk_start;
+        if (pending and !chunk_init_pending(chunk)) {
+            continue;
+        }
         if (!chunk.has_static_init) {
             continue;
         }
 
-        const deinit = try reserve_hidden_func(chunk, "@deinit");
+        const deinit = if (pending)
+            chunk.sym.getMod().getSym("@deinit").?.cast(.func).first
+        else
+            try reserve_hidden_func(chunk, "@deinit");
 
         // Invoke chunk destructor.
         const call = try sema.sema_call_ir(c, deinit, &.{}, c.ast.null_node);

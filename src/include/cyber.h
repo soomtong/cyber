@@ -416,8 +416,15 @@ CLResultCode cl_vm_eval_path(CLVM* vm, CLBytes uri, CLEvalConfig config, CLEvalR
 // Consumes and evaluates all ready tasks. Returns `CL_SUCCESS` if succesfully emptied the ready queue.
 // CLResultCode cl_run_ready_tasks(CLThread* t);
 
+// Compiles the source as a whole program without running it. The VM is reset first, like `cl_vm_reset`:
+// persisted locals and declarations from earlier evals are gone. Used by `cyber compile` to dump bytecode.
 CLResultCode cl_vm_compile(CLVM* vm, CLBytes uri, CLBytes src, CLCompileConfig config);
 CLResultCode cl_vm_compile_path(CLVM* vm, CLBytes uri, CLCompileConfig config);
+
+// Checks the source for compile errors against the current session without running it or resetting the VM.
+// Persisted locals and declarations from earlier evals are visible to it, and nothing it declares is kept for
+// the next eval. A module the source loads first (`use math`) is initialized by the next eval that runs.
+// On `CL_ERROR_COMPILE` the report is available from `cl_vm_compile_error_summary`.
 CLResultCode cl_vm_validate(CLVM* vm, CLBytes src);
 
 /// Convenience function to return the last error summary.

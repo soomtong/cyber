@@ -338,13 +338,29 @@ pub const VM = struct {
         self.last_exe_error = "";
     }
 
+    /// Checks `src` against the current session: the persisted locals and the declarations of earlier evals are
+    /// visible, nothing is run, and nothing the source declares is kept for the next eval (`Compiler.main_discarded`).
+    /// Unlike `compile`, the VM is not reset (F-05). Code is still generated so that a module the source loads
+    /// first (`use math`) is complete; the next eval that runs initializes it (`emit_program_init_func`).
     pub fn validate(self: *VM, srcUri: []const u8, src: ?[]const u8, config: C.ValidateConfig) !void {
         _ = config;
+        if (self.compiler.first_compile_failed) {
+            // Same as `eval`: start over instead of compiling on top of the half-built first compile (F-04).
+            try self.resetVM();
+        }
+        try self.compiler.reinitPerRun();
+
         var compile_c = C.defaultCompileConfig();
-        compile_c.skip_codegen = true;
-        _ = try self.compile(srcUri, src, compile_c);
+        compile_c.single_run = self.config.single_run;
+        compile_c.gen_all_debug_syms = cy.Trace;
+        compile_c.persist_main = self.config.persist_main;
+        compile_c.deny_raw_ptrs = self.config.deny_raw_ptrs;
+        defer self.compiler.main_discarded = true;
+        _ = try self.compiler.compile(srcUri, src, compile_c);
     }
 
+    /// Compiles `src` as a whole program and resets the VM first. See `validate` to check source against the
+    /// current session.
     pub fn compile(self: *VM, srcUri: []const u8, src: ?[]const u8, config: C.CompileConfig) !cy.CompileResult {
         try self.resetVM();
         self.config = C.defaultEvalConfig();
@@ -377,6 +393,15 @@ pub const VM = struct {
         self.compiler.cont = false;
         self.compiler.first_compile_failed = false;
         self.compiler.last_compile_failed = false;
+        self.compiler.main_discarded = false;
+    }
+
+    /// A program ran, so every chunk with generated code has had its `@init` and extern binding run, by this
+    /// program or an earlier one. See `compiler.emit_program_init_func` (F-05).
+    fn markChunksInited(self: *VM) void {
+        for (self.compiler.chunks.items) |chunk| {
+            if (chunk.rt_ready) chunk.rt_inited = true;
+        }
     }
 
     /// Asks every spawned thread to stop at its next checkpoint and waits until the worker pool is idle.
@@ -464,10 +489,12 @@ pub const VM = struct {
             defer tt.endPrintVerbose("eval");
 
             const val = self.exec_bytecode(res.vm) catch |err| {
+                self.markChunksInited();
                 if (config.persist_main) self.dropMainLocalSaves();
                 self.dropMainResult(false);
                 return err;
             };
+            self.markChunksInited();
             if (config.persist_main) self.copyMainLocalSaves();
             if (self.compiler.main_res) |*main_res| {
                 // Copied now, before another eval reuses the stack. The VM owns the copy until the next eval.

@@ -907,6 +907,103 @@ test "Evals after a failed first compile." {
     try zt.eq(C.Success, C.vm_evalx(vm5, "repl", "use test\ntest.eq(6, x + ok())", config, &res));
 }
 
+test "cl_vm_validate checks against the session without resetting it." {
+    // F-05. `cl_vm_validate` used to call `resetVM`: the persisted locals and declarations of a REPL session were
+    // gone, and a validate that failed left the half-built first compile for the next eval (F-04's crash).
+    // Now it compiles against the current session like an eval that is never run, and keeps none of its own
+    // declarations.
+    const S = struct {
+        fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+            if (std.mem.eql(u8, C.from_bytes(uri), "gmod")) {
+                res[0].src = C.to_bytes(
+                    \\global counter int = 10
+                    \\fn get() -> int:
+                    \\  return counter
+                    \\fn bump():
+                    \\  counter += 1
+                );
+                return true;
+            }
+            return C.default_loader(vm_, mod, uri, res);
+        }
+    };
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var res: C.EvalResult = undefined;
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+
+    // A REPL session: a persisted local survives a good and a bad validate, and the compile error summary of the
+    // bad one is readable.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "x := 5\nx", config, &res));
+    try zt.eq(5, @as(*i64, @ptrCast(@alignCast(res.res))).*);
+    try zt.eq(C.Success, C.vm_validate(vm, "_ = x + 1"));
+    // The eval result the host still holds is untouched.
+    try zt.eq(5, @as(*i64, @ptrCast(@alignCast(res.res))).*);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "_ = x +"));
+    {
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(summary.len > 0);
+    }
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "_ = nope"));
+    {
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, "nope") != null);
+    }
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use test\ntest.eq(5, x)", config, &res));
+
+    // Declarations of a validated source are not kept: the next eval neither sees them nor fails on them.
+    try zt.eq(C.Success, C.vm_validate(vm, "fn v() -> int:\n  return 1\ntype Q:\n  a int\ny := 7\n_ = v() + Q{a=1}.a + y"));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = v()", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = Q{a=1}", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = y", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "fn v() -> int:\n  return 2\ntype Q:\n  a int\ny := 8", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use test\ntest.eq(15, x + v() + Q{a=0}.a + y)", config, &res));
+
+    // Declarations from earlier evals are still visible to a validate.
+    try zt.eq(C.Success, C.vm_validate(vm, "_ = v() + Q{a=x}.a + y"));
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "_ = v(1)"));
+
+    // A validate on a fresh VM, then evals.
+    const vm2 = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm2);
+    try zt.eq(C.Success, C.vm_validate(vm2, "fn f() -> int:\n  return 1\n_ = f()"));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm2, "repl", "_ = f()", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm2, "repl", "x := 5", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm2, "repl", "use test\ntest.eq(5, x)", config, &res));
+
+    // A module first loaded by a validate is initialized by the next eval that runs: its extern functions are
+    // bound (`math`) and its globals are initialized (`gmod`).
+    const vm3 = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm3);
+    C.vm_set_loader(vm3, @ptrCast(&S.loader));
+    try zt.eq(C.Success, C.vm_validate(vm3, "use math\nuse gmod\n_ = math.sqrt(16.0) + float(gmod.get())"));
+    try zt.eq(C.Success, C.vm_evalx(vm3, "repl",
+        \\use math
+        \\use gmod
+        \\use test
+        \\test.eq(4.0, math.sqrt(16.0))
+        \\test.eq(10, gmod.get())
+        \\gmod.bump()
+        \\test.eq(11, gmod.get())
+    , config, &res));
+    // The module is not initialized twice.
+    try zt.eq(C.Success, C.vm_evalx(vm3, "repl", "use gmod\nuse test\ntest.eq(11, gmod.get())", config, &res));
+
+    // Without `persist_main` the same holds for a plain eval sequence.
+    const vm4 = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm4);
+    try zt.eq(C.Success, C.vm_eval(vm4, "use test\ntest.eq(1, 1)", &res));
+    try zt.eq(C.Success, C.vm_validate(vm4, "use math\n_ = math.floor(1.5)"));
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm4, "use math\n_ = math.floor('a')"));
+    try zt.eq(C.Success, C.vm_eval(vm4, "use math\nuse test\ntest.eq(1.0, math.floor(1.5))", &res));
+}
+
 test "Eval without main after an eval with main." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

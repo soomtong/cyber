@@ -166,6 +166,12 @@ pub const Chunk = struct {
 
     has_static_init: bool,
 
+    /// Bytecode was generated for this chunk (`bcgen.genAll` finished with it in `newChunks`).
+    rt_ready: bool,
+    /// A program that ran called this chunk's `@init` and bound its extern functions. A chunk compiled by
+    /// `VM.validate` (never run) stays false and the next executed program initializes it (F-05).
+    rt_inited: bool,
+
     encoder: cy.ast.Encoder,
 
     indent: u32,
@@ -222,6 +228,8 @@ pub const Chunk = struct {
             .mainSemaProcId = cy.NullId,
             .fallback_modules = .empty,
             .has_static_init = false,
+            .rt_ready = false,
+            .rt_inited = false,
             .encoder = undefined,
             .indent = 0,
             .syms = .empty,

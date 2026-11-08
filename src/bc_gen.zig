@@ -195,6 +195,10 @@ pub fn genAll(c: *cy.Compiler) !void {
         c.vm.c.types_ptr = @ptrCast(c.vm.types.items.ptr);
         c.vm.c.types_len = c.vm.types.items.len;
     }
+
+    for (c.newChunks()) |chunk| {
+        chunk.rt_ready = true;
+    }
 }
 
 fn prepareSym(c: *cy.Compiler, sym: *cy.Sym) !void {

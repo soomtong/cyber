@@ -780,6 +780,8 @@ typedef struct Thread {
     Value* stack_ptr;
     size_t stack_len;
     Value* stack_end;
+    // Max `stack_len` in slots. Growing past it is a `Stack overflow.` panic. Set with `cl_vm_set_stack_limit`.
+    size_t stack_limit;
 
     // bool unwinding;
 

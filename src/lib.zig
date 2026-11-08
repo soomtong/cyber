@@ -259,6 +259,14 @@ export fn cl_vm_set_fuel(vm: *cy.VM, fuel: i64) void {
     vm.main_thread.c.fuel_limit = fuel;
 }
 
+export fn cl_vm_set_stack_limit(vm: *cy.VM, bytes: i64) void {
+    if (bytes <= 0) {
+        vm.main_thread.c.stack_limit = std.math.maxInt(usize);
+    } else {
+        vm.main_thread.c.stack_limit = @intCast(@divTrunc(bytes, @sizeOf(cy.Value)));
+    }
+}
+
 export fn cl_vm_eval_path(vm: *cy.VM, uri: C.Bytes, config: C.EvalConfig, out: *C.EvalResult) C.ResultCode {
     var res = C.Success;
     out.* = vm.eval(C.from_bytes(uri), null, config) catch |err| b: {
@@ -1030,6 +1038,65 @@ test "value_desc renders values from the type layout." {
     try S.expect(vm, config, "1.5", "`float` 1.5");
     try S.expect(vm, config, "true", "`bool` true");
     try S.expect(vm, config, "error.Oops", "`error` error.Oops");
+}
+
+test "cl_vm_set_stack_limit turns runaway recursion into a panic." {
+    // F-40. Leak-checking allocator: the panic sweep frees the values left in the abandoned frames.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    C.vm_set_stack_limit(vm, 1024 * 1024);
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm,
+        \\fn f(n int) -> int:
+        \\  return f(n + 1) + 1
+        \\_ = f(0)
+    , &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try zt.eq(true, std.mem.startsWith(u8, report, "panic: Stack overflow. The stack limit is 1048576 bytes."));
+        // The trace keeps both ends and elides the middle.
+        try zt.expect(std.mem.indexOf(u8, report, "frames omitted") != null);
+        try zt.expect(std.mem.indexOf(u8, report, " main:") != null);
+    }
+
+    // Managed arguments in the abandoned frames.
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm,
+        \\fn g(s str, n int) -> int:
+        \\  return g(s, n + 1) + 1
+        \\_ = g('abc' + 'def', 0)
+    , &res));
+
+    // Recursion that fits the limit, and the VM is still usable.
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\fn depth(n int) -> int:
+        \\  if n == 0:
+        \\    return 0
+        \\  return depth(n - 1) + 1
+        \\use test
+        \\test.eq(1000, depth(1000))
+    , &res));
+
+    // 200000 levels need more than 1 MiB. Removing the limit lets the stack grow again.
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm,
+        \\fn depth(n int) -> int:
+        \\  if n == 0:
+        \\    return 0
+        \\  return depth(n - 1) + 1
+        \\_ = depth(200000)
+    , &res));
+    C.vm_set_stack_limit(vm, 0);
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\fn depth(n int) -> int:
+        \\  if n == 0:
+        \\    return 0
+        \\  return depth(n - 1) + 1
+        \\use test
+        \\test.eq(200000, depth(200000))
+    , &res));
 }
 
 test "cl_vm_set_fuel stops runaway loops and recursion." {

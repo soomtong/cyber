@@ -397,6 +397,11 @@ void cl_vm_interrupt(CLVM* vm);
 // An eval that runs out returns `CL_ERROR_INTERRUPT`.
 void cl_vm_set_fuel(CLVM* vm, int64_t fuel);
 
+// Caps the VM stack of the main thread and of threads it spawns at `bytes` (rounded down to 8-byte slots).
+// The default is 128 MiB. A call that needs more stack panics with `Stack overflow.` and the eval returns
+// `CL_ERROR_PANIC`; the VM can be used again. Zero or less removes the limit.
+void cl_vm_set_stack_limit(CLVM* vm, int64_t bytes);
+
 // Uses a `uri` to load the source code.
 CLResultCode cl_vm_eval_path(CLVM* vm, CLBytes uri, CLEvalConfig config, CLEvalResult* res);
 

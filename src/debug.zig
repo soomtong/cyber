@@ -433,6 +433,10 @@ pub const StackTrace = struct {
 
 pub fn writeStackFrames(vm: *const cy.VM, w: *std.Io.Writer, frames: []const C.StackFrame) !void {
     for (frames) |frame| {
+        if (is_elision_frame(frame)) {
+            try w.print("{s}\n", .{C.from_bytes(frame.name)});
+            continue;
+        }
         if (frame.chunk != cy.NullId) {
             const chunk = vm.compiler.chunks.items[frame.chunk];
             if (frame.line_pos != cy.NullId) {
@@ -562,6 +566,45 @@ fn getStackFrame(vm: *cy.VM, sym: cy.DebugSym) !C.StackFrame {
             .line_pos = cy.NullId,
         };
     }
+}
+
+/// A panic trace longer than this keeps `trace_edge_frames` frames at each end and one elision frame between
+/// them. Runaway recursion stopped by the stack limit would otherwise print every frame (F-40).
+pub const max_trace_frames = 40;
+pub const trace_edge_frames = 20;
+
+/// Marks the frame that stands for the omitted frames. Host frames have `line` 0.
+fn is_elision_frame(frame: C.StackFrame) bool {
+    return frame.chunk == cy.NullId and frame.line == cy.NullId;
+}
+
+/// `allocStackTrace` with the middle of a long trace replaced by `... N frames omitted ...`.
+pub fn allocStackTraceCapped(vm: *cy.VM, stack: []const cy.Value, cframes: []const vmc.CompactFrame) ![]C.StackFrame {
+    if (cframes.len <= max_trace_frames) {
+        return allocStackTrace(vm, stack, cframes);
+    }
+    const head = try allocStackTrace(vm, stack, cframes[0..trace_edge_frames]);
+    defer vm.alloc.free(head);
+    errdefer for (head) |*f| deinit_frame(f, vm.alloc);
+    const tail = try allocStackTrace(vm, stack, cframes[cframes.len - trace_edge_frames ..]);
+    defer vm.alloc.free(tail);
+    errdefer for (tail) |*f| deinit_frame(f, vm.alloc);
+
+    const omitted = cframes.len - 2 * trace_edge_frames;
+    const name = try vm.alloc.print("... {} frames omitted ...", .{omitted});
+    errdefer vm.alloc.free(name);
+
+    var frames = try vm.alloc.alloc(C.StackFrame, head.len + 1 + tail.len);
+    @memcpy(frames[0..head.len], head);
+    frames[head.len] = .{
+        .name = C.to_bytes(name),
+        .chunk = cy.NullId,
+        .line = cy.NullId,
+        .col = 0,
+        .line_pos = cy.NullId,
+    };
+    @memcpy(frames[head.len + 1 ..], tail);
+    return frames;
 }
 
 pub fn allocStackTrace(vm: *cy.VM, stack: []const cy.Value, cframes: []const vmc.CompactFrame) ![]C.StackFrame {

@@ -62,7 +62,7 @@ pub fn panic(t: *Thread, err: cy.Value) !void {
     cx = try t.unwindStack(t.c.stack(), cx);
 
     // Build detailed stack trace from compact trace.
-    const frames = try cy.debug.allocStackTrace(t.c.vm, t.c.stack(), t.compact_trace.items);
+    const frames = try cy.debug.allocStackTraceCapped(t.c.vm, t.c.stack(), t.compact_trace.items);
     t.stack_trace.deinit(t.alloc);
     t.stack_trace.frames = frames;
 
@@ -180,6 +180,11 @@ test "thread internals." {
     try zt.eq(@offsetOf(Thread, "heap"), @offsetOf(vmc.ZThread, "heap"));
 }
 
+/// Default `ThreadC.stack_limit` in slots: 128 MiB of `Value`s. Deep but finite recursion still fits
+/// (about a million frames of 16 slots), while runaway recursion stops with a panic instead of taking the
+/// host's memory (F-40). `cl_vm_set_stack_limit` changes it.
+pub const default_stack_limit: usize = 16 * 1024 * 1024;
+
 /// Mimic layout but with zig types.
 pub const ThreadC = extern struct {
     id: usize,
@@ -192,6 +197,7 @@ pub const ThreadC = extern struct {
     stack_ptr: [*]cy.Value,
     stack_len: usize,
     stack_end: [*]cy.Value,
+    stack_limit: usize,
 
     panic_payload: u64,
     panic_type: u8,
@@ -236,6 +242,7 @@ pub const Thread = struct {
                 .stack_ptr = undefined,
                 .stack_len = 0,
                 .stack_end = undefined,
+                .stack_limit = default_stack_limit,
                 .panic_payload = undefined,
                 .panic_type = vmc.PANIC_NONE,
                 .trace = undefined,
@@ -489,7 +496,7 @@ pub const Thread = struct {
                 }
 
                 if (res == vmc.RES_STACK_OVERFLOW) {
-                    try @call(.never_inline, cy.Thread.growStackAuto, .{self});
+                    try @call(.never_inline, cy.Thread.growStackAuto, .{self, handle_panic});
                     continue;
                 }
 
@@ -858,15 +865,47 @@ pub const Thread = struct {
     }
 
     // Performs stackGrowTotalCapacityPrecise in addition to patching the frame pointers.
-    pub fn growStackAuto(self: *Thread) !void {
+    // Stops at `stack_limit` with a `Stack overflow.` panic (F-40).
+    pub fn growStackAuto(self: *Thread, handle_panic: bool) !void {
         @branchHint(.cold);
+        if (self.c.stack_len >= self.c.stack_limit) {
+            return self.stack_overflow(handle_panic);
+        }
         // Grow by 50% with minimum of 16.
         var growSize = self.c.stack_len / 2;
         if (growSize < 16) {
             growSize = 16;
         }
-        logger.tracev("grow stack to size={}", .{self.c.stack_len + growSize});
-        try self.growStackPrecise(self.c.stack_len + growSize);
+        var newCap = self.c.stack_len + growSize;
+        if (newCap > self.c.stack_limit) {
+            newCap = self.c.stack_limit;
+        }
+        logger.tracev("grow stack to size={}", .{newCap});
+        try self.growStackPrecise(newCap);
+    }
+
+    /// The stack is at `stack_limit` and the current frame still does not fit. Unwinds like a panic.
+    /// At `CHK_STK` the callee frame has no debug symbol yet (its first failable instruction has not run), so the
+    /// panic is attributed to the call site: `pc` and `fp` are moved to the caller's context. `GEN_NEXT` / `GEN_END`
+    /// are failable instructions in the caller and are left alone.
+    fn stack_overflow(self: *Thread, handle_panic: bool) !void {
+        @branchHint(.cold);
+        if (self.c.pc[0].opcode() == .chk_stk) {
+            const fp_off = getStackOffset(self.c.stack_ptr, self.c.fp);
+            const frame = getFrame(self, self.c.stack(), fp_off, self.c.pc);
+            if (frame.frame_type() != .init) {
+                const prev = frame.prev_context();
+                self.c.pc = prev.pc.?;
+                self.c.fp = prev.fp;
+            }
+        }
+        var buf: [96]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, "Stack overflow. The stack limit is {} bytes.", .{self.c.stack_limit * @sizeOf(Value)}) catch unreachable;
+        _ = self.ret_panic(msg);
+        if (handle_panic) {
+            try handleInterrupt(self);
+        }
+        return error.Panic;
     }
 
     fn growStackPrecise(self: *Thread, newCap: usize) !void {

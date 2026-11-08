@@ -198,24 +198,36 @@ pub const VariantKeyContext = struct {
                     }
                 },
                 bt.FuncSig => {
-                    return av.asPtr(*cy.FuncSig) == b.params[i].asPtr(*cy.FuncSig);
+                    if (av.asPtr(*cy.FuncSig) != b.params[i].asPtr(*cy.FuncSig)) {
+                        return false;
+                    }
                 },
                 bt.I64 => {
-                    return av.asInt() == b.params[i].asInt();
+                    if (av.asInt() != b.params[i].asInt()) {
+                        return false;
+                    }
                 },
                 bt.EvalInt => {
-                    return av.as_eval_int() == b.params[i].as_eval_int();
+                    if (av.as_eval_int() != b.params[i].as_eval_int()) {
+                        return false;
+                    }
                 },
                 bt.EvalStr => {
-                    return std.mem.eql(u8, av.as_eval_str(), b.params[i].as_eval_str());
+                    if (!std.mem.eql(u8, av.as_eval_str(), b.params[i].as_eval_str())) {
+                        return false;
+                    }
                 },
                 else => {
                     switch (param_t.kind()) {
                         .func_sym => {
-                            return av.asPtr(*cy.Func) == b.params[i].asPtr(*cy.Func);
+                            if (av.asPtr(*cy.Func) != b.params[i].asPtr(*cy.Func)) {
+                                return false;
+                            }
                         },
                         .enum_t => {
-                            return av.asInt() == b.params[i].asInt();
+                            if (av.asInt() != b.params[i].asInt()) {
+                                return false;
+                            }
                         },
                         else => {
                             std.debug.panic("Unsupported value comparison: {}", .{param_t.id()});

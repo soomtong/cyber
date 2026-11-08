@@ -112,6 +112,17 @@
     했다(`src/module.zig`의 `isCarriedOverSym`). 이전에는 `use test`를 두 번 eval하면 프로세스가 죽었다.
   - 회귀 테스트는 lib "persist_main keeps main locals across evals."(누수 검사 allocator, 구조체 · 힙 문자열 ·
     스택 재할당 · 재선언 · 컴파일 에러 · panic).
+- 첫 eval의 컴파일 실패(F-04, 2026-11-08 수정 `f5f2d241`). 실패한 첫 컴파일은 core 타입 · core 청크 · main 청크를 반쯤 만든
+  채 `cont=false`로 남겼고, 다음 컴파일이 core를 다시 올리며 죽었다(구문 오류 뒤 SIGSEGV, 의미 오류 뒤 `@program_init has
+  already been declared`). `cont`를 일찍 true로 바꾸는 것은 답이 아니었다: core 청크의 sema · 코드 생성은 `chunk_start`
+  이후 범위에만 돌아 첫 실패 때 건너뛴 core가 처리되지 않는다(`No such field` panic). 지금은 `Compiler.first_compile_failed`를
+  세우고 다음 `VM.eval`이 `resetVM()`으로 처음부터 시작한다. reset은 컴파일러 · 힙 · 심볼 테이블만 비우고 main 스레드의
+  fuel · 스택 상한 · interrupt 플래그, VM의 printer · user data는 그대로 둔다. 호스트가 "빈 소스로 예열"하거나 실패 뒤
+  `cl_vm_reset`을 부르던 우회는 필요 없다.
+- 성공한 eval 뒤 실패한 eval의 선언은 다음 eval로 넘어가지 않는다(같은 커밋). 이전에는 `fn broken() -> int: return nope`가
+  실패해도 `broken`이 `persist_main` alias로 넘어가 다음 eval의 `broken()` 호출이 SIGSEGV(바이트코드 없음)였다.
+  `Compiler.last_compile_failed`면 이전 main 청크 자신의 심볼은 건너뛰고 그 청크가 물려받은 alias만 넘긴다. 실패한 eval 안의
+  지역 변수는 원래 실행되지 않았으므로 저장본도 없다.
 
 ## 발견한 다른 문제
 

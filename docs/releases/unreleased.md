@@ -24,6 +24,10 @@
 - 한 함수에 지역 변수 257개를 두면 컴파일러가 `integer does not fit in destination type` panic으로 호스트 프로세스를 죽였다.
   매개변수 256개(`integer overflow`), 구조체 필드 256개 init도 같은 계열이었다. 모두 컴파일 오류로 보고한다(`04096230`, F-08).
   한계값은 아래 "언어" 절.
+- 임베딩에서 첫 eval이 컴파일에 실패하면 다음 eval이 호스트를 죽였다(구문 오류 뒤 SIGSEGV, 의미 오류 뒤
+  `@program_init has already been declared`). 다음 eval이 VM을 자동으로 reset하고 처음부터 시작한다. 또 성공한 eval 뒤 실패한
+  eval의 함수 · 타입 선언이 `persist_main`으로 넘어가 호출 시 SIGSEGV였던 것도 막았다. "빈 소스로 예열" · 실패 뒤 `cl_vm_reset`
+  우회는 더 필요 없다(`f5f2d241`, F-04).
 - 폭주 재귀가 VM 스택을 상한 없이 키워 호스트 메모리를 소진했다(1초에 RSS 4.5GB). 스택 상한(기본 128 MiB)에 닿으면
   `Stack overflow. The stack limit is N bytes.` panic이고 VM은 계속 쓸 수 있다(`f03cf24c`, F-40). 아래 "임베딩" 절.
 

@@ -771,7 +771,7 @@ int main(void) {
     CLVM* vm = cl_vm_init();
     cl_vm_set_loader(vm, loader);
     cl_vm_set_printer(vm, on_print);
-    CLEvalResult warm; cl_vm_eval(vm, CL_BYTES(""), &warm);   // 첫 eval 이 컴파일 에러면 VM 이 깨지므로 먼저 데운다 (5.3절, 7.3절)
+    CLEvalResult warm; cl_vm_eval(vm, CL_BYTES(""), &warm);   // 예열. 첫 eval 이 컴파일 에러면 VM 이 깨지던 F-04 는 2026-11-08 수정돼 이제 없어도 된다 (5.3절, 7.3절)
 
     turn(vm, "1 setup",    "use agent\nuse math\nn := 0\nfn bump(k int) -> int:\n  return k + 1\n");
     turn(vm, "2 state",    "n = bump(n)\nn = bump(n)\nprint('n=%{n}\\n')\n");
@@ -855,6 +855,8 @@ live objects: 0
 중간 상태를 남기고 `cont` 는 false 로 둔다. 다음 컴파일이 `!cont` 경로로 core 를 다시 올리면서 이미 만들어진 청크와 충돌한다. `cl_vm_validate`/`cl_vm_compile` 이 `resetVM` 으로
 `cont` 를 false 로 되돌린 뒤(vm.zig:383) 컴파일에 실패하면 같은 상태가 된다. 증상과 우회(빈 소스로 데우기, 실패 뒤 `cl_vm_reset`)는 실험으로 확인했고, 위 원인 설명은 코드 판독에서 온 추정이다
 (디버거나 trace 빌드로 충돌 지점을 잡지는 않았다). 에이전트 루프에서 첫 입력이 모델이 쓴 코드라면 이 경로가 곧바로 호스트 크래시이므로 최우선으로 고칠 후보다(7.4절).
+
+2026-11-08 수정(`f5f2d241`): 추정대로였다. lib 테스트로 재현하니 구문 오류 두 번째 eval 에서 abort, `cont` 를 core 적재 직후 true 로 바꾸면 그 다음 정상 eval 이 `No such field \`len\`` panic 으로 바뀌었다(core 청크의 sema 와 코드 생성이 `chunk_start` 이후 범위에만 돌아 첫 실패 때 건너뛴 core 가 영영 처리되지 않음). 그래서 `Compiler.first_compile_failed` 를 세우고 다음 `VM.eval` 이 `resetVM()` 으로 처음부터 다시 시작하게 했다(사용자가 하던 `cl_vm_reset` 우회를 자동화한 것. fuel · 스택 상한 · printer · user data 는 reset 이 건드리지 않는다). 같은 테스트에서 둘째 구멍도 드러났다: 성공한 eval 뒤 실패한 eval 의 `fn broken` 이 `persist_main` alias 로 다음 eval 에 넘어가 `broken()` 호출이 SIGSEGV(바이트코드 없음). `last_compile_failed` 면 실패한 main 청크 자신의 선언은 넘기지 않는다. 위 표의 시나리오는 모두 lib 테스트 `Evals after a failed first compile.` 에 있다. 아래 예열 eval 은 더 필요 없다.
 
 ### 5.4 core.cy 의 함수 하나를 호스트까지 따라가기
 
@@ -1049,7 +1051,7 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
 
 | 구분 | 항목 | 심각도(에이전트 루프 기준) |
 |---|---|---|
-| 재현 버그 | 첫 eval 이 컴파일 실패하면 다음 eval 에서 SIGSEGV/abort (7.3 의 1) | 높음(호스트 프로세스 사망) |
+| 재현 버그 | 첫 eval 이 컴파일 실패하면 다음 eval 에서 SIGSEGV/abort (7.3 의 1). 2026-11-08 수정 | 높음(호스트 프로세스 사망) |
 | 재현 버그 | `cl_vm_validate`/`cl_vm_compile` 가 VM 을 리셋하고 실패하면 VM 이 깨짐 (7.3 의 2) | 높음 |
 | 재현 버그 | print/eprint 콜백의 첫 인자가 VM 포인터 (7.3 의 3) | 중간 |
 | 한계 | 안전 모드 없음, 메모리 한도 없음, raw 포인터로 호스트 크래시 가능 (7.4) | 높음 |

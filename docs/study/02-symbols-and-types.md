@@ -676,7 +676,7 @@ TS/Node 대응은 "일반 지식" 이다. 같아 보여도 의미가 다른 곳�
 8. src/builtins/core.zig:32~77 (`types` 표), :550~565, :808~825 (Ref, Option 생성). 짝으로 src/builtins/core.cy:232~300 (void, bool, error, byte), :395~409 (Int), :1026 (Slice), :1662 (Array), :3237 (str), :4071~4091 (Result, Option), :4319 (Generator), :4375 (Dyn).
 9. src/template.zig:15~44 `Instance`, :133~228 해시와 `eql`, :272~327 `expand_template2`. 이어서 src/sema_type.zig:536~600 `reserve_template_instance`.
 10. 호환 판정: src/sema.zig:6304~6332 `semaExpr` 끝부분 -> :10101~10367 `semaFitTarget` -> src/sema_func.zig:1146~1160, 1260~1272 호출 인자 매칭.
-11. trait: src/compiler.zig:452~489 -> src/types.zig:613~643 `get_trait_method_impl` (버그 주의).
+11. trait: src/compiler.zig:452~489 -> src/types.zig:613~643 `get_trait_method_impl` (F-22, 2026-11-08 수정).
 12. meta API: src/builtins/meta.cy:112~338 의 `TypeInfo` 선언. 구현은 meta.zig.
 13. 역사: docs/history/type_system.md 와 이 문서 6절의 `git show` 명령.
 
@@ -1089,6 +1089,8 @@ fn main():
 
 기대: 컴파일 오류. 실제 출력은 `4611686018427388000`. 오류 없이 컴파일되고, `2.0` 의 비트 패턴(`0x4000000000000000`)이 `int` 로 읽혀 다시 float 로 변환된 값이다. 같은 trait 에서 메서드 파라미터를 하나 빼면(`fn scale(k float, j float)` 인 trait 에 `fn (&Circle) scale(k float)` 구현) 컴파일러가 죽는다.
 
+2026-11-08 수정 `40bfa711`: 세 경우(타입 불일치 · 적은 파라미터 · 많은 파라미터) 모두 "`Circle` does not implement `fn scale(Shape, float) -> float` from `Shape`." 컴파일 오류다. `get_trait_method_impl` 이 파라미터 개수와 모든 파라미터 타입, 반환 타입이 정확히 같은 메서드만 채택한다. 테스트 `src/test/types/trait_param_*_error.cy`. 아래 수정 전 관찰은 기록으로 남긴다.
+
 ```
 thread 55137877 panic: index out of bounds: index 1, len 1
 Cannot print stack trace: stack tracing is disabled
@@ -1114,7 +1116,7 @@ EOF
 cyber eql2.cy | sed -n 45,48p
 ```
 
-기대 출력은 `45 46 47 48` 인데 실제 출력은 `45 46 45 48` 이다. `Buf[1, 47]` 이 `Buf[1, 45]` 의 인스턴스(`data` 가 45바이트)로 조용히 대체되었다. 같은 방식으로 `N[1, k]` 600개를 만들면 13개가 앞선 인스턴스 이름으로 출력된다(예: `N[1, 47]` 대신 `N[1, 45]`). `Type` 매개변수는 같을 때 `return` 하지 않으므로, `[T Any, const N int]` 처럼 `Type` 이 앞이고 비-Type 이 마지막인 core 의 `Vector`, `PartialVector` 는 영향을 받지 않는다. 비-Type 매개변수 뒤에 매개변수가 더 오는 템플릿이 위험하다(사용자의 `const W int, const H int`, core 의 `HashMap[K, V, const HASH, const EQ]` 구조도 해당하지만 후자는 HASH/EQ 가 K 로 정해져 충돌 조합이 나오지 않는다. 이 마지막 문장은 코드 읽기에 기반한 추정이다).
+기대 출력은 `45 46 47 48` 인데 수정 전 실제 출력은 `45 46 45 48` 이었다(2026-11-08 수정 `1ec8d581`: 비-Type 매개변수가 다르면 false, 같으면 다음 매개변수를 본다. 테스트 `src/test/types/template_const_params.cy`). `Buf[1, 47]` 이 `Buf[1, 45]` 의 인스턴스(`data` 가 45바이트)로 조용히 대체되었다. 같은 방식으로 `N[1, k]` 600개를 만들면 13개가 앞선 인스턴스 이름으로 출력된다(예: `N[1, 47]` 대신 `N[1, 45]`). `Type` 매개변수는 같을 때 `return` 하지 않으므로, `[T Any, const N int]` 처럼 `Type` 이 앞이고 비-Type 이 마지막인 core 의 `Vector`, `PartialVector` 는 영향을 받지 않는다. 비-Type 매개변수 뒤에 매개변수가 더 오는 템플릿이 위험하다(사용자의 `const W int, const H int`, core 의 `HashMap[K, V, const HASH, const EQ]` 구조도 해당하지만 후자는 HASH/EQ 가 K 로 정해져 충돌 조합이 나오지 않는다. 이 마지막 문장은 코드 읽기에 기반한 추정이다).
 
 (b) 지원되지 않는 const 매개변수가 컴파일러를 죽인다. `type Flag[const B bool]`(`Flag[true]`)는 "thread panic: Unsupported value hash: .bool 2", `type Tag[const S EvalStr]`(`Tag['a']`)는 "Unsupported: EvalStr", enum 값(`ByLvl[.high]`)은 "Unsupported: Lvl" 로 컴파일러가 패닉한다. 해시(`VariantKeyContext.hash`)와 이름 출력(`writeVariantParam`, src/sym.zig:1652~1678)이 지원하는 종류가 서로 달라서 생긴다. `const A int, const B int` 는 `N[1, 2]` 로 정상 출력된다.
 
@@ -1212,14 +1214,14 @@ history 문서의 표대로 `my -> let -> dyn`, `import -> use`, `func -> fn`, `
 
 ### 6.7 fork 유지보수 시사점
 
-타입 시스템에서 다음에 손댈 가치가 높은 순서는 (1) 5.13 의 trait 검사(안전성, 수정이 작음), (2) 5.14(a) 의 `eql` 조기 return(안전성, 수정 한 군데), (3) 5.14(b) 해시와 이름 출력의 지원 종류 일치, (4) 5.15 가시성을 강제하거나 문서를 고치기(임베딩 환경에서 샌드박스 경계로 쓰려 한다면 지금은 쓸 수 없다), (5) 7절의 죽은 코드 정리다. 모두 `src/test/types/*_error.cy` 형식의 `--cytest: error` 테스트로 먼저 고정하면 회귀를 막을 수 있다(src/behavior_test.zig:182~239 에 등록하는 방식). 템플릿 코드는 인스턴스를 만들어 호출하는 테스트가 있어야 오류가 드러나므로, 새 core 템플릿에는 대표 인스턴스 호출 테스트를 같이 둔다.
+타입 시스템에서 다음에 손댈 가치가 높은 순서는 (1) 5.13 의 trait 검사(안전성, 수정이 작음. 2026-11-08 수정), (2) 5.14(a) 의 `eql` 조기 return(안전성, 수정 한 군데. 2026-11-08 수정), (3) 5.14(b) 해시와 이름 출력의 지원 종류 일치, (4) 5.15 가시성을 강제하거나 문서를 고치기(임베딩 환경에서 샌드박스 경계로 쓰려 한다면 지금은 쓸 수 없다), (5) 7절의 죽은 코드 정리다. 모두 `src/test/types/*_error.cy` 형식의 `--cytest: error` 테스트로 먼저 고정하면 회귀를 막을 수 있다(src/behavior_test.zig:182~239 에 등록하는 방식). 템플릿 코드는 인스턴스를 만들어 호출하는 테스트가 있어야 오류가 드러나므로, 새 core 템플릿에는 대표 인스턴스 호출 테스트를 같이 둔다.
 
 ## 7. 알려진 이슈, 문서와 코드의 차이, 미완 지점
 
 실행으로 재현한 것.
 
-1. trait 구현 검사가 파라미터 타입과 개수를 검사하지 않는다 (src/types.zig:625~640, 5.13). 타입이 다른 메서드를 통과시키고 파라미터가 적으면 컴파일러가 `index out of bounds` 로 죽는다.
-2. 템플릿 캐시 `VariantKeyContext.eql` 이 비-Type 매개변수에서 조기 return 한다 (src/template.zig:189~224, 5.14a). `Buf[1, 47]` 이 `Buf[1, 45]` 로 바뀐다. 함수 템플릿 캐시도 같은 문맥을 쓴다(:481).
+1. trait 구현 검사가 파라미터 타입과 개수를 검사하지 않았다 (src/types.zig:625~640, 5.13). 타입이 다른 메서드를 통과시키고 파라미터가 적으면 컴파일러가 `index out of bounds` 로 죽었다. 2026-11-08 수정 `40bfa711`(F-22).
+2. 템플릿 캐시 `VariantKeyContext.eql` 이 비-Type 매개변수에서 조기 return 했다 (src/template.zig:189~224, 5.14a). `Buf[1, 47]` 이 `Buf[1, 45]` 로 바뀌었다. 함수 템플릿 캐시도 같은 문맥을 쓴다(:481). 2026-11-08 수정 `1ec8d581`(F-23).
 3. `const` 매개변수로 `bool`, `EvalStr`, enum 을 쓰는 타입 템플릿이 컴파일러 패닉을 낸다 (5.14b; 해시는 bool 만, 이름 출력은 EvalStr/enum 을 지원하지 않음).
 4. `type X const:` 가 결과 타입의 이름을 덮어쓴다 (src/sema_type.zig:27~30, 5.14c). init 식 `Pick[int]{...}` 은 "Unsupported: type_const".
 5. `-` 가시성은 파서만 인식하고 함수, 필드, 변수에서는 강제되지 않는다 (5.15). docs.md 의 "Field visibility." 와 다르다.
@@ -1275,7 +1277,7 @@ A: 모델이 생성한 코드에서 타입 이름을 틀리면 TS 였다면 통�
 
 ### Q6. `get_trait_method_impl` 의 버그를 한 문장으로 설명하고, 그 버그가 `Dyn` 호출에서 어떤 증상으로 나타나는지 말하라.
 
-A: 안쪽 `for` 의 `continue` 가 바깥 `while` 이 아니라 `for` 자신에 걸려서 파라미터 타입 불일치가 무시되고, 반환 타입만 같으면 구현으로 채택한다(길이 검사도 없음). `Dyn` 을 통해 호출하면 호출자는 trait 시그니처 대로 인자를 쌓고 피호출자는 자기 시그니처로 읽기 때문에, `float` 비트를 `int` 로 읽는 식의 조용한 오동작이 난다(5.13: `2.0` 이 `4611686018427388000` 이 됨).
+A: 안쪽 `for` 의 `continue` 가 바깥 `while` 이 아니라 `for` 자신에 걸려서 파라미터 타입 불일치가 무시되고, 반환 타입만 같으면 구현으로 채택했다(길이 검사도 없음. 2026-11-08 `40bfa711` 로 개수 · 타입 · 반환을 모두 비교하도록 고침). `Dyn` 을 통해 호출하면 호출자는 trait 시그니처 대로 인자를 쌓고 피호출자는 자기 시그니처로 읽기 때문에, `float` 비트를 `int` 로 읽는 식의 조용한 오동작이 난다(5.13: `2.0` 이 `4611686018427388000` 이 됨).
 
 ### Q7. 구조체 `{byte, int, byte}` 는 24바이트인데 `{int, byte, byte}` 는 16바이트다. 필드 순서를 바꾸는 것을 컴파일러가 자동으로 하지 않는 이유를 이 언어의 용도에서 추정해 보라.
 

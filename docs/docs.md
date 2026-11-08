@@ -1645,7 +1645,7 @@ type Rectangle:
 fn (&Rectangle) area() -> float:
     return self.width * self.height
 ```
-A type that intends to implement a trait but does not satisfy the trait's interface results in a compile error.
+A type that intends to implement a trait but does not satisfy the trait's interface results in a compile error. The implementing method must have the same number of parameters, the same parameter types and the same return type as the trait method. Implicit conversions such as `int` to `float` do not count, so `fn (&Circle) scale(k int)` does not implement `fn scale(k float)`.
 
 ### Dynamic dispatch.
 Since traits are a generic type, they need to be wrapped in a `Dyn` container to be materialized into a dynamic dispatch value. Implementing types become assignable to a `Dyn` reference type:

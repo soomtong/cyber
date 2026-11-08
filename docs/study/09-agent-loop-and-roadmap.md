@@ -203,7 +203,7 @@ TS 개발자 관점의 대응은 `child_process`로 워커를 띄우고 크래�
 | 8 | `as[Ptr[T]]` 캐스트, `use c`, `use os`를 쓰지 않는다(2026-11-08부터 호스트가 `deny_raw_ptrs`를 켜면 `Ptr` · `PtrSpan`은 컴파일 오류) | F-06(수정됨) |
 | 9 | Option은 `x.?`(none이면 panic) 대신 `if x \|v\|:`로 푼다 | [02](02-symbols-and-types.md), [03](03-sema-and-ir.md) |
 | 10 | 도구 호출 실패는 panic이 아니라 반환값(상태 코드가 든 `str`이나 구조체)으로 돌려받는다 | [08 §7.4](08-embedding-builtins-tests.md) |
-| 11 | trait 구현은 시그니처가 정확히 같도록 직접 확인한다 | F-22 |
+| 11 | trait 구현은 시그니처가 정확히 같도록 직접 확인한다 | F-22(2026-11-08 수정, 컴파일러가 검사하므로 규칙 삭제 가능) |
 | 12 | 표준 라이브러리의 알려진 결함을 피한다: 메서드(`&&` 수신자) 안에서 구조체 속 `Array` 필드 변경 (`xs.index(x)` · `int.parse` · `Map.keys()` · `^Dyn[Trait]` 컨테이너는 2026-11-06 수정됨) | F-73 (F-70 · F-71 · F-72 · F-74는 수정됨) |
 | 13 | 정수 리터럴은 int64 범위(최대 9223372036854775807) 안에서 쓴다. 넘는 값은 2026-11-06부터 컴파일 오류다(비트 패턴은 `u` 접미 · 16진 · `r64`) | F-76 (수정됨) |
 
@@ -421,7 +421,7 @@ perl -e 'alarm 5; exec @ARGV' cyber lit.cy   # 4464
 | 6 | F-08 지역 변수 257개를 사용자 오류로 (2026-11-08 완료 `04096230`) | sema, 오류 보고 | `src/sema.zig` `checkLocalLimit` 등(`LocalVarS.id`가 u8) | `functions/too_many_locals_error.cy` · `types/struct_too_many_fields_error.cy` 추가됨 |
 | 7 | F-24 65535 초과 리터럴을 오류로 (2026-11-08 완료 `10f8290b`) | 바이트코드 상수 | `src/bc_gen.zig` `pushConstString` · `max_str_literal_len` | 길이 70000 리터럴이 오류. lib-test 추가됨 |
 | 8 | F-20 cte 복합 대입 | 컴파일타임 평가 | `src/cte.zig:423, 460` | 실습 2(a)가 15, 15. 2026-11-08 수정 `02f39e67` |
-| 9 | F-22 trait 구현 검사 | 타입 시스템 | `src/types.zig:625~640` | 파라미터 불일치가 컴파일 에러 |
+| 9 | F-22 trait 구현 검사 | 타입 시스템 | `src/types.zig:625~640` | 파라미터 불일치가 컴파일 에러. 2026-11-08 수정 `40bfa711` |
 | 10 | F-03 제너레이터 안 panic 언와인드 | VM, 스택 프레임 | `src/thread.zig:1006~1009` | 07 실습 7의 st4가 스택 트레이스로 끝남 |
 
 1~5번은 결과가 눈에 보이고 위험이 낮다(2, 3번은 Cyber로 쓴 `core.cy`만 고치면 된다. CLI는 `zig-out/bin/src/builtins/core.cy`의 복사본을 읽으므로, 실험 중에는 그 복사본을 고치고 확정한 수정을 `src/builtins/core.cy`에 옮기거나 `zig build cli`로 복사본을 갱신한다. 이 복사 동작은 오류 메시지의 경로로 확인했고 수정 반영 절차는 직접 돌려 보지 않았다). 6~8번은 컴파일러를 처음 고치는 경험이고, 9~10번은 앞 장의 지식을 모두 써야 한다.

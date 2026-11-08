@@ -48,6 +48,14 @@
   오류)를 지원하고, 범위 밖 인덱스는 `Index out of bounds.` 컴파일 오류(이전에는 컴파일러 메모리를 덮어씀). cte가 지원하지 않는
   연산(`float`의 `+` 등)은 복합 대입에서도 `Unsupported inline eval` 오류로 드러난다(`02f39e67`, F-20,
   `docs/decisions/project_cte_op_assign.md`).
+- 템플릿 인스턴스 캐시가 비-Type 매개변수(`const N int` 등)를 비교한 자리에서 끝나 뒤 매개변수를 보지 않았다. 해시 지문이 겹치면
+  `Buf[1, 47]`이 `Buf[1, 45]` 인스턴스로 조용히 바뀌었다(`type.size`가 45, 600개 중 13개). 매개변수를 끝까지 비교한다(`1ec8d581`, F-23).
+- trait 구현 검사가 매개변수를 보지 않았다. trait가 `fn scale(k float)`인데 `fn (&Circle) scale(k int)`가 컴파일되어 `Dyn`으로 부르면
+  `2.0`이 `4611686018427388000`으로 읽혔고, 매개변수가 trait보다 적으면 컴파일러가 `index out of bounds` panic, 많으면 쓰레기 인자로
+  실행됐다. 이제 매개변수 개수 · 타입 · 반환 타입이 정확히 같은 메서드만 구현이고, 아니면 `X does not implement fn ... from Trait.`
+  컴파일 오류(`40bfa711`, F-22). 아래 "언어" 절. 이 검사로 `os.File`이 `io.Writer`의 `write([&]byte)`를 실제로 구현하지 않은 것이
+  드러났다(느슨한 검사가 `write(str)`을 구현으로 잡아 `Dyn[io.Writer]`로 쓰면 span 비트를 `str`로 읽었다). `fn (&File) write(buf [&]byte)`를
+  추가했다.
 
 ## 언어와 표준 라이브러리
 
@@ -63,6 +71,8 @@
   긴 본문은 함수로 나눈다. `docs/docs.md` Local variables 절에 적혀 있다.
 - 문자열 리터럴(`10f8290b`): 한 리터럴(보간 문자열의 각 조각 포함)은 65535바이트까지. 넘으면 `String literal too long.` 컴파일 오류.
   긴 텍스트는 여러 리터럴로 나눠 실행 시 이어 붙인다. `docs/docs.md` Strings 절에 적혀 있다.
+- trait 구현(`40bfa711`): `with Trait`를 선언한 타입의 메서드는 trait 메서드와 매개변수 개수 · 각 매개변수 타입 · 반환 타입이 정확히
+  같아야 구현으로 인정된다. `int`와 `float`처럼 암시적으로 변환되는 타입도 다른 것으로 본다. `docs/docs.md` Traits 절에 적혀 있다.
 
 ## 임베딩 API
 

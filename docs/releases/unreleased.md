@@ -24,6 +24,8 @@
 - 한 함수에 지역 변수 257개를 두면 컴파일러가 `integer does not fit in destination type` panic으로 호스트 프로세스를 죽였다.
   매개변수 256개(`integer overflow`), 구조체 필드 256개 init도 같은 계열이었다. 모두 컴파일 오류로 보고한다(`04096230`, F-08).
   한계값은 아래 "언어" 절.
+- 폭주 재귀가 VM 스택을 상한 없이 키워 호스트 메모리를 소진했다(1초에 RSS 4.5GB). 스택 상한(기본 128 MiB)에 닿으면
+  `Stack overflow. The stack limit is N bytes.` panic이고 VM은 계속 쓸 수 있다(`f03cf24c`, F-40). 아래 "임베딩" 절.
 
 ## 언어와 표준 라이브러리
 
@@ -34,6 +36,14 @@
   (`_opt` · `_temp` 등)를 포함한다. 함수 · 람다 · 함수 타입의 매개변수는 255개, 구조체 필드는 255개, C 가변 인자 호출의 인자는
   255개까지. 넘으면 각각 `Too many local variables.` · `Too many parameters.` · `Too many fields.` · `Too many arguments.`
   컴파일 오류. `docs/docs.md` Local variables 절에 적혀 있다. 아직 오류로 바뀌지 않은 한계는 `project_compiler_limits.md`.
+
+## 임베딩 API
+
+- `cl_vm_set_stack_limit(vm, bytes)`(`f03cf24c`): main 스레드와 `spawn` 스레드의 VM 스택 상한. 8바이트 슬롯으로 내림,
+  0 이하는 무제한, 기본 128 MiB. 넘는 호출은 `Stack overflow.` panic으로 `CL_ERROR_PANIC`. `cl_vm_set_fuel` · `cl_vm_interrupt`와
+  함께 쓴다(`src/include/cyber.h`, `docs/decisions/project_stack_limit.md`).
+- panic 트레이스가 40프레임을 넘으면 양 끝 20프레임만 남기고 가운데를 `... N frames omitted ...` 한 줄로 줄인다(`f03cf24c`).
+  `cl_thread_panic_trace`가 돌려주는 프레임 배열도 같다(생략 프레임은 `chunk` · `line`이 `NullId`).
 
 ## 변경
 

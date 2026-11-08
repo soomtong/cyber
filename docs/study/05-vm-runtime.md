@@ -1171,7 +1171,7 @@ NaN boxing 이 필요 없어진 이유는 정적 타입이라서 값이 스스�
 5. `cyber compile` 덤프가 일부 명령어의 피연산자를 잘못 해석해서 출력한다. `call_trait`(bytecode.zig:466~471)는 vtable 번호를 `pc+3`(다음 명령어의 첫 단위)에서 읽는데 실제는 `pc[2]` 이다(실습 값 `[9]` 는 다음 명령어 `mov` 의 opcode 9). `trait`(604~612)는 `dst` 와 `src` 를 거꾸로(`src = pc[1]`, `dst = pc[6]`) 읽는다. `sext`/`zext`(758~769)는 `src` 를 `pc+3`(실제로는 비트 폭 `pc[3]`)에서, `bits` 를 `pc[5]`(명령어 밖)에서 읽는다(`sext(17, %32)` 에서 `%32` 가 실제로는 비트 폭). 디버깅할 때 덤프보다 vm.c 를 믿어야 한다. (2026-11-06 수정됨: 위 명령어 모두 `pc[k].val` 로 읽는다. 발견 이슈 표 F-62)
 6. 제너레이터 본문에서 패닉하면 언와인드가 죽는다. 위치 thread.zig:1006~1009 가 gen 프레임의 `callinfo`, 반환 주소, 제너레이터 포인터를 `fp+1`, `fp+2`, `fp+3` 에서 읽는데, 이것은 `ret_size == 1` 일 때만 맞다. `yield` 가 `?int`(2슬롯)이면 `gen` 함수의 `chk_stk ret=2` 라서 실제 위치는 `fp+2`, `fp+3`, `fp+4` 이고, 잘못된 위치를 포인터로 읽다가 `incorrect alignment` 로 중단된다(원인은 코드 읽기와 `ret=2` 덤프에서 추정. 수정은 `frame.base.?` 사용). 재현: 실습 6d. 제너레이터 자체의 결함은 07 챕터 참조.
 7. `meta.stack_trace()` 가 가장 바깥 프레임 두 개를 지운다. 위치 meta.zig:194~195 (`pop()` 두 번, 의도는 가장 안쪽 두 개). 재현: 실습 3.
-8. 스택에 상한이 없다. 위치 thread.zig:857 `growStackAuto`. 재현: 실습 5 (1초에 RSS 4.5GB). fuel 이 없으면 CLI 에서 폭주 재귀는 호스트 메모리를 소진한다. 할당 실패 시의 동작은 미확인.
+8. 스택에 상한이 없다. 위치 thread.zig:857 `growStackAuto`. 재현: 실습 5 (1초에 RSS 4.5GB). fuel 이 없으면 CLI 에서 폭주 재귀는 호스트 메모리를 소진한다. 할당 실패 시의 동작은 미확인. 2026-11-08 수정 `f03cf24c`: `ThreadC.stack_limit`(기본 128 MiB)을 넘는 성장 요청은 `Stack overflow. The stack limit is N bytes.` panic이다. `CHK_STK`에서 멈춘 경우 callee 프레임에 디버그 심볼이 없어 pc · fp를 호출 지점으로 옮긴 뒤 언와인드한다(`docs/decisions/project_stack_limit.md`).
 9. 정수 연산 결과가 CPU 에 따라 달라질 수 있다(추정). `IDIV/IMOD` 는 `INT64_MIN / -1` 을 막지 않고(x86-64 에서는 SIGFPE), `LSL/LSR` 은 횟수 64 이상을 C 로 정의하지 않은 채 쓰며, `F2I` 는 범위 밖 값과 NaN 을 C 캐스트 그대로 쓴다. 실측은 모두 aarch64 한 곳이다. x86-64 로는 실행하지 못했다. 또 부호 있는 `>>` 가 논리 시프트(`-8 >> 1 = 9223372036854775804`)인 것은 의도인지 미확인이다.
 
 문서와 코드의 차이:
@@ -1211,7 +1211,7 @@ A: 루프 한 바퀴가 역방향 `JUMP` 를 한 번 지나므로 `fuel = 100` �
 
 ### Q7. 깊이 20000 짜리 재귀와 100만 짜리 재귀 모두 성공했는데 "스택 오버플로" 오류는 언제 나는가?
 
-A: 이 구현에서는 나지 않는다. `CHK_STK` 의 `RES_STACK_OVERFLOW` 는 오류가 아니라 "스택을 키우라"는 요청이고(2.3절), `growStackAuto` 에 상한이 없어서 할당이 실패할 때까지 자란다. 폭주 재귀는 호스트 메모리를 소진한다(실습 5: 1초에 4.5GB). 호스트가 막으려면 fuel 로 `CALL` 횟수를 제한해야 하고, fuel 을 주지 않은 CLI 에는 방어가 없다.
+A: 2026-11-08 전에는 나지 않았다. `CHK_STK` 의 `RES_STACK_OVERFLOW` 는 오류가 아니라 "스택을 키우라"는 요청이고(2.3절), `growStackAuto` 에 상한이 없어서 할당이 실패할 때까지 자랐다. 폭주 재귀는 호스트 메모리를 소진했다(실습 5: 1초에 4.5GB). 지금은 `growStackAuto` 가 `stack_limit`(기본 128 MiB, `cl_vm_set_stack_limit`) 에서 멈추고 `Stack overflow.` panic 을 낸다(`f03cf24c`). 호스트가 막으려면 fuel 로 `CALL` 횟수를 제한해야 하고, fuel 을 주지 않은 CLI 에는 방어가 없다.
 
 ## 9. 더 알아보기
 

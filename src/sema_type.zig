@@ -689,6 +689,7 @@ pub fn reifyStructType(c: *cy.Chunk, struct_t: *cy.types.Struct, user_fields: []
     var has_managed_child = false;
     var alignment: u8 = 1;
     var field_state_len: usize = 0;
+    try sema.checkFieldLimit(c, user_fields.len, node);
     const fields = try c.alloc.alloc(cy.types.Field, user_fields.len);
     errdefer c.alloc.free(fields);
 
@@ -816,6 +817,9 @@ pub fn resolveStructFields(c: *cy.Chunk, struct_t: *cy.types.Struct, decl: *ast.
     var has_ct_child = false;
     var alignment: u8 = 1;
     var field_state_len: usize = 0;
+    if (decl.fields.len > sema.max_struct_fields) {
+        try sema.checkFieldLimit(c, decl.fields.len, @ptrCast(decl.fields.ptr[sema.max_struct_fields]));
+    }
     const fields = try c.alloc.alloc(cy.types.Field, decl.fields.len);
     errdefer c.alloc.free(fields);
 
@@ -1031,6 +1035,7 @@ pub fn resolveFuncType(c: *cy.Chunk, func_type: *ast.FuncType) !*cy.FuncSig {
 
     // Get return type.
     const ret_t = try resolveReturnType(c, func_type.ret);
+    try sema.checkParamLimit(c, c.func_param_stack.items.len - start, @ptrCast(func_type));
     return c.sema.ensureFuncSig2(@ptrCast(c.func_param_stack.items[start..]), ret_t, func_type.extern_ != null, null);
 }
 

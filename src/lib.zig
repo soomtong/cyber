@@ -1269,6 +1269,114 @@ test "JIT backend is rejected with a clear compile error." {
     try zt.expect(std.mem.indexOf(u8, summary, "The JIT backend is not supported.") != null);
 }
 
+/// Builds a source with `n` repetitions of `item` (`{}` is the index) between `head` and `tail`, joined by `sep`.
+fn repeat_src(w: *std.Io.Writer, head: []const u8, item: []const u8, sep: []const u8, n: usize, tail: []const u8) !void {
+    try w.writeAll(head);
+    for (0..n) |i| {
+        if (i > 0) try w.writeAll(sep);
+        var rest = item;
+        while (std.mem.indexOf(u8, rest, "{}")) |idx| {
+            try w.writeAll(rest[0..idx]);
+            try w.print("{}", .{i});
+            rest = rest[idx + 2 ..];
+        }
+        try w.writeAll(rest);
+    }
+    try w.writeAll(tail);
+}
+
+fn expect_limit_error(vm: *C.VM, src: []const u8, msg: []const u8) !void {
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
+    const summary = C.vm_compile_error_summary(vm);
+    defer C.vm_freeb(vm, summary);
+    if (std.mem.indexOf(u8, summary, msg) == null) {
+        std.debug.print("expected `{s}`, got:\n{s}\n", .{ msg, summary });
+        return error.TestUnexpectedResult;
+    }
+}
+
+test "Compiler limits are compile errors, not panics." {
+    // F-08. IR local ids, `FuncSig.numParams`, call `nargs` and field `idx` are `u8`. Exceeding them used to
+    // trip an `@intCast` or `+=` panic in sema and abort the host.
+    if (is_wasm) return;
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var lw = std.Io.Writer.Allocating.init(zt.alloc);
+    defer lw.deinit();
+    const w = &lw.writer;
+
+    const locals_msg = "Too many local variables. A function can have at most 256 locals, including hidden temporaries.";
+    const params_msg = "Too many parameters. A function can have at most 255 parameters.";
+    const fields_msg = "Too many fields. A struct can have at most 255 fields.";
+
+    // 257 locals in a function, 300 in main.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "fn f() -> int:\n", "    v{} := {}\n", "", 257, "    return v256\nprint(f())\n");
+        try expect_limit_error(vm, lw.written(), locals_msg);
+    }
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "", "v{} := {}\n", "", 300, "print(v299)\n");
+        try expect_limit_error(vm, lw.written(), locals_msg);
+    }
+    // 256 params of a function, a lambda and a function type.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "fn f(", "a{} int", ", ", 256, ") -> int:\n    return a0\nprint(1)\n");
+        try expect_limit_error(vm, lw.written(), params_msg);
+    }
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "f := fn(", "a{} int", ", ", 256, ") -> int:\n    return a0\nprint(1)\n");
+        try expect_limit_error(vm, lw.written(), params_msg);
+    }
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "type F = fn(", "int", ", ", 256, ") -> int\nprint(1)\n");
+        try expect_limit_error(vm, lw.written(), params_msg);
+    }
+    // 256 fields of a struct.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "type S:\n", "    f{} int\n", "", 256, "s := S{}\nprint(1)\n");
+        try expect_limit_error(vm, lw.written(), fields_msg);
+    }
+    // The limits themselves compile and run: 255 params + 1 local = 256 IR locals, 255 fields.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "fn f(", "a{} int", ", ", 255, ") -> int:\n    x := a254\n    return x\n");
+        try repeat_src(w, "use test\ntest.eq(254, f(", "{}", ", ", 255, "))\n");
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_eval(vm, lw.written(), &res));
+    }
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "type S:\n", "    f{} int\n", "", 255, "");
+        try repeat_src(w, "s := S{", "f{}={}", ", ", 255, "}\nuse test\ntest.eq(254, s.f254)\n");
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_eval(vm, lw.written(), &res));
+    }
+}
+
 /// Counts `funcs_debug` entries named `name` in the main chunk. A function body has one entry and each inline site of it
 /// adds one, so the result minus one is the number of inline sites.
 fn count_debug_frames(vm: ?*C.VM, name: []const u8) u32 {

@@ -122,6 +122,7 @@ fn test_functions(run: *Runner) void {
     run.case("functions/func_type_error.cy");
     run.case("functions/func_union_type.cy");
     run.case("functions/func_union_type_error.cy");
+    run.case("functions/too_many_locals_error.cy");
     run.case("functions/lambda.cy");
     run.case("functions/lambda_incompat_arg_error.cy");
     run.case("functions/main_func_overload_error.cy");
@@ -223,6 +224,7 @@ fn test_types(run: *Runner) void {
     run.case("types/struct_default_initializer.cy");
     run.case("types/struct_init_undeclared_field_error.cy");
     run.case("types/struct_set_undeclared_field_error.cy");
+    run.case("types/struct_too_many_fields_error.cy");
     run.case("types/struct_require_field_error.cy");
     run.case("types/struct_nested.cy");
     run.case("types/template_choices.cy");

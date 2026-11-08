@@ -306,6 +306,7 @@ fn getVmCVariantFunc(c: *cy.Chunk, extern_func: *cy.Func, args: []*ir.Expr, node
     for (args[params.len-1..]) |varg| {
         try c.func_param_stack.append(c.alloc, sema.FuncParam.init(varg.type));
     }
+    try sema.checkArgLimit(c, args.len, node);
     const sig = try c.sema.ensureFuncSig(c.func_param_stack.items[param_start..], extern_func.sig.ret);
 
     const res = try c.sema.vm_c_variadic_funcs.getOrPut(c.alloc, .{ .func = extern_func, .sig = sig });

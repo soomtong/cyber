@@ -3304,6 +3304,7 @@ fn declareParam(c: *cy.Chunk, param: *ast.FuncParam, isSelf: bool, paramIdx: usi
         }
     }
     const local_id = c.varStack.items.len - proc.varStart;
+    try checkLocalLimit(c, local_id, @ptrCast(param));
 
     const id = try pushLocalVar(c, .local, name, declT, false);
     var svar = &c.varStack.items[id];
@@ -3376,6 +3377,7 @@ fn reserveLocalName(c: *cy.Chunk, name: []const u8, declType: *cy.Type, hidden: 
 
     const proc = c.proc();
     const local_id = c.varStack.items.len - proc.varStart;
+    try checkLocalLimit(c, local_id, node);
     const id = try pushLocalVar(c, .local, name, declType, hidden);
     var svar = &c.varStack.items[id];
 
@@ -3389,6 +3391,41 @@ fn reserveLocalName(c: *cy.Chunk, name: []const u8, declType: *cy.Type, hidden: 
         .declIrStart = undefined,
     }};
     return id;
+}
+
+/// IR local ids are `u8` (`LocalVarS.id`, `ir.DeclareLocal.id`, `ir.FuncParam.reg`), so a proc can hold
+/// at most 256 params, locals and hidden temporaries. Report a compile error instead of overflowing the cast.
+pub const max_proc_locals = std.math.maxInt(u8) + 1;
+
+fn checkLocalLimit(c: *cy.Chunk, local_id: usize, node: *ast.Node) !void {
+    if (local_id >= max_proc_locals) {
+        return c.reportErrorFmt("Too many local variables. A function can have at most {} locals, including hidden temporaries.", &.{v(@as(u32, max_proc_locals))}, node);
+    }
+}
+
+/// `FuncSig.numParams`, `Proc.numParams` and the call IR `nargs` are `u8`, so a signature holds at most 255 params
+/// and a call passes at most 255 args (C variadic calls can exceed the param count).
+pub const max_func_params = std.math.maxInt(u8);
+
+pub fn checkParamLimit(c: *cy.Chunk, nparams: usize, node: *ast.Node) !void {
+    if (nparams > max_func_params) {
+        return c.reportErrorFmt("Too many parameters. A function can have at most {} parameters.", &.{v(@as(u32, max_func_params))}, node);
+    }
+}
+
+pub fn checkArgLimit(c: *cy.Chunk, nargs: usize, node: *ast.Node) !void {
+    if (nargs > max_func_params) {
+        return c.reportErrorFmt("Too many arguments. A call can have at most {} arguments.", &.{v(@as(u32, max_func_params))}, node);
+    }
+}
+
+/// The struct init IR `nargs` and the field IR `idx` are `u8`.
+pub const max_struct_fields = std.math.maxInt(u8);
+
+pub fn checkFieldLimit(c: *cy.Chunk, nfields: usize, node: *ast.Node) !void {
+    if (nfields > max_struct_fields) {
+        return c.reportErrorFmt("Too many fields. A struct can have at most {} fields.", &.{v(@as(u32, max_struct_fields))}, node);
+    }
 }
 
 fn declareLocalName(c: *cy.Chunk, name: []const u8, decl_t: *cy.Type, hidden: bool, hasInit: bool, node: *ast.Node) !LocalId {
@@ -4476,6 +4513,8 @@ fn resolveFuncSig(c: *cy.Chunk, func: *cy.Func, resolve_new_types: bool, out_gen
             };
         }
     }
+    const nparams = c.func_param_stack.items.len - start;
+    try checkParamLimit(c, nparams, if (params.len > max_func_params) @ptrCast(params[max_func_params]) else @ptrCast(func_n));
     return c.sema.ensureFuncSig2(c.func_param_stack.items[start..], ret_t, func.info.extern_, scope_param_idx);
 }
 
@@ -4501,6 +4540,9 @@ fn pushLambdaFuncParams(c: *cy.Chunk, params: []const *ast.FuncParam) !void {
             type_ = try cte.eval_type2(c, false, param.type.?);
         }
         try c.func_param_stack.append(c.alloc, .init(type_));
+    }
+    if (params.len > max_func_params) {
+        try checkParamLimit(c, params.len, @ptrCast(params[max_func_params]));
     }
 }
 

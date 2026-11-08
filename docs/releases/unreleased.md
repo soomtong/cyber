@@ -42,6 +42,12 @@
 - 스크립트가 `use c` 없이 `as[Ptr[int]] 8` · `Ptr[int](8)` · `alloc(int)` · `PtrSpan[int]{length=4}`로 임의 주소를 역참조해 호스트를
   죽일 수 있었다. 새 컴파일 옵션 `deny_raw_ptrs`를 켜면 컴파일 오류다(`534a0a9d`, F-06). 기본값은 false라 CLI와 기존 임베딩 동작은
   그대로. 아래 "임베딩 API" 절.
+- 컴파일 타임 평가(`const x = f()` · `type X const:` 본문 · `#{}`)가 복합 대입(`+=` · `-=` · `*=` · `/=`)을 버리고 오른쪽 값을 그대로
+  대입했다. `t := 10; t += 5`가 `5`, `for 0..10 |i|: total += i`가 `45` 대신 `9`로, 같은 함수가 런타임과 다른 답을 냈다. 컴파일 타임
+  변수 · 벡터 원소 · 역참조 대입 모두 런타임과 같이 `left op right`를 평가한다. 컴파일 타임 벡터 원소 읽기(`v[i]`, 이전 `TODO ct_var`
+  오류)를 지원하고, 범위 밖 인덱스는 `Index out of bounds.` 컴파일 오류(이전에는 컴파일러 메모리를 덮어씀). cte가 지원하지 않는
+  연산(`float`의 `+` 등)은 복합 대입에서도 `Unsupported inline eval` 오류로 드러난다(`02f39e67`, F-20,
+  `docs/decisions/project_cte_op_assign.md`).
 
 ## 언어와 표준 라이브러리
 

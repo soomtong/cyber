@@ -556,7 +556,7 @@ var_decl, for_range_stmt, switch_stmt, if_stmt, returnExprStmt, exprStmt, ct_stm
 
 장점은 분명하다. 별도 실행 환경 없이 템플릿 인자, 타입 생성, 시그니처 해석, 조건부 컴파일이 모두 sema 안에서 일어나고, 컴파일 도중의 임의 지점(예: 함수 시그니처 해석 중)에서도 불릴 수 있다. 값이 곧 타입 객체이기도 해서 `type X const:` 가 새 타입을 만들어 타입 레지스트리에 등록한다.
 
-대가는 "언어의 구현이 둘"이라는 점이다. 같은 소스가 런타임(바이트코드)과 컴파일 타임(AST 해석)에서 다르게 동작할 수 있다. 실제 사례를 7절에 적었다. 복합 대입 `t += 5` 가 컴파일 타임에서는 `t = 5` 로 평가된다. `docs/docs.md:3015` 가 "This can not emulate the entire language" 라고 한계를 밝히고 있고, 새 문법이 sema 에 추가될 때 cte 는 따로 따라가야 한다.
+대가는 "언어의 구현이 둘"이라는 점이다. 같은 소스가 런타임(바이트코드)과 컴파일 타임(AST 해석)에서 다르게 동작할 수 있다. 실제 사례를 7절에 적었다. 복합 대입 `t += 5` 가 컴파일 타임에서는 `t = 5` 로 평가됐다(F-20, 2026-11-08 수정). `docs/docs.md:3015` 가 "This can not emulate the entire language" 라고 한계를 밝히고 있고, 새 문법이 sema 에 추가될 때 cte 는 따로 따라가야 한다.
 
 ### 2.8 IR: sema 의 산출물
 
@@ -1025,7 +1025,7 @@ fork 를 유지보수하는 입장에서 시사점은 다음과 같다.
 
 ### 7.1 직접 재현한 버그와 한계
 
-1. cte 복합 대입 무시. `cte.zig:423`(컴파일타임 변수 대입)과 `:460`(벡터 원소 대입)은 `rec_op`(복합 연산자 정보)를 버리고 오른쪽 식만 평가한다. `.deref` 분기만 `eval_assign_right` 를 쓴다(`:436`). 5.6 의 `t += 5` 가 `15` 대신 `5` 가 된다. `src/test/meta` 에 `+=` 를 쓰는 케이스가 없어서 테스트에 걸리지 않는다. 영향 범위는 `const` 초기화, `#{}`, `type ... const:` 본문, `#[consteval]` 함수 안의 `+=`, `-=` 등이다. 고치려면 두 분기에서 `evalCheck` 대신 `eval_assign_right` 를 쓰는 방향이 자연스럽다(추정).
+1. cte 복합 대입 무시. `cte.zig:423`(컴파일타임 변수 대입)과 `:460`(벡터 원소 대입)은 `rec_op`(복합 연산자 정보)를 버리고 오른쪽 식만 평가한다. `.deref` 분기만 `eval_assign_right` 를 쓴다(`:436`). 5.6 의 `t += 5` 가 `15` 대신 `5` 가 된다. `src/test/meta` 에 `+=` 를 쓰는 케이스가 없어서 테스트에 걸리지 않는다. 영향 범위는 `const` 초기화, `#{}`, `type ... const:` 본문, `#[consteval]` 함수 안의 `+=`, `-=` 등이다. 2026-11-08 수정 `02f39e67`: `eval_assign_right(c, right, rec_op, target_t)`가 세 분기 모두에서 `left op right` 를 평가하고 목적지 타입을 검사한다. 컴파일 타임 벡터 원소 읽기와 범위 검사도 함께 넣었다(`docs/decisions/project_cte_op_assign.md`). 테스트 `meta/ct_op_assign.cy` 는 같은 함수를 런타임과 `const` 로 실행해 비교한다.
 2. 지역 변수 257개부터 컴파일러가 죽는다. IR 지역 번호가 `u8`(`LocalVarS.id`)이라 `@intCast(local_id)`(`sema.zig:3416`, 파라미터는 `:3343`)가 넘친다. 한 함수에서 지역 `a0` ~ `a255`(256개)는 통과했고 257개에서 "panic: integer does not fit in destination type" 이 났다(main 블록은 300개에서 확인). `CompileError` 가 아니라 컴파일러 프로세스 패닉이다. 숨은 임시 지역(`_opt`, `_temp` 등)도 번호를 쓰므로 실제 한계는 사용 패턴에 따라 더 낮다. 생성된 코드를 실행하는 에이전트 루프에서는 만날 수 있는 조건이다. 2026-11-08 수정 `04096230`: `reserveLocalName` · `declareParam`이 번호를 매기기 전에 `checkLocalLimit`로 256개 초과를 `CompileError`("Too many local variables. A function can have at most 256 locals, including hidden temporaries.")로 보고한다. 같은 u8 계열인 매개변수 255개 초과(`resolveFuncSig` · `pushLambdaFuncParams` · `resolveFuncType`, "Too many parameters."), 구조체 필드 255개 초과(`resolveStructFields` · `reifyStructType`, "Too many fields."), C 가변 인자 호출의 인자 255개 초과(`getVmCVariantFunc`, "Too many arguments.")도 같은 방식이다. 폭을 u16으로 넓히는 길은 IR extern 구조체 · `FuncParam.reg` · 바이트코드 레지스터 번호까지 번지므로 택하지 않았다.
 3. `try ... else err:` 는 파싱되지만 sema 가 항상 "Unsupported statement: tryStmt" 로 거부한다(`sema.zig:673-678`). 같은 구문의 IR 노드(`tryStmt`), `bc_gen.gen_try_stmt` 가 남아 있다.
 4. 오버로드 시도 롤백이 미완이다(`sema_func.zig:653` TODO). 5.4 에서 다룬 대로 실제 오동작은 찾지 못했다(미확인).
@@ -1067,7 +1067,7 @@ A: `#if` 는 조건을 cte 로 먼저 평가하고 선택된 분기만 `semaStmt
 
 ### Q4. `fn f()` 안의 `t += 5` 가 런타임에서는 15, `const x = f()` 에서는 5 가 된다. 이 불일치가 구조적으로 생기기 쉬운 이유와 재발 방지 방법은?
 
-A: 같은 언어를 두 곳에서 구현했기 때문이다. 바이트코드 경로는 `semaAssignStmt` 가 복합 대입을 `semaBinExpr` 로 풀지만(`sema.zig:430`, `:7623`), cte 의 `eval_assign` 은 대입 대상 종류마다 따로 오른쪽 식을 평가한다. 한 분기(`.deref`)에만 `eval_assign_right` 가 들어갔다(`cte.zig:436`). 재발을 막으려면 cte 쪽 대입 종류마다 복합 대입 케이스를 포함한 테스트(`src/test/meta/`)를 두고, 같은 함수를 런타임과 `const` 로 모두 실행해 결과를 비교하는 테스트를 만드는 것이 가장 싸다.
+A: 같은 언어를 두 곳에서 구현했기 때문이다. 바이트코드 경로는 `semaAssignStmt` 가 복합 대입을 `semaBinExpr` 로 풀지만(`sema.zig:430`, `:7623`), cte 의 `eval_assign` 은 대입 대상 종류마다 따로 오른쪽 식을 평가한다. 한 분기(`.deref`)에만 `eval_assign_right` 가 들어갔다(`cte.zig:436`, 2026-11-08 `02f39e67` 로 세 분기가 모두 쓰도록 고침). 재발을 막으려면 cte 쪽 대입 종류마다 복합 대입 케이스를 포함한 테스트(`src/test/meta/`)를 두고, 같은 함수를 런타임과 `const` 로 모두 실행해 결과를 비교하는 테스트를 만드는 것이 가장 싸다.
 
 ### Q5. `a + b` 에서 정수는 `add` 노드가 되고 사용자 타입은 `call` 이 되는 분기를 sema 에 두면 코드젠에는 어떤 이점이 있는가? 연산자 오버로딩의 확장 지점은 어디인가?
 

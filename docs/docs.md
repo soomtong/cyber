@@ -3100,6 +3100,8 @@ An expression needs to be wrapped with `#{}` to perform inline evaluation if it'
 res := #{fib(30)}
 ```
 
+Inside a compile-time body, locals (`t := 0`), compound assignment (`t += 1`), `for` ranges, `if`, `switch` and fixed-size vectors (`v := [3]int(0)`, `v[i]`, `v[i] += 1`) evaluate the same as at runtime. A vector index out of range is a compile error. Operations the evaluator does not support yet (for example `float` addition) are reported as `Unsupported inline eval`.
+
 ### Inline type creation.
 Types can be created from inline evaluation. Currently, only structs can be created with `meta.new_struct`:
 ```cy

@@ -199,7 +199,7 @@ TS 개발자 관점의 대응은 `child_process`로 워커를 띄우고 크래�
 | 4 | `spawn`, `await`를 쓰지 않는다 | F-07 |
 | 5 | 한 함수의 지역 변수는 256개 이하(2026-11-08부터 넘으면 컴파일 오류. 매개변수 · 구조체 필드는 255개), 문자열 리터럴은 65535바이트 이하(2026-11-08부터 넘으면 컴파일 오류), 루프 · if 본문은 수천 줄을 넘기지 않는다(2026-11-08부터 점프 거리 32767 슬롯 초과는 컴파일 오류) | F-08(수정됨), F-09(수정됨), F-24(수정됨) |
 | 6 | 같은 이름의 함수를 서로 다른 시그니처로 여러 개 만들지 않는다(오버로드 금지) | F-21 |
-| 7 | `const`나 컴파일타임 평가 안에서 복합 대입(`+=`)을 쓰지 않는다 | F-20 |
+| 7 | `const`나 컴파일타임 평가 안에서 복합 대입(`+=`)을 쓰지 않는다 | F-20(2026-11-08 수정, 규칙 삭제 가능) |
 | 8 | `as[Ptr[T]]` 캐스트, `use c`, `use os`를 쓰지 않는다(2026-11-08부터 호스트가 `deny_raw_ptrs`를 켜면 `Ptr` · `PtrSpan`은 컴파일 오류) | F-06(수정됨) |
 | 9 | Option은 `x.?`(none이면 panic) 대신 `if x \|v\|:`로 푼다 | [02](02-symbols-and-types.md), [03](03-sema-and-ir.md) |
 | 10 | 도구 호출 실패는 panic이 아니라 반환값(상태 코드가 든 `str`이나 구조체)으로 돌려받는다 | [08 §7.4](08-embedding-builtins-tests.md) |
@@ -420,7 +420,7 @@ perl -e 'alarm 5; exec @ARGV' cyber lit.cy   # 4464
 | 5 | F-50 print 콜백 첫 인자(`CLThread*`) 수정 | 임베딩 API, Zig <-> C 경계 | `src/builtins/core.zig:1248-1262` 근처 | 08 §7.3 재현 코드에서 `t != vm` |
 | 6 | F-08 지역 변수 257개를 사용자 오류로 (2026-11-08 완료 `04096230`) | sema, 오류 보고 | `src/sema.zig` `checkLocalLimit` 등(`LocalVarS.id`가 u8) | `functions/too_many_locals_error.cy` · `types/struct_too_many_fields_error.cy` 추가됨 |
 | 7 | F-24 65535 초과 리터럴을 오류로 (2026-11-08 완료 `10f8290b`) | 바이트코드 상수 | `src/bc_gen.zig` `pushConstString` · `max_str_literal_len` | 길이 70000 리터럴이 오류. lib-test 추가됨 |
-| 8 | F-20 cte 복합 대입 | 컴파일타임 평가 | `src/cte.zig:423, 460` | 실습 2(a)가 15, 15 |
+| 8 | F-20 cte 복합 대입 | 컴파일타임 평가 | `src/cte.zig:423, 460` | 실습 2(a)가 15, 15. 2026-11-08 수정 `02f39e67` |
 | 9 | F-22 trait 구현 검사 | 타입 시스템 | `src/types.zig:625~640` | 파라미터 불일치가 컴파일 에러 |
 | 10 | F-03 제너레이터 안 panic 언와인드 | VM, 스택 프레임 | `src/thread.zig:1006~1009` | 07 실습 7의 st4가 스택 트레이스로 끝남 |
 

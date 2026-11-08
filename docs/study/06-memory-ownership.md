@@ -1018,6 +1018,8 @@ deinit Node 2
 
 ### 실습 6. 컨테이너의 소유권: Array는 복사 후 파괴, Map은 이동
 
+(2026-11-08 `3979bb13` 이전의 관찰이다. 지금 `Array.append` · `insert`는 매개변수를 `move`로 옮기고 `ensure_cap`은 `@memcpy`로 원소를 옮기므로, 아래 스크립트는 삽입 중 `deinit`이 없고 끝에 9번만 나온다. `docs/decisions/project_array_append_move.md`.)
+
 ```cy
 type Res:
     name str
@@ -1048,7 +1050,7 @@ append r8 (cap=8 len=8)
 ```
 
 9번째 원소를 넣을 때(`ensure_cap`) 옛 8개를 복사한 뒤 `@destruct`해서 `deinit r0 ~ r7`이 몰려 나오고, 방금 넣은 `r8`의 임시 값 정리가 이어진다. 끝에서 전부 한 번 더 정리된다.
-`r0 ~ r7`은 총 세 번(임시, 성장, 최종), `r8`은 두 번이다. 같은 `@deinit` 타입 `V`로 `Map`을 채우면:
+`r0 ~ r7`은 총 세 번(임시, 성장, 최종), `r8`은 두 번이었다(지금은 각 한 번). 같은 `@deinit` 타입 `V`로 `Map`을 채우면:
 
 ```cy
 m := Map[int, V]{}
@@ -1225,9 +1227,9 @@ IR이 정리를 명시하므로 새 코드젠 백엔드(C 백엔드 등)도 소�
 | 3 | 블록을 벗어난 지역을 가리키는 빌림 재대입을 막지 않음 | `localDecl`에만 수명 검사 | `b6.cy`. 2026-11-08 수정 `77d3e881` |
 | 4 | 구조체 필드(`str` 포함)가 있는 관리 구조체의 부분 이동이 컴파일 안 됨. `docs.md`의 예제가 그 형태 | `core.cy:2849`, `ct_inline.zig:309` | `m6.cy`, `m9.cy`, `m12.cy` |
 | 5 | `f(a, &a)` : 지역 인자 +0 전달 + 같은 지역의 빌림으로 재대입 -> 해제된 객체 읽기 | `sema_func.zig:817` | `al1.cy` |
-| 6 | `Array.append(val)`이 `val`을 복사하고 `@deinit`이 임시/성장/최종에 3번 돔. NoCopy 원소는 `append` 불가 | `core.cy:1787`, `:1845~1852` | `ar2.cy`, `d5.cy` |
-| 7 | `Array.clone()`이 없는 `cap` 필드를 써서 컴파일 안 됨 | `core.cy:1808~1814` | `Array[int]{1}.clone()` |
-| 8 | `ArrayStore.append(slice [&]T)`가 같은 블록을 두 번 실행 | `core.cy:1619~1628` | `as1.cy` (`len=6`) |
+| 6 | `Array.append(val)`이 `val`을 복사하고 `@deinit`이 임시/성장/최종에 3번 돔. NoCopy 원소는 `append` 불가 | `core.cy:1787`, `:1845~1852` | `ar2.cy`, `d5.cy`. 2026-11-08 수정 `3979bb13`(F-26, `move` + `@memcpy` 이동. NoCopy 원소는 다른 복사 메서드 때문에 여전히 불가) |
+| 7 | `Array.clone()`이 없는 `cap` 필드를 써서 컴파일 안 됨 | `core.cy:1808~1814` | `Array[int]{1}.clone()`. 2026-11-08 수정 `3979bb13` |
+| 8 | `ArrayStore.append(slice [&]T)`가 같은 블록을 두 번 실행 | `core.cy:1619~1628` | `as1.cy` (`len=6`). 2026-11-08 수정 `3979bb13` |
 | 9 | `Ex[T].ex_borrow()` 컴파일 불가(`&inner.child`) | `core.cy:797` | `e6.cy` |
 | 10 | 사용자 `@copy`를 달아도 `NoCopy` 멤버가 있으면 `no_copy` | `sema_type.zig:945~953` | `k2.cy` 첫 버전(`data Array[int]` 멤버 + `@copy`) |
 | 11 | 문자열 리터럴이 65536바이트 이상이면 길이가 16비트로 잘림(70000 -> 4464) | `bc_gen.zig:1272` | 70000자 리터럴의 `s.len()` |

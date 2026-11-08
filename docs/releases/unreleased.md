@@ -79,6 +79,11 @@
   풀린다. 인자로 넘긴 빌림은 문장과 함께 끝난다. `&&`가 살아 있는 동안의 `&` · `&self`, 같은 호출의 `&&a`와 `a`의 다른 빌림, 더 깊은 블록의
   값을 가리키는 재대입은 컴파일 오류다(`77d3e881`, F-25, `docs/decisions/project_borrow_model.md`). 이 검사가 core `Wyhash.final`의 실제
   use-after-scope(`if` 블록 안 `scratch`를 밖의 `input`이 빌림)를 드러내 고쳤다. 아래 "언어" 절.
+- `Array.append(val)`이 값을 한 번 더 복사하고 매개변수를 파괴해 `@deinit`이 있는 원소가 삽입 때 1번, 성장(`ensure_cap`이 복사 뒤 옛 원소
+  파괴) 때 1번, 배열이 죽을 때 1번으로 3번 파괴됐다(자원을 닫는 `@deinit`이면 세 번 닫힘). 이제 `append` · `insert`가 값을 버퍼로 옮기고
+  성장은 원소 바이트를 옮기므로 배열이 죽을 때 한 번만 파괴된다. `insert`는 꼬리를 `@memmove`로 민다. `Array.clone()`이 없는 필드
+  `cap` 때문에 컴파일되지 않던 것과 `ArrayStore.append(span)`이 원소를 두 번 넣던 것도 고쳤다(`3979bb13`, F-26,
+  `docs/decisions/project_array_append_move.md`). `NoCopy` 원소의 `Array`는 다른 복사 메서드 때문에 여전히 컴파일되지 않는다.
 
 ## 언어와 표준 라이브러리
 

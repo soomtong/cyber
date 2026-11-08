@@ -4212,7 +4212,8 @@ fn @result_unwrap_error(res Code) -> error
 #[bind]
 type Option[T Any] _
 
-fn Option[] :: @init(x Self) -> Self:
+-- `scope` so `?&T` (a borrow container) can be built like any other option.
+fn Option[] :: @init(scope x Self) -> scope Self:
     return x
 
 #[bind]

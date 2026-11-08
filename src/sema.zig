@@ -2896,6 +2896,20 @@ pub fn ensure_resolved_func(c: *cy.Chunk, func: *cy.Func, resolve_new_types: boo
         }
 
         if (has_generator) {
+            // The generator outlives the call that created it: its frame is snapshotted to the heap and resumed
+            // later. A borrow parameter would keep a stack address past the caller's frame (use-after-return),
+            // and the snapshot does not go through `semaLift` where `^borrow` is rejected.
+            var rt_param_idx: usize = 0;
+            for (decl.params.slice()) |param| {
+                if (param.template_param) continue;
+                const param_t = sig.params()[rt_param_idx].get_type();
+                rt_param_idx += 1;
+                if (param_t.info.borrow_only) {
+                    const name = try c.sema.allocTypeName(param_t);
+                    defer c.alloc.free(name);
+                    return c.reportErrorFmt("A `#[generator]` function can not take the borrow type `{}` as a parameter. The generator outlives the call, so pass an owned value or a `^T` pointer instead.", &.{v(name)}, @ptrCast(param));
+                }
+            }
             func.info.generator = true;
             // Modify func signature return type.
             const decl_sig = try c.sema.ensureFuncSig(sig.params(), sig.ret);

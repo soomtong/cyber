@@ -163,6 +163,7 @@ if (!is_wasm) {
     run.case("memory/release_scope_end.cy");
     run.case("memory/lift_borrow_error.cy");
     run.case("memory/lift_borrow_container_error.cy");
+    run.case("memory/lift_borrow_option_error.cy");
     run.case("memory/lift_moves_rvalue.cy");
     run.case("memory/move_local_to_return.cy");
     run.case("memory/move_use_after_error.cy");
@@ -317,6 +318,8 @@ if (!aot) {
     run.case("concurrency/await.cy");
     run.case("concurrency/generator.cy");
     run.case("concurrency/yield_outside_generator_error.cy");
+    run.case("concurrency/generator_borrow_param_error.cy");
+    run.case("concurrency/generator_borrow_option_param_error.cy");
     if (!is_wasm) {
         run.case("concurrency/spawn.cy");
     }

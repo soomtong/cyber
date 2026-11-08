@@ -1160,6 +1160,9 @@ pub fn resolveOptionType(c: *cy.Chunk, option_t: *cy.types.Option, decl: *ast.No
     const has_no_copy_payload = option_t.child_t.info.no_copy;
 
     option_t.base.info.managed = has_managed_child;
+    // `?&T` holds the borrow, so it is bound to the borrowed value's lifetime like `&T` (can not be lifted,
+    // returned without `scope`, carried over by the REPL or taken by a generator).
+    option_t.base.info.borrow_only = option_t.child_t.info.borrow_only;
 
     try resolve_type_info2(c, &option_t.base.info, has_copy_child, has_no_copy_payload);
 

@@ -632,6 +632,7 @@ pub fn evalCompare(c: *cy.Chunk, type_: *cy.Type, a: Value, b: Value, node: *ast
         bt.I16 => {
             return a.u16 == b.u16;
         },
+        bt.Bool,
         bt.R8,
         bt.I8 => {
             return a.byte == b.byte;

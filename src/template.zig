@@ -147,11 +147,22 @@ pub const VariantKeyContext = struct {
                 bt.FuncSig => {
                     c.update(std.mem.asBytes(&val.asPtr(*cy.FuncSig).id));
                 },
-                bt.I32 => {
-                    c.update(std.mem.asBytes(&val.asI32()));
+                bt.Bool,
+                bt.R8,
+                bt.I8 => {
+                    c.update(std.mem.asBytes(&val.asByte()));
                 },
+                bt.R16,
+                bt.I16 => {
+                    c.update(std.mem.asBytes(&val.asU16()));
+                },
+                bt.R32,
+                bt.I32 => {
+                    c.update(std.mem.asBytes(&val.asU32()));
+                },
+                bt.R64,
                 bt.I64 => {
-                    c.update(std.mem.asBytes(&val.asInt()));
+                    c.update(std.mem.asBytes(&val.asUint()));
                 },
                 bt.EvalInt => {
                     c.update(std.mem.asBytes(&val.as_eval_int()));
@@ -202,8 +213,28 @@ pub const VariantKeyContext = struct {
                         return false;
                     }
                 },
+                bt.Bool,
+                bt.R8,
+                bt.I8 => {
+                    if (av.asByte() != b.params[i].asByte()) {
+                        return false;
+                    }
+                },
+                bt.R16,
+                bt.I16 => {
+                    if (av.asU16() != b.params[i].asU16()) {
+                        return false;
+                    }
+                },
+                bt.R32,
+                bt.I32 => {
+                    if (av.asU32() != b.params[i].asU32()) {
+                        return false;
+                    }
+                },
+                bt.R64,
                 bt.I64 => {
-                    if (av.asInt() != b.params[i].asInt()) {
+                    if (av.asUint() != b.params[i].asUint()) {
                         return false;
                     }
                 },
@@ -377,6 +408,10 @@ pub fn resolveTemplateArgs(c: *cy.Chunk, args: []const *ast.Node, template: *cy.
             return c.reportErrorFmt("Expected generic type, found `{}`.", &.{v(name)}, eff_param.type);
         }
 
+        if (eff_param.const_param) {
+            try check_const_param_type(c, param_t, eff_param.type.?);
+        }
+
         const res = try evalParamValueCheck(c, arg, param_t, eff_param.const_param);
 
         try c.valueStack.append(c.alloc, res.value);
@@ -388,10 +423,49 @@ pub fn resolveTemplateArgs(c: *cy.Chunk, args: []const *ast.Node, template: *cy.
         }
 
         // Persist for subsequent parameters that depend on previously resolved parameters.
+        // The context owns its copy; the value stack entry is destructed by the caller.
         const name = template.params[i].name;
-
-        try template_ctx.initCtParam(c.alloc, name, res);
+        const ctx_value = try c.heap.copyValue2(res.type, res.value);
+        try template_ctx.initCtParam(c.alloc, name, cy.TypeValue.init(res.type, ctx_value));
     }
+}
+
+/// Whether a `const` template parameter can have this type.
+/// The set must match what `VariantKeyContext` hashes and compares and what
+/// `sym.writeTemplateParam` prints, so an unsupported type is a compile error at the
+/// parameter instead of a compiler panic at the instance cache or the type name.
+pub fn is_const_param_type(type_: *cy.Type) bool {
+    switch (type_.id()) {
+        bt.Type,
+        bt.PartialStructLayout,
+        bt.FuncSig,
+        bt.Bool,
+        bt.R8,
+        bt.I8,
+        bt.R16,
+        bt.I16,
+        bt.R32,
+        bt.I32,
+        bt.R64,
+        bt.I64,
+        bt.EvalInt,
+        bt.EvalStr => return true,
+        else => {
+            return switch (type_.kind()) {
+                .func_sym, .enum_t => true,
+                else => false,
+            };
+        },
+    }
+}
+
+pub fn check_const_param_type(c: *cy.Chunk, param_t: *cy.Type, node: *ast.Node) !void {
+    if (is_const_param_type(param_t)) {
+        return;
+    }
+    const name = try c.sema.allocTypeName(param_t);
+    defer c.alloc.free(name);
+    return c.reportErrorFmt("Unsupported `const` parameter type `{}`. A `const` template parameter can be a type, an integer, a `bool`, an enum, an `EvalStr`, or a function symbol.", &.{v(name)}, node);
 }
 
 pub fn evalParamValueCheck(c: *cy.Chunk, node: *ast.Node, target_t: *cy.Type, const_param: bool) !cy.TypeValue {
@@ -470,6 +544,9 @@ pub fn expandTemplateFuncForArgs(c: *cy.Chunk, template: *cy.sym.FuncTemplate, a
     for (args, 0..) |arg, i| {
         const type_idx = template.params[i].type_idx;
         const param_t = try cte.eval_type2(c, false, decl.params[type_idx].type.?);
+        if (decl.params[type_idx].const_param) {
+            try check_const_param_type(c, param_t, decl.params[type_idx].type.?);
+        }
         const res = try evalParamValueCheck(c, arg, param_t, decl.params[type_idx].const_param);
         try c.valueStack.append(c.alloc, res.value);
 

@@ -1616,42 +1616,18 @@ pub fn writeSymName(s: *cy.Sema, w: *std.Io.Writer, sym: *cy.Sym, config: SymFor
     }
 }
 
-fn writeVariantParam(s: *cy.Sema, w: anytype, arg: cy.TypeValue, config: SymFormatConfig) !void {
-    switch (arg.type.id()) {
-        bt.Type => {
-            try writeSymName(s, w, @ptrCast(arg.value.asPtr(*cy.Type).sym()), config);
-        },
-        bt.I64 => {
-            try w.print("{}", .{arg.value.asInt()});
-        },
-        bt.EvalInt => {
-            try w.print("{}", .{arg.value.as_eval_int()});
-        },
-        bt.Str => {
-            try w.print("'{s}'", .{arg.value.asString()});
-        },
-        bt.FuncSig => {
-            try w.print("<FuncSig>", .{});
-        },
-        else => {
-            if (arg.type.kind() == .func_sym) {
-                try w.writeAll("fn");
-                try s.writeFuncSigStr(w, arg.value.asPtr(*cy.Func).sig, config.from);
-            } else {
-                std.debug.panic("Unsupported: {s}", .{arg.type.name()});
-            }
-        }
-    }
-}
-
-fn writeLocalVariantParams(s: *cy.Sema, w: anytype, variant: *cy.Instance, config: SymFormatConfig) !void {
-    try writeVariantParam(s, w, variant.getParamAt(0), config);
+/// Type template instances share the parameter printer with function template instances.
+fn writeLocalVariantParams(s: *cy.Sema, w: *std.Io.Writer, variant: *cy.Instance, config: SymFormatConfig) !void {
+    try writeTemplateParam(s, w, variant.param_types[0], variant.params[0], config);
     for (1..variant.params.len) |i| {
         try w.writeAll(", ");
-        try writeVariantParam(s, w, variant.getParamAt(i), config);
+        try writeTemplateParam(s, w, variant.param_types[i], variant.params[i], config);
     }
 }
 
+/// Prints a template parameter value. The supported types are `template.is_const_param_type`
+/// plus `Type`; `resolveTemplateArgs` rejects any other `const` parameter type before an
+/// instance exists.
 fn writeTemplateParam(s: *cy.Sema, w: *std.Io.Writer, param_t: *cy.Type, param: cy.Value, config: SymFormatConfig) !void {
     switch (param_t.id()) {
         bt.Type => {
@@ -1661,11 +1637,35 @@ fn writeTemplateParam(s: *cy.Sema, w: *std.Io.Writer, param_t: *cy.Type, param: 
         bt.PartialStructLayout => {
             try w.writeAll("PartialStructLayout{}");
         },
+        bt.Bool => {
+            try w.writeAll(if (param.asBool()) "true" else "false");
+        },
+        bt.I8 => {
+            try w.print("{}", .{param.asI8()});
+        },
+        bt.R8 => {
+            try w.print("{}", .{param.asU8()});
+        },
+        bt.I16 => {
+            try w.print("{}", .{param.asI16()});
+        },
+        bt.R16 => {
+            try w.print("{}", .{param.asU16()});
+        },
         bt.I32 => {
             try w.print("{}", .{param.asI32()});
         },
+        bt.R32 => {
+            try w.print("{}", .{param.asU32()});
+        },
         bt.I64 => {
             try w.print("{}", .{param.asInt()});
+        },
+        bt.R64 => {
+            try w.print("{}", .{param.asUint()});
+        },
+        bt.EvalInt => {
+            try w.print("{}", .{param.as_eval_int()});
         },
         bt.EvalStr => {
             try w.print("'{s}'", .{param.as_eval_str()});
@@ -1675,13 +1675,20 @@ fn writeTemplateParam(s: *cy.Sema, w: *std.Io.Writer, param_t: *cy.Type, param: 
         },
         else => {
             switch (param_t.kind()) {
+                .func_sym => {
+                    try w.writeAll("fn");
+                    try s.writeFuncSigStr(w, param.asPtr(*cy.Func).sig, config.from);
+                },
                 .enum_t => {
+                    // Same form as an enum value: `Lvl.high`.
                     const case = param_t.cast(.enum_t).getCaseByTag(@intCast(param.asInt()));
-                    try w.print("${s}", .{case.head.name()});
+                    try writeSymName(s, w, @ptrCast(param_t.sym()), config);
+                    try w.print(".{s}", .{case.head.name()});
                 },
                 else => {
                     const name = try s.allocTypeName(param_t);
-                    std.debug.panic("Unsupported: {s}", .{name});
+                    defer s.alloc.free(name);
+                    std.debug.panic("Unsupported template parameter type: {s}", .{name});
                 },
             }
         }

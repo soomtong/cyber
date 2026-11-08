@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.3-dev 694-b5f6148</div>
+    <div class="sub-title">v0.4.3-dev 718-126804f</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1725,6 +1725,7 @@ ref := ^i
 <pre><code class="language-cy">var a ?str = 'abc'
 print(a)    --> abc
 </code></pre>
+<p>An optional borrow <code>?&T</code> is a borrow container: like <code>&T</code> it can not be lifted with <code>^</code>, it is returned with a <code>scope</code> parameter and a <code>scope</code> return type, and a generator can not take it as a parameter.</p>
 <p>The option type's constructor can also wrap a value:</p>
 <pre><code class="language-cy">a := ?str('abc')
 print(a)    --> abc
@@ -2388,7 +2389,7 @@ type Rectangle:
 fn (&Rectangle) area() -> float:
     return self.width * self.height
 </code></pre>
-<p>A type that intends to implement a trait but does not satisfy the trait's interface results in a compile error.</p>
+<p>A type that intends to implement a trait but does not satisfy the trait's interface results in a compile error. The implementing method must have the same number of parameters, the same parameter types and the same return type as the trait method. Implicit conversions such as <code>int</code> to <code>float</code> do not count, so <code>fn (&Circle) scale(k int)</code> does not implement <code>fn scale(k float)</code>.</p>
 <a href="#custom-types">^topic</a>
 <h3 id="dynamic-dispatch">Dynamic dispatch. <a href="#dynamic-dispatch">#</a></h3>
 <p>Since traits are a generic type, they need to be wrapped in a <code>Dyn</code> container to be materialized into a dynamic dispatch value. Implementing types become assignable to a <code>Dyn</code> reference type:</p>
@@ -2429,6 +2430,25 @@ print(a.get())     --> abc
 <p>Template parameters can accept const values other than types with the <code>const</code> modifier:</p>
 <pre><code class="language-cy">type MyArray[T Any, const N int]
 </code></pre>
+<p>A <code>const</code> parameter can be an integer (<code>int</code>, <code>byte</code>, <code>i32</code>, ...), a <code>bool</code>, an enum, an <code>EvalStr</code>, or a function symbol (<code>fnsym</code>). Any other parameter type is a compile error. The value is a compile-time constant inside the template body, so it can drive <code>#if</code> and be expanded to a runtime value:</p>
+<pre><code class="language-cy">type Lvl enum:
+    case low
+    case high
+
+type Tag[const S EvalStr, const L Lvl]:
+    v int
+
+fn (&Tag[]) name() -> str:
+    #if L == .high:
+        return S + '!'
+    #else:
+        return S
+
+t := Tag['warn', .high]{v=1}
+print(t.name())               --> warn!
+print(type.name(Tag['warn', .high]))   --> Tag['warn', Lvl.high]
+</code></pre>
+<p>Instances are memoized by value: <code>Tag['a', .low]</code> and <code>Tag['a', .low]</code> are the same type, <code>Tag['a', .low]</code> and <code>Tag['b', .low]</code> are different types.</p>
 <a href="#custom-types">^topic</a>
 <h3 id="template-specialization">Template specialization. <a href="#template-specialization">#</a></h3>
 <p>Wrapping <a href="#type-evaluation" title="">type evaluation</a> as a type template allows template specialization from template parameters:</p>
@@ -2739,6 +2759,18 @@ print(foo())         --> 4
 print(foo(2))        --> 12
 print(foo(20, 5))    --> 100
 </code></pre>
+<p>A call picks the overload whose parameter types match the arguments without implicit conversions, regardless of declaration order. An integer literal matches <code>int</code> parameters first. If no overload matches exactly, the first declared overload that accepts the arguments with implicit conversions (such as <code>int</code> to <code>float</code>) is used:</p>
+<pre><code class="language-cy">fn show(x float) -> str:
+    return 'float'
+fn show(n int) -> str:
+    return 'int'
+
+n := 3
+print(show(n))       --> int
+print(show(2.5))     --> float
+print(show(4))       --> int
+</code></pre>
+<p>Overloads must differ in their parameter types. Declaring two functions with the same parameters and only a different return type is a compile error.</p>
 <a href="#functions">^topic</a>
 <h2 id="parameter-groups">Parameter groups. <a href="#parameter-groups">#</a></h2>
 <p>When multiple parameters share the same type they can be declared together in a sequence:</p>
@@ -3049,8 +3081,14 @@ fn (&Foo) @clone() -> Self:
 b := move a
 
 print(a)
---> error: `a` does not own a value.
+--> error: `a` is no longer alive in this scope.
 </code></pre>
+<p><code>move</code> is an explicit operation on any value type. It is not restricted to types that implement <code>NoCopy</code>.
+Moving a copyable value such as an <code>int</code> is allowed and still ends the source variable, so whether a type is copyable and whether it can be moved are independent:
+a copyable type can be copied (<code>b := a</code>) or moved (<code>b := move a</code>), a <code>NoCopy</code> type can only be moved or <a href="#cloning" title="">cloned</a>.
+This differs from Rust, where a <code>Copy</code> type is always copied and has no move. Moving a copyable value is useful when the type has a custom <code>@deinit</code> and a copy would deinitialize the resource twice,
+and in generic code that must handle copyable and <code>NoCopy</code> element types with the same statement (<code>Array.append</code> stores its argument with <code>move val</code>).
+Reference types <code>^T</code> are shared and reference counted, so a reference parameter can not be moved (<code>Cannot move a reference parameter.</code>).</p>
 <p>Some types such as <code>Array</code> can not be passed around by default without moving (or cloning) the value:</p>
 <pre><code class="language-cy">a := Array[int]{1, 2, 3}
 
@@ -3064,7 +3102,51 @@ print(compute_sum(move a))
 
 f := Foo{a=123, b='abc'}
 b := move f.b
+print(f.a)
+--> 123
 </code></pre>
+<p>The remaining members stay accessible and are deinitialized when the variable goes out of scope. A moved member can not be accessed again (<code>Member is no longer alive.</code>).
+Members of a nested struct member can be moved one by one as long as the nested type has no custom <code>@deinit</code>:</p>
+<pre><code class="language-cy">type Inner:
+    s str
+    t str
+type Outer:
+    inner Inner
+    x str
+
+o := Outer{inner=Inner{s='s', t='t'}, x='x'}
+s := move o.inner.s
+print(o.inner.t)     -- Ok. Sibling member is still alive.
+</code></pre>
+<p>A type with a custom <code>@deinit</code> is moved as a whole. Moving one of its members is a compile error, since the type can not be partially deinitialized:</p>
+<pre><code class="language-cy">type Res:
+    name str
+fn (&Res) @deinit():
+    pass
+type Pair:
+    a Res
+    b Res
+
+p := Pair{a=Res{name='a'}, b=Res{name='b'}}
+a := move p.a           -- Ok.
+n := move p.b.name
+--> error: Cannot move a member out of `Res`. The type has a custom `@deinit`.
+</code></pre>
+<p>A partially moved value can not be used as a whole. Copying it, borrowing it, or moving it is a compile error until it is reassigned (in the same block):</p>
+<pre><code class="language-cy">f := Foo{a=123, b='abc'}
+b := move f.b
+g := f
+--> error: Cannot copy a partially moved value.
+peek(&f)
+--> error: Cannot borrow a partially moved value.
+h := move f
+--> error: Cannot move a partially moved value.
+f = Foo{a=1, b='x'}     -- Ok. `f` is whole again.
+</code></pre>
+<p><code>h := move f</code> is rejected rather than moving the remaining members, because a value of type <code>Foo</code> promises that all of its members are alive.
+If <code>h</code> received a <code>Foo</code> without <code>b</code>, that promise would be broken for every function <code>h</code> is passed to and every container it is stored in, and the compiler would have to track
+the missing member at runtime. Filling the hole with a default value is not done either, since it would construct a value the program never wrote.
+The partial state belongs to the variable <code>f</code> alone and never leaves it. To move the whole value, make it whole first by reassigning it.</p>
 <a href="#memory">^topic</a>
 <h3 id="borrows">Borrows. <a href="#borrows">#</a></h3>
 <p>Borrows are safe references to values that can never escape the stack.
@@ -3096,6 +3178,7 @@ if true:
     ref = &b
     --> error: `ref` can not outlive `b`.
 </code></pre>
+<p>A borrow stored in a local variable is alive until the end of the block that declares the variable. A borrow that is only passed as an argument or used inside an expression ends with its statement. The compiler does not shorten a borrow to its last use.</p>
 <p>Some dynamic data structure types allow borrowing a reference to an inner element:</p>
 <pre><code class="language-cy">a := Array[int]{1, 2, 3}
 elem := &a[2]
@@ -3124,18 +3207,31 @@ fn invalidate(arr &&Array[int]):
 </code></pre>
 <p>Note that invoking the append <code><<</code> and <code>clear</code> methods automatically obtain an exclusive borrow for <code>self</code> without an explicit <code>&&</code> operator.</p>
 <p>Resize operations such as <code><<</code> and <code>clear</code> require an exclusive borrow because they can potentially reallocate a dynamic buffer, thereby invalidating other borrows.
-If another borrow is alive before invoking these methods, the compiler would attempt to prematurely end the lifetime of the other borrows in order to satisfy the exclusivity constraint.
-If this is not possible, then obtaining an exclusive borrow would result in a compile error:</p>
+If another borrow is alive when an exclusive borrow is obtained, it is a compile error. A borrow stored in a local is alive until its block ends, so put it in an inner block when the owner is resized afterwards:</p>
 <pre><code class="language-cy">a := Array[int]{1, 2, 3}
-elem := &a[2]
+if true:
+    elem := &a[2]
+    elem.* = 300
 a << 4
--- Ok. `elem` is no longer alive.
+-- Ok. `elem` went out of scope with its block.
+
+elem := &a[2]
+a << 5
+--> error: Expected exclusive access. There is another active borrow to `a`.
 
 append_to(&a[2], &&a)
---> error: Can not obtain exclusive borrow, `&a[2]` is still alive.
+--> error: Cannot pass an exclusive borrow of `a` with another argument that borrows `a`.
 
 fn append_to(elem &int, arr &&Array[int]):
     arr << elem.*
+</code></pre>
+<p>While an exclusive borrow is stored in a local, no other borrow of the owner can be made, including the implicit <code>&self</code> borrow of a method call:</p>
+<pre><code class="language-cy">a := Array[int]{1, 2, 3}
+ex := &&a
+r := &a
+--> error: Cannot borrow `a`. There is an active exclusive borrow to it.
+print(a.len())
+--> error: Cannot borrow `a`. There is an active exclusive borrow to it.
 </code></pre>
 <a href="#memory">^topic</a>
 <h3 id="self-borrow"><code>self</code> borrow. <a href="#self-borrow">#</a></h3>
@@ -3198,9 +3294,20 @@ Under normal conditions, the procedure follows these steps:</p>
 fn (&File) @deinit():
     C.close(self.fd)
 </code></pre>
-<p>On thread panic, the runtime begins its <strong>fatal</strong> deinitialization procedure.
-Value deinitializers are only invoked for types that implement <code>Unwind</code>. <em>TBD</em>
-In addition, the deinitializers are not invoked in any hierarchical order but rather a flattened order (as the runtime iterates the alive values at the time of the panic).</p>
+<p>At the end of the program, the locals of the main block are deinitialized first (in reverse declaration order), then the globals. A local's <code>@deinit</code> can still read the globals:</p>
+<pre><code class="language-cy">global log Log = Log{}
+
+type Res:
+    name str
+fn (&Res) @deinit():
+    log.write('deinit %{self.name}')   -- `log` is still alive.
+
+r := Res{name='r'}
+-- End of program: `r.@deinit()`, then `log.@deinit()`.
+</code></pre>
+<p>Locals of a function are deinitialized when the function returns, before the program ends.</p>
+<p>On thread panic, no <code>@deinit</code> is invoked. The runtime sweeps the heap objects and raw buffers that are still alive (memory only) and the operating system reclaims external resources (files, sockets) when the process exits.
+Embedders that enable <code>single_run</code> in <code>CLEvalConfig</code> get the same sweep instead of the main block's deinitializers, so a script that relies on <code>@deinit</code> for cleanup needs the default <code>single_run = false</code>.</p>
 <a href="#memory">^topic</a>
 <h2 id="shared-references">Shared references. <a href="#shared-references">#</a></h2>
 <p>Shared references <code>^T</code> point to objects (values that were allocated on the heap).
@@ -3544,7 +3651,8 @@ print(f.get().?)
 <a href="#concurrency">^topic</a>
 <h3 id="future-await">Future <code>await</code>. <a href="#future-await">#</a></h3>
 <p><code>Future.await()</code> asynchronously waits for a <code>Future</code> to complete.</p>
-<p><code>await</code> suspends the current thread so that the scheduler can resume other threads that are in a ready state.</p>
+<p><code>await</code> blocks the current thread until the <code>Future</code> completes. It can be called from the main thread and from spawned threads. While a thread waits, it runs other spawned threads that are still queued, so waiting on nested <code>spawn</code> calls does not deadlock the worker pool.</p>
+<p>If the spawned thread panicked, <code>await</code> panics with <code>Spawned thread panicked: <message></code>. If the spawned thread was interrupted or ran out of fuel, the waiting thread is interrupted too.</p>
 <p>When <code>await</code> resumes, the expression evaluates to the completed value of the <code>Future</code>:</p>
 <pre><code class="language-cy">use aio
 
@@ -3611,6 +3719,15 @@ print(gen)
 --> Generator[fn()->int]
 </code></pre>
 <p><code>yield</code> pauses the current generator and returns a value back to the call site of <code>Generator.next</code>.</p>
+<p>A generator outlives the call that created it, so its parameters (including a method's receiver) can not be borrow types such as <code>&T</code>, <code>[&]T</code>, <code>?&T</code> or a struct that holds a borrow. Pass a value or a <code>^T</code> pointer instead:</p>
+<pre><code class="language-cy">#[generator]
+fn watch(p &int) -> int:    --> CompileError: A `#[generator]` function can not take the borrow type `&int` as a parameter.
+    yield p.*
+
+#[generator]
+fn watch(p ^int) -> int:    -- OK
+    yield p.*
+</code></pre>
 <p>A generator begins and resumes execution with <code>next</code> which returns the next yielded value as an optional:</p>
 <pre><code class="language-cy">while gen.next() |res|:
     print(res)
@@ -3689,6 +3806,7 @@ const fib30 = fib(30)
 <pre><code class="language-cy">-- Assign pre-computed value to a local.
 res := #{fib(30)}
 </code></pre>
+<p>Inside a compile-time body, locals (<code>t := 0</code>), compound assignment (<code>t += 1</code>), <code>for</code> ranges, <code>if</code>, <code>switch</code> and fixed-size vectors (<code>v := [3]int(0)</code>, <code>v[i]</code>, <code>v[i] += 1</code>) evaluate the same as at runtime. A vector index out of range is a compile error. Operations the evaluator does not support yet (for example <code>float</code> addition) are reported as <code>Unsupported inline eval</code>.</p>
 <a href="#metaprogramming">^topic</a>
 <h3 id="inline-type-creation">Inline type creation. <a href="#inline-type-creation">#</a></h3>
 <p>Types can be created from inline evaluation. Currently, only structs can be created with <code>meta.new_struct</code>:</p>
@@ -4338,6 +4456,17 @@ if (code == CL_SUCCESS) {
 }
 </code></pre>
 <a href="#libcyber">^topic</a>
+<h3 id="checking-a-script-without-running-it">Checking a script without running it. <a href="#checking-a-script-without-running-it">#</a></h3>
+<p><code>cl_vm_validate</code> compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (<code>persist_main</code>) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (<code>use math</code>) is initialized by the next eval that runs.</p>
+<pre><code class="language-c">CLResultCode code = cl_vm_validate(vm, src);
+if (code == CL_ERROR_COMPILE) {
+    CLBytes summary = cl_vm_compile_error_summary(vm);
+    printf("%.*s\n", (int)summary.len, summary.buf);
+    cl_vm_freeb(vm, summary);
+}
+</code></pre>
+<p><code>cl_vm_compile</code> and <code>cl_vm_compile_path</code> compile a whole program instead. They reset the VM first, like <code>cl_vm_reset</code>, so persisted state is gone afterwards.</p>
+<a href="#libcyber">^topic</a>
 <h2 id="module-loader">Module loader. <a href="#module-loader">#</a></h2>
 <p>A module loader is set with <code>cl_vm_set_loader</code>.
 It describes how a module is loaded when triggered by a <code>use</code> import statement:</p>
@@ -4376,6 +4505,13 @@ int main() {
 }
 </code></pre>
 <p>The above example loads <code>my_mod</code> by setting the appropriate function and global bindings, and returning its source code. Other modules get delegated to the default loader <code>cl_default_loader</code> which knows how to load the builtin modules such as <code>core</code>.</p>
+<a href="#libcyber">^topic</a>
+<h3 id="denying-raw-pointers">Denying raw pointers. <a href="#denying-raw-pointers">#</a></h3>
+<p>A host that runs untrusted scripts can set <code>deny_raw_ptrs</code> in <code>CLEvalConfig</code> or <code>CLCompileConfig</code>. Every chunk that is not a standard module (<code>core</code>, <code>meta</code>, <code>math</code>, <code>cy</code>, <code>c</code>, <code>io</code>, <code>test</code>) then gets a compile error for any expression of a raw pointer type: <code>Ptr[T]</code>, <code>PtrSpan[T]</code> or an option of them. That covers <code>as[Ptr[int]] 8</code>, <code>Ptr[int](8)</code>, <code>as[Ptr[int]] &x</code>, <code>alloc(int)</code> and <code>PtrSpan[int]{length=4}</code>, so a script can not read or write an arbitrary address. Slices, spans, maps, strings and borrows keep working; the core library uses raw pointers for them internally. The default is false. The CLI does not set it.</p>
+<pre><code class="language-c">CLEvalConfig cfg = clDefaultEvalConfig();
+cfg.deny_raw_ptrs = true;
+cl_vm_evalx(vm, CL_BYTES("turn"), src, cfg, &res);
+</code></pre>
 <a href="#libcyber">^topic</a>
 <h2 id="function-binding">Function binding. <a href="#function-binding">#</a></h2>
 <p>A function binding describes how to load a <code>#[bind]</code> function.</p>

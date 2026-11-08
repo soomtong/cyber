@@ -1519,6 +1519,64 @@ test "Compiler limits are compile errors, not panics." {
     }
 }
 
+test "Jumps past the one-slot offset are compile errors, not panics or runtime crashes." {
+    // F-09. `jump` · `release` offsets are i16, `jump_f` · `jump_t` offsets u16. A long body used to trip `@intCast` in
+    // bc_gen (host abort), and a forward `jump` of 32768..65535 slots was read back as negative by the VM (SIGSEGV).
+    if (is_wasm) return;
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var lw = std.Io.Writer.Allocating.init(zt.alloc);
+    defer lw.deinit();
+    const w = &lw.writer;
+
+    const jump_msg = "Function body too large. A jump can span at most 32767 bytecode slots.";
+    const cond_jump_msg = "Function body too large. A jump can span at most 65535 bytecode slots.";
+
+    // Loop body: the backward `jump` of `continue` at the end of the body.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "s := 0\ni := 0\nwhile i < 2:\n    i += 1\n", "    s += 1\n", "", 9000, "print(s)\n");
+        try expect_limit_error(vm, lw.written(), jump_msg);
+    }
+    // `if` without `else`: the forward `jump_f` over the body (u16).
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "s := 0\nif s == 0:\n", "    s += 1\n", "", 17000, "print(s)\n");
+        try expect_limit_error(vm, lw.written(), cond_jump_msg);
+    }
+    // Long `else` body: the forward `jump` at the end of the `if` body (i16). This one used to compile and crash at runtime.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "s := 1\nif s == 1:\n    s = -1\nelse:\n", "    s += 1\n", "", 9000, "print(s)\n");
+        try expect_limit_error(vm, lw.written(), jump_msg);
+    }
+    // Inside the limits the bodies compile and run: a loop body of 7000 `add_i16` (4 slots each) and an `if` body of
+    // 15000 (60000 slots fit the u16 conditional jump).
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "use test\ns := 0\ni := 0\nwhile i < 2:\n    i += 1\n", "    s += 1\n", "", 7000, "test.eq(s, 14000)\n");
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_eval(vm, lw.written(), &res));
+    }
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "use test\ns := 0\nif s == 0:\n", "    s += 1\n", "", 15000, "test.eq(s, 15000)\n");
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_eval(vm, lw.written(), &res));
+    }
+}
+
 /// Counts `funcs_debug` entries named `name` in the main chunk. A function body has one entry and each inline site of it
 /// adds one, so the result minus one is the number of inline sites.
 fn count_debug_frames(vm: ?*C.VM, name: []const u8) u32 {

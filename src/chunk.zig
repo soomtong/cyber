@@ -369,6 +369,24 @@ pub const Chunk = struct {
         return self.compiler.chunk_map.get(ruri);
     }
 
+    /// A jump operand is one `Inst` slot. `jump` · `release` · `release_opt` read it as i16, `jump_f` · `jump_t` as u16.
+    /// A body long enough to push a jump past that is reported as a compile error instead of tripping `@intCast`
+    /// (or, for a forward `jump` between 32768 and 65535, jumping backward at runtime). F-09.
+    pub const max_jump: u32 = std.math.maxInt(i16);
+    pub const max_cond_jump: u32 = std.math.maxInt(u16);
+
+    fn checkJump(self: *Chunk, dist: usize, max: u32, node: ?*ast.Node) !u16 {
+        if (dist > max) {
+            return self.reportErrorFmt("Function body too large. A jump can span at most {} bytecode slots. Move part of the body into another function.", &.{v(max)}, node);
+        }
+        return @intCast(dist);
+    }
+
+    fn backJump(self: *Chunk, dist: usize, node: ?*ast.Node) !u16 {
+        const d = try self.checkJump(dist, max_jump, node);
+        return @bitCast(-@as(i16, @intCast(d)));
+    }
+
     pub fn pushEmptyJumpNotCond(self: *Chunk, reg: bc.Reg, node: *ast.Node) !u32 {
         const start: u32 = @intCast(self.buf.ops.items.len);
         try self.pushCode(.jump_f, &.{reg, 0}, node);
@@ -386,7 +404,7 @@ pub const Chunk = struct {
     // debug sym like other failable insts. `pushEmptyJump` can be patched backward by `continue`.
     pub fn pushJumpBackTo(self: *Chunk, toPc: usize, node: *ast.Node) !void {
         const pc = self.buf.ops.items.len;
-        try self.pushFCode(.jump, &.{@bitCast(-@as(i16, @intCast(pc - toPc)))}, node);
+        try self.pushFCode(.jump, &.{try self.backJump(pc - toPc, node)}, node);
     }
 
     pub fn pushEmptyJump(self: *Chunk, node: *ast.Node) !u32 {
@@ -395,28 +413,28 @@ pub const Chunk = struct {
         return start;
     }
 
-    pub fn patchJumpToCurPc(self: *Chunk, jumpPc: u32) void {
-        self.buf.ops.items[jumpPc + 1].val = @intCast(self.buf.ops.items.len - jumpPc);
+    pub fn patchJumpToCurPc(self: *Chunk, jumpPc: u32, node: ?*ast.Node) !void {
+        self.buf.ops.items[jumpPc + 1].val = try self.checkJump(self.buf.ops.items.len - jumpPc, max_jump, node);
     }
 
-    pub fn patchJumpCondToCurPc(self: *Chunk, jumpPc: u32) void {
-        self.buf.ops.items[jumpPc + 2].val = @intCast(self.buf.ops.items.len - jumpPc);
+    pub fn patchJumpCondToCurPc(self: *Chunk, jumpPc: u32, node: ?*ast.Node) !void {
+        self.buf.ops.items[jumpPc + 2].val = try self.checkJump(self.buf.ops.items.len - jumpPc, max_cond_jump, node);
     }
 
-    pub fn patchJumpNotCondToCurPc(self: *Chunk, jumpPc: u32) void {
-        self.buf.ops.items[jumpPc + 2].val = @intCast(self.buf.ops.items.len - jumpPc);
+    pub fn patchJumpNotCondToCurPc(self: *Chunk, jumpPc: u32, node: ?*ast.Node) !void {
+        self.buf.ops.items[jumpPc + 2].val = try self.checkJump(self.buf.ops.items.len - jumpPc, max_cond_jump, node);
     }
 
-    pub fn patchBreaks(self: *Chunk, jumpStackStart: usize, block_offset: usize, breakPc: usize) usize {
+    pub fn patchBreaks(self: *Chunk, jumpStackStart: usize, block_offset: usize, breakPc: usize, node: ?*ast.Node) !usize {
         var jump_stack_end = jumpStackStart;
         for (self.blockJumpStack.items[jumpStackStart..]) |jump| {
             switch (jump.jumpT) {
                 .brk => {
                     if (jump.block_offset == block_offset) {
                         if (breakPc > jump.pc) {
-                            self.buf.ops.items[jump.pc + 1].val = @intCast(breakPc - jump.pc);
+                            self.buf.ops.items[jump.pc + 1].val = try self.checkJump(breakPc - jump.pc, max_jump, node);
                         } else {
-                            self.buf.ops.items[jump.pc + 1].val = @bitCast(-@as(i16, @intCast(jump.pc - breakPc)));
+                            self.buf.ops.items[jump.pc + 1].val = try self.backJump(jump.pc - breakPc, node);
                         }
                     } else {
                         self.blockJumpStack.items[jump_stack_end] = jump;
@@ -432,16 +450,16 @@ pub const Chunk = struct {
         return jump_stack_end;
     }
 
-    pub fn patchForBlockJumps(self: *Chunk, jumpStackStart: usize, block_offset: usize, breakPc: usize, contPc: usize) usize {
+    pub fn patchForBlockJumps(self: *Chunk, jumpStackStart: usize, block_offset: usize, breakPc: usize, contPc: usize, node: ?*ast.Node) !usize {
         var jump_stack_end = jumpStackStart;
         for (self.blockJumpStack.items[jumpStackStart..]) |jump| {
             switch (jump.jumpT) {
                 .brk => {
                     if (jump.block_offset == block_offset) {
                         if (breakPc > jump.pc) {
-                            self.buf.ops.items[jump.pc + 1].val = @intCast(breakPc - jump.pc);
+                            self.buf.ops.items[jump.pc + 1].val = try self.checkJump(breakPc - jump.pc, max_jump, node);
                         } else {
-                            self.buf.ops.items[jump.pc + 1].val = @bitCast(-@as(i16, @intCast(jump.pc - breakPc)));
+                            self.buf.ops.items[jump.pc + 1].val = try self.backJump(jump.pc - breakPc, node);
                         }
                     } else {
                         self.blockJumpStack.items[jump_stack_end] = jump;
@@ -451,9 +469,9 @@ pub const Chunk = struct {
                 .cont => {
                     if (jump.block_offset == block_offset) {
                         if (contPc > jump.pc) {
-                            self.buf.ops.items[jump.pc + 1].val = @intCast(contPc - jump.pc);
+                            self.buf.ops.items[jump.pc + 1].val = try self.checkJump(contPc - jump.pc, max_jump, node);
                         } else {
-                            self.buf.ops.items[jump.pc + 1].val = @bitCast(-@as(i16, @intCast(jump.pc - contPc)));
+                            self.buf.ops.items[jump.pc + 1].val = try self.backJump(jump.pc - contPc, node);
                         }
                     } else {
                         self.blockJumpStack.items[jump_stack_end] = jump;

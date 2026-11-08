@@ -2066,7 +2066,7 @@ fn gen_inline_call(c: *Chunk, expr: *ir.Call, cost: u32, cstr: Cstr, node: *ast.
         try popBlock(c);
     }
     for (ctx.end_jumps.items) |pc| {
-        c.patchJumpToCurPc(pc);
+        try c.patchJumpToCurPc(pc, node);
     }
     c.bc_local_map.items.len = saved_local_len;
 
@@ -2931,7 +2931,7 @@ fn gen_loop_block(c: *cy.Chunk, stmt: *ir.LoopBlock, node: *ast.Node) !void {
         c.cur_proc.loop_depth += 1;
         defer c.cur_proc.loop_depth -= 1;
         try genStmts(c, stmt.body_head);
-        c.blockJumpStack.items.len = c.patchForBlockJumps(jump_start, c.cur_proc.block_depth-1, c.buf.ops.items.len, top_pc);
+        c.blockJumpStack.items.len = try c.patchForBlockJumps(jump_start, c.cur_proc.block_depth-1, c.buf.ops.items.len, top_pc, node);
     } 
     try popLoopBlock(c);
 }
@@ -3005,9 +3005,9 @@ fn gen_for_range_stmt(c: *Chunk, stmt: *ir.ForRangeStmt, node: *ast.Node) !void 
     try c.pushCode(.add_i16, &.{ counter, counter, inc}, node);
 
     try c.pushJumpBackTo(iter_pc, node);
-    c.patchJumpNotCondToCurPc(exit_jump);
+    try c.patchJumpNotCondToCurPc(exit_jump, node);
 
-    c.blockJumpStack.items.len = c.patchForBlockJumps(jumpStackSave, block_offset, c.buf.ops.items.len, cont_pc);
+    c.blockJumpStack.items.len = try c.patchForBlockJumps(jumpStackSave, block_offset, c.buf.ops.items.len, cont_pc, node);
 
     try pop_regs(c, counter, node);
 }
@@ -3050,7 +3050,7 @@ fn gen_if_block(c: *cy.Chunk, stmt: *ir.IfBlock, node: *ast.Node) !void {
     try genStmts(c, stmt.body_head);
     try popBlock(c);
 
-    c.patchJumpNotCondToCurPc(jump_miss);
+    try c.patchJumpNotCondToCurPc(jump_miss, node);
 
     try pop_temp_value(c, condv, cond_n);
 }
@@ -3087,7 +3087,7 @@ fn gen_switch_stmt(c: *Chunk, stmt: *ir.SwitchStmt, node: *ast.Node) !void {
 
         // Jump here from prev case miss.
         if (prevCaseMissJump != cy.NullId) {
-            c.patchJumpToCurPc(prevCaseMissJump);
+            try c.patchJumpToCurPc(prevCaseMissJump, node);
         }
 
         if (!isElse) {
@@ -3103,7 +3103,7 @@ fn gen_switch_stmt(c: *Chunk, stmt: *ir.SwitchStmt, node: *ast.Node) !void {
                 const miss_jump = try c.pushEmptyJumpNotCond(condv.reg, cond_n);
                 const match_jump = try c.pushEmptyJump(cond_n);
                 try c.listDataStack.append(c.alloc, .{ .pc = match_jump });
-                c.patchJumpNotCondToCurPc(miss_jump);
+                try c.patchJumpNotCondToCurPc(miss_jump, cond_n);
                 // Miss continues to next cond.
 
                 try pop_temp_value(c, condv, cond_n);
@@ -3115,7 +3115,7 @@ fn gen_switch_stmt(c: *Chunk, stmt: *ir.SwitchStmt, node: *ast.Node) !void {
             if (!case_data.fallthrough) {
                 // Jump here from all matching conds.
                 for (c.listDataStack.items[condMatchJumpsStart..]) |pc| {
-                    c.patchJumpToCurPc(pc.pc);
+                    try c.patchJumpToCurPc(pc.pc, case_n);
                 }
                 c.listDataStack.items.len = condMatchJumpsStart;
             } else {
@@ -3137,12 +3137,12 @@ fn gen_switch_stmt(c: *Chunk, stmt: *ir.SwitchStmt, node: *ast.Node) !void {
 
     // Jump here from prev case miss.
     if (prevCaseMissJump != cy.NullId) {
-        c.patchJumpToCurPc(prevCaseMissJump);
+        try c.patchJumpToCurPc(prevCaseMissJump, node);
     }
 
     // Jump here from case body ends.
     for (c.listDataStack.items[caseBodyEndJumpsStart..]) |pc| {
-        c.patchJumpToCurPc(pc.jumpToEndPc);
+        try c.patchJumpToCurPc(pc.jumpToEndPc, node);
     }
     c.listDataStack.items.len = caseBodyEndJumpsStart;
 }
@@ -3244,7 +3244,7 @@ fn gen_block(c: *Chunk, stmt: *ir.Block, node: *ast.Node) !void {
     try pushBlock(c, node);
     const jump_stack_start = c.blockJumpStack.items.len;
     try genStmts(c, stmt.bodyHead);
-    c.blockJumpStack.items.len = c.patchBreaks(jump_stack_start, c.cur_proc.block_depth - 1, c.buf.ops.items.len);
+    c.blockJumpStack.items.len = try c.patchBreaks(jump_stack_start, c.cur_proc.block_depth - 1, c.buf.ops.items.len, node);
     try popBlock(c);
 }
 

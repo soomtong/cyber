@@ -1118,7 +1118,7 @@ cyber eql2.cy | sed -n 45,48p
 
 기대 출력은 `45 46 47 48` 인데 수정 전 실제 출력은 `45 46 45 48` 이었다(2026-11-08 수정 `1ec8d581`: 비-Type 매개변수가 다르면 false, 같으면 다음 매개변수를 본다. 테스트 `src/test/types/template_const_params.cy`). `Buf[1, 47]` 이 `Buf[1, 45]` 의 인스턴스(`data` 가 45바이트)로 조용히 대체되었다. 같은 방식으로 `N[1, k]` 600개를 만들면 13개가 앞선 인스턴스 이름으로 출력된다(예: `N[1, 47]` 대신 `N[1, 45]`). `Type` 매개변수는 같을 때 `return` 하지 않으므로, `[T Any, const N int]` 처럼 `Type` 이 앞이고 비-Type 이 마지막인 core 의 `Vector`, `PartialVector` 는 영향을 받지 않는다. 비-Type 매개변수 뒤에 매개변수가 더 오는 템플릿이 위험하다(사용자의 `const W int, const H int`, core 의 `HashMap[K, V, const HASH, const EQ]` 구조도 해당하지만 후자는 HASH/EQ 가 K 로 정해져 충돌 조합이 나오지 않는다. 이 마지막 문장은 코드 읽기에 기반한 추정이다).
 
-(b) 지원되지 않는 const 매개변수가 컴파일러를 죽인다. `type Flag[const B bool]`(`Flag[true]`)는 "thread panic: Unsupported value hash: .bool 2", `type Tag[const S EvalStr]`(`Tag['a']`)는 "Unsupported: EvalStr", enum 값(`ByLvl[.high]`)은 "Unsupported: Lvl" 로 컴파일러가 패닉한다. 해시(`VariantKeyContext.hash`)와 이름 출력(`writeVariantParam`, src/sym.zig:1652~1678)이 지원하는 종류가 서로 달라서 생긴다. `const A int, const B int` 는 `N[1, 2]` 로 정상 출력된다.
+(b) 지원되지 않는 const 매개변수가 컴파일러를 죽인다. `type Flag[const B bool]`(`Flag[true]`)는 "thread panic: Unsupported value hash: .bool 2", `type Tag[const S EvalStr]`(`Tag['a']`)는 "Unsupported: EvalStr", enum 값(`ByLvl[.high]`)은 "Unsupported: Lvl" 로 컴파일러가 패닉한다. 해시(`VariantKeyContext.hash`)와 이름 출력(`writeVariantParam`, src/sym.zig:1652~1678)이 지원하는 종류가 서로 달라서 생긴다. `const A int, const B int` 는 `N[1, 2]` 로 정상 출력된다. 2026-11-08 수정 `bb5d1a05`(F-28): 지원 종류를 `template.is_const_param_type` 하나로 정하고(정수 · `bool` · enum · `EvalStr` · 함수 심볼), 해시 · 비교에 `bool` 과 모든 폭의 정수를 넣고, 타입 · 함수 템플릿의 이름 출력을 `writeTemplateParam` 하나로 합쳤다(`Flag[true]` · `Tag['a']` · `ByLvl[Lvl.high]`). trace 없는 빌드에서 `EvalStr` 인자가 값 스택과 템플릿 컨텍스트에서 두 번 해제되던 것도 같이 고쳤다. 지원 밖 타입(`float`)은 매개변수 위치에 컴파일 오류. 테스트 `src/test/types/template_const_param_kinds.cy` · `template_const_param_type_error.cy`, 결정 문서 `docs/decisions/project_template_const_params.md`.
 
 (c) `type X const:` 가 원래 타입의 이름을 바꾼다.
 
@@ -1214,7 +1214,7 @@ history 문서의 표대로 `my -> let -> dyn`, `import -> use`, `func -> fn`, `
 
 ### 6.7 fork 유지보수 시사점
 
-타입 시스템에서 다음에 손댈 가치가 높은 순서는 (1) 5.13 의 trait 검사(안전성, 수정이 작음. 2026-11-08 수정), (2) 5.14(a) 의 `eql` 조기 return(안전성, 수정 한 군데. 2026-11-08 수정), (3) 5.14(b) 해시와 이름 출력의 지원 종류 일치, (4) 5.15 가시성을 강제하거나 문서를 고치기(임베딩 환경에서 샌드박스 경계로 쓰려 한다면 지금은 쓸 수 없다), (5) 7절의 죽은 코드 정리다. 모두 `src/test/types/*_error.cy` 형식의 `--cytest: error` 테스트로 먼저 고정하면 회귀를 막을 수 있다(src/behavior_test.zig:182~239 에 등록하는 방식). 템플릿 코드는 인스턴스를 만들어 호출하는 테스트가 있어야 오류가 드러나므로, 새 core 템플릿에는 대표 인스턴스 호출 테스트를 같이 둔다.
+타입 시스템에서 다음에 손댈 가치가 높은 순서는 (1) 5.13 의 trait 검사(안전성, 수정이 작음. 2026-11-08 수정), (2) 5.14(a) 의 `eql` 조기 return(안전성, 수정 한 군데. 2026-11-08 수정), (3) 5.14(b) 해시와 이름 출력의 지원 종류 일치(2026-11-08 수정), (4) 5.15 가시성을 강제하거나 문서를 고치기(임베딩 환경에서 샌드박스 경계로 쓰려 한다면 지금은 쓸 수 없다), (5) 7절의 죽은 코드 정리다. 모두 `src/test/types/*_error.cy` 형식의 `--cytest: error` 테스트로 먼저 고정하면 회귀를 막을 수 있다(src/behavior_test.zig:182~239 에 등록하는 방식). 템플릿 코드는 인스턴스를 만들어 호출하는 테스트가 있어야 오류가 드러나므로, 새 core 템플릿에는 대표 인스턴스 호출 테스트를 같이 둔다.
 
 ## 7. 알려진 이슈, 문서와 코드의 차이, 미완 지점
 
@@ -1222,7 +1222,7 @@ history 문서의 표대로 `my -> let -> dyn`, `import -> use`, `func -> fn`, `
 
 1. trait 구현 검사가 파라미터 타입과 개수를 검사하지 않았다 (src/types.zig:625~640, 5.13). 타입이 다른 메서드를 통과시키고 파라미터가 적으면 컴파일러가 `index out of bounds` 로 죽었다. 2026-11-08 수정 `40bfa711`(F-22).
 2. 템플릿 캐시 `VariantKeyContext.eql` 이 비-Type 매개변수에서 조기 return 했다 (src/template.zig:189~224, 5.14a). `Buf[1, 47]` 이 `Buf[1, 45]` 로 바뀌었다. 함수 템플릿 캐시도 같은 문맥을 쓴다(:481). 2026-11-08 수정 `1ec8d581`(F-23).
-3. `const` 매개변수로 `bool`, `EvalStr`, enum 을 쓰는 타입 템플릿이 컴파일러 패닉을 낸다 (5.14b; 해시는 bool 만, 이름 출력은 EvalStr/enum 을 지원하지 않음).
+3. `const` 매개변수로 `bool`, `EvalStr`, enum 을 쓰는 타입 템플릿이 컴파일러 패닉을 냈다 (5.14b; 해시는 bool 만, 이름 출력은 EvalStr/enum 을 지원하지 않음). 2026-11-08 수정 `bb5d1a05`(F-28).
 4. `type X const:` 가 결과 타입의 이름을 덮어쓴다 (src/sema_type.zig:27~30, 5.14c). init 식 `Pick[int]{...}` 은 "Unsupported: type_const".
 5. `-` 가시성은 파서만 인식하고 함수, 필드, 변수에서는 강제되지 않는다 (5.15). docs.md 의 "Field visibility." 와 다르다.
 6. 파라미터가 같고 반환만 다른 오버로드가 거부되지 않고 첫 번째 선언이 호출됐다 (5.7). 2026-11-08 수정 `cf4aa84a`(F-21).

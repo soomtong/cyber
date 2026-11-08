@@ -92,6 +92,11 @@
 - 프로그램이 정상 종료할 때 전역의 `@deinit`이 main 지역보다 먼저 돌아 main 지역의 `@deinit`이 해제된 전역(로그 · 카운터)을 읽었다.
   이제 main 지역을 선언 역순으로 먼저 정리한 뒤 전역을 정리한다(main 안의 `return`과 같은 순서). 패닉과 `single_run`에서 `@deinit`이
   돌지 않는 것은 계약으로 매뉴얼에 적었다(`19873949`, F-29, `docs/decisions/project_program_deinit_order.md`).
+- `const` 템플릿 매개변수가 `bool`이면 인스턴스를 만들 때(`Flag[true]`) 컴파일러가 `Unsupported value hash` panic으로 호스트를 죽였다.
+  `EvalStr` · enum 매개변수(`Tag['a']` · `ByLvl[.high]`)는 타입 이름을 찍을 때 `Unsupported: EvalStr` panic이고, trace 없는 빌드에서는
+  `EvalStr` 인자의 이중 해제로 `integer overflow` panic이었다. 세 종류 모두 동작하고(`type.name`은 `Flag[true]` · `Tag['a']` · `ByLvl[Lvl.high]`),
+  지원하지 않는 매개변수 타입(`float` 등)은 매개변수 위치에 컴파일 오류 `Unsupported \`const\` parameter type ...`다(`bb5d1a05`, F-28,
+  `docs/decisions/project_template_const_params.md`). 아래 "언어" 절.
 
 ## 언어와 표준 라이브러리
 
@@ -130,6 +135,10 @@
   `docs/docs.md` Moving 절에 적혀 있다.
 - 종료 정리 순서(`19873949`): 정상 종료에서 main 지역 `@deinit`(선언 역순) → 전역 `@deinit`. 패닉에서는 어떤 `@deinit`도 돌지 않고 힙 스윕만
   한다. 임베딩의 `single_run`도 main 지역의 `@deinit`을 건너뛴다. `docs/docs.md` Deinitializers 절에 적혀 있다.
+- `const` 템플릿 매개변수(`bb5d1a05`): 매개변수 타입은 정수(`int` · `byte` · `i32` 등) · `bool` · enum · `EvalStr` · 함수 심볼(`fnsym`)만 된다.
+  그 밖(`float` · `str` 등)은 `Unsupported \`const\` parameter type \`float\`.` 컴파일 오류. 인스턴스 이름은 `Flag[true]` · `Tag['a']` ·
+  `ByLvl[Lvl.high]` 형식(함수 템플릿의 enum 인자는 이전 `$high`에서 바뀜). `docs/docs.md` `const` template parameter 절에 적혀 있다.
+
 
 ## 임베딩 API
 
@@ -157,3 +166,5 @@
 
 - 발견 이슈 표 · 학습 가이드 갱신: `e66d6316` · `ba0d496d` · `5a75d9c6` · `6e618aec` · `85b5d21b` · `854b4d33` · `6f581b88`.
 - fuel 의미를 "fuel N은 검사점 N개를 통과하고 N+1번째에서 멈춤"으로 문서 확정(`ba0d496d`, F-42. 코드 변경 없음).
+- 매뉴얼 "Moving" 절: `move`가 `NoCopy` 전용이 아니라 모든 값 타입에 쓰는 명시적 연산임을 명시(첫 예제의 오류 메시지도 실제 출력 `` `a` is no longer alive in this scope. ``로 정정),
+  부분 이동된 값의 통째 `move`를 거부하는 이유를 추가. `docs/decisions/project_partial_move.md`에 설계 메모(검토한 선택지, 멤버 재대입 복원 확장 후보), 06장 Q9. 이 과정에서 옮긴 멤버 재대입이 이중 파괴 · 누수인 것을 찾아 F-79로 등록(코드 변경 없음).

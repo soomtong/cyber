@@ -1694,6 +1694,26 @@ Template parameters can accept const values other than types with the `const` mo
 ```cy
 type MyArray[T Any, const N int]
 ```
+A `const` parameter can be an integer (`int`, `byte`, `i32`, ...), a `bool`, an enum, an `EvalStr`, or a function symbol (`fnsym`). Any other parameter type is a compile error. The value is a compile-time constant inside the template body, so it can drive `#if` and be expanded to a runtime value:
+```cy
+type Lvl enum:
+    case low
+    case high
+
+type Tag[const S EvalStr, const L Lvl]:
+    v int
+
+fn (&Tag[]) name() -> str:
+    #if L == .high:
+        return S + '!'
+    #else:
+        return S
+
+t := Tag['warn', .high]{v=1}
+print(t.name())               --> warn!
+print(type.name(Tag['warn', .high]))   --> Tag['warn', Lvl.high]
+```
+Instances are memoized by value: `Tag['a', .low]` and `Tag['a', .low]` are the same type, `Tag['a', .low]` and `Tag['b', .low]` are different types.
 
 ### Template specialization.
 Wrapping [type evaluation](#type-evaluation) as a type template allows template specialization from template parameters:
@@ -2397,8 +2417,15 @@ a := 123
 b := move a
 
 print(a)
---> error: `a` does not own a value.
+--> error: `a` is no longer alive in this scope.
 ```
+
+`move` is an explicit operation on any value type. It is not restricted to types that implement `NoCopy`.
+Moving a copyable value such as an `int` is allowed and still ends the source variable, so whether a type is copyable and whether it can be moved are independent:
+a copyable type can be copied (`b := a`) or moved (`b := move a`), a `NoCopy` type can only be moved or [cloned](#cloning).
+This differs from Rust, where a `Copy` type is always copied and has no move. Moving a copyable value is useful when the type has a custom `@deinit` and a copy would deinitialize the resource twice,
+and in generic code that must handle copyable and `NoCopy` element types with the same statement (`Array.append` stores its argument with `move val`).
+Reference types `^T` are shared and reference counted, so a reference parameter can not be moved (`Cannot move a reference parameter.`).
 
 Some types such as `Array` can not be passed around by default without moving (or cloning) the value:
 ```cy
@@ -2460,6 +2487,10 @@ h := move f
 --> error: Cannot move a partially moved value.
 f = Foo{a=1, b='x'}     -- Ok. `f` is whole again.
 ```
+`h := move f` is rejected rather than moving the remaining members, because a value of type `Foo` promises that all of its members are alive.
+If `h` received a `Foo` without `b`, that promise would be broken for every function `h` is passed to and every container it is stored in, and the compiler would have to track
+the missing member at runtime. Filling the hole with a default value is not done either, since it would construct a value the program never wrote.
+The partial state belongs to the variable `f` alone and never leaves it. To move the whole value, make it whole first by reassigning it.
 
 ### Borrows.
 Borrows are safe references to values that can never escape the stack.

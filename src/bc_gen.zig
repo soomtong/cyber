@@ -1551,7 +1551,9 @@ fn gen_call_trait(c: *Chunk, expr: *ir.CallTrait, cstr: Cstr, node: *ast.Node) !
         _ = try genExpr(c, arg, Cstr.toTemp(temp));
     }
 
+    const pc = c.buf.ops.items.len;
     try c.pushFCode(.call_trait, &.{inst.base, @intCast(expr.vtable_idx) }, node);
+    try push_site_ptr_layout(c, pc);
 
     return endCall(c, inst, ret_t, node);
 }
@@ -2129,7 +2131,9 @@ fn gen_call_union(c: *Chunk, expr: *ir.CallUnion, cstr: Cstr, node: *ast.Node) !
         _ = try genExpr(c, arg, Cstr.toTemp(temp));
     }
 
+    const pc = c.buf.ops.items.len;
     try c.pushFCode(.call_union, &.{inst.base}, node);
+    try push_site_ptr_layout(c, pc);
 
     try pop_regs(c, arg_start, node);
     return endCall(c, inst, ret_t, node);
@@ -2155,7 +2159,9 @@ fn gen_call_ptr(c: *Chunk, expr: *ir.CallPtr, cstr: Cstr, node: *ast.Node) !GenV
         _ = try genExpr(c, arg, Cstr.toTemp(temp));
     }
 
+    const pc = c.buf.ops.items.len;
     try c.pushFCode(.call_ptr, &.{inst.base}, node);
+    try push_site_ptr_layout(c, pc);
 
     return endCall(c, inst, ret_t, node);
 }
@@ -3529,7 +3535,8 @@ fn pushCall(c: *cy.Chunk, base: Reg, func: *cy.Func, node: *ast.Node) !void {
 }
 
 /// Records the current proc's live pointer locals at a site that can be suspended under a callee frame
-/// (calls, `gen_next`, `gen_end`). Growing the stack patches the frame's stack pointers from this layout.
+/// (`call` · `call_host` · `call_ptr` · `call_union` · `call_trait`, `gen_next`, `gen_end`). Growing the stack
+/// patches the frame's stack pointers from this layout (F-10: the indirect calls used to have no entry).
 fn push_site_ptr_layout(c: *cy.Chunk, pc: usize) !void {
     if (c.cur_proc.num_ptr_locals > 0) {
         const layout = try get_uniq_ptr_layout(c, c.buf.ptr_layout_builder.items);

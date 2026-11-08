@@ -938,10 +938,15 @@ pub const Thread = struct {
             const top_fp_off = fp;
             var frame = getFrame(self, self.c.stack(), fp, pc);
             const top_base_off = getStackOffset(self.c.stack_ptr, frame.base.?);
-            while (frame.frame_type() != .init) {
-                if (get_ptr_layout(self.c.vm, pc.?)) |layout| {
-                    patch_frame_ptrs(self, fp, layout, newStack.ptr);
+            while (true) {
+                if (pc) |site_pc| {
+                    if (get_ptr_layout(self.c.vm, site_pc)) |layout| {
+                        patch_frame_ptrs(self, fp, layout, newStack.ptr);
+                    }
                 }
+                // The main frame (`.init`) has no caller to walk to, but its own pointers are patched like any
+                // other frame's (F-10: the walk used to stop before it).
+                if (frame.frame_type() == .init) break;
                 const prev = frame.prev_context();
                 const prev_fp_off = getStackOffset(self.c.stack_ptr, prev.fp);
                 // Patch where the caller's fp is kept: the frame's slot in the new stack, or `Generator.prev_fp`

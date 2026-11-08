@@ -71,4 +71,60 @@ fn reassign_pair():
 reassign_pair()
 test.eq(4, deinits)
 
+-- Assigning to a moved member revives it. The old value belongs to its new owner and is not destructed again.
+deinits = 0
+fn revive_pair():
+    p := Pair{a=Res{name='a'}, b=Res{name='b'}, c='c'}
+    a := move p.a
+    p.a = Res{name='a2'}
+    test.eq('a2', p.a.name)
+    test.eq('a', a.name)
+    -- Every member is alive again, so the value can be used as a whole.
+    q := move p
+    test.eq('a2', q.a.name)
+    test.eq('b', q.b.name)
+revive_pair()
+test.eq(3, deinits)
+
+-- Revive a `str` member and a non-managed member.
+f2 := Foo{a=1, b='abc'}
+n := move f2.a
+b2 := move f2.b
+f2.a = 5
+f2.b = 'xyz'
+test.eq(5, f2.a)
+test.eq('xyz', f2.b)
+g := f2
+test.eq('xyz', g.b)
+
+-- Revive a member of a nested struct member.
+o3 := Outer{inner=Inner{s='s', t='t', n=1}, x='x', k=2}
+s3 := move o3.inner.s
+o3.inner.s = 's2'
+test.eq('s2', o3.inner.s)
+inner3 := o3.inner
+test.eq('s2', inner3.s)
+
+-- Reassign a nested struct member while one of its members is moved out. Only its members that are still alive are destructed.
+o4 := Outer{inner=Inner{s='s', t='tttttttttttttttttttttttttttttttttttttttttttt', n=1}, x='x', k=2}
+s4 := move o4.inner.s
+o4.inner = Inner{s='S', t='T', n=9}
+test.eq('S', o4.inner.s)
+test.eq('T', o4.inner.t)
+test.eq('s', s4)
+
+-- Members of a `@deinit` member share its single state. Reading one after a sibling was moved is fine.
+type Two:
+    a Res
+    b Res
+fn read_sibling():
+    t := Two{a=Res{name='a'}, b=Res{name='b'}}
+    b := move t.b
+    test.eq('a', t.a.name)
+    name := t.a.name
+    test.eq('a', name)
+    t.a.name = 'a2'
+    test.eq('a2', t.a.name)
+read_sibling()
+
 --cytest: pass

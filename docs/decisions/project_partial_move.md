@@ -40,6 +40,8 @@
    통째로 옮긴 멤버의 하위 멤버는 `Member is no longer alive.`다.
 5. 부분 이동된 값은 통째로 쓸 수 없다. 범위에 죽은 상태가 하나라도 있으면 복사(`sema_copy`) · 빌림(`semaBorrow` · `sema_ex_borrow2`)이
    `Cannot copy|borrow a partially moved value.`, 통째 `move`는 `Cannot move a partially moved value.`다. 멤버 접근과 재대입(기존 규칙, 같은 블록에서만)은 그대로다.
+6. 옮겨 나간 멤버에 대입하면 그 멤버가 되살아난다(2026-11-09, F-79). 옛 값은 파괴하지 않고 상태 칸을 true로 돌리며, 모든 칸이 살아나면 변수는 다시 온전하다.
+   변수가 선언된 블록 안에서만 된다(`Can only assign to a moved member of a variable declared in the same block.`). 아래 설계 메모.
 
 ## 구현 메모
 
@@ -58,6 +60,8 @@
 - 매뉴얼 예제 `f := Foo{a=123, b='abc'}; b := move f.b; print(b); print(f.a)`가 `abc` · `123`.
 - `o := Outer{inner=Inner{s, t, n}, x, k}; s := move o.inner.s` 뒤 `o.inner.t` · `o.inner.n` · `o.x` · `o.k` 읽기 가능, `&o.inner` · `x := o.inner`는 오류.
 - `a := move p.a`(`Res`에 `@deinit`) 뒤 함수가 끝나면 `deinit`이 `a`와 `p.b`에서 한 번씩(2회).
+- `a := move p.a; p.a = Res{name='a2'}` 뒤 `q := move p`가 되고 함수가 끝나면 `deinit`이 `a` · `a2` · `b`에서 한 번씩(3회). `s := move o.inner.s; o.inner = Inner{..}`는 옛 `t`만 파괴(누수 없음, Debug 누수 검사 통과).
+- `type Two: a Res, b Res; b := move t.b` 뒤 `t.a.name` 읽기 · `t.a.name = 'a2'` 대입이 된다(F-80).
 
 ## 설계 메모: 부분 이동 뒤의 통째 이동
 
@@ -76,11 +80,27 @@
 Rust는 한 단계 더 허용한다. 옮겨 나간 필드에 `a.name = ...`로 다시 대입하면 그 필드만 되살아나고 그 뒤 `move a`가 된다. 이 규칙은 상태 벡터 모델로 자연스럽게 확장된다.
 죽은 멤버에 대한 `set_field`를 "기존 값 파괴 없이 초기화"로 내보내고 해당 상태 칸을 true로 돌리면 된다.
 
-현재 구현은 이 경로를 막지도 지원하지도 않는다(2026-11-08 재현, F-79). `a := move p.a; p.a = Res{name='a2'}`가 컴파일되는데, 좌변 `p.a`는 `.value_field` 대입이라
-`check_struct_access_path`를 지나지 않고 상태 칸도 true로 돌아가지 않는다. 그 결과 `set_field`가 옛 값(이미 `a`로 옮겨 간 `Res`)을 파괴해 `a`의 `@deinit`이 두 번 돌고(재대입 시점과 `a`의 블록 끝),
-새 값 `a2`는 상태가 죽은 채라 `@partial_destruct`가 건너뛰어 한 번도 정리되지 않는다. 대입 뒤 `p.a`를 읽으면 여전히 `Member is no longer alive.`다. 고치는 방향은 둘 중 하나다.
-(1) 죽은 멤버 대입을 컴파일 오류로 막는다(읽기와 같은 규칙). (2) Rust처럼 되살린다(위 문단). "멤버 하나 빼고 나머지를 다른 곳으로 넘기는" 패턴이 실제로 필요해지면
-`b := move a`의 의미를 바꾸는 것이 아니라 (2)가 맞는 확장이다.
+2026-11-08까지의 구현은 이 경로를 막지도 지원하지도 않았다(F-79). `a := move p.a; p.a = Res{name='a2'}`가 컴파일되는데, 좌변 `p.a`는 `semaAssignToAccessStmt`의 필드 대입이라
+상태 칸을 보지도 되돌리지도 않았다. 그 결과 `set_field` 앞의 옛 값 파괴가 이미 `a`로 옮겨 간 `Res`를 파괴해 `a`의 `@deinit`이 두 번 돌고(재대입 시점과 `a`의 블록 끝),
+새 값 `a2`는 상태가 죽은 채라 `@partial_destruct`가 건너뛰어 한 번도 정리되지 않았다. 대입 뒤 `p.a`를 읽으면 여전히 `Member is no longer alive.`였다.
+
+2026-11-09에 (2) 되살리기로 고쳤다. 결정 6: 옮겨 나간 멤버에 대입하면 그 멤버가 되살아난다.
+- `semaAssignToAccessStmt`가 수신자에 접근 경로(`check_struct_field_access`)가 붙어 있으면 우변을 평가하기 전에 대입 대상 멤버의 상태 칸을 읽는다(`ReviveMember`: 변수 · 칸 오프셋 · 길이 · 일부만 살아 있는지).
+  우변 평가가 `c.temp_access_path`를 덮어쓸 수 있어 먼저 읽는다.
+- 죽은 칸이 하나라도 있으면 옛 값을 파괴하지 않고 `set_field`만 내보낸 뒤 그 칸들을 true로 돌린다. 멤버의 일부 칸만 살아 있으면(`s := move o.inner.s; o.inner = Inner{..}`) 새 함수
+  `sema_call_partial_destruct_member`가 그 멤버의 주소에 `@partial_destruct(Inner, layout)`을 불러 산 멤버(`t`)만 파괴한다. 옮겨 나간 멤버는 새 소유자의 것이다.
+- 되살린 뒤 변수의 모든 칸이 true면 `var_active_struct_fields`에서 빼고 `has_inactive_struct_fields = false`. 변수는 다시 온전하므로 통째 복사 · 빌림 · 이동이 된다.
+- 변수가 선언된 블록 안에서만 되살릴 수 있다(`Can only assign to a moved member of a variable declared in the same block.`). 통째 재대입과 같은 규칙이고 이유도 같다. `if` 안에서 되살리면
+  블록 끝의 상태가 분기에 따라 달라져 런타임 drop flag가 필요해진다. move 자체가 선언 블록에서만 되므로 "선언 블록 = move 블록 = 되살리기 블록"이다.
+- 산 멤버에 대입하는 것은 이전과 같다(옛 값 파괴 뒤 저장). 죽은 멤버의 하위 멤버에 대입(`inner := move o.inner; o.inner.s = 'x'`)은 수신자 `o.inner` 평가에서 `Member is no longer alive.`다.
+  죽은 멤버를 읽는 복합 대입(`p.a += x`)도 읽기 쪽에서 같은 오류다.
+
+같은 수정에서 F-80을 찾았다. `semaField`가 접근 경로를 한 단계 들어갈 때 `state_len = fieldStateLen(field_t)`로 바꾸는데, `@deinit`이 있는 멤버(상태 1칸, 예: `Res`)의 하위 필드 `name str`로
+들어가면 `str`이 core.cy의 구조체(`type str:`, 필드 3개, `@deinit` 선언 없음)라 `fieldStateLen(str) = 3`이 되어 1칸짜리 멤버 자리에서 3칸을 읽었다. `type Two: a Res, b Res; b := move t.b; t.a.name`은
+상태 벡터가 2칸뿐이라 컴파일러 panic `index out of bounds: index 3, len 2`(호스트 사망), 칸이 더 있는 `Pair{a, b, c str}`에서는 형제 `b`의 false를 읽어 거짓 `Cannot copy a partially moved value.`였다.
+기존 테스트가 통과한 것은 첫 멤버를 옮기고 둘째를 읽는 순서라 뒤쪽 칸이 모두 true였기 때문이다. 수정은 `step_member_access_path`: 수신자 타입에 `@deinit`이 있으면 경로를 그대로 둔다
+(그 멤버의 하위 멤버는 모두 그 1칸을 공유한다). `semaField`와 되살리기 양쪽이 이 함수를 쓴다. `str`이 3칸을 차지하는 것 자체는 Zig(`fieldStateLen`)와 core.cy(`type.struct_state_len`)가
+같은 값을 보므로 일관되고, `str`의 내부 필드를 사용자가 따로 옮길 수 없어 항상 세 칸이 함께 움직인다. 칸을 1로 줄이려면 양쪽을 같이 고쳐야 해 이번에는 두지 않았다.
 
 참고로 `move`는 `NoCopy` 타입 전용이 아니다. `move_expr`은 복사 가능 여부를 보지 않으며 `a := 123; b := move a`도 `a`를 죽인다(`memory/move_use_after_error.cy`).
 복사 가능(`NoCopy` 아님)과 이동 가능은 직교하는 두 축이고, `NoCopy`는 암시적 복사가 일어나는 자리(`sema_copy`)에서만 검사된다. Rust는 `Copy` 타입에 move 의미가 없다는 점이 다르다.
@@ -88,7 +108,8 @@ Rust는 한 단계 더 허용한다. 옮겨 나간 필드에 `a.name = ...`로 �
 ## 남은 것
 
 - 부분 이동 뒤 지역을 조건부로 다시 채우는 것(drop flag)은 없다. 재대입은 같은 블록에서만.
-- 옮겨 나간 멤버에 다시 대입하는 것(`p.a = Res{..}`)이 막히지도 되살리지도 않아 옛 값 이중 파괴 + 새 값 누수다(F-79, 위 설계 메모). 막거나 되살려야 한다.
+- 되살리기도 선언 블록 안에서만. 조건부 되살리기(drop flag)는 없다.
+- `str`은 상태 벡터에서 3칸(core.cy 구조체 필드 수)을 차지한다. 1칸으로 줄이려면 `sema_type.fieldStateLen`과 core.cy `@partial_destruct`의 `type.struct_state_len`을 함께 고친다.
 - `Local.has_inactive_struct_fields`가 있는 지역은 `implicitReturnMoveLocal`에서 제외되어 `return f`가 복사 경로로 가고, 그 복사는 이제 오류다. 부분 이동된 값을
   반환하려면 멤버를 따로 반환한다.
 - 접근 경로가 `.deref`를 지나는 경우(`&Foo` 빌림의 멤버 move)는 이전처럼 검사하지 않는다.

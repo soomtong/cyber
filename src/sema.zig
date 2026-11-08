@@ -1618,6 +1618,32 @@ fn semaAssignToAccessStmt(c: *cy.Chunk, var_start: usize, rec_n: *ast.Node, rec:
     }
     const field_s = sym.cast(.field);
 
+    // Assigning to a member that was moved out revives it (F-79). `rec` carries the access path
+    // when its root local has inactive members. Resolve the member's states before the rhs is
+    // evaluated since the rhs can overwrite `c.temp_access_path`.
+    var revive: ?ReviveMember = null;
+    if (rec.check_struct_field_access and rec.type.kind() == .struct_t) {
+        const var_id = c.temp_access_path.var_id;
+        step_member_access_path(c, rec.type, field_s.idx, field_s.type);
+        const offset = c.temp_access_path.struct_field_offset;
+        const len = c.temp_access_path.state_len;
+        const fields = c.proc().var_active_struct_fields.get(var_id).?;
+        const states = fields[offset..offset + len];
+        if (std.mem.findScalar(bool, states, false) != null) {
+            // The owner must be declared in the same block so the state is known at the block end.
+            // (Same rule as reassigning a partially moved variable: no runtime drop flags.)
+            if (var_id < c.block().varStart) {
+                return c.reportError("Can only assign to a moved member of a variable declared in the same block.", access_right_n);
+            }
+            revive = .{
+                .var_id = var_id,
+                .offset = offset,
+                .len = len,
+                .partial = std.mem.findScalar(bool, states, true) != null,
+            };
+        }
+    }
+
     if (rec.type.kind() == .struct_t) {
         if (rec.resType == .value_field) {
             rec.ir.cast(.field).member_cont = true;
@@ -1631,6 +1657,43 @@ fn semaAssignToAccessStmt(c: *cy.Chunk, var_start: usize, rec_n: *ast.Node, rec:
     const cstr = Cstr.initRequire(field_s.type);
     var right_res = try c.semaExprOrOpAssignBinExpr(right, cstr, opts.rhsOpAssignBinExpr);
     right_res = try semaOwn(c, right_res, right);
+
+    if (revive) |rv| {
+        if (field_s.type.isManaged()) {
+            // Store new value.
+            const res = try declareHiddenLocal(c, "_res", field_s.type, right_res, right);
+            const res_local = try semaLocal(c, res.id, right);
+
+            if (rv.partial) {
+                // Some members of the old value are still alive. Destruct those only.
+                // (The moved out members belong to their new owners.)
+                const fields = c.proc().var_active_struct_fields.get(rv.var_id).?;
+                try sema_call_partial_destruct_member(c, loc, field_s.type, fields[rv.offset..rv.offset + rv.len], access_right_n);
+            }
+
+            // Move new value. The old value is not destructed: it was moved out.
+            _ = try c.ir.pushStmt(.set_field, node, .{
+                .field = loc,
+                .right = res_local.ir,
+            });
+            c.varStack.items[res.id].type = .dead;
+        } else {
+            _ = try c.ir.pushStmt(.set_field, node, .{
+                .field = loc,
+                .right = right_res.ir,
+            });
+        }
+
+        // The member is alive again.
+        const fields = c.proc().var_active_struct_fields.get(rv.var_id).?;
+        @memset(fields[rv.offset..rv.offset + rv.len], true);
+        if (std.mem.findScalar(bool, fields, false) == null) {
+            // Every member is alive. The variable is whole again.
+            _ = c.proc().var_active_struct_fields.remove(rv.var_id);
+            c.varStack.items[rv.var_id].has_inactive_struct_fields = false;
+        }
+        return;
+    }
 
     if (field_s.type.isManaged()) {
         // Store new value.
@@ -1657,6 +1720,28 @@ fn semaAssignToAccessStmt(c: *cy.Chunk, var_start: usize, rec_n: *ast.Node, rec:
             .right = right_res.ir,
         });
     }
+}
+
+/// A member that is assigned to while some of its partial-move states are dead.
+const ReviveMember = struct {
+    var_id: LocalId,
+    /// Offset of the member's states in the owner's state vector.
+    offset: usize,
+    len: usize,
+    /// Some states of the member are still alive. The old value needs a partial destruct.
+    partial: bool,
+};
+
+/// Partially destruct the struct member `field_loc`: only its members that `states` marks alive.
+fn sema_call_partial_destruct_member(c: *cy.Chunk, field_loc: *ir.Expr, field_t: *cy.Type, states: []bool, node: *ast.Node) !void {
+    const ptr_t = try getPtrType(c, field_t);
+    const field = ExprResult.init(field_loc, field_t);
+    const addr = try semaAddressOf(c, field, ptr_t, node);
+    const layout = try ensure_partial_struct_layout(c, states);
+    const dtor = try get_partial_dtor(c, field_t, layout, node);
+    const arg = Argument.initPreResolved(node, addr);
+    const call = try c.semaCallFunc2(dtor, &.{arg}, &.{}, node);
+    _ = try c.ir.pushStmt(.discard, node, .{ .expr = call.ir });
 }
 
 fn semaAssignToGlobal(c: *cy.Chunk, left: ExprResult, left_n: *ast.Node, right: ExprResult, right_n: *ast.Node, node: *ast.Node) !void {
@@ -2350,12 +2435,23 @@ pub fn semaField(c: *cy.Chunk, rec: ExprResult, rec_n: *ast.Node, idx: usize, fi
     // final_rec is ensured to be addressable.
     res.addressable = final_rec.addressable;
     if (rec.check_struct_field_access and rec.type.kind() == .struct_t) {
-        c.temp_access_path.struct_field_offset += rec.type.cast(.struct_t).fields()[idx].state_offset;
-        c.temp_access_path.state_len = sema_type.fieldStateLen(field_t);
+        step_member_access_path(c, rec.type, idx, field_t);
         try check_struct_access_path(c, node);
         res.check_struct_field_access = true;
     }
     return res;
+}
+
+/// Advance `c.temp_access_path` from a struct `rec_t` to its member `idx` of type `field_t`.
+/// A struct with a custom `@deinit` occupies a single state (`sema_type.fieldStateLen`) and is moved as a whole,
+/// so its members share that state and the path stays on it. Stepping into them with `fieldStateLen(field_t)`
+/// would read the states of the following members (or past the end of the state vector) (F-80).
+fn step_member_access_path(c: *cy.Chunk, rec_t: *cy.Type, idx: usize, field_t: *cy.Type) void {
+    if (rec_t.sym().has_decl("@deinit")) {
+        return;
+    }
+    c.temp_access_path.struct_field_offset += rec_t.cast(.struct_t).fields()[idx].state_offset;
+    c.temp_access_path.state_len = sema_type.fieldStateLen(field_t);
 }
 
 pub fn checkSymInitField(c: *cy.Chunk, type_sym: *cy.Sym, name: []const u8, node: *ast.Node) !InitFieldResult {

@@ -183,6 +183,7 @@ if (!is_wasm) {
     run.case("memory/partial_move_copy_error.cy");
     run.case("memory/partial_move_borrow_error.cy");
     run.case("memory/partial_move_whole_error.cy");
+    run.case("memory/partial_move_member_assign_block_error.cy");
     run.case("memory/program_deinit_order.cy");
     run.case("memory/return_moves_rvalue.cy");
     run.case("memory/return_borrow_scope_missing_error.cy");

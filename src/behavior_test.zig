@@ -165,6 +165,7 @@ if (!is_wasm) {
     run.case("memory/lift_borrow_container_error.cy");
     run.case("memory/lift_borrow_option_error.cy");
     run.case("memory/borrow_scope_release.cy");
+    run.case("memory/array_append_move.cy");
     run.case("memory/borrow_outlive_error.cy");
     run.case("memory/borrow_while_exclusive_error.cy");
     run.case("memory/exclusive_borrow_arg_conflict_error.cy");

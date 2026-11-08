@@ -1705,20 +1705,22 @@ fn (&ArrayStore[]) `<<`(val T):
 fn (&ArrayStore[]) `<<`(arr AsSpan[T]):
     Self.append[2](self, arr.span())
 
---| Appends a value to the end of the array.
+--| Appends a value to the end of the array. See `Array.append`.
 fn (&ArrayStore[]) append(val T):
     self.ensure_cap(self.length + 1)
-    @ptr_init(self.buf + self.length, val)
+    #switch type.info(T):
+        #case .ref:
+            @ptr_init(self.buf + self.length, val)
+        #case .func:
+            @ptr_init(self.buf + self.length, val)
+        #else:
+            @ptr_init(self.buf + self.length, move val)
     self.length += 1
 
 --| Appends the elements of a `Span` to the end of this `ArrayStore`.
 fn (&ArrayStore[]) append(slice [&]T):
     if slice.len() == 0:
         return
-    self.ensure_cap(self.length + slice.length)
-    self.buf[self.length..self.length + slice.length].init(as slice)
-    self.length += slice.length
-
     self.ensure_cap(self.length + slice.length)
     self.buf[self.length..self.length + slice.length].init(as slice)
     self.length += slice.length
@@ -1735,11 +1737,8 @@ fn (&ArrayStore[]) ensure_cap(new_cap int):
     if self.buf != none:
         new_buf := alloc(T, final_cap).ptr
 
-        -- TODO: Move old elements to new buffer.
-        new_buf[0..self.length].init(self.buf[0..self.length])
-        #if type.managed(T):
-            for 0..self.length |i|:
-                @destruct(T, self.buf + i)
+        -- Move the elements: the bytes carry the ownership, so no copy and no destructor runs.
+        @memcpy(as new_buf, as self.buf, self.length * type.size(T))
         free(self.buf)
 
         self.buf = new_buf
@@ -1888,10 +1887,18 @@ fn (&&Array[]) `<<`(arr AsSpan[T]):
     Self.append[2](self, move arr)
 
 --| Appends a value to the end of the array.
+--| The value is moved into the buffer. A reference element (`^T`, function value) is retained instead,
+--| since a reference parameter is managed by the caller and can not be moved.
 fn (&&Array[]) append(val T):
     if self.length >= (self.header && ~(3 << 62)):
         self.ensure_cap(self.length + 1)
-    @ptr_init(*self.buf[self.length], val)
+    #switch type.info(T):
+        #case .ref:
+            @ptr_init(*self.buf[self.length], val)
+        #case .func:
+            @ptr_init(*self.buf[self.length], val)
+        #else:
+            @ptr_init(*self.buf[self.length], move val)
     self.length += 1
 
 --| Appends the elements of a span to the end of this array.
@@ -1913,12 +1920,18 @@ fn (&&Array[]) clear():
     self.size_down(0)
 
 fn (&Array[]) clone() -> Self:
+    if self.length == 0:
+        return {
+            buf    = none,
+            length = 0,
+            header = 0,
+        }
     new_buf := alloc(T, self.length).ptr
     new_buf[0..self.length].init(self.buf[0..self.length])
     return {
         buf    = new_buf,
         length = self.length,
-        cap    = self.length,
+        header = self.length,
     }
 
 fn (&Array[]) contains(needle T) -> bool:
@@ -1952,11 +1965,8 @@ fn (&&Array[]) ensure_cap(new_cap int):
     if self.buf != none:
         new_buf := alloc(T, final_cap).ptr
 
-        -- TODO: Move old elements to new buffer.
-        new_buf[0..self.length].init(self.buf[0..self.length])
-        #if type.managed(T):
-            for 0..self.length |i|:
-                @destruct(T, self.buf + i)
+        -- Move the elements: the bytes carry the ownership, so no copy and no destructor runs.
+        @memcpy(as new_buf, as self.buf, self.length * type.size(T))
         free(self.buf)
 
         self.buf = new_buf
@@ -1982,17 +1992,18 @@ fn (&&Array[]) insert(idx int, val T):
 
     self.ensure_cap(self.length + 1)
 
-    if idx == self.length:
-        -- Appending to end.
-        @ptr_init(self.buf + self.length, val)
-        self.length += 1
-        return
-
     if idx < self.length:
-        @ptr_init(self.buf + self.length, self.buf[self.length-1])
-    if idx + 1 < self.length:
-        self.buf[idx+1..self.length].set_backwards(self.buf[idx..self.length-1])
-    self.buf[idx] = val
+        -- Shift the tail up by one slot. The bytes carry the ownership.
+        @memmove(as (self.buf + idx + 1), as (self.buf + idx), (self.length - idx) * type.size(T))
+
+    -- See `append`.
+    #switch type.info(T):
+        #case .ref:
+            @ptr_init(self.buf + idx, val)
+        #case .func:
+            @ptr_init(self.buf + idx, val)
+        #else:
+            @ptr_init(self.buf + idx, move val)
     self.length += 1
 
 --| Returns a new iterator over the slice elements.

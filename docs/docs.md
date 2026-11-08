@@ -2454,6 +2454,8 @@ if true:
     --> error: `ref` can not outlive `b`.
 ```
 
+A borrow stored in a local variable is alive until the end of the block that declares the variable. A borrow that is only passed as an argument or used inside an expression ends with its statement. The compiler does not shorten a borrow to its last use.
+
 Some dynamic data structure types allow borrowing a reference to an inner element:
 ```cy
 a := Array[int]{1, 2, 3}
@@ -2487,19 +2489,34 @@ fn invalidate(arr &&Array[int]):
 Note that invoking the append `<<` and `clear` methods automatically obtain an exclusive borrow for `self` without an explicit `&&` operator.
 
 Resize operations such as `<<` and `clear` require an exclusive borrow because they can potentially reallocate a dynamic buffer, thereby invalidating other borrows.
-If another borrow is alive before invoking these methods, the compiler would attempt to prematurely end the lifetime of the other borrows in order to satisfy the exclusivity constraint.
-If this is not possible, then obtaining an exclusive borrow would result in a compile error:
+If another borrow is alive when an exclusive borrow is obtained, it is a compile error. A borrow stored in a local is alive until its block ends, so put it in an inner block when the owner is resized afterwards:
 ```cy
 a := Array[int]{1, 2, 3}
-elem := &a[2]
+if true:
+    elem := &a[2]
+    elem.* = 300
 a << 4
--- Ok. `elem` is no longer alive.
+-- Ok. `elem` went out of scope with its block.
+
+elem := &a[2]
+a << 5
+--> error: Expected exclusive access. There is another active borrow to `a`.
 
 append_to(&a[2], &&a)
---> error: Can not obtain exclusive borrow, `&a[2]` is still alive.
+--> error: Cannot pass an exclusive borrow of `a` with another argument that borrows `a`.
 
 fn append_to(elem &int, arr &&Array[int]):
     arr << elem.*
+```
+
+While an exclusive borrow is stored in a local, no other borrow of the owner can be made, including the implicit `&self` borrow of a method call:
+```cy
+a := Array[int]{1, 2, 3}
+ex := &&a
+r := &a
+--> error: Cannot borrow `a`. There is an active exclusive borrow to it.
+print(a.len())
+--> error: Cannot borrow `a`. There is an active exclusive borrow to it.
 ```
 
 ### `self` borrow.

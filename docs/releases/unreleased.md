@@ -73,6 +73,12 @@
   (41 다음 1). 이제 `A \`#[generator]\` function can not take the borrow type \`&int\` as a parameter.` 컴파일 오류다. 같이 찾은 구멍으로
   `?&T`가 빌림으로 취급되지 않아 `^(?&int(&x))` lift와 `scope` 없는 `-> ?&int` 반환이 통과했는데, 이제 `&T`와 같은 규칙을 받는다
   (`a7418c29`, F-14, `docs/decisions/project_generator_borrow_params.md`). 아래 "언어" 절.
+- 빌림 검사가 세 군데에서 틀렸다. 한 번 `&a`를 취하면(인자로 잠깐 넘겨도) 그 함수 안에서 `a.append(4)`가 영원히 `Expected exclusive access.`로
+  거부됐고, 반대로 `ex := &&a` 뒤의 `r := &a[0]`와 같은 호출의 `grow(&&a, &a[0])`은 통과해 재할당으로 해제된 버퍼를 읽고 썼으며, 블록 안의
+  `b`를 밖의 `ref`에 `ref = &b`로 넣는 것을 막지 않아 블록 뒤에 다른 지역의 값이 읽혔다. 이제 지역에 저장된 빌림만 세고 그 블록이 끝나면
+  풀린다. 인자로 넘긴 빌림은 문장과 함께 끝난다. `&&`가 살아 있는 동안의 `&` · `&self`, 같은 호출의 `&&a`와 `a`의 다른 빌림, 더 깊은 블록의
+  값을 가리키는 재대입은 컴파일 오류다(`77d3e881`, F-25, `docs/decisions/project_borrow_model.md`). 이 검사가 core `Wyhash.final`의 실제
+  use-after-scope(`if` 블록 안 `scratch`를 밖의 `input`이 빌림)를 드러내 고쳤다. 아래 "언어" 절.
 
 ## 언어와 표준 라이브러리
 
@@ -99,6 +105,12 @@
 - 제너레이터 매개변수(`a7418c29`): `#[generator]` 함수의 매개변수(메서드의 `&self` 수신자 포함)는 빌림 타입(`&T` · `[&]T` · 빌림 필드를 가진
   구조체 · `?&T`)일 수 없다. 제너레이터는 호출보다 오래 살므로 값이나 `^T`를 넘긴다. `?&T`는 `&T`와 같은 빌림 컨테이너다. lift 불가,
   반환하려면 `scope` 매개변수 · `scope` 반환, REPL 최상위 지역으로 이월 불가. `docs/docs.md` Generators · Optionals 절에 적혀 있다.
+- 빌림 수명(`77d3e881`): 지역 변수에 저장된 빌림(`r := &a`, `elem := &a[2]`, `ex := &&a`, `for a |x|`의 숨은 빌림)은 그 지역의 블록이 끝날 때까지
+  산다. 인자나 식 안의 빌림(`peek(&a)`)은 문장이 끝나면 끝난다. 마지막 사용까지로 줄이지 않으므로 `elem := &a[2]; a << 4`는 같은 블록이면
+  오류이고 `elem`을 안쪽 블록에 두면 된다. `&&`가 살아 있는 동안 같은 값의 `&` · `&self`(메서드 호출)는 `Cannot borrow \`a\`. There is an
+  active exclusive borrow to it.`, 한 호출의 인자에 `&&a`와 `a`를 빌리는 다른 인자가 함께 있으면 `Cannot pass an exclusive borrow of \`a\` with
+  another argument that borrows \`a\`.`, 빌림 지역에 더 깊은 블록의 값을 재대입하면 `\`ref\` can not outlive \`b\`.`. `docs/docs.md` Borrows ·
+  Exclusive borrows 절에 적혀 있다.
 
 ## 임베딩 API
 

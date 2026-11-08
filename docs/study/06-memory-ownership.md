@@ -87,7 +87,7 @@ Cyber에는 추적 GC가 없다. 대신 질문 네 개에 컴파일러가 답한
  ----------------------------        ---------------------------------      ----------------------------
  a := b        copy 또는 error       semaOwn -> sema_copy                    copy_str / retain 명령
  a := move b   b 는 죽음             move_expr: Local.type = .dead           (런타임 흔적 없음)
- f(&a)         빌림                  semaBorrow: active_borrows += 1         포인터 한 개(주소)
+ f(&a)         빌림                  semaBorrow(지역에 저장되면 bindBorrowLocal) 포인터 한 개(주소)
  ^T            힙 객체, 공유         semaLift: ir.lift                       new 명령 + 헤더 rc=1
  블록 끝       자동 정리             semaDestructLocal -> dtor 호출 /        dtor_str / release 명령 +
                                     ir.release                              @deinitObject[T] 호출
@@ -424,15 +424,16 @@ pub fn ownOrManageArg(c: *cy.Chunk, arg: sema.ExprResult, node: *ast.Node) !sema
 
 #### 규칙 7: 빌림 검사
 
-- `&x`(`semaBorrow`, 8779)는 `x`를 addressable로 만들고(임시이면 `_temp`) 빌림 타입의 `address_of` IR을 낸다. 그리고 소유 지역의 `active_borrows`를 1 올리고 결과에 `parent_local`(소유 지역)을 기록한다.
-- `&&x` 또는 `&&` 수신자(`sema_ex_borrow2`, 8750)는 소유 지역의 `active_borrows > 0`이면 "Expected exclusive access. There is another active borrow to `a`."로 거부한다.
+- `&x`(`semaBorrow`, 8779)는 `x`를 addressable로 만들고(임시이면 `_temp`) 빌림 타입의 `address_of` IR을 낸다. 결과에 `parent_local`(소유 지역)을 기록하고, 소유 지역에 배타 빌림이 살아 있으면 "Cannot borrow `a`. There is an active exclusive borrow to it."로 거부한다(2026-11-08 `77d3e881`, F-25. 이전에는 여기서 `active_borrows`를 올렸다).
+- 빌림이 지역에 저장되면(`r := &a`, 대입, `for`의 `_iterable`) `bindBorrowLocal`이 `Local.parent_local`을 소유 지역으로 묶고 `active_borrows`(공유) 또는 `active_ex_borrows`(배타)를 올린다. 지역이 블록을 벗어나면(`popLocals2` · `popBlock`) 내린다. 인자로 넘긴 빌림은 세지 않는다(문장과 함께 끝난다).
+- `&&x` 또는 `&&` 수신자(`sema_ex_borrow2`, 8750)는 소유 지역에 어떤 빌림이든 살아 있으면 "Expected exclusive access. There is another active borrow to `a`."로 거부한다. 같은 호출의 인자 안에서 `&&a`와 `a`를 빌리는 다른 인자가 함께 있으면 `matchFuncSig`가 순서와 무관하게 "Cannot pass an exclusive borrow of `a` with another argument that borrows `a`."로 거부한다.
+- 빌림 지역의 재대입(`ref = &b`)은 `b`가 `ref`보다 깊은 블록이면 "`ref` can not outlive `b`."로 거부한다(`checkBorrowOutlives`).
 - 호출 결과의 수명: 시그니처에 `scope` 매개변수가 있으면 `matchFuncSig`(`sema_func.zig:504`)가 그 인자의 `parent_local`을 호출 결과의 `parent_local`로 이어 준다.
   `localDecl`(3495)은 빌림 값이 `temp` 수명 지역에 매여 있으면 "Cannot assign to local `b` with a value that has a shorter lifetime."로 거부한다(`foo(&123)`처럼 `&123`이 임시 지역을 만드는 경우).
   `semaReturnExpr`(829)는 `scope` 함수가 반환하는 빌림의 `parent_local`이 `scope` 매개변수인지 확인한다("Expected to return a borrow from the same scope as `c`.").
 
-실제로 돌려 보면 이 검사는 Rust의 NLL(마지막 사용까지만 빌림이 산다)과 다르다. `popLocals2`(322)에는 빌림을 쥔 지역이 사라질 때 `active_borrows`를 줄이는 코드가 있지만,
-`Local.parent_local`(120)은 선언 때 `cy.NullId`(4926)로만 초기화되고 다른 곳에서 대입되지 않아 이 감소는 실행되지 않는다. 그래서 같은 변수에 한 번이라도 명시적 `&`를 취하면,
-그 빌림이 끝난 뒤에도 같은 함수에서 이후의 `&&` 연산(`a.append(4)` 등)이 모두 컴파일 에러가 된다(실습 5). 반대 방향(`&&`를 쥔 상태에서 `&` 취득)은 검사하지 않는다.
+이 검사는 Rust의 NLL(마지막 사용까지만 빌림이 산다)과 다르다. 빌림의 수명은 어휘적이다. 지역에 저장된 빌림은 그 지역의 블록이 끝날 때까지 살고, 저장되지 않은 빌림은 문장이 끝나면 끝난다(`docs/decisions/project_borrow_model.md`).
+2026-11-08 이전에는 `popLocals2`(322)의 감소가 `Local.parent_local`(120)이 대입되지 않아 죽은 코드였고, 같은 변수에 한 번이라도 명시적 `&`를 취하면 그 빌림이 끝난 뒤에도 같은 함수에서 이후의 `&&` 연산이 모두 컴파일 에러였다(실습 5). 반대 방향(`&&`를 쥔 상태에서 `&` 취득)은 검사하지 않았다.
 
 #### IR에서 바이트코드로
 
@@ -954,7 +955,7 @@ rc with array of two: 3
 (`peek`는 `a &Array[int]`를 받아 `a.len()`을 돌려주는 함수, `a`는 `Array[int]{1, 2, 3}`이다.) 먼저 `&`는 읽기 전용이 아니다.
 `x := &a; y := &a; x.* = 20; y.* = y.* + 1; print(a)`(`b5.cy`)는 `21`을 낸다.
 
-`active_borrows`가 줄지 않는 문제(2.3절 규칙 7). 아래는 모두 빌림이 끝난 뒤인데도 `append`가 거부된다.
+`active_borrows`가 줄지 않는 문제(2.3절 규칙 7). 아래는 모두 빌림이 끝난 뒤인데도 `append`가 거부된다(2026-11-08 `77d3e881` 이전. 지금은 bb1 · bb3이 통과하고 bb6 · b2는 `r` · `elem`이 같은 블록에 살아 있어 그대로 오류다. 안쪽 블록에 두면 된다).
 
 ```
 $ cyber bb1.cy     -- print(a.len()); print(peek(&a)); a.append(4)
@@ -970,7 +971,7 @@ CompileError: Expected exclusive access. There is another active borrow to `a`.
 `docs.md`의 예제(`elem := &a[2]` 뒤 `a << 4`는 "elem이 더 이상 살아 있지 않아 OK")도 같은 에러다(`b2.cy`). 암시적 수신자 빌림은 세지 않아서 `a.len()`, `a.append(4)`, `r := &a`, `r.len()` 순서는 통과한다(`bb5.cy`: `3`, `4`, `4`).
 `r := &a; print(r.len()); a.append(4)`처럼 순서를 뒤집으면(`bb6.cy`) `r`을 그 뒤에 안 써도 에러다.
 
-반대 방향은 검사가 없다. `&&`를 먼저 쥐거나 넘기고 `&`를 나중에 만들면 통과하고, 재할당된 버퍼를 가리키는 빌림이 남는다.
+반대 방향은 검사가 없었다(2026-11-08 이전). `&&`를 먼저 쥐거나 넘기고 `&`를 나중에 만들면 통과하고, 재할당된 버퍼를 가리키는 빌림이 남았다. 지금은 b7이 "Cannot borrow `a`. There is an active exclusive borrow to it.", b9 · b4가 "Cannot pass an exclusive borrow of `a` with another argument that borrows `a`."다.
 
 ```
 $ cyber b7.cy      -- ex := &&a; r := &a[0]; ex.append(...) x4; print(r.*)
@@ -983,7 +984,7 @@ a[0]=1
 
 `append`가 버퍼를 새로 할당하고 옛 버퍼를 해제한 뒤 `elem.* = 999`가 해제된 메모리에 써진다(`a[0]`은 그대로). 순서를 뒤집은 `append_to(&a[2], &&a)`(`b4.cy`)만 에러가 난다.
 
-범위를 벗어난 빌림 대입도 막지 않는다. 문서는 "`ref`가 `b`보다 오래 살 수 없다"는 에러를 약속하지만(`b6.cy`: `a := 123; ref := &a`, `if true:` 안에서 `b := 234; ref = &b`, 블록 뒤에 `c := 999; d := 777`):
+범위를 벗어난 빌림 대입도 막지 않았다(2026-11-08 이전. 지금은 b6이 "`ref` can not outlive `b`."다). 문서는 "`ref`가 `b`보다 오래 살 수 없다"는 에러를 약속하지만(`b6.cy`: `a := 123; ref := &a`, `if true:` 안에서 `b := 234; ref = &b`, 블록 뒤에 `c := 999; d := 777`):
 
 ```
 inner b=234 ref=234
@@ -1219,9 +1220,9 @@ IR이 정리를 명시하므로 새 코드젠 백엔드(C 백엔드 등)도 소�
 
 | # | 내용 | 근거 | 재현 |
 |---|---|---|---|
-| 1 | 명시적 `&x` 뒤 같은 함수의 `x`에 대한 `&&` 연산이 영구 거부됨(`active_borrows` 감소 없음) | `sema.zig:120`, `:322`, `:4926`, `:8788` | `bb1.cy`, `bb3.cy`, `bb6.cy` |
-| 2 | `&&` 취득 뒤 만든 `&`와 `&&` 인자 뒤의 `&` 인자를 검사 안 함 -> 해제된 버퍼에 쓰기 | `sema.zig:8750` | `b7.cy`, `b9.cy` |
-| 3 | 블록을 벗어난 지역을 가리키는 빌림 재대입을 막지 않음 | `localDecl`에만 수명 검사 | `b6.cy` |
+| 1 | 명시적 `&x` 뒤 같은 함수의 `x`에 대한 `&&` 연산이 영구 거부됨(`active_borrows` 감소 없음) | `sema.zig:120`, `:322`, `:4926`, `:8788` | `bb1.cy`, `bb3.cy`, `bb6.cy`. 2026-11-08 수정 `77d3e881`(F-25, 어휘적 수명. bb6은 같은 블록이라 그대로 오류) |
+| 2 | `&&` 취득 뒤 만든 `&`와 `&&` 인자 뒤의 `&` 인자를 검사 안 함 -> 해제된 버퍼에 쓰기 | `sema.zig:8750` | `b7.cy`, `b9.cy`. 2026-11-08 수정 `77d3e881` |
+| 3 | 블록을 벗어난 지역을 가리키는 빌림 재대입을 막지 않음 | `localDecl`에만 수명 검사 | `b6.cy`. 2026-11-08 수정 `77d3e881` |
 | 4 | 구조체 필드(`str` 포함)가 있는 관리 구조체의 부분 이동이 컴파일 안 됨. `docs.md`의 예제가 그 형태 | `core.cy:2849`, `ct_inline.zig:309` | `m6.cy`, `m9.cy`, `m12.cy` |
 | 5 | `f(a, &a)` : 지역 인자 +0 전달 + 같은 지역의 빌림으로 재대입 -> 해제된 객체 읽기 | `sema_func.zig:817` | `al1.cy` |
 | 6 | `Array.append(val)`이 `val`을 복사하고 `@deinit`이 임시/성장/최종에 3번 돔. NoCopy 원소는 `append` 불가 | `core.cy:1787`, `:1845~1852` | `ar2.cy`, `d5.cy` |

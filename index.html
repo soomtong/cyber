@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.3-dev 686-0e82811</div>
+    <div class="sub-title">v0.4.3-dev 694-b5f6148</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1209,7 +1209,7 @@ if true: print(123)
 <p>Variables can be assigned afterwards using the <code>=</code> operator:</p>
 <pre><code class="language-cy">a = 234
 </code></pre>
-<p>A function body, including the main block, can hold at most 256 locals. Parameters and the hidden temporaries the compiler creates count towards that limit. A function signature can have at most 255 parameters and a struct at most 255 fields. Exceeding a limit is a compile error.</p>
+<p>A function body, including the main block, can hold at most 256 locals. Parameters and the hidden temporaries the compiler creates count towards that limit. A function signature can have at most 255 parameters and a struct at most 255 fields. A single branch (the body of a loop, an <code>if</code> or a <code>switch</code> case) can span at most 32767 bytecode slots, roughly 8000 simple statements; a plain <code>if</code> body without <code>else</code> can span 65535. Exceeding a limit is a compile error. Move part of a long body into another function.</p>
 <a href="#syntax">^topic</a>
 <h3 id="var-declaration"><code>var</code> declaration. <a href="#var-declaration">#</a></h3>
 <p>When a local variable is declared with <code>var</code>, a type specifier is required.
@@ -1559,6 +1559,7 @@ line "b"
 line %{title}
 """
 </code></pre>
+<p>A string literal can hold at most 65535 bytes. Each literal piece of an interpolated string counts on its own. A longer literal is a compile error; split the text into several literals and join them at runtime.</p>
 <a href="#basic-types">^topic</a>
 <h3 id="escape-sequences">Escape sequences. <a href="#escape-sequences">#</a></h3>
 <p>The following escape sequences are supported in string literals:</p>

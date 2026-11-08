@@ -1455,7 +1455,7 @@ test "Spawned threads stop with the eval and do not abort the host." {
     , &res));
     thread.join();
 
-    // A panic in a spawned thread fails the eval instead of aborting the process.
+    // A panic in a spawned thread fails the eval instead of aborting the process, with the thread's message.
     try zt.eq(C.ErrorPanic, C.vm_eval(vm,
         \\fn boom(n int) -> int:
         \\  panic('boom')
@@ -1465,15 +1465,48 @@ test "Spawned threads stop with the eval and do not abort the host." {
     {
         const report = C.vm_error_summary(vm);
         defer C.vm_freeb(vm, report);
-        try zt.eq(true, std.mem.startsWith(u8, report, "panic: Spawned thread did not finish."));
+        try zt.eq(true, std.mem.startsWith(u8, report, "panic: Spawned thread panicked: boom\n"));
     }
 
-    // Still usable.
+    // `await` inside a spawned thread blocks that thread. A panic below it reaches the main thread through
+    // each awaiting thread. (Before, the nested `await` was a Zig `@panic("TODO")` that aborted the host.)
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm,
+        \\fn boom(n int) -> int:
+        \\  panic('boom')
+        \\  return n
+        \\fn mid(n int) -> int:
+        \\  return spawn(boom, {n}).await() + 1
+        \\_ = spawn(mid, {1}).await()
+    , &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try zt.eq(true, std.mem.startsWith(u8, report, "panic: Spawned thread panicked: Spawned thread panicked: boom\n"));
+    }
+
+    // The fuel limit stops a thread below a nested `await` and the eval reports the interrupt.
+    C.vm_set_fuel(vm, 10000);
+    try zt.eq(C.ErrorInterrupt, C.vm_eval(vm,
+        \\fn spin(start int) -> int:
+        \\  i := start
+        \\  while true:
+        \\    i += 1
+        \\  return i
+        \\fn mid(n int) -> int:
+        \\  return spawn(spin, {n}).await() + 1
+        \\_ = spawn(mid, {0}).await()
+    , &res));
+    C.vm_set_fuel(vm, 0);
+
+    // Still usable, including nested `await`.
     try zt.eq(C.Success, C.vm_eval(vm,
         \\fn add(a int, b int) -> int:
         \\  return a + b
+        \\fn mid(a int) -> int:
+        \\  return spawn(add, {a, 3}).await() * 10
         \\use test
         \\test.eq(5, spawn(add, {2, 3}).await())
+        \\test.eq(50, spawn(mid, {2}).await())
     , &res));
 }
 

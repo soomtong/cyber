@@ -6,8 +6,23 @@ const std = @import("std");
 /// 0, pending: Initially marked as pending. At this point, the future's result can not be read.
 /// 1, writing: Transition from `pending` by producer to prevent a race when the owner invalidates the future.
 /// 2, completed: Transition from `writing` by producer once it's done writing the result.
-/// 3, invalidated: Transition from `pending` by owner when the future is deinitialized.
-pub const FutureSyncState = u8;
+/// 3, failed: Transition from `pending` by the worker when the spawned thread panicked.
+///    `panic_msg` carries the thread's panic message when it had one. Also reserved for the owner
+///    invalidating a pending future when it is deinitialized.
+/// 4, stopped: Transition from `pending` by the worker when the spawned thread was interrupted or ran out of fuel.
+///
+/// `state` is the first field: `core.cy` holds the state as `Ptr[byte]` and writes the initial 0 through it.
+/// Owned by `VM.shared_states` and freed with the VM (or its reset), so an awaiting thread only reads `panic_msg`.
+pub const FutureSyncState = extern struct {
+    state: u8,
+    panic_msg_ptr: ?[*]const u8 = null,
+    panic_msg_len: usize = 0,
+
+    pub fn panic_msg(self: *const FutureSyncState) ?[]const u8 {
+        const ptr = self.panic_msg_ptr orelse return null;
+        return ptr[0..self.panic_msg_len];
+    }
+};
 
 pub const SeqLock = packed struct(u8) {
     value: u8 = 0,

@@ -1473,8 +1473,10 @@ pub fn new_shared_state(t: *cy.Thread) !C.Ret {
     t.c.vm.shared_state_mutex.lockUncancelable(stdx.io());
     defer t.c.vm.shared_state_mutex.unlock(stdx.io());
 
-    const ret = t.ret(*u8);
-    const state = try t.alloc.create(u8);
+    const ret = t.ret(*cy.sync.FutureSyncState);
+    const state = try t.alloc.create(cy.sync.FutureSyncState);
+    errdefer t.alloc.destroy(state);
+    state.* = .{ .state = 0 };
     try t.c.vm.shared_states.append(t.alloc, state);
     ret.* = state;
     return C.RetOk;

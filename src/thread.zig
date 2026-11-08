@@ -807,13 +807,27 @@ pub const Thread = struct {
         }
     }
 
-    pub fn free_panic(self: *const Thread) void {
+    /// The current panic message, when the panic carries one.
+    pub fn panic_msg(self: *const Thread) ?[]const u8 {
         const panicT: PanicType = @fromBackingInt(@intCast(self.c.panic_type));
-        if (panicT == .msg) {
-            const ptr: usize = @intCast(self.c.panic_payload & ((1 << 48) - 1));
-            const len: usize = @intCast(self.c.panic_payload >> 48);
-            self.alloc.free(@as([*]const u8, @ptrFromInt(ptr))[0..len]);
+        if (panicT != .msg) return null;
+        const ptr: usize = @intCast(self.c.panic_payload & ((1 << 48) - 1));
+        const len: usize = @intCast(self.c.panic_payload >> 48);
+        return @as([*]const u8, @ptrFromInt(ptr))[0..len];
+    }
+
+    pub fn free_panic(self: *const Thread) void {
+        if (self.panic_msg()) |msg| {
+            self.alloc.free(msg);
         }
+    }
+
+    pub fn ret_panic_fmt(self: *cy.Thread, format: []const u8, args: []const fmt.FmtValue) c.Ret {
+        @branchHint(.cold);
+        const msg = fmt.allocFormat(self.alloc, format, args) catch cy.fatal();
+        self.c.panic_payload = (@as(u64, @intCast(@intFromPtr(msg.ptr))) & 0xffffffffffff) | (@as(u64, msg.len) << 48);
+        self.c.panic_type = vmc.PANIC_MSG;
+        return c.RetInterrupt;
     }
 
     pub fn ret_panic(self: *cy.Thread, msg: []const u8) c.Ret {

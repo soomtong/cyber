@@ -49,7 +49,7 @@ pub const VM = struct {
     // Not protected for incremental compilation.
     globals: std.ArrayList(*GlobalSym),
 
-    shared_states: std.ArrayList(*u8),
+    shared_states: std.ArrayList(*cy.sync.FutureSyncState),
 
     // Protects `shared_states`.
     // TODO: Make lock-free.
@@ -196,6 +196,10 @@ pub const VM = struct {
             return;
         }
 
+        // A future that was never awaited can leave a spawned thread running or queued. Stop it before
+        // the main heap it writes to is freed, and before the worker threads are joined.
+        self.stopSpawnedThreads();
+
         // The REPL result shares its heap objects with an abandoned main local, so it is released before the
         // sweep below frees them.
         self.dropMainResult(true);
@@ -267,6 +271,9 @@ pub const VM = struct {
         }
 
         for (self.shared_states.items) |state| {
+            if (state.panic_msg()) |msg| {
+                self.alloc.free(msg);
+            }
             self.alloc.destroy(state);
         }
         if (reset) {
@@ -945,48 +952,35 @@ fn zAwait(t: *cy.Thread, fut_value_bits: u64) callconv(.c) vmc.ResultCode {
     const fut_value_ptr: Value = .{ .val = fut_value_bits };
     const future = fut_value_ptr.asPtr(*cy.heap.FutureValue);
     if (future.shared_state) |shared_state| {
-        var state = @atomicLoad(u8, shared_state, .acquire);
-        if (state == 2) {
-            return vmc.RES_SUCCESS;
-        }
-
-        if (t == t.c.vm.main_thread) {
-            // Block until future is done. Stops for an interrupt, and when the spawned thread failed
-            // (it panicked, was interrupted or ran out of fuel).
-            while (true) {
-                state = @atomicLoad(u8, shared_state, .acquire);
-                if (state == 2) {
-                    break;
-                }
-                if (state == 3) {
-                    _ = t.ret_panic("Spawned thread did not finish.");
-                    return vmc.RES_PANIC;
-                }
-                if (state == 4) {
-                    return vmc.RES_INTERRUPT;
-                }
-                if (@atomicLoad(u8, t.c.interrupt, .acquire) != 0) {
-                    return vmc.RES_INTERRUPT;
-                }
-                std.atomic.spinLoopHint();
+        // Block until the future is done. Stops for an interrupt, and when the spawned thread failed
+        // (it panicked, was interrupted or ran out of fuel).
+        // A spawned thread awaits the same way. While it waits it runs queued thread tasks itself, so
+        // awaiting inside spawned threads can not exhaust the worker pool and deadlock: the task it waits
+        // for is either running on another worker or in the queue where it can pick it up.
+        // The main thread helps too, which also covers a pool without workers (one cpu).
+        while (true) {
+            const state = @atomicLoad(u8, &shared_state.state, .acquire);
+            if (state == 2) {
+                return vmc.RES_SUCCESS;
             }
-            return vmc.RES_SUCCESS;
-        } else {
-            // // Add task to future's continuation list.
-            // const task_id = vm.task_nodes.items.len;
-            // const task = cy.heap.ContinuationTask{
-            //     .thread = t,
-            // };
-            // vm.task_nodes.append(vm.alloc, .{
-            //     .next = cy.NullId,
-            //     .task = .{
-            //         .type = .cont,
-            //         .data = .{ .cont = task },
-            //     },
-            // }) catch @panic("error");
-            // appendCont(vm, future, task_id);
-            // return vmc.RES_AWAIT;
-            @panic("TODO");
+            if (state == 3) {
+                if (shared_state.panic_msg()) |msg| {
+                    _ = t.ret_panic_fmt("Spawned thread panicked: {}", &.{cy.fmt.v(msg)});
+                } else {
+                    _ = t.ret_panic("Spawned thread did not finish.");
+                }
+                return vmc.RES_PANIC;
+            }
+            if (state == 4) {
+                return vmc.RES_INTERRUPT;
+            }
+            if (@atomicLoad(u8, t.c.interrupt, .acquire) != 0) {
+                return vmc.RES_INTERRUPT;
+            }
+            if (t.c.vm.worker_pool.run_queued_task()) {
+                continue;
+            }
+            std.atomic.spinLoopHint();
         }
     } else {
         if (!future.completed) {

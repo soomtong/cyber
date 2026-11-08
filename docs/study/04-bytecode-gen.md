@@ -500,7 +500,7 @@ else: Z                        if_block(B) { Y; break outer }   }               
 | `funcs_debug` | `FuncDebugInfo{func, name, src_chunk}` | `pushProc`, 인라인 | `frameLoc` 가 이 목록의 인덱스. 함수 이름과 소스 청크 |
 | `func_table` | 각 함수 `chk_stk` 의 pc 목록 | `genFuncBlock` | pc 로 함수를 찾아 `ret_size` / `stack_size` 복원 (`debug.zig:46`, `thread.zig:1104`) |
 | `Compiler.debug_tables` | `{chunk, ptr}` 를 ops 주소 순으로 정렬 | `genChunkInner` (`:470-480`) | pc 포인터가 어느 청크 소속인지 이분 탐색 (`debug.zig:96`) |
-| `ptr_table`, `ptr_layouts` | call 지점 pc → 스택 포인터가 든 슬롯의 비트집합 | `pushCall`, `reserve_reg` | 스택이 커져 이동할 때 포인터 패치 (`thread.zig:68-100, 868-901`) |
+| `ptr_table`, `ptr_layouts` | 호출 지점 pc → 스택 포인터가 든 슬롯의 비트집합 | `push_site_ptr_layout`(`pushCall` · `call_ptr` · `call_union` · `call_trait` · `gen_next` · `gen_end`), `reserve_reg` | 스택이 커져 이동할 때 포인터 패치 (`thread.zig` `growStackPrecise` · `patch_frame_ptrs`) |
 | `inline_sites` | 인라인 본문의 pc 구간 `[start, end)` 와 호출 지점 | `gen_inline_call` | 스택 트레이스에서 인라인 프레임 펼치기 (`debug.zig:592-636`) |
 | `markers` | pc → `*Func` | `genFuncBlock` | 덤프의 `--N` 줄만 |
 | `labels`, `consts` | | | 사실상 미사용 (7절) |
@@ -1148,7 +1148,7 @@ print(r)
 ```
 
 - 두 명령어 모두 `base+3` 의 callee 슬롯이 열쇠다. `call_union` 은 그 슬롯의 `Func` 객체를, `call_trait` 은 vtable id 를 읽고 명령어의 `vtable_idx` 로 메서드를 고른다(2단 조회).
-- 이 둘은 호출 대상이 바이트코드에 없어 재배치 대상이 아니다. 대신 `ptr_table` 에 올라가지 않는 것이 7절의 문제를 낳는다.
+- 이 둘은 호출 대상이 바이트코드에 없어 재배치 대상이 아니다. 2026-11-08 `c94f1569` 전에는 `ptr_table` 에도 올라가지 않아 7절의 문제를 낳았다.
 
 ### 5.9 Option 언랩
 
@@ -1305,7 +1305,7 @@ print(div(5, 0))
 설계 철학을 정리하면 이렇다.
 
 1. 정적 타입이 명령어를 단순하게 만든다. 값에 태그가 없으니 검사도 박싱도 없다. 대가는 명령어 종류의 증가(f32 변종, 폭별 load/store, 부호별 비교)와 좁은 정수의 폭 정리를 소비 지점에 미룬 규약이다(2.6절).
-2. 호출 규약이 레지스터 윈도우 방식이라 인자와 반환값을 복사하지 않는다(2.7절). 대가는 스택이 하나의 연속 배열이라 커질 때 재배치와 포인터 패치가 필요하다는 점이고, 이 패치 장치(`ptr_table`)가 지금 가장 허술한 곳이다(7절).
+2. 호출 규약이 레지스터 윈도우 방식이라 인자와 반환값을 복사하지 않는다(2.7절). 대가는 스택이 하나의 연속 배열이라 커질 때 재배치와 포인터 패치가 필요하다는 점이고, 이 패치 장치(`ptr_table`)가 가장 허술한 곳이었다(7절, 2026-11-08 `c94f1569` 로 수정).
 3. 코드 생성은 한 번의 재귀 패스에서 레지스터를 즉석 배정하는 단순한 구조다. 최적화는 `gen_*` 안의 국소 패턴 매칭(`add_i16`, `add_mul_i16`)과 인라인뿐이고 공통 부분식 제거나 `addr` 재사용이 없다(5.6절의 `dist2`).
 4. opcode 추가는 가볍다. 이 fork 의 두 사례가 보여 주듯 vm.h, vm.c, bytecode.zig, bc_gen.zig 네 파일이면 된다. JIT 는 맞추지 않기로 결정되어 있다.
 
@@ -1322,9 +1322,11 @@ print(div(5, 0))
 
 모든 재현은 이 저장소의 ReleaseSafe CLI(macOS arm64)에서 실행한 것이다.
 
-### 7.1 스택이 커질 때 스택 포인터가 고쳐지지 않는 경우 (확인된 버그)
+### 7.1 스택이 커질 때 스택 포인터가 고쳐지지 않는 경우 (확인된 버그, 2026-11-08 수정)
 
-2.9절의 `ptr_table` 은 `growStackAuto`(`thread.zig:857`)가 스택을 재할당할 때 호출 지점별 "스택 포인터 슬롯"을 새 주소로 고치는 데 쓰인다. 두 군데에 구멍이 있다.
+2026-11-08 `c94f1569` 로 두 구멍 모두 막았다(F-10, `docs/decisions/project_stack_ptr_patch.md`). `growStackPrecise` 의 걷기가 main 프레임까지 패치하고, `gen_call_ptr` · `gen_call_union` · `gen_call_trait` 가 `push_site_ptr_layout` 으로 `ptr_table` 항목을 남긴다. 아래 재현 1 · 2 는 이제 `42` · `20043` 을 낸다(behavior 테스트 `functions/stack_grow_ptr_patch.cy`). 이하는 수정 전 기록이다.
+
+2.9절의 `ptr_table` 은 `growStackAuto`(`thread.zig:857`)가 스택을 재할당할 때 호출 지점별 "스택 포인터 슬롯"을 새 주소로 고치는 데 쓰인다. 두 군데에 구멍이 있었다.
 
 - main 프레임: 거슬러 올라가는 루프가 `while (frame.frame_type() != .init)`(`thread.zig:890`)이라 main 프레임에 도달하면 패치 없이 끝난다. main 의 `&x` 같은 포인터는 이동 후 옛 스택을 가리킨다.
 - `call_ptr` / `call_union` / `call_trait` / `gen_next`: `ptr_table` 항목은 `pushCall`(`bc_gen.zig:3127-3133`)만 올린다. 이 호출들이 스택을 키우면 호출한 쪽 프레임의 포인터가 패치되지 않는다.

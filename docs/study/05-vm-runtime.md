@@ -184,7 +184,7 @@ vm: main stack size: 43690
 
 부수 효과로 안전 검사 빌드에서는 main 스택이 항상 약 45506 슬롯(11번의 1.5배 성장으로 도달하는 첫 값: 511 -> 774 -> ... -> 45506) 이상으로 시작한다. 이 숫자는 첫 번째 성장 로그가 45506 * 1.5 = 68259 인 것과 일치한다. 이것이 의도된 설계는 아니므로 7절 이슈 목록에 올렸다.
 
-스택이 `realloc` 으로 다른 주소로 옮겨지면, 스택 안의 값 중 "스택 내부를 가리키는 포인터"(예: `&x`, 빌림 `&T`)는 새 주소로 고쳐 써야 한다. `growStackPrecise`(thread.zig:868)가 프레임을 거슬러 올라가며 `patch_frame_ptrs`(thread.zig:68)로 고치는데, 어느 레지스터가 스택 포인터인지는 바이트코드 생성기가 호출 지점마다 기록해 둔 `ptr_table`/`ptr_layouts` 로 알아낸다(bc_gen.zig:3103 `pushCall`). 이 메커니즘에는 구멍이 있다(7절 이슈 3, 실습 6에서 재현).
+스택이 `realloc` 으로 다른 주소로 옮겨지면, 스택 안의 값 중 "스택 내부를 가리키는 포인터"(예: `&x`, 빌림 `&T`)는 새 주소로 고쳐 써야 한다. `growStackPrecise`(thread.zig:868)가 프레임을 거슬러 올라가며 `patch_frame_ptrs`(thread.zig:68)로 고치는데, 어느 레지스터가 스택 포인터인지는 바이트코드 생성기가 호출 지점마다 기록해 둔 `ptr_table`/`ptr_layouts` 로 알아낸다(bc_gen.zig:3103 `pushCall`). 이 메커니즘에는 구멍이 있었다(7절 이슈 3, 실습 6에서 재현. 2026-11-08 `c94f1569` 로 수정).
 
 ### 2.4 인터프리터 루프 해부
 
@@ -1060,7 +1060,7 @@ direct   : stored==current? true  (moved during call? true)  d=200000
 call_ptr : stored==current? false  (moved during call? true)  d=200000
 ```
 
-(각 줄은 별도 프로세스에서 하나씩 실행한 결과이다. 한 프로세스에서 이어 부르면 첫 호출이 스택을 이미 키워서 두 번째는 이동이 일어나지 않는다.) 직접 호출은 스택이 이동했는데도 포인터가 새 주소로 고쳐졌고, `call_ptr` 은 고쳐지지 않았다.
+(각 줄은 별도 프로세스에서 하나씩 실행한 결과이다. 한 프로세스에서 이어 부르면 첫 호출이 스택을 이미 키워서 두 번째는 이동이 일어나지 않는다.) 직접 호출은 스택이 이동했는데도 포인터가 새 주소로 고쳐졌고, `call_ptr` 은 고쳐지지 않았다. (2026-11-08 `c94f1569` 수정, F-10. `call_ptr` · `call_union` · `call_trait` 지점도 `ptr_table` 에 오르고 main 프레임도 패치된다.)
 
 (6c) 한 번의 앞 점프가 32767 단위를 넘으면 크래시한다. else 쪽 본문이 `y += 1` 문 N 개인 if/else 를 생성했다.
 
@@ -1168,7 +1168,7 @@ NaN boxing 이 필요 없어진 이유는 정적 타입이라서 값이 스스�
 
 1. `FN_HOST` 가 no-op 이다. 위치 vm.c:1716~1721 의 `addr | (1<<63)`. `1` 이 `int` 라서 63칸 시프트가 정의되지 않은 동작(UB)이고, 컴파일러가 대입을 통째로 지운다(컴파일 경고 `shift count >= width of type`, 어셈블리에서 핸들러가 `pc += 5` 만 함). 재현: 실습 6a. 영향: 호스트 함수를 값으로 변수/인자에 담아 부르면 목적지 레지스터가 갱신되지 않아 쓰레기 값으로 점프한다. 호출 쪽 `callPtrInst`(thread.zig:684)는 63번 비트로 호스트 여부를 판정하므로 수정은 한 줄이면 된다.
 2. 안전 검사 빌드에서 `buf.mainStackSize` 가 쓰레기(0xAAAA)이다. 위치 bc_gen.zig:628~630 (`popProc` 뒤에 `getMaxUsedRegisters`). 재현: 트레이스 빌드 `-v` 마지막 줄 `main stack size: 43690`. 영향: main 스택이 의도와 무관하게 약 45506 슬롯으로 시작한다. ReleaseFast 의 동작은 미확인.
-3. `call_ptr`/`call_union`/`call_trait` 호출 중 스택이 옮겨지면 호출자의 스택 포인터가 갱신되지 않는다. 위치 bc_gen.zig:3103 `pushCall`(직접 호출과 `call_host` 만 `ptr_table` 에 기록)과 thread.zig:891 의 소비 코드. 재현: 실습 6b (`stored==current? false`). 영향: 빌림/주소를 들고 클로저나 함수 값을 호출하는 코드에서 해제된 메모리를 쓰게 된다.
+3. `call_ptr`/`call_union`/`call_trait` 호출 중 스택이 옮겨지면 호출자의 스택 포인터가 갱신되지 않는다. 위치 bc_gen.zig:3103 `pushCall`(직접 호출과 `call_host` 만 `ptr_table` 에 기록)과 thread.zig:891 의 소비 코드. 재현: 실습 6b (`stored==current? false`). 영향: 빌림/주소를 들고 클로저나 함수 값을 호출하는 코드에서 해제된 메모리를 쓰게 된다. (2026-11-08 `c94f1569` 수정됨. main 프레임이 패치에서 빠지던 것도 함께. 발견 이슈 표 F-10, `docs/decisions/project_stack_ptr_patch.md`)
 4. `JUMP` 의 오프셋이 `int16_t` 라서 32767 단위(약 64KB 바이트코드)를 넘는 앞 점프가 깨진다. 위치 vm.c:868, chunk.zig:472. 재현: 실습 6c (N=8200 에서 크래시, 17000 에서 컴파일 패닉). 오프셋이 u16 범위를 넘으면 `@intCast` 가 안전 검사 빌드에서 패닉한다. ReleaseFast 에서는 조용히 잘릴 것으로 추정한다(미확인). (2026-11-08 `8560b025` 수정됨: `chunk.zig` 의 패치 함수가 거리를 재서 컴파일 오류 `Function body too large.` 를 낸다. VM 의 `int16_t` 해석은 그대로. 발견 이슈 표 F-09)
 5. `cyber compile` 덤프가 일부 명령어의 피연산자를 잘못 해석해서 출력한다. `call_trait`(bytecode.zig:466~471)는 vtable 번호를 `pc+3`(다음 명령어의 첫 단위)에서 읽는데 실제는 `pc[2]` 이다(실습 값 `[9]` 는 다음 명령어 `mov` 의 opcode 9). `trait`(604~612)는 `dst` 와 `src` 를 거꾸로(`src = pc[1]`, `dst = pc[6]`) 읽는다. `sext`/`zext`(758~769)는 `src` 를 `pc+3`(실제로는 비트 폭 `pc[3]`)에서, `bits` 를 `pc[5]`(명령어 밖)에서 읽는다(`sext(17, %32)` 에서 `%32` 가 실제로는 비트 폭). 디버깅할 때 덤프보다 vm.c 를 믿어야 한다. (2026-11-06 수정됨: 위 명령어 모두 `pc[k].val` 로 읽는다. 발견 이슈 표 F-62)
 6. 제너레이터 본문에서 패닉하면 언와인드가 죽는다. 위치 thread.zig:1006~1009 가 gen 프레임의 `callinfo`, 반환 주소, 제너레이터 포인터를 `fp+1`, `fp+2`, `fp+3` 에서 읽는데, 이것은 `ret_size == 1` 일 때만 맞다. `yield` 가 `?int`(2슬롯)이면 `gen` 함수의 `chk_stk ret=2` 라서 실제 위치는 `fp+2`, `fp+3`, `fp+4` 이고, 잘못된 위치를 포인터로 읽다가 `incorrect alignment` 로 중단된다(원인은 코드 읽기와 `ret=2` 덤프에서 추정. 수정은 `frame.base.?` 사용). 재현: 실습 6d. 제너레이터 자체의 결함은 07 챕터 참조.

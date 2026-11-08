@@ -97,6 +97,11 @@
   `EvalStr` 인자의 이중 해제로 `integer overflow` panic이었다. 세 종류 모두 동작하고(`type.name`은 `Flag[true]` · `Tag['a']` · `ByLvl[Lvl.high]`),
   지원하지 않는 매개변수 타입(`float` 등)은 매개변수 위치에 컴파일 오류 `Unsupported \`const\` parameter type ...`다(`bb5d1a05`, F-28,
   `docs/decisions/project_template_const_params.md`). 아래 "언어" 절.
+- 부분 이동 뒤 옮겨 나간 멤버에 다시 대입하면(`a := move p.a; p.a = Res{name='a2'}`) 옛 값(이미 `a`의 것)을 한 번 더 파괴해 `@deinit`이 두 번
+  돌고 새 값은 상태가 죽은 채라 한 번도 정리되지 않아 누수였다. 이제 대입이 멤버를 되살린다(`96007fe5`, F-79). 규칙은 아래 "언어" 절.
+- 부분 이동된 변수에서 `@deinit`이 있는 멤버의 하위 필드를 읽으면(`b := move t.b; t.a.name`) 컴파일러가 `index out of bounds` panic으로
+  호스트를 죽이거나 거짓 `Cannot copy a partially moved value.`였다. 멤버 하나가 상태 한 칸인데 `str` 필드로 들어가며 세 칸을 읽어서다
+  (`96007fe5`, F-80).
 
 ## 언어와 표준 라이브러리
 
@@ -138,6 +143,10 @@
 - `const` 템플릿 매개변수(`bb5d1a05`): 매개변수 타입은 정수(`int` · `byte` · `i32` 등) · `bool` · enum · `EvalStr` · 함수 심볼(`fnsym`)만 된다.
   그 밖(`float` · `str` 등)은 `Unsupported \`const\` parameter type \`float\`.` 컴파일 오류. 인스턴스 이름은 `Flag[true]` · `Tag['a']` ·
   `ByLvl[Lvl.high]` 형식(함수 템플릿의 enum 인자는 이전 `$high`에서 바뀜). `docs/docs.md` `const` template parameter 절에 적혀 있다.
+- 부분 이동 멤버 되살리기(`96007fe5`): 옮겨 나간 멤버에 다시 대입하면 그 멤버가 되살아나고 옛 값은 파괴하지 않는다. 모든 멤버가 살아나면 값을
+  통째로 복사 · 빌림 · 이동할 수 있다. 통째 재대입과 같이 변수가 선언된 블록 안에서만 되며, 안쪽 블록에서는
+  `Can only assign to a moved member of a variable declared in the same block.` 컴파일 오류. 하위 멤버 일부가 옮겨진 중첩 멤버를 통째로
+  재대입하면 살아 있던 하위 멤버만 정리한다. `docs/docs.md` Moving 절에 적혀 있다.
 
 
 ## 임베딩 API

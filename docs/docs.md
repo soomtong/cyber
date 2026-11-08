@@ -2487,6 +2487,22 @@ h := move f
 --> error: Cannot move a partially moved value.
 f = Foo{a=1, b='x'}     -- Ok. `f` is whole again.
 ```
+Assigning to a moved member revives that member. The old value is not deinitialized since it belongs to its new owner. Once every member is alive again, the value can be used as a whole:
+```cy
+f := Foo{a=123, b='abc'}
+b := move f.b
+f.b = 'xyz'             -- Ok. `f.b` is alive again.
+h := move f             -- Ok. `f` is whole again.
+```
+Like reassigning the whole value, a member can only be revived in the block that declared the variable, so the state at the end of the block is known without runtime flags:
+```cy
+f := Foo{a=123, b='abc'}
+b := move f.b
+if cond:
+    f.b = 'xyz'
+--> error: Can only assign to a moved member of a variable declared in the same block.
+```
+Reassigning a nested struct member while some of its members are moved out deinitializes only the members that are still alive.
 `h := move f` is rejected rather than moving the remaining members, because a value of type `Foo` promises that all of its members are alive.
 If `h` received a `Foo` without `b`, that promise would be broken for every function `h` is passed to and every container it is stored in, and the compiler would have to track
 the missing member at runtime. Filling the hole with a default value is not done either, since it would construct a value the program never wrote.

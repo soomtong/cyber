@@ -217,6 +217,7 @@ a
 제약도 몇 개 있다(모두 실행 확인).
 
 - 같은 블록에서 선언한 변수만 move할 수 있다. `if` 안에서 바깥 변수를 move하면 `Can only move variable declared in the same block.`
+- 옮겨 나간 멤버에 다시 대입하면 그 멤버가 되살아난다(`a := move p.a; p.a = Res{..}`). 옛 값은 파괴하지 않는다. 역시 선언 블록 안에서만(`Can only assign to a moved member of a variable declared in the same block.`, 2026-11-09 F-79).
   이 제약 덕분에 "어느 분기에서만 move됐는가"를 추적하는 런타임 drop flag가 필요 없다. 코드가 위에서 아래로 한 번 훑는 sema 상태만으로 충분하다.
 - 참조 매개변수(`^T` 등 object 타입)는 move할 수 없다: `Cannot move a reference parameter.` (매개변수가 호출자 소유이기 때문이다.)
 - 복사 가능한 타입도 move할 수 있다. `move_expr`은 `NoCopy` 여부를 보지 않으며 위 `a := 123; b := move a`가 그 예다. 복사 가능(`b := a`)과 이동 가능(`b := move a`)은 직교하는 두 축이고,
@@ -1249,7 +1250,8 @@ IR이 정리를 명시하므로 새 코드젠 백엔드(C 백엔드 등)도 소�
 | 16 | `cl_slice_deinit`/호스트 경로의 `destructValueAt`이 사용자 `@deinit`을 안 부름 | `lib.zig:166`, `heap_value.zig:404` | 코드 근거(미실행) |
 | 17 | trace 빌드의 `freePoolObject`가 `heapFreeTail`을 갱신하지 않는 것으로 읽힘(해제 슬롯 유실 가능성) | `heap.zig:219~250` | 코드 근거(추정, 미실행) |
 | 18 | trace 빌드에서 dangling retain 보고 경로가 `integer overflow`로 죽음 | `debug.zig:106` | `s2.cy`를 trace CLI로 |
-| 19 | 옮겨 나간 멤버에 재대입(`a := move p.a; p.a = Res{..}`)이 컴파일되지만 상태를 되살리지 않음. `set_field`가 이미 옮긴 옛 값을 파괴해 `@deinit` 2회, 새 값은 정리되지 않아 누수 | `sema.zig` `semaAssignStmt`의 `.value_field` 분기(상태 검사 · 복원 없음) | 2026-11-08 재현(Q9, F-79). `deinit a` 2회 · `deinits=3`에 `a2` 없음 |
+| 19 | 옮겨 나간 멤버에 재대입(`a := move p.a; p.a = Res{..}`)이 컴파일되지만 상태를 되살리지 않음. `set_field`가 이미 옮긴 옛 값을 파괴해 `@deinit` 2회, 새 값은 정리되지 않아 누수 | `sema.zig` `semaAssignToAccessStmt`(상태 검사 · 복원 없음) | 2026-11-08 재현(Q9, F-79). `deinit a` 2회 · `deinits=3`에 `a2` 없음. 2026-11-09 `96007fe5`로 수정: 대입이 멤버를 되살린다(`a` · `a2` · `b` 각 1회) |
+| 20 | 부분 이동된 변수에서 `@deinit` 멤버의 하위 필드 읽기(`b := move t.b; t.a.name`)가 컴파일러 panic `index out of bounds` 또는 거짓 `Cannot copy a partially moved value.`. `semaField`가 1칸 멤버 안에서 `state_len`을 `str`의 3칸으로 늘림 | `sema.zig` `semaField` | 2026-11-09 재현(F-80). 같은 날 `96007fe5`로 수정(`step_member_access_path`) |
 
 ### 7.2 문서와 코드의 차이
 
@@ -1329,8 +1331,9 @@ Zig 미러가 `@deinit`을 부르지 않는다는 점을 확인한다(7.1의 16�
 A: 아무것도 가져가지 않는다. `Cannot move a partially moved value.` 컴파일 오류다(`partial_move_whole_error.cy`). `b`의 타입이 `User`이고 `User` 값은 모든 멤버가 살아 있다는 보장을 지니므로,
 `name`이 빠진 껍데기를 `b`로 옮기면 `b`가 넘어가는 모든 함수와 컨테이너에서 그 보장이 깨진다. 부분 이동 상태는 지역 `a`에만 붙은 `[]bool` sema 정보라 변수 경계를 넘기지 않는 것이 모델을 단순하게 한다
 (Rust E0382와 같다). 남은 멤버만 옮기고 `b`도 부분 이동 상태로 두는 안은 `b`를 인자 · 반환 · 원소로 넘기는 순간 런타임 drop flag가 필요해지고, 빠진 멤버를 기본값으로 채우는 안(Rust `mem::take`)은
-프로그램이 쓰지 않은 생성을 숨긴다. 통째로 옮기려면 같은 블록에서 `a = User{...}`로 다시 온전하게 만든 뒤 `move a`한다. Rust처럼 `a.name = ...`로 멤버만 되살리는 것은 아직 없고,
-현재는 그 대입이 컴파일은 되지만 상태가 죽은 채 남아 옛 값을 두 번 파괴하고 새 값을 누수한다(7.1의 19번, F-79. `docs/decisions/project_partial_move.md` 설계 메모).
+프로그램이 쓰지 않은 생성을 숨긴다. 통째로 옮기려면 `a`를 다시 온전하게 만든 뒤 `move a`한다. 방법은 둘이고 둘 다 `a`가 선언된 블록 안에서만 된다. 통째 재대입 `a = User{...}`, 또는 Rust처럼 옮겨 나간 멤버만 다시 대입
+`a.name = 'other'`(2026-11-09 `96007fe5`, F-79). 멤버 대입은 옛 값을 파괴하지 않고(그 값은 `name`의 것이다) 상태 칸만 되살리며, 모든 칸이 살아나면 `move a`가 된다. 2026-11-08까지는 그 대입이
+컴파일은 되지만 상태가 죽은 채 남아 옛 값을 두 번 파괴하고 새 값을 누수했다(7.1의 19번. `docs/decisions/project_partial_move.md` 결정 6 · 설계 메모).
 
 ## 9. 더 알아보기
 

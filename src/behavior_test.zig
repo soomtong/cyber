@@ -178,6 +178,12 @@ if (!is_wasm) {
     run.case("memory/partial_move.cy");
     run.case("memory/partial_move_use_after_error.cy");
     run.case("memory/partial_move_ref_child_error.cy");
+    run.case("memory/partial_move_struct_fields.cy");
+    run.case("memory/partial_move_deinit_member_error.cy");
+    run.case("memory/partial_move_copy_error.cy");
+    run.case("memory/partial_move_borrow_error.cy");
+    run.case("memory/partial_move_whole_error.cy");
+    run.case("memory/program_deinit_order.cy");
     run.case("memory/return_moves_rvalue.cy");
     run.case("memory/return_borrow_scope_missing_error.cy");
     run.case("memory/return_borrow_container_scope_missing_error.cy");

@@ -2966,13 +2966,17 @@ fn @partial_destruct(%T type, %Layout PartialStructLayout, val Ptr[T]):
                 #field := struct_t.fields[i]
                 #switch type.info(field.type):
                     #case .struct:
-                        -- TODO: Skip when all sub fields are inactive.
-                        #if Layout.field_layout(field.state_offset, type.struct_state_len(field.type)) |layout|:
-                            -- Field contains a partial type layout.
-                            #partial_destruct(field.type, layout, *meta.access(val, field.name))
+                        #if meta.has_decl(field.type, '@deinit'):
+                            -- A struct with `@deinit` is moved and destructed as a whole (one field state).
+                            #if Layout.is_field_active(field.state_offset):
+                                @destruct(field.type, *meta.access(val, field.name))
                         #else:
-                            -- Regular active field.
-                            @destruct(field.type, *meta.access(val, field.name))
+                            #if Layout.field_layout(field.state_offset, type.struct_state_len(field.type)) |layout|:
+                                -- Some members of the field were moved out. Destruct the rest.
+                                @partial_destruct(field.type, layout, *meta.access(val, field.name))
+                            #else:
+                                -- Regular active field.
+                                @destruct(field.type, *meta.access(val, field.name))
                     #else:
                         #if Layout.is_field_active(field.state_offset):
                             -- Regular active field.

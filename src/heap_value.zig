@@ -336,8 +336,9 @@ pub fn destructValue2(self: *cy.Heap, val_t: *cy.Type, val: Value) void {
                 .option => {
                     const option_t = val_t.cast(.option);
                     if (option_t.zero_union) {
+                        // The payload is the value itself. Raw pointers and `PartialStructLayout` are not heap objects.
                         if (val.val != 0) {
-                            self.release(val);
+                            destructValue2(self, option_t.child_t, val);
                         }
                     } else {
                         self.release(val);

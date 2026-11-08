@@ -291,6 +291,9 @@ pub fn evalStmt(c: *cy.Chunk, ct_stmt: *ast.ComptimeStmt) !void {
         .if_stmt => {
             try ifStmt(c, ct_stmt.child.cast(.if_stmt));
         },
+        .if_unwrap_stmt => {
+            try ifUnwrapStmt(c, ct_stmt.child.cast(.if_unwrap_stmt));
+        },
         .switch_stmt => {
             try cte.switchStmt(c, ct_stmt.child.cast(.switch_stmt), true, switchCaseInner, null, null);
         },
@@ -312,36 +315,61 @@ pub fn evalStmt(c: *cy.Chunk, ct_stmt: *ast.ComptimeStmt) !void {
 }
 
 pub fn ifStmt(c: *cy.Chunk, if_stmt: *ast.IfStmt) !void {
-    var cond_res = try cte.evalCheck(c, if_stmt.cond, c.sema.bool_t);
+    const cond_res = try cte.evalCheck(c, if_stmt.cond, c.sema.bool_t);
     if (cond_res.value.asBool()) {
         const start = try pushCtBlock(c, @ptrCast(if_stmt));
-        const res = try evalStmts(c, if_stmt.stmts);
-        _ = res;
+        try evalStmts(c, if_stmt.stmts);
         try popInlineCtBlock(c, start);
         return;
-    } else {
-        for (if_stmt.else_blocks) |ct_else| {
-            if (ct_else.type() != .ct_stmt) {
-                return c.reportErrorFmt("Expected compile-time `else` statement.", &.{}, ct_else);
-            }
-            const else_b = ct_else.cast(.ct_stmt).child;
-            if (else_b.type() == .elseif_block) {
-                const else_ = else_b.cast(.elseif_block);
-                cond_res = try cte.evalCheck(c, else_.cond, c.sema.bool_t);
-                if (!cond_res.value.asBool()) {
-                    continue;
-                }
-                const start = try pushCtBlock(c, @ptrCast(else_b));
-                try evalStmts(c, else_.stmts);
-                try popInlineCtBlock(c, start);
-            } else {
-                const else_ = else_b.cast(.else_block);
-                const start = try pushCtBlock(c, @ptrCast(else_b));
-                try evalStmts(c, else_.stmts);
-                try popInlineCtBlock(c, start);
-            }
-            return;
+    }
+    try elseBlocks(c, if_stmt.else_blocks);
+}
+
+/// `#if <opt> |x|:` where `<opt>` is a compile-time optional.
+/// Binds `x` as a compile-time variable for the block when the optional has a value.
+pub fn ifUnwrapStmt(c: *cy.Chunk, stmt: *ast.IfUnwrapStmt) !void {
+    const opt = try cte.eval(c, stmt.opt);
+    defer c.heap.destructValue(opt);
+    if (opt.type.kind() != .option) {
+        return c.reportErrorFmt("Expected optional type, found `{}`.", &.{v(opt.type.name())}, stmt.opt);
+    }
+    const option_t = opt.type.cast(.option);
+    if (try c.heap.unwrap_option_or(option_t, opt.value)) |unwrapped| {
+        if (stmt.unwrap.type() != .ident) {
+            c.heap.destructValue2(option_t.child_t, unwrapped);
+            return c.reportErrorFmt("Unsupported unwrap declaration: {}", &.{v(stmt.unwrap.type())}, stmt.unwrap);
         }
+        const start = try pushCtBlock(c, @ptrCast(stmt));
+        try cte.localDecl2(c, stmt.unwrap.cast(.ident).name.slice(), option_t.child_t, unwrapped, stmt.unwrap);
+        try evalStmts(c, stmt.stmts);
+        try popInlineCtBlock(c, start);
+        return;
+    }
+    try elseBlocks(c, stmt.else_blocks);
+}
+
+fn elseBlocks(c: *cy.Chunk, else_blocks: []*ast.Node) !void {
+    for (else_blocks) |ct_else| {
+        if (ct_else.type() != .ct_stmt) {
+            return c.reportErrorFmt("Expected compile-time `else` statement.", &.{}, ct_else);
+        }
+        const else_b = ct_else.cast(.ct_stmt).child;
+        if (else_b.type() == .elseif_block) {
+            const else_ = else_b.cast(.elseif_block);
+            const cond_res = try cte.evalCheck(c, else_.cond, c.sema.bool_t);
+            if (!cond_res.value.asBool()) {
+                continue;
+            }
+            const start = try pushCtBlock(c, @ptrCast(else_b));
+            try evalStmts(c, else_.stmts);
+            try popInlineCtBlock(c, start);
+        } else {
+            const else_ = else_b.cast(.else_block);
+            const start = try pushCtBlock(c, @ptrCast(else_b));
+            try evalStmts(c, else_.stmts);
+            try popInlineCtBlock(c, start);
+        }
+        return;
     }
 }
 

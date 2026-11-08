@@ -684,6 +684,19 @@ pub const StructField = extern struct {
     }
 };
 
+/// Number of partial-move states a field of type `field_t` occupies in its parent struct.
+/// A struct field without a custom `@deinit` exposes the states of its own fields so its members can be moved out one by one.
+/// Any other field, including a struct with `@deinit` (it can only be destructed as a whole), is a single state.
+pub fn fieldStateLen(field_t: *cy.Type) usize {
+    if (field_t.kind() != .struct_t) {
+        return 1;
+    }
+    if (field_t.sym().has_decl("@deinit")) {
+        return 1;
+    }
+    return field_t.cast(.struct_t).field_state_len;
+}
+
 pub fn reifyStructType(c: *cy.Chunk, struct_t: *cy.types.Struct, user_fields: []const StructField, node: *ast.Node) !void {
     // Alignment follows C-ABI rules.
     var has_managed_child = false;
@@ -726,11 +739,7 @@ pub fn reifyStructType(c: *cy.Chunk, struct_t: *cy.types.Struct, user_fields: []
         //     fields[i].init_n = init;
         // }
 
-        if (field_t.kind() == .struct_t) {
-            field_state_len += field_t.cast(.struct_t).field_state_len;
-        } else {
-            field_state_len += 1;
-        }
+        field_state_len += fieldStateLen(field_t);
     }
 
     // After alignment is determined, compute size and field offsets.
@@ -897,11 +906,7 @@ pub fn resolveStructFields(c: *cy.Chunk, struct_t: *cy.types.Struct, decl: *ast.
             .init_n = field.init,
         };
 
-        if (field_t.kind() == .struct_t) {
-            field_state_len += field_t.cast(.struct_t).field_state_len;
-        } else {
-            field_state_len += 1;
-        }
+        field_state_len += fieldStateLen(field_t);
     }
 
     // After alignment is determined, compute size and field offsets.

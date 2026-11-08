@@ -2234,12 +2234,30 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
     return semaField(c, rec, rec_n, field_sym.idx, field_sym.type, field);
 }
 
+/// The accessed member is alive when any of its states is active.
+/// A nested struct member stays accessible while only some of its own members were moved out.
 fn check_struct_access_path(c: *cy.Chunk, node: *ast.Node) !void {
     const fields = c.proc().var_active_struct_fields.get(c.temp_access_path.var_id).?;
-    if (fields[c.temp_access_path.struct_field_offset]) {
+    const start = c.temp_access_path.struct_field_offset;
+    const states = fields[start..start + c.temp_access_path.state_len];
+    if (states.len == 0 or std.mem.findScalar(bool, states, true) != null) {
         return;
     } else {
         return c.reportError("Member is no longer alive.", node);
+    }
+}
+
+/// A partially moved value can not be used as a whole (copied, borrowed, moved): the moved members are dead.
+/// `expr` carries the access path from `semaLocal` / `semaField` when its root local has inactive members.
+fn checkPartialMoveWhole(c: *cy.Chunk, expr: ExprResult, action: []const u8, node: *ast.Node) !void {
+    if (!expr.check_struct_field_access) {
+        return;
+    }
+    const fields = c.proc().var_active_struct_fields.get(c.temp_access_path.var_id).?;
+    const start = c.temp_access_path.struct_field_offset;
+    const states = fields[start..start + c.temp_access_path.state_len];
+    if (std.mem.findScalar(bool, states, false) != null) {
+        return c.reportErrorFmt("Cannot {} a partially moved value.", &.{v(action)}, node);
     }
 }
 
@@ -2263,9 +2281,12 @@ fn build_move_access_path(c: *cy.Chunk, res: ExprResult, node: *ast.Node) !bool 
     };
     c.temp_access_path.var_id = var_id;
     c.temp_access_path.struct_field_offset = 0;
+    c.temp_access_path.state_len = 1;
     var expr = res.ir;
     var field_access = false;
     var root = true;
+    // The member being moved is the outermost field access, or the first one after a choice payload unwrap.
+    var moved_member_known = false;
     while (true) {
         switch (expr.code) {
             .local => {
@@ -2276,12 +2297,21 @@ fn build_move_access_path(c: *cy.Chunk, res: ExprResult, node: *ast.Node) !bool 
             },
             .field => {
                 const field = expr.cast(.field);
+                const member_t = expr.type;
                 expr = field.rec;
                 if (expr.type.isObjectLike()) {
                     return c.reportError("Cannot move a member from a shared reference.", node);
                 }
-                const state_offset = expr.type.cast(.struct_t).fields()[field.idx].state_offset;
+                const rec_struct = expr.type.cast(.struct_t);
+                if (rec_struct.base.sym().has_decl("@deinit")) {
+                    return c.reportErrorFmt("Cannot move a member out of `{}`. The type has a custom `@deinit`.", &.{v(expr.type.name())}, node);
+                }
+                const state_offset = rec_struct.fields()[field.idx].state_offset;
                 c.temp_access_path.struct_field_offset += state_offset;
+                if (!moved_member_known) {
+                    c.temp_access_path.state_len = sema_type.fieldStateLen(member_t);
+                    moved_member_known = true;
+                }
                 field_access = true;
             },
             .deref => {
@@ -2290,6 +2320,7 @@ fn build_move_access_path(c: *cy.Chunk, res: ExprResult, node: *ast.Node) !bool 
             .unwrap_addr => {
                 expr = expr.cast(.unwrap_addr).choice;
                 c.temp_access_path.struct_field_offset = 0;
+                moved_member_known = false;
             },
             .address_of => {
                 expr = expr.cast(.address_of).expr;
@@ -2318,8 +2349,9 @@ pub fn semaField(c: *cy.Chunk, rec: ExprResult, rec_n: *ast.Node, idx: usize, fi
 
     // final_rec is ensured to be addressable.
     res.addressable = final_rec.addressable;
-    if (rec.check_struct_field_access) {
-        c.temp_access_path.struct_field_offset += idx;
+    if (rec.check_struct_field_access and rec.type.kind() == .struct_t) {
+        c.temp_access_path.struct_field_offset += rec.type.cast(.struct_t).fields()[idx].state_offset;
+        c.temp_access_path.state_len = sema_type.fieldStateLen(field_t);
         try check_struct_access_path(c, node);
         res.check_struct_field_access = true;
     }
@@ -4224,6 +4256,7 @@ pub fn semaLocal(c: *cy.Chunk, id: LocalId, node: *ast.Node) !ExprResult {
             if (local.has_inactive_struct_fields) {
                 c.temp_access_path.var_id = local.stack_idx;
                 c.temp_access_path.struct_field_offset = 0;
+                c.temp_access_path.state_len = local.decl_t.cast(.struct_t).field_state_len;
                 res.check_struct_field_access = true;
             }
             return res;
@@ -4721,7 +4754,11 @@ pub fn ensureDeclNamePath(c: *cy.Chunk, mod: *cy.Sym, parent_opt: ?*ast.Node, na
 }
 
 pub fn popProc(self: *cy.Chunk) !cy.ir.StmtBlock {
-    const stmtBlock = try popBlock(self);
+    return popProc2(self, true);
+}
+
+pub fn popProc2(self: *cy.Chunk, destruct_locals: bool) !cy.ir.StmtBlock {
+    const stmtBlock = try popBlock2(self, destruct_locals);
     const proc = self.proc();
     proc.deinit(self.alloc);
     self.semaProcs.items.len -= 1;
@@ -4820,9 +4857,21 @@ pub fn sema_program(c: *cy.Chunk, opt_main_func: ?*cy.Func) !*ir.Stmt {
             try semaStmts(c, stmts);
         }
 
+        var destruct_locals = true;
         if (c.block().endReachable) {
+            // Main locals are destructed before `@program_deinit` releases the globals, in the same order
+            // as `return` in main (`semaReturn`). A local's `@deinit` may still read the globals.
+            if (shouldGenMainScopeReleaseOps(c.compiler)) {
+                try semaDestructBlock(c);
+                destruct_locals = false;
+            }
             try sema_program_deinit(c);
         }
+        const stmtBlock = try popProc2(c, destruct_locals);
+        program_block.cast(.mainBlock).* = .{
+            .bodyHead = stmtBlock.first,
+        };
+        return program_block;
     }
 
     const stmtBlock = try popProc(c);
@@ -5955,6 +6004,7 @@ pub fn semaDeref(c: *cy.Chunk, ptr: ExprResult, node: *ast.Node) !ExprResult {
 }
 
 pub fn sema_copy(c: *cy.Chunk, expr: ExprResult, node: *ast.Node) anyerror!ExprResult {
+    try checkPartialMoveWhole(c, expr, "copy", node);
     if (expr.type.info.no_copy) {
         const name = try c.sema.allocTypeName(expr.type);
         defer c.alloc.free(name);
@@ -7667,6 +7717,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
 
             if (!field_access) {
                 // move owner.
+                if (local.has_inactive_struct_fields) {
+                    return c.reportError("Cannot move a partially moved value.", child);
+                }
                 res.owned = true;
                 local.type = .dead;
                 return res;
@@ -7684,7 +7737,8 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                 state_res.value_ptr.* = fields;
                 local.has_inactive_struct_fields = true;
             }
-            state_res.value_ptr.*[c.temp_access_path.struct_field_offset] = false;
+            const start = c.temp_access_path.struct_field_offset;
+            @memset(state_res.value_ptr.*[start..start + c.temp_access_path.state_len], false);
 
             res.owned = true;
             return res;
@@ -8979,6 +9033,7 @@ fn semaLambdaMulti(c: *cy.Chunk, lambda: *ast.LambdaMulti, stmts: []const *ast.N
 }
 
 pub fn sema_ex_borrow2(c: *cy.Chunk, child: ExprResult, ex_borrow_t: *cy.Type, node: *ast.Node) !ExprResult {
+    try checkPartialMoveWhole(c, child, "borrow", node);
     const eff_child = try sema.semaEnsureAddressable(c, child, node);
 
     const parent_local = eff_child.recParentLocal() orelse {
@@ -9005,6 +9060,7 @@ fn sema_ex_borrow(c: *cy.Chunk, child: ExprResult, node: *ast.Node) !ExprResult 
 }
 
 fn semaBorrow(c: *cy.Chunk, child: ExprResult, node: *ast.Node) !ExprResult {
+    try checkPartialMoveWhole(c, child, "borrow", node);
     // Assign expression to a temp to extend the lifetime.
     const eff_child = try semaEnsureAddressable(c, child, node);
     const borrow_t = try getBorrowType(c, eff_child.type);

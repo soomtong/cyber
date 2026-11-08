@@ -22,6 +22,8 @@ const VarAccessPath = struct {
     var_id: sema.LocalId = undefined,
 
     struct_field_offset: usize = 0,
+    /// Number of field states the accessed member occupies. See `sema_type.fieldStateLen`.
+    state_len: usize = 1,
 };
 
 /// A compilation unit.

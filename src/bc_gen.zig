@@ -1486,7 +1486,14 @@ fn pushConstStrZPtr(c: *Chunk, str: []const u8, dst: Reg, node: *ast.Node) !void
     try genConst64_(c, @intFromPtr(res.slice.ptr), dst, node);
 }
 
+/// `const_str` packs the pointer (48 bits) and the length (16 bits) into one u64 operand, so a literal is at most
+/// 65535 bytes. A longer one used to have its length silently truncated (F-24).
+pub const max_str_literal_len: usize = std.math.maxInt(u16);
+
 fn pushConstString(c: *Chunk, str: []const u8, dst: Reg, node: *ast.Node) !void {
+    if (str.len > max_str_literal_len) {
+        return c.reportErrorFmt("String literal too long. A string literal can have at most {} bytes. Split it and join the parts at runtime.", &.{v(max_str_literal_len)}, node);
+    }
     const res = try c.buf.getOrPushConstString(str);
     const ptr_len = (@as(u64, @intFromPtr(res.slice.ptr)) & 0xffffffffffff) | (@as(u64, res.slice.len) << 48);
     const pc = c.buf.ops.items.len;

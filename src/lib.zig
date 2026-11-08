@@ -1577,6 +1577,44 @@ test "Jumps past the one-slot offset are compile errors, not panics or runtime c
     }
 }
 
+test "String literals past 65535 bytes are compile errors, not truncated." {
+    // F-24. `const_str` keeps the length in the upper 16 bits of its u64 operand, so a 70000-byte literal used to run
+    // with `len()` 4464 and a 65536-byte one with `len()` 0.
+    if (is_wasm) return;
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var lw = std.Io.Writer.Allocating.init(zt.alloc);
+    defer lw.deinit();
+    const w = &lw.writer;
+    const msg = "String literal too long. A string literal can have at most 65535 bytes.";
+
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "s := '", "a", "", 65536, "'\nprint(s.len())\n");
+        try expect_limit_error(vm, lw.written(), msg);
+    }
+    // The pieces of an interpolated string are literals too.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "x := 1\ns := '", "a", "", 70000, "%{x}'\nprint(s.len())\n");
+        try expect_limit_error(vm, lw.written(), msg);
+    }
+    // 65535 bytes is the limit and runs.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        lw.clearRetainingCapacity();
+        try repeat_src(w, "use test\ns := '", "a", "", 65535, "'\ntest.eq(s.len(), 65535)\n");
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_eval(vm, lw.written(), &res));
+    }
+}
+
 /// Counts `funcs_debug` entries named `name` in the main chunk. A function body has one entry and each inline site of it
 /// adds one, so the result minus one is the number of inline sites.
 fn count_debug_frames(vm: ?*C.VM, name: []const u8) u32 {

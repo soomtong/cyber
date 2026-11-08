@@ -487,7 +487,7 @@ else: Z                        if_block(B) { Y; break outer }   }               
 
 - 정수와 실수 상수는 명령어 안의 즉치다(`const_16s`, `const_16`, `const_32`, `const_64`). 별도의 상수 풀 `ByteCodeBuffer.consts` 와 중복 제거 맵 `constMap`, `getOrPushConst`(`bytecode.zig:182`)가 정의되어 있지만 호출하는 곳이 없다(`genConstInt` 안의 호출은 주석 처리, `bc_gen.zig:3080`). 풀 방식에서 즉치 방식으로 옮겨 간 흔적으로 보인다(추정). 상수 풀과 `VM.consts_ptr`/`consts_len` 은 2026-11-06 에 삭제했다(F-61).
 - 문자열 리터럴은 `getOrPushConstString`(`bytecode.zig:170`)이 `const_string_map`(내용 → ASCII 여부)으로 중복을 제거한다. 처음 보는 내용이면 0으로 끝나는 복사본을 할당해 맵의 키로 두고, ASCII 여부는 `cy.string.isAstring` 으로 계산한다. 같은 리터럴은 같은 포인터를 가리킨다.
-- `pushConstString`(`bc_gen.zig:1270`)이 그 포인터(하위 48비트)와 길이(상위 16비트)를 u64 하나로 합쳐 `const_str` 의 피연산자에 쓰고, 마지막 유닛에 ASCII 비트를 둔다. VM 의 `CONST_STR`(`vm.c:624`)은 이것으로 `buf = NULL` 인 정적 `String` 을 만든다(`static_str`, `vm.c:265`). `buf` 가 없으므로 해제할 소유 버퍼가 없고, 길이의 최상위 비트가 ASCII 힌트다. 길이를 16비트에 담기 때문에 65536 바이트 이상의 리터럴이 잘린다(7.2절). C 문자열 포인터 타입의 리터럴은 `const_64` 에 복사본의 주소를 담는다(`pushConstStrZPtr`, `:1265`).
+- `pushConstString`(`bc_gen.zig:1270`)이 그 포인터(하위 48비트)와 길이(상위 16비트)를 u64 하나로 합쳐 `const_str` 의 피연산자에 쓰고, 마지막 유닛에 ASCII 비트를 둔다. VM 의 `CONST_STR`(`vm.c:624`)은 이것으로 `buf = NULL` 인 정적 `String` 을 만든다(`static_str`, `vm.c:265`). `buf` 가 없으므로 해제할 소유 버퍼가 없고, 길이의 최상위 비트가 ASCII 힌트다. 길이를 16비트에 담기 때문에 65536 바이트 이상의 리터럴은 잘렸는데, 2026-11-08 `10f8290b` 부터 `pushConstString` 이 `String literal too long.` 컴파일 오류를 낸다(7.2절, F-24). C 문자열 포인터 타입의 리터럴은 `const_64` 에 복사본의 주소를 담는다(`pushConstStrZPtr`, `:1265`).
 - 디버그 라벨 `nops` 도 같은 맵을 쓴다(`genNopLabel2`, `:604`).
 
 ### 2.9 부가 테이블: 실행 중 pc 와 소스를 이어 주는 장치들
@@ -1378,9 +1378,9 @@ print(via_union(rec, &x))
 | 루프 본문이 32767 유닛을 넘음 (`s += 1` 6000번은 통과, 9000번에서 죽음) | 같은 패닉 | 뒤로 가는 `jump` 오프셋 i16 (`chunk.zig:545`). 2026-11-08 `8560b025` 컴파일 오류 `Function body too large.`로 수정(F-09) |
 | `if` 본문이 65535 유닛을 넘음 (9000번 통과, 17000번에서 죽음) | 같은 패닉 | `jump_f` 오프셋 u16 (`chunk.zig:480`). 같은 커밋으로 수정 |
 | `else` 본문이 32767 유닛을 넘고 `if` 갈래가 실행됨 (`s += 1` 9000번) | 컴파일은 되고 실행에서 `Segmentation fault at address 0xaaaaaaaaaaaaaaaa` | `if` 갈래 끝의 앞 `jump` 를 VM 이 `int16_t` 로 읽어 뒤로 감. 같은 커밋으로 수정 |
-| 문자열 리터럴이 65536 바이트 이상 | 패닉 없이 길이가 잘림: 65535 바이트는 `65535`, 65536 바이트는 `0`, 70000 바이트는 `4464` | `const_str` 이 길이를 u64 의 상위 16비트에 담음 (`bc_gen.zig:1272`, `vm.c:628`) |
+| 문자열 리터럴이 65536 바이트 이상 | 패닉 없이 길이가 잘림: 65535 바이트는 `65535`, 65536 바이트는 `0`, 70000 바이트는 `4464` | `const_str` 이 길이를 u64 의 상위 16비트에 담음 (`bc_gen.zig:1272`, `vm.c:628`). 2026-11-08 `10f8290b` 컴파일 오류 `String literal too long.`으로 수정(F-24) |
 
-앞의 세 개는 `Cannot print stack trace` 와 함께 컴파일러가 죽었다. 스크립트를 생성하는 에이전트가 만들 수 있는 입력이다. 2026-11-08 현재 지역 변수(F-08)와 점프(F-09)는 컴파일 오류이고, 문자열 리터럴(F-24)만 남아 있다.
+앞의 세 개는 `Cannot print stack trace` 와 함께 컴파일러가 죽었다. 스크립트를 생성하는 에이전트가 만들 수 있는 입력이다. 2026-11-08 현재 네 줄 모두 컴파일 오류다(F-08 · F-09 · F-24).
 
 ### 7.3 `mainStackSize` 가 쓰레기 값을 읽는다 (원인은 추정)
 

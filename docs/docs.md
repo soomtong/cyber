@@ -587,6 +587,8 @@ line %{title}
 """
 ```
 
+A string literal can hold at most 65535 bytes. Each literal piece of an interpolated string counts on its own. A longer literal is a compile error; split the text into several literals and join them at runtime.
+
 ### Escape sequences.
 The following escape sequences are supported in string literals:
 

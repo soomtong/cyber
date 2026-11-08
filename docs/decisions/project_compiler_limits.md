@@ -24,7 +24,7 @@ panic을 내 호스트 프로세스가 abort했다(발견 이슈 F-08 · F-09 ·
 | C 가변 인자 함수 호출의 인자(고정 매개변수 포함) | 255 | `ir.Call.numArgs u8` | `Too many arguments. A call can have at most 255 arguments.` | `04096230`. `checkArgLimit`(`sema_func.getVmCVariantFunc`). 일반 호출은 매개변수 한계가 먼저 막는다 |
 | 구조체 · cstruct 필드 | 255 | init IR `nargs u8` · `ir.Field.idx u8` | `Too many fields. A struct can have at most 255 fields.` | `04096230`. `checkFieldLimit`(`resolveStructFields`는 256번째 필드 위치에, `reifyStructType`은 타입 노드에) |
 | 바이트코드 레지스터 번호 | 65535 | `Inst.val u16`(피연산자 슬롯) | 지역 한계가 먼저 걸려 닿지 않음 | 한계 아님 |
-| 문자열 리터럴 길이 | 65535바이트 | `pushConstString`의 `len << 48`(16비트) | 길이가 잘림(70000 → 4464). 오류 없음 | 미처리, F-24 |
+| 문자열 리터럴 길이(보간 문자열의 조각 포함) | 65535바이트 | `pushConstString`의 `len << 48`(16비트), `vm.c` `CONST_STR` | `String literal too long. A string literal can have at most 65535 bytes. Split it and join the parts at runtime.` | `10f8290b` 컴파일 오류. `bc_gen.max_str_literal_len`, F-24. 수정 전에는 길이가 잘렸다(65536 → 0, 70000 → 4464) |
 | 점프 거리. `jump`(`break` · `continue` · 루프 끝 · if 갈래 끝) · `release` · `release_opt` | 32767 명령 슬롯 | `vm.c` `JUMP`의 `int16_t`, `Inst.val u16` | `Function body too large. A jump can span at most 32767 bytecode slots. Move part of the body into another function.` | `8560b025` 컴파일 오류. `chunk.zig` `checkJump` · `backJump`(`patchJumpToCurPc` · `patchBreaks` · `patchForBlockJumps` · `pushJumpBackTo`), F-09 |
 | 조건 점프 거리. `jump_f` · `jump_t`(앞으로만) | 65535 명령 슬롯 | `vm.c` `JUMP_F` · `JUMP_T`의 `pc += pc[2]`(부호 없음) | 같은 메시지, 65535 | `8560b025`. `patchJumpCondToCurPc` · `patchJumpNotCondToCurPc`. 수정 전: 32768~65535 슬롯의 앞 `jump`는 VM이 음수로 읽어 세그폴트, 그 이상은 `@intCast` panic |
 | 한 청크의 함수 수 · 심볼 수 | u32 | `FuncSig.id` 등 | 실질적으로 닿지 않음 | 한계 아님 |
@@ -41,6 +41,8 @@ panic을 내 호스트 프로세스가 abort했다(발견 이슈 F-08 · F-09 ·
   `jump`) · `if` 본문 17000줄(`jump_f`) · `else` 본문 9000줄에 `if` 갈래 실행(앞 `jump`, 수정 전 세그폴트)이 오류, 7000줄 루프 · 15000줄 `if`
   (60000 슬롯, u16에 맞음)는 정상 실행. `s += 1`은 `add_i16` 4슬롯. behavior 테스트는 소스가 수천 줄이라 두지 않았다. 오류 위치는 점프를
   가진 문(루프 · `if` · `switch` · `case`)이고, `break` · `continue`의 위치는 `BlockJump`에 없어 둘러싼 루프 문으로 보고한다.
+- 문자열 리터럴(F-24): lib-test `String literals past 65535 bytes are compile errors, not truncated.`: 65536바이트 리터럴 · 70000바이트
+  조각이 든 보간 문자열이 오류, 65535바이트는 `len()` 65535로 정상. C 문자열 포인터 리터럴(`pushConstStrZPtr`, `const_64`)에는 길이 한계가 없다.
 
 ## 기록 규칙
 

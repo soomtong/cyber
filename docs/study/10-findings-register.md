@@ -59,7 +59,7 @@ tags:
 | F-21 | 오버로드는 선언 순서대로 처음 성공하는 후보를 고른다. `float` 오버로드를 먼저 선언하면 `int` 인자도 `float` 쪽으로 간다. 파라미터가 같고 반환만 다른 오버로드도 에러 없이 통과 | `sema_func.zig`(롤백 TODO는 653) | 메인 재현(`show(n)`이 `float`) + [03 §7.1](03-sema-and-ir.md), [02 §5](02-symbols-and-types.md) | 높음 | 가장 적합한 후보 선택 또는 모호성 에러 |
 | F-22 | trait 구현 검사가 파라미터 타입 불일치를 무시한다(trait는 `k float`, 구현은 `k int`가 컴파일). `Dyn`으로 부르면 값이 깨진다. 파라미터가 trait보다 적으면 컴파일러가 index out of bounds로 죽는다 | `types.zig:625~640`(`get_trait_method_impl`의 안쪽 `for`의 `continue`, 현재 609 · 루프 626~630) | 메인 재현(컴파일되고 실행됨) + [02 §5](02-symbols-and-types.md) | 높음 | 불일치 시 해당 후보를 실패로 |
 | F-23 | 템플릿 캐시 비교가 틀리다. 비-Type 매개변수에서 조기 return해 `Buf[1,47]`이 `Buf[1,45]`로 조용히 대체된다 | `template.zig:189~224` | 챕터 재현 [02 §5](02-symbols-and-types.md) | 높음 | 매개변수 전부 비교 |
-| F-24 | 문자열 리터럴이 65536바이트 이상이면 길이가 잘린다(65536 → 0, 70000 → 4464). 길이가 `const_str`의 16비트에 들어간다 | `bc_gen.zig:1272`(현재 1489~1494 `pushConstString`, `len << 48`) | 메인 재현(70000 → 4464) + [04 §7](04-bytecode-gen.md) | 중간 | 긴 리터럴은 거부하거나 u32 길이 |
+| F-24 | 문자열 리터럴이 65536바이트 이상이면 길이가 잘린다(65536 → 0, 70000 → 4464). 길이가 `const_str`의 16비트에 들어간다 | `bc_gen.zig:1272`(현재 1489~1494 `pushConstString`, `len << 48`) | 메인 재현(70000 → 4464) + [04 §7](04-bytecode-gen.md) | 중간 | 2026-11-08 수정 `10f8290b`. `pushConstString`이 65535바이트 초과를 `String literal too long. A string literal can have at most 65535 bytes.` 컴파일 오류로 보고(보간 문자열의 조각도 같음). 인코딩은 그대로. lib-test `String literals past 65535 bytes are compile errors` |
 | F-25 | 빌림 검사 구멍. `Local.parent_local`이 대입되지 않아 `active_borrows` 감소가 죽은 코드라 `r := &a; a.append(4)`가 막힌다(과잉 거부). 반대로 `&&`를 먼저 쥐고 `&`를 나중에 만들면 통과하고, 블록을 벗어난 빌림 재대입도 못 막는다(과소 거부) | `sema.zig:322`, `:4926`(현재 4982, `parent_local`은 `cy.NullId`로만 초기화) | 챕터 재현 [06 §7.1](06-memory-ownership.md) | 높음 | 빌림 모델을 문장으로 먼저 적는다 |
 | F-26 | `Array.append(val T)`가 복사해서 `@deinit`이 원소마다 3번 돈다. NoCopy 원소는 append 불가. `Array.clone()`은 없는 필드 때문에 컴파일되지 않고 `ArrayStore.append(slice)`는 블록이 두 번 실행된다 | `core.cy`(현재 `Array.append` 1888, `Array.clone` 1912, `ArrayStore.append(slice)` 1712) | 챕터 재현 [06 §7.1](06-memory-ownership.md) | 높음 | move 시맨틱으로. `90fafc1f`는 ArrayStore 순회만 더했다 |
 | F-27 | 구조체 필드(`str` 포함)를 가진 관리 구조체의 `move f.b`(부분 이동)가 `core.cy:2849`의 컴파일타임 `if \|x\|` 미지원으로 컴파일되지 않는다. 문서의 예제가 이 형태 | `core.cy:2849`(현재 2954) | 챕터 재현 [06 §7.1](06-memory-ownership.md) | 중간 | |
@@ -122,7 +122,7 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 에이전트 루프 용도에서 먼저 막아야 하는 순서(제안이다. 공식 로드맵은 [09장](09-agent-loop-and-roadmap.md)).
 
 1. 호스트가 죽는 경로: F-06, F-10 (F-03 · F-04 · F-08 · F-09 · F-11 · F-12 · F-40은 수정됨)
-2. 조용한 오답: F-20, F-21, F-22, F-23, F-24 (F-01은 수정됨, F-73은 재현 안 됨 · 미확정)
+2. 조용한 오답: F-20, F-21, F-22, F-23 (F-01 · F-24는 수정됨, F-73은 재현 안 됨 · 미확정)
 3. 상태가 깨지는 경로: F-05, F-07, F-14, F-25, F-26
 4. 표준 라이브러리와 리터럴에서 LLM 스크립트가 바로 닿는 곳: 모두 수정됨(F-70 · F-71 · F-72 · F-74 · F-76)
 5. 정리: F-50~F-54, F-60~F-66, F-77, F-78 (F-64는 일부 정리, F-61 · F-62 · F-63 · F-75는 수정됨, F-31 · F-42는 종료)

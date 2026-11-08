@@ -34,6 +34,8 @@
   `if` 본문 17000줄도 같았다. 더 나쁜 경우로 `else` 본문이 약 8200~16000줄이면 컴파일은 되지만 `if` 갈래가 실행될 때 VM이 앞 점프를
   음수로 읽어 세그폴트였다. 모두 컴파일 오류 `Function body too large. A jump can span at most N bytecode slots.`로 보고한다
   (`8560b025`, F-09). 한계값은 아래 "언어" 절.
+- 65536바이트 이상의 문자열 리터럴이 조용히 잘렸다(`len()`이 65536 → 0, 70000 → 4464. 보간 문자열의 조각도 같음). 컴파일 오류
+  `String literal too long. A string literal can have at most 65535 bytes.`로 보고한다(`10f8290b`, F-24).
 
 ## 언어와 표준 라이브러리
 
@@ -47,6 +49,8 @@
 - 점프 거리(`8560b025`): 한 갈래(루프 본문, `if` · `else` 갈래, `switch` case 본문, `break` · `continue`가 건너뛰는 구간)는 바이트코드
   32767 슬롯(`s += 1` 같은 단순 문 약 8000개)까지, `else` 없는 `if` 본문은 65535 슬롯까지. 넘으면 `Function body too large.` 컴파일 오류.
   긴 본문은 함수로 나눈다. `docs/docs.md` Local variables 절에 적혀 있다.
+- 문자열 리터럴(`10f8290b`): 한 리터럴(보간 문자열의 각 조각 포함)은 65535바이트까지. 넘으면 `String literal too long.` 컴파일 오류.
+  긴 텍스트는 여러 리터럴로 나눠 실행 시 이어 붙인다. `docs/docs.md` Strings 절에 적혀 있다.
 
 ## 임베딩 API
 

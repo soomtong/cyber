@@ -28,6 +28,10 @@
   `@program_init has already been declared`). 다음 eval이 VM을 자동으로 reset하고 처음부터 시작한다. 또 성공한 eval 뒤 실패한
   eval의 함수 · 타입 선언이 `persist_main`으로 넘어가 호출 시 SIGSEGV였던 것도 막았다. "빈 소스로 예열" · 실패 뒤 `cl_vm_reset`
   우회는 더 필요 없다(`f5f2d241`, F-04).
+- `cl_vm_validate`가 VM을 리셋해 `persist_main` 세션의 지역 변수 · 함수 · 타입을 모두 지웠다(검증 뒤 `print(x)`가 컴파일 오류).
+  이제 현재 세션 위에서 컴파일만 하고 실행하지 않으며, 검증한 소스가 선언한 것은 다음 eval로 넘어가지 않는다. 검증 중 처음
+  로드된 모듈(`use math` 등)은 다음에 실행되는 eval이 초기화한다(`707b03e1`, F-05, `docs/decisions/project_vm_validate.md`).
+  `cl_vm_compile`은 전체 프로그램 컴파일이라 그대로 리셋한다(헤더 주석에 명시). 아래 "임베딩 API" 절.
 - 폭주 재귀가 VM 스택을 상한 없이 키워 호스트 메모리를 소진했다(1초에 RSS 4.5GB). 스택 상한(기본 128 MiB)에 닿으면
   `Stack overflow. The stack limit is N bytes.` panic이고 VM은 계속 쓸 수 있다(`f03cf24c`, F-40). 아래 "임베딩" 절.
 - 루프 본문이 약 9000줄(`s += 1` 기준)을 넘으면 컴파일러가 `integer does not fit in destination type` panic으로 호스트를 죽였고,
@@ -93,6 +97,9 @@
   함께 쓴다(`src/include/cyber.h`, `docs/decisions/project_stack_limit.md`).
 - panic 트레이스가 40프레임을 넘으면 양 끝 20프레임만 남기고 가운데를 `... N frames omitted ...` 한 줄로 줄인다(`f03cf24c`).
   `cl_thread_panic_trace`가 돌려주는 프레임 배열도 같다(생략 프레임은 `chunk` · `line`이 `NullId`).
+- `cl_vm_validate(vm, src)`(`707b03e1`): 현재 세션(이월된 지역 변수 · 이전 eval의 선언)을 기준으로 컴파일 오류만 확인한다. 실행하지
+  않고 VM을 리셋하지 않으며, 검증한 소스의 선언은 남기지 않는다. 실패하면 `CL_ERROR_COMPILE`과 `cl_vm_compile_error_summary`.
+  `cl_vm_compile` · `cl_vm_compile_path`는 전체 프로그램 컴파일로 `cl_vm_reset`처럼 세션을 지운다.
 
 ## 변경
 

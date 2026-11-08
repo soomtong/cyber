@@ -125,6 +125,11 @@
   실패해도 `broken`이 `persist_main` alias로 넘어가 다음 eval의 `broken()` 호출이 SIGSEGV(바이트코드 없음)였다.
   `Compiler.last_compile_failed`면 이전 main 청크 자신의 심볼은 건너뛰고 그 청크가 물려받은 alias만 넘긴다. 실패한 eval 안의
   지역 변수는 원래 실행되지 않았으므로 저장본도 없다.
+- `cl_vm_validate`가 세션을 지우던 것(F-05, 2026-11-08 수정 `707b03e1`). `VM.compile`의 `resetVM()`을 거쳐 이월된 지역 변수 ·
+  선언이 모두 사라졌다. 이제 reset 없이 현재 세션 위에 cont 컴파일만 하고 실행하지 않으며, 검증한 소스의 선언은
+  `Compiler.main_discarded`로 다음 eval에 넘기지 않는다(실패한 컴파일과 같은 규칙). 검증이 처음 로드한 모듈의 `@init` ·
+  extern 바인딩은 `Chunk.rt_ready` · `rt_inited`로 다음에 도는 프로그램이 대신 한다. 에이전트 루프는 모델이 쓴 코드를
+  eval 전에 같은 VM에서 검증할 수 있다(`docs/decisions/project_vm_validate.md`). `cl_vm_compile`은 그대로 reset한다.
 
 ## 발견한 다른 문제
 

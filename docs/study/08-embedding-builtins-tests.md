@@ -159,8 +159,9 @@ persist_main 의 지역 변수 이월은 REPL 을 위해 e541090a 에서 들어�
 그래서 `VM.deinit` 이 맨 앞에서 `freeHeapPages` 로 힙을 한꺼번에 쓸어 낸다(vm.zig:204-209). CLI 는 ReleaseFast 일 때만 켠다(src/main.zig:161, 198, 269).
 임베딩에서 VM 을 재사용하거나 누수 검사를 하려면 끄는 편이 안전하다는 것이 fork 의 결정이다(docs/decisions/project_embedding_agent_loop.md).
 
-`cl_vm_compile`/`cl_vm_validate` 는 eval 과 다르게 맨 앞에서 `resetVM` 을 부른다(vm.zig:354-356). 컴파일만 하고 결과를 실행하는 공개 API 는 없다
-(`exec_bytecode` 호출자는 `VM.eval` 하나뿐: rg 로 확인). 이 때문에 생기는 함정이 7.3절에 있다.
+`cl_vm_compile` 은 eval 과 다르게 맨 앞에서 `resetVM` 을 부른다(`VM.compile`). 컴파일만 하고 결과를 실행하는 공개 API 는 없다
+(`exec_bytecode` 호출자는 `VM.eval` 하나뿐: rg 로 확인). `cl_vm_validate` 도 같은 경로였지만 2026-11-08(F-05)부터 reset 없이 현재 세션 위에
+cont 컴파일만 한다(`VM.validate`, `docs/decisions/project_vm_validate.md`). 이전 함정은 7.3절에 있다.
 
 ### 2.4 호스트 함수: #[bind] 선언에서 CALL_HOST 까지
 
@@ -498,7 +499,7 @@ behavior-test 는 이 장의 핵심이다. 파일을 "발견"하지 않는다. �
 | `gen_all_debug_syms` | 실패 가능한 명령에만이 아니라 모든 명령에 debug sym 을 만든다 | chunk.zig:682 |
 | `backend` | `CL_VM`(기본). `CL_JIT` 는 컴파일 에러 "The JIT backend is not supported."(compiler.zig:287-290, lib.zig 테스트 1136), `CL_TCC`/`CL_CC` 는 C 로 내보내 외부 실행(vm.zig:481-511), `CL_LLVM` 은 `error.TODO` | fork 방침상 VM 만 지원 |
 | `spawn_exe` | AOT 백엔드 산출물을 spawn 으로 실행할지 | vm.zig:487 |
-| `skip_codegen` (Compile 전용) | 바이트코드 생성을 건너뜀. `cl_vm_validate` 가 이것으로 구문/의미 검사만 한다 | vm.zig:347-352 |
+| `skip_codegen` (Compile 전용) | 바이트코드 생성을 건너뜀. `cl_vm_validate` 가 이것으로 구문/의미 검사만 했으나 2026-11-08(F-05)부터는 코드 생성까지 한다(검증이 처음 로드한 모듈을 다음 eval 이 그대로 쓰기 위해) | `VM.validate` |
 | `emit_source_map` (Compile 전용) | C 백엔드 소스맵 | cgen.zig:298 |
 
 `CLResultCode`(cyber.h:40-48)는 다섯 값이다.
@@ -848,8 +849,8 @@ live objects: 0
 | 첫 eval 이 panic 인 뒤 정상 | 정상 동작 |
 | 구문 오류 뒤 `cl_vm_reset(vm)` 하고 정상 | 정상 동작 |
 | 첫 eval 로 빈 소스 `""` 를 먼저 돌린 뒤 구문 오류, 이어서 정상 | 정상 동작 |
-| 성공한 eval 뒤 `cl_vm_validate(good)` | persist 변수 `x` 소실(`print(x)` 컴파일 에러), 이후 eval 은 동작 |
-| 성공한 eval 뒤 `cl_vm_validate(bad)` | 이후 eval 이 `CompileError`, 그 요약을 읽다 SIGBUS(신호 10). `cl_vm_reset` 을 끼우면 정상 |
+| 성공한 eval 뒤 `cl_vm_validate(good)` | persist 변수 `x` 소실(`print(x)` 컴파일 에러), 이후 eval 은 동작. 2026-11-08 F-05 수정 뒤에는 `x` 유지 |
+| 성공한 eval 뒤 `cl_vm_validate(bad)` | 이후 eval 이 `CompileError`, 그 요약을 읽다 SIGBUS(신호 10). `cl_vm_reset` 을 끼우면 정상. 2026-11-08 F-04 · F-05 수정 뒤에는 정상 |
 
 원인은 `cont` 와 chunk 상태의 비대칭으로 추정한다. `Compiler.compile` 은 성공해야 `cont = true` 로 바꾸는데(compiler.zig:310), 실패한 첫 컴파일은 core 청크, main 청크와 `@program_init` 예약 등
 중간 상태를 남기고 `cont` 는 false 로 둔다. 다음 컴파일이 `!cont` 경로로 core 를 다시 올리면서 이미 만들어진 청크와 충돌한다. `cl_vm_validate`/`cl_vm_compile` 이 `resetVM` 으로
@@ -1052,7 +1053,7 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
 | 구분 | 항목 | 심각도(에이전트 루프 기준) |
 |---|---|---|
 | 재현 버그 | 첫 eval 이 컴파일 실패하면 다음 eval 에서 SIGSEGV/abort (7.3 의 1). 2026-11-08 수정 | 높음(호스트 프로세스 사망) |
-| 재현 버그 | `cl_vm_validate`/`cl_vm_compile` 가 VM 을 리셋하고 실패하면 VM 이 깨짐 (7.3 의 2) | 높음 |
+| 재현 버그 | `cl_vm_validate`/`cl_vm_compile` 가 VM 을 리셋하고 실패하면 VM 이 깨짐 (7.3 의 2). 2026-11-08 수정 | 높음 |
 | 재현 버그 | print/eprint 콜백의 첫 인자가 VM 포인터 (7.3 의 3) | 중간 |
 | 한계 | 안전 모드 없음, 메모리 한도 없음, raw 포인터로 호스트 크래시 가능 (7.4) | 높음 |
 | 문서 차이 | 헤더에 선언만 있고 구현이 없는 함수 3개, 시그니처가 다른 함수 1개 (7.2) | 중간 |
@@ -1084,7 +1085,9 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
 1. 첫 eval 컴파일 실패. 재현: `CLVM* vm = cl_vm_init(); cl_vm_eval(vm, "x := \n"); cl_vm_eval(vm, "print('ok')");` -> 두 번째 호출에서 SIGSEGV. 의미 오류(`print(nope)`)면
    `@program_init has already been declared with the same function signature.` 컴파일 에러. 우회: 첫 eval 로 빈 소스를 돌리거나, 실패 뒤 `cl_vm_reset`. Debug 라이브러리에서도 같다(5.3절 표).
 2. `cl_vm_validate`/`cl_vm_compile` 이 `resetVM` 을 부르므로 persist_main 변수를 지우고, 구문 오류가 나면 다음 eval 이 CompileError 를 내고 요약 조회가 SIGBUS 까지 간다. 우회: 에이전트 루프에서는 구문 검증용
-   VM 을 따로 두거나 실패 뒤 `cl_vm_reset`.
+   VM 을 따로 두거나 실패 뒤 `cl_vm_reset`. 2026-11-08 수정(`707b03e1`, F-05): `cl_vm_validate` 는 reset 없이 현재 세션 위에 컴파일만 하고(이월된 변수 · 선언이 보임), 검증한 소스의 선언은 다음 eval 로
+   넘기지 않으며, 검증이 처음 로드한 모듈은 다음에 도는 eval 이 초기화한다. `cl_vm_compile` 은 전체 프로그램 컴파일이라 그대로 reset 한다(헤더에 명시). SIGBUS 쪽은 F-04 수정이 먼저 막았다.
+   lib 테스트 `cl_vm_validate checks against the session without resetting it.`, `docs/decisions/project_vm_validate.md`.
 3. print/eprint 콜백의 `t`. 재현: printer 안에서 `(void*)t == (void*)vm` 이 참, `== cl_vm_main_thread(vm)` 은 거짓. `cl_thread_vm(t)` 등으로 `t` 를 쓰는 콜백은 오작동한다. 제안: core.zig:1248-1262 에서 `@ptrCast(t.c.vm)` 대신
    `@ptrCast(t)` 를 넘긴다(`cl_vm_set_logger` 콜백은 `CLVM*` 이 맞다).
 4. 호스트 함수 안에서 일시 중단된 스크립트를 끊을 수 없다(docs/decisions 문서에 기록. 이 장에서 재현하지 않음).
@@ -1147,7 +1150,7 @@ A: 컴파일러는 object 가 아닌 인자를 복사해 피호출자 소유로 
 
 A: `persist_main` 은 core 컴파일을 다시 하지 않으면서(턴당 수십 µs) 함수/타입/use 와 지역 변수를 이월하지만 panic/interrupt 가 나면 변수가 모두 사라진다. `cl_vm_reset` 은 모든 것을 버리고 다음 eval 이
 core 를 다시 컴파일한다(약 3ms). 새 VM 도 마찬가지로 3ms 이상이다. 실패가 잦은 도구 호출이라면 중요한 상태를 호스트가 들고 매 턴 스크립트에 넘기거나, 오류를 panic 이 아닌 반환 값으로 전달하는 설계가 필요하다.
-첫 eval 컴파일 실패 문제(7.3)도 있으므로 VM 은 빈 소스로 데운 뒤 쓴다.
+첫 eval 컴파일 실패 문제(7.3)는 2026-11-08 수정돼 빈 소스로 데울 필요가 없고, 같은 날부터 `cl_vm_validate` 로 세션을 지우지 않고 입력을 미리 검증할 수 있다.
 
 ### Q5. `core.cy` 를 Cyber 로 쓴 대가와 완화책은 무엇인가? 직렬화로 시작 비용을 없앨 수 있는가?
 
@@ -1177,4 +1180,4 @@ A: math.cy 첫 줄이 `use c` 이기 때문이다. loader 는 모듈마다 불�
   docs/history/embedding_cli.md(0.3 -> 0.4 API 변천), docs/history/ownership_memory.md(호스트 매개변수 소유 규약).
 - 관련 장: 호출 프레임과 `CALL_HOST`, 인터럽트 구현은 [Day 5](05-vm-runtime.md), `ownOrManageArg` 와 소멸자는 [Day 6 오전](06-memory-ownership.md), `Future`/`Generator`/`spawn` 은 [Day 6 오후](07-coroutines-concurrency.md).
   에이전트 루프 설계 제안은 이 장의 7.3, 7.4절을 근거로 [Day 7 오후](09-agent-loop-and-roadmap.md)에서 다룬다.
-- 다음 단계 제안: 7.3 의 버그 두 개(첫 eval 실패, validate)와 printer 인자를 고치는 패치를 lib.zig 테스트와 함께 만들어 보는 것이 이 코드를 인수하는 가장 좋은 첫 작업이다.
+- 다음 단계 제안: 7.3 의 버그 두 개(첫 eval 실패, validate)는 2026-11-08 에 lib.zig 테스트와 함께 고쳤다(F-04 `f5f2d241`, F-05 `707b03e1`). printer 인자(7.3 의 3)가 남은 첫 작업 후보다.

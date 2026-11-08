@@ -3895,6 +3895,18 @@ if (code == CL_SUCCESS) {
 }
 ```
 
+### Checking a script without running it.
+`cl_vm_validate` compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (`persist_main`) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (`use math`) is initialized by the next eval that runs.
+```c
+CLResultCode code = cl_vm_validate(vm, src);
+if (code == CL_ERROR_COMPILE) {
+    CLBytes summary = cl_vm_compile_error_summary(vm);
+    printf("%.*s\n", (int)summary.len, summary.buf);
+    cl_vm_freeb(vm, summary);
+}
+```
+`cl_vm_compile` and `cl_vm_compile_path` compile a whole program instead. They reset the VM first, like `cl_vm_reset`, so persisted state is gone afterwards.
+
 ## Module loader.
 A module loader is set with `cl_vm_set_loader`.
 It describes how a module is loaded when triggered by a `use` import statement:

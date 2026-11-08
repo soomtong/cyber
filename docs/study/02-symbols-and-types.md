@@ -896,7 +896,7 @@ fn main():
     print(f(1))
 ```
 
-출력은 `1` 이고 오류가 없다. 2.3절에서 말한 구멍이다. 파라미터가 같고 반환만 다른 선언은 거부되지 않으며 호출은 먼저 선언된 쪽으로 간다. 파라미터와 반환이 모두 같을 때만 "`f` has already been declared with the same function signature." 가 나온다. 오버로드된 이름을 값으로 쓰면(`g := f`) 오류 메시지가 `AmbiguousSymbol` 이라는 Zig 에러 이름 그대로 나온다. 함수와 타입이 같은 이름이면 5.6 의 "has already been declared as a `type`" 이 나온다.
+수정 전 출력은 `1` 이고 오류가 없었다. 2.3절에서 말한 구멍이다. 파라미터가 같고 반환만 다른 선언은 거부되지 않았고 호출은 먼저 선언된 쪽으로 갔다. 2026-11-08 `cf4aa84a`(F-21)부터는 "`f` has already been declared with the same parameters. Overloads must differ in their parameter types, not only in the return type." 컴파일 오류다. 파라미터와 반환이 모두 같을 때만 "`f` has already been declared with the same function signature." 가 나온다. 오버로드된 이름을 값으로 쓰면(`g := f`) 오류 메시지가 `AmbiguousSymbol` 이라는 Zig 에러 이름 그대로 나온다. 함수와 타입이 같은 이름이면 5.6 의 "has already been declared as a `type`" 이 나온다.
 
 ### 5.8 meta 로 타입 정보 조회하기
 
@@ -1225,7 +1225,7 @@ history 문서의 표대로 `my -> let -> dyn`, `import -> use`, `func -> fn`, `
 3. `const` 매개변수로 `bool`, `EvalStr`, enum 을 쓰는 타입 템플릿이 컴파일러 패닉을 낸다 (5.14b; 해시는 bool 만, 이름 출력은 EvalStr/enum 을 지원하지 않음).
 4. `type X const:` 가 결과 타입의 이름을 덮어쓴다 (src/sema_type.zig:27~30, 5.14c). init 식 `Pick[int]{...}` 은 "Unsupported: type_const".
 5. `-` 가시성은 파서만 인식하고 함수, 필드, 변수에서는 강제되지 않는다 (5.15). docs.md 의 "Field visibility." 와 다르다.
-6. 파라미터가 같고 반환만 다른 오버로드가 거부되지 않고 첫 번째 선언이 호출된다 (5.7).
+6. 파라미터가 같고 반환만 다른 오버로드가 거부되지 않고 첫 번째 선언이 호출됐다 (5.7). 2026-11-08 수정 `cf4aa84a`(F-21).
 7. `Object.toString()` 을 호출하면 프로그램 종료 시 "integer overflow" 패닉이 난다. 최소 재현은 `a := Object(^'s')` / `print(a.toString())` / `print('end')` 이고 `end` 출력 뒤에 패닉한다(`Object(^5)` 도 동일, `downcast` 는 정상). 원인은 `(as[^str] self.inner).*` 가 retain 없이 만든 `^` 값이 소멸되며 참조 카운트가 어긋나는 것으로 추정한다. 확인하지 않았다.
 8. `fn show(x Any)` 가 호출 시 "Expected type `Any`. Found `int`." 로 실패한다. docs.md 의 Generic types 절은 `Any` 가 "template parameters and generic function parameters" 에서 쓰인다고 한다. trait 나 `Copyable` 을 매개변수 타입으로 쓰는 함수는 정상적으로 제네릭이 된다.
 9. 템플릿 제약 위반 메시지가 "Expected type `Showable`. Found `type`." 이다.

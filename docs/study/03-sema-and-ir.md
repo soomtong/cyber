@@ -419,7 +419,7 @@ semaExprNoCheck(.callExpr)                      sema.zig:6831
 
 첫째, 메서드 호출 `x.m(a)` 는 수신자 `x` 가 첫 번째 인자(`Argument.initReceiver`)가 되는 같은 `matchFuncSym2` 이다. 수신자가 `T` 인데 메서드가 `&T` 를 받으면 `resolveRtArg` 의 `.receiver` 분기(`sema_func.zig:872-977`)가 암시적으로 `semaAddressOf` 를 넣어 준다. 위 사용자 연산자 호출에서 `address_of(local a)` 가 생긴 이유다. 반면 일반 인자(`b`)는 `P` 에서 `&P` 로 자동 변환되지 않아서, ``fn (&P) `+`(o &P)`` 로 선언하고 `a + b` 를 쓰면 "Expected argument `&P`, found `P`, when calling `fn +(&P, &P) -> P`." 에러가 났다(직접 확인).
 
-둘째, 오버로드 해석은 "최적 매칭"이 아니라 "선언 순서대로 처음 성공하는 것"이다(`sema_func.zig:611-645`, 성공하면 즉시 반환). 모두 실패하면 인자 번호가 가장 큰 곳까지 맞았던 함수 하나를 골라 불일치 에러를 낸다(`:660-668`, `reportCallFuncMismatch` `:1278`). `call_overload_incompat_arg_error.cy` 의 기대 메시지가 첫 번째 오버로드 `fn foo(int)` 를 지목하는 이유다.
+둘째, 오버로드 해석은 2026-11-08 `cf4aa84a`(F-21)부터 두 단계다. 1단계는 암시적 변환 없이(`fit_target=false`) 매개변수 타입이 그대로 맞는 후보를 선언 순서와 무관하게 고르고(정수 리터럴은 `int` · `raw` 매개변수에만 맞음, 제네릭 후보 제외), 없으면 2단계가 이전처럼 "선언 순서대로 처음 성공하는 것"이다(`matchRtOverload`, 성공하면 즉시 반환). 모두 실패하면 인자 번호가 가장 큰 곳까지 맞았던 함수 하나를 골라 불일치 에러를 낸다(`:660-668`, `reportCallFuncMismatch` `:1278`). `call_overload_incompat_arg_error.cy` 의 기대 메시지가 첫 번째 오버로드 `fn foo(int)` 를 지목하는 이유다.
 
 셋째, 시도에 실패한 오버로드가 남긴 IR 을 되돌리는 코드가 "미완" 표시와 함께 있다. 실패하면 `varStack` 을 시도 전 길이로 줄이고 현재 문장 리스트의 꼬리를 잘라내지만(`:647-658`), 바로 옆에 `TODO: Also remove the statements and expressions generated.` 가 남아 있다. 이미 만든 식 노드는 arena 에 남는다(arena 는 개별 해제가 없다). 이 불완전한 롤백이 실제 오동작을 일으키는 사례는 찾지 못했다(미확인). 다만 후보 인자 평가가 숨은 지역이나 문장을 만드는 코드를 고칠 때는 이 경로를 의심해야 한다.
 
@@ -1028,7 +1028,7 @@ fork 를 유지보수하는 입장에서 시사점은 다음과 같다.
 1. cte 복합 대입 무시. `cte.zig:423`(컴파일타임 변수 대입)과 `:460`(벡터 원소 대입)은 `rec_op`(복합 연산자 정보)를 버리고 오른쪽 식만 평가한다. `.deref` 분기만 `eval_assign_right` 를 쓴다(`:436`). 5.6 의 `t += 5` 가 `15` 대신 `5` 가 된다. `src/test/meta` 에 `+=` 를 쓰는 케이스가 없어서 테스트에 걸리지 않는다. 영향 범위는 `const` 초기화, `#{}`, `type ... const:` 본문, `#[consteval]` 함수 안의 `+=`, `-=` 등이다. 2026-11-08 수정 `02f39e67`: `eval_assign_right(c, right, rec_op, target_t)`가 세 분기 모두에서 `left op right` 를 평가하고 목적지 타입을 검사한다. 컴파일 타임 벡터 원소 읽기와 범위 검사도 함께 넣었다(`docs/decisions/project_cte_op_assign.md`). 테스트 `meta/ct_op_assign.cy` 는 같은 함수를 런타임과 `const` 로 실행해 비교한다.
 2. 지역 변수 257개부터 컴파일러가 죽는다. IR 지역 번호가 `u8`(`LocalVarS.id`)이라 `@intCast(local_id)`(`sema.zig:3416`, 파라미터는 `:3343`)가 넘친다. 한 함수에서 지역 `a0` ~ `a255`(256개)는 통과했고 257개에서 "panic: integer does not fit in destination type" 이 났다(main 블록은 300개에서 확인). `CompileError` 가 아니라 컴파일러 프로세스 패닉이다. 숨은 임시 지역(`_opt`, `_temp` 등)도 번호를 쓰므로 실제 한계는 사용 패턴에 따라 더 낮다. 생성된 코드를 실행하는 에이전트 루프에서는 만날 수 있는 조건이다. 2026-11-08 수정 `04096230`: `reserveLocalName` · `declareParam`이 번호를 매기기 전에 `checkLocalLimit`로 256개 초과를 `CompileError`("Too many local variables. A function can have at most 256 locals, including hidden temporaries.")로 보고한다. 같은 u8 계열인 매개변수 255개 초과(`resolveFuncSig` · `pushLambdaFuncParams` · `resolveFuncType`, "Too many parameters."), 구조체 필드 255개 초과(`resolveStructFields` · `reifyStructType`, "Too many fields."), C 가변 인자 호출의 인자 255개 초과(`getVmCVariantFunc`, "Too many arguments.")도 같은 방식이다. 폭을 u16으로 넓히는 길은 IR extern 구조체 · `FuncParam.reg` · 바이트코드 레지스터 번호까지 번지므로 택하지 않았다.
 3. `try ... else err:` 는 파싱되지만 sema 가 항상 "Unsupported statement: tryStmt" 로 거부한다(`sema.zig:673-678`). 같은 구문의 IR 노드(`tryStmt`), `bc_gen.gen_try_stmt` 가 남아 있다.
-4. 오버로드 시도 롤백이 미완이다(`sema_func.zig:653` TODO). 5.4 에서 다룬 대로 실제 오동작은 찾지 못했다(미확인).
+4. 오버로드 시도 롤백이 미완이다(`matchRtOverload` 의 TODO). 5.4 에서 다룬 대로 실제 오동작은 찾지 못했다(미확인). 선언 순서가 결과를 바꾸던 F-21 은 2026-11-08 `cf4aa84a` 로 고쳤다(`docs/decisions/project_overload_exact_match.md`).
 5. 클로저는 참조형(`^T`, `&T`) 지역만 캡처하고 바로 위 `Proc` 한 단계만 본다(`sema.zig:5066`, `:5115`). 값 타입 캡처는 `TODO: Capture non-reference stack variables too.`(`:5063`).
 6. `cyber -cc`/`-tcc` 는 sema 단계에서 실패한다(`sema.zig:2870`). C 백엔드(`cgen.zig`)는 이 IR 을 읽도록 작성되어 있으나 현재 core.cy 와는 맞지 않는다.
 
@@ -1059,7 +1059,7 @@ A: 소유권과 이동 판단에 필요한 정보가 식 하나 안에 없고 "�
 
 ### Q2. 오버로드를 "선언 순서대로 처음 성공하는 것"으로 고르면 어떤 문제가 생기는가? 이를 완화하는 장치는 무엇인가?
 
-A: 선언 순서가 의미를 바꾼다. `foo(int)` 와 `foo(float)` 를 `float` 먼저 선언하면 `foo(1)` 은 물론 `int` 변수를 넘긴 `foo(n)` 도 `float` 오버로드가 선택된다(직접 실행). `int` → `float` 이 암시적 변환이라 먼저 선언된 후보가 성공하기 때문이다. 시도에 실패한 오버로드가 만든 숨은 지역과 문장은 되돌려야 하는데 그 코드에 TODO 가 있다(`sema_func.zig:653`). 장치는 `Cstr.return_infer_error`(오버로드 중이면 리터럴 추론 실패를 에러 대신 `infer_error` 로 반환)와 `varStack`/문장 꼬리 복원이다. 그리고 모두 실패했을 때는 가장 멀리 간 후보를 에러에 쓴다.
+A: 선언 순서가 의미를 바꾼다. `foo(int)` 와 `foo(float)` 를 `float` 먼저 선언하면 `foo(1)` 은 물론 `int` 변수를 넘긴 `foo(n)` 도 `float` 오버로드가 선택됐다(직접 실행, 2026-11-08 `cf4aa84a` 전). `int` → `float` 이 암시적 변환이라 먼저 선언된 후보가 성공하기 때문이다. 지금은 변환 없이 맞는 후보를 먼저 찾는 1단계가 앞에 있어 `foo(n)` · `foo(1)` 모두 `int` 로 간다. 시도에 실패한 오버로드가 만든 숨은 지역과 문장은 되돌려야 하는데 그 코드에 TODO 가 있다(`sema_func.zig:653`). 장치는 `Cstr.return_infer_error`(오버로드 중이면 리터럴 추론 실패를 에러 대신 `infer_error` 로 반환)와 `varStack`/문장 꼬리 복원이다. 그리고 모두 실패했을 때는 가장 멀리 간 후보를 에러에 쓴다.
 
 ### Q3. `#if false:` 안의 `this_function_does_not_exist()` 는 에러가 없는데 `if false:` 안에서는 에러가 난다. 왜 이렇게 설계했는가?
 

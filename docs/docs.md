@@ -2022,6 +2022,19 @@ print(foo())         --> 4
 print(foo(2))        --> 12
 print(foo(20, 5))    --> 100
 ```
+A call picks the overload whose parameter types match the arguments without implicit conversions, regardless of declaration order. An integer literal matches `int` parameters first. If no overload matches exactly, the first declared overload that accepts the arguments with implicit conversions (such as `int` to `float`) is used:
+```cy
+fn show(x float) -> str:
+    return 'float'
+fn show(n int) -> str:
+    return 'int'
+
+n := 3
+print(show(n))       --> int
+print(show(2.5))     --> float
+print(show(4))       --> int
+```
+Overloads must differ in their parameter types. Declaring two functions with the same parameters and only a different return type is a compile error.
 
 ## Parameter groups.
 When multiple parameters share the same type they can be declared together in a sequence:

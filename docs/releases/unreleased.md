@@ -56,6 +56,9 @@
   컴파일 오류(`40bfa711`, F-22). 아래 "언어" 절. 이 검사로 `os.File`이 `io.Writer`의 `write([&]byte)`를 실제로 구현하지 않은 것이
   드러났다(느슨한 검사가 `write(str)`을 구현으로 잡아 `Dyn[io.Writer]`로 쓰면 span 비트를 `str`로 읽었다). `fn (&File) write(buf [&]byte)`를
   추가했다.
+- 오버로드가 선언 순서대로 처음 맞는 후보를 골라 `fn show(x float)`을 `fn show(x int)`보다 먼저 선언하면 `int` 변수 · 정수 리터럴도
+  `float` 쪽으로 갔다. 이제 암시적 변환 없이 타입이 그대로 맞는 후보를 먼저 고른다(`cf4aa84a`, F-21). 매개변수가 같고 반환 타입만 다른
+  오버로드는 컴파일 오류다. 아래 "언어" 절.
 
 ## 언어와 표준 라이브러리
 
@@ -73,6 +76,11 @@
   긴 텍스트는 여러 리터럴로 나눠 실행 시 이어 붙인다. `docs/docs.md` Strings 절에 적혀 있다.
 - trait 구현(`40bfa711`): `with Trait`를 선언한 타입의 메서드는 trait 메서드와 매개변수 개수 · 각 매개변수 타입 · 반환 타입이 정확히
   같아야 구현으로 인정된다. `int`와 `float`처럼 암시적으로 변환되는 타입도 다른 것으로 본다. `docs/docs.md` Traits 절에 적혀 있다.
+- 오버로드 선택(`cf4aa84a`): 호출 인자와 매개변수 타입이 암시적 변환 없이 그대로 맞는 후보가 있으면 선언 순서와 무관하게 그것을 고른다.
+  정수 리터럴은 `int` · `raw` 매개변수에만 그대로 맞고, `float` 매개변수에는 2단계에서 맞는다. 그런 후보가 없으면 이전처럼 선언 순서대로
+  암시적 변환(`int` → `float`, `T` → `?T` 등)을 허용해 처음 맞는 후보다. 제네릭 오버로드와 컴파일 타임 호출은 2단계만 쓴다. 매개변수가 같고
+  반환 타입만 다른 오버로드는 `X has already been declared with the same parameters.` 컴파일 오류. `docs/docs.md` Function overloading
+  절에 적혀 있다. 설계는 `docs/decisions/project_overload_exact_match.md`.
 
 ## 임베딩 API
 

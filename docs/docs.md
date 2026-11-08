@@ -161,6 +161,8 @@ Variables can be assigned afterwards using the `=` operator:
 a = 234
 ```
 
+A function body, including the main block, can hold at most 256 locals. Parameters and the hidden temporaries the compiler creates count towards that limit. A function signature can have at most 255 parameters and a struct at most 255 fields. Exceeding a limit is a compile error.
+
 ### `var` declaration.
 When a local variable is declared with `var`, a type specifier is required.
 The initializer must satisfy the type constraint:

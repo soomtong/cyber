@@ -43,7 +43,7 @@ tags:
 | F-05 | `cl_vm_validate`/`cl_vm_compile`이 VM을 리셋해 `persist_main` 변수를 지운다. validate가 구문 오류로 실패하면 이후 eval이 깨지고 요약 조회가 SIGBUS | `lib.zig`의 resetVM 호출 | 챕터 재현 [08 §7.3](08-embedding-builtins-tests.md) | 높음 | 검증용 VM을 따로 두거나 리셋하지 않게 |
 | F-06 | 스크립트가 `use c` 없이 `p := as[Ptr[int]] 8; print(p.*)`로 임의 주소를 역참조해 프로세스를 죽인다 | `as[Ptr[T]]` 캐스트 sema | 메인 재현(`Segmentation fault at address 0x8`) + [08 §7.4](08-embedding-builtins-tests.md) | 치명 | 로더 허용 목록으로는 막을 수 없다. 캐스트 자체를 막는 컴파일 옵션이 필요 |
 | F-07 | 비-main 스레드의 `await`가 `@panic("TODO")`로 프로세스를 죽인다. 스레드 panic의 원래 메시지는 사라지고 `Spawned thread did not finish.`만 남는다 | `vm.zig`의 zAwait | 코드 판독 + [07 §2.6](07-coroutines-concurrency.md) | 높음 | 에이전트 환경에서는 spawn 금지 또는 이 경로 차단 |
-| F-08 | 컴파일러의 `std.debug.panic` 경로가 호스트를 abort시킨다. 알려진 사례: 한 함수에 지역 변수 257개(256개는 통과) | `sema.zig:3416`(`LocalVarS.id`가 u8, 현재 `sema.zig:50` 선언 · `@intCast`는 3312 · 3385) | 메인 재현(`integer does not fit in destination type`) + [03 §7](03-sema-and-ir.md) | 치명 | 한계 검사를 사용자 오류로 바꾼다 |
+| F-08 | 컴파일러의 `std.debug.panic` 경로가 호스트를 abort시킨다. 알려진 사례: 한 함수에 지역 변수 257개(256개는 통과) | `sema.zig:3416`(`LocalVarS.id`가 u8, 현재 `sema.zig:50` 선언, 검사는 `checkLocalLimit` · `checkParamLimit` · `checkArgLimit` · `checkFieldLimit` 약 3395~3430) | 메인 재현(`integer does not fit in destination type`) + [03 §7](03-sema-and-ir.md) | 치명 | 2026-11-08 수정 `04096230`. u8 폭은 그대로 두고 sema가 한계를 컴파일 오류로 보고한다: 한 함수(main 포함)의 IR 지역(매개변수 · 숨은 임시 포함) 256개 초과는 `Too many local variables.`, 매개변수 255개 초과(함수 · 람다 · 함수 타입, `FuncSig.numParams` · `Proc.numParams`가 u8)는 `Too many parameters.`, 구조체 필드 255개 초과(init `nargs` · 필드 `idx`가 u8)는 `Too many fields.`, C 가변 인자 호출의 인자 255개 초과는 `Too many arguments.`. 같은 계열이던 매개변수 257개(`numParams += 1` overflow · 호출 `nargs` 캐스트)와 필드 300개 init도 같이 막았다. 테스트 `functions/too_many_locals_error.cy` · `types/struct_too_many_fields_error.cy` · lib-test `Compiler limits are compile errors, not panics.`(경계값 255 · 256은 정상 실행 확인) |
 | F-09 | 같은 계열의 다른 한계: 루프 본문 `s += 1` 9000줄 이상, if 본문 17000줄 이상, 점프 오프셋 `int16_t`(앞 점프가 32767단위를 넘으면 런타임 크래시) | `bc_gen.zig`의 점프 패치, `vm.c:867`(현재 861, 여전히 `int16_t`) | 챕터 재현 [04 §5](04-bytecode-gen.md), [05 §5 실습 6](05-vm-runtime.md) | 높음 | LLM이 긴 스크립트를 생성할 때 닿는다 |
 | F-10 | 스택 포인터 패치 구멍. 스택이 재할당될 때 main 프레임의 `&x`, `call_ptr`/`call_union`로 부른 호출 중의 포인터는 갱신되지 않아 쓰레기를 읽는다 | `thread.zig:890`(init 프레임 미패치, 현재 902), `bc_gen.zig:3127`(ptr_table은 call/call_host만, `call_ptr` · `call_union`은 현재 2125 · 2151) | 챕터 재현 [04 §7](04-bytecode-gen.md), [05 §7](05-vm-runtime.md) | 치명 | 깊은 재귀 + 빌림 조합에서 발생. `a2236c78`이 `gen_next` · `gen_end` 지점에 ptr layout을 더하고 걷기가 `Generator.prev_fp`를 따르게 했지만 두 구멍은 그대로 |
 | F-11 | `g := math.sqrt; g(16.0)`처럼 호스트 함수를 함수 값으로 쓰면 segfault. `addr \| (1<<63)`가 정의되지 않은 시프트라 컴파일러가 대입을 지운다 | `vm.c:1718`(FN_HOST, 현재 1695) | 챕터 재현 [05 §5 실습 6](05-vm-runtime.md) | 높음 | 2026-11-06 수정 `dfaab96a`(`vm.c` `FN_HOST`가 `(u64)1 << 63`, 현재 1704). `g := math.sqrt; g(16.0)`이 `4`. 테스트 `modules/math.cy` |
@@ -121,7 +121,7 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 
 에이전트 루프 용도에서 먼저 막아야 하는 순서(제안이다. 공식 로드맵은 [09장](09-agent-loop-and-roadmap.md)).
 
-1. 호스트가 죽는 경로: F-04, F-06, F-08, F-09, F-10, F-40 (F-03 · F-11 · F-12는 수정됨)
+1. 호스트가 죽는 경로: F-04, F-06, F-09, F-10, F-40 (F-03 · F-08 · F-11 · F-12는 수정됨)
 2. 조용한 오답: F-20, F-21, F-22, F-23, F-24 (F-01은 수정됨, F-73은 재현 안 됨 · 미확정)
 3. 상태가 깨지는 경로: F-05, F-07, F-14, F-25, F-26
 4. 표준 라이브러리와 리터럴에서 LLM 스크립트가 바로 닿는 곳: 모두 수정됨(F-70 · F-71 · F-72 · F-74 · F-76)

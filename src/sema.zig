@@ -6405,6 +6405,9 @@ pub fn semaExpr(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
     if (cy.Trace) {
         log.tracev("expr.{s}: end {s}", .{@tagName(node.type()), res.type.name()});
     }
+    if (c.compiler.config.deny_raw_ptrs) {
+        try check_raw_ptr(c, res.type, node);
+    }
 
     if (cstr.target_t) |target_t| {
         if (target_t == res.type) {
@@ -6426,6 +6429,29 @@ pub fn semaExpr(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
         }
     }
     return res;
+}
+
+/// `deny_raw_ptrs` (F-06): a script chunk may not produce a value of a raw pointer type. Without `Ptr[T]` and
+/// `PtrSpan[T]` values there is nothing to dereference at an arbitrary address (`as[Ptr[int]] 8`, `Ptr[int](8)`,
+/// `as[Ptr[int]] &x` + `p[100000]`, `alloc(int)`, `PtrSpan[int]{length=4}`). Standard module chunks are exempt
+/// because the core library is built on raw pointers. `^T` and `&T` can not be cast from an integer and stay allowed.
+fn check_raw_ptr(c: *cy.Chunk, type_: *cy.Type, node: *ast.Node) !void {
+    var ptr_t = type_;
+    if (ptr_t.kind() == .option) {
+        ptr_t = ptr_t.cast(.option).child_t;
+    }
+    if (!ptr_t.isPointer() and !ptr_t.isInstanceOf(c.sema.ptr_span_tmpl)) {
+        return;
+    }
+    // The node's own chunk decides, not `c`: a struct field default such as `PtrSpan.ptr = none` is evaluated
+    // under the script chunk that writes the initializer, and core nodes stay exempt.
+    const node_chunk = c.compiler.chunks.items[node.src()];
+    if (cy.compiler.is_std_module_uri(node_chunk.srcUri)) {
+        return;
+    }
+    const name = try c.sema.allocTypeName(ptr_t);
+    defer c.alloc.free(name);
+    return c.reportErrorFmt("Raw pointer type `{}` is not allowed. The host disabled raw pointers for this script (`deny_raw_ptrs`).", &.{v(name)}, node);
 }
 
 pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprResult {

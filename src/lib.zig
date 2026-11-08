@@ -212,6 +212,7 @@ export fn clDefaultEvalConfig() C.EvalConfig {
         .gen_all_debug_syms = false,
         .spawn_exe = false, 
         .persist_main = false,
+        .deny_raw_ptrs = false,
     };
 }
 
@@ -380,6 +381,7 @@ export fn clDefaultCompileConfig() C.CompileConfig {
         .skip_codegen = false,
         .emit_source_map = false,
         .persist_main = false,
+        .deny_raw_ptrs = false,
     };
 }
 
@@ -1612,6 +1614,83 @@ test "String literals past 65535 bytes are compile errors, not truncated." {
         try repeat_src(w, "use test\ns := '", "a", "", 65535, "'\ntest.eq(s.len(), 65535)\n");
         var res: C.EvalResult = undefined;
         try zt.eq(C.Success, C.vm_eval(vm, lw.written(), &res));
+    }
+}
+
+fn expect_deny_raw_ptr_error(vm: *C.VM, src: []const u8, type_name: []const u8) !void {
+    var config = C.defaultEvalConfig();
+    config.deny_raw_ptrs = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "t", src, config, &res));
+    const summary = C.vm_compile_error_summary(vm);
+    defer C.vm_freeb(vm, summary);
+    var buf: [128]u8 = undefined;
+    const msg = try std.fmt.bufPrint(&buf, "Raw pointer type `{s}` is not allowed.", .{type_name});
+    if (std.mem.indexOf(u8, summary, msg) == null) {
+        std.debug.print("expected `{s}`, got:\n{s}\n", .{ msg, summary });
+        return error.TestUnexpectedResult;
+    }
+}
+
+test "deny_raw_ptrs rejects raw pointers in script chunks." {
+    // F-06. Without the option a script dereferences any address (`as[Ptr[int]] 8` → SIGSEGV in the host).
+    if (is_wasm) return;
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    const cast_src = "p := as[Ptr[int]] 8\nprint(p.*)\n";
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        try expect_deny_raw_ptr_error(vm, cast_src, "Ptr[int]");
+        try expect_deny_raw_ptr_error(vm, "p := Ptr[int](8)\nprint(p.*)\n", "Ptr[int]");
+        try expect_deny_raw_ptr_error(vm, "x := 1\nr := &x\np := as[Ptr[int]] r\nprint(p[100000000])\n", "Ptr[int]");
+        try expect_deny_raw_ptr_error(vm, "p := alloc(int)\np.* = 1\n", "Ptr[int]");
+        try expect_deny_raw_ptr_error(vm, "ps := PtrSpan[int]{length=4}\nprint(ps[1])\n", "PtrSpan[int]");
+        try expect_deny_raw_ptr_error(vm, "fn f(p Ptr[int]) -> int:\n    return p.*\nprint(f(as[Ptr[int]] 8))\n", "Ptr[int]");
+        // `?Ptr[T]` (what `StaticMap.get` returns) is checked through the option.
+        try expect_deny_raw_ptr_error(vm, "fn g() -> ?Ptr[int]:\n    return none\nprint(g())\n", "Ptr[int]");
+    }
+    // Safe code still runs: spans, slices, maps, strings and borrows are implemented with raw pointers inside core.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        var config = C.defaultEvalConfig();
+        config.deny_raw_ptrs = true;
+        var res: C.EvalResult = undefined;
+        const src =
+            \\use test
+            \\xs := []int{1, 2, 3}
+            \\xs += 4
+            \\sp := [&]int{4, 5, 6}
+            \\m := Map[str, int]{}
+            \\m['a'] = 1
+            \\x := 42
+            \\r := &x
+            \\test.eq(xs[3] + sp[2] + m['a'] + r.*, 4 + 6 + 1 + 42)
+            \\s := 'ab%{x}'
+            \\test.eq(s.len(), 4)
+            \\
+        ;
+        try zt.eq(C.Success, C.vm_evalx(vm, "t", src, config, &res));
+    }
+    // REPL: a rejected eval does not break the next one.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        var config = C.defaultEvalConfig();
+        config.deny_raw_ptrs = true;
+        config.persist_main = true;
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_evalx(vm, "t", "a := 1\n", config, &res));
+        try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "t", cast_src, config, &res));
+        try zt.eq(C.Success, C.vm_evalx(vm, "t", "use test\ntest.eq(a, 1)\n", config, &res));
+    }
+    // The default keeps raw pointers (the CLI and existing hosts). Compile only: running it would crash.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        try zt.eq(C.Success, C.vm_compile(vm, "t", cast_src, C.defaultCompileConfig()));
     }
 }
 

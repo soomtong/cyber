@@ -1403,6 +1403,12 @@ const mods = std.StaticStringMap(ModuleEntry).initComptime(.{
     .{"test", ModuleEntry{.bind = &test_mod.bind}},
 });
 
+/// Whether `uri` names a standard module (`core`, `meta`, ...). `deny_raw_ptrs` exempts these chunks: the core
+/// library implements `Span`, `Map` and friends with raw pointers.
+pub fn is_std_module_uri(uri: []const u8) bool {
+    return mods.has(uri);
+}
+
 pub fn default_loader(vm_: ?*C.VM, mod_: ?*C.Sym, spec: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
     const name = C.from_bytes(spec);
     if (mods.get(name)) |entry| {

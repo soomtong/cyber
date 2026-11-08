@@ -287,6 +287,11 @@ typedef struct CLEvalConfig {
     
     /// Persist main locals / use imports into the VM env. For REPL-like behavior.
     bool persist_main;
+
+    /// Reject raw pointers (`Ptr[T]`, `PtrSpan[T]`) in every chunk that is not a standard module.
+    /// An expression of such a type is a compile error, so an untrusted script can not build or dereference
+    /// an arbitrary address. The core library keeps using raw pointers internally. Default false.
+    bool deny_raw_ptrs;
 } CLEvalConfig;
 
 typedef struct CLEvalResult {
@@ -310,6 +315,9 @@ typedef struct CLCompileConfig {
 
     /// Persist main locals / use imports into the VM env. For REPL-like behavior.
     bool persist_main;
+
+    /// See `CLEvalConfig.deny_raw_ptrs`.
+    bool deny_raw_ptrs;
 } CLCompileConfig;
 
 typedef struct CLValidateConfig {

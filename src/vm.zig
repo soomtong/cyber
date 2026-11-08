@@ -438,6 +438,7 @@ pub const VM = struct {
         compile_c.gen_all_debug_syms = cy.Trace;
         compile_c.backend = config.backend;
         compile_c.persist_main = config.persist_main;
+        compile_c.deny_raw_ptrs = config.deny_raw_ptrs;
         const res = try self.compiler.compile(src_uri, src, compile_c);
         tt.endPrintVerbose("compile");
 

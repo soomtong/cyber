@@ -302,7 +302,7 @@ pub fn semaManage(c: *cy.Chunk, expr: ExprResult, node: *ast.Node) !ExprResult {
 | 지역의 타입 | 내는 IR | 이후 바이트코드 |
 |---|---|---|
 | 비관리 타입 | 없음 | 없음 |
-| 일반 함수의 `^T`/함수 값 매개변수 | 없음(호출자가 관리) | 없음. 제너레이터 함수의 매개변수만 예외 |
+| 일반 함수의 `^T`/함수 값 매개변수 | 없음(호출자가 관리) | 없음. 제너레이터 함수의 매개변수만 예외(빌림 매개변수는 2026-11-08부터 컴파일 오류, F-14) |
 | `str` | `@destruct[str]` 호출 | `dtor_str` 한 개로 치환 |
 | `^T` | `release` stmt(`deinit_obj` = `@deinitObject[T]`) | `release` 명령 + 0이 되면 `call @deinitObject` |
 | 함수 값(클로저) | `release` stmt | 위와 같음 |

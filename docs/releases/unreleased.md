@@ -69,6 +69,10 @@
   `Spawned thread did not finish.` 대신 `Spawned thread panicked: <메시지>`로 원래 메시지를 담는다. VM을 해제하면 worker 스레드도
   멈추고 join한다(이전에는 해제된 VM의 풀 위에서 잠든 채 남았다)(`56af553f`, F-07,
   `docs/decisions/project_spawn_nested_await.md`). `docs/docs.md` Future await 절에 적혀 있다.
+- 빌림 매개변수(`&int` 등)를 받는 `#[generator]` 함수가 컴파일되어, 호출자가 끝난 뒤 `next()`를 부르면 사라진 스택 슬롯을 읽었다
+  (41 다음 1). 이제 `A \`#[generator]\` function can not take the borrow type \`&int\` as a parameter.` 컴파일 오류다. 같이 찾은 구멍으로
+  `?&T`가 빌림으로 취급되지 않아 `^(?&int(&x))` lift와 `scope` 없는 `-> ?&int` 반환이 통과했는데, 이제 `&T`와 같은 규칙을 받는다
+  (`a7418c29`, F-14, `docs/decisions/project_generator_borrow_params.md`). 아래 "언어" 절.
 
 ## 언어와 표준 라이브러리
 
@@ -91,6 +95,10 @@
   암시적 변환(`int` → `float`, `T` → `?T` 등)을 허용해 처음 맞는 후보다. 제네릭 오버로드와 컴파일 타임 호출은 2단계만 쓴다. 매개변수가 같고
   반환 타입만 다른 오버로드는 `X has already been declared with the same parameters.` 컴파일 오류. `docs/docs.md` Function overloading
   절에 적혀 있다. 설계는 `docs/decisions/project_overload_exact_match.md`.
+
+- 제너레이터 매개변수(`a7418c29`): `#[generator]` 함수의 매개변수(메서드의 `&self` 수신자 포함)는 빌림 타입(`&T` · `[&]T` · 빌림 필드를 가진
+  구조체 · `?&T`)일 수 없다. 제너레이터는 호출보다 오래 살므로 값이나 `^T`를 넘긴다. `?&T`는 `&T`와 같은 빌림 컨테이너다. lift 불가,
+  반환하려면 `scope` 매개변수 · `scope` 반환, REPL 최상위 지역으로 이월 불가. `docs/docs.md` Generators · Optionals 절에 적혀 있다.
 
 ## 임베딩 API
 

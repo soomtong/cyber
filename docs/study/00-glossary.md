@@ -118,7 +118,7 @@ tags:
 | --- | --- | --- |
 | stackful / stackless | 코루틴이 자기 스택 전체를 갖는가 / 프레임 하나만 힙에 두는가. 0.3 fiber는 전자, 0.4 generator는 후자 | 07 |
 | fiber(0.3) | `coinit`/`coresume`/`coyield`로 쓰던 stackful 코루틴. 0.4에서 삭제되었고 `src/fiber.zig`와 `vm.h`의 `Fiber`는 죽은 잔재 | 07 |
-| `#[generator]` | 이 속성을 붙인 함수를 호출하면 `^Generator[Fn]`이 돌아온다. 반환 타입이 시그니처와 달라지는 점에 주의 | 07 |
+| `#[generator]` | 이 속성을 붙인 함수를 호출하면 `^Generator[Fn]`이 돌아온다. 반환 타입이 시그니처와 달라지는 점에 주의. 빌림 매개변수(`&T` · `[&]T` · `?&T`)는 컴파일 오류(2026-11-08, F-14) | 07 |
 | `RET_GEN` / `RET_Y` / `GEN_NEXT` / `GEN_END` | 제너레이터 생성 / yield / 다음 값 / 종료 명령. `RET_Y`는 지역을 되돌려 저장하지 않는다(F-01) | 07 |
 | `Future` / `FutureValue` / `FutureResolver` | `spawn`의 결과 / 값 저장 객체 / 완료시키는 쪽. await는 어느 스레드에서나 블록(비-main abort였던 F-07은 2026-11-08 수정) | 07 |
 | `Thread` / `spawn` | OS 워커 풀에서 도는 격리된 실행 맥락. 스레드마다 힙과 스택. 인자와 결과는 `@send`로 복사(int 계열과 str만) | 07 |

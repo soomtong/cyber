@@ -807,6 +807,8 @@ var a ?str = 'abc'
 print(a)    --> abc
 ```
 
+An optional borrow `?&T` is a borrow container: like `&T` it can not be lifted with `^`, it is returned with a `scope` parameter and a `scope` return type, and a generator can not take it as a parameter.
+
 The option type's constructor can also wrap a value:
 ```cy
 a := ?str('abc')
@@ -3028,6 +3030,17 @@ print(gen)
 --> Generator[fn()->int]
 ```
 `yield` pauses the current generator and returns a value back to the call site of `Generator.next`.
+
+A generator outlives the call that created it, so its parameters (including a method's receiver) can not be borrow types such as `&T`, `[&]T`, `?&T` or a struct that holds a borrow. Pass a value or a `^T` pointer instead:
+```cy
+#[generator]
+fn watch(p &int) -> int:    --> CompileError: A `#[generator]` function can not take the borrow type `&int` as a parameter.
+    yield p.*
+
+#[generator]
+fn watch(p ^int) -> int:    -- OK
+    yield p.*
+```
 
 A generator begins and resumes execution with `next` which returns the next yielded value as an optional:
 ```cy

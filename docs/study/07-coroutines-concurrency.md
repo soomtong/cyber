@@ -1322,7 +1322,7 @@ $ cyber br2.cy
 1
 ```
 
-`make` 의 지역 `local` 은 함수가 끝나면 사라진다. 제너레이터는 그 주소(빌림 `&int`)를 스냅샷에 넣어 힙으로 가져왔다. 컴파일 에러가 없다.
+`make` 의 지역 `local` 은 함수가 끝나면 사라진다. 제너레이터는 그 주소(빌림 `&int`)를 스냅샷에 넣어 힙으로 가져왔다. 컴파일 에러가 없었다(2026-11-08 `a7418c29` 부터는 `A \`#[generator]\` function can not take the borrow type \`&int\` as a parameter.` 컴파일 오류다. `[&]T`, 빌림 필드를 가진 구조체, `&self` 수신자, `?&T` 도 같다. `docs/decisions/project_generator_borrow_params.md`).
 첫 값 41 은 그 스택 슬롯에 우연히 남은 값이고 둘째 값 1 은 이미 덮인 값이다(use-after-return).
 보통은 `^b`(빌림을 힙으로 올림)가 `semaLift` 에서 막힌다(`sema.zig:5834~5845`, `src/test/memory/lift_borrow_error.cy`: "Cannot lift the borrow type `&int`."). 제너레이터의 스냅샷은 이 검사를 거치지 않는다.
 같은 코드를 `x := 7; g := watch(&x)` 처럼 호출자가 `x` 를 살려 두면 정상이다(br1.cy: 7, 8).
@@ -1497,7 +1497,7 @@ CodeAct 루프의 이상적인 모양은 이렇다. 스크립트가 `r := tool('
 | --- | --- | --- | --- | --- |
 | 1 | generator 본문 지역이 `ret_gen` 스냅샷 밖 (`bc_gen.zig:2345`) 이고 `RET_Y` 가 저장하지 않음 | 조용한 오답, 무한 루프 | 실습 3 (b1, b2, b3, d2, c1) | 실행으로 재현, 원인 코드 확인 |
 | 2 | yield 를 넘는 관리 타입 지역이 해제/읽기에서 쓰레기 포인터를 씀 | segfault | 실습 4 (e5) | 실행으로 재현 |
-| 3 | 빌림 `&T` 매개변수가 `semaLift` 검사 없이 힙 스냅샷으로 들어감 | use-after-return | 실습 8 (br2) | 실행으로 재현 |
+| 3 | 빌림 `&T` 매개변수가 `semaLift` 검사 없이 힙 스냅샷으로 들어감 | use-after-return | 실습 8 (br2) | 실행으로 재현. 2026-11-08 수정 `a7418c29` (F-14, 빌림 매개변수는 컴파일 오류) |
 | 4 | `unwindStack` 의 `.gen` 분기가 반환 슬롯 1개를 가정 (`thread.zig:1006~1009`) | `-> int` generator 안 panic 이 호스트를 abort (exit 134) | 실습 7 (st4) | 실행으로 재현 |
 | 5 | `gen_next` / `gen_end` 에 debug sym 이 없음 (`bc_gen.zig:720, 733`) | 릴리스에서 generator 관련 panic 이 `unexpected 4`(`CL_ERROR_UNKNOWN`) | 실습 7 (st3, dn1) | 증상 재현, 원인은 추정 |
 | 6 | `recordCurFrames` 에 `.gen` 분기 없음 (`thread.zig:930`) | generator 안에서 `meta.stack_trace()` 가 호스트 abort | `stt1.cy` (exit 134) | 실행으로 재현 |

@@ -49,7 +49,7 @@ tags:
 | F-11 | `g := math.sqrt; g(16.0)`처럼 호스트 함수를 함수 값으로 쓰면 segfault. `addr \| (1<<63)`가 정의되지 않은 시프트라 컴파일러가 대입을 지운다 | `vm.c:1718`(FN_HOST, 현재 1695) | 챕터 재현 [05 §5 실습 6](05-vm-runtime.md) | 높음 | 2026-11-06 수정 `dfaab96a`(`vm.c` `FN_HOST`가 `(u64)1 << 63`, 현재 1704). `g := math.sqrt; g(16.0)`이 `4`. 테스트 `modules/math.cy` |
 | F-12 | `#[generator]` 밖에서 `yield`를 쓰면 컴파일러가 segfault | `sema.zig:711`(현재 724) | 챕터 재현 [07 §7.1](07-coroutines-concurrency.md) | 높음 | 2026-11-04 수정 `3aa5b400`(컴파일 오류, 테스트 `concurrency/yield_outside_generator_error.cy`) |
 | F-13 | 끝난 제너레이터에 `next()`를 한 번 더 부르면 릴리스 CLI가 `unexpected 4`만 찍는다. `gen_next`/`gen_end`에 debug sym이 없다(추정) | `bc_gen.zig:720, 733` | 챕터 재현 [07 §2.5](07-coroutines-concurrency.md) | 중간 | 2026-11-04 수정 `a2236c78`(`pushFCode`로, 현재 `bc_gen.zig:719` · `734`). `panic: Generator is already done.`을 찍는다 |
-| F-14 | 빌림 `&int` 매개변수를 받는 제너레이터는 힙 스냅샷에 스택 주소를 담아 use-after-return이 된다. 컴파일 에러가 없다 | sema의 `semaLift` 우회 | 챕터 재현 [07 실습 8](07-coroutines-concurrency.md) | 높음 | borrow 매개변수 거부 |
+| F-14 | 빌림 `&int` 매개변수를 받는 제너레이터는 힙 스냅샷에 스택 주소를 담아 use-after-return이 된다. 컴파일 에러가 없다 | sema의 `semaLift` 우회 | 챕터 재현 [07 실습 8](07-coroutines-concurrency.md) | 높음 | 2026-11-08 수정 `a7418c29`. `#[generator]` 함수의 `borrow_only` 매개변수(`&T` · `[&]T` · 빌림 필드 구조체 · `&self` 수신자)는 `A \`#[generator]\` function can not take the borrow type ... as a parameter.` 컴파일 오류. 같이 발견한 구멍으로 `?&T`가 빌림으로 취급되지 않아 lift · `scope` 없는 반환 · 제너레이터 매개변수를 모두 통과했는데, Option이 자식의 `borrow_only`를 물려받게 했다(core `Option.@init`에 `scope`). behavior `concurrency/generator_borrow_param_error.cy` · `generator_borrow_option_param_error.cy` · `memory/lift_borrow_option_error.cy`, `docs/decisions/project_generator_borrow_params.md` |
 
 ## B. 조용히 틀린 결과를 내는 것
 
@@ -123,7 +123,7 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 
 1. 호스트가 죽는 경로: 모두 수정됨(F-03 · F-04 · F-06 · F-08 · F-09 · F-10 · F-11 · F-12 · F-40. F-06은 호스트가 `deny_raw_ptrs`를 켜야 함)
 2. 조용한 오답: 모두 수정됨(F-01 · F-20 · F-21 · F-22 · F-23 · F-24. F-73은 재현 안 됨 · 미확정)
-3. 상태가 깨지는 경로: F-14, F-25, F-26 (F-05 · F-07은 2026-11-08 수정)
+3. 상태가 깨지는 경로: F-25, F-26 (F-05 · F-07 · F-14는 2026-11-08 수정)
 4. 표준 라이브러리와 리터럴에서 LLM 스크립트가 바로 닿는 곳: 모두 수정됨(F-70 · F-71 · F-72 · F-74 · F-76)
 5. 정리: F-50~F-54, F-60~F-66, F-77, F-78 (F-64는 일부 정리, F-61 · F-62 · F-63 · F-75는 수정됨, F-31 · F-42는 종료)
 

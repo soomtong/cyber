@@ -620,16 +620,17 @@ pub const Type = extern struct {
             }
             const trait_sig = member.func.sig;
 
-            // Skip receiver.
+            // Skip receiver. Every parameter type and the return type must match exactly.
             const trait_params = trait_sig.params()[1..];
             const func_params = func.sig.params()[1..];
-            for (trait_params, 0..) |trait_param, i| {
-                if (trait_param != func_params[i]) {
-                    next = func.next;
-                    continue;
-                }
+            if (trait_params.len != func_params.len or trait_sig.ret != func.sig.ret) {
+                next = func.next;
+                continue;
             }
-            if (trait_sig.ret != func.sig.ret) {
+            const params_match = for (trait_params, func_params) |trait_param, func_param| {
+                if (trait_param != func_param) break false;
+            } else true;
+            if (!params_match) {
                 next = func.next;
                 continue;
             }

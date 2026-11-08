@@ -237,6 +237,9 @@ fn test_types(run: *Runner) void {
     run.case("types/template_structs.cy");
     run.case("types/template_const_params.cy");
     run.case("types/trait_error.cy");
+    run.case("types/trait_param_type_error.cy");
+    run.case("types/trait_param_count_error.cy");
+    run.case("types/trait_param_extra_error.cy");
     run.case("types/trait.cy");
     run.case("types/tuple.cy");
     run.case("types/type_alias.cy");

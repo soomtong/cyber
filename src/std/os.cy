@@ -762,6 +762,21 @@ fn (&File) write(val str) -> !int:
             return fromErrno()
         return written
 
+--| Writes the span `buf` to the file and returns the number of bytes written. Implements `io.Writer`.
+fn (&File) write(buf [&]byte) -> !int:
+    #if meta.system() == .windows:
+        var bytes_written windows.DWORD = 0
+        result := kernel32.WriteFile(self.fd, as buf.base, windows.DWORD(buf.length), &bytes_written, none)
+        if result == windows.FALSE:
+            return windows.fromWin32Error()
+        return as[int] bytes_written
+
+    #else:
+        written := lc.write(self.fd, as buf.base, buf.length)
+        if written == -1:
+            return fromErrno()
+        return written
+
 --| Writes `buf` to the file and returns the number of bytes written.
 fn (&File) write(buf []byte) -> !int:
     #if meta.system() == .windows:

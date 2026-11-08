@@ -1,4 +1,5 @@
 use os
+use io
 use meta
 use t 'test'
 
@@ -131,6 +132,13 @@ file = os.open_file('src/test/assets/write.txt', .write)!
 file.seekFromEnd(0)!
 _ = file.write('abcxyz')!
 t.eq('foobarabcxyz', str(os.read_file('src/test/assets/write.txt')!))
+
+-- File.write([&]byte) through `Dyn[io.Writer]`. Before F-22 the trait check accepted `write(str)` for this method.
+fn emit(w ^Dyn[io.Writer], bytes [&]byte) -> !int:
+    return w.write(bytes)
+bytes := []byte{49, 50, 51}
+t.eq(3, emit(^os.open_file('src/test/assets/write.txt', .write)!, bytes.span())!)
+t.eq('123barabcxyz', str(os.read_file('src/test/assets/write.txt')!))
 
 -- Dir.iterator()
 dir = os.open_dir('src/test/assets/dir', true)!

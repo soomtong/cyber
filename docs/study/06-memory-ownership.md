@@ -351,8 +351,10 @@ main 블록은 조금 다르다. `shouldGenMainScopeReleaseOps`(4802)가 `!singl
 `popBlock2`가 `proc.func == null and block_depth == 1`에서 정리를 건너뛰기 때문이다. `single_run`은 ReleaseFast CLI가 켠다(`src/main.zig:161`: `config.single_run = builtin.mode == .fast`).
 이 문서의 `cyber`는 ReleaseSafe라서 main 지역이 정상적으로 정리된다(ReleaseFast에서 `@deinit`이 안 도는 현상은 코드 근거이고 실행해 보지는 못했다).
 
-한 가지 더. `sema_program`(4555)은 main 문장을 다 분석한 뒤 `sema_program_deinit`(전역 정리)을 먼저 내고 `popProc`이 main 지역을 정리한다.
-그래서 정상 종료에서는 전역 변수의 `@deinit`이 main 지역보다 먼저 돈다(실행 확인: `global g Res`, `local := Res{...}`에서 `deinit global`이 `deinit main-local`보다 먼저 나왔다).
+한 가지 더. `sema_program`은 2026-11-08(`19873949`, F-29) 전에는 main 문장을 다 분석한 뒤 `sema_program_deinit`(전역 정리)을 먼저 내고 `popProc`이 main 지역을 정리했다.
+그래서 정상 종료에서 전역 변수의 `@deinit`이 main 지역보다 먼저 돌았다(`global g Res`, `local := Res{...}`에서 `deinit global`이 `deinit main-local`보다 먼저).
+지금은 main 안의 `return`과 같은 순서다: `semaDestructBlock`으로 main 지역을 선언 역순으로 정리한 뒤 `sema_program_deinit`을 내고 `popProc2(c, false)`로 블록을 닫는다
+(`deinit main-local` → `deinit global`). `single_run` · `persist_main`은 main 지역 정리를 내지 않으므로 그대로다(`docs/decisions/project_program_deinit_order.md`).
 
 #### 규칙 4: 재대입은 "새 값 → 옛 값 정리 → 저장"
 
@@ -388,8 +390,11 @@ if (!field_access) { res.owned = true; local.type = .dead; return res; }   // �
 "어느 필드를 정리하는가"가 인스턴스마다 고정된 코드가 된다. 죽은 멤버를 읽으면 `Member is no longer alive.`(`check_struct_access_path`, 2129).
 `^T` 안의 멤버를 move하려 하면 `Cannot move a member from a shared reference.`(`build_move_access_path`, 2152).
 
-한계: 정리 템플릿이 구조체 필드마다 `#if Layout.field_layout(...) |layout|:`(`core.cy:2849`)를 쓰는데, 이 형태의 컴파일 타임 `if` 언랩을 `ct_inline.zig:309`가 지원하지 않는다.
-결과적으로 구조체 필드(`str` 포함)를 가진 관리 구조체의 부분 이동은 컴파일되지 않는다(7절 이슈 4, 실습 2).
+한계였던 것: 정리 템플릿이 구조체 필드마다 `#if Layout.field_layout(...) |layout|:`를 쓰는데, 이 형태의 컴파일 타임 `if` 언랩을 `ct_inline.zig`가 지원하지 않아
+구조체 필드(`str` 포함)를 가진 관리 구조체의 부분 이동은 컴파일되지 않았다(7절 이슈 4, 실습 2). 2026-11-08(`19873949`, F-27)에 `ct_inline.ifUnwrapStmt`를 넣고 상태 모델을 정리했다
+(`docs/decisions/project_partial_move.md`): 필드가 차지하는 상태 수는 `sema_type.fieldStateLen`이 정하며 `@deinit` 없는 구조체 필드만 하위 필드의 상태를 펼친다.
+`str`처럼 `@deinit`이 있는 타입은 상태 하나라 통째로만 옮기고(`move p.a.name`은 `Cannot move a member out of \`Res\`...`), 멤버 읽기는 `state_offset`을 누적해 범위에 살아 있는 상태가 있으면 통과한다
+(중첩 멤버 하나를 옮긴 뒤 형제 멤버 읽기 가능). 부분 이동된 값을 통째로 복사 · 빌림 · 이동하면 `Cannot copy|borrow|move a partially moved value.`다.
 
 #### 규칙 6: 함수 호출 인자 — 누가 소유하는가
 
@@ -846,9 +851,9 @@ CompileError: Unsupported compile-time statement. if_unwrap_stmt
                         ^~~~~~~~~~~~~~~~...
 ```
 
-문서의 예제가 컴파일되지 않는다. 필드가 `int`/`^int`/`?int`/choice뿐이면(`partial_move.cy`) 되고, 구조체 필드(`str` 포함)가 있는 관리 구조체이면 실패한다(`move f.a`로 바꿔도 실패, `m9.cy`).
-정수만 가진 구조체 필드는 비관리라서 정리 코드를 만들지 않아 통과한다(`m8.cy`). 원인은 2.3절 규칙 5다.
-변형 과제: `b ^int`로 바꾸면 통과하는지, 에러가 `core.cy`를 가리키는 이유를 `ct_inline.zig:309`에서 찾아본다.
+2026-11-08(`19873949`, F-27) 전에는 문서의 예제가 이렇게 컴파일되지 않았다. 필드가 `int`/`^int`/`?int`/choice뿐이면(`partial_move.cy`) 되고, 구조체 필드(`str` 포함)가 있는 관리 구조체이면 실패했다(`move f.a`로 바꿔도 실패, `m9.cy`).
+지금은 `abc`를 찍고 `f.a`도 읽을 수 있다(`memory/partial_move_struct_fields.cy`). 원인과 수정은 2.3절 규칙 5.
+변형 과제: `n := move p.a.name`(`Res`에 `@deinit`)과 `g := f`(부분 이동 뒤 통째 복사)가 어떤 오류를 내는지 `partial_move_deinit_member_error.cy` · `partial_move_copy_error.cy`로 확인한다.
 
 ### 실습 3. `@deinit` 호출 순서 관찰
 
@@ -1225,7 +1230,7 @@ IR이 정리를 명시하므로 새 코드젠 백엔드(C 백엔드 등)도 소�
 | 1 | 명시적 `&x` 뒤 같은 함수의 `x`에 대한 `&&` 연산이 영구 거부됨(`active_borrows` 감소 없음) | `sema.zig:120`, `:322`, `:4926`, `:8788` | `bb1.cy`, `bb3.cy`, `bb6.cy`. 2026-11-08 수정 `77d3e881`(F-25, 어휘적 수명. bb6은 같은 블록이라 그대로 오류) |
 | 2 | `&&` 취득 뒤 만든 `&`와 `&&` 인자 뒤의 `&` 인자를 검사 안 함 -> 해제된 버퍼에 쓰기 | `sema.zig:8750` | `b7.cy`, `b9.cy`. 2026-11-08 수정 `77d3e881` |
 | 3 | 블록을 벗어난 지역을 가리키는 빌림 재대입을 막지 않음 | `localDecl`에만 수명 검사 | `b6.cy`. 2026-11-08 수정 `77d3e881` |
-| 4 | 구조체 필드(`str` 포함)가 있는 관리 구조체의 부분 이동이 컴파일 안 됨. `docs.md`의 예제가 그 형태 | `core.cy:2849`, `ct_inline.zig:309` | `m6.cy`, `m9.cy`, `m12.cy` |
+| 4 | 구조체 필드(`str` 포함)가 있는 관리 구조체의 부분 이동이 컴파일 안 됨. `docs.md`의 예제가 그 형태 | `core.cy:2849`, `ct_inline.zig:309` | `m6.cy`, `m9.cy`, `m12.cy`. 2026-11-08 수정 `19873949`(F-27, 컴파일 타임 `#if \|x\|` 지원 + 상태 모델 정리. `docs/decisions/project_partial_move.md`) |
 | 5 | `f(a, &a)` : 지역 인자 +0 전달 + 같은 지역의 빌림으로 재대입 -> 해제된 객체 읽기 | `sema_func.zig:817` | `al1.cy` |
 | 6 | `Array.append(val)`이 `val`을 복사하고 `@deinit`이 임시/성장/최종에 3번 돔. NoCopy 원소는 `append` 불가 | `core.cy:1787`, `:1845~1852` | `ar2.cy`, `d5.cy`. 2026-11-08 수정 `3979bb13`(F-26, `move` + `@memcpy` 이동. NoCopy 원소는 다른 복사 메서드 때문에 여전히 불가) |
 | 7 | `Array.clone()`이 없는 `cap` 필드를 써서 컴파일 안 됨 | `core.cy:1808~1814` | `Array[int]{1}.clone()`. 2026-11-08 수정 `3979bb13` |
@@ -1235,8 +1240,8 @@ IR이 정리를 명시하므로 새 코드젠 백엔드(C 백엔드 등)도 소�
 | 11 | 문자열 리터럴이 65536바이트 이상이면 길이가 16비트로 잘림(70000 -> 4464) | `bc_gen.zig:1272` | 70000자 리터럴의 `s.len()` |
 | 12 | `Slice.size_down` 등 뒤 원본 슬라이스 읽기 = 해제된 칸 읽기(문서도 인정) | `core.cy:1373` | `s2.cy` |
 | 13 | 순환 참조는 수거/탐지 없이 누수. 원시 버퍼가 낀 때만 릴리스 CLI가 `Unfreed raw buffers`로 패닉 | `thread.zig:1018`, `heap.zig:97` | `cyc1.cy`, `cyc2.cy` |
-| 14 | 패닉/`single_run` 종료에서 `@deinit` 미실행(자원 정리 불가) | `thread.zig:35`, `vm.zig:204` | `p1.cy` |
-| 15 | 정상 종료에서 전역 `@deinit`이 main 지역보다 먼저 | `sema.zig:4555` 근처 | `g1.cy` |
+| 14 | 패닉/`single_run` 종료에서 `@deinit` 미실행(자원 정리 불가) | `thread.zig:35`, `vm.zig:204` | `p1.cy`. 2026-11-08 계약으로 문서화(F-29, 매뉴얼 Deinitializers 절). 릴리스 CLI는 ReleaseSafe라 `single_run`이 아님 |
+| 15 | 정상 종료에서 전역 `@deinit`이 main 지역보다 먼저 | `sema.zig:4555` 근처 | `g1.cy`. 2026-11-08 수정 `19873949`(F-29, main 지역 먼저. `docs/decisions/project_program_deinit_order.md`) |
 | 16 | `cl_slice_deinit`/호스트 경로의 `destructValueAt`이 사용자 `@deinit`을 안 부름 | `lib.zig:166`, `heap_value.zig:404` | 코드 근거(미실행) |
 | 17 | trace 빌드의 `freePoolObject`가 `heapFreeTail`을 갱신하지 않는 것으로 읽힘(해제 슬롯 유실 가능성) | `heap.zig:219~250` | 코드 근거(추정, 미실행) |
 | 18 | trace 빌드에서 dangling retain 보고 경로가 `integer overflow`로 죽음 | `debug.zig:106` | `s2.cy`를 trace CLI로 |
@@ -1245,7 +1250,7 @@ IR이 정리를 명시하므로 새 코드젠 백엔드(C 백엔드 등)도 소�
 
 - `docs/docs.md` "Borrows": 빌림은 수명을 넘을 수 없다고 하지만 재대입 경로는 검사하지 않는다(3번). "Exclusive borrows"의 `elem := &a[2]; a << 4 -- Ok`는 에러가 난다(1번).
 - `docs/docs.md` "Cycle detection": 안전 모드에서 스레드 끝에 탐지해 패닉한다고 하지만 `check_memory`는 껍데기다. `@check_cycles`, `Unwind`, Weak references는 소스에 없다.
-- `docs/docs.md` "Moving"/`Foo{a int, b str}` 부분 이동 예제는 컴파일되지 않는다(4번).
+- `docs/docs.md` "Moving"/`Foo{a int, b str}` 부분 이동 예제는 컴파일되지 않았다(4번). 2026-11-08 수정으로 컴파일되고, 매뉴얼에 부분 이동 규칙을 추가했다.
 - `core.cy:758~761`의 `Copyable` 주석("`@copy`가 구현되면 `Copyable`")은 멤버가 `NoCopy`이면 틀리다(10번).
 - `behavior_test.zig`와 `src/test/memory`: 폴더에는 36개 파일이 있지만 `gc_reference_cycle_*.cy`와 `default_memory.cy`는 0.3 문법이라 실행 불가이고, `scope_return_too_ephemeral_error.cy`는 등록되지 않았다.
 - 작업 지시서의 가정 두 가지를 바로잡는다: `src/map.zig`(`ValueMap`)는 사용되지 않는 코드이고, `ptr_table`/`ptr_layouts`는 패닉 정리가 아니라 스택 확장 때 포인터를 패치하는 용도다.

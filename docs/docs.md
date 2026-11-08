@@ -2416,6 +2416,49 @@ type Foo:
 
 f := Foo{a=123, b='abc'}
 b := move f.b
+print(f.a)
+--> 123
+```
+The remaining members stay accessible and are deinitialized when the variable goes out of scope. A moved member can not be accessed again (`Member is no longer alive.`).
+Members of a nested struct member can be moved one by one as long as the nested type has no custom `@deinit`:
+```cy
+type Inner:
+    s str
+    t str
+type Outer:
+    inner Inner
+    x str
+
+o := Outer{inner=Inner{s='s', t='t'}, x='x'}
+s := move o.inner.s
+print(o.inner.t)     -- Ok. Sibling member is still alive.
+```
+A type with a custom `@deinit` is moved as a whole. Moving one of its members is a compile error, since the type can not be partially deinitialized:
+```cy
+type Res:
+    name str
+fn (&Res) @deinit():
+    pass
+type Pair:
+    a Res
+    b Res
+
+p := Pair{a=Res{name='a'}, b=Res{name='b'}}
+a := move p.a           -- Ok.
+n := move p.b.name
+--> error: Cannot move a member out of `Res`. The type has a custom `@deinit`.
+```
+A partially moved value can not be used as a whole. Copying it, borrowing it, or moving it is a compile error until it is reassigned (in the same block):
+```cy
+f := Foo{a=123, b='abc'}
+b := move f.b
+g := f
+--> error: Cannot copy a partially moved value.
+peek(&f)
+--> error: Cannot borrow a partially moved value.
+h := move f
+--> error: Cannot move a partially moved value.
+f = Foo{a=1, b='x'}     -- Ok. `f` is whole again.
 ```
 
 ### Borrows.
@@ -2587,9 +2630,22 @@ fn (&File) @deinit():
     C.close(self.fd)
 ```
 
-On thread panic, the runtime begins its **fatal** deinitialization procedure.
-Value deinitializers are only invoked for types that implement `Unwind`. *TBD*
-In addition, the deinitializers are not invoked in any hierarchical order but rather a flattened order (as the runtime iterates the alive values at the time of the panic).
+At the end of the program, the locals of the main block are deinitialized first (in reverse declaration order), then the globals. A local's `@deinit` can still read the globals:
+```cy
+global log Log = Log{}
+
+type Res:
+    name str
+fn (&Res) @deinit():
+    log.write('deinit %{self.name}')   -- `log` is still alive.
+
+r := Res{name='r'}
+-- End of program: `r.@deinit()`, then `log.@deinit()`.
+```
+Locals of a function are deinitialized when the function returns, before the program ends.
+
+On thread panic, no `@deinit` is invoked. The runtime sweeps the heap objects and raw buffers that are still alive (memory only) and the operating system reclaims external resources (files, sockets) when the process exits.
+Embedders that enable `single_run` in `CLEvalConfig` get the same sweep instead of the main block's deinitializers, so a script that relies on `@deinit` for cleanup needs the default `single_run = false`.
 
 ## Shared references.
 Shared references `^T` point to objects (values that were allocated on the heap).

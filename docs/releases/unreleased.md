@@ -84,6 +84,14 @@
   성장은 원소 바이트를 옮기므로 배열이 죽을 때 한 번만 파괴된다. `insert`는 꼬리를 `@memmove`로 민다. `Array.clone()`이 없는 필드
   `cap` 때문에 컴파일되지 않던 것과 `ArrayStore.append(span)`이 원소를 두 번 넣던 것도 고쳤다(`3979bb13`, F-26,
   `docs/decisions/project_array_append_move.md`). `NoCopy` 원소의 `Array`는 다른 복사 메서드 때문에 여전히 컴파일되지 않는다.
+- 구조체 필드(`str` 포함)를 가진 구조체의 부분 이동(`b := move f.b`, 매뉴얼 "Moving" 절의 예제)이 `Unsupported compile-time statement.
+  if_unwrap_stmt` 컴파일 오류였다. 정리 템플릿이 쓰는 컴파일 타임 `#if <opt> |x|:`를 지원한다. 같이 고친 것: 중첩 구조체 멤버 하나를
+  옮기면 형제 멤버(`o.inner.t`)가 `Member is no longer alive.`로 거부됐고, 구조체 멤버를 통째로 옮기면(`move o.inner`) 하위 멤버가 블록 끝에
+  다시 정리되어 이중 해제였다. 부분 이동된 값을 통째로 복사 · 빌림 · 이동하는 것(`g := f` · `&f` · `move f`)을 막지 않던 것도 컴파일 오류로
+  (`19873949`, F-27, `docs/decisions/project_partial_move.md`). 규칙은 아래 "언어" 절.
+- 프로그램이 정상 종료할 때 전역의 `@deinit`이 main 지역보다 먼저 돌아 main 지역의 `@deinit`이 해제된 전역(로그 · 카운터)을 읽었다.
+  이제 main 지역을 선언 역순으로 먼저 정리한 뒤 전역을 정리한다(main 안의 `return`과 같은 순서). 패닉과 `single_run`에서 `@deinit`이
+  돌지 않는 것은 계약으로 매뉴얼에 적었다(`19873949`, F-29, `docs/decisions/project_program_deinit_order.md`).
 
 ## 언어와 표준 라이브러리
 
@@ -116,6 +124,12 @@
   active exclusive borrow to it.`, 한 호출의 인자에 `&&a`와 `a`를 빌리는 다른 인자가 함께 있으면 `Cannot pass an exclusive borrow of \`a\` with
   another argument that borrows \`a\`.`, 빌림 지역에 더 깊은 블록의 값을 재대입하면 `\`ref\` can not outlive \`b\`.`. `docs/docs.md` Borrows ·
   Exclusive borrows 절에 적혀 있다.
+- 부분 이동(`19873949`): `@deinit`이 없는 구조체 멤버는 그 하위 멤버를 하나씩 옮길 수 있고 남은 형제 · 바깥 멤버는 그대로 읽는다. `str` 등
+  `@deinit`이 있는 타입은 통째로만 옮기며 그 멤버를 옮기면 `Cannot move a member out of \`Res\`. The type has a custom \`@deinit\`.`.
+  부분 이동된 값은 재대입(같은 블록)하기 전까지 통째로 복사 · 빌림 · 이동할 수 없다(`Cannot copy|borrow|move a partially moved value.`).
+  `docs/docs.md` Moving 절에 적혀 있다.
+- 종료 정리 순서(`19873949`): 정상 종료에서 main 지역 `@deinit`(선언 역순) → 전역 `@deinit`. 패닉에서는 어떤 `@deinit`도 돌지 않고 힙 스윕만
+  한다. 임베딩의 `single_run`도 main 지역의 `@deinit`을 건너뛴다. `docs/docs.md` Deinitializers 절에 적혀 있다.
 
 ## 임베딩 API
 

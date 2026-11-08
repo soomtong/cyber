@@ -219,6 +219,8 @@ a
 - 같은 블록에서 선언한 변수만 move할 수 있다. `if` 안에서 바깥 변수를 move하면 `Can only move variable declared in the same block.`
   이 제약 덕분에 "어느 분기에서만 move됐는가"를 추적하는 런타임 drop flag가 필요 없다. 코드가 위에서 아래로 한 번 훑는 sema 상태만으로 충분하다.
 - 참조 매개변수(`^T` 등 object 타입)는 move할 수 없다: `Cannot move a reference parameter.` (매개변수가 호출자 소유이기 때문이다.)
+- 복사 가능한 타입도 move할 수 있다. `move_expr`은 `NoCopy` 여부를 보지 않으며 위 `a := 123; b := move a`가 그 예다. 복사 가능(`b := a`)과 이동 가능(`b := move a`)은 직교하는 두 축이고,
+  `NoCopy`는 암시적 복사 자리(`sema_copy`, 규칙 2)에서만 검사된다. Rust의 `Copy` 타입에는 move 의미가 없다는 점이 다르다(6절 8번).
 - 값 매개변수는 move할 수 있다. `fn put(v Array[int]): ... move v`는 컴파일된다.
 - 함수 인자로 `move a`를 넘기면 그 함수가 소유한다(`consume(move a)` 뒤 `a`는 죽음).
 - `sink` 매개변수는 호출 지점에 `move`를 안 써도 인자 변수를 죽인다(`sink_use_arg_after_error.cy`, `sink_use_rec_after_error.cy`). 문서가 "move와 크게 다르지 않아 제거될 수 있다"고 적은 기능이다.
@@ -1209,6 +1211,8 @@ IR이 정리를 명시하므로 새 코드젠 백엔드(C 백엔드 등)도 소�
    (`core.cy:797`의 `&inner.child`가 `$` 제거(`e4804c08`) 때 `self.inner.child`로 안 고쳐졌다).
 6. Swift의 COW와 달리 `Slice`는 "소유한 변수가 변경될 때만 제자리"가 아니라 "`&Slice` 수신자의 버퍼가 유일하면" 제자리이므로 별칭이 남는다(결정 문서가 Lean/Koka/Swift와 비교해 짚은 부분).
 7. Weak/unowned가 없다. Swift와 가장 크게 다른 운영 차이다.
+8. `move`가 모든 값 타입에 열려 있다. Rust는 `Copy` 타입을 언제나 복사하고 명시적 move 구문이 없지만, Cyber는 `int`라도 `move`하면 원본이 죽는다. 복사 가능 여부(`NoCopy`)와
+   이동 가능 여부가 직교하는 두 축이다. 부분 이동 뒤 통째 `move`를 거부하는 것(Q9)은 Rust와 같다.
 
 정리하면 "정적 언어의 소유권 문법에 Rust보다 훨씬 느슨한 검사를 얹고, 런타임은 Swift식 ARC"다. 검사가 느슨한 자리에서 생기는 버그(실습 5, 6)가 이 fork에서 실제로 마주칠 종류다.
 
@@ -1245,6 +1249,7 @@ IR이 정리를 명시하므로 새 코드젠 백엔드(C 백엔드 등)도 소�
 | 16 | `cl_slice_deinit`/호스트 경로의 `destructValueAt`이 사용자 `@deinit`을 안 부름 | `lib.zig:166`, `heap_value.zig:404` | 코드 근거(미실행) |
 | 17 | trace 빌드의 `freePoolObject`가 `heapFreeTail`을 갱신하지 않는 것으로 읽힘(해제 슬롯 유실 가능성) | `heap.zig:219~250` | 코드 근거(추정, 미실행) |
 | 18 | trace 빌드에서 dangling retain 보고 경로가 `integer overflow`로 죽음 | `debug.zig:106` | `s2.cy`를 trace CLI로 |
+| 19 | 옮겨 나간 멤버에 재대입(`a := move p.a; p.a = Res{..}`)이 컴파일되지만 상태를 되살리지 않음. `set_field`가 이미 옮긴 옛 값을 파괴해 `@deinit` 2회, 새 값은 정리되지 않아 누수 | `sema.zig` `semaAssignStmt`의 `.value_field` 분기(상태 검사 · 복원 없음) | 2026-11-08 재현(Q9, F-79). `deinit a` 2회 · `deinits=3`에 `a2` 없음 |
 
 ### 7.2 문서와 코드의 차이
 
@@ -1318,6 +1323,14 @@ trace 빌드는 전역 rc 합계로 `unreleased refcount`를 보고해 두 경�
 A: `Future[T]`는 관리 필드(`^FutureValue`)를 가진 구조체라서 값 매개변수 규약에 따라 호출자가 복사해 넘기고 호스트가 소유한다. 정리를 빠뜨리면 호출마다 샌다(실제로 `@notifyFutureComplete`가 그랬다).
 막는 방법은 선언을 `&FutureValue[T]` 같은 빌림으로 바꾸는 것이 가장 싸고(`memory/future_resolver.cy`), 값이 꼭 필요하면 호스트에서 `destructValueAt` 등으로 정리하되 사용자 `@deinit`이 있는 타입에서는
 Zig 미러가 `@deinit`을 부르지 않는다는 점을 확인한다(7.1의 16번). 누수는 32바이트가 넘는 힙 문자열/큰 객체로 테스트해야 누수 검사 allocator에 걸린다.
+
+### Q9. `name := move a.name` 뒤 `b := move a`에서 `b`는 무엇을 가져가야 하는가?
+
+A: 아무것도 가져가지 않는다. `Cannot move a partially moved value.` 컴파일 오류다(`partial_move_whole_error.cy`). `b`의 타입이 `User`이고 `User` 값은 모든 멤버가 살아 있다는 보장을 지니므로,
+`name`이 빠진 껍데기를 `b`로 옮기면 `b`가 넘어가는 모든 함수와 컨테이너에서 그 보장이 깨진다. 부분 이동 상태는 지역 `a`에만 붙은 `[]bool` sema 정보라 변수 경계를 넘기지 않는 것이 모델을 단순하게 한다
+(Rust E0382와 같다). 남은 멤버만 옮기고 `b`도 부분 이동 상태로 두는 안은 `b`를 인자 · 반환 · 원소로 넘기는 순간 런타임 drop flag가 필요해지고, 빠진 멤버를 기본값으로 채우는 안(Rust `mem::take`)은
+프로그램이 쓰지 않은 생성을 숨긴다. 통째로 옮기려면 같은 블록에서 `a = User{...}`로 다시 온전하게 만든 뒤 `move a`한다. Rust처럼 `a.name = ...`로 멤버만 되살리는 것은 아직 없고,
+현재는 그 대입이 컴파일은 되지만 상태가 죽은 채 남아 옛 값을 두 번 파괴하고 새 값을 누수한다(7.1의 19번, F-79. `docs/decisions/project_partial_move.md` 설계 메모).
 
 ## 9. 더 알아보기
 

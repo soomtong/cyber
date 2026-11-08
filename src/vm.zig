@@ -375,6 +375,8 @@ pub const VM = struct {
 
         try self.compiler.reinitPerRun();
         self.compiler.cont = false;
+        self.compiler.first_compile_failed = false;
+        self.compiler.last_compile_failed = false;
     }
 
     /// Asks every spawned thread to stop at its next checkpoint and waits until the worker pool is idle.
@@ -420,6 +422,12 @@ pub const VM = struct {
 
     pub fn eval(self: *VM, src_uri: []const u8, src: ?[]const u8, config: C.EvalConfig) !C.EvalResult {
         var tt = cy.debug.timer();
+
+        if (self.compiler.first_compile_failed) {
+            // Start over instead of compiling on top of the half-built first compile (F-04). Nothing from a failed
+            // first compile is worth keeping, and the host's settings (fuel, stack limit, printer, user data) survive.
+            try self.resetVM();
+        }
 
         self.config = config;
         self.dropMainResult(true);

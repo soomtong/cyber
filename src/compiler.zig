@@ -98,8 +98,14 @@ pub const Compiler = struct {
 
     find_type_cache: std.StringHashMapUnmanaged(*cy.Type),
 
-    /// Whether this is a subsequent compilation reusing the same state.
+    /// Whether this is a subsequent compilation reusing the same state. Set after the first successful compile.
     cont: bool,
+
+    /// The first compile of this VM (or since a reset) failed. The next `VM.eval` resets the VM before compiling.
+    first_compile_failed: bool,
+
+    /// The previous compile failed. Its main chunk's own declarations are not carried over by `persist_main`.
+    last_compile_failed: bool,
 
     chunk_start: u32,
     type_start: u32,
@@ -136,6 +142,8 @@ pub const Compiler = struct {
             .program_ir = undefined,
             .api_chunk = undefined,
             .cont = false,
+            .first_compile_failed = false,
+            .last_compile_failed = false,
             .chunk_start = 0,
             .type_start = 0,
             .find_type_cache = .empty,
@@ -280,7 +288,15 @@ pub const Compiler = struct {
             return error.CompileError;
         }
 
+        const first_compile = !self.cont;
         const res = self.compileInner(uri, src, config) catch |err| {
+            self.last_compile_failed = true;
+            // A failed first compile leaves core types, the core chunk and a main chunk half built while `cont`
+            // stays false. Compiling again on top of that loaded core twice (SIGSEGV after a syntax error,
+            // `@program_init has already been declared` after a sema error, F-04). `VM.eval` resets the VM first.
+            if (first_compile) {
+                self.first_compile_failed = true;
+            }
             if (dumpCompileErrorStackTrace and !C.silent()) {
                 std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);
             }
@@ -299,6 +315,7 @@ pub const Compiler = struct {
 
         // Successful.
         self.cont = true;
+        self.last_compile_failed = false;
         return res;
     }
 
@@ -348,6 +365,12 @@ pub const Compiler = struct {
                 while (iter.next()) |e| {
                     const name = e.key_ptr.*;
                     const sym = e.value_ptr.*;
+
+                    // A failed eval contributes nothing of its own: its functions have no bytecode and its types may
+                    // be half resolved. The aliases it inherited from earlier evals are still carried over.
+                    if (self.last_compile_failed and sym.type != .use_alias) {
+                        continue;
+                    }
 
                     const resolved = switch (sym.type) {
                         .type => b: {

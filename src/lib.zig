@@ -830,6 +830,81 @@ test "Return from main." {
     try zt.eq(123, @as(*i64, @ptrCast(res.res)).*);
 }
 
+test "Evals after a failed first compile." {
+    // F-04. The first compile used to leave the core chunk loaded while `Compiler.cont` stayed false, so the next
+    // compile loaded core again: SIGSEGV after a syntax error, `@program_init has already been declared` after a
+    // sema error. Each failure kind is followed by a successful eval on the same VM.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var res: C.EvalResult = undefined;
+    // Syntax error, twice.
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "x := ", &res));
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "x := ", &res));
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use test
+        \\test.eq(3, 1 + 2)
+    , &res));
+
+    // Sema error on a fresh VM.
+    const vm2 = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm2);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm2, "print(nope)", &res));
+    {
+        const summary = C.vm_compile_error_summary(vm2);
+        defer C.vm_freeb(vm2, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, "nope") != null);
+    }
+    try zt.eq(C.Success, C.vm_eval(vm2,
+        \\use test
+        \\test.eq(3, 1 + 2)
+    , &res));
+
+    // Different uris, then a declaration from the failed eval does not block the next one.
+    const vm3 = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm3);
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm3, "first", "fn f() -> int:\n  return nope", C.defaultEvalConfig(), &res));
+    try zt.eq(C.Success, C.vm_evalx(vm3, "second",
+        \\fn f() -> int:
+        \\  return 7
+        \\use test
+        \\test.eq(7, f())
+    , C.defaultEvalConfig(), &res));
+
+    // `cl_vm_validate` of bad source, then an eval. The compile error summary stays readable.
+    const vm4 = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm4);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm4, "_ = 1 +"));
+    try zt.eq(C.Success, C.vm_eval(vm4, "_ = 1 + 2", &res));
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm4, "_ = 1 +", &res));
+    {
+        const summary = C.vm_compile_error_summary(vm4);
+        defer C.vm_freeb(vm4, summary);
+        try zt.expect(summary.len > 0);
+    }
+    try zt.eq(C.Success, C.vm_eval(vm4, "_ = 1 + 2", &res));
+
+    // REPL shape: `persist_main`, a failed first input, then a local that persists.
+    const vm5 = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm5);
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm5, "repl", "x := ", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm5, "repl", "x := 5", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm5, "repl", "use test\ntest.eq(5, x)", config, &res));
+
+    // A failed eval after a successful one: its declarations are not carried over (the function has no bytecode),
+    // while the earlier eval's locals and functions still are.
+    try zt.eq(C.Success, C.vm_evalx(vm5, "repl", "fn ok() -> int:\n  return 1", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm5, "repl", "fn broken() -> int:\n  return nope\ntype P:\n  a int", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm5, "repl", "use test\ntest.eq(6, x + ok())", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm5, "repl", "_ = broken()", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm5, "repl", "_ = P{a=1}", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm5, "repl", "use test\ntest.eq(6, x + ok())", config, &res));
+}
+
 test "Eval without main after an eval with main." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

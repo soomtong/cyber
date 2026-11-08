@@ -25,7 +25,8 @@ panic을 내 호스트 프로세스가 abort했다(발견 이슈 F-08 · F-09 ·
 | 구조체 · cstruct 필드 | 255 | init IR `nargs u8` · `ir.Field.idx u8` | `Too many fields. A struct can have at most 255 fields.` | `04096230`. `checkFieldLimit`(`resolveStructFields`는 256번째 필드 위치에, `reifyStructType`은 타입 노드에) |
 | 바이트코드 레지스터 번호 | 65535 | `Inst.val u16`(피연산자 슬롯) | 지역 한계가 먼저 걸려 닿지 않음 | 한계 아님 |
 | 문자열 리터럴 길이 | 65535바이트 | `pushConstString`의 `len << 48`(16비트) | 길이가 잘림(70000 → 4464). 오류 없음 | 미처리, F-24 |
-| 점프 오프셋 | ±32767 명령 슬롯 | `vm.c` `JUMP*`의 `int16_t`, bc_gen 점프 패치 | 앞 점프가 넘으면 런타임 크래시. 루프 본문 약 9000줄, if 본문 약 17000줄에서 재현 | 미처리, F-09 |
+| 점프 거리. `jump`(`break` · `continue` · 루프 끝 · if 갈래 끝) · `release` · `release_opt` | 32767 명령 슬롯 | `vm.c` `JUMP`의 `int16_t`, `Inst.val u16` | `Function body too large. A jump can span at most 32767 bytecode slots. Move part of the body into another function.` | `8560b025` 컴파일 오류. `chunk.zig` `checkJump` · `backJump`(`patchJumpToCurPc` · `patchBreaks` · `patchForBlockJumps` · `pushJumpBackTo`), F-09 |
+| 조건 점프 거리. `jump_f` · `jump_t`(앞으로만) | 65535 명령 슬롯 | `vm.c` `JUMP_F` · `JUMP_T`의 `pc += pc[2]`(부호 없음) | 같은 메시지, 65535 | `8560b025`. `patchJumpCondToCurPc` · `patchJumpNotCondToCurPc`. 수정 전: 32768~65535 슬롯의 앞 `jump`는 VM이 음수로 읽어 세그폴트, 그 이상은 `@intCast` panic |
 | 한 청크의 함수 수 · 심볼 수 | u32 | `FuncSig.id` 등 | 실질적으로 닿지 않음 | 한계 아님 |
 | VM 스택 크기 | 상한 없음 | `thread.zig` `growStackAuto`(1.5배) | 무한 재귀가 메모리를 다 쓴다 | 미처리, F-40. 스택 상한과 `RES_STACK_OVERFLOW` 오류가 필요 |
 
@@ -36,6 +37,10 @@ panic을 내 호스트 프로세스가 abort했다(발견 이슈 F-08 · F-09 ·
   (255 매개변수 + 지역 1개 = IR 지역 256, 255 필드 init)이 정상 실행되는 2케이스. 소스는 `repeat_src`로 생성한다.
 - 수정 전 재현: 지역 257 `integer does not fit in destination type`, 매개변수 256 `integer overflow`(`numParams += 1`),
   매개변수 257 호출 `integer does not fit`(`numArgs` 캐스트), 필드 300 init `integer does not fit`(`nargs` 캐스트).
+- 점프(F-09): lib-test `Jumps past the one-slot offset are compile errors, not panics or runtime crashes.`: `while` 본문 `s += 1` 9000줄(역방향
+  `jump`) · `if` 본문 17000줄(`jump_f`) · `else` 본문 9000줄에 `if` 갈래 실행(앞 `jump`, 수정 전 세그폴트)이 오류, 7000줄 루프 · 15000줄 `if`
+  (60000 슬롯, u16에 맞음)는 정상 실행. `s += 1`은 `add_i16` 4슬롯. behavior 테스트는 소스가 수천 줄이라 두지 않았다. 오류 위치는 점프를
+  가진 문(루프 · `if` · `switch` · `case`)이고, `break` · `continue`의 위치는 `BlockJump`에 없어 둘러싼 루프 문으로 보고한다.
 
 ## 기록 규칙
 

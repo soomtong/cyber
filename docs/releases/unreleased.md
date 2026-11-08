@@ -30,6 +30,10 @@
   우회는 더 필요 없다(`f5f2d241`, F-04).
 - 폭주 재귀가 VM 스택을 상한 없이 키워 호스트 메모리를 소진했다(1초에 RSS 4.5GB). 스택 상한(기본 128 MiB)에 닿으면
   `Stack overflow. The stack limit is N bytes.` panic이고 VM은 계속 쓸 수 있다(`f03cf24c`, F-40). 아래 "임베딩" 절.
+- 루프 본문이 약 9000줄(`s += 1` 기준)을 넘으면 컴파일러가 `integer does not fit in destination type` panic으로 호스트를 죽였고,
+  `if` 본문 17000줄도 같았다. 더 나쁜 경우로 `else` 본문이 약 8200~16000줄이면 컴파일은 되지만 `if` 갈래가 실행될 때 VM이 앞 점프를
+  음수로 읽어 세그폴트였다. 모두 컴파일 오류 `Function body too large. A jump can span at most N bytecode slots.`로 보고한다
+  (`8560b025`, F-09). 한계값은 아래 "언어" 절.
 
 ## 언어와 표준 라이브러리
 
@@ -40,6 +44,9 @@
   (`_opt` · `_temp` 등)를 포함한다. 함수 · 람다 · 함수 타입의 매개변수는 255개, 구조체 필드는 255개, C 가변 인자 호출의 인자는
   255개까지. 넘으면 각각 `Too many local variables.` · `Too many parameters.` · `Too many fields.` · `Too many arguments.`
   컴파일 오류. `docs/docs.md` Local variables 절에 적혀 있다. 아직 오류로 바뀌지 않은 한계는 `project_compiler_limits.md`.
+- 점프 거리(`8560b025`): 한 갈래(루프 본문, `if` · `else` 갈래, `switch` case 본문, `break` · `continue`가 건너뛰는 구간)는 바이트코드
+  32767 슬롯(`s += 1` 같은 단순 문 약 8000개)까지, `else` 없는 `if` 본문은 65535 슬롯까지. 넘으면 `Function body too large.` 컴파일 오류.
+  긴 본문은 함수로 나눈다. `docs/docs.md` Local variables 절에 적혀 있다.
 
 ## 임베딩 API
 

@@ -161,7 +161,7 @@ Variables can be assigned afterwards using the `=` operator:
 a = 234
 ```
 
-A function body, including the main block, can hold at most 256 locals. Parameters and the hidden temporaries the compiler creates count towards that limit. A function signature can have at most 255 parameters and a struct at most 255 fields. Exceeding a limit is a compile error.
+A function body, including the main block, can hold at most 256 locals. Parameters and the hidden temporaries the compiler creates count towards that limit. A function signature can have at most 255 parameters and a struct at most 255 fields. A single branch (the body of a loop, an `if` or a `switch` case) can span at most 32767 bytecode slots, roughly 8000 simple statements; a plain `if` body without `else` can span 65535. Exceeding a limit is a compile error. Move part of a long body into another function.
 
 ### `var` declaration.
 When a local variable is declared with `var`, a type specifier is required.

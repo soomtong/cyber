@@ -731,7 +731,7 @@ static bool loader(CLVM* vm, CLSym* mod, CLBytes uri, CLLoaderResult* res) {
         res->manage_src = false;
         return true;
     }
-    static const char* allow[] = { "core", "meta", "math", "c", "test" };
+    static const char* allow[] = { "core", "meta", "math", "c", "test" };   // 2026-11-08 부터는 cfg.deny_raw_ptrs = true 도 함께 켠다 (7.4절, F-06)
     for (size_t i = 0; i < 5; i++)
         if (uri.len == strlen(allow[i]) && !strncmp(uri.ptr, allow[i], uri.len))
             return cl_default_loader(vm, mod, uri, res);
@@ -1094,6 +1094,7 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
 
 격리와 권한.
 - 샌드박스 플래그는 없다. 호스트가 loader 로 `use` 가능한 모듈을 걸러내는 것이 유일한 수단이다(5.2절). 허용 목록에서 `math` 를 열면 `c` 도 열어야 한다(math.cy 의 `use c`).
+- (2026-11-08 `534a0a9d` 수정, F-06: `CLEvalConfig.deny_raw_ptrs = true` 를 켜면 표준 모듈이 아닌 청크에서 `Ptr[T]` · `PtrSpan[T]` 타입의 식이 컴파일 오류가 된다. `as[Ptr[int]] 8` · `Ptr[int](8)` · `alloc(int)` · `PtrSpan[int]{length=4}` 모두 막힌다. 기본값은 false 라 아래 실험은 기본 설정의 기록이다. `docs/decisions/project_deny_raw_ptrs.md`.)
 - 라이브러리 기본 모듈 중 `c` 는 포인터 도구를 가진다. 더 근본적으로 `use c` 없이도 정수를 `Ptr` 로 캐스팅해 역참조할 수 있다. 실험(CLI): `p := as[Ptr[int]] 8` 후 `print(p.*)` ->
   `Segmentation fault at address 0x8` 이고 CLI 의 시그널 핸들러가 abort(종료 코드 134). 시그널 핸들러는 CLI `main`(main.zig:31)과 테스트 러너에서만 설치되므로
   라이브러리 호스트에서는 프로세스가 그대로 SIGSEGV 로 죽는다고 읽을 수 있다(코드 판독. 라이브러리에서 직접 돌리지는 않았다). 호스트가 자체 핸들러를 설치할 때 쓰라고

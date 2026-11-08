@@ -39,6 +39,9 @@
 - 깊은 호출로 VM 스택이 이동할 때 main 블록의 빌림(`p := &x`)과 함수 값 · `Func[T]` · trait(`&Dyn[T]`)로 부른 호출 중 호출자 프레임의
   빌림이 옛 스택을 가리킨 채 남아 쓰레기(`-6148914691236517206`)를 읽었다. main 프레임도 패치하고 세 간접 호출 지점에도 포인터
   레이아웃을 남긴다(`c94f1569`, F-10, `docs/decisions/project_stack_ptr_patch.md`).
+- 스크립트가 `use c` 없이 `as[Ptr[int]] 8` · `Ptr[int](8)` · `alloc(int)` · `PtrSpan[int]{length=4}`로 임의 주소를 역참조해 호스트를
+  죽일 수 있었다. 새 컴파일 옵션 `deny_raw_ptrs`를 켜면 컴파일 오류다(`534a0a9d`, F-06). 기본값은 false라 CLI와 기존 임베딩 동작은
+  그대로. 아래 "임베딩 API" 절.
 
 ## 언어와 표준 라이브러리
 
@@ -57,6 +60,10 @@
 
 ## 임베딩 API
 
+- `CLEvalConfig.deny_raw_ptrs` · `CLCompileConfig.deny_raw_ptrs`(`534a0a9d`): true면 표준 모듈(`core` · `meta` · `math` · `cy` · `c` · `io` ·
+  `test`)이 아닌 청크에서 `Ptr[T]` · `PtrSpan[T]` · `?Ptr[T]` 타입의 식이 `Raw pointer type \`Ptr[int]\` is not allowed. The host disabled
+  raw pointers for this script (\`deny_raw_ptrs\`).` 컴파일 오류. `[]T` · `[&]T` · `Map` · `&T` 등 core가 내부에서 포인터로 구현한 타입은
+  그대로 쓴다. 신뢰하지 않는 스크립트를 돌리는 호스트는 허용 목록 로더와 함께 켠다(`docs/decisions/project_deny_raw_ptrs.md`).
 - `cl_vm_set_stack_limit(vm, bytes)`(`f03cf24c`): main 스레드와 `spawn` 스레드의 VM 스택 상한. 8바이트 슬롯으로 내림,
   0 이하는 무제한, 기본 128 MiB. 넘는 호출은 `Stack overflow.` panic으로 `CL_ERROR_PANIC`. `cl_vm_set_fuel` · `cl_vm_interrupt`와
   함께 쓴다(`src/include/cyber.h`, `docs/decisions/project_stack_limit.md`).

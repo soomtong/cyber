@@ -3920,6 +3920,14 @@ int main() {
 ```
 The above example loads `my_mod` by setting the appropriate function and global bindings, and returning its source code. Other modules get delegated to the default loader `cl_default_loader` which knows how to load the builtin modules such as `core`.
 
+### Denying raw pointers.
+A host that runs untrusted scripts can set `deny_raw_ptrs` in `CLEvalConfig` or `CLCompileConfig`. Every chunk that is not a standard module (`core`, `meta`, `math`, `cy`, `c`, `io`, `test`) then gets a compile error for any expression of a raw pointer type: `Ptr[T]`, `PtrSpan[T]` or an option of them. That covers `as[Ptr[int]] 8`, `Ptr[int](8)`, `as[Ptr[int]] &x`, `alloc(int)` and `PtrSpan[int]{length=4}`, so a script can not read or write an arbitrary address. Slices, spans, maps, strings and borrows keep working; the core library uses raw pointers for them internally. The default is false. The CLI does not set it.
+```c
+CLEvalConfig cfg = clDefaultEvalConfig();
+cfg.deny_raw_ptrs = true;
+cl_vm_evalx(vm, CL_BYTES("turn"), src, cfg, &res);
+```
+
 ## Function binding.
 A function binding describes how to load a `#[bind]` function.
 

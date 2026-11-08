@@ -33,7 +33,9 @@
 - `os` · `libc` · `cli`는 CLI 전용이다(`src/cli.zig:88`). 라이브러리에서 `use os`는 "Failed to load module: os"
   컴파일 에러가 된다. 파일 · 프로세스 · 환경변수 접근은 호스트가 도구 함수로 열어 주는 것만 가능하다.
 - `c` 모듈은 FFI를 꺼도 남는다. `c.to_strz` · `c.from_strz`와 `Ptr[byte]`로 raw 포인터를 다룰 수 있고, extern
-  호출만 panic으로 막힌다. 스크립트를 신뢰하지 않는다면 로더에서 `c`를 거르는 것을 고려한다.
+  호출만 panic으로 막힌다. 스크립트를 신뢰하지 않는다면 로더에서 `c`를 거르는 것을 고려한다. `use c` 없이도 `as[Ptr[int]] 8`로
+  임의 주소를 읽을 수 있었으므로(F-06) 2026-11-08부터는 `CLEvalConfig.deny_raw_ptrs = true`를 함께 켠다
+  (`project_deny_raw_ptrs.md`).
 - `cl_vm_initx(CLAllocator)`로 할당자를 바꿀 수 있어 메모리 상한을 호스트 할당자에서 걸 수 있다.
 
 ## `single_run`

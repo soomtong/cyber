@@ -1612,6 +1612,7 @@ fn semaAssignToAccessStmt(c: *cy.Chunk, var_start: usize, rec_n: *ast.Node, rec:
         return c.reportErrorFmt("Field `{}` does not exist in `{}`.", &.{v(access_right_name), v(type_name)}, access_right_n);
     };
 
+    try cy.module.check_sym_visible(c, sym, access_right_n);
     if (sym.type != .field) {
         const type_name = type_sym.type.name();
         return c.reportErrorFmt("Type `{}` does not have a field named `{}`.", &.{v(type_name), v(access_right_name)}, access_right_n);
@@ -2293,6 +2294,7 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
             defer c.alloc.free(type_name);
             return c.reportErrorFmt("Field `{}` does not exist in `{}`.", &.{v(name), v(type_name)}, field);
         };
+        try cy.module.check_sym_visible(c, sym, field);
         if (sym.type != .field) {
             const type_name = try c.sema.allocTypeName(child_t);
             defer c.alloc.free(type_name);
@@ -2311,6 +2313,7 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
         res.addressable = true;
         return res;
     };
+    try cy.module.check_sym_visible(c, sym, field);
     if (sym.type != .field) {
         const type_name = type_.name();
         return c.reportErrorFmt("Type `{}` does not have a field named `{}`.", &.{v(type_name), v(name)}, field);
@@ -2465,6 +2468,7 @@ pub fn checkSymInitField(c: *cy.Chunk, type_sym: *cy.Sym, name: []const u8, node
             return c.reportErrorFmt("Field `{}` does not exist in `{}`.", &.{v(name), v(type_name)}, node);
         // }
     };
+    try cy.module.check_sym_visible(c, sym, node);
     if (sym.type != .field) {
         const type_name = type_sym.name();
         return c.reportErrorFmt("Type `{}` does not have a field named `{}`.", &.{v(type_name), v(name)}, node);

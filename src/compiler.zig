@@ -1212,6 +1212,7 @@ fn reserveChunkSyms(c: *cy.Chunk) anyerror!void {
             .custom_type_decl => {
                 const decl = stmt.cast(.custom_type_decl);
                 const sym = try sema_type.resolve_custom_type(c, decl, null);
+                sym.getMetadata().private = decl.hidden;
                 _ = try cy.module.addUniqueSym(c, sym.parent.?.getMod().?, sym.name(), sym, @ptrCast(decl));
             },
             .template => {

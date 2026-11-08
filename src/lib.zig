@@ -907,6 +907,21 @@ test "Evals after a failed first compile." {
     try zt.eq(C.Success, C.vm_evalx(vm5, "repl", "use test\ntest.eq(6, x + ok())", config, &res));
 }
 
+test "Private symbols of an earlier eval stay visible to the next eval of the same session." {
+    // F-30. `-` symbols are visible to the chunk that declares them. The main chunks of a `persist_main` session
+    // share one `srcUri`, so a method or field declared private in one eval is still reachable from the next one.
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var res: C.EvalResult = undefined;
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "type Foo:\n  -b int = 1\n-fn (&Foo) m() -> int:\n  return self.b\n-fn s() -> int:\n  return 4", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use test\nf := Foo{}\ntest.eq(f.m() + f.b + s(), 6)", config, &res));
+}
+
 test "cl_vm_validate checks against the session without resetting it." {
     // F-05. `cl_vm_validate` used to call `resetVM`: the persisted locals and declarations of a REPL session were
     // gone, and a validate that failed left the half-built first compile for the next eval (F-04's crash).

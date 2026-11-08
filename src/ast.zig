@@ -734,6 +734,7 @@ pub const TraitDecl = extern struct {
     name: *Node,
     attrs: Slice(*Attribute),
     funcs: Slice(*FuncDecl),
+    hidden: bool,
     pos: u32,
 };
 
@@ -753,6 +754,7 @@ pub const CUnionDecl = extern struct {
     attrs: Slice(*Attribute),
     impls: Slice(*ImplDecl),
     cases: Slice(*UnionCase),
+    hidden: bool,
     pos: u32,
 };
 
@@ -763,6 +765,7 @@ pub const StructDecl = extern struct {
     fields: Slice(*Field),
     num_embedded_fields: u32,
     is_tuple: bool,
+    hidden: bool,
     pos: u32,
 };
 
@@ -2040,4 +2043,25 @@ pub fn findAttr(attrs: []const *Attribute, attr_t: AttributeType) ?*Attribute {
         }
     }
     return null;
+}
+
+/// Whether a declaration was written with the `-` visibility prefix. A template takes it from its child declaration.
+pub fn isHiddenDecl(node: *Node) bool {
+    return switch (node.type()) {
+        .funcDecl         => node.cast(.funcDecl).hidden,
+        .struct_decl      => node.cast(.struct_decl).hidden,
+        .cstruct_decl     => node.cast(.cstruct_decl).hidden,
+        .cunion_decl      => node.cast(.cunion_decl).hidden,
+        .trait_decl       => node.cast(.trait_decl).hidden,
+        .enumDecl         => node.cast(.enumDecl).hidden,
+        .custom_type_decl => node.cast(.custom_type_decl).hidden,
+        .type_alias_decl  => node.cast(.type_alias_decl).hidden,
+        .type_const_decl  => node.cast(.type_const_decl).hidden,
+        .const_decl       => node.cast(.const_decl).hidden,
+        .global_decl      => node.cast(.global_decl).hidden,
+        .use_alias        => node.cast(.use_alias).hidden,
+        .struct_field     => node.cast(.struct_field).hidden,
+        .template         => isHiddenDecl(node.cast(.template).child_decl),
+        else => false,
+    };
 }

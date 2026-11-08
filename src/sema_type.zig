@@ -1310,7 +1310,8 @@ fn resolveCopiedType(c: *cy.Chunk, sym: *cy.sym.TypeSym, src_t: *cy.Type, node: 
             // Declare fields in new sym's module.
             for (struct_t.fields(), 0..) |field, i| {
                 const field_name = field.sym.head.name();
-                _ = try c.declareField(@ptrCast(sym), field_name, i, field.type, node);
+                const new_field = try c.declareField(@ptrCast(sym), field_name, i, field.type, node);
+                new_field.head.getMetadata().private = field.sym.head.getMetadata().private;
             }
 
             const copy_t = sym.type.cast(.struct_t);

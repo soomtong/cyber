@@ -103,10 +103,15 @@ pub fn addUniqueSym(c: *cy.Chunk, mod: *Module, name: []const u8, sym: *cy.Sym, 
 }
 
 fn prepareFuncSym(c: *cy.Chunk, parent: *cy.Sym, mod: *Module, name: []const u8, decl: ?*ast.FuncDecl) !*cy.sym.FuncSym {
+    const hidden = if (decl) |d| d.hidden else false;
     if (mod.symMap.get(name)) |sym| {
         if (isCarriedOverSym(sym)) {
             _ = mod.symMap.remove(name);
         } else if (sym.type == .func) {
+            // Overloads share one func sym, so they share one visibility (F-30).
+            if (sym.getMetadata().private != hidden) {
+                return c.reportErrorFmt("Overloads of `{}` must have the same visibility.", &.{v(name)}, @ptrCast(decl));
+            }
             return sym.cast(.func);
         } else {
             try reportDupSym(c, sym, name, @ptrCast(decl));
@@ -114,6 +119,7 @@ fn prepareFuncSym(c: *cy.Chunk, parent: *cy.Sym, mod: *Module, name: []const u8,
     }
     // Create func sym.
     const sym = try c.createFuncSym(parent, name);
+    sym.head.getMetadata().private = hidden;
     try mod.addSym(c.alloc, name, @ptrCast(sym));
     return sym;
 }
@@ -141,6 +147,7 @@ pub fn reserveTypeAlias(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: *
 
 pub fn reserveFuncTemplateSym(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, callable: bool, decl: *ast.TemplateDecl) !*cy.sym.FuncTemplate {
     const sym = try c.createFuncTemplate(parent, name, callable, decl);
+    sym.head.getMetadata().private = ast.isHiddenDecl(decl.child_decl);
     const mod = parent.getMod().?;
     try addUniqueSym(c, mod, name, @ptrCast(sym), @ptrCast(decl));
     return sym;
@@ -150,6 +157,7 @@ pub fn reserveTemplate(c: *cy.Chunk, parent: *cy.Sym, name: []const u8,
     kind: cy.sym.TemplateType, decl: *ast.TemplateDecl) !*cy.sym.Template {
 
     const sym = try c.createTemplate(parent, name, kind, decl);
+    sym.head.getMetadata().private = ast.isHiddenDecl(decl.child_decl);
     const mod = parent.getMod().?;
     try addUniqueSym(c, mod, name, @ptrCast(sym), @ptrCast(decl));
     return sym;
@@ -181,6 +189,7 @@ pub fn declareUnionCase(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, type_: 
 
 pub fn reserveExternVar(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: ?*ast.GlobalDecl) !*cy.sym.ExternVar {
     const sym = try c.createExternVar(parent, name, decl);
+    sym.head.getMetadata().private = if (decl) |d| d.hidden else false;
     const mod = parent.getMod().?;
     try addUniqueSym(c, mod, name, @ptrCast(sym), @ptrCast(decl));
     return sym;
@@ -188,6 +197,7 @@ pub fn reserveExternVar(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: ?
 
 pub fn reserveHostVar(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: ?*ast.GlobalDecl) !*cy.sym.HostVar {
     const sym = try c.createHostVar(parent, name, decl);
+    sym.head.getMetadata().private = if (decl) |d| d.hidden else false;
     const mod = parent.getMod().?;
     try addUniqueSym(c, mod, name, @ptrCast(sym), @ptrCast(decl));
     return sym;
@@ -201,6 +211,7 @@ pub fn resolveHostVar(c: *cy.Chunk, sym: *cy.sym.HostVar, var_t: *cy.Type, val: 
 
 pub fn reserveConst(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: ?*ast.ConstDecl) !*cy.sym.Const {
     const sym = try c.createConst(parent, name, decl);
+    sym.head.getMetadata().private = if (decl) |d| d.hidden else false;
     const mod = parent.getMod().?;
     _ = try addUniqueSym(c, mod, name, @ptrCast(sym), @ptrCast(decl));
     return sym;
@@ -208,6 +219,7 @@ pub fn reserveConst(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: ?*ast
 
 pub fn reserveUserVar(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: ?*ast.GlobalDecl) !*cy.sym.UserVar {
     const sym = try c.createUserVar(parent, name, decl);
+    sym.head.getMetadata().private = if (decl) |d| d.hidden else false;
     const mod = parent.getMod().?;
     _ = try addUniqueSym(c, mod, name, @ptrCast(sym), @ptrCast(decl));
     return sym;
@@ -220,6 +232,11 @@ pub fn resolveUserVarType(c: *cy.Chunk, sym: *cy.sym.UserVar, type_: *cy.Type) v
 
 pub fn declareField(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, idx: usize, type_: *cy.Type, decl: ?*ast.Node) !*cy.sym.Field {
     const sym = try c.createField(parent, name, idx, type_);
+    if (decl) |d| {
+        if (d.type() == .struct_field) {
+            sym.head.getMetadata().private = d.cast(.struct_field).hidden;
+        }
+    }
     const mod = parent.getMod().?;
     _ = try addUniqueSym(c, mod, name, @ptrCast(sym), decl);
     return sym;
@@ -227,6 +244,7 @@ pub fn declareField(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, idx: usize,
 
 pub fn reserveTypeSym(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, type_: *cy.Type, decl: ?*ast.Node) !*cy.sym.TypeSym {
     const sym = try c.createTypeSym(parent, name, type_, decl);
+    sym.head.getMetadata().private = if (decl) |d| ast.isHiddenDecl(d) else false;
     const mod = parent.getMod().?;
     _ = try addUniqueSym(c, mod, name, @ptrCast(sym), @ptrCast(decl));
     return sym;
@@ -252,6 +270,7 @@ pub fn reserveVariantMember(
     c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: *ast.Node,
 ) !*cy.sym.VariantMember {
     const sym = try c.createVariantMember(parent, name, @ptrCast(decl));
+    sym.head.getMetadata().private = ast.isHiddenDecl(decl);
     const mod = parent.getMod().?;
     _ = try addUniqueSym(c, mod, name, @ptrCast(sym), @ptrCast(decl));
     return sym;
@@ -265,6 +284,9 @@ pub fn reserveVariantFunc(
     if (mod.symMap.get(name)) |sym| {
         if (sym.type == .variant_func) {
             const sym_ = sym.cast(.variant_func);
+            if (sym.getMetadata().private != decl.hidden) {
+                return c.reportErrorFmt("Overloads of `{}` must have the same visibility.", &.{v(name)}, @ptrCast(decl));
+            }
             try sym_.rest().append(c.alloc, .{
                 .decl = decl,
                 .with_cstrs = .{ .ptr = undefined, .len = 0 },
@@ -277,6 +299,7 @@ pub fn reserveVariantFunc(
         }
     } else {
         const sym = try c.createVariantFunc(parent, name, decl);
+        sym.head.getMetadata().private = decl.hidden;
         try mod.addSym(c.alloc, name, @ptrCast(sym));
         return sym;
     }
@@ -423,9 +446,12 @@ pub fn resolveFuncInfo(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig) void {
 }
 
 pub fn get_pub_resolved_chunk_sym(c: *cy.Chunk, chunk: *cy.sym.Chunk, name: []const u8, node: *ast.Node) anyerror!?*cy.Sym {
-    _ = node;
     const mod = chunk.getMod();
     const sym = mod.getSym(name) orelse return null;
+    if (!is_sym_visible(c, sym, node)) {
+        // A `-` symbol of a fallback module (core) is not reachable from a script by its bare name (F-30).
+        return null;
+    }
     switch (sym.type) {
         .module_alias => {
             {
@@ -458,12 +484,51 @@ pub fn get_pub_resolved_chunk_sym(c: *cy.Chunk, chunk: *cy.sym.Chunk, name: []co
     }
 }
 
+/// The chunk that an access is written in. `c` can be a different chunk: a core template body expanded for a
+/// user type is resolved under the user chunk, and a field default is evaluated under the chunk that writes the
+/// initializer. Generated nodes without a source fall back to `c`.
+pub fn access_chunk(c: *cy.Chunk, node: *ast.Node) *cy.Chunk {
+    const src = node.src();
+    if (src == cy.NullId) {
+        return c;
+    }
+    return c.compiler.chunks.items[src];
+}
+
+/// A `-` symbol is visible to the chunk that declares it. Chunks with the same `srcUri` are one module: a
+/// `persist_main` session creates a new main chunk for every eval under the same uri (F-30).
+pub fn is_sym_visible(c: *cy.Chunk, sym: *cy.Sym, node: *ast.Node) bool {
+    if (!sym.getMetadata().private) {
+        return true;
+    }
+    // A `use` alias is always private so that `use *` does not re-export it, but the qualified path through it
+    // (`libc.macos.Stat`) stays open as before.
+    if (sym.type == .use_alias or sym.type == .module_alias) {
+        return true;
+    }
+    const owner = sym.getRootChunk();
+    const from = access_chunk(c, node);
+    return owner == from or std.mem.eql(u8, owner.srcUri, from.srcUri);
+}
+
+/// Reports an access to a `-` symbol from another module. Aliases are checked as themselves, not as their target,
+/// so `use *` aliases and `persist_main` aliases of private symbols pass (they belong to the importing chunk).
+pub fn check_sym_visible(c: *cy.Chunk, sym: *cy.Sym, node: *ast.Node) !void {
+    if (is_sym_visible(c, sym, node)) {
+        return;
+    }
+    const kind: []const u8 = if (sym.type == .field) "field" else "symbol";
+    const parent_name = try cy.sym.formatSymName(c.sema, &cy.tempBuf, sym.parent.?, .{ .from = c });
+    return c.reportErrorFmt("Can not access the private {} `{}` in `{}`. A symbol declared with `-` is only visible to the module that declares it.", &.{v(kind), v(sym.name()), v(parent_name)}, node);
+}
+
 /// Note that resolved refers to a resolved symbol path and not the underlying symbol content.
 pub fn getResolvedSym(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *ast.Node) anyerror!?*cy.Sym {
     const mod = modSym.getMod() orelse {
         return null;
     };
     if (mod.getSym(name)) |sym| {
+        try check_sym_visible(c, sym, node);
         switch (sym.type) {
             .module_alias => {
                 return sym.cast(.module_alias).sym;
@@ -509,9 +574,12 @@ pub fn getResolvedSym(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *as
                     func = (try c.reserveFunc(modSym, sym.name(), decl.decl)) orelse continue;
                     try sema.ensure_resolved_func(c, func, true, node);
                 }
-                return mod.getSym(name).?;
+                const res = mod.getSym(name).?;
+                try check_sym_visible(c, res, node);
+                return res;
             } else if (sym.type == .variant_member) {
                 const member = sym.cast(.variant_member);
+                try check_sym_visible(c, sym, node);
                 if (member.decl.type() == .const_decl) {
                     return sema.reserveConst(c, modSym, sym.name(), member.decl.cast(.const_decl));
                 } else if (member.decl.type() == .template) {

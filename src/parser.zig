@@ -1270,6 +1270,7 @@ pub const Parser = struct {
             .impls = .{ .ptr = impls.ptr, .len = impls.len },
             .cases = .{ .ptr = cases.ptr, .len = cases.len },
             .attrs = .{ .ptr = config.attrs.ptr, .len = config.attrs.len },
+            .hidden = config.hidden,
         });
     }
 
@@ -1285,6 +1286,7 @@ pub const Parser = struct {
             .attrs = .{ .ptr = config.attrs.ptr, .len = config.attrs.len },
             .num_embedded_fields = @intCast(num_embedded_fields),
             .is_tuple = is_tuple,
+            .hidden = config.hidden,
         });
         n.setType(node_t);
         return @ptrCast(@alignCast(n));
@@ -1425,6 +1427,7 @@ pub const Parser = struct {
                 .pos = self.tokenPos(start),
                 .attrs = .{ .ptr = config.attrs.ptr, .len = config.attrs.len },
                 .funcs = .{ .ptr = undefined, .len = 0 },
+                .hidden = config.hidden,
             });
         }
 
@@ -1438,6 +1441,7 @@ pub const Parser = struct {
             .pos = self.tokenPos(start),
             .attrs = .{ .ptr = config.attrs.ptr, .len = config.attrs.len },
             .funcs = .{ .ptr = funcs.ptr, .len = funcs.len },
+            .hidden = config.hidden,
         });
     }
 

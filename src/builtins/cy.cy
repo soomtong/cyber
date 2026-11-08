@@ -844,6 +844,7 @@ type CUnionDecl:
     attrs []^Node
     impls []^Node
     cases []^Node
+    hidden bool
     pos i32
 
 type StructDecl:
@@ -853,6 +854,7 @@ type StructDecl:
     fields   []^Node
     num_embedded_fields i32
     is_tuple bool
+    hidden   bool
     pos      i32
 
 type EnumMember:
@@ -917,6 +919,7 @@ type TraitDecl:
     name  ^Node
     attrs []^Node
     funcs []^Node
+    hidden bool
     pos   i32
 
 type VectorType:

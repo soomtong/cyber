@@ -94,6 +94,7 @@ fn test_functions(run: *Runner) void {
     run.case("functions/call_overload_incompat_arg_error.cy");
     run.case("functions/call_overload_exact.cy");
     run.case("functions/call_overload_ret_only_error.cy");
+    run.case("functions/overload_visibility_error.cy");
     run.case("functions/call_float_param_error.cy");
     run.case("functions/call_method_missing_error.cy");
     run.case("functions/call_method_sig_error.cy");
@@ -289,6 +290,22 @@ fn test_modules(run: *Runner) void {
         run.case("modules/import.cy");
         run.case("modules/import_all.cy");
         run.case("modules/import_sym_alias.cy");
+        run.case("modules/visibility.cy");
+        run.case("modules/visibility_import_all.cy");
+        run.case("modules/private_func_error.cy");
+        run.case("modules/private_method_error.cy");
+        run.case("modules/private_field_error.cy");
+        run.case("modules/private_field_init_error.cy");
+        run.case("modules/private_field_assign_error.cy");
+        run.case("modules/private_field_borrow_error.cy");
+        run.case("modules/private_type_error.cy");
+        run.case("modules/private_type_template_error.cy");
+        run.case("modules/private_global_error.cy");
+        run.case("modules/private_const_error.cy");
+        run.case("modules/private_variant_func_error.cy");
+        run.case("modules/private_variant_field_error.cy");
+        run.case("modules/import_all_private_error.cy");
+        run.case("modules/core_private_error.cy");
     }
     run.case("modules/core.cy");
 if (!aot) {

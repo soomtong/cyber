@@ -1399,7 +1399,7 @@ print(total)
 | `Func(FN)` (2064) | `Func[FN]`가 실제 표기(`src/test/functions/call_closure.cy:17`) |
 | `case 100` / `case 200` 본문 없는 fallthrough 예제 (1850) | 그대로 쓰면 `ParseError: Unexpected indentation.` |
 | `try:` ... `catch err:` (2656 부근) | 구현 없음(TBD). `!else`만 사용 |
-| `-` 접두 비공개 (1159, 3290대) | 다른 모듈에서 `x.b`, `u.hidden()` 접근이 막히지 않는다. 가시성 검사 자리는 `module.zig:502,510`에 `TODO: check visibility.` |
+| `-` 접두 비공개 (1159, 3290대) | 다른 모듈에서 `x.b`, `u.hidden()` 접근이 막히지 않는다. 가시성 검사 자리는 `module.zig:502,510`에 `TODO: check visibility.` 2026-11-09 수정 `2646638d`(F-30): 이제 컴파일 오류 |
 
 ### 7.3 구현 버그와 놀라운 점 (HEAD b40531a1, 재현 방법 포함)
 

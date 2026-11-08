@@ -1143,6 +1143,8 @@ fn main():
 
 `mods/priv.cy` 에 `type Info: a int / -b int`, `-fn secret() -> int`, `type Visible = Info`, `-type Alias = Info` 를 선언하고 다른 파일에서 `use p 'mods/priv.cy'` 로 쓴다. 결과: `p.Info{a=1, b=2}.b` 는 `2`, `p.secret()` 은 `7` 이 접근된다. docs.md 의 "필드는 같은 모듈 안에서만 접근" 과 다르다. 유일하게 강제되는 곳은 `use * 'mods/priv.cy'` 로 가져올 때 `-type Alias` 가 빠지는 것이다("Undeclared variable `Alias`"). 이것도 `p.Alias{...}` 로 한정 접근하면 통과한다. `private` 메타데이터가 type_alias/type_const/use_alias/chunk 에만 설정되고(src/sym.zig:1330, 1369, 1382, 1394), 함수/필드/변수의 `hidden` 은 파서 값으로만 남기 때문이다(rg 로 `.hidden` 사용처 확인).
 
+2026-11-09 수정(`2646638d`, F-30): 위 재현은 이제 모두 컴파일 오류다. `module.reserve*` · `declareField` · `reserveTypeSym` 이 선언의 `hidden` 을 `Sym.metadata.private` 로 옮기고(struct · trait · cunion AST 노드에 `hidden` 필드가 없던 것도 추가), 이름 조회 `module.getResolvedSym` 과 sema 의 필드 조회가 `module.check_sym_visible` 로 "접근 노드의 청크(`node.src()`)가 선언 청크인가" 를 검사한다. `c` 가 아니라 노드의 청크를 보는 이유는 core 템플릿 본문이 사용자 타입으로 확장될 때 core 의 `-fn` 을 계속 불러야 하기 때문이다. `srcUri` 가 같은 청크(`persist_main` 의 연속 main 청크)는 같은 모듈이다. 별칭은 별칭 자체를 검사하므로 `use *` 와 REPL 이월 별칭은 통과한다. 오버로드는 가시성이 같아야 하고, 폴백 모듈(core) 조회는 private 을 없음으로 본다. `docs/decisions/project_symbol_visibility.md`.
+
 ### 5.16 변형 과제
 
 1. 5.14(a)의 생성기에서 `Buf[const A int, const N int]` 를 `Buf[T Any, const N int]` 로 바꿔(`Buf[int, k]`) 충돌이 사라지는지 확인한다. 왜 그런지 `VariantKeyContext.eql` 의 분기 순서로 설명해 본다.
@@ -1214,7 +1216,7 @@ history 문서의 표대로 `my -> let -> dyn`, `import -> use`, `func -> fn`, `
 
 ### 6.7 fork 유지보수 시사점
 
-타입 시스템에서 다음에 손댈 가치가 높은 순서는 (1) 5.13 의 trait 검사(안전성, 수정이 작음. 2026-11-08 수정), (2) 5.14(a) 의 `eql` 조기 return(안전성, 수정 한 군데. 2026-11-08 수정), (3) 5.14(b) 해시와 이름 출력의 지원 종류 일치(2026-11-08 수정), (4) 5.15 가시성을 강제하거나 문서를 고치기(임베딩 환경에서 샌드박스 경계로 쓰려 한다면 지금은 쓸 수 없다), (5) 7절의 죽은 코드 정리다. 모두 `src/test/types/*_error.cy` 형식의 `--cytest: error` 테스트로 먼저 고정하면 회귀를 막을 수 있다(src/behavior_test.zig:182~239 에 등록하는 방식). 템플릿 코드는 인스턴스를 만들어 호출하는 테스트가 있어야 오류가 드러나므로, 새 core 템플릿에는 대표 인스턴스 호출 테스트를 같이 둔다.
+타입 시스템에서 다음에 손댈 가치가 높은 순서는 (1) 5.13 의 trait 검사(안전성, 수정이 작음. 2026-11-08 수정), (2) 5.14(a) 의 `eql` 조기 return(안전성, 수정 한 군데. 2026-11-08 수정), (3) 5.14(b) 해시와 이름 출력의 지원 종류 일치(2026-11-08 수정), (4) 5.15 가시성을 강제하거나 문서를 고치기(임베딩 환경에서 샌드박스 경계로 쓰려 한다면 지금은 쓸 수 없다. 2026-11-09 강제로 수정), (5) 7절의 죽은 코드 정리다. 모두 `src/test/types/*_error.cy` 형식의 `--cytest: error` 테스트로 먼저 고정하면 회귀를 막을 수 있다(src/behavior_test.zig:182~239 에 등록하는 방식). 템플릿 코드는 인스턴스를 만들어 호출하는 테스트가 있어야 오류가 드러나므로, 새 core 템플릿에는 대표 인스턴스 호출 테스트를 같이 둔다.
 
 ## 7. 알려진 이슈, 문서와 코드의 차이, 미완 지점
 
@@ -1224,7 +1226,7 @@ history 문서의 표대로 `my -> let -> dyn`, `import -> use`, `func -> fn`, `
 2. 템플릿 캐시 `VariantKeyContext.eql` 이 비-Type 매개변수에서 조기 return 했다 (src/template.zig:189~224, 5.14a). `Buf[1, 47]` 이 `Buf[1, 45]` 로 바뀌었다. 함수 템플릿 캐시도 같은 문맥을 쓴다(:481). 2026-11-08 수정 `1ec8d581`(F-23).
 3. `const` 매개변수로 `bool`, `EvalStr`, enum 을 쓰는 타입 템플릿이 컴파일러 패닉을 냈다 (5.14b; 해시는 bool 만, 이름 출력은 EvalStr/enum 을 지원하지 않음). 2026-11-08 수정 `bb5d1a05`(F-28).
 4. `type X const:` 가 결과 타입의 이름을 덮어쓴다 (src/sema_type.zig:27~30, 5.14c). init 식 `Pick[int]{...}` 은 "Unsupported: type_const".
-5. `-` 가시성은 파서만 인식하고 함수, 필드, 변수에서는 강제되지 않는다 (5.15). docs.md 의 "Field visibility." 와 다르다.
+5. `-` 가시성은 파서만 인식하고 함수, 필드, 변수에서는 강제되지 않는다 (5.15). docs.md 의 "Field visibility." 와 다르다. 2026-11-09 수정.
 6. 파라미터가 같고 반환만 다른 오버로드가 거부되지 않고 첫 번째 선언이 호출됐다 (5.7). 2026-11-08 수정 `cf4aa84a`(F-21).
 7. `Object.toString()` 을 호출하면 프로그램 종료 시 "integer overflow" 패닉이 난다. 최소 재현은 `a := Object(^'s')` / `print(a.toString())` / `print('end')` 이고 `end` 출력 뒤에 패닉한다(`Object(^5)` 도 동일, `downcast` 는 정상). 원인은 `(as[^str] self.inner).*` 가 retain 없이 만든 `^` 값이 소멸되며 참조 카운트가 어긋나는 것으로 추정한다. 확인하지 않았다.
 8. `fn show(x Any)` 가 호출 시 "Expected type `Any`. Found `int`." 로 실패한다. docs.md 의 Generic types 절은 `Any` 가 "template parameters and generic function parameters" 에서 쓰인다고 한다. trait 나 `Copyable` 을 매개변수 타입으로 쓰는 함수는 정상적으로 제네릭이 된다.

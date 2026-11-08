@@ -1228,6 +1228,7 @@ type Info:
     -b      int
     -secret str
 ```
+The module is the file that declares the type. From another module, reading, assigning or initializing a private field (`Info{a=1, b=2}`), also through a borrow or pointer, is a compile error: `Can not access the private field `b` in `Info`.` A type that other modules need to initialize gives its private fields a default value. A `persist_main` session (the REPL) counts as one module.
 
 ### Circular references.
 Field declarations may have circular type references if the struct can be initialized:
@@ -3573,6 +3574,7 @@ This only allows the source module to access the symbol:
 -fn add(a, b int) -> int:
     return a + b
 ```
+The prefix applies to functions and methods, globals, constants, types (including templates, traits and type aliases) and [fields](#field-visibility). The module is the file that declares the symbol, so `m.add(1, 2)` from another module is a compile error: `Can not access the private symbol `add` in `m`. A symbol declared with `-` is only visible to the module that declares it.` A `use *` import skips private symbols. Overloads of one function share one visibility: declaring `fn f(a int)` and `-fn f(a float)` is a compile error. A `persist_main` session (the REPL) counts as one module, so a private symbol declared by an earlier eval stays visible to the next one.
 
 ## Symbol alias.
 `use` can create an alias to another symbol:

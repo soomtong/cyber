@@ -102,6 +102,11 @@
 - 부분 이동된 변수에서 `@deinit`이 있는 멤버의 하위 필드를 읽으면(`b := move t.b; t.a.name`) 컴파일러가 `index out of bounds` panic으로
   호스트를 죽이거나 거짓 `Cannot copy a partially moved value.`였다. 멤버 하나가 상태 한 칸인데 `str` 필드로 들어가며 세 칸을 읽어서다
   (`96007fe5`, F-80).
+- `-` 가시성이 강제되지 않았다. `use p 'mod.cy'` 뒤 `p.secret()`(`-fn`) · `p.Info{a=1, b=2}.b`(`-b` 필드) · `p.counter`(`-global`) ·
+  `p.Hidden{}`(`-type`)이 모두 통과했고, struct · trait · cunion 선언은 `-`가 파서에서 버려졌다. `use *`가 `-type` 별칭을 건너뛰는 것이
+  전부였다. 이제 다른 모듈의 접근은 컴파일 오류 ``Can not access the private symbol `secret` in `p`. ...``(필드는 `private field`)다
+  (`2646638d`, F-30, `docs/decisions/project_symbol_visibility.md`). 규칙은 아래 "언어" 절. core의 `-fn`(`alloc_` · `panic_oob` 등)도
+  스크립트에서 맨 이름으로 보이지 않는다(`Undeclared variable`).
 
 ## 언어와 표준 라이브러리
 
@@ -147,6 +152,11 @@
   통째로 복사 · 빌림 · 이동할 수 있다. 통째 재대입과 같이 변수가 선언된 블록 안에서만 되며, 안쪽 블록에서는
   `Can only assign to a moved member of a variable declared in the same block.` 컴파일 오류. 하위 멤버 일부가 옮겨진 중첩 멤버를 통째로
   재대입하면 살아 있던 하위 멤버만 정리한다. `docs/docs.md` Moving 절에 적혀 있다.
+- 가시성(`2646638d`): `-` 접두는 함수 · 메서드 · `global` · `const` · 타입(struct · cstruct · enum · choice · trait · cunion · 템플릿 ·
+  별칭) · 필드에 붙는다. 모듈은 선언한 파일이고, 다른 모듈에서 이름으로 접근(필드는 읽기 · 대입 · 초기화 · 빌림 · 포인터 경유)하면
+  컴파일 오류. `use *`는 private 심볼을 건너뛴다. 한 함수의 오버로드는 가시성이 같아야 한다(``Overloads of `f` must have the same
+  visibility.``). `persist_main` 세션(REPL)은 eval이 바뀌어도 한 모듈이다. 메타프로그래밍(`type.info`) · 컴파일러가 이름으로 찾는
+  `@init` · `@deinit` 등은 검사하지 않는다. `docs/docs.md` Symbol visibility · Field visibility 절에 적혀 있다.
 
 
 ## 임베딩 API

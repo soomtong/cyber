@@ -3220,6 +3220,8 @@ fn (&Wyhash) update(input [&]byte):
 
 fn (&Wyhash) final() -> int:
     input := self.buf[0..self.buf_len]
+    -- Declared at the same depth as `input`, which borrows it after the inner `if` block ends.
+    scratch := [16]byte(0)
     newSelf := self.shallowCopy() -- ensure idempotency
 
     if self.cur_len <= 16:
@@ -3227,7 +3229,6 @@ fn (&Wyhash) final() -> int:
     else:
         offset := 0
         if self.buf_len < 16:
-            scratch := [16]byte(0)
             rem := 16 - self.buf_len
             scratch[0..rem].set(self.buf[self.buf.len()-rem..][0..rem])
             scratch[rem..][0..self.buf_len].set(self.buf[0..self.buf_len])

@@ -164,6 +164,12 @@ if (!is_wasm) {
     run.case("memory/lift_borrow_error.cy");
     run.case("memory/lift_borrow_container_error.cy");
     run.case("memory/lift_borrow_option_error.cy");
+    run.case("memory/borrow_scope_release.cy");
+    run.case("memory/borrow_outlive_error.cy");
+    run.case("memory/borrow_while_exclusive_error.cy");
+    run.case("memory/exclusive_borrow_arg_conflict_error.cy");
+    run.case("memory/exclusive_borrow_twice_error.cy");
+    run.case("memory/receiver_borrow_while_exclusive_error.cy");
     run.case("memory/lift_moves_rvalue.cy");
     run.case("memory/move_local_to_return.cy");
     run.case("memory/move_use_after_error.cy");

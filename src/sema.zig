@@ -106,8 +106,11 @@ pub const Local = struct {
 
     lifetime: Lifetime,
 
-    /// If this is an owning local, track the active borrows for exclusivity check.
+    /// If this is an owning local, track the borrows stored in other locals for the exclusivity check.
+    /// Only borrows that live in a local count; a borrow passed as an argument ends with its statement.
+    /// See `docs/decisions/project_borrow_model.md`.
     active_borrows: u8,
+    active_ex_borrows: u8,
 
     /// Local register offset assigned to this var.
     /// Locals are relative to the stack frame's start position.
@@ -116,8 +119,11 @@ pub const Local = struct {
     /// Contains active fields in `proc.var_active_struct_fields`.
     has_inactive_struct_fields: bool = false,
 
-    /// If this is a borrow/ex_borrow, track the parent local.
+    /// If this local holds a borrow, the owning local it borrows from (`cy.NullId` otherwise).
+    /// Set by `bindBorrowLocal`, released by `popLocals2` and on reassignment.
     parent_local: LocalId,
+    /// Whether the borrow held by this local is exclusive (`&&T`).
+    ex_borrow: bool = false,
 
     stack_idx: u32,
 
@@ -307,6 +313,82 @@ fn popLocals(c: *cy.Chunk, var_start: usize, node: *ast.Node) !void {
     return popLocals2(c, var_start, true, node);
 }
 
+/// The local that owns the value an expression borrows from. Borrow locals are followed to their owner,
+/// so `r := &a; x := r` and `&r.field` all resolve to `a`.
+pub fn borrowOwner(c: *cy.Chunk, expr: ExprResult) ?LocalId {
+    const parent = expr.recParentLocal() orelse return null;
+    return borrowOwnerOf(c, parent);
+}
+
+pub fn borrowOwnerOf(c: *cy.Chunk, local: LocalId) LocalId {
+    var owner = local;
+    while (c.varStack.items[owner].parent_local != cy.NullId) {
+        owner = c.varStack.items[owner].parent_local;
+    }
+    return owner;
+}
+
+/// Records that the local `var_idx` holds the borrow `init` until it goes out of scope.
+fn bindBorrowLocal(c: *cy.Chunk, var_idx: LocalId, init: ExprResult) void {
+    const decl_t = c.varStack.items[var_idx].decl_t;
+    if (!decl_t.info.borrow_only) return;
+    const owner = borrowOwner(c, init) orelse return;
+    if (owner == var_idx) return;
+    const ex = decl_t.kind() == .ex_borrow;
+    const local = &c.varStack.items[var_idx];
+    local.parent_local = owner;
+    local.ex_borrow = ex;
+    if (ex) {
+        c.varStack.items[owner].active_ex_borrows += 1;
+    } else {
+        c.varStack.items[owner].active_borrows += 1;
+    }
+}
+
+fn unbindBorrowLocal(c: *cy.Chunk, local: *Local) void {
+    if (local.parent_local == cy.NullId) return;
+    const owner = &c.varStack.items[local.parent_local];
+    if (local.ex_borrow) {
+        owner.active_ex_borrows -= 1;
+    } else {
+        owner.active_borrows -= 1;
+    }
+    local.parent_local = cy.NullId;
+    local.ex_borrow = false;
+}
+
+/// A shared borrow (`&a`, `&self`) is not allowed while a local holds an exclusive borrow of the owner.
+pub fn checkSharedBorrow(c: *cy.Chunk, owner: LocalId, node: *ast.Node) !void {
+    if (c.varStack.items[owner].active_ex_borrows > 0) {
+        const name = c.varStack.items[owner].name();
+        return c.reportErrorFmt("Cannot borrow `{}`. There is an active exclusive borrow to it.", &.{v(name)}, node);
+    }
+}
+
+/// An exclusive borrow (`&&a`, `&&self`) is not allowed while a local holds any borrow of the owner.
+pub fn checkExclusiveBorrow(c: *cy.Chunk, owner: LocalId, node: *ast.Node) !void {
+    const local = c.varStack.items[owner];
+    if (local.active_borrows > 0 or local.active_ex_borrows > 0) {
+        return c.reportErrorFmt("Expected exclusive access. There is another active borrow to `{}`.", &.{v(local.name())}, node);
+    }
+}
+
+/// A borrow assigned to a local can not come from a value that dies before the local does.
+fn checkBorrowOutlives(c: *cy.Chunk, var_idx: LocalId, right: ExprResult, node: *ast.Node) !void {
+    if (!c.varStack.items[var_idx].decl_t.info.borrow_only) return;
+    const owner = borrowOwner(c, right) orelse return;
+    if (owner == var_idx) return;
+    const owner_local = c.varStack.items[owner];
+    const local = c.varStack.items[var_idx];
+    if (owner_local.lifetime.kind == .temp) {
+        return c.reportError("The result can not borrow from a temporary value.", node);
+    }
+    if (owner_local.lifetime.kind == .block and local.lifetime.kind == .block and
+        owner_local.lifetime.block_depth > local.lifetime.block_depth) {
+        return c.reportErrorFmt("`{}` can not outlive `{}`.", &.{v(local.name()), v(owner_local.name())}, node);
+    }
+}
+
 fn popLocals2(c: *cy.Chunk, var_start: usize, destruct: bool, node: *ast.Node) !void {
     if (c.varStack.items.len <= var_start) {
         return;
@@ -318,10 +400,8 @@ fn popLocals2(c: *cy.Chunk, var_start: usize, destruct: bool, node: *ast.Node) !
         i -= 1;
         const local = &c.varStack.items[i];
 
-        // Release active borrow.
-        if (local.parent_local != cy.NullId) {
-            c.varStack.items[local.parent_local].active_borrows -= 1;
-        }
+        // Release the borrow this local held.
+        unbindBorrowLocal(c, local);
 
         if (destruct) {
             if (local.type == .local) {
@@ -474,6 +554,8 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
                     iterable_expr = try semaBorrow(c, iterable_expr, node);
                 }
                 const iterable_v = try declareHiddenLocal(c, "_iterable", iterable_expr.type, iterable_expr, iterable_n);
+                // The loop borrows the iterable until it ends.
+                bindBorrowLocal(c, iterable_v.id, iterable_expr);
                 const iterable = try semaLocal(c, iterable_v.id, node);
 
                 const iterator_sym = try c.accessResolvedSymOrFail(iterable_init.type, "iterator", iterable_n);
@@ -1740,6 +1822,8 @@ fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.
                 if (right_res.resType == .value and right_res.data.value.has_aux_local) {
                     var_start += 1;
                 }
+                try checkBorrowOutlives(c, id, right_res, right);
+                const borrow_init = right_res;
                 right_res = try semaOwn(c, right_res, right);
 
                 if (right_res.type.isManaged()) {
@@ -1761,6 +1845,10 @@ fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.
                     _ = c.proc().var_active_struct_fields.remove(leftRes.data.value_local);
                     local.has_inactive_struct_fields = false;
                 }
+
+                // The local now holds a different borrow.
+                unbindBorrowLocal(c, local);
+                bindBorrowLocal(c, leftRes.data.value_local, borrow_init);
 
                 _ = try c.ir.pushStmt(.set_local, node, .{
                     .id = local.inner.local.id,
@@ -3544,6 +3632,7 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
     // Local now alive.
     svar = &c.varStack.items[var_idx];
     svar.type = .local;
+    bindBorrowLocal(c, @intCast(var_idx), right);
     if (var_start == c.varStack.items.len and !init_after_aux) {
         declare.cast(.declare_local).init = right.ir;
     } else {
@@ -4941,7 +5030,9 @@ pub fn popBlock2(c: *cy.Chunk, destruct_locals: bool) !cy.ir.StmtBlock {
     if (proc.block_depth > 1) {
         // Remove dead vars.
         const varDecls = c.varStack.items[b.varStart..];
-        for (varDecls) |decl| {
+        for (varDecls) |*decl| {
+            // Borrows held by the block's locals end here.
+            unbindBorrowLocal(c, decl);
             if (decl.type == .local and decl.inner.local.hidden) {
                 continue;
             }
@@ -5035,6 +5126,7 @@ fn pushLocalVar(c: *cy.Chunk, _type: LocalVarType, name: []const u8, declType: *
         .decl_t = declType,
         .lifetime = Lifetime.initBlock(@intCast(proc.block_depth)),
         .active_borrows = 0,
+        .active_ex_borrows = 0,
         .parent_local = cy.NullId,
         .type = _type,
         .stack_idx = id,
@@ -8897,10 +8989,7 @@ pub fn sema_ex_borrow2(c: *cy.Chunk, child: ExprResult, ex_borrow_t: *cy.Type, n
         }
     };
 
-    if (c.varStack.items[parent_local].active_borrows > 0) {
-        const name = c.varStack.items[parent_local].name();
-        return c.reportErrorFmt("Expected exclusive access. There is another active borrow to `{}`.", &.{v(name)}, node);
-    }
+    try checkExclusiveBorrow(c, borrowOwnerOf(c, parent_local), node);
 
     const addr_of = try c.ir.newExpr(.address_of, ex_borrow_t, node, .{
         .expr = eff_child.ir,
@@ -8924,7 +9013,8 @@ fn semaBorrow(c: *cy.Chunk, child: ExprResult, node: *ast.Node) !ExprResult {
     });
     var res = ExprResult.init2(addr_of);
     if (eff_child.recParentLocal()) |parent_local| {
-        c.varStack.items[parent_local].active_borrows += 1;
+        // Counted only when stored in a local (`bindBorrowLocal`). A temporary borrow ends with its statement.
+        try checkSharedBorrow(c, borrowOwnerOf(c, parent_local), node);
         res.data.value.parent_local = parent_local;
     } else {
         res.data.value.parent_local = null;
@@ -9873,11 +9963,12 @@ pub fn unescapeSeq(seq: []const u8) !CharAdvance {
 
 test "sema internals." {
     // `Local` holds a bare union, which carries a hidden tag only with runtime safety.
+    // The borrow tracking fields (`active_ex_borrows`, `ex_borrow`) added a word in 2026-11 (F-25).
     if (cy.is32Bit) {
-        try t.eq(if (std.debug.runtime_safety) 40 else 36, @sizeOf(Local));
+        try t.eq(if (std.debug.runtime_safety) 44 else 40, @sizeOf(Local));
         try t.eq(16, @sizeOf(FuncSig));
     } else {
-        try t.eq(if (std.debug.runtime_safety) 56 else 48, @sizeOf(Local));
+        try t.eq(if (std.debug.runtime_safety) 64 else 56, @sizeOf(Local));
         try t.eq(24, @sizeOf(FuncSig));
     }
 }

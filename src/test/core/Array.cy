@@ -32,8 +32,10 @@ t.eq_span(a[0..3], {1, 2, 3})
 
 --| Array of managed elements.
 a2 := Array[^int]{^1, ^2, ^3}
-a2_view := a2[0..1]
-t.eq(1, a2_view[0].*)
+-- A span borrows the array until its block ends, so it lives in its own block before `a2` is resized below.
+if true:
+    a2_view := a2[0..1]
+    t.eq(1, a2_view[0].*)
 
 -- Set index
 a = {}

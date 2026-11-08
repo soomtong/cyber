@@ -520,6 +520,11 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
     const capture_param_scope = sig.scope_param_idx != cy.NullU8;
     var ret_parent_scope_local: ?u32 = null;
 
+    // Owners borrowed by each argument, to reject an exclusive borrow next to another borrow of the same local.
+    var arg_owners: [256]?sema.LocalId = @splat(null);
+    var arg_ex: [256]bool = @splat(false);
+    var arg_nodes: [256]*ast.Node = undefined;
+
     var arg_idx: u32 = 0;
 
     for (0..nargs) |i| {
@@ -551,8 +556,24 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         if (capture_param_scope and sig.scope_param_idx == i) {
             ret_parent_scope_local = arg_res.recParentLocal();
         }
+        arg_owners[arg_idx] = sema.borrowOwner(c, arg_res);
+        arg_ex[arg_idx] = arg_res.type.kind() == .ex_borrow;
+        arg_nodes[arg_idx] = arg.node;
         args[arg_idx] = arg_res.ir;
         arg_idx += 1;
+    }
+
+    // All arguments are alive inside the call, so an exclusive borrow can not share its owner with another argument.
+    for (0..arg_idx) |i| {
+        if (!arg_ex[i]) continue;
+        const owner = arg_owners[i] orelse continue;
+        for (0..arg_idx) |j| {
+            if (j == i) continue;
+            if (arg_owners[j] == owner) {
+                const name = c.varStack.items[owner].name();
+                return c.reportErrorFmt("Cannot pass an exclusive borrow of `{}` with another argument that borrows `{}`.", &.{v(name), v(name)}, arg_nodes[i]);
+            }
+        }
     }
 
     return .{
@@ -946,6 +967,9 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
                         // Implicit T -> &T
                         const rec = try sema.semaManage(c, arg.data.receiver, node);
                         const addressable = try sema.semaEnsureAddressable(c, rec, node);
+                        if (addressable.recParentLocal()) |parent_local| {
+                            try sema.checkSharedBorrow(c, sema.borrowOwnerOf(c, parent_local), node);
+                        }
                         return sema.semaAddressOf(c, addressable, target_t, node);
                     }
                     if (arg.data.receiver.type != target_t) {

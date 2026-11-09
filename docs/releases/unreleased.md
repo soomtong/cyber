@@ -14,5 +14,8 @@
 
 - `cyber compile` 덤프의 `addr` 명령 표기를 `%dst = *%src`에서 `%dst = &%src`로 바꿨다. 이 명령은 레지스터 `src`의 스택 주소를 `dst`에
   넣는 것이라 옛 표기가 역참조로 읽혔다(`docs/decisions/project_ex_borrow_field_addr.md`).
+- 빌드 버전 문자열(`cyber version`의 `build-N-xxxxxxx`)을 `zig build -Dbuild=N -Dcommit=xxxxxxx` 옵션으로 넘긴다. `BUILD` · `COMMIT` 환경
+  변수는 폴백으로 남지만 Zig 0.17.1의 configure 캐시가 환경 변수를 추적하지 않아 같은 인자의 이전 빌드 결과가 남을 수 있다
+  (`docs/decisions/project_fork_release_ci.md`).
 
 ## 문서

@@ -101,26 +101,32 @@
   macOS 27 GA 뒤 퇴역 수순이다. 큐 지연은 무료 arm64 풀 전체의 문제라 레이블로 해결되지는 않는다(GitHub 상태 페이지 2025-03 ·
   2025-10 기록).
 - arm64 job이 또 배정되지 않으면 아래 명령으로 이 머신에서 두 자산을 만들어 `gh release upload`로 올린다(0.4.4 때 `build-729-8ad0d43`
-  번들을 이 방법으로 만들어 실행 · 버전 문자열을 확인했다). CI와 같은 버전 문자열을 내려면 `BUILD` · `COMMIT` 환경 변수가 필요하다
-  (`build.zig`가 `environ_map`에서 읽음). `BUILD`는 CI의 `git rev-list --count 0.3..<태그 커밋>`(짧은 버전 0.4.x의 직전 minor 태그
-  `0.3`부터 센다), `COMMIT`은 태그 커밋 앞 7자리.
+  번들을 이 방법으로 만들어 실행 · 버전 문자열을 확인했다). CI와 같은 버전 문자열을 내려면 `-Dbuild` · `-Dcommit` 옵션이 필요하다
+  (2026-11-10부터. 그 전에는 `BUILD` · `COMMIT` 환경 변수였고 지금도 폴백으로 읽는다). `BUILD`는 CI의
+  `git rev-list --count 0.3..<태그 커밋>`(짧은 버전 0.4.x의 직전 minor 태그 `0.3`부터 센다), `COMMIT`은 태그 커밋 앞 7자리.
 
 ```bash
 sha=$(git rev-parse <태그>); n=$(git rev-list --count 0.3..$sha)
-BUILD=$n COMMIT=${sha:0:7} zig build cli -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false --cache-poison=poisoned
+zig build cli -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false -Dbuild=$n -Dcommit=${sha:0:7}
 zig-out/bin/cyber version            # Cyber 0.4.4 build-N-xxxxxxx
 tar -C zig-out/bin -czvf cyber-macos-arm64.tar.gz cyber src
-BUILD=$n COMMIT=${sha:0:7} zig build lib -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false --cache-poison=poisoned
+zig build lib -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false -Dbuild=$n -Dcommit=${sha:0:7}
 cp zig-out/lib/libcyber.a libcyber-macos-arm64.a
 gh release upload <태그> cyber-macos-arm64.tar.gz libcyber-macos-arm64.a -R soomtong/cyber --clobber
 zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Ddev 기본 true)
 ```
 
-- `--cache-poison=poisoned`가 필요한 이유: Zig 0.17.1(로컬)은 configure 단계 결과를 `.zig-cache`에 캐시하고(`zig build --help`의
-  `--cache-poison`, 기본 `pure`), `build.zig`가 `b.graph.environ_map.get("BUILD")`로 읽는 환경 변수는 추적되지 않는다. 같은 인자로 한 번
-  빌드하면 다음 빌드는 환경 변수를 바꿔도 configure가 다시 돌지 않아 옛 `build-N-xxxxxxx`가 그대로 박힌다(2026-11-09 확인: `BUILD=999`로
-  빌드해도 `build-729-8ad0d43`). CI(Zig 0.17.0)의 산출물은 `latest`(`build-722-44a8467`) · 0.4.3(`build-668-a26645f`) 모두 커밋과 맞았지만,
-  CI가 `.zig-cache`를 `actions/cache`로 복원하므로 Zig 버전을 올리면 같은 문제가 생길 수 있다. 근본 수정 후보: `create_lib_config`에서
-  `BUILD` · `COMMIT`가 있으면 `b.graph.poisonCache()`를 부르기(환경 변수를 안 쓰는 로컬 빌드는 영향 없음). 0.4.4 릴리스 뒤에 넣는다.
+- 빌드 번호를 옵션으로 바꾼 이유(2026-11-10): Zig 0.17.1은 configure 단계 결과를 `.zig-cache`에 캐시하고(`zig build --help`의
+  `--cache-poison`, 기본 `pure`), `build.zig`가 `b.graph.environ_map.get("BUILD")`로 읽는 환경 변수는 캐시 키에 들어가지 않는다. 같은
+  인자로 한 번 빌드하면 다음 빌드는 환경 변수를 바꿔도 configure가 다시 돌지 않아 옛 `build-N-xxxxxxx`가 그대로 박힌다(2026-11-09 확인:
+  `BUILD=999`로 빌드해도 `build-729-8ad0d43`). 0.4.4 때는 `--cache-poison=poisoned`로 피했다. 환경 변수를 읽은 configure에서
+  `b.graph.poisonCache()`를 부르는 것만으로는 반만 고쳐진다: 환경 변수 없이 configure한 결과는 `pure`로 캐시되고, 뒤에 환경 변수를 주고
+  같은 인자로 빌드하면 그 캐시를 맞아 `build.zig`가 아예 실행되지 않는다(2026-11-10 새 캐시 디렉터리로 확인: `BUILD=901` → `902`는
+  반영, 환경 변수 없이 한 번 빌드한 뒤 `BUILD=903`은 `build-0-local`). 그래서 `-Dbuild` · `-Dcommit` 옵션을 추가했다. 옵션은 configure
+  캐시 키의 일부라 값이 바뀌면 configure가 다시 돈다(`-Dbuild=` 빈 값은 없는 것으로). 환경 변수는 폴백으로 남기되 그 경로는
+  `poisonCache()`(0.17.0에는 없으므로 `@hasDecl` 가드)로 캐시하지 않는다. CI `latest-build.yml`의 릴리스 Build 단계는
+  `-Dbuild=${{ env.BUILD }} -Dcommit=${{ env.COMMIT }}`를 넘긴다. 이 수정이 들어간 뒤 CI · `Taskfile.yml` · `build.zig.zon`의 Zig를
+  0.17.1로 올렸다(0.17.0 CI 산출물 `latest` `build-722-44a8467` · 0.4.3 `build-668-a26645f`는 환경 변수만으로도 커밋과 맞았지만,
+  `.zig-cache`를 `actions/cache`로 복원하므로 0.17.1에서는 같은 문제가 생길 수 있었다).
 - 워크플로의 `push.paths`가 `.github/**` · `**.md`를 제외하므로 워크플로만 고친 커밋은 Latest Build를 트리거하지 않는다. 확인하려면
   `gh workflow run latest-build.yml -R soomtong/cyber --ref master`로 직접 실행한다.

@@ -26,6 +26,8 @@ var rtarget: std.Build.ResolvedTarget = undefined;
 var target: std.Target = undefined;
 var optimize: std.lang.Optimize = undefined;
 var dev: bool = undefined;
+var build_tag: ?[]const u8 = undefined;
+var commit_tag: ?[]const u8 = undefined;
 var isystem: []const []const u8 = undefined;
 
 pub const Allocator = enum {
@@ -50,6 +52,8 @@ pub fn build(b: *std.Build) !void {
     log_mem = b.option(bool, "log-mem", "Log memory traces.") orelse false;
     no_cache = b.option(bool, "no-cache", "Disable caching when running tests.") orelse false;
     dev = b.option(bool, "dev", "Marks version as dev.") orelse true;
+    build_tag = non_empty(b.option([]const u8, "build", "Build number for the version string. Falls back to the BUILD env var."));
+    commit_tag = non_empty(b.option([]const u8, "commit", "Short commit hash for the version string. Falls back to the COMMIT env var."));
     isystem = b.option([]const []const u8, "isystem", "System includes.") orelse &.{};
     strip = b.option(bool, "strip", "Override strip.") orelse b: {
         if (optimize != .debug and !trace) {
@@ -425,8 +429,17 @@ fn create_cli_config(b: *std.Build, opts: CliConfig) !*std.Build.Module {
 }
 
 fn create_lib_config(b: *std.Build, opts: Options) !*std.Build.Module {
-    const buildTag = b.graph.environ_map.get("BUILD") orelse "0";
-    const commitTag = b.graph.environ_map.get("COMMIT") orelse "local";
+    // `-Dbuild` and `-Dcommit` are part of the configure cache key. The env vars are not tracked
+    // by the configure cache (Zig 0.17.1+), so a configuration that read them is not cached.
+    const env_build = b.graph.environ_map.get("BUILD");
+    const env_commit = b.graph.environ_map.get("COMMIT");
+    if ((build_tag == null and env_build != null) or (commit_tag == null and env_commit != null)) {
+        if (@hasDecl(std.Build.Graph, "poisonCache")) {
+            b.graph.poisonCache();
+        }
+    }
+    const buildTag = build_tag orelse env_build orelse "0";
+    const commitTag = commit_tag orelse env_commit orelse "local";
     const options = b.addOptions();
     options.addOption(bool, "dev", dev);
     if (dev) {
@@ -447,6 +460,12 @@ fn create_lib_config(b: *std.Build, opts: Options) !*std.Build.Module {
     options.addOption(bool, "cli", opts.cli);
     options.addOption(bool, "threads", threads);
     return options.createModule();
+}
+
+fn non_empty(opt: ?[]const u8) ?[]const u8 {
+    const s = opt orelse return null;
+    if (s.len == 0) return null;
+    return s;
 }
 
 fn add_cli_test(b: *std.Build, cli: *std.Build.Module) !*std.Build.Step.Compile {

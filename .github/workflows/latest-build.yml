@@ -107,7 +107,7 @@ jobs:
       BIN_EXT: ${{ contains(matrix.config.target, 'windows') && '.exe' || '' }}
       ZIG_MODE_FLAG: ${{ (matrix.config.mode == 'release' && '-Doptimize=ReleaseSafe') || '' }}
       DEV_FLAG: ${{ startsWith(github.ref, 'refs/tags/') && '-Ddev=false' || '' }}
-      ZIG_VERSION: 0.17.0
+      ZIG_VERSION: 0.17.1
     steps:
       - name: Install Linux deps.
         if: env.BUILD_HOST == 'ubuntu-24.04' && env.BUILD_TARGET == 'x86_64-linux-gnu'
@@ -242,7 +242,7 @@ jobs:
           wasm3/build/wasm3 zig-out/bin/behavior_test.wasm
 
       - name: Build.
-        run: zig build ${{ env.BUILD_CMD }} ${{ env.ZIG_MODE_FLAG }} ${{ env.ZIG_TARGET_FLAG }} ${{ env.DEV_FLAG }}
+        run: zig build ${{ env.BUILD_CMD }} ${{ env.ZIG_MODE_FLAG }} ${{ env.ZIG_TARGET_FLAG }} ${{ env.DEV_FLAG }} -Dbuild=${{ env.BUILD }} -Dcommit=${{ env.COMMIT }}
 
       # Remove when zig strip is fixed.
       - name: Strip (Linux)
@@ -344,7 +344,7 @@ jobs:
   docs:
     runs-on: ubuntu-24.04
     env:
-      ZIG_VERSION: 0.17.0
+      ZIG_VERSION: 0.17.1
     steps:
       - name: Clone repo.
         uses: actions/checkout@v4

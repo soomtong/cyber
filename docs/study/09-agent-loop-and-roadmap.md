@@ -124,7 +124,7 @@ TS/Node 개발자에게 익숙한 비교를 하면 이렇다. 앞의 방식은 R
 | --- | --- | --- |
 | 스크립트 반복 실행 | 됨 | 같은 VM에서 반복 eval. 컴파일 오류, panic 뒤에도 VM 유지 |
 | 도구를 함수로 노출 | 됨 | `#[bind] fn` + `cl_mod_add_func`. 값 인자는 호스트가 해제(소유 규약이 확정됨, [06](06-memory-ownership.md)) |
-| 출력 수집 | 됨, 결함 있음 | `cl_vm_set_printer`. 콜백 첫 인자가 VM 포인터(F-50) |
+| 출력 수집 | 됨 | `cl_vm_set_printer`. 콜백 첫 인자가 VM 포인터이던 F-50은 2026-11-10 수정 |
 | 턴 사이 상태 유지 | 부분 | `persist_main`. panic이면 전부 소실, 도구 실패가 곧 세션 손실([08 §7.4](08-embedding-builtins-tests.md)) |
 | 시간 제한 | 부분 | `cl_vm_interrupt`(다른 스레드), fuel. 호스트 함수 안 대기는 못 끊음(F-42) |
 | 메모리 제한 | 스택만 | 스택 상한 기본 128 MiB · `cl_vm_set_stack_limit`(F-40, 2026-11-08 수정). 힙 한도는 없음, C 호스트용 할당자 훅 곤란(F-41) |
@@ -393,7 +393,7 @@ perl -e 'alarm 5; exec @ARGV' cyber lit.cy   # 4464
 | 1. 호스트를 죽이는 경로 | 스크립트가 호스트를 못 죽이게 | F-03, F-12, F-13, F-11 (한계를 사용자 오류로 바꾸는 F-08 · F-09 · F-24와 F-04 · F-05는 2026-11-08 수정) | M ~ L | 각 항목의 재현 스크립트가 컴파일 에러 또는 panic 보고로 끝남. 회귀 테스트 |
 | 2. 조용한 오답 | 컴파일은 되는데 틀린 결과 제거 | F-01(+F-02), F-20, F-21, F-22, F-23, F-73 (F-14는 2026-11-08 수정, F-73은 2026-11-09 수정) | M ~ L | 07 §6.5의 순서(회귀 테스트 → 안 C 가드 → 안 A). 규칙 3, 6, 7, 11 삭제 가능 |
 | 2b. 표준 라이브러리 | LLM 스크립트가 바로 닿는 결함 | F-70 · F-71 · F-72 · F-74 · F-76 모두 2026-11-06 수정 | S ~ M | 각 재현 스크립트가 정상 결과. 규칙 12 삭제 가능 |
-| 3. 임베딩 하드닝 | 호스트가 자원과 권한을 쥔다 | F-41(C용 할당자 훅), F-42, F-50~F-52 (F-40 스택 상한 · F-06 `deny_raw_ptrs` · F-07 비-main await는 2026-11-08 수정) | M ~ L | 08 §5.2 데모에 메모리 상한 턴이 추가됨. 규칙 4, 5, 8 삭제 가능 |
+| 3. 임베딩 하드닝 | 호스트가 자원과 권한을 쥔다 | F-41(C용 할당자 훅), F-42, F-52 (F-40 스택 상한 · F-06 `deny_raw_ptrs` · F-07 비-main await는 2026-11-08, F-50 print 콜백 · F-51 헤더 동기화는 2026-11-10 수정) | M ~ L | 08 §5.2 데모에 메모리 상한 턴이 추가됨. 규칙 4, 5, 8 삭제 가능 |
 | 4. 메모리 안전 | 소유권 검사의 구멍 | F-27, F-29 (F-25 · F-26은 2026-11-08 수정, `project_borrow_model.md` · `project_array_append_move.md`) | L | 빌림 모델 문서 → 검사 수정 → 테스트 |
 | 5. 언어 완성도 | 스크립트 CLI 1순위 | Unwrap block(F-32, 2026-11-09 구현), error payload, Attributes 문서, Named parameters | L | 문서의 TBD 40곳 중 1순위 항목 감소 |
 | 6. 중단과 재개 | 길 2 시제품 | `CALL_HOST` 대기 + `cl_vm_resume` | L | 호스트가 도구 응답을 기다리는 동안 스크립트가 멈췄다 이어지는 시나리오 테스트 |
@@ -417,7 +417,7 @@ perl -e 'alarm 5; exec @ARGV' cyber lit.cy   # 4464
 | 2 | F-71 `int.parse('-5')` 수정과 회귀 테스트 | `core.cy` 읽기, Cyber로 작성된 표준 라이브러리, 테스트 추가 | `src/builtins/core.cy:476-482` | `int.parse('-5')`가 `-5`, 빈 문자열은 에러. 테스트는 `src/test/core/ints.cy`류에 추가 |
 | 3 | F-70 `[]T.index` 자기 재귀 수정 | 슬라이스와 템플릿 메서드, `cyber compile`로 호출 구조 보기 | `src/builtins/core.cy:1293-1294` | 실습 재현이 즉시 끝남 |
 | 4 | F-62 덤프 오표기 수정(`write_inst`의 `jump`, `is_zero` 등) | 명령어 인코딩, 덤프 코드 | `src/bytecode.zig` | `cyber compile` 출력이 04 §5의 실제 인코딩과 일치 |
-| 5 | F-50 print 콜백 첫 인자(`CLThread*`) 수정 | 임베딩 API, Zig <-> C 경계 | `src/builtins/core.zig:1248-1262` 근처 | 08 §7.3 재현 코드에서 `t != vm` |
+| 5 | F-50 print 콜백 첫 인자(`CLThread*`) 수정 (2026-11-10 완료 `85a0f229`) | 임베딩 API, Zig <-> C 경계 | `src/builtins/core.zig:1248-1262` 근처 | 08 §7.3 재현 코드에서 `t != vm`. lib 테스트 추가됨 |
 | 6 | F-08 지역 변수 257개를 사용자 오류로 (2026-11-08 완료 `04096230`) | sema, 오류 보고 | `src/sema.zig` `checkLocalLimit` 등(`LocalVarS.id`가 u8) | `functions/too_many_locals_error.cy` · `types/struct_too_many_fields_error.cy` 추가됨 |
 | 7 | F-24 65535 초과 리터럴을 오류로 (2026-11-08 완료 `10f8290b`) | 바이트코드 상수 | `src/bc_gen.zig` `pushConstString` · `max_str_literal_len` | 길이 70000 리터럴이 오류. lib-test 추가됨 |
 | 8 | F-20 cte 복합 대입 | 컴파일타임 평가 | `src/cte.zig:423, 460` | 실습 2(a)가 15, 15. 2026-11-08 수정 `02f39e67` |

@@ -1042,7 +1042,7 @@ eval:7:9 main:
 `os.fetchUrl`, `os.cacheUrl`).
 
 fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cyber.h`, `lib.zig`, `capi.zig`, 테스트 네 곳을 같이 본다. 번역 모듈 `cyber_c` 때문에 헤더와 구현의 시그니처 불일치가 빌드 오류가 되지
-않는다(7.2절의 `cl_type_from_id`). C 로 컴파일되는 `examples/libcyber/*.c` 가 실제 ABI 의 유일한 검사자이므로 새 API 마다 예제나 `lib-standalone-test` 를 늘리는 것이 안전하다.
+않는다(7.2절의 `cl_type_from_id`). C 로 컴파일되는 `examples/libcyber/*.c` 가 실제 ABI 의 유일한 검사자였으므로 새 API 마다 예제나 `lib-standalone-test` 를 늘리는 것이 안전하다. 2026-11-10 부터는 lib 테스트 `Every function declared in cyber.h is exported.` 가 헤더의 모든 `cl*` 함수 선언의 주소를 참조해 export 없는 선언을 링크 오류로 잡는다(F-51).
 (b) 테스트는 목록 방식이라 추가 비용이 있지만 실패 기대 출력까지 한 파일에 있어 리뷰가 쉽다. 목록 밖 파일을 주기적으로 점검할 필요가 있다(5.6절). (c) 에이전트 루프 쪽에서 가장 먼저 손볼 곳은
 첫 eval 컴파일 실패와 `cl_vm_validate` 의 VM 리셋 부작용이다. 둘 다 `Compiler.compile` 의 실패 시 상태 정리 문제로 보인다(5.3절 추정).
 
@@ -1054,7 +1054,7 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
 |---|---|---|
 | 재현 버그 | 첫 eval 이 컴파일 실패하면 다음 eval 에서 SIGSEGV/abort (7.3 의 1). 2026-11-08 수정 | 높음(호스트 프로세스 사망) |
 | 재현 버그 | `cl_vm_validate`/`cl_vm_compile` 가 VM 을 리셋하고 실패하면 VM 이 깨짐 (7.3 의 2). 2026-11-08 수정 | 높음 |
-| 재현 버그 | print/eprint 콜백의 첫 인자가 VM 포인터 (7.3 의 3) | 중간 |
+| 재현 버그 | print/eprint 콜백의 첫 인자가 VM 포인터 (7.3 의 3). 2026-11-10 수정 | 중간 |
 | 한계 | 안전 모드 없음, 메모리 한도 없음, raw 포인터로 호스트 크래시 가능 (7.4) | 높음 |
 | 문서 차이 | 헤더에 선언만 있고 구현이 없는 함수 3개, 시그니처가 다른 함수 1개 (7.2) | 중간 |
 
@@ -1063,12 +1063,12 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
 | 항목 | 문서/헤더가 말하는 것 | 코드/실행 결과 |
 |---|---|---|
 | 마지막 표현식의 값 | cyber.h:383-385 "마지막 문장이 표현식이면 `outVal` 에 값이 담긴다" | 표현식 문장은 컴파일 에러(`1 + 2` -> `Expected assignment to a variable or placeholder for int`). 값은 `fn main() -> T` 반환에서만 나온다 |
-| 구현이 없는 선언 | cyber.h:569 `clResolveType`, 613 `cl_array_empty_new`, 615 `cl_map_empty_new` | lib.zig 에는 없고 대신 `cl_array_empty`(643), `cl_map_empty`(647)가 `export` 됨(헤더에는 없음). 링크하면 undefined symbol |
-| 시그니처 불일치 | cyber.h:605 `cl_type_from_id(CLTypeId id)` | lib.zig:734 는 `(vm, type_id)` 두 인자. 헤더대로 부르면 id 가 vm 자리로 들어간다 |
-| 없는 함수 이름 | cyber.h:411 `cl_new_compile_error_summary`, 416 · 474 `cl_free` | 실제 이름은 `cl_vm_compile_error_summary`, `cl_vm_freeb`. 헤더 420 의 `clAlloc` 은 lib.zig:89 에 있으나 헤더 선언은 `cl_vm_alloc` |
-| 죽은 매크로 | cyber.h:233-238 `CL_CUSTOM_TYPE` 등 | `CLBindTypeEntry`, `CL_STR`, `CL_BIND_TYPE_CUSTOM` 가 정의돼 있지 않다. 쓰는 순간 컴파일 에러 |
+| 구현이 없는 선언 | cyber.h:569 `clResolveType`, 613 `cl_array_empty_new`, 615 `cl_map_empty_new` | lib.zig 에는 없고 대신 `cl_array_empty`(643), `cl_map_empty`(647)가 `export` 됨(헤더에는 없음). 링크하면 undefined symbol. 2026-11-10 수정(F-51): 헤더가 `cl_array_empty` · `cl_map_empty` 를 선언하고 `clResolveType` 은 삭제 |
+| 시그니처 불일치 | cyber.h:605 `cl_type_from_id(CLTypeId id)` | lib.zig:734 는 `(vm, type_id)` 두 인자. 헤더대로 부르면 id 가 vm 자리로 들어간다. 2026-11-10 수정: 헤더도 `(CLVM* vm, CLTypeId id)` |
+| 없는 함수 이름 | cyber.h:411 `cl_new_compile_error_summary`, 416 · 474 `cl_free` | 실제 이름은 `cl_vm_compile_error_summary`, `cl_vm_freeb`. 헤더 420 의 `clAlloc` 은 lib.zig:89 에 있으나 헤더 선언은 `cl_vm_alloc`. 2026-11-10 수정: 주석을 현재 이름으로, 헤더에 없던 export `clAlloc` · `clGetAllocator` 삭제 |
+| 죽은 매크로 | cyber.h:233-238 `CL_CUSTOM_TYPE` 등 | `CLBindTypeEntry`, `CL_STR`, `CL_BIND_TYPE_CUSTOM` 가 정의돼 있지 않다. 쓰는 순간 컴파일 에러. 2026-11-10 수정: `cl_mod_add_type` 에 넘길 `CLBindType` 을 만드는 `CL_BIND_DECL_TYPE(id)` · `CL_BIND_CREATE_TYPE(fn)` · `CL_BIND_ALIAS_TYPE(fn)` 으로 교체 |
 | 선언 수 | docs/history/embedding_cli.md "101개" | `rg` 로 센 선언 113개 |
-| print 콜백 | cyber.h:252 `CLPrintFn(CLThread* t, CLBytes)` | `t` 자리에 VM 포인터가 들어옴(실험, 7.3 의 3) |
+| print 콜백 | cyber.h:252 `CLPrintFn(CLThread* t, CLBytes)` | `t` 자리에 VM 포인터가 들어옴(실험, 7.3 의 3). 2026-11-10 수정 |
 | 테스트 발견 방식 | (브리프의 가정) "setup.zig 가 src/test 를 발견" | 발견 로직 없음. behavior_test.zig 의 수작업 목록이며 `cytest:` 해석은 `case2`(behavior_test.zig:606) |
 | bindings.zig 의 역할 | (가정) 호스트 함수 등록 | 등록은 core.zig 의 `funcs`/`types` 표. bindings.zig 는 symbol 열거형 + 훅 + 죽은 `ModuleBuilder` |
 | `cyber fmt` | `cyber help` 에 "Reformat the source code" | main.zig:121 `std.debug.panic("TODO: Embed src/tools/fmt.cy")`, 종료 코드 134 |
@@ -1089,7 +1089,8 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
    넘기지 않으며, 검증이 처음 로드한 모듈은 다음에 도는 eval 이 초기화한다. `cl_vm_compile` 은 전체 프로그램 컴파일이라 그대로 reset 한다(헤더에 명시). SIGBUS 쪽은 F-04 수정이 먼저 막았다.
    lib 테스트 `cl_vm_validate checks against the session without resetting it.`, `docs/decisions/project_vm_validate.md`.
 3. print/eprint 콜백의 `t`. 재현: printer 안에서 `(void*)t == (void*)vm` 이 참, `== cl_vm_main_thread(vm)` 은 거짓. `cl_thread_vm(t)` 등으로 `t` 를 쓰는 콜백은 오작동한다. 제안: core.zig:1248-1262 에서 `@ptrCast(t.c.vm)` 대신
-   `@ptrCast(t)` 를 넘긴다(`cl_vm_set_logger` 콜백은 `CLVM*` 이 맞다).
+   `@ptrCast(t)` 를 넘긴다(`cl_vm_set_logger` 콜백은 `CLVM*` 이 맞다). 2026-11-10 수정 `85a0f229`(F-50): `prints` · `eprints` 가 실행 중인 스레드를, `runtime.zig` 의 VM 수준 출력이 `main_thread` 를 넘긴다.
+   lib 테스트 `print and eprint callbacks receive the running thread.` 가 `t == cl_vm_main_thread(vm)` · `cl_thread_vm(t) == vm` 을 확인한다. `docs/decisions/project_capi_header_sync.md`.
 4. 호스트 함수 안에서 일시 중단된 스크립트를 끊을 수 없다(docs/decisions 문서에 기록. 이 장에서 재현하지 않음).
 5. 컴파일러 내부의 `std.debug.panic` 경로가 호스트 프로세스를 abort 시킨다(decisions 문서에 기록). 5.3절의 `panic: Unsupported: .null` abort 가 그 사례다. 스크립트 실행 프로세스를 분리할 이유가 하나 더 된다.
 

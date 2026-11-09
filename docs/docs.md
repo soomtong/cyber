@@ -3983,7 +3983,7 @@ int main() {
 The builtin `print` function does nothing by default, so it needs to be overrided to print to stdout for example:
 ```c
 void printer(CLThread* t, CLBytes str) {
-    printf("Invoked printer: %.*s\n", (int)str.len, str.buf);
+    printf("Invoked printer: %.*s\n", (int)str.len, str.ptr);
 }
 
 int main() {
@@ -3996,12 +3996,12 @@ Note that `prints` invokes printer once. But `print` invokes the printer twice, 
 
 Similarly, `eprint`, and `log` can also be overridden:
 ```c
-void eprinter(CLThread* vm, CLBytes str) {
-    fprintf(stderr, "Invoked eprinter: %.*s\n", (int)str.len, str.buf);
+void eprinter(CLThread* t, CLBytes str) {
+    fprintf(stderr, "Invoked eprinter: %.*s\n", (int)str.len, str.ptr);
 }
 
-void logger(CLThread* vm, CLBytes str) {
-    fprintf(stderr, "Invoked log: %.*s\n", (int)str.len, str.buf);
+void logger(CLVM* vm, CLBytes str) {
+    fprintf(stderr, "Invoked log: %.*s\n", (int)str.len, str.ptr);
 }
 
 int main() {

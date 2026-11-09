@@ -400,7 +400,7 @@ type A: lo byte, mid int, hi byte     type B: mid int, lo byte, hi byte
 값 타입과 힙 박스의 구분이 0.4 의 핵심이다. 구조체, Option, Result, choice, 벡터, str, Slice, Array 는 전부 값 타입이다. 변수에 담기면 스택(레지스터) 슬롯에 그대로 인라인되고, 대입과 인자 전달은 슬롯 복사다. 힙에 올리려면 `^T` 로 명시한다. 바이트코드(`cyber compile`)로 확인하자. 5.1 의 r1.cy 에서 `Point{x=3, y=4}` 를 만들어 `dist(p)` 에 넘기는 부분이다.
 
 ```
-0:72 .addr: %3 = *%1            -- p 는 %1,%2 두 칸. %3 에 %1 의 주소
+0:72 .addr: %3 = &%1            -- p 는 %1,%2 두 칸. %3 에 %1 의 주소
 0:75 .const_16s: %4 = 3
 0:78 .const_16s: %5 = 4
 0:81 .store_64: [%3 + 0] = %4   -- x 를 오프셋 0 에
@@ -409,7 +409,7 @@ type A: lo byte, mid int, hi byte     type B: mid int, lo byte, hi byte
 0:92 .call: %7 = r1.dist(%12..%14) 0
 ```
 
-`dist` 안에서는 `p.y` 가 `.addr: %10 = *%5` + `.load_64: %9 = [%10 + 8]` 로 읽힌다(레지스터 두 칸을 메모리처럼 취급하고 오프셋으로 접근). 이 때문에 VM 에는 `LOAD_8/16/32/64`, `LOAD_2W/3W/4W/N`, `STORE_*`, `MOV_2/3/4/N` 같은 폭별 명령이 있다(src/vm.h:150~300 의 OpCode). 이 명령들은 [Day 4](04-bytecode-gen.md)에서 다룬다.
+`dist` 안에서는 `p.y` 가 `.addr: %10 = &%5` + `.load_64: %9 = [%10 + 8]` 로 읽힌다(레지스터 두 칸을 메모리처럼 취급하고 오프셋으로 접근). 이 때문에 VM 에는 `LOAD_8/16/32/64`, `LOAD_2W/3W/4W/N`, `STORE_*`, `MOV_2/3/4/N` 같은 폭별 명령이 있다(src/vm.h:150~300 의 OpCode). 이 명령들은 [Day 4](04-bytecode-gen.md)에서 다룬다.
 
 힙 박스 `^T` 는 8바이트 포인터이고, 가리키는 객체 바로 앞 8바이트에 헤더가 있다(src/vm.h:484~487 `ObjectHeader { u32 meta; u32 rc; }`, `OBJ_TYPEID(o)` 는 `o - 8` 을 읽는다). `meta` 의 하위 28비트가 타입 id 이고(`TYPE_MASK 0x0fffffff`, src/vm.h:83) 나머지가 플래그다. `NEW` 명령이 객체를 할당한다(src/vm.c:1269 `allocObjectInit(t, val_t, size)`). 소멸자를 고르는 법은 [Day 6](06-memory-ownership.md)에서 다룬다.
 

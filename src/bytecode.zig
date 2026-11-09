@@ -619,7 +619,7 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
         .addr => {
             const dst = pc[1].val;
             const reg = pc[2].val;
-            try w.print("%{} = *%{}", .{dst, reg});
+            try w.print("%{} = &%{}", .{dst, reg});
         },
         .add_mul_i16 => {
             const dst = pc[1].val;

@@ -325,13 +325,13 @@ fn gen_yield_stmt(c: *Chunk, stmt: *ir.Yield, node: *ast.Node) !void {
 ```text
 0:148 .chk_stk: ret=2, frame=14
 0:151 .ret_gen: ret gen(type=115, %6..%10, resume_off=14, ret_size=2)
-0:156 .addr: %10 = *%7
+0:156 .addr: %10 = &%7
 0:159 .dtor_str: destruct [%10]              <- RET_GEN 직후 해제 블록: 매개변수 tag(str) 를 해제
 0:161 .ret_y: yield ret=2, resume_off=4, done=true
 0:165 .const_16s: %10 = 0                    <- 본문 시작 (`i := 0`). 첫 next() 는 여기서 시작한다
 ...
 0:189 .ret_y: yield ret=2, resume_off=13, done=false   <- `yield i`
-0:193 .addr: %12 = *%7
+0:193 .addr: %12 = &%7
 0:196 .dtor_str: destruct [%12]              <- 이 yield 에서 버려질 때의 해제 블록
 0:198 .ret_y: yield ret=2, resume_off=4, done=true
 0:202 .add_i16: %10 = %10 + 1                <- 정상 재개 지점 (resume_off=13 이 건너뛴 곳)
@@ -507,7 +507,7 @@ $ cyber compile b1.cy        (함수 b 부분)
 0:280 .chk_stk: ret=2, frame=9
 0:283 .ret_gen: ret gen(type=115, %6..%6, resume_off=5, ret_size=2)   <- 스냅샷 범위가 비어 있다
 0:288 .const_16s: %6 = 10                                             <- i 는 %6
-0:291 .addr: %7 = *%0
+0:291 .addr: %7 = &%0
 0:294 .const_16s: %8 = 1
 0:297 .store_64: [%7 + 0] = %8
 0:301 .store_64: [%7 + 8] = %6
@@ -953,7 +953,7 @@ GeneratorStatus.done
 $ cyber compile g0.cy       (fn iterate 부분)
 0:240 .chk_stk: ret=2, frame=9
 0:243 .ret_gen: ret gen(type=115, %6..%6, resume_off=5, ret_size=2)
-0:248 .addr: %6 = *%0
+0:248 .addr: %6 = &%0
 0:251 .const_16s: %7 = 1
 0:254 .const_16s: %8 = 123
 0:257 .store_64: [%6 + 0] = %7          <- ?int 의 태그(1 = some)
@@ -961,7 +961,7 @@ $ cyber compile g0.cy       (fn iterate 부분)
 0:265 .ret_y: yield ret=2, resume_off=4, done=false
 ```
 
-`%0..%1` 이 `?int` 반환 슬롯이고 `yield 123` 은 거기에 `(1, 123)` 을 써 넣은 뒤 `ret_y` 한다. `%6 = *%0` 은 반환 슬롯의 주소를 잡는 `addr` 이다.
+`%0..%1` 이 `?int` 반환 슬롯이고 `yield 123` 은 거기에 `(1, 123)` 을 써 넣은 뒤 `ret_y` 한다. `%6 = &%0` 은 반환 슬롯의 주소를 잡는 `addr` 이다.
 
 변형 과제: (a) `yield` 를 세 번으로 늘리고 `ret_y` 의 `resume_off` 가 어떻게 바뀌는지 본다(해제 블록이 없으므로 모두 4). (b) 매개변수 `tag str` 를 추가하고 `ret_gen` 범위와 `resume_off` 가 어떻게 달라지는지 본다(2.3.4 의 덤프).
 

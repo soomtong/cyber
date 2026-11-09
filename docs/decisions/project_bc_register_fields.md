@@ -8,7 +8,7 @@
 덤프를 보면 `append` · `next`는 모두 인라인되어 있고 남은 비용은 명령 수 자체다. append 루프 한 바퀴가 17개, `for arr` 루프가
 21개 디스패치인데 그중 상당수가 두 패턴이다.
 
-- `addr %r = *%지역` 뒤에 `[%r + 상수]`를 `load_64` · `store_64`. 값 타입 지역(구조체 · option · result · `str` · `[&]T`)은
+- `addr %r = &%지역`(2026-11-10 전 덤프 표기는 `*%지역`) 뒤에 `[%r + 상수]`를 `load_64` · `store_64`. 값 타입 지역(구조체 · option · result · `str` · `[&]T`)은
   레지스터에 메모리 레이아웃 그대로 놓이므로 8바이트 정렬된 필드는 그냥 `지역 + offset/8` 레지스터다.
   `?T`를 만드는 `addr` + `const` + `store` ×2와 그걸 바로 해체하는 `addr` + `load` + `is_zero` + `lnot` + `jump_f`가 여기에 든다.
 - 인라인된 `arr.append(i)`의 `self`는 `&arr`를 `addr`로 임시에 담은 포인터고, 본문의 `self.length` · `self.header` · `self.buf`는

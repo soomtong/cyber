@@ -853,14 +853,14 @@ funcBlock find(x)
 0:184 .const_16s: %8 = 2
 0:187 .gt: %7 = %6 > %8                 <- cmp(gt)
 0:191 .jump_f: if (!%7) jmp @217        <- if_block
-0:194 .addr: %8 = *%0                   <- init(Option) 의 저장 위치 (반환 슬롯)
+0:194 .addr: %8 = &%0                   <- init(Option) 의 저장 위치 (반환 슬롯)
 0:197 .const_16s: %9 = 1
 0:200 .const_16s: %11 = 2
 0:203 .imul: %10 = %6 * %11             <- imul
 0:207 .store_64: [%8 + 0] = %9          <- 태그 1
 0:211 .store_64: [%8 + 8] = %10         <- payload
 0:215 .ret_n: ret %0..%2                <- set_ret + ret
-0:217 .addr: %7 = *%0
+0:217 .addr: %7 = &%0
 0:220 .const_16s: %8 = 0
 0:223 .store_64: [%7 + 0] = %8          <- none: 태그 0
 0:227 .ret_n: ret %0..%2

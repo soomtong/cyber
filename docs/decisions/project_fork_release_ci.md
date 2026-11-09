@@ -58,6 +58,11 @@
 - 0.4.3은 2026-11-06에 `a26645f1`(버전 올림 + `docs/releases/0.4.3.md`)로 찍었다. master push → Latest Build 성공 확인 → annotated 태그 push →
   릴리스 run 성공(`build-668-a26645f`, 에셋 14개) → `gh release edit 0.4.3 --notes-file --latest`로 본문 업로드 → `install.sh 0.4.3`로
   macOS arm64 번들 설치 · `cyber version` 확인. 성능 표는 0.4.2 태그 커밋을 worktree에서 ReleaseSafe로 빌드해 같은 시각에 번갈아 쟀다.
+- 0.4.4는 2026-11-09에 `b02d2f63`(버전 올림 `6aab6658` + `macos-26` 워크플로)으로 찍었다. 워크플로만 바뀐 커밋은 push 트리거가 없어
+  `gh workflow run`으로 Latest Build(run 42627626892, 12 job 성공) → annotated 태그 push → 릴리스 run 42631294431 성공(`build-730-b02d2f6`,
+  에셋 14개, `macos-26` arm64 job도 정상 배정) → `gh release edit 0.4.4 --notes-file --latest` → `install.sh 0.4.4`를 `CYBER_HOME` · `CYBER_BIN`
+  override로 임시 경로에 설치해 `cyber version` 확인. `/usr/local`의 설치본은 sudo가 필요해 사용자가 직접 올린다. 성능 표는 성능 변경이 없어
+  넣지 않았다.
 - 번들의 `src/`는 타깃별로 다르다. `build.zig`의 `cli` 스텝이 공통 10개에 macOS(`os.macos.cy`,
   `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
   더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.

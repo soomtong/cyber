@@ -459,6 +459,9 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/switch_choice_unhandled_error.cy");
     run.case("control_flow/try_error.cy");
     run.case("control_flow/try.cy");
+    run.case("control_flow/try_block.cy");
+    run.case("control_flow/try_block_else_error.cy");
+    run.case("control_flow/try_block_capture_error.cy");
     run.case("control_flow/try_panic.cy");
     run.case("control_flow/unreachable.cy");
     // run.case("control_flow/unreachable_error.cy");

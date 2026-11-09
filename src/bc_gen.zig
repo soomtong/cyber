@@ -422,7 +422,6 @@ fn genStmt(c: *Chunk, stmt: *ir.Stmt) anyerror!void {
         .set_ret            => try gen_set_ret(c, stmt.cast(.set_ret), node),
         .switch_stmt        => try gen_switch_stmt(c, stmt.cast(.switch_stmt), node),
         .trap               => try gen_trap(c, node),
-        .tryStmt            => try gen_try_stmt(c, stmt.cast(.tryStmt), node),
         .verbose            => try verbose(c, stmt.cast(.verbose), node),
         .yield              => try gen_yield_stmt(c, stmt.cast(.yield), node),
         //         .dumpBytecode => {
@@ -3033,29 +3032,6 @@ fn verbose(c: *cy.Chunk, stmt: *ir.Verbose, node: *ast.Node) !void {
     _ = c;
     _ = node;
     cc.setVerbose(stmt.verbose);
-}
-
-fn gen_try_stmt(c: *cy.Chunk, stmt: *ir.TryStmt, node: *ast.Node) !void {
-    try pushBlock(c, node);
-    try genStmts(c, stmt.bodyHead);
-    try popBlock(c);
-
-    const catch_pc = c.buf.ops.items.len;
-    _ = catch_pc;
-    // try c.pushCode(.catch_op, &.{0, 0, 0, 0}, node);
-
-    try pushBlock(c, node);
-    try genStmts(c, stmt.catchBodyHead);
-    var errReg: Reg = cy.NullU8;
-    if (stmt.hasErrLocal) {
-        errReg = toLocalReg(c, stmt.errLocal);
-    }
-    try popBlock(c);
-
-    // // Patch pushTry with errReg.
-    // c.buf.setOpArgs1(catch_pc + 3, errReg);
-
-    // c.buf.setOpArgU16(catch_pc + 1, @intCast(c.buf.ops.items.len - catch_pc));
 }
 
 fn gen_if_block(c: *cy.Chunk, stmt: *ir.IfBlock, node: *ast.Node) !void {

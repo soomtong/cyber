@@ -1421,7 +1421,6 @@ fn genExpr(c: *Chunk, expr: *ir.Expr, cstr: Cstr) anyerror!GenValue {
         .trait              => genTrait(c, expr.cast(.trait), cstr, node),
         .truev              => genTrue(c, cstr, node),
         .trunc              => genTrunc(c, expr.cast(.trunc), cstr, node),
-        // .tryExpr            => genTryExpr(c, idx, cstr, node),
         .unary_op           => genUnOp(c, expr.cast(.unary_op), cstr, node),
         .unwrap_addr        => genUnwrapAddr(c, expr.cast(.unwrap_addr), cstr, node),
         .voidv              => genVoid(c, cstr, node),

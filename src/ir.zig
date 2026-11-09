@@ -44,7 +44,6 @@ pub const StmtCode = enum(u8) {
 
     if_block,
     switch_stmt,
-    tryStmt,
     loop_block,
     forRangeStmt,
     yield,
@@ -437,14 +436,6 @@ pub const ForRangeStmt = extern struct {
     bodyHead: ?*Stmt,
 };
 
-pub const TryStmt = extern struct {
-    base: Stmt = undefined,
-    hasErrLocal: bool,
-    errLocal: u8,
-    bodyHead: ?*Stmt,
-    catchBodyHead: *Stmt,
-};
-
 pub const Local = extern struct {
     base: Expr = undefined,
     id: u8,
@@ -703,7 +694,6 @@ pub fn StmtImpl(comptime code: StmtCode) type {
         .declare_local => DeclareLocal,
         .discard => Discard,
         .if_block => IfBlock,
-        .tryStmt => TryStmt,
         .forRangeStmt => ForRangeStmt,
         .set_local => SetLocal,
         .set_ret => SetReturn,

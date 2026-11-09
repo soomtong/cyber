@@ -216,6 +216,14 @@ pub const Block = struct {
 
 pub const ProcId = u32;
 
+/// Lowering target of a `try` block. See `sema_try_stmt`.
+pub const TryCtx = struct {
+    /// Sema block of the `try` body. `!` breaks out of it on failure.
+    body_block: BlockId,
+    /// Hidden `error` local that carries the failure to the `else` block.
+    err_local: LocalId,
+};
+
 pub const CaptureInfo = struct {
     parent_var_idx: u32,
     val_t: *cy.Type,
@@ -262,6 +270,10 @@ pub const Proc = struct {
     active_field_start: u32,
 
     global_init: bool,
+
+    /// Innermost enclosing `try` block of this proc. `!` inside it jumps to the `else` block
+    /// instead of returning or panicking. A lambda starts a new proc, so it does not inherit it.
+    try_ctx: ?TryCtx = null,
 
     ir: *ir.Stmt,
 
@@ -763,40 +775,7 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
             try semaIfUnwrapStmt(c, node.cast(.if_unwrap_stmt));
         },
         .tryStmt => {
-            const stmt = node.cast(.tryStmt);
-
-            {
-                return c.reportErrorFmt("Unsupported statement: {}", &.{v(node.type())}, node);
-            }
-
-            if (stmt.stmts.len == 0) {
-                return;
-            }
-
-            var data: ir.TryStmt = undefined;
-            const irIdx = try c.ir.pushEmptyStmt(c.alloc, .tryStmt, node);
-            _ = try pushBlock(c, node);
-            {
-                try semaStmts(c, stmt.stmts);
-            }
-            var block = try popBlock(c);
-            data.bodyHead = block.first;
-
-            _ = try pushBlock(c, node);
-            {
-                if (stmt.catchStmt.errorVar) |err_var| {
-                    const id = try declareLocal(c, err_var, c.sema.error_t, false);
-                    data.hasErrLocal = true;
-                    data.errLocal = c.varStack.items[id].inner.local.id;
-                } else {
-                    data.hasErrLocal = false;
-                }
-                try semaStmts(c, stmt.catchStmt.stmts);
-            }
-            block = try popBlock(c);
-            data.catchBodyHead = block.first;
-
-            c.ir.setStmtData(irIdx, .tryStmt, data);
+            try sema_try_stmt(c, node.cast(.tryStmt));
         },
         .yield_stmt => {
             const yield = node.cast(.yield_stmt);
@@ -1420,6 +1399,73 @@ fn sema_begin_stmt(c: *cy.Chunk, node: *ast.BeginStmt) !void {
     const block = try popBlock(c);
     _ = try c.ir.pushStmt(.block, @ptrCast(node), .{ .bodyHead = block.first });
     if (!end_reachable) {
+        c.block().endReachable = false;
+    }
+}
+
+/// `try: body else |err|: handler` is lowered without new IR:
+///
+///     block outer:
+///         block body:
+///             <body>          -- `!` on failure: _try_err = err; break body
+///             break outer
+///         err := _try_err
+///         <handler>
+///
+/// Only `!` in the body is redirected (see `.unwrap_res`). `return`, `!else` and panics keep their
+/// meaning. Both paths continue after the statement, so the handler may reach its end.
+fn sema_try_stmt(c: *cy.Chunk, stmt: *ast.TryStmt) !void {
+    const node: *ast.Node = @ptrCast(stmt);
+    const proc = c.proc();
+
+    var body_end_reachable = false;
+    var handler_end_reachable = false;
+    const outer = try pushBlock(c, node);
+    {
+        // Declared in `outer`, below the body block, so a failing `!` keeps it while the body's locals
+        // are destructed. `error` has no destructor; it is marked dead so the else block does not
+        // release an uninitialized local.
+        const err_local = try declareHiddenLocal(c, "_try_err", c.sema.error_t, null, node);
+        c.varStack.items[err_local.id].type = .dead;
+
+        const body_block = try pushBlock(c, node);
+        const prev_ctx = proc.try_ctx;
+        proc.try_ctx = .{ .body_block = @intCast(body_block), .err_local = err_local.id };
+        {
+            try semaStmts(c, stmt.stmts);
+            body_end_reachable = c.block().endReachable;
+            if (body_end_reachable) {
+                try semaBreakTo(c, outer, node);
+            }
+        }
+        proc.try_ctx = prev_ctx;
+        const body = try popBlock2(c, false);
+        _ = try c.ir.pushStmt(.block, node, .{ .bodyHead = body.first });
+
+        const catch_stmt = stmt.catchStmt;
+        const catch_node: *ast.Node = @ptrCast(catch_stmt);
+        _ = try pushBlock(c, catch_node);
+        {
+            if (catch_stmt.errorVar) |capture| {
+                if (capture.type() != .ident) {
+                    return c.reportErrorFmt("Unsupported error variable: {}", &.{v(capture.type())}, capture);
+                }
+                c.varStack.items[err_local.id].type = .local;
+                const err = try semaLocal(c, err_local.id, capture);
+                c.varStack.items[err_local.id].type = .dead;
+                _ = try declareLocalInit(c, capture.cast(.ident).name.slice(), c.sema.error_t, err, capture);
+            }
+            try semaStmts(c, catch_stmt.stmts);
+            handler_end_reachable = c.block().endReachable;
+        }
+        const handler = try popBlock(c);
+        _ = try c.ir.pushStmt(.block, catch_node, .{ .bodyHead = handler.first });
+        // The else block falls through to the end of `outer`, where the body's `break outer` lands.
+        c.block().endReachable = body_end_reachable or handler_end_reachable;
+    }
+    const block = try popBlock(c);
+    _ = try c.ir.pushStmt(.block, node, .{ .bodyHead = block.first });
+    if (!body_end_reachable and !handler_end_reachable) {
         c.block().endReachable = false;
     }
 }
@@ -7355,7 +7401,16 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
             _ = try pushBlock(c, node);
             {
                 const proc = c.proc();
-                if (proc.func != null) {
+                if (proc.try_ctx) |try_ctx| {
+                    // Inside a `try` block: hand the error to the `else` block instead of leaving the proc.
+                    const err = try semaUnwrapResultErrorNoCheck(c, res, node);
+                    const err_local = &c.varStack.items[try_ctx.err_local];
+                    _ = try c.ir.pushStmt(.set_local, node, .{
+                        .id = @intCast(err_local.inner.local.id),
+                        .right = err.ir,
+                    });
+                    try semaBreakTo(c, try_ctx.body_block, node);
+                } else if (proc.func != null) {
                     const ret_t = proc.getReturnType(c.sema);
                     if (ret_t.id() == bt.Error) {
                         const err = try semaUnwrapResultErrorNoCheck(c, res, node);

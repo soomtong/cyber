@@ -1865,20 +1865,29 @@ pub const Parser = struct {
 
         const indent = try self.consumeFirstIndent();
         if (indent != self.cur_indent) {
-            return self.reportError("Expected catch block.", &.{});
+            return self.reportError("Expected else block.", &.{});
         }
 
         var token = self.peek();
         if (token.tag() != .else_k) {
-            return self.reportError("Expected catch block.", &.{});
+            return self.reportError("Expected else block.", &.{});
         }
         const catch_start = self.next_pos;
         self.advance();
 
+        // Optional `|err|` capture, the same shape as `!else |err|:`.
         token = self.peek();
         var errorVar: ?*ast.Node = null;
-        if (token.tag() == .ident) {
+        if (token.tag() == .vert_bar) {
+            self.advance();
+            if (self.peek().tag() != .ident) {
+                return self.reportError("Expected error variable.", &.{});
+            }
             errorVar = @ptrCast(try self.newIdentNode(self.next_pos));
+            self.advance();
+            if (self.peek().tag() != .vert_bar) {
+                return self.reportError("Expected vertical bar.", &.{});
+            }
             self.advance();
         }
 

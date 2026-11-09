@@ -85,12 +85,6 @@ export fn cl_thread_dump_live_objects(t: *cy.Thread) void {
     }
 }
 
-/// This is useful when calling into wasm to allocate some memory.
-export fn clAlloc(vm: *cy.VM, size: usize) [*]const u8 {
-    const slice = vm.alloc.alignedAlloc(u8, .@"8", size) catch fatal();
-    return slice.ptr;
-}
-
 export fn cl_thread_ret(t: *cy.Thread, size: usize) *anyopaque {
     return t.ret_sized(size);
 }
@@ -199,10 +193,6 @@ export fn cl_vm_freeb(vm: *cy.VM, bytes: C.Bytes) void {
 
 export fn cl_vm_freez(vm: *cy.VM, str: [*:0]const u8) void {
     vm.alloc.free(std.mem.sliceTo(str, 0));
-}
-
-export fn clGetAllocator(vm: *cy.VM) C.Allocator {
-    return C.toAllocator(vm.alloc);
 }
 
 export fn clDefaultEvalConfig() C.EvalConfig {
@@ -2636,6 +2626,65 @@ fn declaresType(decl_name: []const u8, type_name: []const u8) bool {
     @setEvalBranchQuota(1_000_000);
     if (std.mem.eql(u8, decl_name, type_name)) return true;
     return std.mem.endsWith(u8, type_name, decl_name) and type_name[type_name.len - decl_name.len - 1] == '.';
+}
+
+test "print and eprint callbacks receive the running thread." {
+    // The header declares `CLPrintFn(CLThread* t, CLBytes str)`. The builtins used to pass the VM pointer
+    // instead, so `cl_thread_vm(t)` in a host callback read garbage (F-50).
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    const S = struct {
+        var expected: ?*C.Thread = null;
+        var expected_vm: ?*C.VM = null;
+        var print_calls: u32 = 0;
+        var eprint_calls: u32 = 0;
+        var print_ok = true;
+        var eprint_ok = true;
+
+        fn check(t_: ?*C.Thread) bool {
+            if (t_ != expected) return false;
+            return C.thread_vm(t_.?) == expected_vm.?;
+        }
+        fn printer(t_: ?*C.Thread, _: C.Bytes) callconv(.c) void {
+            print_calls += 1;
+            print_ok = print_ok and check(t_);
+        }
+        fn eprinter(t_: ?*C.Thread, _: C.Bytes) callconv(.c) void {
+            eprint_calls += 1;
+            eprint_ok = eprint_ok and check(t_);
+        }
+    };
+    S.expected = C.vm_main_thread(vm);
+    S.expected_vm = vm;
+    C.vm_set_printer(vm, &S.printer);
+    C.vm_set_eprinter(vm, &S.eprinter);
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\print('a')
+        \\prints('b')
+        \\eprint('c')
+        \\eprints('d')
+    , &res));
+    // `print` and `eprint` invoke the callback twice (value and new line).
+    try zt.eq(@as(u32, 3), S.print_calls);
+    try zt.eq(@as(u32, 3), S.eprint_calls);
+    try zt.expect(S.print_ok);
+    try zt.expect(S.eprint_ok);
+}
+
+test "Every function declared in cyber.h is exported." {
+    // The header is the C contract. Zig does not analyze an unreferenced extern, so a declaration without
+    // an export passes this build and only fails when a C host links it (F-51). Reference each one here.
+    @setEvalBranchQuota(100_000);
+    inline for (comptime std.meta.declarations(C.c)) |decl_name| {
+        if (comptime std.mem.startsWith(u8, decl_name, "cl")) {
+            if (@typeInfo(@TypeOf(@field(C.c, decl_name))) == .@"fn") {
+                std.mem.doNotOptimizeAway(&@field(C.c, decl_name));
+            }
+        }
+    }
 }
 
 // Zig only analyzes code that something references, so a function nothing calls can keep using removed APIs

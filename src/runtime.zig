@@ -320,7 +320,7 @@ pub const ErrorWriter = struct {
 
 pub fn err(c: Context, str: []const u8) void {
     if (build_options.rt == .vm) {
-        c.print_err.?(@ptrCast(c), C.toStr(str));
+        c.print_err.?(@ptrCast(c.main_thread), C.toStr(str));
     } else {
         var w = std.Io.File.stderr().writer(stdx.io(), &.{});
         w.interface.writeAll(str) catch cy.fatal();
@@ -331,7 +331,7 @@ pub fn errFmt(c: Context, format: []const u8, args: []const cy.fmt.FmtValue) voi
     if (build_options.rt == .vm) {
         const w = c.clearTempString();
         cy.fmt.print(w, format, args);
-        c.print_err.?(@ptrCast(c), C.toStr(c.getTempString()));
+        c.print_err.?(@ptrCast(c.main_thread), C.toStr(c.getTempString()));
     } else {
         var w = std.Io.File.stderr().writer(stdx.io(), &.{});
         cy.fmt.print(&w.interface, format, args);
@@ -342,7 +342,7 @@ pub fn errZFmt(c: Context, comptime format: []const u8, args: anytype) void {
     if (build_options.rt == .vm) {
         const w = c.clearTempString();
         w.print(format, args) catch cy.fatal();
-        c.print_err.?(@ptrCast(c), C.toStr(c.getTempString()));
+        c.print_err.?(@ptrCast(c.main_thread), C.toStr(c.getTempString()));
     } else {
         var w = std.Io.File.stderr().writer(stdx.io(), &.{});
         w.interface.print(format, args) catch cy.fatal();
@@ -351,7 +351,7 @@ pub fn errZFmt(c: Context, comptime format: []const u8, args: anytype) void {
 
 pub fn print(c: Context, str: []const u8) void {
     if (build_options.rt == .vm) {
-        c.print.?(@ptrCast(c), C.toStr(str));
+        c.print.?(@ptrCast(c.main_thread), C.toStr(str));
     } else {
         var w = std.Io.File.stdout().writer(stdx.io(), &.{});
         w.interface.writeAll(str) catch cy.fatal();
@@ -362,7 +362,7 @@ pub fn printFmt(c: Context, format: []const u8, args: []const cy.fmt.FmtValue) v
     if (build_options.rt == .vm) {
         const w = c.clearTempString();
         cy.fmt.print(w, format, args);
-        c.print.?(@ptrCast(c), C.toStr(c.getTempString()));
+        c.print.?(@ptrCast(c.main_thread), C.toStr(c.getTempString()));
     } else {
         var w = std.Io.File.stdout().writer(stdx.io(), &.{});
         cy.fmt.print(&w.interface, format, args);
@@ -373,7 +373,7 @@ pub fn printZFmt(c: Context, comptime format: []const u8, args: anytype) void {
     if (build_options.rt == .vm) {
         const w = c.clearTempString();
         w.print(format, args) catch cy.fatal();
-        c.print.?(@ptrCast(c), C.toStr(c.getTempString()));
+        c.print.?(@ptrCast(c.main_thread), C.toStr(c.getTempString()));
     } else {
         var w = std.Io.File.stdout().writer(stdx.io(), &.{});
         w.interface.print(format, args) catch cy.fatal();

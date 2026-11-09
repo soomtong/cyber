@@ -230,12 +230,10 @@ size_t cl_strlen(const char* s);
 
 #define CL_BITCAST(type, x) (((union {typeof(x) src; type dst;})(x)).dst)
 #define CL_BYTES(str) ((CLBytes){ .ptr = str, .len = cl_strlen(str) })
-// #define CL_CORE_TYPE(t) ((CLHostType){ .data = { .core_custom = { .type_id = t, .get_children = NULL, .finalizer = NULL }}, .type = CL_BIND_TYPE_CORE_CUSTOM })
-// #define CL_CORE_TYPE_EXT(t, gc, f) ((CLHostType){ .data = { .core_custom = { .type_id = t, .get_children = gc, .finalizer = f }}, .type = CL_BIND_TYPE_CORE_CUSTOM })
-// #define CL_CORE_TYPE_DECL(t) ((CLHostType){ .data = { .core_decl = { .type_id = t }}, .type = CL_BIND_TYPE_CORE_DECL })
-#define CL_CUSTOM_TYPE(name, ot, gc, f) ((CLBindTypeEntry){ CL_STR(name), (CLBindType){ .data = { .custom = { .out_type_id = ot, .get_children = gc, .finalizer = f, .pre = false }}, .type = CL_BIND_TYPE_CUSTOM }})
-#define CL_CUSTOM_PRE_TYPE(name, ot, gc, f) ((CLBindTypeEntry){ CL_STR(name), (CLBindType){ .data = { .custom = { .out_type_id = ot, .get_children = gc, .finalizer = f, .pre = true }}, .type = CL_BIND_TYPE_CUSTOM }})
-#define CL_CREATE_TYPE(name, fn) ((CLBindTypeEntry){ name, (CLBindType){ .data = { .create = { .create_fn = fn }}, .type = CL_BIND_TYPE_CREATE }})
+// Type bindings for `cl_mod_add_type`.
+#define CL_BIND_DECL_TYPE(id) ((CLBindType){ .data = { .decl = { .type_id = id }}, .type = CL_BIND_TYPE_DECL })
+#define CL_BIND_CREATE_TYPE(fn) ((CLBindType){ .data = { .create = { .create_fn = fn }}, .type = CL_BIND_TYPE_CREATE })
+#define CL_BIND_ALIAS_TYPE(fn) ((CLBindType){ .data = { .alias = { .resolve_fn = fn }}, .type = CL_BIND_TYPE_ALIAS })
 #define CL_BIND_FUNC(host_ptr) ((CLBindFunc){.kind = CL_BIND_FUNC_VM, .ptr = host_ptr})
 #define CL_BIND_GLOBAL(val_ptr) ((CLBindGlobal){.ptr = val_ptr})
 
@@ -428,16 +426,16 @@ CLResultCode cl_vm_compile_path(CLVM* vm, CLBytes uri, CLCompileConfig config);
 CLResultCode cl_vm_validate(CLVM* vm, CLBytes src);
 
 /// Convenience function to return the last error summary.
-/// Returns `cl_new_compile_error_summary` if the last result was a CL_ERROR_COMPILE,
+/// Returns `cl_vm_compile_error_summary` if the last result was a CL_ERROR_COMPILE,
 /// or `cl_thread_panic_summary` if the last result was a CL_ERROR_PANIC,
 /// or the null string.
 CLBytes cl_vm_error_summary(CLVM* vm);
 
-/// Returns first compile-time error summary. Must be freed with `cl_free`.
+/// Returns first compile-time error summary. Must be freed with `cl_vm_freeb`.
 CLBytes cl_vm_compile_error_summary(CLVM* vm);
 
 // For embedded, Cyber by default uses malloc (it can be configured to use the high-perf mimalloc).
-// If the host uses a different allocator than Cyber, use `clAlloc` to allocate memory
+// If the host uses a different allocator than Cyber, use `cl_vm_alloc` to allocate memory
 // that is handed over to Cyber so it knows how to free it.
 // This is also used to manage accessible buffers when embedding WASM.
 // Only pointer is returned so wasm callsite can just receive the return value.
@@ -491,7 +489,7 @@ typedef struct CLStackTrace {
 
 CLStackTrace cl_thread_panic_trace(CLThread* t);
 
-/// Returns runtime panic summary. Must be freed with `cl_free`.
+/// Returns runtime panic summary. Must be freed with `cl_vm_freeb`.
 CLBytes cl_thread_panic_summary(CLThread* t);
 
 /// Return and parameters for host functions.
@@ -578,15 +576,11 @@ CLBytes cl_mod_bind_test(CLVM* vm, CLSym* mod);
 // Expand type template for given arguments.
 CLType* clExpandTypeTemplate(CLVM* vm, CLSym* type_t, const CLType* param_types, const CLValue* args, size_t nargs);
 
-// Find and return the type from a given type specifier.
-// Returns `NULL` if the symbol could not be found or the symbol is not a type.
-// Returns `NULL` if trying to resolve a template expansion that doesn't already exist.
-// NOTE: Currently this behaves like `clResolveType`.
+// Find and return the type from a given type specifier (a symbol name in main, then in the builtins).
+// Returns `NULL` before the first compile, if the symbol could not be found or the symbol is not a type.
+// Returns `NULL` for a template expansion that doesn't already exist. Use `clExpandTypeTemplate` to create one.
 // If a type is returned, the type specifier is memoized to return the same result.
 CLType* cl_find_type(CLVM* vm, CLBytes spec);
-
-// Similar to `clFindType` and also resolves any missing template expansions.
-CLType* clResolveType(CLVM* vm, CLBytes spec);
 
 // -----------------------------------
 // [ Values ]
@@ -622,17 +616,18 @@ CLFuncSig* cl_vm_ensure_func_sig(CLVM* vm, const CLType* params, size_t nparams,
 CLValue cl_new_func_union(CLThread* t, CLType* union_t, CLHostFn func);
 
 // Types.
-CLType* cl_type_from_id(CLTypeId id);
+CLType* cl_type_from_id(CLVM* vm, CLTypeId id);
 CLTypeId cl_type_id(CLType* type);
 
 // Consumes and lifts a value (given as a pointer to the value) to the heap.
 CLValue cl_lift(CLThread* t, CLType* type, void* value);
 
 // Creates an empty array value.
-// Expects an array type `[]T` as `array_t` which can be obtained from `clExpandTypeTemplate` or `clResolveType`.
-CLValue cl_array_empty_new(CLVM* vm, CLType* array_t);
+// Expects an array type `Array[T]` as `array_t` which can be obtained from `clExpandTypeTemplate` or `cl_find_type`.
+CLValue cl_array_empty(CLThread* t, CLType* array_t);
 
-CLValue cl_map_empty_new(CLThread* t, CLType* map_t);
+// Creates an empty map value. Expects a map type `Map[K, V]` as `map_t`.
+CLValue cl_map_empty(CLThread* t, CLType* map_t);
 
 #ifdef __cplusplus
 } // extern "C"

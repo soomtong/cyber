@@ -1244,7 +1244,7 @@ pub fn eprints(t: *cy.Thread) callconv(.c) C.Ret {
     _ = t.ret(void);
     const str = t.param(cy.heap.Str);
     defer t.heap.destructStr(&str);
-    t.c.vm.print_err.?(@ptrCast(t.c.vm), C.to_bytes(str.slice()));
+    t.c.vm.print_err.?(@ptrCast(t), C.to_bytes(str.slice()));
     return C.RetOk;
 }
 
@@ -1252,7 +1252,7 @@ pub fn prints(t: *cy.Thread) callconv(.c) C.Ret {
     _ = t.ret(void);
     const str = t.param(cy.heap.Str);
     defer t.heap.destructStr(&str);
-    t.c.vm.print.?(@ptrCast(t.c.vm), C.to_bytes(str.slice()));
+    t.c.vm.print.?(@ptrCast(t), C.to_bytes(str.slice()));
     return C.RetOk;
 }
 

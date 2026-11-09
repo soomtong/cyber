@@ -14,7 +14,7 @@
 version: '3'
 
 vars:
-  ZIG_VERSION: 0.17.0
+  ZIG_VERSION: 0.17.1
   OPT: '{{.OPT | default "Debug"}}'
   TARGET: '{{.TARGET | default ""}}'
   FILTER: '{{.FILTER | default ""}}'

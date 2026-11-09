@@ -17,5 +17,6 @@
 - 빌드 버전 문자열(`cyber version`의 `build-N-xxxxxxx`)을 `zig build -Dbuild=N -Dcommit=xxxxxxx` 옵션으로 넘긴다. `BUILD` · `COMMIT` 환경
   변수는 폴백으로 남지만 Zig 0.17.1의 configure 캐시가 환경 변수를 추적하지 않아 같은 인자의 이전 빌드 결과가 남을 수 있다
   (`docs/decisions/project_fork_release_ci.md`).
+- 빌드 · CI의 Zig를 0.17.0에서 0.17.1로 올렸다(`build.zig.zon` `minimum_zig_version`, 워크플로 `ZIG_VERSION`, `Taskfile.yml`, `docs/build.md`).
 
 ## 문서

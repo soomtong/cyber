@@ -2,7 +2,7 @@
     .name = .cyber,
     .version = "0.4.4",
     .fingerprint = 0xe355852a90df6d01,
-    .minimum_zig_version = "0.17.0",
+    .minimum_zig_version = "0.17.1",
     .dependencies = .{
         .translate_c = .{
             .url = "git+https://codeberg.org/ziglang/translate-c#02ff0c523fb92a38939b04d0145c4a9602a74d56",

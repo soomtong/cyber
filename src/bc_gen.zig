@@ -844,10 +844,9 @@ fn genAddressOfField(c: *cy.Chunk, data: *ir.Field, cstr: Cstr, node: *ast.Node)
 
     const rec_t = rec.rec.type;
 
+    // A pointer or borrow (`&T`, `&&T`) record is already an address. A value record needs its address taken.
     var recv: GenValue = undefined;
-    if (rec_t.kind() == .pointer) {
-        recv = try genExpr(c, rec.rec, Cstr.localOrTemp());
-    } else if (rec_t.kind() == .borrow) {
+    if (rec_t.isRefLike()) {
         recv = try genExpr(c, rec.rec, Cstr.localOrTemp());
     } else {
         recv = try genAddressOf2(c, rec.rec, Cstr.localOrTemp(), node);
@@ -901,7 +900,8 @@ fn fold_rec_offset(init_rec: *ir.Expr) RecOffset {
 
     // Check to fold with previous field access.
     while (true) {
-        if (rec.type.kind() == .pointer or rec.type.kind() == .borrow) {
+        // Stop at a pointer or borrow (`&T`, `&&T`): the fields behind it live elsewhere.
+        if (rec.type.isRefLike()) {
             break;
         }
         if (rec.code == .field) {

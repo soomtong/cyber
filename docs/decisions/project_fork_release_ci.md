@@ -84,3 +84,29 @@
 ## 도구
 
 - `Taskfile.yml`에 빌드 · 테스트 · 문서 사이트 · 도구 태스크가 있다. `task`로 목록을 본다.
+
+## macOS arm64 자산은 로컬에서 만든다 (2026-11-09)
+
+- GitHub 호스티드 `macos-15`(arm64) 러너는 용량 부족으로 job이 15분 안에 배정되지 않아 "The job was not acquired by Runner of type
+  hosted"로 취소되는 일이 잦았다(`aa642ed5` run 42611240702의 lib, `6aab6658` run 42623377479의 cli · lib 둘 다. `--failed` 재실행도
+  같은 이유로 취소). Release job은 `needs: build`라 arm64 job 하나가 취소되면 릴리스가 skipped다.
+- 사용자 결정: 이 머신이 Apple Silicon macOS이므로 arm64 두 job(cli · lib)을 워크플로 매트릭스에서 빼고, 자산
+  `cyber-macos-arm64.tar.gz` · `libcyber-macos-arm64.a`는 로컬에서 만들어 `gh release upload`로 올린다. 릴리스 step의 파일 목록에서도
+  두 이름을 뺐다(softprops는 못 찾은 패턴을 경고만 하지만 목록을 실제와 맞춤). arm64의 테스트는 이 머신의 12단계 검증(aarch64-macos
+  네이티브, Debug · ReleaseFast · ReleaseSafe · trace 끔 · lib-test · standalone · wasm32)이 대신한다.
+- 로컬 빌드 명령. CI와 같은 버전 문자열을 내려면 `BUILD` · `COMMIT` 환경 변수가 필요하다(`build.zig`가 `environ_map`에서 읽음).
+  `BUILD`는 CI의 `git rev-list --count 0.3..<태그 커밋>`(짧은 버전 0.4.x의 직전 minor 태그 `0.3`부터 센다), `COMMIT`은 태그 커밋 앞 7자리.
+
+```bash
+sha=$(git rev-parse <태그>); n=$(git rev-list --count 0.3..$sha)
+BUILD=$n COMMIT=${sha:0:7} zig build cli -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false
+zig-out/bin/cyber version            # Cyber 0.4.4 build-N-xxxxxxx
+tar -C zig-out/bin -czvf cyber-macos-arm64.tar.gz cyber src
+BUILD=$n COMMIT=${sha:0:7} zig build lib -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false
+cp zig-out/lib/libcyber.a libcyber-macos-arm64.a
+gh release upload <태그> cyber-macos-arm64.tar.gz libcyber-macos-arm64.a -R soomtong/cyber --clobber
+zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Ddev 기본 true)
+```
+
+- `latest`(master push) 릴리스에는 arm64 자산이 없다. 필요하면 같은 방법으로 `latest`에 올린다. `install.sh`는 arm64 Mac에서
+  `cyber-macos-arm64.tar.gz`를 받으므로 버전 릴리스에는 반드시 올려야 한다.

@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.3-dev 718-126804f</div>
+    <div class="sub-title">v0.4.3-dev 722-44a8467</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -2046,6 +2046,7 @@ print(v.y)       --> 0
     -b      int
     -secret str
 </code></pre>
+<p>The module is the file that declares the type. From another module, reading, assigning or initializing a private field (<code>Info{a=1, b=2}</code>), also through a borrow or pointer, is a compile error: <code>Can not access the private field </code>b<code>in</code>Info<code>.</code> A type that other modules need to initialize gives its private fields a default value. A <code>persist_main</code> session (the REPL) counts as one module.</p>
 <a href="#custom-types">^topic</a>
 <h3 id="circular-references">Circular references. <a href="#circular-references">#</a></h3>
 <p>Field declarations may have circular type references if the struct can be initialized:</p>
@@ -3143,7 +3144,21 @@ h := move f
 --> error: Cannot move a partially moved value.
 f = Foo{a=1, b='x'}     -- Ok. `f` is whole again.
 </code></pre>
-<p><code>h := move f</code> is rejected rather than moving the remaining members, because a value of type <code>Foo</code> promises that all of its members are alive.
+<p>Assigning to a moved member revives that member. The old value is not deinitialized since it belongs to its new owner. Once every member is alive again, the value can be used as a whole:</p>
+<pre><code class="language-cy">f := Foo{a=123, b='abc'}
+b := move f.b
+f.b = 'xyz'             -- Ok. `f.b` is alive again.
+h := move f             -- Ok. `f` is whole again.
+</code></pre>
+<p>Like reassigning the whole value, a member can only be revived in the block that declared the variable, so the state at the end of the block is known without runtime flags:</p>
+<pre><code class="language-cy">f := Foo{a=123, b='abc'}
+b := move f.b
+if cond:
+    f.b = 'xyz'
+--> error: Can only assign to a moved member of a variable declared in the same block.
+</code></pre>
+<p>Reassigning a nested struct member while some of its members are moved out deinitializes only the members that are still alive.
+<code>h := move f</code> is rejected rather than moving the remaining members, because a value of type <code>Foo</code> promises that all of its members are alive.
 If <code>h</code> received a <code>Foo</code> without <code>b</code>, that promise would be broken for every function <code>h</code> is passed to and every container it is stored in, and the compiler would have to track
 the missing member at runtime. Filling the hole with a default value is not done either, since it would construct a value the program never wrote.
 The partial state belongs to the variable <code>f</code> alone and never leaves it. To move the whole value, make it whole first by reassigning it.</p>
@@ -4094,6 +4109,7 @@ This only allows the source module to access the symbol:</p>
 -fn add(a, b int) -> int:
     return a + b
 </code></pre>
+<p>The prefix applies to functions and methods, globals, constants, types (including templates, traits and type aliases) and <a href="#field-visibility" title="">fields</a>. The module is the file that declares the symbol, so <code>m.add(1, 2)</code> from another module is a compile error: <code>Can not access the private symbol </code>add<code>in</code>m<code>. A symbol declared with </code>-<code> is only visible to the module that declares it.</code> A <code>use *</code> import skips private symbols. Overloads of one function share one visibility: declaring <code>fn f(a int)</code> and <code>-fn f(a float)</code> is a compile error. A <code>persist_main</code> session (the REPL) counts as one module, so a private symbol declared by an earlier eval stays visible to the next one.</p>
 <a href="#modules">^topic</a>
 <h2 id="symbol-alias">Symbol alias. <a href="#symbol-alias">#</a></h2>
 <p><code>use</code> can create an alias to another symbol:</p>

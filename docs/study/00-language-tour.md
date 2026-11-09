@@ -1422,7 +1422,7 @@ d.push(3)
 print(d.items.len())
 ```
 
-   `3`이어야 하지만 `1`이 나온다(필드 앞에 다른 필드를 두면 segfault). `cyber compile`을 보면 `fn D.push`가 `addr %7 = *%4`로 `self`(빌림 포인터가 든 슬롯 %4)의 주소를 필드 시작 주소로 쓴다. 정수 필드 접근(`load_64 [%4 + 0]`)은 포인터 값을 제대로 쓴다. `^D` 수신자나 메인 블록의 `d.items << 1`은 정상이다. 원인 후보는 bc_gen의 "빌림 매개변수를 거친 필드의 주소 취하기" 경로이며 03/04 챕터에서 확인한다(추정).
+   `3`이어야 하지만 `1`이 나온다(필드 앞에 다른 필드를 두면 segfault). `cyber compile`을 보면 `fn D.push`가 `addr %7 = *%4`로 `self`(빌림 포인터가 든 슬롯 %4)의 주소를 필드 시작 주소로 쓴다. 정수 필드 접근(`load_64 [%4 + 0]`)은 포인터 값을 제대로 쓴다. `^D` 수신자나 메인 블록의 `d.items << 1`은 정상이다. 원인 후보는 bc_gen의 "빌림 매개변수를 거친 필드의 주소 취하기" 경로이며 03/04 챕터에서 확인한다(추정). 2026-11-09 수정 `b8e9f759`(F-73): 추정이 맞았다. `addr %7 = *%4`는 VM에서 레지스터 `%4`의 주소라 `self`(`&&D`)가 든 슬롯이 `Array`로 읽혔다. `genAddressOfField`가 `&&T`(`ex_borrow`)를 `&T`처럼 주소로 보지 않은 것이 원인이고, `38272a0c` 이후 인라인된 호출에서만 증상이 사라졌었다(인라인되지 않는 긴 본문은 HEAD에서도 세그폴트). `docs/decisions/project_ex_borrow_field_addr.md`.
 5. `^Dyn[Trait]` 값을 `[]`/`Array`/`ArrayStore`에 넣으면 죽는다(`xs += d`). ReleaseSafe에서는 `panic: integer overflow`, 트레이스 빌드에서는 `Double free`다(Circle의 힙 객체를 `@copy`한 뒤 이중 해제). 컨테이너 없이 `^Dyn`/`&Dyn`를 인자로 넘기고 변수에 재대입하는 것은 정상이다. 2026-11-06 수정: `@copy`의 `.ref_trait` 분기가 impl을 retain하지 않던 것이 원인이었다(F-74).
 6. `cyber fmt`는 `std.debug.panic("TODO: Embed src/tools/fmt.cy")`다(`main.zig:120-121`).
 7. `print(slice)`는 내용 대신 `[]int`를, `dump(x)`는 값 대신 타입 구조를 출력한다. (2026-11-04 둘 다 값을 찍도록 수정, `docs/decisions/project_print_string.md`)

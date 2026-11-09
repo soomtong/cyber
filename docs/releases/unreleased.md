@@ -107,6 +107,11 @@
   전부였다. 이제 다른 모듈의 접근은 컴파일 오류 ``Can not access the private symbol `secret` in `p`. ...``(필드는 `private field`)다
   (`2646638d`, F-30, `docs/decisions/project_symbol_visibility.md`). 규칙은 아래 "언어" 절. core의 `-fn`(`alloc_` · `panic_oob` 등)도
   스크립트에서 맨 이름으로 보이지 않는다(`Undeclared variable`).
+- `&&self` 메서드나 `&&T` 매개변수 안에서 구조체의 `Array` 필드에 `<<` · `append`처럼 필드를 다시 빌려 넘기면(`self.items << x`) 틀린 결과
+  (세 번 넣고 `len()`이 1)거나 세그폴트 · 무한 루프였다. 배타 빌림 `&&T`를 거친 필드의 주소를 빌림 값이 아니라 빌림이 든 레지스터의
+  주소로 계산해서다. 구조체에 든 `&&T` 필드 뒤의 필드(`self.r.items`)도 같은 원인으로 틀렸다. 2026-11-06 `38272a0c` 이후에는 호출이
+  인라인될 때만 증상이 사라졌었고, 본문이 긴 메서드 · `&&T` 일반 매개변수는 그대로였다(`b8e9f759`, F-73,
+  `docs/decisions/project_ex_borrow_field_addr.md`).
 
 ## 언어와 표준 라이브러리
 

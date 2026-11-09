@@ -102,14 +102,20 @@
 
 ```bash
 sha=$(git rev-parse <태그>); n=$(git rev-list --count 0.3..$sha)
-BUILD=$n COMMIT=${sha:0:7} zig build cli -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false
+BUILD=$n COMMIT=${sha:0:7} zig build cli -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false --cache-poison=poisoned
 zig-out/bin/cyber version            # Cyber 0.4.4 build-N-xxxxxxx
 tar -C zig-out/bin -czvf cyber-macos-arm64.tar.gz cyber src
-BUILD=$n COMMIT=${sha:0:7} zig build lib -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false
+BUILD=$n COMMIT=${sha:0:7} zig build lib -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false --cache-poison=poisoned
 cp zig-out/lib/libcyber.a libcyber-macos-arm64.a
 gh release upload <태그> cyber-macos-arm64.tar.gz libcyber-macos-arm64.a -R soomtong/cyber --clobber
 zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Ddev 기본 true)
 ```
 
+- `--cache-poison=poisoned`가 필요한 이유: Zig 0.17.1(로컬)은 configure 단계 결과를 `.zig-cache`에 캐시하고(`zig build --help`의
+  `--cache-poison`, 기본 `pure`), `build.zig`가 `b.graph.environ_map.get("BUILD")`로 읽는 환경 변수는 추적되지 않는다. 같은 인자로 한 번
+  빌드하면 다음 빌드는 환경 변수를 바꿔도 configure가 다시 돌지 않아 옛 `build-N-xxxxxxx`가 그대로 박힌다(2026-11-09 확인: `BUILD=999`로
+  빌드해도 `build-729-8ad0d43`). CI(Zig 0.17.0)의 산출물은 `latest`(`build-722-44a8467`) · 0.4.3(`build-668-a26645f`) 모두 커밋과 맞았지만,
+  CI가 `.zig-cache`를 `actions/cache`로 복원하므로 Zig 버전을 올리면 같은 문제가 생길 수 있다. 근본 수정 후보: `create_lib_config`에서
+  `BUILD` · `COMMIT`가 있으면 `b.graph.poisonCache()`를 부르기(환경 변수를 안 쓰는 로컬 빌드는 영향 없음). 0.4.4 릴리스 뒤에 넣는다.
 - 워크플로의 `push.paths`가 `.github/**` · `**.md`를 제외하므로 워크플로만 고친 커밋은 Latest Build를 트리거하지 않는다. 확인하려면
   `gh workflow run latest-build.yml -R soomtong/cyber --ref master`로 직접 실행한다.

@@ -2833,7 +2833,7 @@ The `!` postfix operator unwraps a result's payload or rethrows the error:
 ```cy
 data := os.read_file('data.txt')!
 ```
-In the main block, the rethrow case would result in a thread panic.
+In the main block, the rethrow case would result in a thread panic. Inside a [`try` block](#unwrap-block), the rethrow case jumps to the block's `else` instead.
 
 If the unwrap expression is inside a function, the rethrow case would bubble up the error to the caller. This suggests that the function must have a `Result` return type:
 ```cy
@@ -2860,19 +2860,11 @@ res := do_something() !else |err|:
     panic('Failed with %{err}')
 ```
 
-The `try` block catches thrown errors and resumes execution in a followup `catch` block:
-```cy
-try:
-    funcThatCanFail()
-catch err:
-    print err      -- 'error.Failed'
-```
-
 ### Unwrap or guard.
 *TBD*
 
 ### Unwrap block.
-Sometimes it can be useful to catch all errors thrown in a block: *TBD*
+Sometimes it can be useful to handle every rethrow in a block at one place. A `try` block runs its body, and when a `!` in the body meets an error, execution jumps to the `else` block with that error instead of rethrowing or panicking:
 ```cy
 try:
     res := do_something()!
@@ -2880,8 +2872,32 @@ try:
     validate(res)!
     print('Success.')
 else |err|:
-    panic('Failed with %{err}.')
+    print('Failed with %{err}.')
 ```
+
+Only the `!` operator in the body is redirected. `!else`, `return error.X`, a `Result` value that is not unwrapped, and panics keep their meaning. Since errors are values, nothing is thrown at runtime: the compiler lowers the block to a branch on each `!`.
+
+The capture `|err|` is optional and has the type `error`. When the body reaches its end, the `else` block is skipped. Both paths continue after the `try` statement, so unlike an `!else` block, the `else` block does not have to end with `return` or `panic`:
+```cy
+var count int = 0
+try:
+    count += parse(a)!
+    count += parse(b)!
+else:
+    count = -1
+print(count)
+```
+
+The body is its own scope: variables declared in it are not visible after the block, and they are destructed before the `else` block runs when a `!` fails. In a function, a `!` inside a `try` body does not require a `Result` return type:
+```cy
+fn content_length(path str) -> int:
+    try:
+        return os.read_file(path)!.len()
+    else:
+        return 0
+```
+
+Nested `try` blocks are resolved from the inside out. A `!` inside the `else` block belongs to the enclosing `try`, or to the function when there is none. A lambda declared in the body has its own rules: its `!` follows the lambda's return type.
 
 ## Panics.
 The builtin `panic` is a fail-fast mechanism to quickly exit the current thread with an error message:

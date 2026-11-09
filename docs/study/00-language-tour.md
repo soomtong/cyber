@@ -776,7 +776,7 @@ b is none
 - `expr !else 기본값`
 - `expr !else |err|:` 블록: 블록은 반드시 끝에서 빠져나가야 한다(`return`/`panic`). 블록이 값을 내는 형태는 아직 없다(`Expected unreachable block end.`, `docs.md`의 `break value`는 Planned).
 
-`try` 키워드는 예약어이지만 `try:/catch` 블록은 TBD이고 실제로 쓸 수 없다. `panic(msg)`는 잡을 수 없고 스레드를 멈추며 스택 트레이스를 stderr로 낸다. 종료 코드는 1.
+`try:` 블록은 2026-11-09(F-32)부터 동작한다. 본문 안의 `!`가 실패하면 함수 반환 · panic 대신 `else |err|:` 블록으로 뛰고, `else` 블록은 끝에 도달해도 된다(`docs.md` Unwrap block). `panic(msg)`는 잡을 수 없고 스레드를 멈추며 스택 트레이스를 stderr로 낸다. 종료 코드는 1.
 
 ```cy
 fn parse(s str) -> !int:
@@ -1398,7 +1398,7 @@ print(total)
 | 비참조 지역 변수 캡처는 pinned closure (2032) | `Can only capture variables declared with the reference types ...` |
 | `Func(FN)` (2064) | `Func[FN]`가 실제 표기(`src/test/functions/call_closure.cy:17`) |
 | `case 100` / `case 200` 본문 없는 fallthrough 예제 (1850) | 그대로 쓰면 `ParseError: Unexpected indentation.` |
-| `try:` ... `catch err:` (2656 부근) | 구현 없음(TBD). `!else`만 사용 |
+| `try:` ... `catch err:` (2656 부근) | 구현 없음(TBD). `!else`만 사용. 2026-11-09 구현(F-32): `try:` ... `else |err|:`, 매뉴얼의 `catch err:` 문단은 삭제 |
 | `-` 접두 비공개 (1159, 3290대) | 다른 모듈에서 `x.b`, `u.hidden()` 접근이 막히지 않는다. 가시성 검사 자리는 `module.zig:502,510`에 `TODO: check visibility.` 2026-11-09 수정 `2646638d`(F-30): 이제 컴파일 오류 |
 
 ### 7.3 구현 버그와 놀라운 점 (HEAD b40531a1, 재현 방법 포함)

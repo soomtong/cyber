@@ -238,7 +238,7 @@ Trace 빌드에서는 문장 하나가 끝날 때마다 `check_locals`(`sema.zig
 | `breakStmt`, `continueStmt` | `semaBreak` (791), `semaContinue` (811) | 소멸자 문장들 + `break_`/`continue_` |
 | `yield_stmt` | 인라인 (709-750) | `set_ret` + `yield` (07 챕터) |
 | `ct_stmt` (`#if` 등) | `ct_inline.evalStmt` | 고른 분기만 다시 `semaStmt` |
-| `tryStmt` | 인라인 (673) | 항상 에러: "Unsupported statement: tryStmt" |
+| `tryStmt` | `sema_try_stmt` | `block` 둘 + 본문 `!` 의 `set_local` · `break_` (2026-11-09 F-32 구현. 이전에는 항상 "Unsupported statement: tryStmt") |
 
 `await` 는 문장 노드가 아니다. core.cy 의 `@await_`(`src/builtins/core.cy:4097`)가 `host_builtin` 함수로 연결되어 있고, 그 Zig 구현 `await_`(`src/builtins/core.zig:1508`)가 sema 도중에 `.await_` IR 문장을 직접 push 한다. 같은 메커니즘으로 `gen_next`/`gen_end` IR 식도 `core.zig:1999-2026` 의 호스트 빌트인이 만든다(`sema.zig` 안에는 `newExpr(.gen_next` 가 없다). 이 "Zig 로 IR 을 직접 만드는 함수" 종류가 `host_builtin` 이다(`src/module.zig:344`, 호출 쪽은 `sema_func.zig:362-383`). 코루틴의 의미는 [07 코루틴](07-coroutines-concurrency.md)에서 다룬다.
 
@@ -324,7 +324,7 @@ block
 
 fork 가 추가한 최적화가 하나 있다. 반환하는 식이 소유권 없는 managed 지역 변수 이름 하나(`return s`)면 복사 대신 이동한다(`implicitReturnMoveLocal`, `sema.zig:994-1019`, 커밋 eb060d5e). 지역을 `.dead` 로 표시한 채 소멸자를 생성하므로 그 지역은 소멸자 대상에서 빠진다.
 
-`try ... else err:` 문은 파서가 AST 를 만들지만(`parser.zig:1862`) sema 가 거부한다(`sema.zig:673-678`). 5절에서 재현한다. 현재 에러 처리의 실제 경로는 `!`/`!else`/`Result` 식이다.
+`try ... else err:` 문은 파서가 AST 를 만들지만(`parser.zig:1862`) sema 가 거부했다(`sema.zig:673-678`). 5절에서 재현한다. 2026-11-09 F-32 로 `try: … else |err|: …` 가 구현됐다(`sema_try_stmt`, `docs/decisions/project_try_block.md`). 오류는 값이므로 런타임 catch 가 아니라 본문 안 `!` 의 오류 분기를 `else` 블록으로의 `break_` 로 바꾸는 변환이다. 그 밖의 에러 처리 경로는 변함없이 `!`/`!else`/`Result` 식이다.
 
 ### 2.5 식(expression) 디스패치와 대표 경로
 
@@ -604,7 +604,7 @@ funcBlock(find)
 |---|---|
 | 블록 구조 | `mainBlock`, `funcBlock`, `block`, `pop_locals`, `nop_label` |
 | 지역과 수명 | `declare_local`, `discard`, `release` |
-| 제어 흐름 | `if_block`, `loop_block`, `forRangeStmt`, `switch_stmt`, `break_`, `continue_`, `trap`, `tryStmt`(미사용) |
+| 제어 흐름 | `if_block`, `loop_block`, `forRangeStmt`, `switch_stmt`, `break_`, `continue_`, `trap` (`tryStmt` IR 은 2026-11-09 삭제, `try` 블록은 `block` · `break_` 로 낮춘다) |
 | 반환과 코루틴 | `ret`, `set_ret`, `ret_gen`, `yield`, `await_`, `ret_expr`(미사용) |
 | 쓰기 | `set_local`, `set_field`, `set_global`, `set_deref`, `setCaptured`, `set`(미사용) |
 | 디버그 | `breakpoint`, `dumpBytecode`(미사용), `verbose`(미사용) |
@@ -890,7 +890,7 @@ funcBlock find(x)
 | `fn foo(a bool): pass` / `foo(123)` | Expected argument `bool`, found `int`, when calling `fn foo(bool) -> void`. | `sema_func.zig:1301` | `matchFuncSym2` → `matchFuncSym` → `matchFunc` → `matchFuncRt` → `matchFuncSig`(불일치) → `reportCallFuncMismatch` |
 | `x := 1` / `x + 2` | Expected assignment to a variable or placeholder for `int`. | `sema.zig:357` | `semaStmt` → `semaExprStmt` (값 있는 식을 버림) |
 | `fn bar() -> int:` 본문이 `x := 1` 뿐 | Missing return statement. | `sema.zig:9141` | `semaFuncBody2` → `procPrologue` (끝에 닿는데 void 아님) |
-| `try:` / `else err:` | Unsupported statement: tryStmt | `sema.zig:677` | `semaStmt` 의 `.tryStmt` 분기 |
+| `try:` / `else err:` | Unsupported statement: tryStmt (2026-11-09 이후 `try:` / `else \|err\|:` 가 동작하고, 이 구문은 `Expected colon.`) | `sema.zig:677` | `semaStmt` 의 `.tryStmt` 분기 → 지금은 `sema_try_stmt` |
 | `n := 1` / `fn() -> int: return n` | Can only capture variables declared with the reference types `^T` or `&T`. | `sema.zig:5066` | `semaIdent` → `lookupIdent` (부모 지역을 찾았는데 값 타입) |
 | `case k:` (k 는 런타임 지역) | Could not find the symbol `k`. | `cte.zig:1950` | `semaSwitchBody` → `semaCaseCond` → `cte.evalTarget` → `eval_ident` |
 | `1!` (`try_error.cy`) | Expected type instance of `Result`, found `int`. | `sema.zig:10592` 또는 `cte.zig:585` | 트레이스 마지막 줄이 `sema: expr.unwrap_res: "1!"` 와 `expr.decLit` → `sema_expr_cstr_template` |
@@ -967,7 +967,7 @@ print(#{f()})       # 컴파일타임 평가: 5
 - 컴파일타임 평가에서 지원하지 않는 식: `const x = f(1)` 의 `f` 안에 문자열 보간(`'a%{n}'`)을 쓰면 "Unsupported compile-time expression: `stringt`", 람다(`fn(a int) => a + n`)를 쓰면 `lambda_expr` 로 같은 에러가 난다.
 - `if false: this_function_does_not_exist()` 는 `Undeclared variable` 에러. `#if false:` 는 에러가 없다. 런타임 `if` 는 죽은 분기도 sema 하지만 `#if` 는 아니다.
 - `var d i8 = 300` → `Parsing decimal literal overflows integer type.`
-- `try: ... else err: ...` → `Unsupported statement: tryStmt`. 문서(`docs/docs.md:2667-2670`)의 `catch err:` 형태는 파서에서 "Expected catch block." 로 거부된다.
+- `try: ... else err: ...` → `Unsupported statement: tryStmt`. 문서(`docs/docs.md:2667-2670`)의 `catch err:` 형태는 파서에서 "Expected catch block." 로 거부된다. 2026-11-09 F-32 로 `else |err|:` 캡처 구문이 구현됐고, `else` 가 없으면 "Expected else block.", 캡처가 식별자가 아니면 "Expected error variable." 이다.
 
 ### 5.8 변형 과제
 
@@ -1027,7 +1027,7 @@ fork 를 유지보수하는 입장에서 시사점은 다음과 같다.
 
 1. cte 복합 대입 무시. `cte.zig:423`(컴파일타임 변수 대입)과 `:460`(벡터 원소 대입)은 `rec_op`(복합 연산자 정보)를 버리고 오른쪽 식만 평가한다. `.deref` 분기만 `eval_assign_right` 를 쓴다(`:436`). 5.6 의 `t += 5` 가 `15` 대신 `5` 가 된다. `src/test/meta` 에 `+=` 를 쓰는 케이스가 없어서 테스트에 걸리지 않는다. 영향 범위는 `const` 초기화, `#{}`, `type ... const:` 본문, `#[consteval]` 함수 안의 `+=`, `-=` 등이다. 2026-11-08 수정 `02f39e67`: `eval_assign_right(c, right, rec_op, target_t)`가 세 분기 모두에서 `left op right` 를 평가하고 목적지 타입을 검사한다. 컴파일 타임 벡터 원소 읽기와 범위 검사도 함께 넣었다(`docs/decisions/project_cte_op_assign.md`). 테스트 `meta/ct_op_assign.cy` 는 같은 함수를 런타임과 `const` 로 실행해 비교한다.
 2. 지역 변수 257개부터 컴파일러가 죽는다. IR 지역 번호가 `u8`(`LocalVarS.id`)이라 `@intCast(local_id)`(`sema.zig:3416`, 파라미터는 `:3343`)가 넘친다. 한 함수에서 지역 `a0` ~ `a255`(256개)는 통과했고 257개에서 "panic: integer does not fit in destination type" 이 났다(main 블록은 300개에서 확인). `CompileError` 가 아니라 컴파일러 프로세스 패닉이다. 숨은 임시 지역(`_opt`, `_temp` 등)도 번호를 쓰므로 실제 한계는 사용 패턴에 따라 더 낮다. 생성된 코드를 실행하는 에이전트 루프에서는 만날 수 있는 조건이다. 2026-11-08 수정 `04096230`: `reserveLocalName` · `declareParam`이 번호를 매기기 전에 `checkLocalLimit`로 256개 초과를 `CompileError`("Too many local variables. A function can have at most 256 locals, including hidden temporaries.")로 보고한다. 같은 u8 계열인 매개변수 255개 초과(`resolveFuncSig` · `pushLambdaFuncParams` · `resolveFuncType`, "Too many parameters."), 구조체 필드 255개 초과(`resolveStructFields` · `reifyStructType`, "Too many fields."), C 가변 인자 호출의 인자 255개 초과(`getVmCVariantFunc`, "Too many arguments.")도 같은 방식이다. 폭을 u16으로 넓히는 길은 IR extern 구조체 · `FuncParam.reg` · 바이트코드 레지스터 번호까지 번지므로 택하지 않았다.
-3. `try ... else err:` 는 파싱되지만 sema 가 항상 "Unsupported statement: tryStmt" 로 거부한다(`sema.zig:673-678`). 같은 구문의 IR 노드(`tryStmt`), `bc_gen.gen_try_stmt` 가 남아 있다.
+3. `try ... else err:` 는 파싱되지만 sema 가 항상 "Unsupported statement: tryStmt" 로 거부한다(`sema.zig:673-678`). 같은 구문의 IR 노드(`tryStmt`), `bc_gen.gen_try_stmt` 가 남아 있다. 2026-11-09 F-32 로 구현됐고 죽은 IR · 코드젠은 지웠다(`docs/decisions/project_try_block.md`).
 4. 오버로드 시도 롤백이 미완이다(`matchRtOverload` 의 TODO). 5.4 에서 다룬 대로 실제 오동작은 찾지 못했다(미확인). 선언 순서가 결과를 바꾸던 F-21 은 2026-11-08 `cf4aa84a` 로 고쳤다(`docs/decisions/project_overload_exact_match.md`).
 5. 클로저는 참조형(`^T`, `&T`) 지역만 캡처하고 바로 위 `Proc` 한 단계만 본다(`sema.zig:5066`, `:5115`). 값 타입 캡처는 `TODO: Capture non-reference stack variables too.`(`:5063`).
 6. `cyber -cc`/`-tcc` 는 sema 단계에서 실패한다(`sema.zig:2870`). C 백엔드(`cgen.zig`)는 이 IR 을 읽도록 작성되어 있으나 현재 core.cy 와는 맞지 않는다.
@@ -1040,13 +1040,13 @@ fork 를 유지보수하는 입장에서 시사점은 다음과 같다.
 | `ir.zig:802` "IR ops use an explicit index since the underlying buffer can grow." | 위와 같은 이유로 낡은 주석 |
 | `ir.zig:11` IR 은 코드젠이 소비한 뒤 버려진다 | 청크 arena 이므로 `Chunk.deinit` 때까지 유지(`chunk.zig:313`) |
 | `ir.zig:913-1139` `visitStmts`/`visitExpr` 방문자 | 존재하지 않는 코드(`.byte`, `.float`, `.int`)와 필드(`numArgs`, `src_ptr`)를 참조한다. Zig 는 쓰이지 않는 함수를 분석하지 않아 컴파일이 통과한다. 쓰는 곳은 `dce.zig` 뿐이고 `enable_dce = false` |
-| `docs/docs.md:2667-2670` `try:` / `catch err:` | 파서는 `else`(`parser.zig:1876`)를 기대하고 sema 는 어느 쪽이든 거부 |
+| `docs/docs.md:2667-2670` `try:` / `catch err:` | 파서는 `else`(`parser.zig:1876`)를 기대하고 sema 는 어느 쪽이든 거부. 2026-11-09 F-32 로 `else |err|:` 가 동작하고 매뉴얼의 `catch err:` 문단은 삭제 |
 | `docs/docs.md:3015` 인라인 평가는 "전체 언어를 흉내 낼 수는 없다" | 맞다. 문장은 `cte.zig:480-557` 의 9종, `while` 없음 |
 | `.?` 가 none 에서 패닉하지 않고 쓰레기 값을 읽는다는 보고(제너레이터에서 관찰) | 직접 `.?` 는 `?int`, `?str`, `?^Foo` 모두 패닉(5.7). 제너레이터 값 문제는 별개로 추정 |
 
 ### 7.3 미완 지점 (코드에 TODO 나 막힌 분기로 남은 것)
 
-- sema 가 만들지 않는 IR 코드: `tryStmt`, `ret_expr`, `set`, `dumpBytecode`, `verbose`, `closure`, `mainEnd`, `vector`, `partial_vector`(2.8절). `ret_expr` 는 `sema.zig:857` 의 TODO 최적화, 나머지는 옛 설계의 잔재로 보인다(추정).
+- sema 가 만들지 않는 IR 코드: `ret_expr`, `set`, `dumpBytecode`, `verbose`, `closure`, `mainEnd`, `vector`, `partial_vector`(2.8절). `ret_expr` 는 `sema.zig:857` 의 TODO 최적화, 나머지는 옛 설계의 잔재로 보인다(추정). `tryStmt` 는 2026-11-09 에 지웠다.
 - "Unreachable statement." 검사 비활성(`sema.zig:381-383`), 연결된 테스트는 주석 처리(`behavior_test.zig:410`).
 - `if opt |[a, b]|` 같은 구조 분해 캡처는 즉시 `TODO` 에러(`sema.zig:1101-1106`). `yield` 인자 없음도 `TODO`(`:748`), 타입 추론 없는 `{...}` 리터럴은 "TODO: infer tuple type"(`:7253`).
 - `docs/decisions/project_ct_eval_loop_result.md` 의 "남은 문제": `type ... const:` 본문이 기존 타입(`int` 등)을 반환하면 `resolve_type_const` 가 그 타입의 이름과 부모를 덮어써 오염시킨다(`sema_type.zig:27-30`). 현재 내장 type const 는 모두 새 타입을 만들어 반환해서 드러나지 않는다.

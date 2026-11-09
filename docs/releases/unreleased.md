@@ -157,6 +157,14 @@
   컴파일 오류. `use *`는 private 심볼을 건너뛴다. 한 함수의 오버로드는 가시성이 같아야 한다(``Overloads of `f` must have the same
   visibility.``). `persist_main` 세션(REPL)은 eval이 바뀌어도 한 모듈이다. 메타프로그래밍(`type.info`) · 컴파일러가 이름으로 찾는
   `@init` · `@deinit` 등은 검사하지 않는다. `docs/docs.md` Symbol visibility · Field visibility 절에 적혀 있다.
+- `try` 블록(`e2998e91`): 매뉴얼의 Unwrap block이 동작한다. `try:` 본문 안의 `!`가 오류를 만나면 함수 반환 · panic 대신
+  `else |err|:` 블록으로 뛴다(`|err|`는 생략 가능, 타입 `error`). 영향을 받는 것은 본문의 `!`뿐이고 `!else` · `return error.X` ·
+  panic은 그대로다. 본문이 끝에 닿으면 `else`를 건너뛰고, 두 경로 모두 문 다음으로 이어지므로 `else` 블록은 끝에 도달해도 된다.
+  본문의 지역은 블록 스코프이고 실패 시 `else` 전에 파괴된다. 중첩은 안쪽 우선, `else` 안의 `!`는 바깥 `try`로, 람다는 자기 규칙.
+  함수 안에서는 `try` 본문의 `!` 때문에 반환 타입이 `!T`일 필요가 없다. 이전에는 파서가 `else err:`를 받고 sema가 항상
+  `Unsupported statement: tryStmt`로 거부했다. 캡처 구문은 `!else |err|:`와 같은 `else |err|:`이고, `else` 블록이 없으면
+  `Expected else block.`, 캡처가 식별자가 아니면 `Expected error variable.`. 매뉴얼 Unwrap or default 절의 낡은 `try:/catch err:`
+  문단은 지웠다. `docs/docs.md` Unwrap block 절에 적혀 있다.
 
 
 ## 임베딩 API

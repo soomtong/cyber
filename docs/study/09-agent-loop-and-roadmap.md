@@ -395,7 +395,7 @@ perl -e 'alarm 5; exec @ARGV' cyber lit.cy   # 4464
 | 2b. 표준 라이브러리 | LLM 스크립트가 바로 닿는 결함 | F-70 · F-71 · F-72 · F-74 · F-76 모두 2026-11-06 수정 | S ~ M | 각 재현 스크립트가 정상 결과. 규칙 12 삭제 가능 |
 | 3. 임베딩 하드닝 | 호스트가 자원과 권한을 쥔다 | F-41(C용 할당자 훅), F-42, F-50~F-52 (F-40 스택 상한 · F-06 `deny_raw_ptrs` · F-07 비-main await는 2026-11-08 수정) | M ~ L | 08 §5.2 데모에 메모리 상한 턴이 추가됨. 규칙 4, 5, 8 삭제 가능 |
 | 4. 메모리 안전 | 소유권 검사의 구멍 | F-27, F-29 (F-25 · F-26은 2026-11-08 수정, `project_borrow_model.md` · `project_array_append_move.md`) | L | 빌림 모델 문서 → 검사 수정 → 테스트 |
-| 5. 언어 완성도 | 스크립트 CLI 1순위 | Unwrap block(F-32와 묶음), error payload, Attributes 문서, Named parameters | L | 문서의 TBD 40곳 중 1순위 항목 감소 |
+| 5. 언어 완성도 | 스크립트 CLI 1순위 | Unwrap block(F-32, 2026-11-09 구현), error payload, Attributes 문서, Named parameters | L | 문서의 TBD 40곳 중 1순위 항목 감소 |
 | 6. 중단과 재개 | 길 2 시제품 | `CALL_HOST` 대기 + `cl_vm_resume` | L | 호스트가 도구 응답을 기다리는 동안 스크립트가 멈췄다 이어지는 시나리오 테스트 |
 | 7. 정리 | 읽기 쉬운 코드베이스 | F-60~F-66, 죽은 코드 삭제(fiber.zig, map.zig 등), `write_inst` 정정 | S ~ M | 덤프가 실제 인코딩과 일치 |
 

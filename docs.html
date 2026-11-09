@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.3-dev 722-44a8467</div>
+    <div class="sub-title">v0.4.3-dev 725-aa642ed</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -3451,7 +3451,7 @@ res = 'abcxyz'
 <p>The <code>!</code> postfix operator unwraps a result's payload or rethrows the error:</p>
 <pre><code class="language-cy">data := os.read_file('data.txt')!
 </code></pre>
-<p>In the main block, the rethrow case would result in a thread panic.</p>
+<p>In the main block, the rethrow case would result in a thread panic. Inside a <a href="#unwrap-block" title=""><code>try</code> block</a>, the rethrow case jumps to the block's <code>else</code> instead.</p>
 <p>If the unwrap expression is inside a function, the rethrow case would bubble up the error to the caller. This suggests that the function must have a <code>Result</code> return type:</p>
 <pre><code class="language-cy">fn content_length(path str) -> !int:
     data := os.read_file(path)!
@@ -3470,26 +3470,38 @@ res = 'abcxyz'
 <pre><code class="language-cy">res := do_something() !else |err|:
     panic('Failed with %{err}')
 </code></pre>
-<p>The <code>try</code> block catches thrown errors and resumes execution in a followup <code>catch</code> block:</p>
-<pre><code class="language-cy">try:
-    funcThatCanFail()
-catch err:
-    print err      -- 'error.Failed'
-</code></pre>
 <a href="#error-handling">^topic</a>
 <h3 id="unwrap-or-guard">Unwrap or guard. <a href="#unwrap-or-guard">#</a></h3>
 <p><em>TBD</em></p>
 <a href="#error-handling">^topic</a>
 <h3 id="unwrap-block">Unwrap block. <a href="#unwrap-block">#</a></h3>
-<p>Sometimes it can be useful to catch all errors thrown in a block: <em>TBD</em></p>
+<p>Sometimes it can be useful to handle every rethrow in a block at one place. A <code>try</code> block runs its body, and when a <code>!</code> in the body meets an error, execution jumps to the <code>else</code> block with that error instead of rethrowing or panicking:</p>
 <pre><code class="language-cy">try:
     res := do_something()!
     do_even_more_things(res)!
     validate(res)!
     print('Success.')
 else |err|:
-    panic('Failed with %{err}.')
+    print('Failed with %{err}.')
 </code></pre>
+<p>Only the <code>!</code> operator in the body is redirected. <code>!else</code>, <code>return error.X</code>, a <code>Result</code> value that is not unwrapped, and panics keep their meaning. Since errors are values, nothing is thrown at runtime: the compiler lowers the block to a branch on each <code>!</code>.</p>
+<p>The capture <code>|err|</code> is optional and has the type <code>error</code>. When the body reaches its end, the <code>else</code> block is skipped. Both paths continue after the <code>try</code> statement, so unlike an <code>!else</code> block, the <code>else</code> block does not have to end with <code>return</code> or <code>panic</code>:</p>
+<pre><code class="language-cy">var count int = 0
+try:
+    count += parse(a)!
+    count += parse(b)!
+else:
+    count = -1
+print(count)
+</code></pre>
+<p>The body is its own scope: variables declared in it are not visible after the block, and they are destructed before the <code>else</code> block runs when a <code>!</code> fails. In a function, a <code>!</code> inside a <code>try</code> body does not require a <code>Result</code> return type:</p>
+<pre><code class="language-cy">fn content_length(path str) -> int:
+    try:
+        return os.read_file(path)!.len()
+    else:
+        return 0
+</code></pre>
+<p>Nested <code>try</code> blocks are resolved from the inside out. A <code>!</code> inside the <code>else</code> block belongs to the enclosing <code>try</code>, or to the function when there is none. A lambda declared in the body has its own rules: its <code>!</code> follows the lambda's return type.</p>
 <a href="#error-handling">^topic</a>
 <h2 id="panics">Panics. <a href="#panics">#</a></h2>
 <p>The builtin <code>panic</code> is a fail-fast mechanism to quickly exit the current thread with an error message:</p>

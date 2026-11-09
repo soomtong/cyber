@@ -29,10 +29,6 @@ jobs:
   build:
     name: host=${{ matrix.config.host }} cmd=${{ matrix.config.cmd }} target=${{ matrix.config.target }} mode=${{ matrix.config.mode }}
     runs-on: ${{ matrix.config.host }}
-    # macOS arm64 (aarch64-macos-none) is not built here: hosted `macos-15` arm64 runners are often not
-    # acquired within 15 minutes and the job is cancelled. Those two assets (cyber-macos-arm64.tar.gz,
-    # libcyber-macos-arm64.a) are built on a local Apple Silicon machine and uploaded with `gh release upload`.
-    # See docs/decisions/project_fork_release_ci.md.
     strategy:
       fail-fast: false
       matrix:
@@ -45,8 +41,12 @@ jobs:
             target: x86_64-selinux-gnu
             mode: release
             cmd: cli
-          - host: macos-15-intel
+          - host: macos-26-intel
             target: x86_64-macos-none
+            mode: release
+            cmd: cli
+          - host: macos-26
+            target: aarch64-macos-none
             mode: release
             cmd: cli
           - host: windows-2022
@@ -69,8 +69,12 @@ jobs:
             target: x86_64-linux-gnu
             mode: release
             cmd: lib
-          - host: macos-15-intel
+          - host: macos-26-intel
             target: x86_64-macos-none
+            mode: release
+            cmd: lib
+          - host: macos-26
+            target: aarch64-macos-none
             mode: release
             cmd: lib
     env:
@@ -135,9 +139,15 @@ jobs:
           make
 
       - name: Install zig.
-        if: env.BUILD_HOST == 'macos-15-intel'
+        if: env.BUILD_HOST == 'macos-26-intel'
         run: |
           wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-x86_64-macos-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin
+          xcode-select --print-path
+
+      - name: Install zig.
+        if: env.BUILD_HOST == 'macos-26'
+        run: |
+          wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-aarch64-macos-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin
           xcode-select --print-path
 
       - name: Install zig.
@@ -213,7 +223,7 @@ jobs:
 
       # Optimized builds without runtime safety expose layout mismatches and UB on undefined values.
       - name: Run tests. (fast)
-        if: env.BUILD_CMD == 'cli' && env.BUILD_TARGET == 'x86_64-linux-gnu'
+        if: env.BUILD_CMD == 'cli' && (env.BUILD_TARGET == 'x86_64-linux-gnu' || env.BUILD_TARGET == 'aarch64-macos-none')
         run: |
           zig build test ${{ env.ZIG_TARGET_FLAG }} ${{ env.DEV_FLAG }} -Doptimize=ReleaseFast
 
@@ -260,7 +270,7 @@ jobs:
       #     zig-out/${{ env.BUILD_TARGET }}/main/cosmic${{ env.BIN_EXT }}
 
       - name: Zip. (linux/macos)
-        if: (env.BUILD_HOST == 'ubuntu-24.04' || env.BUILD_HOST == 'macos-15-intel') && env.BUILD_TARGET != 'wasm32-wasi' && env.BUILD_CMD == 'cli'
+        if: (env.BUILD_HOST == 'ubuntu-24.04' || env.BUILD_HOST == 'macos-26-intel' || env.BUILD_HOST == 'macos-26') && env.BUILD_TARGET != 'wasm32-wasi' && env.BUILD_CMD == 'cli'
         # The CLI loads its standard modules from `src/` next to the executable.
         run: |
            tar -C zig-out/bin -czvf ${{ env.BIN_ZIP }} cyber src
@@ -291,6 +301,11 @@ jobs:
         run: |
           mv zig-out/lib/libcyber.a libcyber-macos-x64.a
 
+      - name: Move. (macos lib)
+        if: env.BUILD_TARGET == 'aarch64-macos-none' && env.BUILD_CMD == 'lib'
+        run: |
+          mv zig-out/lib/libcyber.a libcyber-macos-arm64.a
+
       - name: Move. (wasm)
         if: env.BUILD_TARGET == 'wasm32-freestanding'
         run: |
@@ -319,6 +334,7 @@ jobs:
             libcyber-windows-msvc-x64.lib
             libcyber-linux-x64.a
             libcyber-macos-x64.a
+            libcyber-macos-arm64.a
             cyber-web.wasm
 
     outputs:
@@ -453,11 +469,13 @@ jobs:
             cyber-linux-x64.tar.gz
             cyber-selinux-x64.tar.gz
             cyber-macos-x64.tar.gz
+            cyber-macos-arm64.tar.gz
             cyber-windows-x64.zip
             libcyber-windows-gnu-x64.lib
             libcyber-windows-msvc-x64.lib
             libcyber-linux-x64.a
             libcyber-macos-x64.a
+            libcyber-macos-arm64.a
             cyber-web.wasm
             cyber-wasi.wasm
             docs.html
@@ -465,7 +483,6 @@ jobs:
             api.html
 
       # Auto dispatch.
-      # cyber-macos-arm64.tar.gz and libcyber-macos-arm64.a are added afterwards with `gh release upload`.
       - name: Github Release.
         uses: softprops/action-gh-release@v2
         # Releases for tags only.
@@ -475,11 +492,13 @@ jobs:
             cyber-linux-x64.tar.gz
             cyber-selinux-x64.tar.gz
             cyber-macos-x64.tar.gz
+            cyber-macos-arm64.tar.gz
             cyber-windows-x64.zip
             libcyber-windows-gnu-x64.lib
             libcyber-windows-msvc-x64.lib
             libcyber-linux-x64.a
             libcyber-macos-x64.a
+            libcyber-macos-arm64.a
             cyber-web.wasm
             cyber-wasi.wasm
             docs.html

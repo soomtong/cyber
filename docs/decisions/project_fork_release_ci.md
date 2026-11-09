@@ -85,17 +85,20 @@
 
 - `Taskfile.yml`에 빌드 · 테스트 · 문서 사이트 · 도구 태스크가 있다. `task`로 목록을 본다.
 
-## macOS arm64 자산은 로컬에서 만든다 (2026-11-09)
+## macOS 러너 레이블 `macos-26` · `macos-26-intel` (2026-11-09)
 
 - GitHub 호스티드 `macos-15`(arm64) 러너는 용량 부족으로 job이 15분 안에 배정되지 않아 "The job was not acquired by Runner of type
   hosted"로 취소되는 일이 잦았다(`aa642ed5` run 42611240702의 lib, `6aab6658` run 42623377479의 cli · lib 둘 다. `--failed` 재실행도
-  같은 이유로 취소). Release job은 `needs: build`라 arm64 job 하나가 취소되면 릴리스가 skipped다.
-- 사용자 결정: 이 머신이 Apple Silicon macOS이므로 arm64 두 job(cli · lib)을 워크플로 매트릭스에서 빼고, 자산
-  `cyber-macos-arm64.tar.gz` · `libcyber-macos-arm64.a`는 로컬에서 만들어 `gh release upload`로 올린다. 릴리스 step의 파일 목록에서도
-  두 이름을 뺐다(softprops는 못 찾은 패턴을 경고만 하지만 목록을 실제와 맞춤). arm64의 테스트는 이 머신의 12단계 검증(aarch64-macos
-  네이티브, Debug · ReleaseFast · ReleaseSafe · trace 끔 · lib-test · standalone · wasm32)이 대신한다.
-- 로컬 빌드 명령. CI와 같은 버전 문자열을 내려면 `BUILD` · `COMMIT` 환경 변수가 필요하다(`build.zig`가 `environ_map`에서 읽음).
-  `BUILD`는 CI의 `git rev-list --count 0.3..<태그 커밋>`(짧은 버전 0.4.x의 직전 minor 태그 `0.3`부터 센다), `COMMIT`은 태그 커밋 앞 7자리.
+  시작조차 못 하고 취소). Release job은 `needs: build`라 arm64 job 하나가 취소되면 릴리스가 skipped다.
+- 중간에 arm64 두 job을 매트릭스에서 빼고 로컬(Apple Silicon) 빌드로 대신하는 커밋(`8ad0d43d`)을 넣었다가, 사용자 결정으로 되돌려
+  x86_64 · arm64 둘 다 CI에서 만든다. 레이블은 GitHub 현재 체계(2026-11)에 맞춰 `macos-26`(arm64, `macos-latest`와 같음) ·
+  `macos-26-intel`(x64)로 올렸다. macOS 14 이미지는 2026-11-02 퇴역했고 GitHub는 OS 계열당 GA 이미지를 둘만 유지하므로 `macos-15`는
+  macOS 27 GA 뒤 퇴역 수순이다. 큐 지연은 무료 arm64 풀 전체의 문제라 레이블로 해결되지는 않는다(GitHub 상태 페이지 2025-03 ·
+  2025-10 기록).
+- arm64 job이 또 배정되지 않으면 아래 명령으로 이 머신에서 두 자산을 만들어 `gh release upload`로 올린다(0.4.4 때 `build-729-8ad0d43`
+  번들을 이 방법으로 만들어 실행 · 버전 문자열을 확인했다). CI와 같은 버전 문자열을 내려면 `BUILD` · `COMMIT` 환경 변수가 필요하다
+  (`build.zig`가 `environ_map`에서 읽음). `BUILD`는 CI의 `git rev-list --count 0.3..<태그 커밋>`(짧은 버전 0.4.x의 직전 minor 태그
+  `0.3`부터 센다), `COMMIT`은 태그 커밋 앞 7자리.
 
 ```bash
 sha=$(git rev-parse <태그>); n=$(git rev-list --count 0.3..$sha)
@@ -108,5 +111,5 @@ gh release upload <태그> cyber-macos-arm64.tar.gz libcyber-macos-arm64.a -R so
 zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Ddev 기본 true)
 ```
 
-- `latest`(master push) 릴리스에는 arm64 자산이 없다. 필요하면 같은 방법으로 `latest`에 올린다. `install.sh`는 arm64 Mac에서
-  `cyber-macos-arm64.tar.gz`를 받으므로 버전 릴리스에는 반드시 올려야 한다.
+- 워크플로의 `push.paths`가 `.github/**` · `**.md`를 제외하므로 워크플로만 고친 커밋은 Latest Build를 트리거하지 않는다. 확인하려면
+  `gh workflow run latest-build.yml -R soomtong/cyber --ref master`로 직접 실행한다.

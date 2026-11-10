@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.4-dev 769-2cd18a5</div>
+    <div class="sub-title">v0.4.4-dev 770-d38b8a0</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1252,16 +1252,16 @@ var b float = 'hello'
 fn foo():
     print(a)    --> 123
 </code></pre>
-<p>The initializer of a global variable cannot reference other global variables:</p>
+<p>The initializer of a global variable can use the global variables that are initialized before it:</p>
 <pre><code class="language-cy">global a int = 123
 
-global b int = a
---> error: Initializer can not reference a global variable.
+global b int = a + 1
 </code></pre>
-<p>However, they can be reassigned afterwards to any runtime expression:</p>
-<pre><code class="language-cy">global b int = 0
+<p>Using a global that is initialized later, or the global itself, is a compile error:</p>
+<pre><code class="language-cy">global b int = a + 1
+--> error: The initializer of `b` accesses the global `a`. `a` is initialized after `b`.
 
-b = a
+global a int = 123
 </code></pre>
 <p>Global variables are initialized before the main block runs, in a fixed order. The globals of a module are initialized in the order that they are declared.
 The following would invoke <code>load_a</code> before <code>load_b</code>:</p>
@@ -1269,7 +1269,7 @@ The following would invoke <code>load_a</code> before <code>load_b</code>:</p>
 global b int = load_b()
 </code></pre>
 <p>A module is initialized after the modules that it imports with <code>use</code>, so a function of an imported module sees the globals of its module initialized. At the end of the program, modules are deinitialized in the reverse order.</p>
-<p>A function that an initializer calls can read and write the globals that are initialized before it. Reaching a global that is initialized later, or the global that is being initialized, is a compile error:</p>
+<p>The same rule holds for the functions that an initializer calls. They can read and write the globals that are initialized before it. Reaching a global that is initialized later, or the global that is being initialized, is a compile error:</p>
 <pre><code class="language-cy">global a int = load_a()
 --> error: The initializer of `a` can reach `load_a`, which accesses the global `b`. `b` is initialized after `a`.
 global b int = 123
@@ -1279,12 +1279,13 @@ fn load_a() -> int:
 </code></pre>
 <p>Declare <code>b</code> before <code>a</code> to fix the error.</p>
 <p>The check follows the functions that are called by name, including operators, <code>@init</code> and <code>@deinit</code>. It does not know the target of a call through a function value or a trait. When an initializer can reach such a call, every function that is used as a value (a lambda, a function assigned to a variable or passed as an argument, a generator) and every method that implements a trait counts as reachable. The check does not look at conditions either, so an access that never runs at initialization is still an error.</p>
-<p>Circular references are not possible because a global initializer cannot reference another global variable:</p>
-<pre><code class="language-cy">global a = b
---> error: Initializer can not reference a global variable.
+<p>Circular references between initializers are not possible. One of the two globals is initialized first, and its initializer can not use the other:</p>
+<pre><code class="language-cy">global a int = b
+--> error: The initializer of `a` accesses the global `b`. `b` is initialized after `a`.
 
-global b = a     
+global b int = a
 </code></pre>
+<p>An <code>#[extern]</code> global can not be used in a global initializer.</p>
 <a href="#syntax">^topic</a>
 <h2 id="constants">Constants. <a href="#constants">#</a></h2>
 <p>Constants are declared with a const evaluated expression:</p>

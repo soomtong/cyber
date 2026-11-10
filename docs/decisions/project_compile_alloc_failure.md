@@ -9,6 +9,7 @@
 크기 아레나를 준 호스트는 스크립트 하나가 큰 것만으로 프로세스를 잃을 수 있었다.
 
 측정은 lib 테스트에 임시로 넣은 `ProbeAlloc`(eval 하나에서 N번째 할당만 실패, N마다 새 프로세스, 누수 검사 할당자 위)으로 했다.
+코드와 실행 스크립트는 `src/tools/alloc_fuzz/`에 있다(`README.md`).
 스크립트는 struct · enum · 템플릿 · 제너레이터 · 클로저 · 오류 union을 쓰고 Array · Map · 문자열 · `^Node` 리스트를 600번 키운다.
 
 - 시나리오 0(새 VM의 첫 eval, 할당 10444회): 8554회 정상(오류를 돌려주고 누수 없음), 1261회 누수, 629회 프로세스 종료.
@@ -104,7 +105,8 @@ struct 필드, enum case, choice case, cunion case의 이름이 한 타입 안�
   `string.zig` 5, `vm.zig` 3, `os_ffi.zig` 3, `core.zig` 2, `mem_account.zig` · `heap_value.zig` · `cgen.zig` ·
   `builtins/string.zig` 각 1. 이번 퍼즈의 스크립트가 닿지 않은 경로(FFI, C 백엔드, 문자열 포맷 일부)다.
 - 퍼즈는 스크립트 하나(와 세션 스크립트 하나)의 경로만 본다. 그 밖의 문법 · 모듈 로더 · `spawn` 경로는 같은 방식으로 다시
-  돌려야 드러난다. `ProbeAlloc`은 커밋하지 않았고 회귀 테스트의 `FailingAlloc`이 같은 일을 한다.
+  돌려야 드러난다. `ProbeAlloc`은 빌드에 넣지 않고 `src/tools/alloc_fuzz/`에 두었다(`fuzz.sh build`가 `src/lib.zig`에 잠깐 덧붙여
+  빌드한다). 평소 회귀는 lib 테스트의 `FailingAlloc`이 본다.
 
 ## 검증
 

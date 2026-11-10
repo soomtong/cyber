@@ -81,25 +81,29 @@ loader 는 (1) 그 모듈의 `cl_mod_add_func` 로 이름 -> 함수 포인터 �
 
 첫 eval 이 하는 일을 순서대로 따라가 보자.
 
-1. 생성. `cl_vm_init` 은 `std.heap.c_allocator` 로 `VM` 을 만들고 `vm.init` 을 부른다(src/lib.zig:27-32). `VM.init`(src/vm.zig:132)은 워커 풀,
+1. 생성. `cl_vm_init` 은 `std.heap.c_allocator` 로 `VM` 을 만들고 `vm.init` 을 부른다(src/lib.zig:23-28). `VM.init`(src/vm.zig:132)은 워커 풀,
    `Compiler.init`(vm.zig:180-182), main `Thread`(184-185)를 만들고 `funcSyms` 용량을 255로 잡은 뒤 `bindCore` 로 내장 symbol 표(`.utf8`, `.little` 같은 리터럴 id)를
    미리 등록한다(vm.zig:196, src/builtins/bindings.zig:98-101). 이 시점에는 어떤 소스도 컴파일되지 않았다. 실험: 같은 프로세스에서 `cl_vm_init` 은 첫 호출 0.5~0.7ms,
    이후 호출 0.01~0.04ms 였다(5.7절).
-2. 진입. `cl_vm_eval(vm, src, &res)` 는 uri `"eval"` 과 기본 설정으로 `cl_vm_evalx` 를 부르는 얇은 래퍼다(lib.zig:222-225).
+2. 진입. `cl_vm_eval(vm, src, &res)` 는 uri `"eval"` 과 기본 설정으로 `cl_vm_evalx` 를 부르는 얇은 래퍼다(lib.zig:281-284).
    `cl_vm_evalx` 는 `vm.eval` 의 Zig 에러를 결과 코드로 번역한다.
 
 ```zig
-// src/lib.zig:227-249 (발췌)
+// src/lib.zig:260-294 (발췌)
+fn evalResultCode(err: anyerror) C.ResultCode {
+    return switch (err) {
+        error.CompileError => C.ErrorCompile,
+        error.Panic => C.ErrorPanic,
+        error.Interrupted => C.ErrorInterrupt,
+        error.Await => C.Await,
+        else => b: { log.tracev("{}", .{err}); break :b C.ErrorUnknown; },
+    };
+}
+
 export fn cl_vm_evalx(vm: *cy.VM, uri: C.Bytes, src: C.Bytes, config: C.EvalConfig, out: *C.EvalResult) C.ResultCode {
     var res = C.Success;
     out.* = vm.eval(C.from_bytes(uri), C.from_bytes(src), config) catch |err| b: {
-        switch (err) {
-            error.CompileError => { res = C.ErrorCompile; },
-            error.Panic => { res = C.ErrorPanic; },
-            error.Interrupted => { res = C.ErrorInterrupt; },
-            error.Await => { res = C.Await; },
-            else => { log.tracev("{}", .{err}); res = C.ErrorUnknown; },
-        }
+        res = evalResultCode(err);
         break :b undefined;
     };
     vm.last_res = res;
@@ -107,7 +111,7 @@ export fn cl_vm_evalx(vm: *cy.VM, uri: C.Bytes, src: C.Bytes, config: C.EvalConf
 }
 ```
 
-   `vm.last_res` 가 `cl_vm_error_summary` 의 분기 근거다(lib.zig:453-461). 에러일 때 `out` 은 `undefined` 이므로 호스트는 `res.res` 를 읽으면 안 된다.
+   `vm.last_res` 가 `cl_vm_error_summary` 의 분기 근거다(lib.zig:382-390). 에러일 때 `out` 은 `undefined` 이므로 호스트는 `res.res` 를 읽으면 안 된다.
 3. 컴파일. `VM.eval`(vm.zig:421-512)은 `reinitPerRun`(리포트만 비움, compiler.zig:260)을 부르고 `CompileConfig` 를 채워
    `Compiler.compile`(compiler.zig:279)로 넘긴다. `compileInner`(compiler.zig:315-531)의 순서는 다음과 같다.
    - `!cont` 이면 `reserveCoreTypes`(compiler.zig:318-320).
@@ -171,7 +175,7 @@ cont 컴파일만 한다(`VM.validate`, `docs/decisions/project_vm_validate.md`)
  loader 콜백 안에서                              스크립트 소스(방금 loader 가 돌려준 문자열)
  cl_mod_add_func(mod, "tool", CL_BIND_FUNC(tool))     #[bind] fn tool(name str, args str) -> str
         │ chunk.host_funcs["tool"] = {ptr, kind=VM}            │ sema.ensure_resolved_func (sema.zig:2807)
-        │ (lib.zig:582-585)                                    │   bind 속성 발견 (2866-2867)
+        │ (lib.zig:531-537)                                    │   bind 속성 발견 (2866-2867)
         │                                                      ▼
         └──────────────────────────────▶ resolveHostBindFunc: 이름 "tool" 로 host_funcs 조회 (sema.zig:2980-2995)
                                                                │ kind 별 분기 resolveHostFunc2 (sema.zig:2942-2962)
@@ -257,15 +261,15 @@ docs/decisions/project_embedding_agent_loop.md).
 | `[&]T` span, `&T`, `Ptr[T]` | `cl_thread_param(t, 16)`, `cl_thread_ptr` | 해제 금지(빌림) |
 | `int`, `float`, `bool` 등 | `cl_thread_int`, `cl_thread_float`, `cl_thread_byte` | 없음 |
 
-`cl_slice_deinit` 의 동작(lib.zig:166-180)은 `Slice.@deinit` 과 같다. 버퍼의 참조 횟수가 1일 때만 버퍼 앞 8바이트에 기록된 초기화 원소 수만큼 원소를 파괴하고
-(`destructValueAt`), 어느 경우든 버퍼를 release 한다. 이 단위 테스트는 누수 검사 allocator 로 돌린다(lib.zig:1259-1355). 헤더가 아니라 이 테스트를 읽어야 규약이 보인다.
+`cl_slice_deinit` 의 동작(lib.zig:206-220)은 `Slice.@deinit` 과 같다. 버퍼의 참조 횟수가 1일 때만 버퍼 앞 8바이트에 기록된 초기화 원소 수만큼 원소를 파괴하고
+(`destructValueAt`), 어느 경우든 버퍼를 release 한다. 이 단위 테스트는 누수 검사 allocator 로 돌린다(src/lib_test/api.zig 의 "Host functions release their owned str params." · "Host functions release their owned slice params."). 헤더가 아니라 이 테스트를 읽어야 규약이 보인다.
 `cl_thread_count_objects` 로는 이 누수가 잡히지 않는다는 점도 기록돼 있다.
 
-반환 쪽은 호스트가 만든 값을 반환 슬롯에 쓰면 소유권이 스크립트로 넘어간다. `str` 은 `cl_str_init`(lib.zig:623), 슬라이스는 `cl_slice_init`(lib.zig:158)로 만든다
-(lib.zig:1189-1225 의 "cl_slice_init." 테스트가 `[]int` 반환 예).
+반환 쪽은 호스트가 만든 값을 반환 슬롯에 쓰면 소유권이 스크립트로 넘어간다. `str` 은 `cl_str_init`(lib.zig:578), 슬라이스는 `cl_slice_init`(lib.zig:198)로 만든다
+(src/lib_test/api.zig 의 "cl_slice_init." 테스트가 `[]int` 반환 예).
 
 호스트 전역 변수는 `#[bind] global g int` 와 `cl_mod_add_global(mod, "g", CL_BIND_GLOBAL(&host_var))` 로 호스트 메모리를 직접 가리킨다(sema.zig:3295-3316).
-스크립트의 읽기/쓰기가 곧바로 호스트 변수에 닿는다(lib.zig:1465-1496 테스트: eval 사이에 값이 유지됨).
+스크립트의 읽기/쓰기가 곧바로 호스트 변수에 닿는다(src/lib_test/api.zig 의 "Bind global persists across multiple evals." 테스트: eval 사이에 값이 유지됨).
 
 ### 2.5 내장 라이브러리: core.cy 는 Cyber 이고 필요한 곳만 Zig
 
@@ -411,7 +415,7 @@ REPL 은 "Cyber 로 쓴 Cyber 호스트"다. `cli.repl()`(src/std/cli.cy:13)이 
 
 ```
  zig build test
-   ├─ lib-test             src/lib.zig 의 C API 테스트 (+ 도달 가능한 다른 파일의 test)   실행: 53/53 통과
+   ├─ lib-test             src/lib_test 의 C API 테스트 (+ 도달 가능한 다른 파일의 test)   실행: 53/53 통과
    ├─ lib-standalone-test  examples/libcyber/{main, bind_module, host_tool}.c 를 libcyber.a 에 링크해 실행   실행: 통과
    ├─ cli-test             cli 모듈(main.zig -> cli.zig refAllDecls) 테스트                  실행: 5/5 통과
    ├─ trace-test           src/trace_test.zig  ARC retain/release 횟수 단언 11개 (Trace 빌드 전용 lib 를 따로 빌드)
@@ -419,7 +423,7 @@ REPL 은 "Cyber 로 쓴 Cyber 호스트"다. `cli.repl()`(src/std/cli.cy:13)이 
 ```
 
 실행 횟수는 이 세션에서 `zig build lib-test|lib-standalone-test|cli-test --prefix <임시 폴더> --summary all` 로 직접 돌려 얻었다(behavior-test, trace-test 는 시간 때문에 돌리지 않았다).
-`lib-test` 의 53개는 lib.zig 의 `test "..."` 블록 28개와 lib 모듈이 끌어오는 다른 파일의 테스트를 합친 값으로 추정한다(블록 수는 `rg -c '^test "'` 로 센 28개뿐이고 나머지 25개의 출처는 따로 추적하지 않았다).
+`lib-test` 의 53개는 lib.zig 의 `test "..."` 블록 28개와 lib 모듈이 끌어오는 다른 파일의 테스트를 합친 값으로 추정한다(블록 수는 `rg -c '^test "'` 로 센 28개뿐이고 나머지 25개의 출처는 따로 추적하지 않았다). 2026-11-10 에 이 블록들을 `src/lib_test/` 아래로 옮겼다(그때 56개, `lib-test` 는 84개).
 
 behavior-test 는 이 장의 핵심이다. 파일을 "발견"하지 않는다. 사람이 쓴 목록이 전부다.
 
@@ -451,19 +455,19 @@ behavior-test 는 이 장의 핵심이다. 파일을 "발견"하지 않는다. �
 
 | 영역 | 개수 | 대표 함수 | 읽을 곳 |
 |---|---|---|---|
-| 최상위/버전 | 6 | `cl_version`, `cl_full_version`, `clResultName`, `cl_strlen` | lib.zig:440, 766-800 |
-| VM 생성/해제/설정 | 9 | `cl_vm_init`, `cl_vm_initx`, `cl_vm_deinit`, `cl_vm_reset`, `cl_vm_set_user_data` | lib.zig:27-60, 218, 615 |
-| eval/컴파일/에러 | 10 | `cl_vm_eval`, `cl_vm_evalx`, `cl_vm_eval_path`, `cl_vm_compile`, `cl_vm_validate`, `cl_vm_error_summary`, `clDefaultEvalConfig` | lib.zig:208-262, 367-424, 453-469 |
-| 중단/fuel | 2 | `cl_vm_interrupt`, `cl_vm_set_fuel` | lib.zig:254-260, vm.c:330-336 |
-| 모듈 resolver/loader | 8 | `cl_vm_set_resolver`, `cl_vm_set_loader`, `cl_default_loader`, `cl_vm_set_dl_resolver` | lib.zig:487-512, 802-805 |
-| 출력/로그 | 7 | `cl_vm_set_printer`, `cl_vm_set_eprinter`, `cl_vm_set_logger`, `clReportApiError` | lib.zig:483, 514-536 |
-| 메모리/할당 | 6 | `cl_vm_alloc`, `cl_vm_allocb`, `cl_vm_freeb`, `cl_thread_allocator` | lib.zig:182-202 |
-| 호스트 함수 슬롯 접근(스레드) | 17 | `cl_thread_ret`, `cl_thread_ret_panic`, `cl_thread_param`, `cl_thread_int`, `cl_thread_str`, `cl_thread_slice` | lib.zig:94-156 |
-| panic 정보 | 2 | `cl_thread_panic_summary`, `cl_thread_panic_trace` | lib.zig:471-481 |
-| 참조 카운트/진단 | 10 | `cl_thread_retain/release`, `cl_thread_count_objects`, `cl_thread_check_memory`, `cl_thread_signal_host_segfault` | lib.zig:54-86, 542, 607-613, 746-758 |
-| 모듈 바인딩 | 15 | `cl_mod_add_func`, `cl_mod_add_type`, `cl_mod_add_global`, `cl_mod_on_load`, `cl_mod_set_fallback_func`, `cl_mod_bind_core` 등 7종 | lib.zig:577-605 |
-| 타입/심볼 | 7 | `cl_find_type`, `clExpandTypeTemplate`, `cl_type_id`, `cl_vm_ensure_func_sig`, `cl_new_func_union` | lib.zig:546-575, 651-657, 730-736 |
-| 값/문자열/슬라이스 | 14 | `cl_str_init`, `cl_str_deinit`, `cl_slice_init`, `cl_slice_deinit`, `cl_lift`, `cl_value_desc`, `cl_symbol` | lib.zig:158-180, 623-641, 679-685 |
+| 최상위/버전 | 6 | `cl_version`, `cl_full_version`, `clResultName`, `cl_strlen` | lib.zig:369, 691-714 |
+| VM 생성/해제/설정 | 9 | `cl_vm_init`, `cl_vm_initx`, `cl_vm_deinit`, `cl_vm_reset`, `cl_vm_set_user_data` | lib.zig:23-90, 255, 574 |
+| eval/컴파일/에러 | 10 | `cl_vm_eval`, `cl_vm_evalx`, `cl_vm_eval_path`, `cl_vm_compile`, `cl_vm_validate`, `cl_vm_error_summary`, `clDefaultEvalConfig` | lib.zig:244-328, 330-367, 382-400 |
+| 중단/fuel | 2 | `cl_vm_interrupt`, `cl_vm_set_fuel` | lib.zig:296-302, vm.c:330-336 |
+| 모듈 resolver/loader | 8 | `cl_vm_set_resolver`, `cl_vm_set_loader`, `cl_default_loader`, `cl_vm_set_dl_resolver` | lib.zig:449-474, 707-710 |
+| 출력/로그 | 7 | `cl_vm_set_printer`, `cl_vm_set_eprinter`, `cl_vm_set_logger`, `clReportApiError` | lib.zig:445, 476-498 |
+| 메모리/할당 | 6 | `cl_vm_alloc`, `cl_vm_allocb`, `cl_vm_freeb`, `cl_thread_allocator` | lib.zig:222-242 |
+| 호스트 함수 슬롯 접근(스레드) | 17 | `cl_thread_ret`, `cl_thread_ret_panic`, `cl_thread_param`, `cl_thread_int`, `cl_thread_str`, `cl_thread_slice` | lib.zig:134-196 |
+| panic 정보 | 2 | `cl_thread_panic_summary`, `cl_thread_panic_trace` | lib.zig:430-443 |
+| 참조 카운트/진단 | 10 | `cl_thread_retain/release`, `cl_thread_count_objects`, `cl_thread_check_memory`, `cl_thread_signal_host_segfault` | lib.zig:92-132, 504, 562-568, 671-684 |
+| 모듈 바인딩 | 15 | `cl_mod_add_func`, `cl_mod_add_type`, `cl_mod_add_global`, `cl_mod_on_load`, `cl_mod_set_fallback_func`, `cl_mod_bind_core` 등 7종 | lib.zig:523-560 |
+| 타입/심볼 | 7 | `cl_find_type`, `clExpandTypeTemplate`, `cl_type_id`, `cl_vm_ensure_func_sig`, `cl_new_func_union` | lib.zig:508-521, 606-612, 655-661 |
+| 값/문자열/슬라이스 | 14 | `cl_str_init`, `cl_str_deinit`, `cl_slice_init`, `cl_slice_deinit`, `cl_lift`, `cl_value_desc`, `cl_symbol` | lib.zig:198-220, 578-596, 634-653 |
 
 `CLVM`, `CLThread`, `CLSym`, `CLType` 은 불투명 포인터이고 `CLBytes`(포인터+길이, 널 종료 아님), `CLstr`(24바이트), `CLSlice`(32바이트)만 값 구조다. 이름 규칙이 두 가지다.
 `cl_` 로 시작하는 snake_case 107개와 `clResultName`, `clDefaultEvalConfig` 같은 camelCase 6개가 섞여 있다(옛 0.3 `cs*` 접두어 흔적).
@@ -497,7 +501,7 @@ behavior-test 는 이 장의 핵심이다. 파일을 "발견"하지 않는다. �
 | `single_run` | main 블록 지역 변수의 해제 코드를 생략하고 `VM.deinit` 이 힙을 쓸어 담는다. 재사용할 VM 에는 쓰지 않는다 | vm.zig:204-209, main.zig:161 |
 | `persist_main` | main 의 함수/타입/use 와 지역 변수를 다음 eval 로 이월(REPL). 2.3절 | compiler.zig:352-390, vm.zig:473-476 |
 | `gen_all_debug_syms` | 실패 가능한 명령에만이 아니라 모든 명령에 debug sym 을 만든다 | chunk.zig:682 |
-| `backend` | `CL_VM`(기본). `CL_JIT` 는 컴파일 에러 "The JIT backend is not supported."(compiler.zig:287-290, lib.zig 테스트 1136), `CL_TCC`/`CL_CC` 는 C 로 내보내 외부 실행(vm.zig:481-511), `CL_LLVM` 은 `error.TODO` | fork 방침상 VM 만 지원 |
+| `backend` | `CL_VM`(기본). `CL_JIT` 는 컴파일 에러 "The JIT backend is not supported."(compiler.zig:287-290, src/lib_test/compile.zig 의 "JIT backend is rejected with a clear compile error." 테스트), `CL_TCC`/`CL_CC` 는 C 로 내보내 외부 실행(vm.zig:481-511), `CL_LLVM` 은 `error.TODO` | fork 방침상 VM 만 지원 |
 | `spawn_exe` | AOT 백엔드 산출물을 spawn 으로 실행할지 | vm.zig:487 |
 | `skip_codegen` (Compile 전용) | 바이트코드 생성을 건너뜀. `cl_vm_validate` 가 이것으로 구문/의미 검사만 했으나 2026-11-08(F-05)부터는 코드 생성까지 한다(검증이 처음 로드한 모듈을 다음 eval 이 그대로 쓰기 위해) | `VM.validate` |
 | `emit_source_map` (Compile 전용) | C 백엔드 소스맵 | cgen.zig:298 |
@@ -507,14 +511,14 @@ behavior-test 는 이 장의 핵심이다. 파일을 "발견"하지 않는다. �
 | 코드 | 값 | 발생 |
 |---|---|---|
 | `CL_SUCCESS` | 0 | 정상 |
-| `CL_AWAIT` | 1 | main 이 끝나지 않은 future 를 기다리다 멈춤(vm.c:1500, lib.zig:240). 이어 실행하는 API(`cl_run_ready_tasks`)는 주석 처리돼 있다 |
+| `CL_AWAIT` | 1 | main 이 끝나지 않은 future 를 기다리다 멈춤(vm.c:1500, lib.zig:265). 이어 실행하는 API(`cl_run_ready_tasks`)는 헤더 선언이 주석이고 구현이 없다 |
 | `CL_ERROR_COMPILE` | 2 | 파싱/의미 오류. `cl_vm_error_summary` 가 요약을 돌려줌(컴파일러는 첫 오류에서 멈춘다). 2026-11-10부터 `cl_vm_compile_error` 가 종류 · 메시지 · uri · 줄 · 열 · 길이를 구조체로 준다 |
 | `CL_ERROR_PANIC` | 3 | 런타임 panic. 스택 트레이스 포함 요약 |
 | `CL_ERROR_UNKNOWN` | 4 | 위에 속하지 않는 Zig 에러(OOM 등). 요약 없음 |
 | `CL_ERROR_INTERRUPT` | 5 | `cl_vm_interrupt` 또는 fuel 소진. 요약은 `panic: Interrupted.` / `panic: Out of fuel.` |
 
-`clResultName` 은 이 다섯 값 이름(`Success`, `CompileError`, ...)만 처리하고 `CL_AWAIT` 를 넘기면 `fatal()` 이다(lib.zig:440-449).
-`cl_vm_error_summary`(lib.zig:453)는 마지막 결과가 COMPILE 이면 컴파일 요약, PANIC 이나 INTERRUPT 면 panic 요약, 아니면 빈 문자열을 돌려준다. 돌려받은 `CLBytes` 는 `cl_vm_freeb(vm, bytes)` 로 해제한다.
+`clResultName` 은 이 다섯 값 이름(`Success`, `CompileError`, ...)만 처리하고 `CL_AWAIT` 를 넘기면 `fatal()` 이다(lib.zig:369-378).
+`cl_vm_error_summary`(lib.zig:382)는 마지막 결과가 COMPILE 이면 컴파일 요약, PANIC 이나 INTERRUPT 면 panic 요약, 아니면 빈 문자열을 돌려준다. 돌려받은 `CLBytes` 는 `cl_vm_freeb(vm, bytes)` 로 해제한다.
 
 `CLBindFuncKind`(cyber.h:172-184) 네 가지의 의미는 2.5절 표와 같다. `CLBindTypeKind` 는 `DECL`(사전 정의 type id 를 받는 `TYPE_RESERVE_DECL`, sema_type.zig:518), `CREATE`(콜백이 `*Type` 생성, sema_type.zig:70-78),
 `ALIAS`(콜백이 기존 심볼을 가리킴, sema_type.zig:276)이다. 후자 둘의 콜백은 컴파일러 내부 타입을 요구하므로 사실상 fork 의 Zig 코드 전용이다.
@@ -622,7 +626,7 @@ docs/build.md 는 `zig build test-trace` 라고 쓰지만 실제 이름은 `trac
 - 알려진 플랫폼 제약(같은 문서): msvc 는 translate-c 가 mimalloc.h 의 `__declspec` 을 못 읽어 libc malloc, macOS x86_64 는 `stat$INODE64`, wasm32 는 `Value` C ABI 간접 전달,
   Linux x86_64 의 AVX2 경로는 baseline CPU 에서 컴파일되지 않아 `-Dcpu=skylake` 로 교차 빌드해야 잡힌다.
 - Zig 0.17 이후 코드 규칙(docs/specs/2026-10-25-zig-0.17-upgrade-design.md, project_zig_017_upgrade.md): `Io` 는 `stdx.io()`, 바이트코드 `u48` 피연산자는 6바이트만 쓴다(`setOpArgU48`,
-  회귀 테스트가 lib.zig:1357), 읽힐 수 있는 필드를 `undefined` 로 두지 않는다, extern 타입 재해석은 `.val`/`stdx.reinterpret`. `bytecode.zig` 안의 `test` 블록은 어느 단계에서도
+  회귀 테스트가 src/lib_test/compile.zig 의 "setOpArgU48 writes only its 6-byte operand."), 읽힐 수 있는 필드를 `undefined` 로 두지 않는다, extern 타입 재해석은 `.val`/`stdx.reinterpret`. `bytecode.zig` 안의 `test` 블록은 어느 단계에서도
   참조되지 않아 실행되지 않는다(문서 기록. 이 장에서 재확인하지 않음).
 
 ## 4. 소스 읽기 지도
@@ -631,7 +635,7 @@ docs/build.md 는 `zig build test-trace` 라고 쓰지만 실제 이름은 `trac
 
 1. examples/libcyber/main.c(37줄) -> host_tool.c(158줄) -> bind_module.c(121줄). (embedding 의 최소 형태, 호스트 도구 패턴, 타입/전역 바인딩)
 2. src/include/cyber.h:1-130(타입, enum, 호스트 함수 typedef), 172-250(BindFunc/BindType/Loader), 280-330(Config), 333-445(VM API), 452-530(Thread API). (3.1절 표로 먼저 훑고 주석을 읽는다)
-3. src/lib.zig:27-60(생성), 208-287(eval), 440-500(에러/resolver), 577-613(mod_add_*), 821-1000(상태 유지 테스트), 1189-1355(슬라이스/문자열 소유 테스트). (테스트가 사용 설명서다)
+3. src/lib.zig:23-90(생성), 244-328(eval), 369-474(에러/resolver), 523-568(mod_add_*), src/lib_test/session.zig(상태 유지 테스트), src/lib_test/api.zig 의 "cl_slice_init." · "Host functions release ..."(슬라이스/문자열 소유 테스트). (테스트가 사용 설명서다)
 4. src/vm.zig:132-197(init), 354-384(compile/resetVM), 398-415(local saves), 421-512(eval), 593-610(exec_bytecode).
 5. src/compiler.zig:279-312(compile), 315-531(compileInner), 879-918(builtin 청크 특수 심볼), 1052-1136(loadChunk/ensureModule), 1439-1514(resolver/loader).
 6. src/sema.zig:2807-2995(`#[bind]` 해석), src/module.zig:316-345(호스트 함수 심볼), src/sema_type.zig:35-80(호스트 타입), src/bc_gen.zig:286-300, 3104-3120(call_host).
@@ -827,7 +831,7 @@ live objects: 0
   (persist_main 의 panic 규칙: 힙이 비워지므로 변수 전부 폐기). 에이전트 루프에서 도구 실패가 panic 이면 세션 변수를 잃는다는 뜻이다.
 - 문장으로 쓴 호출 `agent.tool(...)` 의 반환 값을 버리면 컴파일 에러다. 처음 시도에서 `Expected assignment to a variable or placeholder for str` 가 나서 `_ =` 를 붙였다.
 - 처음에 허용 목록에서 `c` 를 뺐더니 턴 1 이 `Failed to load module: c`(`math:1:1: use c`)로 실패했다. math 가 c 에 의존하므로 `math` 를 허용하려면 `c`(포인터 도구 포함)도 열어야 한다.
-- 호스트 함수가 str 인자를 `cl_str_deinit` 하지 않으면 누수다(lib.zig:1259 의 테스트가 누수 검사 allocator 로 증명). 이 데모는 `live objects: 0` 으로 끝났지만, 누수 여부를 `cl_thread_count_objects` 로 확신할 수는 없다
+- 호스트 함수가 str 인자를 `cl_str_deinit` 하지 않으면 누수다(src/lib_test/api.zig 의 "Host functions release their owned str params." 테스트가 누수 검사 allocator 로 증명). 이 데모는 `live objects: 0` 으로 끝났지만, 누수 여부를 `cl_thread_count_objects` 로 확신할 수는 없다
   (docs/decisions/project_embedding_agent_loop.md 가 이 함수로는 이 누수가 잡히지 않았다고 기록한다).
 
 ### 5.3 반복 eval 과 상태: C 로 확인한 결과
@@ -1032,9 +1036,9 @@ eval:7:9 main:
 ### 변형 과제
 
 1. printer 인자 확인. `cl_vm_set_user_data` 로 구조체를 걸고 printer 안에서 `cl_vm_user_data(cl_thread_vm(t))` 를 읽어 보라. 7.3절의 증상(`t` 가 VM 포인터)으로 어떻게 되는지 보고, core.zig:1248-1262 를 `t` 로 고치면 lib 테스트 하나로 회귀를 잡을 수 있는지 설계해 보라.
-2. 첫 eval 실패 재현 테스트를 lib.zig 에 추가한다. 구문 오류 첫 eval 뒤에 정상 eval 을 하는 `test` 를 쓰고(현재는 크래시하므로 `fork` 대신 Zig 의 `-Dtrace` Debug 빌드로 어느 단언에서 멈추는지 본다), `Compiler.compile` 의 실패 경로가 남긴 상태를 목록으로 만들어 보라.
+2. 첫 eval 실패 재현 테스트를 src/lib_test/session.zig 에 추가한다. 구문 오류 첫 eval 뒤에 정상 eval 을 하는 `test` 를 쓰고(현재는 크래시하므로 `fork` 대신 Zig 의 `-Dtrace` Debug 빌드로 어느 단언에서 멈추는지 본다), `Compiler.compile` 의 실패 경로가 남긴 상태를 목록으로 만들어 보라.
 3. `CLEvalConfig` 에 모듈 허용 목록 대신 쓸 수 있는 필드를 설계하라. 지금은 loader 에서 걸러야 하므로(5.2절) `math` -> `c` 의존을 어떻게 다룰지가 핵심이다.
-4. `[]str` 를 받아 각 길이를 `[]int` 로 돌려주는 호스트 함수를 `cl_slice_deinit(t, str_t, &s)` 로 구현하고, `[&]str` span 으로 받는 버전과 비교하라. `elem_t` 를 NULL 로 주면 어떤 누수가 생기는지 lib.zig:1296-1355 의 테스트 형태로 재현해 본다.
+4. `[]str` 를 받아 각 길이를 `[]int` 로 돌려주는 호스트 함수를 `cl_slice_deinit(t, str_t, &s)` 로 구현하고, `[&]str` span 으로 받는 버전과 비교하라. `elem_t` 를 NULL 로 주면 어떤 누수가 생기는지 src/lib_test/api.zig 의 "Host functions release their owned slice params." 테스트 형태로 재현해 본다.
 5. 4절의 목록 밖 테스트 중 "등록만 빠진 것 2개"를 `test_syntax`/`test_memory` 에 등록하고 `zig build behavior-test` 가 통과하는지 확인하라(이 장에서는 돌리지 않았다).
 6. core.cy 에 `#[bind] fn clock_ms() -> int` 를 추가하고 core.zig 의 `funcs` 에 `zErrFunc` 항목을 더해 보라. 릴리스 CLI 는 `zig-out/bin/src/builtins/core.cy` 를 읽으므로 .cy 만 바꾸면 되지만 .zig 쪽은 재빌드가 필요하다. `cyber compile` 에서 `call_host` 가 보이면 성공이다.
 
@@ -1073,9 +1077,9 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
 | 항목 | 문서/헤더가 말하는 것 | 코드/실행 결과 |
 |---|---|---|
 | 마지막 표현식의 값 | cyber.h:383-385 "마지막 문장이 표현식이면 `outVal` 에 값이 담긴다" | 표현식 문장은 컴파일 에러(`1 + 2` -> `Expected assignment to a variable or placeholder for int`). 값은 `fn main() -> T` 반환에서만 나온다. 2026-11-04부터 `persist_main` eval은 마지막 맨 표현식의 값을 돌려주고, 2026-11-10에 헤더 주석을 이 동작으로 고쳤다(F-52) |
-| 구현이 없는 선언 | cyber.h:569 `clResolveType`, 613 `cl_array_empty_new`, 615 `cl_map_empty_new` | lib.zig 에는 없고 대신 `cl_array_empty`(643), `cl_map_empty`(647)가 `export` 됨(헤더에는 없음). 링크하면 undefined symbol. 2026-11-10 수정(F-51): 헤더가 `cl_array_empty` · `cl_map_empty` 를 선언하고 `clResolveType` 은 삭제 |
-| 시그니처 불일치 | cyber.h:605 `cl_type_from_id(CLTypeId id)` | lib.zig:734 는 `(vm, type_id)` 두 인자. 헤더대로 부르면 id 가 vm 자리로 들어간다. 2026-11-10 수정: 헤더도 `(CLVM* vm, CLTypeId id)` |
-| 없는 함수 이름 | cyber.h:411 `cl_new_compile_error_summary`, 416 · 474 `cl_free` | 실제 이름은 `cl_vm_compile_error_summary`, `cl_vm_freeb`. 헤더 420 의 `clAlloc` 은 lib.zig:89 에 있으나 헤더 선언은 `cl_vm_alloc`. 2026-11-10 수정: 주석을 현재 이름으로, 헤더에 없던 export `clAlloc` · `clGetAllocator` 삭제 |
+| 구현이 없는 선언 | cyber.h:569 `clResolveType`, 613 `cl_array_empty_new`, 615 `cl_map_empty_new` | lib.zig 에는 없고 대신 `cl_array_empty`(598), `cl_map_empty`(602)가 `export` 됨(헤더에는 없음). 링크하면 undefined symbol. 2026-11-10 수정(F-51): 헤더가 `cl_array_empty` · `cl_map_empty` 를 선언하고 `clResolveType` 은 삭제 |
+| 시그니처 불일치 | cyber.h:605 `cl_type_from_id(CLTypeId id)` | lib.zig:659 는 `(vm, type_id)` 두 인자. 헤더대로 부르면 id 가 vm 자리로 들어간다. 2026-11-10 수정: 헤더도 `(CLVM* vm, CLTypeId id)` |
+| 없는 함수 이름 | cyber.h:411 `cl_new_compile_error_summary`, 416 · 474 `cl_free` | 실제 이름은 `cl_vm_compile_error_summary`, `cl_vm_freeb`. 헤더 420 의 `clAlloc` 은 lib.zig 에 있으나 헤더 선언은 `cl_vm_alloc`. 2026-11-10 수정: 주석을 현재 이름으로, 헤더에 없던 export `clAlloc` · `clGetAllocator` 삭제 |
 | 죽은 매크로 | cyber.h:233-238 `CL_CUSTOM_TYPE` 등 | `CLBindTypeEntry`, `CL_STR`, `CL_BIND_TYPE_CUSTOM` 가 정의돼 있지 않다. 쓰는 순간 컴파일 에러. 2026-11-10 수정: `cl_mod_add_type` 에 넘길 `CLBindType` 을 만드는 `CL_BIND_DECL_TYPE(id)` · `CL_BIND_CREATE_TYPE(fn)` · `CL_BIND_ALIAS_TYPE(fn)` 으로 교체 |
 | 선언 수 | docs/history/embedding_cli.md "101개" | `rg` 로 센 선언 113개 |
 | print 콜백 | cyber.h:252 `CLPrintFn(CLThread* t, CLBytes)` | `t` 자리에 VM 포인터가 들어옴(실험, 7.3 의 3). 2026-11-10 수정 |
@@ -1087,7 +1091,7 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
 | 에러 요약의 색 | (문서 없음) | debug.zig:345-350 이 `ESC[31m ... ESC[0m` 를 무조건 넣는다. 같은 줄에 `TODO: Should not emit escape codes` 주석. 하네스는 이를 지우고 비교한다(setup.zig:185-187) |
 | 호스트 타입 에러 문구 | sema_type.zig:43 `Custom type requires a @host attribute.` | 속성은 이미 `#[bind]` 로 바뀜. 문구만 남음 |
 | 예제 주석 | bind_module.c:7 `inject_module.c` 참조 | 그런 파일은 없음 |
-| lib.zig 주석 | lib.zig:1069-1071 "`spawn(f, {})` 는 두 번째 VM 부터 크래시" | 바로 아래 테스트(1119)가 고쳐졌음을 단언. 주석만 낡음 |
+| lib 테스트 주석 | src/lib_test/limits.zig 의 "Spawned threads stop with the eval and do not abort the host." 안 "`spawn(f, {})` 는 두 번째 VM 부터 크래시" | 바로 아래 테스트("Spawn without args works in every VM.")가 고쳐졌음을 단언. 주석만 낡음 |
 | capi.zig 낡은 참조 | `c.clGetType`, `c.CLSemaFn`, `c.clTypeId` (capi.zig:78-80, 182, 384-388) | 헤더에 없는 이름. Zig 가 참조되지 않는 선언을 분석하지 않아 빌드는 통과 |
 
 ### 7.3 재현 가능한 버그
@@ -1119,7 +1123,7 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
   쓸 때는 OS 수준 격리가 필요하다.
 
 자원 제한.
-- 있음: `cl_vm_set_fuel`(검사점 = 루프 역방향 점프와 호출, vm.c:330-336), `cl_vm_interrupt`(다른 스레드에서 호출 가능). spawn 된 스레드도 fuel 을 물려받고 중단된다(lib.zig:1035-1117 테스트).
+- 있음: `cl_vm_set_fuel`(검사점 = 루프 역방향 점프와 호출, vm.c:330-336), `cl_vm_interrupt`(다른 스레드에서 호출 가능). spawn 된 스레드도 fuel 을 물려받고 중단된다(src/lib_test/limits.zig 의 "Spawned threads stop with the eval and do not abort the host." 테스트).
   시간 제한은 호스트의 타이머 스레드가 `cl_vm_interrupt` 를 부르는 방식이다.
 - 있음(2026-11-10, F-41 수정 `b7fdf554` · `eee5bcdb`): 메모리 한도와 C 호스트용 메모리 함수.
   `cl_vm_set_memory_limit(vm, bytes)` 는 VM 이 할당자로 쥔 전체 바이트(`cl_vm_memory_used`, 컴파일러 · 모듈 · 힙 · 스택. 첫 eval 뒤 약 2 MiB)에 한도를 건다. 스크립트에 N 바이트를 주려면
@@ -1130,14 +1134,14 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
   `alloc` 이 `NULL` 을 돌려줘도 호스트는 죽지 않는다(2026-11-10, `87248791`): 컴파일 중이면 `CL_ERROR_COMPILE`(요약은 `CompileError: OutOfMemory` 계열이거나 빈 문자열), 실행 중이면 `panic: OutOfMemory`,
   실행 뒤 정리 중이면 `CL_ERROR_UNKNOWN` 이고 다음 eval 은 성공한다. 다만 컴파일이 메모리 부족으로 끝나면 다음 eval 이 VM 을 reset 하므로 `persist_main` 세션은 앞선 지역 변수와 선언을 잃는다.
   세션을 지키려면 상한은 `NULL` 이 아니라 `cl_vm_set_memory_limit` 으로 건다. VM 생성(`cl_vm_init*`)과 값 생성 API(`cl_str_init*` 등)의 할당 실패는 여전히 abort 다(`docs/decisions/project_compile_alloc_failure.md`).
-- 없음: 호스트 함수 안에서 오래 막힌 호출을 끊는 수단, 호스트 함수에서 스크립트를 멈췄다가 나중에 재개하는 수단. `CL_AWAIT` 는 반환되지만 재개 API 는 주석 처리돼 있다(lib.zig:289-365).
+- 없음: 호스트 함수 안에서 오래 막힌 호출을 끊는 수단, 호스트 함수에서 스크립트를 멈췄다가 나중에 재개하는 수단. `CL_AWAIT` 는 반환되지만 재개 API 는 없다(`cl_run_ready_tasks` 의 헤더 선언은 주석이고, `lib.zig` 에 주석으로 남아 있던 구현은 2026-11-10 에 지웠다).
 
 상태와 결과.
 - 값을 받는 길은 `fn main() -> T` 의 반환 하나다. 문자열/정수/실수/불리언은 `cl_value_desc` 나 슬롯 읽기로 얻고, 구조체/슬라이스는 레이아웃을 호스트가 직접 해석해야 한다. 힙 값 결과의 소유권(누가 해제하는가)은
   문서화돼 있지 않아 이 장에서 확정하지 못했다(미확인).
 - `persist_main` 은 panic/interrupt 시 모든 지역 변수를 버린다. 호스트 함수가 실패를 알릴 수단이 `cl_thread_ret_panic` 뿐이라(`Result` 를 만들어 돌려주는 C 도우미가 헤더에 없다. `cl_error(vm, name)` 이
   error 값은 만든다) 도구 실패가 곧 세션 상태 손실이다. 도구 실패를 스크립트가 처리하려면 반환 타입에 오류 정보를 담는 설계(예: 상태 코드가 든 구조체나 `str`)를 호스트가 따로 정해야 한다.
-- 컴파일 에러는 첫 리포트 하나만(`reports.items[0]`, lib.zig:463-469) 문자열로 나온다. 구조화된 위치 정보는 panic 쪽만 `cl_thread_panic_trace`(`CLStackFrame {name, line, col, line_pos, chunk}`)로 있다.
+- 컴파일 에러는 첫 리포트 하나만(`reports.items[0]`, lib.zig:392-400) 문자열로 나온다. 구조화된 위치 정보는 panic 쪽만 `cl_thread_panic_trace`(`CLStackFrame {name, line, col, line_pos, chunk}`)로 있다.
   요약에는 ANSI 색 코드가 섞인다.
   2026-11-10 수정(F-52, `ea06b925`): 요약은 이스케이프 코드 없는 텍스트이고 색은 호스트가 `cl_vm_set_error_color` 로 켠다. 위치는 `cl_vm_compile_error`(`CLCompileError {kind, msg, uri, has_loc, line, col, len}`)로 받는다.
   리포트가 하나인 것은 API가 나머지를 버려서가 아니라 `reportError` 가 곧바로 `error.CompileError` 를 돌려주어 컴파일러가 첫 오류에서 멈추기 때문이다(오류 복구 없음, F-78).
@@ -1166,7 +1170,7 @@ CALL_HOST 는 `fp_end` 를 건드리지 않는다(vm.c:940-961). 반환값이 �
 ### Q3. 값으로 받은 `str` 을 `cl_str_deinit` 하지 않으면 무슨 일이 생기고, 왜 `cl_thread_count_objects` 가 0 으로 나올 수 있는가?
 
 A: 컴파일러는 object 가 아닌 인자를 복사해 피호출자 소유로 넘기므로(sema_func.zig:817-832) 호스트가 해제하지 않으면 힙 문자열이 샌다. 리터럴은 버퍼가 없어 드러나지 않고, 32바이트를 넘는 문자열은 힙 페이지 밖의
-큰 객체로 할당된다(lib.zig:1259-1261 주석). 문서 기록상 `cl_thread_count_objects` 로는 이 누수가 잡히지 않았고, 그래서 회귀 테스트가 누수 검사 allocator(`cl_vm_initx(zt.alloc)`)를 쓴다.
+큰 객체로 할당된다(src/lib_test/api.zig 의 "Host functions release their owned str params." 테스트 주석). 문서 기록상 `cl_thread_count_objects` 로는 이 누수가 잡히지 않았고, 그래서 회귀 테스트가 누수 검사 allocator(`cl_vm_initx(zt.alloc)`)를 쓴다.
 
 ### Q4. `persist_main`, `cl_vm_reset`, 새 VM 중 에이전트 턴 사이의 상태 유지에 무엇을 쓰고, 각각 어떤 대가를 치르는가?
 
@@ -1202,4 +1206,4 @@ A: math.cy 첫 줄이 `use c` 이기 때문이다. loader 는 모듈마다 불�
   docs/history/embedding_cli.md(0.3 -> 0.4 API 변천), docs/history/ownership_memory.md(호스트 매개변수 소유 규약).
 - 관련 장: 호출 프레임과 `CALL_HOST`, 인터럽트 구현은 [Day 5](05-vm-runtime.md), `ownOrManageArg` 와 소멸자는 [Day 6 오전](06-memory-ownership.md), `Future`/`Generator`/`spawn` 은 [Day 6 오후](07-coroutines-concurrency.md).
   에이전트 루프 설계 제안은 이 장의 7.3, 7.4절을 근거로 [Day 7 오후](09-agent-loop-and-roadmap.md)에서 다룬다.
-- 다음 단계 제안: 7.3 의 버그 두 개(첫 eval 실패, validate)는 2026-11-08 에 lib.zig 테스트와 함께 고쳤다(F-04 `f5f2d241`, F-05 `707b03e1`). printer 인자(7.3 의 3)가 남은 첫 작업 후보다.
+- 다음 단계 제안: 7.3 의 버그 두 개(첫 eval 실패, validate)는 2026-11-08 에 lib 테스트(지금은 `src/lib_test/session.zig`)와 함께 고쳤다(F-04 `f5f2d241`, F-05 `707b03e1`). printer 인자(7.3 의 3)가 남은 첫 작업 후보다.

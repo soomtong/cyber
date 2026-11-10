@@ -106,7 +106,7 @@ struct 필드, enum case, choice case, cunion case의 이름이 한 타입 안�
   `builtins/string.zig` 각 1. 이번 퍼즈의 스크립트가 닿지 않은 경로(FFI, C 백엔드, 문자열 포맷 일부)다.
 - 퍼즈는 스크립트 하나(와 세션 스크립트 하나)의 경로만 본다. 그 밖의 문법 · 모듈 로더 · `spawn` 경로는 같은 방식으로 다시
   돌려야 드러난다. `ProbeAlloc`은 빌드에 넣지 않고 `src/tools/alloc_fuzz/`에 두었다(`fuzz.sh build`가 `src/lib.zig`에 잠깐 덧붙여
-  빌드한다). 평소 회귀는 lib 테스트의 `FailingAlloc`이 본다.
+  빌드한다). 평소 회귀는 lib 테스트의 `FailingAlloc`(`src/lib_test/alloc_fail.zig`)이 본다.
 
 ## 검증
 

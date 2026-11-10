@@ -3,6 +3,7 @@
 호스트 할당자가 eval 하나의 N번째 할당에서 실패할 때 VM이 abort나 누수 없이 오류를 돌려주는지 본다.
 N마다 새 프로세스를 띄우고, 누수 검사를 하는 테스트 할당자 위에 `ProbeAlloc`을 얹는다.
 배경과 처리 설계는 `docs/decisions/project_compile_alloc_failure.md`에 있다.
+평소 회귀를 보는 `FailingAlloc` 테스트 둘은 `src/lib_test/alloc_fail.zig`에 있다.
 
 ## 파일
 
@@ -28,7 +29,8 @@ src/tools/alloc_fuzz/fuzz.sh agg s0           # 집계만 다시
 - `build`는 `probe.zig`를 `src/lib.zig` 끝에 덧붙여 `zig build build-test -Dtest-filter=PROBE`로 빌드하고 `src/lib.zig`를
   되돌린다. 필터 때문에 `behavior_test` · `trace_test`가 링크 오류를 내 `zig build`는 rc=1로 끝나지만 `lib_test`는
   만들어진다. 스크립트는 `src/` 안의 컴파일 오류와 `lib_test` 유무만 본다. 중간에 강제 종료되면 원본이
-  `zig-out/alloc_fuzz/lib.zig.orig`에 남는다.
+  `zig-out/alloc_fuzz/lib.zig.orig`에 남는다. `probe.zig`는 `src/lib.zig`가 선언한 `std` · `zt` · `C`를 쓰므로 그 이름들은
+  `src/lib.zig`에 남겨 둔다.
 - 소스를 고치면 `build`를 다시 한다. 할당 횟수도 달라지므로 `count`로 `run`의 범위를 다시 정한다. 범위는 횟수보다
   조금 크게 잡는다(넘는 N은 실패 없이 성공으로 끝난다).
 - 시나리오 0은 새 VM의 첫 eval이다. 시나리오 1은 `persist_main` 세션에서 `probe_src`를 실패 없이 돌린 뒤 두 번째

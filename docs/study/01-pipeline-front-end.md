@@ -76,7 +76,7 @@ TS/Node 개발자에게는 `ts.createScanner` → `parseSourceFile` → binder/c
 
 | 단계 | 파일 (줄 수) | 역할 |
 |---|---|---|
-| 진입 | `main.zig`(378), `lib.zig`(1569), `capi.zig`(416), `cli.zig`(784) | CLI 인자 처리, 임베딩용 C API(`cl_vm_*`), 모듈 로더/리졸버 |
+| 진입 | `main.zig`(378), `lib.zig`(724), `capi.zig`(416), `cli.zig`(784) | CLI 인자 처리, 임베딩용 C API(`cl_vm_*`), 모듈 로더/리졸버 |
 | 프런트엔드 | `tokenizer.zig`(1218), `parser.zig`(4809), `ast.zig`(2097) | 이 챕터 |
 | 지휘 | `compiler.zig`(1516), `chunk.zig`(932) | 단계 지휘, 청크(파일 단위 컴파일 상태) |
 | 심볼/타입 | `sym.zig`(1750), `module.zig`(679), `types.zig`(1507), `sema_type.zig`(1339), `template.zig`(540) | 02 챕터 |
@@ -107,7 +107,7 @@ TS/Node 개발자에게는 `ts.createScanner` → `parseSourceFile` → binder/c
 | 11 | 452-489 | 새 타입을 훑어 `with Trait` 구현 검사 | 모든 메서드가 확정된 뒤에야 "구현 안 함" 오류를 정확히 낼 수 있다 |
 | 12 | 491-528 | `skip_codegen`이 아니면 백엔드별 코드 생성. VM이면 `bcgen.genAll(self)` | 결과는 `main_chunk.buf`(바이트코드 버퍼) |
 
-`skip_codegen`이 켜지면 10~11까지만 하고 끝난다. 임베딩 API의 `cl_vm_validate`(`lib.zig:410`)가 이 경로이고, 코드를 실행하지 않고 문법/타입만 검사하고 싶은 에이전트 루프에 쓸 수 있다.
+`skip_codegen`이 켜지면 10~11까지만 하고 끝난다. 임베딩 API의 `cl_vm_validate`(`lib.zig:360`)가 이 경로이고, 코드를 실행하지 않고 문법/타입만 검사하고 싶은 에이전트 루프에 쓸 수 있다.
 
 ### 2.4 프런트엔드가 끼는 자리: `loadChunk`
 
@@ -150,7 +150,7 @@ CLI에서는 표준 모듈의 `.cy` 소스를 실행 파일에 박힌 사본이 
 ```
 vm_initx -> cli.init_cli(vm)         표준 모듈 표(mod_uris/mod_bindings), 로더/리졸버/프린터 설치
          -> vm_eval_path(vm, path, config{ single_run, backend, spawn_exe=true })
-                └ lib.zig:262 -> VM.eval (vm.zig:421) -> Compiler.compile -> execBytecode
+                └ lib.zig:320 -> VM.eval (vm.zig:421) -> Compiler.compile -> execBytecode
          -> 결과 코드: Success | ErrorPanic | ErrorCompile  -> 보고서 출력 -> exit(1)
 ```
 
@@ -160,11 +160,11 @@ vm_initx -> cli.init_cli(vm)         표준 모듈 표(mod_uris/mod_bindings), �
 
 | 함수 | 줄 | 동작 |
 |---|---|---|
-| `cl_vm_eval` / `cl_vm_evalx` | 222 / 227 | 소스 문자열을 컴파일하고 실행 (`uri`는 기본 `"eval"`) |
-| `cl_vm_eval_path` | 262 | 파일 경로를 컴파일하고 실행 (CLI가 사용) |
-| `cl_vm_compile` / `cl_vm_compile_path` | 394 / 378 | 컴파일만 (`CompileConfig`, `skip_codegen` 포함) |
-| `cl_vm_validate` | 410 | `skip_codegen`으로 파싱 + 분석까지만. 내부 테스트가 `"_ = 1 + 2"`는 성공, `"_ = 1 +"`는 `ErrorCompile`임을 확인한다(`lib.zig:426-438`) |
-| `cl_vm_compile_error_summary` | 463 | 보고서 목록의 첫 항목만 문자열로 만든다(`reports.items[0]`) |
+| `cl_vm_eval` / `cl_vm_evalx` | 281 / 286 | 소스 문자열을 컴파일하고 실행 (`uri`는 기본 `"eval"`) |
+| `cl_vm_eval_path` | 320 | 파일 경로를 컴파일하고 실행 (CLI가 사용) |
+| `cl_vm_compile` / `cl_vm_compile_path` | 351 / 342 | 컴파일만 (`CompileConfig`, `skip_codegen` 포함) |
+| `cl_vm_validate` | 360 | `skip_codegen`으로 파싱 + 분석까지만. 내부 테스트가 `"_ = 1 + 2"`는 성공, `"_ = 1 +"`는 `ErrorCompile`임을 확인한다(`src/lib_test/api.zig`의 "cl_vm_validate()") |
+| `cl_vm_compile_error_summary` | 392 | 보고서 목록의 첫 항목만 문자열로 만든다(`reports.items[0]`) |
 
 마지막 줄이 중요하다. 이 컴파일러는 첫 오류에서 멈추고 보고서에도 첫 항목만 노출한다(3.3절). 한 번에 여러 오류를 모아 보여 주는 에이전트 UX가 필요하면 파서 수준의 오류 복구부터 만들어야 한다.
 
@@ -776,7 +776,7 @@ print(x)
 
 코드 상의 문제점과 놀라운 점:
 
-1. 오류 복구가 없다. 파서/토크나이저는 첫 오류에서 멈추고, 컴파일 오류 요약 API도 첫 보고서만 낸다(`lib.zig:463-469`). 오류 3개 파일이 1개만 보고하는 것을 5.2절에서 확인했다.
+1. 오류 복구가 없다. 파서/토크나이저는 첫 오류에서 멈추고, 컴파일 오류 요약 API도 첫 보고서만 낸다(`lib.zig:392-400`). 오류 3개 파일이 1개만 보고하는 것을 5.2절에서 확인했다.
 2. 열은 바이트 기준이고 캐럿 정렬도 바이트 수를 쓴다(5.2절의 한글 예). `computeLinePos`는 오류마다 소스를 처음부터 훑는다(`ast.zig:1905`).
 3. 토큰 시작 위치는 24비트다(`tokenizer.zig:176,193`). 16 MiB 이상 소스에서 위치가 잘릴 가능성이 있다(추정).
 4. `compiler.zig:560-571`의 `resolveCopyCtor`/`resolveFuncTemplate`는 호출하는 곳이 없고 존재하지 않는 `cy.generics`를 참조하는 죽은 코드다(Zig는 쓰이지 않는 함수를 컴파일하지 않아 빌드가 통과한다). 2026-11-06에 삭제했다(F-61).

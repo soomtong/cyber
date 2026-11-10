@@ -630,7 +630,7 @@ e4 는 완료 경로가 같은 슬롯을 읽어서 우연히 맞은 경우다. �
 
 - `src/test/concurrency/generator.cy`: 모든 케이스가 상태를 `^ArrayStore[int]` 매개변수(힙)에 두거나 상태가 없다(`foo6` 의 `list << 123; yield list.len()`). 본문 지역 변수 + yield 조합이 하나도 없다. `genSum` 은 `yield sum(n)` 으로 지역 없이 호출만 한다.
 - `src/test/bench/fiber/fiber.cy`: 상태는 전역 `count` 이고 `yield 0` 뿐이다.
-- `src/lib.zig` 의 "single_run frees big heap objects at deinit." 테스트: `yield 0` 뿐.
+- `src/lib_test/runtime.zig` 의 "single_run frees big heap objects at deinit." 테스트: `yield 0` 뿐.
 - `examples/fiber.cy`: 지역(`for` 상태)이 있지만 소비자 루프가 같은 호출 지점에서 얕은 호출만 한다(f2).
 - 모든 테스트가 `next()` 사이에 스택을 건드리지 않거나(건드려도 같은 슬롯에 값을 쓰지 않거나) 지역을 yield 너머로 쓰지 않는다. 버그는 "지역 + yield + 소비자 쪽 호출" 세 조건이 겹칠 때만 드러난다.
 
@@ -787,8 +787,8 @@ fn zAwait(t: *cy.Thread, fut_value_bits: u64) callconv(.c) vmc.ResultCode {
 
 스레드 panic 의 메시지도 같이 고쳐졌다(아래 표 10번). worker 가 스레드를 해제하기 전에 메시지를 공유 상태(`sync.zig` `FutureSyncState`, 이제 `state` 바이트와 메시지 포인터를 가진 구조체)에 복사해 두고 3 으로 바꾸면, 기다리던 쪽이 `Spawned thread panicked: boom` 으로 panic 한다. 중첩이면 `Spawned thread panicked: Spawned thread panicked: boom` 처럼 겹친다.
 
-`AWAIT` 명령어는 `RES_AWAIT` 를 받으면 VM 루프를 빠져나가게 만들어져 있다(`vm.c:1499~1502`, `thread.zig:483~485` 의 `error.Await`, `lib.zig:240` 의 `CL_AWAIT`, `include/cyber.h:42`). 그러나 지금은 `RES_AWAIT` 를 돌려주는 곳이 없다(`vm.zig:1025` 주석 처리).
-continuation 큐(`vm.task_nodes`, `FutureValue.cont_head`, `completeFuture`)도 마찬가지다. `completeFuture`(`core.zig:1437~1446`)는 대기 노드를 `.dead` 로 표시만 하고 ready 큐에 넣는 줄은 주석이다. `cl_run_ready_tasks`(`lib.zig:289~`, `include/cyber.h:404`)도 주석이다.
+`AWAIT` 명령어는 `RES_AWAIT` 를 받으면 VM 루프를 빠져나가게 만들어져 있다(`vm.c:1499~1502`, `thread.zig:483~485` 의 `error.Await`, `lib.zig:265` 의 `CL_AWAIT`, `include/cyber.h:42`). 그러나 지금은 `RES_AWAIT` 를 돌려주는 곳이 없다(`vm.zig:1025` 주석 처리).
+continuation 큐(`vm.task_nodes`, `FutureValue.cont_head`, `completeFuture`)도 마찬가지다. `completeFuture`(`core.zig:1437~1446`)는 대기 노드를 `.dead` 로 표시만 하고 ready 큐에 넣는 줄은 주석이다. `cl_run_ready_tasks`의 헤더 선언(`include/cyber.h:466`)도 주석이다. `lib.zig` 에 주석으로 남아 있던 구현은 2026-11-10 에 지웠다.
 이 부분이 6.4 의 에이전트 루프 논의의 출발점이다.
 
 #### 스케줄링: 풀 크기 `CPU 수 - 1`, 그리고 동시에 던지면 직렬화될 수 있다
@@ -1401,7 +1401,7 @@ CodeAct 루프의 이상적인 모양은 이렇다. 스크립트가 `r := tool('
 코드에서 확인한 사실 네 가지가 근거다.
 
 1. `execBytecode` 는 `t->c.pc` / `t->c.fp` 에서 시작하고(`vm.c:608~609`), `RETURN(code)` 는 둘을 `t->c` 에 되돌려 놓는다(`vm.c:322~327`). 스크립트 상태가 C 스택에 없고 스레드 구조체와 스택 배열에 있다.
-2. `exec_auto` 는 `RES_AWAIT` 를 `error.Await` 로 올리고(`thread.zig:483~485`), `cl_vm_eval*` 는 이를 `CL_AWAIT` 로 돌려준다(`lib.zig:240, 275`). 즉 "중단됐지만 실패 아님"을 나타내는 결과 코드가 이미 ABI 에 있다.
+2. `exec_auto` 는 `RES_AWAIT` 를 `error.Await` 로 올리고(`thread.zig:483~485`), `cl_vm_eval*` 는 이를 `CL_AWAIT` 로 돌려준다(`lib.zig:260` 의 `evalResultCode`). 즉 "중단됐지만 실패 아님"을 나타내는 결과 코드가 이미 ABI 에 있다.
 3. 메인 스택은 힙 할당이고 재할당되어도 포인터 레이아웃으로 패치된다(실습 8). 멈춘 동안 스택이 그대로 남는다.
 4. VM 이 실행 도중 `RETURN` 해서 호스트 코드가 처리한 뒤 `execBytecode` 를 다시 불러 이어가는 구조가 이미 있다. 스택 오버플로(`RES_STACK_OVERFLOW`)가 그 예로, `exec_auto` 의 `while (true)` 루프가 스택을 키운 뒤 `continue` 한다(`thread.zig:471~499`).
 

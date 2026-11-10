@@ -501,7 +501,7 @@ HeapPage = 102 x PoolObject (4080바이트)                allocator 블록 하�
   `freeBigObject`(189)는 포인터 객체를 풀에 돌려주고 allocator로 블록을 반납한다.
 - 분기 기준은 `size <= 4 * 8`이고 한 곳이 아니다. `NEW` 명령(`vm.c:251`의 `allocObjectInit`), Zig의 `new_object_undef`(`heap.zig:1539`), 해제 쪽 `freeObject`(209)가 같은 기준을 쓴다.
   `NEW`의 크기 피연산자가 `u16`이라 한 번에 만드는 힙 객체가 65535바이트를 넘을 수 없다(코드 근거, 큰 구조체는 미실험).
-- allocator: CLI는 Debug가 아니고 wasm/MSVC가 아니면 mimalloc, Debug는 Zig의 `SafeAllocator`(`build.zig:436~448`, `cli.zig:686~740`). libcyber는 `cl_vm_init`에서 `std.heap.c_allocator`(libc malloc)를 쓰고(`lib.zig:28`),
+- allocator: CLI는 Debug가 아니고 wasm/MSVC가 아니면 mimalloc, Debug는 Zig의 `SafeAllocator`(`build.zig:436~448`, `cli.zig:686~740`). libcyber는 `cl_vm_init`에서 `std.heap.c_allocator`(libc malloc)를 쓰고(`lib.zig:24`),
   `cl_vm_initx`로 호스트 할당자를 주입할 수 있다. C 호스트는 `cl_vm_init_mem`(2026-11-10)으로 `alloc` · `free` 함수 둘을 준다. 어느 쪽이든 VM은 그 위에 바이트를 세는 래퍼
   (`mem_account.zig`의 `MemAccount`)를 얹어 쓰고, `cl_vm_set_memory_limit`의 한도는 힙 · 스택이 자라는 지점(`Heap.reserve`, `growHeapPages`, `growStackAuto`)에서 검사한다(F-41).
 - 스레드마다 `Heap`이 따로 있고(`Thread.heap`) `rc` 증감은 비원자적 일반 연산이다(`vm.c:92~143`의 `head->rc -= 1`). 스레드 사이로 `^T`를 공유하지 않는다는 전제다. 자세한 것은 [07](07-coroutines-concurrency.md).
@@ -537,7 +537,7 @@ CASE(Release): {
 | 만든 이유 | 타입별로 모양이 다른 정리를 Cyber 코드로 표현 | 컴파일 타임 평가와 호스트 바인딩이 "단순한 타입"을 다루기 위해(`heap.zig:35~37` 주석) |
 
 두 구현이 같은 일을 하도록 사람이 맞춰야 한다는 점이 유지보수 위험이다. 예를 들어 `Slice.@deinit`은 원소를 `@destruct`로 정리하지만 호스트의 `cl_slice_deinit`은 `destructValueAt`을 쓰므로
-원소 타입에 사용자 `@deinit`이 있으면 호스트 쪽 경로에서는 돌지 않는다(`lib.zig:166~180`, 코드 근거).
+원소 타입에 사용자 `@deinit`이 있으면 호스트 쪽 경로에서는 돌지 않는다(`lib.zig:206~220`, 코드 근거).
 
 `@destruct`가 하는 일(발췌, `core.cy:2869` 이하):
 
@@ -673,7 +673,7 @@ Slice[T] (32바이트)                                   버퍼 (^RawBuffer[byte
 `^T`끼리 서로를 가리키면 rc가 0이 되지 않아 영영 해제되지 않는다. 0.3은 `performGC()`로 수거했다. 0.4의 현실은 이렇다.
 
 - 수거도 탐지도 없다. 순환을 찾아야 하는 자리는 `Thread.check_memory`(`thread.zig:1018`)인데 본문이 `num_cyc_objects = 0`을 돌려주는 껍데기이고 `TODO: Detect cycles by iterating heap.`만 있다.
-  C API `cl_thread_check_memory`(`lib.zig:542`, `cyber.h:520`)가 이것을 노출하지만 호출하는 내부 코드가 없다. `docs/docs.md:2520`의 "safe mode에서 스레드 끝에 탐지하고 패닉한다",
+  C API `cl_thread_check_memory`(`lib.zig:504`, `cyber.h:520`)가 이것을 노출하지만 호출하는 내부 코드가 없다. `docs/docs.md:2520`의 "safe mode에서 스레드 끝에 탐지하고 패닉한다",
   `@check_cycles()`는 코드에 없다(`rg 'check_cycles'`는 문서만 찾는다). `thread.zig:1213`의 `markValue`는 `setGcMarked()`가 주석 처리된 0.3의 잔재다.
 - 순환 테스트 두 개(`gc_reference_cycle_reachable.cy`, `gc_reference_cycle_unreachable.cy`)는 0.3 문법(`var a = List[dyn]{}`, `collectCycles()`)이라 지금은 `ParseError`가 나고,
   `behavior_test.zig:155~156`에서 주석 처리되어 있다(`default_memory.cy`도 같은 이유로 `:153`에서 꺼져 있다). 테스트 폴더에 있다고 해서 현재 동작을 검증하는 것이 아니다.
@@ -700,7 +700,7 @@ TS 개발자가 조심할 점: 부모 포인터가 있는 트리, 양방향 연�
 - trace 빌드는 이중 해제(`zCheckDoubleFree`)와 해제된 객체의 retain(`zCheckRetainDanglingPointer`)도 즉시 잡는다. `Slice.size_down` 뒤 읽기 실험에서 후자가 발동했는데,
   보고를 만드는 경로(`zPrintTraceAtPc` -> `debug.indexOfTableEntry`)가 `integer overflow`로 한 번 더 죽었다. 보고기 자체의 버그로 보이며 원인은 조사하지 않았다.
 - 자동 테스트의 누수 검사는 한계가 있다. 라이브러리 테스트는 누수 검사 allocator로 VM을 만들지만 풀 페이지는 `Heap.deinit`에서 통째로 반납되므로 풀 객체의 누수는 보이지 않는다.
-  그래서 `lib.zig:1259`의 테스트는 32바이트가 넘는 문자열(큰 객체)을 쓴다. `cl_thread_count_objects`도 이 누수를 못 잡았다고 결정 문서에 적혀 있다.
+  그래서 `src/lib_test/api.zig`의 "Host functions release their owned str params." 테스트는 32바이트가 넘는 문자열(큰 객체)을 쓴다. `cl_thread_count_objects`도 이 누수를 못 잡았다고 결정 문서에 적혀 있다.
 
 ### 2.7 패닉과 종료
 
@@ -732,8 +732,8 @@ TS 개발자가 조심할 점: 부모 포인터가 있는 트리, 양방향 연�
 정상 종료는 2.3절의 순서다(전역 정리 -> main 지역 역순 정리). `single_run`(ReleaseFast CLI) 또는 `persist_main`(REPL)이면 main 최상위 지역의 정리 코드가 아예 없고,
 `VM.deinit`(`vm.zig:199`)이 맨 앞에서 `freeHeapPages`를 돌려 힙과 원시 버퍼를 쓸어 담는다(`vm.zig:204~210`). 패닉과 같은 스윕이라 이 경로도 소멸자를 건너뛴다.
 `docs/decisions/project_embedding_agent_loop.md`가 이것을 계약으로 못 박았다. "프로세스가 곧 끝나므로 빠르게" 끝내는 대신, 종료 시 돌아야 하는 정리 코드(`@deinit`으로 파일 flush 등)가
-생기면 다시 보기로 했다. 임베딩에서 VM을 재사용하거나 누수를 검사하려면 기본값 `single_run = false`를 유지한다(`lib.zig:210`, `:369`).
-`lib.zig:1152`, `:1166`의 테스트가 이 스윕이 원시 버퍼와 큰 객체(48바이트 `Generator`)를 놓치지 않음을 보증한다.
+생기면 다시 보기로 했다. 임베딩에서 VM을 재사용하거나 누수를 검사하려면 기본값 `single_run = false`를 유지한다(`lib.zig:246`, `:332`).
+`src/lib_test/runtime.zig`의 "single_run frees the main block's raw buffers at deinit." · "single_run frees big heap objects at deinit." 테스트가 이 스윕이 원시 버퍼와 큰 객체(48바이트 `Generator`)를 놓치지 않음을 보증한다.
 
 ### 2.8 호스트 함수의 매개변수 소유 규약
 
@@ -749,7 +749,7 @@ Zig/C로 쓴 `#[bind]` 함수는 컴파일러가 만든 호출 규약을 그대�
 코드로 본 모범 사례는 `string.zig`의 `concat`(27줄)이다. 수신자는 `&str`이라 `t.param(*cy.heap.Str)`로 포인터를 받고 그대로 둔다. 인자 `s str`은 값이라
 `const str2 = t.param(cy.heap.Str); defer t.heap.destructStr(&str2);`로 정리한다. `interpolate`(37)의 두 `[&]str`은 빌림이라 정리하지 않는다.
 fork가 2026-11-01에 이 규약을 어긴 바인딩 7개(`atof`, `atof32`, `str.index`, `str.insert`, `cy.VM.eval`, `os.fetchUrl`, `os.cacheUrl`)를 고쳤고(커밋 `c755c23f`),
-`[]T` 매개변수용으로 `cl_slice_deinit`을 추가했으며(`1490366c`, `lib.zig:166`), `@notifyFutureComplete`를 값 `Future[T]`에서 `&FutureValue[T]` 빌림으로 바꿨다(`memory/future_resolver.cy`).
+`[]T` 매개변수용으로 `cl_slice_deinit`을 추가했으며(`1490366c`, `lib.zig:206`), `@notifyFutureComplete`를 값 `Future[T]`에서 `&FutureValue[T]` 빌림으로 바꿨다(`memory/future_resolver.cy`).
 이 누수들은 문자열이 리터럴(`buf == NULL`)일 때는 드러나지 않았다. 힙 문자열을 넘겨야 샌다는 점이 늦게 발견된 이유다(`memory/host_str_params.cy`는 `'1' + '2.5'`처럼 연결해 힙 문자열로 만든다).
 
 새 바인딩을 추가하는 사람이 던질 질문: (1) 이 매개변수 타입이 `isManaged`인가? (2) 객체형도 빌림도 아닌가? 둘 다 그렇다면 정리 코드를 써야 한다.
@@ -796,7 +796,7 @@ fork가 2026-11-01에 이 규약을 어긴 바인딩 7개(`atof`, `atof32`, `str
 8. `src/heap_value.zig:404` `destructValueAt`, `:634` `destroyObject`.
 9. `src/builtins/core.cy`: `:2798` `@deinitObject`, `:2836` `@partial_destruct`, `:2869` `@destruct`, `:2679` `@copy`, `:1026` `Slice`, `:1662` `Array`, `:2181` `Map`/`HashMap`, `:3224` `StrBuffer`/`str`, `:662` `Object`.
 10. `src/thread.zig:35` `panic`, `:68~100` 스택 포인터 패치, `:108` `freeHeapPages`, `:1018` `check_memory`(껍데기). `src/vm.zig:199` `VM.deinit`.
-11. `src/lib.zig:166` `cl_slice_deinit`, `:1152~1330` 메모리 관련 라이브러리 테스트.
+11. `src/lib.zig:206` `cl_slice_deinit`, `src/lib_test/runtime.zig` · `src/lib_test/api.zig`의 메모리 관련 라이브러리 테스트(single_run, 제너레이터, "cl_slice_init.", "Host functions release ...").
 
 ## 5. 실습
 
@@ -1248,7 +1248,7 @@ IR이 정리를 명시하므로 새 코드젠 백엔드(C 백엔드 등)도 소�
 | 13 | 순환 참조는 수거/탐지 없이 누수. 원시 버퍼가 낀 때만 릴리스 CLI가 `Unfreed raw buffers`로 패닉 | `thread.zig:1018`, `heap.zig:97` | `cyc1.cy`, `cyc2.cy` |
 | 14 | 패닉/`single_run` 종료에서 `@deinit` 미실행(자원 정리 불가) | `thread.zig:35`, `vm.zig:204` | `p1.cy`. 2026-11-08 계약으로 문서화(F-29, 매뉴얼 Deinitializers 절). 릴리스 CLI는 ReleaseSafe라 `single_run`이 아님 |
 | 15 | 정상 종료에서 전역 `@deinit`이 main 지역보다 먼저 | `sema.zig:4555` 근처 | `g1.cy`. 2026-11-08 수정 `19873949`(F-29, main 지역 먼저. `docs/decisions/project_program_deinit_order.md`) |
-| 16 | `cl_slice_deinit`/호스트 경로의 `destructValueAt`이 사용자 `@deinit`을 안 부름 | `lib.zig:166`, `heap_value.zig:404` | 코드 근거(미실행) |
+| 16 | `cl_slice_deinit`/호스트 경로의 `destructValueAt`이 사용자 `@deinit`을 안 부름 | `lib.zig:206`, `heap_value.zig:404` | 코드 근거(미실행) |
 | 17 | trace 빌드의 `freePoolObject`가 `heapFreeTail`을 갱신하지 않는 것으로 읽힘(해제 슬롯 유실 가능성) | `heap.zig:219~250` | 코드 근거(추정, 미실행) |
 | 18 | trace 빌드에서 dangling retain 보고 경로가 `integer overflow`로 죽음 | `debug.zig:106` | `s2.cy`를 trace CLI로 |
 | 19 | 옮겨 나간 멤버에 재대입(`a := move p.a; p.a = Res{..}`)이 컴파일되지만 상태를 되살리지 않음. `set_field`가 이미 옮긴 옛 값을 파괴해 `@deinit` 2회, 새 값은 정리되지 않아 누수 | `sema.zig` `semaAssignToAccessStmt`(상태 검사 · 복원 없음) | 2026-11-08 재현(Q9, F-79). `deinit a` 2회 · `deinits=3`에 `a2` 없음. 2026-11-09 `96007fe5`로 수정: 대입이 멤버를 되살린다(`a` · `a2` · `b` 각 1회) |

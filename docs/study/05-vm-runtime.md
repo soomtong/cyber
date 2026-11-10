@@ -59,7 +59,7 @@ tags:
 
 ```
 src/main.zig        evalPath (255)                       CLI 가 VM 을 만들고 eval 요청
-  └ c.vm_eval_path  -> src/lib.zig cl_vm_eval_path (262)  C API 경계(임베딩도 같은 길)
+  └ c.vm_eval_path  -> src/lib.zig cl_vm_eval_path (320)  C API 경계(임베딩도 같은 길)
       └ VM.eval (src/vm.zig:421)
           ├ self.compiler.compile(...)                    소스 -> ByteCodeBuffer (01~04 챕터)
           └ VM.exec_bytecode (src/vm.zig:593)
@@ -767,8 +767,8 @@ print(outer(0))
     } while (false)
 ```
 
-- `t->c.interrupt` 는 `u8*` 이고 스레드마다 갖는 것이 아니라 main thread 의 `interrupt_flag` 를 가리킨다(`Thread.init`, thread.zig:253, 그리고 spawn 스레드는 core.zig:1603 에서 main 의 포인터를 복사). 그래서 `cl_vm_interrupt`(lib.zig:254)의 `@atomicStore(u8, main.interrupt, 1, .release)` 한 번이 모든 스레드에 닿는다. `volatile` 로 읽어서 컴파일러가 루프 밖으로 끌어올리지 못하게 한다.
-- `t->c.fuel` 은 스레드별 카운터이다. `cl_vm_set_fuel(vm, n)`(lib.zig:258)은 `main_thread.c.fuel_limit` 만 쓰고, 실제 `fuel` 은 eval 시작마다 `resetStop -> resetFuel`(thread.zig:458, 463)이 `fuel_limit > 0 ? fuel_limit : maxInt(i64)` 로 채운다. 무제한은 사실상 "2^63 번 이상"이라 분기가 하나로 합쳐진다. `--fuel < 0` 이므로 `n` 번의 체크포인트는 통과하고 `n+1` 번째에서 멈춘다(문서의 "n번 지나면 멈춘다"와 한 칸 차이).
+- `t->c.interrupt` 는 `u8*` 이고 스레드마다 갖는 것이 아니라 main thread 의 `interrupt_flag` 를 가리킨다(`Thread.init`, thread.zig:253, 그리고 spawn 스레드는 core.zig:1603 에서 main 의 포인터를 복사). 그래서 `cl_vm_interrupt`(lib.zig:296)의 `@atomicStore(u8, main.interrupt, 1, .release)` 한 번이 모든 스레드에 닿는다. `volatile` 로 읽어서 컴파일러가 루프 밖으로 끌어올리지 못하게 한다.
+- `t->c.fuel` 은 스레드별 카운터이다. `cl_vm_set_fuel(vm, n)`(lib.zig:300)은 `main_thread.c.fuel_limit` 만 쓰고, 실제 `fuel` 은 eval 시작마다 `resetStop -> resetFuel`(thread.zig:458, 463)이 `fuel_limit > 0 ? fuel_limit : maxInt(i64)` 로 채운다. 무제한은 사실상 "2^63 번 이상"이라 분기가 하나로 합쳐진다. `--fuel < 0` 이므로 `n` 번의 체크포인트는 통과하고 `n+1` 번째에서 멈춘다(문서의 "n번 지나면 멈춘다"와 한 칸 차이).
 - 체크포인트 위치는 `JUMP`(오프셋 < 0), `CALL`, `CALL_TRAIT`, `CALL_PTR`, `CALL_UNION`. `CHK_STK` 에 두지 않은 이유는 프레임 전환 도중이라는 점이다(결정 문서). `CALL` 안에서도 `stack[0..2]` 를 쓰기 전, `stack += base` 이전에 검사하므로 `RETURN` 이 저장하는 `(pc, stack)` 은 호출자 프레임의 일관된 상태이다(vm.c:929~930).
 - `CALL_HOST` 에는 체크포인트가 없다. 호스트 함수가 오래 걸리면 끊을 수 없다.
 
@@ -793,7 +793,7 @@ LBB1_23: add x21, x20, x8, lsl #1 ...   ; pc += offset 후 다음 디스패치
 
 설계적 의미를 정리하면 이렇다. (1) 명령어 단위 카운터가 아니라 "루프 한 바퀴/호출 한 번" 단위이므로 직선 코드는 비용이 없다. 대신 검사점 없이 오래 도는 직선 코드의 길이는 바이트코드 크기가 상한이다. (2) fuel 은 시간이 아니라 사건 수라서 같은 입력이면 항상 같은 지점에서 멈추므로 에이전트 실행을 재현/테스트하기 좋다. (3) 정지는 재개가 아니라 패닉과 같은 경로의 종료이다(힙이 정리됨). "멈췄다가 이어서 실행"은 지원하지 않는다. (4) 호스트 함수 안과 `AWAIT` 의 spin 대기 같은 "VM 루프 밖"은 따로 처리해야 해서, `zAwait`(vm.zig:981)의 spin 루프가 interrupt 플래그를 직접 확인한다(vm.zig:1005).
 
-CLI 에서는 fuel 도 interrupt 도 쓸 수 없다. `rg 'fuel|interrupt' src/cli.zig src/main.zig` 결과가 비어 있다. 따라서 직접 실행 증거는 없고, 근거는 `src/lib.zig` 의 테스트 두 개(915행 "cl_vm_set_fuel stops runaway loops and recursion.", 959행 "cl_vm_interrupt stops a running eval.")를 읽은 것이다. 첫 테스트는 `vm_set_fuel(vm, 10000)` 뒤 `while true: i += 1` 과 `fn f(n): return f(n+1)` 이 모두 `C.ErrorInterrupt` 를 돌려주고 보고서가 "panic: Out of fuel." 로 시작함을 확인한 다음, 같은 VM 에서 `0..100` 루프가 정상 완료됨을 확인한다. 직접 빌드는 하지 않았다.
+CLI 에서는 fuel 도 interrupt 도 쓸 수 없다. `rg 'fuel|interrupt' src/cli.zig src/main.zig` 결과가 비어 있다. 따라서 직접 실행 증거는 없고, 근거는 `src/lib_test/limits.zig` 의 테스트 두 개("cl_vm_set_fuel stops runaway loops and recursion.", "cl_vm_interrupt stops a running eval.")를 읽은 것이다. 첫 테스트는 `vm_set_fuel(vm, 10000)` 뒤 `while true: i += 1` 과 `fn f(n): return f(n+1)` 이 모두 `C.ErrorInterrupt` 를 돌려주고 보고서가 "panic: Out of fuel." 로 시작함을 확인한 다음, 같은 VM 에서 `0..100` 루프가 정상 완료됨을 확인한다. 직접 빌드는 하지 않았다.
 
 ### 2.10 관찰 도구: 트레이스 빌드
 
@@ -860,7 +860,7 @@ t0@3d84d0380b4 .call: core.prints(%6..%7) 4
 7. src/thread.zig:970~1016 과 src/debug.zig:46~117, 459~613 (30분). 언와인드와 pc -> 소스 위치 변환.
 8. src/builtins/core.zig:1256~1262, 2173~2179 와 src/thread.zig:543~566 (15분). 호스트 함수의 실제 모양.
 9. src/vm.c:1559~1710 (20분). 산술/변환/비교. 의미 세부는 2.6절 표와 실습 4 로 확인한다.
-10. src/lib.zig:254~260, 915~1000 과 docs/decisions/project_vm_interrupt.md (20분). interrupt/fuel 의 API 와 테스트.
+10. src/lib.zig:296~302, src/lib_test/limits.zig 의 "cl_vm_set_fuel stops runaway loops and recursion." · "cl_vm_interrupt stops a running eval." 테스트와 docs/decisions/project_vm_interrupt.md (20분). interrupt/fuel 의 API 와 테스트.
 11. src/vm.zig:864~1104 (20분). C 가 부르는 Zig 헬퍼들(`zCallTrait`, `zAwait`, `zCallPtr`, `zCallUnion`, `zAlloc*`). 에러를 `ResultCode` 로 번역하는 패턴이 반복된다.
 12. src/bytecode.zig:898~1066 (10분). 모든 명령어의 길이 표. 새 opcode 를 추가하는 사람이 반드시 고치는 곳.
 
@@ -1093,7 +1093,7 @@ Cannot print stack trace: stack tracing is disabled
 
 ### 실습 7 (읽기 전용). fuel 이 무한 루프를 끊는 방법
 
-CLI 로는 실행할 수 없으므로 `src/lib.zig:915` 의 테스트를 읽는다. 질문: (1) `vm_set_fuel(vm, 10000)` 후 `while true: i += 1` 은 어디서 멈추는가(`JUMP` 의 역방향 체크포인트). (2) `fn f(n): return f(n+1)` 은(`CALL`). (3) 멈춘 뒤 같은 VM 이 계속 쓰이는 근거는(같은 테스트 안에서 `0..100` 루프가 정상 완료되고, 누수 검사 allocator 로 통과했으므로 패닉 경로가 힙을 비웠다는 뜻이다).
+CLI 로는 실행할 수 없으므로 `src/lib_test/limits.zig` 의 "cl_vm_set_fuel stops runaway loops and recursion." 테스트를 읽는다. 질문: (1) `vm_set_fuel(vm, 10000)` 후 `while true: i += 1` 은 어디서 멈추는가(`JUMP` 의 역방향 체크포인트). (2) `fn f(n): return f(n+1)` 은(`CALL`). (3) 멈춘 뒤 같은 VM 이 계속 쓰이는 근거는(같은 테스트 안에서 `0..100` 루프가 정상 완료되고, 누수 검사 allocator 로 통과했으므로 패닉 경로가 힙을 비웠다는 뜻이다).
 
 ### 변형 과제
 

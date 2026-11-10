@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.4-dev 755-d5e6554</div>
+    <div class="sub-title">v0.4.4-dev 767-a943661</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1263,11 +1263,22 @@ global b int = a
 
 b = a
 </code></pre>
-<p>Global variable initializers have a natural order based on when it was encountered by the compiler.
+<p>Global variables are initialized before the main block runs, in a fixed order. The globals of a module are initialized in the order that they are declared.
 The following would invoke <code>load_a</code> before <code>load_b</code>:</p>
 <pre><code class="language-cy">global a int = load_a()
 global b int = load_b()
 </code></pre>
+<p>A module is initialized after the modules that it imports with <code>use</code>, so a function of an imported module sees the globals of its module initialized. At the end of the program, modules are deinitialized in the reverse order.</p>
+<p>A function that an initializer calls can read and write the globals that are initialized before it. Reaching a global that is initialized later, or the global that is being initialized, is a compile error:</p>
+<pre><code class="language-cy">global a int = load_a()
+--> error: The initializer of `a` can reach `load_a`, which accesses the global `b`. `b` is initialized after `a`.
+global b int = 123
+
+fn load_a() -> int:
+    return b + 1
+</code></pre>
+<p>Declare <code>b</code> before <code>a</code> to fix the error.</p>
+<p>The check follows the functions that are called by name, including operators, <code>@init</code> and <code>@deinit</code>. It does not know the target of a call through a function value or a trait. When an initializer can reach such a call, every function that is used as a value (a lambda, a function assigned to a variable or passed as an argument, a generator) and every method that implements a trait counts as reachable. The check does not look at conditions either, so an access that never runs at initialization is still an error.</p>
 <p>Circular references are not possible because a global initializer cannot reference another global variable:</p>
 <pre><code class="language-cy">global a = b
 --> error: Initializer can not reference a global variable.
@@ -1353,10 +1364,10 @@ For references types, the comparison checks that the two references point to the
 a := 'abc'
 a == 'abc'      --> true
 
-la := {1, 2, 3}
+la := []int{1, 2, 3}
 lb := la
-la == lb        --> true
-la == {1, 2, 3} --> false
+la == lb             --> true
+la == []int{1, 2, 3} --> false
 </code></pre>
 <p>The not equals operator returns true if the two values are not equal.</p>
 <pre><code class="language-cy">1 != 1          --> false
@@ -1392,12 +1403,17 @@ a ~ b
 -- logical right shift: a's bits are shifted b bits to the least significant end. 
 a >> b
 
+-- arithmetic right shift: like `>>` but the sign bit fills the vacated bits. `(-8).asr(1)` is `-4`, `-8 >> 1` is a large positive integer.
+-- A shift amount past the sign bit leaves only the sign: `-1` for a negative integer, otherwise `0`.
+a.asr(b)
+
 -- logical left shift: a's bits are shifted b bits to the most significant end. This does not perform sign-extension on the 32-bit integer.
 a << b
 
 -- not: a's integer bits are flipped.
 ~a
 </code></pre>
+<p>When the place of a <code>~</code> expression expects a wider integer type, the operand is converted to that type before its bits are flipped: <code>var z r32 = ~r16(5)</code> is <code>0xfffffffa</code>. Assign the result to a variable first to flip the bits in the width of the operand: <code>n := ~r16(5)</code> is <code>0xfffa</code>. A <code>float</code> target converts the result: <code>float(~5)</code> is <code>-6.0</code>.</p>
 <a href="#syntax">^topic</a>
 <h3 id="operator-overloading">Operator overloading. <a href="#operator-overloading">#</a></h3>
 <p>See <a href="#operator-methods" title="">Custom types -> Operator methods</a>.</p>
@@ -1887,7 +1903,8 @@ arr = arr.remove(1)
 <a href="#basic-types">^topic</a>
 <h2 id="maps">Maps. <a href="#maps">#</a></h2>
 <p>A <code>Map</code> type is a dynamic data structure that stores key value pairs in a lookup table governed by hashing functions (key hash and equality functions).
-<code>Map</code> provides default hashing functions while <code>HashMap</code> requires custom hash functions.</p>
+<code>Map</code> provides default hashing functions while <code>HashMap</code> requires custom hash functions.
+The default functions accept these key types: <code>str</code>, integers (<code>Int</code> and <code>Raw</code> of any width), <code>float</code>, <code>f32</code>, <code>bool</code>, <code>symbol</code>, <code>error</code>, enums, <code>Object</code> and references (<code>^T</code>, hashed by address). Another key type is a compile error.</p>
 <p>Maps are constructed with the initializer expression:</p>
 <pre><code class="language-cy">map := Map[str, int]{a=123, b=234}
 </code></pre>
@@ -2653,7 +2670,7 @@ switch val:
 switch val:
     case 100
     case 200
-    case 1000
+    case 1000:
         print('handle case')
     else:
         print('val is %{val}')
@@ -2862,15 +2879,13 @@ func = |a, b| a + b + 123
 </code></pre>
 <a href="#functions">^topic</a>
 <h3 id="function-union-types">Function union types. <a href="#function-union-types">#</a></h3>
-<p>A function union type is denoted as <code>Func(FN)</code> where <code>FN</code> is a function pointer type.</p>
+<p>A function union type is denoted as <code>Func[FN]</code> where <code>FN</code> is a function pointer type.</p>
 <p>It can hold closures in addition to functions and lambdas:</p>
 <pre><code class="language-cy">c := ^5
-fn add_c(a int, b int) -> int:
-    return a + b + c.*
 
 type AddFn = fn(int, int) -> int
 
-var func Func(AddFn) = add_c
+var func Func[AddFn] = |a, b| a + b + c.*
 func(10, 20)       --> 35
 </code></pre>
 <a href="#functions">^topic</a>
@@ -3472,6 +3487,7 @@ res = 'abcxyz'
 <pre><code class="language-cy">res := do_something() !else |err|:
     panic('Failed with %{err}')
 </code></pre>
+<p>An <code>!else</code> block can not reach its end. It must end with <code>return</code>, <code>panic</code>, <code>break</code> or <code>continue</code>. To continue after handling the error, use the <a href="#unwrap-block" title="">unwrap block</a>.</p>
 <a href="#error-handling">^topic</a>
 <h3 id="unwrap-or-guard">Unwrap or guard. <a href="#unwrap-or-guard">#</a></h3>
 <p><em>TBD</em></p>

@@ -47,7 +47,7 @@ TS/Node 개발자에게 익숙한 대응(일반 지식)을 먼저 깔아 둔다.
 
 | Cyber | Node/TS 쪽에서 비슷한 것 | 다른 점 |
 |---|---|---|
-| libcyber 의 `cl_vm_init`, `cl_vm_eval` | `vm.createContext` + `vm.runInContext`, 또는 isolated-vm | Cyber VM 은 프로세스 안의 C 라이브러리이고, 컨텍스트가 곧 VM 하나다. 격리 장치(권한, 메모리 한도)는 직접 만들어야 한다 |
+| libcyber 의 `cl_vm_init`, `cl_vm_eval` | `vm.createContext` + `vm.runInContext`, 또는 isolated-vm | Cyber VM 은 프로세스 안의 C 라이브러리이고, 컨텍스트가 곧 VM 하나다. 권한 격리는 직접 만들어야 한다. 메모리 한도는 2026-11-10부터 `cl_vm_set_memory_limit` 이 준다(F-41) |
 | `cl_vm_set_loader`, `cl_vm_set_resolver` | Node 모듈 customization hooks 의 `load`, `resolve` | 둘 다 "문자열 -> 소스" 변환이지만 Cyber 는 C 콜백이고 모듈 하나가 호스트 함수 표(`cl_mod_add_func`)를 함께 받는다 |
 | core.cy 와 `#[bind]` | Node core 의 `lib/*.js` 가 `internalBinding('fs')` 같은 C++ 바인딩을 부르는 구조 | Node 는 JS 가 미리 번들/스냅샷되지만 Cyber 는 매 실행마다 core.cy 를 파싱하고 컴파일한다(5.7절 측정) |
 | `--cytest: pass\|error\|panic` | Jest 의 파일 단위 스냅샷 테스트에 가깝다 | 기대값이 같은 .cy 파일 끝 주석에 들어 있고 하네스가 그 주석을 읽는다 |
@@ -345,7 +345,7 @@ bindings.zig 는 이름과 달리 "등록 표"가 아니다. 이 파일에는 (1
 - 기본 resolver 는 아무 정규화도 하지 않는다. 그래서 `use 'lib/util'` 의 loader 인자는 문자열 그대로 `lib/util` 이고, 상대 경로(`./x.cy`)도 그대로 loader 에 도착한다
   (실험: loader 가 `uri='./nothere.cy'` 를 받음). 상대 경로를 풀려면 resolver 가 `params.curUri` 와 `params.chunkId` 로 직접 해야 한다.
 - 기본 loader(`cl_default_loader`, compiler.zig:1459-1470)는 내장 7종(`core`, `meta`, `math`, `cy`, `c`, `io`, `test`)만 안다(StaticStringMap `mods`, 1449-1457).
-  다른 이름은 `false` 를 돌려주므로 "Failed to load module" 이다. 호스트 loader 는 자기 모듈을 처리하고 나머지를 `cl_default_loader` 에 위임하는 것이 관용구다(examples/libcyber/host_tool.c:37-45).
+  다른 이름은 `false` 를 돌려주므로 "Failed to load module" 이다. 호스트 loader 는 자기 모듈을 처리하고 나머지를 `cl_default_loader` 에 위임하는 것이 관용구다(examples/libcyber/host_tool.c 의 `loader`).
 - loader 는 청크당 한 번만 불린다. 같은 VM 에서 모듈 소스를 바꾸고 다시 `use` 해도 이전 청크가 재사용된다(실험: v1 로 로드 후 v2 로 바꿔 eval 해도 loader 호출 없음, `cl_vm_reset` 후에야 v2 로드).
 - loader 는 반드시 소스를 돌려줘야 하지만 `res->manage_src = false` 면 소스는 호스트 소유 정적 메모리여야 한다(cyber.h:543-544 주석).
   `true` 면 컴파일러가 `cl_vm_alloc` 계열 할당자로 해제한다.
@@ -629,7 +629,7 @@ docs/build.md 는 `zig build test-trace` 라고 쓰지만 실제 이름은 `trac
 
 처음부터 끝까지 읽는 순서다. 괄호는 읽는 이유다.
 
-1. examples/libcyber/main.c(37줄) -> host_tool.c(103줄) -> bind_module.c(121줄). (embedding 의 최소 형태, 호스트 도구 패턴, 타입/전역 바인딩)
+1. examples/libcyber/main.c(37줄) -> host_tool.c(158줄) -> bind_module.c(121줄). (embedding 의 최소 형태, 호스트 도구 패턴, 타입/전역 바인딩)
 2. src/include/cyber.h:1-130(타입, enum, 호스트 함수 typedef), 172-250(BindFunc/BindType/Loader), 280-330(Config), 333-445(VM API), 452-530(Thread API). (3.1절 표로 먼저 훑고 주석을 읽는다)
 3. src/lib.zig:27-60(생성), 208-287(eval), 440-500(에러/resolver), 577-613(mod_add_*), 821-1000(상태 유지 테스트), 1189-1355(슬라이스/문자열 소유 테스트). (테스트가 사용 설명서다)
 4. src/vm.zig:132-197(init), 354-384(compile/resetVM), 398-415(local saves), 421-512(eval), 593-610(exec_bytecode).
@@ -680,13 +680,22 @@ core:148:5 panic_oob:  ->  core:1729:9 Array.@index_addr:  ->  eval:2:7 main:
 use os: CompileError: Failed to load module: os
 main: Success!
 body after main: Success!
+memory limit: panic: OutOfMemory          (2026-11-10 추가: 한도 8 MiB 를 넘긴 Array 성장)
+core:30:12 alloc[int]:  ->  core:1966:20 Array.ensure_cap:  ->  ...  ->  eval:3:3 main:
+My print: still alive
+after memory limit: Success!
 Live objects: 0
+VM memory: 1831 KiB, host blocks: 4289
+Host blocks after deinit: 0
 ```
 
 관찰 포인트.
 - `print` 가 `printer` 를 두 번 부르므로(본문, 개행) 예제는 길이 1 인 `\n` 호출을 건너뛴다.
 - panic 요약에 라이브러리 내부 프레임(`core:148 panic_oob`, `core:1729 Array.@index_addr`)이 나온다. core.cy 가 매 실행 컴파일되는 소스이기 때문에 스택 트레이스에 보인다.
 - `use os` 의 위치 줄이 두 번 출력된다(같은 줄이 두 리포트로 들어감). 내용은 같다.
+- 2026-11-10 부터 host_tool.c 는 `cl_vm_init` 대신 `cl_vm_init_mem` 으로 VM 을 만든다. `malloc` 위에 정렬을 맞추고 바이트 · 블록 수를 세는 함수 둘(`host_alloc`, `host_free`)이
+  VM 의 모든 메모리를 대고, `cl_vm_deinit` 뒤 블록 수가 0 인지 확인한다. 한도 턴은 `cl_vm_memory_used(vm) + 8 MiB` 로 한도를 걸고 끝없이 자라는 Array 가 `panic: OutOfMemory` 로
+  끝난 뒤 같은 VM 을 다시 쓴다(F-41, 7.4).
 - 이 세 예제는 `zig build lib-standalone-test` 가 그대로 실행한다. 이 세션에서 돌려 `Build Summary: 37/37 steps succeeded`, 세 프로그램 모두 `Live objects: 0` 을 확인했다.
 
 ### 5.2 에이전트 루프용 호스트 직접 만들기
@@ -1055,7 +1064,7 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
 | 재현 버그 | 첫 eval 이 컴파일 실패하면 다음 eval 에서 SIGSEGV/abort (7.3 의 1). 2026-11-08 수정 | 높음(호스트 프로세스 사망) |
 | 재현 버그 | `cl_vm_validate`/`cl_vm_compile` 가 VM 을 리셋하고 실패하면 VM 이 깨짐 (7.3 의 2). 2026-11-08 수정 | 높음 |
 | 재현 버그 | print/eprint 콜백의 첫 인자가 VM 포인터 (7.3 의 3). 2026-11-10 수정 | 중간 |
-| 한계 | 안전 모드 없음, 메모리 한도 없음, raw 포인터로 호스트 크래시 가능 (7.4) | 높음 |
+| 한계 | 안전 모드 없음, raw 포인터로 호스트 크래시 가능 (7.4). 메모리 한도는 2026-11-10 추가(`cl_vm_set_memory_limit`) | 높음 |
 | 문서 차이 | 헤더에 선언만 있고 구현이 없는 함수 3개, 시그니처가 다른 함수 1개 (7.2) | 중간 |
 
 ### 7.2 문서, 헤더, 코드의 차이
@@ -1111,8 +1120,13 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
 자원 제한.
 - 있음: `cl_vm_set_fuel`(검사점 = 루프 역방향 점프와 호출, vm.c:330-336), `cl_vm_interrupt`(다른 스레드에서 호출 가능). spawn 된 스레드도 fuel 을 물려받고 중단된다(lib.zig:1035-1117 테스트).
   시간 제한은 호스트의 타이머 스레드가 `cl_vm_interrupt` 를 부르는 방식이다.
-- 없음: 메모리 한도. `cl_vm_initx(CLAllocator)` 가 있지만 `CLAllocator` 는 Zig 의 `std.mem.Allocator`(`ptr` + `vtable`)와 같은 배치이고(capi.zig:32-38) vtable 함수들은 Zig 호출 규약
-  (`alloc(ctx, len, alignment, ret_addr)`, 슬라이스 값을 받는 `resize`/`remap`/`free`)이라 C 호스트가 현실적으로 채울 수 없다. 메모리 상한은 Zig 호스트이거나 프로세스 수준이다(코드 판독).
+- 있음(2026-11-10, F-41 수정 `b7fdf554` · `eee5bcdb`): 메모리 한도와 C 호스트용 메모리 함수.
+  `cl_vm_set_memory_limit(vm, bytes)` 는 VM 이 할당자로 쥔 전체 바이트(`cl_vm_memory_used`, 컴파일러 · 모듈 · 힙 · 스택. 첫 eval 뒤 약 2 MiB)에 한도를 건다. 스크립트에 N 바이트를 주려면
+  `cl_vm_memory_used(vm) + N` 이다. 스크립트가 힙이나 스택을 한도 너머로 키우면 `panic: OutOfMemory`(`CL_ERROR_PANIC`)이고, panic 이 힙 페이지와 커진 스택을 돌려주므로 같은 한도로 VM 을 계속 쓴다.
+  컴파일 단계와 호스트 함수의 할당은 세기만 하고 막지 않는다(`docs/decisions/project_memory_limit.md`).
+  `cl_vm_init_mem(CLMemFuncs)` 는 `ctx` + `alloc(ctx, size, align)` + `free(ctx, ptr, size, align)` 로 VM 을 만든다. 이전에는 `cl_vm_initx(CLAllocator)` 뿐이었는데 `CLAllocator` 가
+  Zig 의 `std.mem.Allocator`(`ptr` + `vtable`)와 같은 배치이고 vtable 함수들이 Zig 호출 규약이라 C 호스트가 채울 수 없었다(`docs/decisions/project_c_mem_funcs.md`).
+  `alloc` 이 `NULL` 을 돌려주는 것으로 상한을 걸지는 말 것: 컴파일 단계의 할당 실패는 정의된 동작이 아니다. 상한은 `cl_vm_set_memory_limit` 이다.
 - 없음: 호스트 함수 안에서 오래 막힌 호출을 끊는 수단, 호스트 함수에서 스크립트를 멈췄다가 나중에 재개하는 수단. `CL_AWAIT` 는 반환되지만 재개 API 는 주석 처리돼 있다(lib.zig:289-365).
 
 상태와 결과.

@@ -502,7 +502,8 @@ HeapPage = 102 x PoolObject (4080바이트)                allocator 블록 하�
 - 분기 기준은 `size <= 4 * 8`이고 한 곳이 아니다. `NEW` 명령(`vm.c:251`의 `allocObjectInit`), Zig의 `new_object_undef`(`heap.zig:1539`), 해제 쪽 `freeObject`(209)가 같은 기준을 쓴다.
   `NEW`의 크기 피연산자가 `u16`이라 한 번에 만드는 힙 객체가 65535바이트를 넘을 수 없다(코드 근거, 큰 구조체는 미실험).
 - allocator: CLI는 Debug가 아니고 wasm/MSVC가 아니면 mimalloc, Debug는 Zig의 `SafeAllocator`(`build.zig:436~448`, `cli.zig:686~740`). libcyber는 `cl_vm_init`에서 `std.heap.c_allocator`(libc malloc)를 쓰고(`lib.zig:28`),
-  `cl_vm_initx`로 호스트 할당자를 주입할 수 있다.
+  `cl_vm_initx`로 호스트 할당자를 주입할 수 있다. C 호스트는 `cl_vm_init_mem`(2026-11-10)으로 `alloc` · `free` 함수 둘을 준다. 어느 쪽이든 VM은 그 위에 바이트를 세는 래퍼
+  (`mem_account.zig`의 `MemAccount`)를 얹어 쓰고, `cl_vm_set_memory_limit`의 한도는 힙 · 스택이 자라는 지점(`Heap.reserve`, `growHeapPages`, `growStackAuto`)에서 검사한다(F-41).
 - 스레드마다 `Heap`이 따로 있고(`Thread.heap`) `rc` 증감은 비원자적 일반 연산이다(`vm.c:92~143`의 `head->rc -= 1`). 스레드 사이로 `^T`를 공유하지 않는다는 전제다. 자세한 것은 [07](07-coroutines-concurrency.md).
 
 `Array`/`Map`이 쓰는 원시 버퍼는 이 힙 객체가 아니다. `alloc(T, n)`은 `new_byte_buffer`(`heap.zig:1249`)로 가서 allocator에서 바로 받고, 포인터와 크기를 `Heap.buffers` 해시 맵에 등록한다.

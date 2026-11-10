@@ -88,4 +88,14 @@ test.eq(r16(0x0fff), (~r16(0)) >> r16(4))
 test.eq(r32(0), (r32(0xFFFFFFFF) + r32(2)) / r32(2))
 test.eq(r32(0x7FFFFFFF), (~r32(0)) >> r32(1))
 
+-- A wrapped value converts to a float as the wrapped value (F-84).
+wrapped := byte(200) + byte(100)
+test.eq(44.0, float(wrapped))
+test.eq(f32(44.0), f32(wrapped))
+wrapped16 := (~r16(0)) + r16(2)
+test.eq(1.0, float(wrapped16))
+wrapped32 := (~r32(0)) + r32(2)
+test.eq(1.0, float(wrapped32))
+test.eq(byte(44), wrapped)
+
 --cytest: pass

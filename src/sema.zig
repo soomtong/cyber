@@ -8514,7 +8514,15 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: Cstr) !ExprResult {
             return c.semaCallFuncSym1(func_sym, unary.child, child, node);
         },
         .bitwiseNot => {
-            const child = try c.semaExprTarget(unary.child, expr.target_t);
+            // Only an int or raw target reaches the operand. Another target (float) would convert
+            // the operand to a type that has no `~`.
+            var child_target: ?*cy.Type = null;
+            if (expr.target_t) |target_t| {
+                if (target_t.kind() == .int or target_t.kind() == .raw) {
+                    child_target = target_t;
+                }
+            }
+            const child = try c.semaExprTarget(unary.child, child_target);
 
             switch (child.type.id()) {
                 bt.R8,

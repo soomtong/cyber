@@ -631,7 +631,7 @@ fn (Int[]) `**`(e Self) -> Self:
             return  -1
         return 0
 
-    result := 1
+    result := Self(1)
     while:
         if e && 1 > 0:
             result *= b

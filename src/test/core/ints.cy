@@ -186,4 +186,36 @@ t.eq(i8(-56), narrow_a)
 t.eq(i8(2), narrow_b)
 t.eq(-56, int(narrow_a))
 
+-- Narrow ints convert to a float from their own sign bit (F-84).
+t.eq(-56.0, float(i8(100) + i8(100)))
+t.eq(-56.0, float(narrow_a))
+t.eq(-5536.0, float(i16(30000) + i16(30000)))
+t.eq(-294967296.0, float(i32(2000000000) + i32(2000000000)))
+t.eq(f32(-56.0), f32(narrow_a))
+t.eq(-28.0, float(narrow_a) / 2.0)
+t.eq(i8(-56), narrow_a)
+
+-- Narrow ints, power (F-85).
+t.eq(i8(8), i8(2) ** i8(3))
+t.eq(i8(-8), i8(-2) ** i8(3))
+t.eq(i8(0), i8(2) ** i8(-1))
+t.eq(i8(1), i8(1) ** i8(-1))
+t.eq(i8(-1), i8(-1) ** i8(-1))
+t.eq(i16(81), i16(3) ** i16(4))
+t.eq(i32(-27), i32(-3) ** i32(3))
+t.eq(i8(0), i8(2) ** i8(8))
+t.eq(1024, 2 ** 10)
+
+-- `~` with a float target applies to the int operand (F-86).
+not_x := 5
+t.eq(-6.0, float(~not_x))
+t.eq(-6.0, float(~5))
+var not_f float = ~not_x
+t.eq(-6.0, not_f)
+fn take_float(a float) -> float:
+    return a
+t.eq(-4.0, take_float(~3))
+var not_opt ?int = ~not_x
+t.eq(-6, not_opt.?)
+
 --cytest: pass

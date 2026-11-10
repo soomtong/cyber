@@ -402,6 +402,8 @@ a << b
 ~a
 ```
 
+When the place of a `~` expression expects a wider integer type, the operand is converted to that type before its bits are flipped: `var z r32 = ~r16(5)` is `0xfffffffa`. Assign the result to a variable first to flip the bits in the width of the operand: `n := ~r16(5)` is `0xfffa`. A `float` target converts the result: `float(~5)` is `-6.0`.
+
 ### Operator overloading.
 See [Custom types -> Operator methods](#operator-methods).
 

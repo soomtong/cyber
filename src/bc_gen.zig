@@ -1369,6 +1369,19 @@ fn genUnwrapNZ(c: *Chunk, expr: *ir.UnwrapNZ, cstr: Cstr, node: *ast.Node) !GenV
 fn gen_i2f(c: *Chunk, expr: *ir.UnOp2, cstr: Cstr, node: *ast.Node) !GenValue {
     const dst = try bc.selectReg(c, expr.base.type, cstr, node);
     const src = try genExpr(c, expr.expr, Cstr.localOrTemp());
+    // The upper bits of a narrow int register are undefined. Extend from the int's width first.
+    const src_t = expr.expr.type;
+    switch (src_t.kind()) {
+        .int => {
+            const bits = src_t.cast(.int).bits;
+            if (bits < 64) try push_sext(c, src.reg, src.reg, @intCast(bits), node);
+        },
+        .raw => {
+            const bits = src_t.cast(.raw).bits;
+            if (bits < 64) try push_zext(c, src.reg, src.reg, @intCast(bits), node);
+        },
+        else => {},
+    }
     if (expr.base.type.id() == bt.F64) {
         try c.pushCode(.i2f, &.{ dst.reg, src.reg}, node);
     } else {

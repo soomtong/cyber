@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.4-dev 767-a943661</div>
+    <div class="sub-title">v0.4.4-dev 769-2cd18a5</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1091,7 +1091,7 @@ strong {
 <li>Metaprogramming with templates, inline evaluation, and compiler hooks.</li>
 <li>Concurrency. Channels, futures, and <code>await</code> to synchronize green threads. Fibers and generators for cooperative coroutines.</li>
 <li>Compilation ahead-of-time to C or interpeted from its virtual machine.</li>
-<li>Sandbox mode that restricts the language to only safe constructs.</li>
+<li>Sandbox mode that restricts the language to only safe constructs. <em>Planned Feature</em></li>
 <li>Introspection. Much of the internals such as the builtin types and runtime is written in Cyber and can be inspected from the source code or the <a href="api.html" title="">API docs</a>.</li>
 </ul>
 <p>These docs provide a reference manual for the language. It can be read in order or browsed from the navigation. Features that are marked <code>Incomplete</code>, <code>Planned</code>, or <code>TBD</code> have not been completed at the time of writing.</p>
@@ -1245,7 +1245,7 @@ var b float = 'hello'
 </code></pre>
 <a href="#syntax">^topic</a>
 <h3 id="global-variables"><code>global</code> variables. <a href="#global-variables">#</a></h3>
-<p>Global variables live until the end of the program and can be accessed from any context (unless they have a private modifier). Globals are considered <em>unsafe</em> and are forbidden in sandbox mode.</p>
+<p>Global variables live until the end of the program and can be accessed from any context (unless they have a private modifier). Globals are considered <em>unsafe</em>. A sandbox mode that forbids them is planned.</p>
 <p>Global variables are declared with <code>global</code> and require a type specifier:</p>
 <pre><code class="language-cy">global a int = 123
 
@@ -1944,7 +1944,7 @@ f = i
 <p>Implicit casts avoid lossy conversions (with the exception of int to float)
 and they never produce runtime errors.
 The following implicit casts are supported:</p>
-<table><thead><tr><th>Source</th><th>Target</th><th>Behavior</th></tr></thead><tbody><tr><td><code>Int[W]</code></td><td><code>Raw[W]</code></td><td>reinterpret</td></tr><tr><td><code>Int[X]</code></td><td><code>Raw[W] where X < W</code></td><td>zero extension</td></tr><tr><td><code>Raw[X]</code></td><td><code>Raw[W] where X < W</code></td><td>zero extension</td></tr><tr><td><code>Raw[W]</code></td><td><code>Int[W]</code></td><td>reinterpret</td></tr><tr><td><code>Raw[X]</code></td><td><code>Int[W] where X < W</code></td><td>zero extension</td></tr><tr><td><code>Int[X]</code></td><td><code>Int[W] where X < W</code></td><td>sign extension</td></tr><tr><td><code>Int[X]</code></td><td><code>Float[W]</code></td><td>conversion</td></tr><tr><td><code>Raw[X]</code></td><td><code>Float[W]</code></td><td>conversion</td></tr><tr><td><code>f32</code></td><td><code>f64</code></td><td>conversion</td></tr><tr><td><code>T</code></td><td><code>?T</code></td><td>wrap</td></tr><tr><td><code>T</code></td><td><code>!T</code></td><td>wrap</td></tr><tr><td><code>error</code></td><td><code>!T</code></td><td>wrap</td></tr><tr><td><code>T</code></td><td><code>!?T</code></td><td>wrap</td></tr><tr><td><code>^T</code></td><td><code>&T</code></td><td>reinterpret</td></tr><tr><td><code>^T</code></td><td><code>Object</code></td><td>reinterpret</td></tr><tr><td><code>FuncPtr[Sig]</code></td><td><code>Func[Sig]</code></td><td>wrap</td></tr><tr><td><code>&S</code></td><td><code>&Dyn[T] where S implements T</code></td><td>wrap</td></tr><tr><td><code>^S</code></td><td><code>^Dyn[T] where S implements T</code></td><td>wrap</td></tr><tr><td><code>Ptr[T]</code></td><td><code>Ptr[void]</code></td><td>reinterpret</td></tr><tr><td><code>&T</code></td><td><code>Ptr[void]</code></td><td>reinterpret</td></tr><tr><td><code>Ptr[void]</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>&[N]T</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>&[..N]T</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>Ptr[Int[W]]</code></td><td><code>Ptr[Raw[W]]</code></td><td>reinterpret</td></tr><tr><td><code>Ptr[Raw[W]]</code></td><td><code>Ptr[Int[W]]</code></td><td>reinterpret</td></tr><tr><td><code>&T</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>&Int[W]</code></td><td><code>Ptr[Raw[W]]</code></td><td>reinterpret</td></tr><tr><td><code>&Raw[W]</code></td><td><code>Ptr[Int[W]]</code></td><td>reinterpret</td></tr></tbody></table><a href="#basic-types">^topic</a>
+<table><thead><tr><th>Source</th><th>Target</th><th>Behavior</th></tr></thead><tbody><tr><td><code>Int[W]</code></td><td><code>Raw[W]</code></td><td>reinterpret</td></tr><tr><td><code>Int[X]</code></td><td><code>Raw[W] where X < W</code></td><td>zero extension</td></tr><tr><td><code>Raw[X]</code></td><td><code>Raw[W] where X < W</code></td><td>zero extension</td></tr><tr><td><code>Raw[W]</code></td><td><code>Int[W]</code></td><td>reinterpret</td></tr><tr><td><code>Raw[X]</code></td><td><code>Int[W] where X < W</code></td><td>zero extension</td></tr><tr><td><code>Int[X]</code></td><td><code>Int[W] where X < W</code></td><td>sign extension</td></tr><tr><td><code>Int[X]</code></td><td><code>Float[W]</code></td><td>conversion</td></tr><tr><td><code>Raw[X]</code></td><td><code>Float[W]</code></td><td>conversion</td></tr><tr><td><code>f32</code></td><td><code>f64</code></td><td>conversion</td></tr><tr><td><code>T</code></td><td><code>?T</code></td><td>wrap</td></tr><tr><td><code>T</code></td><td><code>!T</code></td><td>wrap</td></tr><tr><td><code>error</code></td><td><code>!T</code></td><td>wrap</td></tr><tr><td><code>T</code></td><td><code>!?T</code></td><td>wrap</td></tr><tr><td><code>^T</code></td><td><code>&T</code></td><td>reinterpret</td></tr><tr><td><code>FuncPtr[Sig]</code></td><td><code>Func[Sig]</code></td><td>wrap</td></tr><tr><td><code>&S</code></td><td><code>&Dyn[T] where S implements T</code></td><td>wrap</td></tr><tr><td><code>^S</code></td><td><code>^Dyn[T] where S implements T</code></td><td>wrap</td></tr><tr><td><code>Ptr[T]</code></td><td><code>Ptr[void]</code></td><td>reinterpret</td></tr><tr><td><code>&T</code></td><td><code>Ptr[void]</code></td><td>reinterpret</td></tr><tr><td><code>Ptr[void]</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>&[N]T</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>&[..N]T</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>Ptr[Int[W]]</code></td><td><code>Ptr[Raw[W]]</code></td><td>reinterpret</td></tr><tr><td><code>Ptr[Raw[W]]</code></td><td><code>Ptr[Int[W]]</code></td><td>reinterpret</td></tr><tr><td><code>&T</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>&Int[W]</code></td><td><code>Ptr[Raw[W]]</code></td><td>reinterpret</td></tr><tr><td><code>&Raw[W]</code></td><td><code>Ptr[Int[W]]</code></td><td>reinterpret</td></tr></tbody></table><a href="#basic-types">^topic</a>
 <h2 id="type-casts">Type casts. <a href="#type-casts">#</a></h2>
 <p>The <code>as</code> operator casts a value to a supported target type:</p>
 <pre><code class="language-cy">var i int = 127
@@ -2082,7 +2082,7 @@ n := Node{val=123, next=none}
 </code></pre>
 <a href="#custom-types">^topic</a>
 <h3 id="type-embedding">Type embedding. <a href="#type-embedding">#</a></h3>
-<p>Type embedding facilitates type composition by using the namespace of a child field's type: <em>Planned Feature</em></p>
+<p>Type embedding facilitates type composition by using the namespace of a child field's type:</p>
 <pre><code class="language-cy">type Base:
     a int
 
@@ -2978,7 +2978,7 @@ print(add(1.0, 2.0))    --> 3.0
 </tr></table>
 <p><a href="#table-of-contents" title="">^top</a></p>
 <p>Cyber provides memory safety by default by providing structured memory semantics.
-Manual memory is also supported but it's forbidden in safe mode.</p>
+Manual memory is also supported. A safe mode that forbids it is planned. An embedding host can already reject raw pointers in scripts with the <code>deny_raw_ptrs</code> compile option.</p>
 <h2 id="structured-memory">Structured memory. <a href="#structured-memory">#</a></h2>
 <p>Cyber supports value ownership, borrowing, and deinitializers.
 These concepts allow a value to be cleaned up automatically during execution because their lifetimes can be determined from analyzing the program's control flow.</p>
@@ -3362,7 +3362,7 @@ For example, passing a reference to a function call doesn't need a retain since 
 </blockquote><a href="#memory">^topic</a>
 <h3 id="cycle-detection">Cycle detection. <a href="#cycle-detection">#</a></h3>
 <p>When shared references form a reference cycle, it's considered a runtime error.
-In safe mode, cycle detection is dispatched at the end of a thread.
+Cycle detection is dispatched at the end of a thread.
 The thread will panic if a cycle is detected which subsequently begins the runtime's <a href="#deinitializers" title="">fatal deinitialization procedure</a>.</p>
 <p>When enabled, the cycle detector can also be invoked manually <code>@check_cycles</code>: <em>TBD</em></p>
 <pre><code class="language-cy">fn foo():
@@ -3591,15 +3591,21 @@ fn fib(n int) -> int:
 <pre><code class="language-cy">task := spawn(|_| -> int, {}):
     -- Do computation.
 </code></pre>
-<p><code>spawn</code> returns a <code>Result[Future[T]]</code> where <code>T</code> is the return type of the entry function. If the runtime could not dispatch the thread, a panic is raised.
-If the thread was dispatched, the wrapped <code>Future</code> contains the asynchronous result of the new thread.</p>
+<p><code>spawn</code> returns a <code>Future[T]</code> where <code>T</code> is the return type of the entry function. If the runtime could not dispatch the thread, a panic is raised.
+The <code>Future</code> contains the asynchronous result of the new thread.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="sendable-values"><code>Sendable</code> values. <a href="#sendable-values">#</a></h3>
 <p>Values that can be transferred from one thread to another must be types that implement <code>Sendable</code>.</p>
-<p>Here is a list of common types that implement <code>Sendable</code>:</p>
+<p>The arguments of <code>spawn</code> and the return value of the entry function are sent. These types can be sent:</p>
 <ul>
-<li>Primitives types: <code>int</code>, <code>byte</code>, <code>bool</code></li>
-<li><code>str</code></li>
+<li>Integers of any width: <code>int</code>, <code>i8</code>, <code>i16</code>, <code>i32</code>, <code>byte</code>, <code>r16</code>, <code>r32</code>, <code>r64</code>.</li>
+<li><code>bool</code>, <code>float</code>, <code>f32</code>, <code>symbol</code>, <code>error</code> and enums.</li>
+<li><code>str</code>. The string is copied to the receiving thread.</li>
+<li>A struct that declares a <code>@send</code> method.</li>
+</ul>
+<p>Sending another type is a compile error: <code>Expected sendable: []int</code>.</p>
+<p>These types are planned to be <code>Sendable</code>: <em>Planned Feature</em></p>
+<ul>
 <li><code>?T</code> if <code>T</code> is <code>Sendable</code></li>
 <li><code>!T</code> if <code>T</code> is <code>Sendable</code></li>
 <li><code>[]T</code> if <code>T</code> is <code>Sendable</code>. <code>[]T</code> is cloned when sending.</li>
@@ -3671,6 +3677,7 @@ The compiler generates pointer layouts that tells the runtime where pointer valu
 This abstraction allows the current thread to continue execution without waiting for the completion of the <code>Future</code>.</p>
 <p>Futures can represent asynchronous work that is run in parallel or on a single thread.
 I/O bound work can be delegated to the operating system and CPU bound work can be run across multiple threads. A <code>Future</code> is not concerned with how the work is accomplished.</p>
+<p>The <code>aio</code> module in the examples below does not exist yet. <em>Planned Feature</em></p>
 <p>If an API function is meant to do work asynchronously, it would return a <code>Future</code>:</p>
 <pre><code class="language-cy">use aio
 
@@ -3687,10 +3694,7 @@ print(work)
 </code></pre>
 <p>Futures can be created with a completed value:</p>
 <pre><code class="language-cy">work := Future.complete(100)
-print(f)
---> Future[int]
-
-print(f.get().?)
+print(work.await())
 --> 100
 </code></pre>
 <a href="#concurrency">^topic</a>
@@ -4003,7 +4007,14 @@ m := IntMap[str, my_hash]{}
 <p><code>EvalInt</code> can be expanded to different integer types. Currently, it has the extent of an <code>int</code> type.</p>
 <a href="#metaprogramming">^topic</a>
 <h2 id="attributes">Attributes. <a href="#attributes">#</a></h2>
-<p><em>TBD</em></p>
+<p>An attribute annotates the declaration that follows it. It is written as <code>#[name]</code> or <code>#[name='value']</code>, on the line before the declaration or on the same line:</p>
+<pre><code class="language-cy">#[generator]
+fn count() -> int:
+    yield 1
+
+#[extern] global errno Ptr[int]
+</code></pre>
+<table><thead><tr><th>Attribute</th><th>Applies to</th><th>Purpose</th></tr></thead><tbody><tr><td><code>#[generator]</code></td><td>function</td><td>The function is a <a href="#generators" title="">generator</a>.</td></tr><tr><td><code>#[inline]</code></td><td>function</td><td>Calls are inlined in bytecode with a larger size limit.</td></tr><tr><td><code>#[bind]</code></td><td>function, type, global</td><td>The declaration is provided by the host or by a compiler hook. See <a href="#bind-hooks" title=""><code>#[bind]</code> hooks</a>.</td></tr><tr><td><code>#[extern]</code></td><td>function, global</td><td>The declaration is a C symbol. <code>#[extern='name']</code> gives the symbol name. See <a href="#ffi" title="">FFI</a>.</td></tr><tr><td><code>#[unsafe]</code></td><td>function</td><td>The function is exempt from checks on borrow containers. Used by the builtin modules.</td></tr><tr><td><code>#[consteval]</code></td><td>function</td><td>The function is only evaluated at compile-time. Used by the builtin modules.</td></tr><tr><td><code>#[reserve]</code></td><td>function</td><td>Reserves the name for a declaration that the compiler provides. Used by the builtin modules.</td></tr><tr><td><code>#[cond]</code>, <code>#[call]</code></td><td></td><td>Reserved.</td></tr></tbody></table><p>An unknown attribute name is a parse error: <code>Unknown attribute.</code></p>
 <a href="#metaprogramming">^topic</a>
 <h1 id="modules">Modules. <a href="#modules">#</a></h1>
 <table><tr>

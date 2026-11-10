@@ -151,4 +151,39 @@ t.eq(r64(0xffffffffffffffff), full)
 var top i64 = 9223372036854775807
 t.eq(9223372036854775807, top)
 
+-- Narrow ints divide from their own sign bit.
+t.eq(i8(-4), i8(-8) / i8(2))
+t.eq(i8(-3), i8(-7) % i8(4))
+t.eq(i16(-4), i16(-8) / i16(2))
+t.eq(i16(-3), i16(-7) % i16(4))
+t.eq(i32(-4), i32(-8) / i32(2))
+t.eq(i32(-3), i32(-7) % i32(4))
+t.eq(i32(4), i32(-8) / i32(-2))
+
+-- Narrow ints, a wrapped sum divides as the wrapped value.
+t.eq(i8(-28), (i8(100) + i8(100)) / i8(2))
+t.eq(i8(-2), (i8(100) + i8(100)) % i8(3))
+t.eq(i32(-1), (i32.max + i32(1)) / i32.max)
+
+-- Narrow ints, `>>` shifts in zeros from their own width.
+t.eq(i8(124), i8(-8) >> i8(1))
+t.eq(i16(32764), i16(-8) >> i16(1))
+t.eq(i32(2147483644), i32(-8) >> i32(1))
+t.eq(i8(100), (i8(100) + i8(100)) >> i8(1))
+t.eq(i8(15), (i8(-1) << i8(4)) >> i8(4))
+
+-- Narrow ints, unsigned division.
+t.eq(i32(2147483644), i32(-8).udiv(i32(2)))
+t.eq(i32(15), i32(-1).umod(i32(16)))
+t.eq(i8(100), (i8(100) + i8(100)).udiv(i8(2)))
+
+-- Narrow ints, the operands keep their values after a division or shift.
+narrow_a := i8(100) + i8(100)
+narrow_b := i8(2)
+t.eq(i8(-28), narrow_a / narrow_b)
+t.eq(i8(100), narrow_a >> i8(1))
+t.eq(i8(-56), narrow_a)
+t.eq(i8(2), narrow_b)
+t.eq(-56, int(narrow_a))
+
 --cytest: pass

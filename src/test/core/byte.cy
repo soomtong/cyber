@@ -79,4 +79,13 @@ test.eq(97, aa)
 var opt_aa ?byte = 'a'
 test.eq(97, opt_aa.?)
 
+-- A wrapped value divides and shifts as the wrapped value.
+test.eq(byte(22), (byte(200) + byte(100)) / byte(2))
+test.eq(byte(2), (byte(200) + byte(100)) % byte(7))
+test.eq(byte(22), (byte(200) + byte(100)) >> byte(1))
+test.eq(byte(15), (~byte(0)) >> byte(4))
+test.eq(r16(0x0fff), (~r16(0)) >> r16(4))
+test.eq(r32(0), (r32(0xFFFFFFFF) + r32(2)) / r32(2))
+test.eq(r32(0x7FFFFFFF), (~r32(0)) >> r32(1))
+
 --cytest: pass

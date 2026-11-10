@@ -533,7 +533,7 @@ fn genExpr(c: *Chunk, expr: *ir.Expr, cstr: Cstr) anyerror!GenValue {
         .const32            => gen_const32(c, expr.cast(.const32), cstr, node),
         .const64            => gen_const64(c, expr.cast(.const64), cstr, node),
         .deref              => gen_deref(c, expr.cast(.deref), cstr, node),
-        .div                => genBinOp2(c, expr.cast(.div), .div, cstr, node),
+        .div                => gen_width_binop(c, expr.cast(.div), .div, false, cstr, node),
         .f2i                => gen_f2i(c, expr.cast(.f2i), cstr, node),
         .fabs               => gen_fabs(c, expr.cast(.fabs), cstr, node),
         .fadd               => gen_fadd(c, expr.cast(.fadd), cstr, node),
@@ -550,8 +550,8 @@ fn genExpr(c: *Chunk, expr: *ir.Expr, cstr: Cstr) anyerror!GenValue {
         .gen_next           => gen_gen_next(c, expr.cast(.gen_next), cstr, node),
         .global             => gen_global(c, expr.cast(.global), cstr, node),
         .i2f                => gen_i2f(c, expr.cast(.i2f), cstr, node),
-        .idiv               => genBinOp2(c, expr.cast(.idiv), .idiv, cstr, node),
-        .imod               => genBinOp2(c, expr.cast(.imod), .imod, cstr, node),
+        .idiv               => gen_width_binop(c, expr.cast(.idiv), .idiv, true, cstr, node),
+        .imod               => gen_width_binop(c, expr.cast(.imod), .imod, true, cstr, node),
         .imul               => genBinOp2(c, expr.cast(.imul), .imul, cstr, node),
         .init               => gen_init(c, expr.cast(.init), cstr, node),
         .init_case          => gen_init_case(c, expr.cast(.init_case), cstr, node),
@@ -561,8 +561,8 @@ fn genExpr(c: *Chunk, expr: *ir.Expr, cstr: Cstr) anyerror!GenValue {
         .lift               => gen_lift(c, expr.cast(.lift), cstr, node),
         .local              => gen_local(c, expr.cast(.local), cstr, node),
         .lsl                => genBinOp2(c, expr.cast(.lsl), .lsl, cstr, node),
-        .lsr                => genBinOp2(c, expr.cast(.lsr), .lsr, cstr, node),
-        .mod                => genBinOp2(c, expr.cast(.mod), .mod, cstr, node),
+        .lsr                => gen_width_binop(c, expr.cast(.lsr), .lsr, false, cstr, node),
+        .mod                => gen_width_binop(c, expr.cast(.mod), .mod, false, cstr, node),
         .mul                => genBinOp2(c, expr.cast(.mul), .mul, cstr, node),
         .neg                => genUnOp2(c, expr.cast(.neg), .neg, cstr, node),
         .not                => genUnOp2(c, expr.cast(.not), .not, cstr, node),
@@ -2424,6 +2424,33 @@ fn genBinOp2(c: *Chunk, expr: *ir.BinOp2, op: cy.OpCode, cstr: Cstr, node: *ast.
     const dst = try bc.selectReg(c, expr.base.type, cstr, node);
     const leftv = try genExpr(c, expr.left, Cstr.localOrTemp());
     const rightv = try genExpr(c, expr.right, Cstr.localOrTemp());
+    try pushInlineBinExpr(c, op, dst, leftv.reg, rightv.reg, node);
+    try pop_temp_value(c, rightv, node);
+    try pop_temp_value(c, leftv, node);
+    return dst;
+}
+
+/// A binary op whose result depends on the bits above the operand's width: division, remainder and
+/// logical shift right. The upper bits of a narrow int register are undefined (`trunc` and a wrapped
+/// `add` leave them as is), so both operands are extended in place first, like `genCompare`.
+fn gen_width_binop(c: *Chunk, expr: *ir.BinOp2, op: cy.OpCode, signed: bool, cstr: Cstr, node: *ast.Node) !GenValue {
+    const bits: u32 = switch (expr.left.type.kind()) {
+        .int => expr.left.type.cast(.int).bits,
+        .raw => expr.left.type.cast(.raw).bits,
+        else => 64,
+    };
+    const dst = try bc.selectReg(c, expr.base.type, cstr, node);
+    const leftv = try genExpr(c, expr.left, Cstr.localOrTemp());
+    const rightv = try genExpr(c, expr.right, Cstr.localOrTemp());
+    if (bits < 64) {
+        if (signed) {
+            try push_sext(c, leftv.reg, leftv.reg, @intCast(bits), node);
+            try push_sext(c, rightv.reg, rightv.reg, @intCast(bits), node);
+        } else {
+            try push_zext(c, leftv.reg, leftv.reg, @intCast(bits), node);
+            try push_zext(c, rightv.reg, rightv.reg, @intCast(bits), node);
+        }
+    }
     try pushInlineBinExpr(c, op, dst, leftv.reg, rightv.reg, node);
     try pop_temp_value(c, rightv, node);
     try pop_temp_value(c, leftv, node);

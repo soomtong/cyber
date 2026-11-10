@@ -36,8 +36,5 @@ for w in $wasm_tests; do
   n=$((n+1))
 done
 run 13-cli-safe          zig build cli -Doptimize=ReleaseSafe
-if ! git diff --quiet -- src/test/assets/write.txt; then
-  echo "note: the tests changed src/test/assets/write.txt. Restore it: git checkout -- src/test/assets/write.txt"
-fi
 if [ $fail -eq 0 ]; then echo "DONE all steps rc=0"; else echo "FAILED see $L"; fi
 exit $fail

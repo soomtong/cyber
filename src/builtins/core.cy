@@ -1454,6 +1454,14 @@ fn (&Slice[]) next(idx &int) -> ?T:
     idx.* += 1
     return val
 
+--| Returns a borrow of the next element. `for s |&elem|` iterates with this method and copies no element.
+fn (scope &Slice[]) next_borrow(idx &int) -> scope ?&T:
+    i := idx.*
+    if i >= self._len:
+        return none
+    idx.* = i + 1
+    return &self[i]
+
 --| Removes an element at index `idx`.
 fn (&Slice[]) remove(idx int) -> Self:
     cur := self.clone_on_resize(0)
@@ -1792,7 +1800,12 @@ fn Array[] :: @init_sequence(init [&]T) -> Self:
         }
     cap := compute_new_cap(0, init.length)
     buf := alloc(T, cap).ptr
-    buf[0..init.length].init(as init)
+    #if type.is_copyable(T):
+        buf[0..init.length].init(as init)
+    #else:
+        -- The compiler passes the elements of the literal and does not destruct them after this call.
+        -- Move them: the bytes carry the ownership.
+        @memcpy(as buf, as init.base, init.length * type.size(T))
     return {
         buf    = buf,
         length = init.length,
@@ -1800,6 +1813,7 @@ fn Array[] :: @init_sequence(init [&]T) -> Self:
     }
 
 --| Creates an array with initial length and capacity of `n` and values set to `val`.
+#[cond=type.is_copyable(T)]
 fn Array[] :: @init(n int, val T) -> Self:
     buf := alloc(T, n).ptr
     buf[0..n].init(val)
@@ -1845,7 +1859,11 @@ fn (&Array[]) @index(idx int) -> T:
 fn (&Array[]) @set_index(idx int, val T):
     if (as[r64] idx) >= (as[r64] self.length):
         panic_oob(idx)
-    self.buf[idx] = val
+    #if type.is_copyable(T):
+        self.buf[idx] = val
+    #else:
+        -- The old element is destructed and the new value is moved in.
+        self.buf[idx] = move val
 
 fn (scope &Array[]) span() -> scope [&]T:
     return self[..]
@@ -1878,13 +1896,19 @@ fn (scope &Array[]) @slice(start int, end int) -> scope [&]T:
 
 --| Alias for `append`.
 fn (&&Array[]) `<<`(val T):
-    Self.append[0](self, val)
+    #if type.is_copyable(T):
+        Self.append[0](self, move val)
+    #else:
+        -- The overloads that copy do not exist for a `NoCopy` element.
+        Self.append(self, move val)
 
 --| Alias for `append`.
+#[cond=type.is_copyable(T)]
 fn (&&Array[]) `<<`(span [&]T):
     Self.append[1](self, span)
 
 --| Alias for `append`.
+#[cond=type.is_copyable(T)]
 fn (&&Array[]) `<<`(arr AsSpan[T]):
     Self.append[2](self, move arr)
 
@@ -1904,6 +1928,7 @@ fn (&&Array[]) append(val T):
     self.length += 1
 
 --| Appends the elements of a span to the end of this array.
+#[cond=type.is_copyable(T)]
 fn (&&Array[]) append(span [&]T):
     if span.len() == 0:
         return
@@ -1912,6 +1937,7 @@ fn (&&Array[]) append(span [&]T):
     self.length += span.length
 
 --| Appends the elements of a `AsSpan` to the end of this array.
+#[cond=type.is_copyable(T)]
 fn (&&Array[]) append(arr AsSpan[T]):
     self.append(arr.span())
 
@@ -1921,6 +1947,7 @@ fn (&Array[]) cap() -> int:
 fn (&&Array[]) clear():
     self.size_down(0)
 
+#[cond=type.is_copyable(T)]
 fn (&Array[]) clone() -> Self:
     if self.length == 0:
         return {
@@ -1936,6 +1963,7 @@ fn (&Array[]) clone() -> Self:
         header = self.length,
     }
 
+#[cond=type.is_copyable(T)]
 fn (&Array[]) contains(needle T) -> bool:
     return self[..].contains(needle)
 
@@ -1984,6 +2012,7 @@ fn (&&Array[]) ensureUnusedCap(unused int):
         self.ensure_cap(cap + 1)
 
 --| Returns the first index of `needle` in the array or `none` if not found.
+#[cond=type.is_copyable(T)]
 fn (&Array[]) index(needle T) -> ?int:
     return self[..].index(needle)
 
@@ -2021,6 +2050,7 @@ fn (&Array[]) join(sep str) -> str:
         res += sep + str(self.buf[i])
     return res
 
+#[cond=type.is_copyable(T)]
 fn (&Array[]) last() -> T:
     return self[self.length-1]
 
@@ -2047,6 +2077,14 @@ fn (&Array[]) next(idx &int) -> ?T:
     idx.* = i + 1
     return val
 
+--| Returns a borrow of the next element. `for a |&elem|` iterates with this method and copies no element.
+fn (scope &Array[]) next_borrow(idx &int) -> scope ?&T:
+    i := idx.*
+    if (as[r64] i) >= (as[r64] self.length):
+        return none
+    idx.* = i + 1
+    return &self[i]
+
 --| Removes an element at index `idx`.
 fn (&&Array[]) remove(idx int):
     @destruct(T, self.buf + idx)
@@ -2070,6 +2108,7 @@ fn (&&Array[]) size_down(new_len int):
 
 --| Increases the size of the array to `new_len` elements. If the new size is bigger, `init` values
 --| are appended to the array.
+#[cond=type.is_copyable(T)]
 fn (&&Array[]) size_up(new_len int, init T):
     if new_len.ult(self.length):
         panic('Invalid argument.')
@@ -2082,6 +2121,7 @@ fn (&&Array[]) size_up(new_len int, init T):
     self.buf[self.length..new_len].init(init)
     self.length = new_len
 
+#[cond=type.is_copyable(T)]
 fn (&Array[]) setLast(val T) -> void:
     self[self.length-1] = val
 

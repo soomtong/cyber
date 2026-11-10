@@ -85,6 +85,18 @@
   `#[cond=type.is_copyable(T)] fn (&Box[]) dup() -> T`는 ``Could not find the symbol `T`.``였다. 조건이 거짓인 인스턴스에는
   그 메서드가 없다(``Can not find the symbol `dup` in `Box[R]`.``). 같은 이름의 오버로드 가운데 첫 선언이 빠져도 뒤의 선언은
   남는다(이전에는 템플릿 인스턴스에서 첫 선언이 빠지면 이름 전체가 사라졌다). `NoCopy` 원소 컨테이너(F-26)의 준비 단계다.
+- (F-26) `Array`가 복사할 수 없는 원소를 담는다. `with NoCopy` 타입, `NoCopy` 멤버를 가진 struct, `Array` 자신
+  (`Array[Array[int]]`)이 원소가 될 수 있다. 이전에는 `Array[R]{}`부터 core.cy 안의 `Cannot copy` 오류였다.
+  규칙은 다른 곳과 같다. 넣을 때는 옮긴다: `a.append(R{id=1})`, `a << R{id=2}`, `Array[R]{R{id=1}, move x}`, `a[0] = R{id=5}`
+  (옛 원소는 파괴된다). 읽을 때는 빌린다: `a[1].id`, `r := &a[0]`. `x := a[0]`과 `for a |r|`는 복사라 컴파일 오류다.
+  원소마다 `@deinit`은 한 번 돈다. 원소를 복사하는 메서드(`clone` · `last` · `contains` · `index` · `size_up` · `setLast` ·
+  `Array[R](n, val)` · span을 붙이는 `append` · `<<`)는 이런 배열에 없다(``Can not find the symbol `last` in `Array[R]`.``).
+  `Slice` · `Map`의 원소는 아직 안 된다(`docs/decisions/project_array_nocopy_elem.md`).
+- 빌림 순회 `for a |&elem|`을 추가했다. `elem`은 원소의 빌림(`&T`)이고 원소를 복사하지 않는다. 인덱스와 함께는
+  `for a |i, &elem|`. `Array`와 `Slice`가 지원한다(`next_borrow(idx &int) -> scope ?&T` 메서드). 복사할 수 있는 원소에도 쓸 수 있고,
+  `@deinit`이 있는 원소는 `for a |elem|`과 달리 순회마다 복사 · 파괴가 없다. 순회 중에는 배열을 고칠 수 없다
+  (`Expected exclusive access.`). `next_borrow`가 없는 타입은
+  `` `Map[str, int]` can not be iterated by borrow. It has no `next_borrow` method. ``
 
 ## 임베딩 API
 

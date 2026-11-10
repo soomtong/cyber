@@ -168,6 +168,11 @@ fn test_memory(run: *Runner) void {
     run.case("memory/lift_borrow_option_error.cy");
     run.case("memory/borrow_scope_release.cy");
     run.case("memory/array_append_move.cy");
+    run.case("memory/array_nocopy_elem.cy");
+    run.case("memory/array_nocopy_index_copy_error.cy");
+    run.case("memory/array_nocopy_for_copy_error.cy");
+    run.case("memory/array_nocopy_last_error.cy");
+    run.case("memory/array_nocopy_literal_var_error.cy");
     run.case("memory/borrow_outlive_error.cy");
     run.case("memory/borrow_while_exclusive_error.cy");
     run.case("memory/exclusive_borrow_arg_conflict_error.cy");
@@ -458,6 +463,8 @@ fn test_vars(run: *Runner) void {
 fn test_control_flow(run: *Runner) void {
     run.case("control_flow/for_iter.cy");
     run.case("control_flow/for_iter_unsupported_error.cy");
+    run.case("control_flow/for_iter_borrow_unsupported_error.cy");
+    run.case("control_flow/for_iter_borrow_mutate_error.cy");
     run.case("control_flow/for_range.cy");
     run.case("control_flow/if_expr.cy");
     run.case("control_flow/if_expr_error.cy");

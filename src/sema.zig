@@ -638,7 +638,26 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
                         }
                     }; 
 
-                    const next_sym = try c.accessResolvedSymOrFail(iterable_init.type, "next", iterable_n);
+                    // `for a |&r|` iterates by borrow: `next_borrow` returns `?&T` and no element is copied.
+                    var each_n = stmt.each;
+                    var next_name: []const u8 = "next";
+                    if (stmt.each) |each| {
+                        if (each.type() == .borrow) {
+                            const child = each.cast(.borrow).child;
+                            if (child.type() != .ident) {
+                                return c.reportError("Expected a variable name after `&`.", child);
+                            }
+                            each_n = child;
+                            next_name = "next_borrow";
+                            const iterable_sym = iterable_init.type.sym();
+                            if ((try c.getResolvedSym(@ptrCast(iterable_sym), next_name, iterable_n)) == null) {
+                                const type_name = try c.sema.allocTypeName(iterable_init.type);
+                                defer c.alloc.free(type_name);
+                                return c.reportErrorFmt("`{}` can not be iterated by borrow. It has no `next_borrow` method.", &.{v(type_name)}, each);
+                            }
+                        }
+                    }
+                    const next_sym = try c.accessResolvedSymOrFail(iterable_init.type, next_name, iterable_n);
                     func_sym = try requireFuncSym(c, next_sym, iterable_n);
                     const args = [2]sema_func.Argument{
                         sema_func.Argument.initReceiver(iterable_n, iterable),
@@ -651,7 +670,7 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
                         .counterv = counterv,
                         .outer = outer,
                     };
-                    _ = try semaIfUnwrapBlock2(c, next, node, stmt.each, S.body, &closure_data, outer, true, @ptrCast(stmt));
+                    _ = try semaIfUnwrapBlock2(c, next, node, each_n, S.body, &closure_data, outer, true, @ptrCast(stmt));
                 }
                 const block = try popBlock(c);
                 _ = try c.ir.pushStmt(.loop_block, node, .{
@@ -9378,7 +9397,13 @@ fn sema_call_init_span(c: *cy.Chunk, init: *cy.sym.FuncSym, span_t: *cy.Type, bo
     });
     const borrow = ExprResult.init2(addr_of);
     const init_span = try sema_span(c, span_t, borrow, @intCast(args.len), node);
-    return c.semaCallFuncSym1(init, node, init_span, node);
+    const res = try c.semaCallFuncSym1(init, node, init_span, node);
+    if (!elem_t.is_copyable()) {
+        // Elements that can not be copied are moved. The initializer takes the bytes of the elements
+        // (`@memcpy`), so the temporary vector is dead after the call and its elements are not destructed.
+        c.varStack.items[array_var.id].type = .dead;
+    }
+    return res;
 }
 
 fn semaInitRecord(c: *cy.Chunk, init_pairs: *cy.Sym, init_n: *ast.InitLit) !ExprResult {

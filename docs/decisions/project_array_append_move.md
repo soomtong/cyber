@@ -57,5 +57,6 @@ rvalue를 넘겨도 `@deinit`이 삽입마다 한 번(임시), 성장 때 옛 �
   붙이면 `append(val T)`는 `NoCopy` 원소에서도 컴파일된다(실험으로 확인, core에는 아직 붙이지 않음). 그래도 `Array[R]{}`는
   `@init_sequence(init [&]T)`가 `PtrSpan.init(o Self)`로 원소를 복사해 막힌다. 남은 결정은 언어 쪽이다: 리터럴의 원소를
   옮겨 받는 초기화, 원소를 값으로 돌려주는 `a[i]`(`@index`) 대신 빌림으로 읽는 방법, `for a |r|`의 복사.
+  같은 날 사용자 결정으로 구현: `project_array_nocopy_elem.md`.
 - `for a |r|`은 원소를 복사해 `r`에 넣는다(순회마다 `@deinit` 2회). 빌림 순회(`for a |&r|`)는 별개 과제.
 - `Slice.append(val)` · `insert`도 같은 `@ptr_init(…, val)` 복사다. `Slice`는 버퍼 공유(`project_slice_append_aliasing.md`)라 따로 본다.

@@ -1924,6 +1924,17 @@ for arr |i, val|:
     print('index %{i}, value %{val}')
 ```
 
+The each variable receives a copy of the element. `&` before the name iterates by borrow instead. The variable is a borrow (`&T`) of the element and nothing is copied:
+```cy
+arr := Array[str]{'a', 'bc'}
+for arr |&val|:
+    print(val.len())
+
+for arr |i, &val|:
+    print('index %{i}, length %{val.len()}')
+```
+Iteration by borrow is required when the element type can not be copied. `Array` and `Slice` support it. A type supports it by declaring `next_borrow(idx &int) -> scope ?&T` next to `next`. The iterable is borrowed during the loop, so it can not be modified in the loop body.
+
 ### `break` statement.
 The `break` statement exits the current parent loop prematurely:
 ```cy
@@ -2425,6 +2436,23 @@ f := Foo{a=123}
 g := f
 --> error: `Foo` is not copyable.
 ```
+
+An `Array` can hold elements that are not copyable. The elements are moved into the array, read by borrow and deinitialized once:
+```cy
+a := Array[Foo]{Foo{a=1}, Foo{a=2}}   -- A literal moves its elements.
+f := Foo{a=3}
+a << move f                           -- A variable is moved explicitly.
+a[0] = Foo{a=4}                       -- The old element is deinitialized.
+
+print(a[1].a)       --> 2
+r := &a[0]          -- Borrow an element.
+for a |&e|:         -- Iterate by borrow.
+    print(e.a)
+
+x := a[0]
+--> error: Cannot copy `Foo`, type implements `NoCopy`.
+```
+The methods that copy an element, such as `clone`, `last`, `contains` and `index`, do not exist for such an array. This includes an array of arrays: `Array[Array[int]]{{1}, {2, 3}}`.
 
 Some types such as `Array` disallows copying but can still be [cloned](#cloning) or [moved](#moving).
 

@@ -527,6 +527,8 @@ fn Int[] :: @init(x %T) -> Self:
                     return @bitTrunc(Self, x)
                 #else:
                     return x
+            #case .enum:
+                return Self(@enumToInt(x))
             #else:
                 meta.error('Unsupported: ' + type.name(T))
 

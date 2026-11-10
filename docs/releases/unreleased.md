@@ -44,6 +44,9 @@
   `core.cy`의 `AutoHash`에서 `CompileError: Unsupported: i8`이었다(`int` · `str` · `float` · enum · `Object` · `^T`만 됐다).
   좁은 정수 키는 자기 폭의 값으로 해시하므로 넘친 값(`i8(100) + i8(100)`)과 `i8(-56)`은 같은 키다.
 
+- `int(e)`가 enum 값을 case의 정수 값으로 바꾼다(F-77). 매뉴얼의 Enums 절 예제(`print(int(fruit))  --> 3`)가 `core.cy`의 `Int.@init`에서
+  `CompileError: Unsupported: Fruit`였다. `i8` · `i16` · `i32`도 받는다.
+
 ## 임베딩 API
 
 - 메모리 한도: `cl_vm_set_memory_limit(vm, bytes)`와 `cl_vm_memory_used(vm)`(F-41). 한도는 VM이 할당자로 쥔 전체 바이트
@@ -114,3 +117,7 @@
 - 빌드 · CI의 Zig를 0.17.0에서 0.17.1로 올렸다(`build.zig.zon` `minimum_zig_version`, 워크플로 `ZIG_VERSION`, `Taskfile.yml`, `docs/build.md`).
 
 ## 문서
+
+- 매뉴얼(`docs/docs.md`)의 컴파일되지 않던 예제를 고쳤다(F-77): 비교 연산 절의 `{1, 2, 3}`은 `[]int{1, 2, 3}`(목표 타입 없는 `{...}`는
+  `TODO: infer tuple type`), `case` fallthrough 예제의 마지막 `case 1000`에 `:`, 함수 유니온 타입 표기 `Func(FN)` → `Func[FN]`와
+  그 예제(최상위 `fn`은 지역 변수를 잡지 못하므로 람다로), `!else` 블록은 끝에 도달할 수 없다는 문장.

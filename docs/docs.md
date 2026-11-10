@@ -343,10 +343,10 @@ For references types, the comparison checks that the two references point to the
 a := 'abc'
 a == 'abc'      --> true
 
-la := {1, 2, 3}
+la := []int{1, 2, 3}
 lb := la
-la == lb        --> true
-la == {1, 2, 3} --> false
+la == lb             --> true
+la == []int{1, 2, 3} --> false
 ```
 
 The not equals operator returns true if the two values are not equal.
@@ -1946,7 +1946,7 @@ val := 1000
 switch val:
     case 100
     case 200
-    case 1000
+    case 1000:
         print('handle case')
     else:
         print('val is %{val}')
@@ -2171,17 +2171,15 @@ func = |a, b| a + b + 123
 ```
 
 ### Function union types.
-A function union type is denoted as `Func(FN)` where `FN` is a function pointer type.
+A function union type is denoted as `Func[FN]` where `FN` is a function pointer type.
 
 It can hold closures in addition to functions and lambdas:
 ```cy
 c := ^5
-fn add_c(a int, b int) -> int:
-    return a + b + c.*
 
 type AddFn = fn(int, int) -> int
 
-var func Func(AddFn) = add_c
+var func Func[AddFn] = |a, b| a + b + c.*
 func(10, 20)       --> 35
 ```
 
@@ -2870,6 +2868,8 @@ The error value can be captured:
 res := do_something() !else |err|:
     panic('Failed with %{err}')
 ```
+
+An `!else` block can not reach its end. It must end with `return`, `panic`, `break` or `continue`. To continue after handling the error, use the [unwrap block](#unwrap-block).
 
 ### Unwrap or guard.
 *TBD*

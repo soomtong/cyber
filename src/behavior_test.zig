@@ -62,6 +62,9 @@ fn test_syntax(run: *Runner) void {
     run.case("syntax/comment_multiple.cy");
     run.case("syntax/compact_block_error.cy");
     run.case("syntax/func_missing_param_type_error.cy");
+    run.case("syntax/func_param_name_error.cy");
+    run.case("syntax/func_param_name_second_error.cy");
+    run.case("syntax/lambda_param_name_error.cy");
     run.case("syntax/func_param_group.cy");
     run.case("syntax/indentation.cy");
     run.case("syntax/last_line_empty_indent.cy");
@@ -239,6 +242,9 @@ fn test_types(run: *Runner) void {
     run.case("types/Self.cy");
     run.case("types/struct_circular_dep_error.cy");
     run.case("types/struct_dup_field_error.cy");
+    run.case("types/struct_init_field_name_error.cy");
+    run.case("types/struct_init_mixed_error.cy");
+    run.case("types/struct_init_mixed_const_error.cy");
     run.case("types/structs.cy");
     run.case("types/struct_default_initializer.cy");
     run.case("types/struct_init_undeclared_field_error.cy");
@@ -457,6 +463,7 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/return.cy");
     run.case("control_flow/switch.cy");
     run.case("control_flow/switch_error.cy");
+    run.case("control_flow/switch_capture_non_choice_error.cy");
     run.case("control_flow/switch_choice_else_error.cy");
     run.case("control_flow/switch_choice_dup_case_error.cy");
     run.case("control_flow/switch_choice_unhandled_error.cy");

@@ -1222,6 +1222,12 @@ An initializer literal can infer the target struct type:
 var v Vec2 = {x=30, y=40}
 ```
 
+Every entry of a struct initializer is a `name = value` pair. An entry without a field name is a compile error:
+```cy
+v := Vec2{x=30, 40}
+--> error: Expected key value pair.
+```
+
 Structs by default are copyable (unless a child member is not):
 ```cy
 v := Vec2{x=30, y=40}
@@ -1642,6 +1648,16 @@ switch s:
         print('a point')
     else:
         print('Unsupported.')
+```
+
+Only a case of a choice has a payload to capture. A capture clause in a `switch` on another type is a compile error:
+```cy
+switch 1:
+    case 1 |a|:
+        pass
+    else:
+        pass
+--> error: Only a case of a choice can capture a payload.
 ```
 
 ### Unwrap choice.

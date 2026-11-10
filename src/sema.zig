@@ -5927,7 +5927,9 @@ fn semaSwitchCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt, control:
     _ = try pushBlock(c, @ptrCast(case));
 
     if (hasCapture) {
-        const capture_t = case_capture_type.?;
+        const capture_t = case_capture_type orelse {
+            return c.reportError("Only a case of a choice can capture a payload.", case.data.case.capture.?);
+        };
 
         // Copy payload to captured var.
         const fieldLoc = try c.ir.newExpr(.field, capture_t, case.data.case.capture.?, .{
@@ -6364,8 +6366,13 @@ pub fn semaInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, initializer: *as
     @memset(fieldNodes, .{ .node = null });
 
     for (initializer.args.slice()) |arg| {
+        if (arg.type() != .keyValue) {
+            return c.reportError("Expected key value pair.", arg);
+        }
         const pair = arg.cast(.keyValue);
-        const fieldName = pair.key.as_name();
+        const fieldName = pair.key.nameOrNull() orelse {
+            return c.reportError("Expected field name.", pair.key);
+        };
         const info = try checkSymInitField(c, @ptrCast(sym), fieldName, pair.key);
         // if (info.use_get_method) {
         //     try c.listDataStack.append(c.alloc, .{ .node = entryId });

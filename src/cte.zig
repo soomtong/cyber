@@ -1237,8 +1237,13 @@ pub fn evalInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, init_lit: *ast.I
     @memset(fieldNodes, .{ .node = null });
 
     for (init_lit.args.slice()) |arg| {
+        if (arg.type() != .keyValue) {
+            return c.reportError("Expected key value pair.", arg);
+        }
         const pair = arg.cast(.keyValue);
-        const fieldName = pair.key.as_name();
+        const fieldName = pair.key.nameOrNull() orelse {
+            return c.reportError("Expected field name.", pair.key);
+        };
         const info = try sema.checkSymInitField(c, @ptrCast(sym), fieldName, pair.key);
         fieldNodes[info.idx] = .{ .node = pair.value };
     }

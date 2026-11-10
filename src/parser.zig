@@ -619,7 +619,18 @@ pub const Parser = struct {
             try self.pushNode(@ptrCast(param));
         }
         const params = self.node_stack.items[param_start..];
+        try self.checkParamNames(@ptrCast(params));
         return @ptrCast(try self.ast.dupeNodes(params));
+    }
+
+    /// A parameter of a function declaration, a lambda or a template is declared by name.
+    /// Only a function type takes a parameter that is a type alone.
+    fn checkParamNames(self: *Parser, params: []const *ast.FuncParam) !void {
+        for (params) |param| {
+            if (param.name_type.nameOrNull() == null) {
+                return self.reportErrorAtSrc("Expected parameter name.", &.{}, param.name_type.pos());
+            }
+        }
     }
 
     fn parseParenAndFuncParams(self: *Parser) ![]*ast.FuncParam {
@@ -682,6 +693,7 @@ pub const Parser = struct {
             try self.pushNode(@ptrCast(param));
         }
         const params = self.node_stack.items[param_start..];
+        try self.checkParamNames(@ptrCast(params));
         return @ptrCast(try self.ast.dupeNodes(params));
     }
 
@@ -1619,6 +1631,7 @@ pub const Parser = struct {
             self.advance();
 
             const params = try self.parseFuncParams(&.{ self_param });
+            try self.checkParamNames(params);
             const ret = try self.parseFuncReturn();
 
             var stmts: []*ast.Node = undefined;
@@ -1682,6 +1695,7 @@ pub const Parser = struct {
         self.advance();
 
         const params = try self.parseFuncParams(&.{});
+        try self.checkParamNames(params);
         const ret = try self.parseFuncReturn();
 
         // const nameStr = self.ast.nodeString(name);
@@ -3967,6 +3981,7 @@ pub const Parser = struct {
                     // Parse typed lambda.
                     self.advance();
                     const params = try self.parseParenAndFuncParams();
+                    try self.checkParamNames(params);
                     return self.parseFuncLambda(params);
                 }
             },

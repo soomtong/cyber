@@ -26,6 +26,15 @@
 - 타입 선언이 중간에 컴파일 오류로 끝날 때 컴파일러가 메모리를 놓치던 곳 셋을 고쳤다. trait의 메서드 하나가 해석에 실패할 때
   (없는 반환 타입 등) 그 앞 메서드들, enum · choice · cunion의 case 하나가 실패할 때(없는 payload 타입, 중복 이름) case 목록.
   누수는 실패한 eval마다 쌓였고 `cl_vm_deinit`도 돌려주지 않았다.
+- 잘못 쓴 선언 넷이 컴파일러를 죽이던 것을 고쳤다(F-89). 모두 종료 코드 134였고 이제 위치가 붙은 오류다.
+  (1) 매개변수 이름 자리에 이름이 아닌 식: `fn foo(&self):`, `fn foo(a int, 1):`, `f := fn(^a) => 1`은
+  `panic: Expected name.`이었다. 이제 `ParseError: Expected parameter name.`(메서드의 receiver는 `fn (&T) name()`으로 적는다).
+  타입만 적는 매개변수는 함수 타입(`fn(&int, ^int) -> int`)에서만 된다.
+  (2) struct 초기화의 필드 이름 자리에 숫자: `A{1 = 2}`는 같은 panic이었다. 이제 `CompileError: Expected field name.`
+  (3) struct 초기화에 `이름 = 값`과 값만 있는 항목을 섞은 것: `A{x = 2, 3}` · `A{3, y = 2}`는 Bus error였다.
+  이제 `CompileError: Expected key value pair.`(`const` 초기화식도 같다).
+  (4) choice가 아닌 값의 `switch`에서 payload 캡처: `case 1 |a|:`는 `panic: attempt to use null value`였다.
+  이제 `CompileError: Only a case of a choice can capture a payload.`
 
 ## 언어와 표준 라이브러리
 

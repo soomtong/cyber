@@ -9,6 +9,12 @@
 - 스크립트가 호스트 프로세스를 끝낼 수 있던 경로 둘을 막았다(F-52). 실패한 적 없는 `cy.VM`에 `compile_error_summary()`를 부르면
   `panic: No report.`, `panic_summary()`를 부르면 `panic: Unexpected panic type.`으로 프로세스가 abort했다(종료 코드 134).
   이제 빈 문자열을 돌려준다.
+- 한 타입 안에서 이름이 겹치는 필드나 case가 컴파일러를 죽이던 것을 고쳤다(F-81). `type P: x int, x int`, 같은 case를 두 번 적은
+  enum · choice · cunion은 `panic: Unsupported: .field`(`.enum_case` · `.choice_case` · `.union_case`)로 프로세스가 abort했다
+  (종료 코드 134). 이제 두 번째 선언 위치의 컴파일 오류다: ``CompileError: `x` has already been declared as a `field`.``
+- 타입 선언이 중간에 컴파일 오류로 끝날 때 컴파일러가 메모리를 놓치던 곳 셋을 고쳤다. trait의 메서드 하나가 해석에 실패할 때
+  (없는 반환 타입 등) 그 앞 메서드들, enum · choice · cunion의 case 하나가 실패할 때(없는 payload 타입, 중복 이름) case 목록.
+  누수는 실패한 eval마다 쌓였고 `cl_vm_deinit`도 돌려주지 않았다.
 
 ## 언어와 표준 라이브러리
 

@@ -1055,6 +1055,8 @@ pub const GenericTrait = extern struct {
 
     members_ptr: [*]const TraitMember = undefined,
     members_len: u32 = 0,
+    /// Allocated length. More than `members_len` when the trait failed to resolve part way.
+    members_cap: u32 = 0,
 
     predicate: ?*cy.Func = null,
 
@@ -1069,7 +1071,7 @@ pub const GenericTrait = extern struct {
         for (self.members()) |member| {
             member.func.destroy(alloc);
         }
-        alloc.free(self.members());
+        alloc.free(self.members_ptr[0..self.members_cap]);
 
         self.zimpls().deinit(alloc);
     }

@@ -80,7 +80,11 @@ pub const Module = struct {
 
 pub fn reportDupSym(c: *cy.Chunk, sym: *cy.Sym, name: []const u8, decl: ?*ast.Node) !void {
     const id = try c.addReportFmt("`{}` has already been declared as a `{}`", &.{v(name), v(sym.type)}, decl);
-    const last = try c.appendContextTrace(&c.compiler.reports.items[id], "First declared at:", sym.declNode());
+    var last = &c.compiler.reports.items[id];
+    // A field or a case does not keep its declaration. The report then has no "First declared at".
+    if (sym.declNodeOrNull()) |first_decl| {
+        last = try c.appendContextTrace(last, "First declared at:", first_decl);
+    }
     try c.appendErrorTrace(last);
     return error.CompileError;
 }

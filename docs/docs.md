@@ -1185,6 +1185,8 @@ type Vec2:
     y float
 ```
 
+Field names are unique in a type. Declaring a second field with the same name is a compile error.
+
 ### Initialize struct.
 Structs are constructed from an initializer expression:
 ```cy
@@ -1544,6 +1546,8 @@ print(int(fruit))  --> 3
 ```
 
 The memory representation of an enum defaults to `int`. Each case has an increasing value starting from 0.
+
+Case names are unique in an enum. Declaring a second case with the same name is a compile error. The same holds for the cases of a choice and of a C union.
 
 A dot literal can infer a target enum type:
 ```cy

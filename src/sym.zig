@@ -351,6 +351,11 @@ pub const Sym = extern struct {
     }
 
     pub fn declNode(self: *Sym) *ast.Node {
+        return self.declNodeOrNull() orelse std.debug.panic("Unsupported: {}", .{self.type});
+    }
+
+    /// Null for a sym that does not keep its declaration: a field, an enum or choice case.
+    pub fn declNodeOrNull(self: *Sym) ?*ast.Node {
         switch (self.type) {
             .type_alias => {
                 if (self.cast(.type_alias).decl) |decl| {
@@ -409,7 +414,7 @@ pub const Sym = extern struct {
             },
             else => {},
         }
-        std.debug.panic("Unsupported: {}", .{self.type});
+        return null;
     }
 };
 

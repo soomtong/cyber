@@ -101,13 +101,21 @@ pub fn resolve_trait_type(c: *cy.Chunk, trait_t: *cy.types.GenericTrait, node: *
     const decl = sym.decl.?.cast(.trait_decl);
 
     const members = try c.alloc.alloc(cy.types.TraitMember, decl.funcs.len);
-    errdefer c.alloc.free(members);
+    var num_members: u32 = 0;
+    // The trait owns its funcs, and a reserved func is already linked into its func sym. When a later method
+    // fails, the trait keeps the ones reserved so far and destroys them with the type.
+    errdefer {
+        trait_t.members_ptr = members.ptr;
+        trait_t.members_len = num_members;
+        trait_t.members_cap = @intCast(members.len);
+    }
     for (decl.funcs.slice(), 0..) |func_decl, i| {
         const func = try sema.reserveImplicitTraitMethod(c, @ptrCast(sym), func_decl, i);
-        try sema.ensure_resolved_func(c, func, false, @ptrCast(func_decl));
         members[i] = .{
             .func = func,
         };
+        num_members += 1;
+        try sema.ensure_resolved_func(c, func, false, @ptrCast(func_decl));
     }
 
     if (sym.getMod().getSym("@predicate")) |func_sym| {
@@ -116,6 +124,7 @@ pub fn resolve_trait_type(c: *cy.Chunk, trait_t: *cy.types.GenericTrait, node: *
 
     trait_t.members_ptr = members.ptr;
     trait_t.members_len = @intCast(members.len);
+    trait_t.members_cap = @intCast(members.len);
 
     trait_t.base.info.managed = false;
     trait_t.base.info.copy_base = false;
@@ -325,6 +334,8 @@ pub fn declare_enum_cases(c: *cy.Chunk, enum_t: *cy.types.Enum, decl: *ast.EnumD
         return;
     }
     const cases = try c.alloc.alloc(*cy.sym.EnumCase, decl.members.len);
+    // The case syms belong to the type's module. Only the list is lost when a case fails to declare.
+    errdefer c.alloc.free(cases);
     for (decl.members.slice(), 0..) |member, i| {
         const mName = member.name.as_name();
         cases[i] = try c.declareEnumCase(@ptrCast(enum_t.base.sym()), mName, @ptrCast(enum_t), @intCast(i), member);
@@ -370,6 +381,8 @@ pub fn resolve_cunion_type(c: *cy.Chunk, c_union: *cy.types.CUnion, node: *ast.N
 
     const decl = sym.decl.?.cast(.cunion_decl);
     const cases = try c.alloc.alloc(cy.types.CUnionCase, decl.cases.len);
+    var cases_owned = false;
+    errdefer if (!cases_owned) c.alloc.free(cases);
     for (decl.cases.slice(), 0..) |case, i| {
         const case_name = case.name.as_name();
         const payload_t = try cte.eval_type2(c, true, case.payload_t);
@@ -403,6 +416,7 @@ pub fn resolve_cunion_type(c: *cy.Chunk, c_union: *cy.types.CUnion, node: *ast.N
     }
     c_union.cases_ptr = cases.ptr;
     c_union.cases_len = @intCast(cases.len);
+    cases_owned = true;
 
     var size = max_payload_size;
     const rem = size % alignment;
@@ -446,6 +460,9 @@ pub fn declare_choice_cases(c: *cy.Chunk, choice_t: *cy.types.Choice, decl: *ast
     var has_no_copy_payload = false;
     var has_ct_child = false;
     const cases = try c.alloc.alloc(cy.types.Case, decl.members.len);
+    // Until the type takes the list. `resolve_type_info` can still fail after that.
+    var cases_owned = false;
+    errdefer if (!cases_owned) c.alloc.free(cases);
     for (decl.members.slice(), 0..) |member, i| {
         const mName = member.name.as_name();
         var payload_t: *cy.Type = undefined;
@@ -490,6 +507,7 @@ pub fn declare_choice_cases(c: *cy.Chunk, choice_t: *cy.types.Choice, decl: *ast
     }
     choice_t.cases_ptr = cases.ptr;
     choice_t.cases_len = @intCast(cases.len);
+    cases_owned = true;
 
     var size = 8 + max_payload_size;
     const rem = size % alignment;

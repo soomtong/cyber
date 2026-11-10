@@ -218,9 +218,12 @@ fn test_types(run: *Runner) void {
     //     );
     // }}.func);
     run.case("types/choice_access_error.cy");
+    run.case("types/choice_dup_case_error.cy");
     run.case("types/choice_type.cy");
     run.case("types/choice_unwrap_panic.cy");
     run.case("types/cstructs.cy");
+    run.case("types/cunion_dup_case_error.cy");
+    run.case("types/enum_dup_case_error.cy");
     run.case("types/enums.cy");
     run.case("types/func_return_type_error.cy");
     run.case("types/func_param_type_undeclared_error.cy");
@@ -239,6 +242,7 @@ fn test_types(run: *Runner) void {
     run.case("types/Span.cy");
     run.case("types/Self.cy");
     run.case("types/struct_circular_dep_error.cy");
+    run.case("types/struct_dup_field_error.cy");
     run.case("types/structs.cy");
     run.case("types/struct_default_initializer.cy");
     run.case("types/struct_init_undeclared_field_error.cy");

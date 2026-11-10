@@ -3294,3 +3294,34 @@ test "Every function declared in cyber.h is exported." {
 test "All declarations compile." {
     refAllDeclsRecursive(cy);
 }
+
+test "A type declaration that fails part way frees what it reserved." {
+    // Found by the allocation fuzz of F-41, but these fail with an ordinary compile error.
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    const srcs = [_][]const u8{
+        // The second method fails after the first one was reserved.
+        \\type Shape trait:
+        \\    fn area() -> float
+        \\    fn name() -> Missing
+        ,
+        // The second case fails after the list of cases was allocated.
+        \\type Color enum:
+        \\    case red
+        \\    case red
+        ,
+        \\type Shape enum:
+        \\    case circle float
+        \\    case rect   Missing
+        ,
+    };
+    for (srcs) |src| {
+        // `zt.alloc` reports what the VM did not free.
+        const vm = C.vm_initx(zt.alloc);
+        defer C.vm_deinit(vm);
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
+        try zt.eq(C.Success, C.vm_eval(vm, "a := 1", &res));
+    }
+}

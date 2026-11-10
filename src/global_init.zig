@@ -1,9 +1,9 @@
 //! Compile-time check of global initializers (F-88).
 //!
 //! Globals are initialized at the start of the program in a fixed order: chunk by chunk
-//! (`initOrder`), and inside a chunk in declaration order. An initializer cannot name a global,
-//! but it can call a function, and that function can read or write a global that is not
-//! initialized yet. That read is of undefined memory.
+//! (`initOrder`), and inside a chunk in declaration order. An initializer, or a function that it
+//! calls, could read or write a global that is not initialized yet. That read is of undefined
+//! memory.
 //!
 //! Sema records what each function touches (`Deps`). After sema, `check` follows the calls
 //! that start at each initializer and reports an access to a global that is initialized later,
@@ -208,7 +208,8 @@ pub fn check(compiler: *cy.Compiler) !void {
             const global = sym.cast(.userVar);
             try rank.put(alloc, global, @intCast(globals.items.len));
             try globals.append(alloc, global);
-            if (global.init_deps.callees.items.len > 0 or global.init_deps.indirect) {
+            const init = &global.init_deps;
+            if (init.callees.items.len > 0 or init.indirect or init.globals.items.len > 0) {
                 has_call = true;
             }
         }
@@ -226,6 +227,13 @@ pub fn check(compiler: *cy.Compiler) !void {
 
     for (globals.items, 0..) |global, global_rank| {
         const init = &global.init_deps;
+        // Globals that the initializer names.
+        for (init.globals.items) |used| {
+            const used_rank = rank.get(used) orelse continue;
+            if (used_rank >= global_rank) {
+                return reportDirect(compiler, global, used);
+            }
+        }
         if (init.callees.items.len == 0 and !init.indirect) {
             continue;
         }
@@ -266,6 +274,18 @@ pub fn check(compiler: *cy.Compiler) !void {
             }
         }
     }
+}
+
+fn reportDirect(compiler: *cy.Compiler, global: *cy.sym.UserVar, used: *cy.sym.UserVar) anyerror {
+    const chunk = compiler.getSymChunk(&global.head);
+    const node: *cy.ast.Node = global.decl.?.right.?;
+    if (used == global) {
+        return chunk.reportErrorFmt("The initializer of `{}` accesses `{}` before it is initialized.",
+            &.{ v(global.head.name()), v(used.head.name()) }, node);
+    }
+    return chunk.reportErrorFmt(
+        "The initializer of `{}` accesses the global `{}`. `{}` is initialized after `{}`.",
+        &.{ v(global.head.name()), v(used.head.name()), v(used.head.name()), v(global.head.name()) }, node);
 }
 
 fn report(compiler: *cy.Compiler, global: *cy.sym.UserVar, func: *cy.Func, used: *cy.sym.UserVar) anyerror {

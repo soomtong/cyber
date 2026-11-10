@@ -212,19 +212,19 @@ fn foo():
     print(a)    --> 123
 ```
 
-The initializer of a global variable cannot reference other global variables:
+The initializer of a global variable can use the global variables that are initialized before it:
 ```cy
 global a int = 123
 
-global b int = a
---> error: Initializer can not reference a global variable.
+global b int = a + 1
 ```
 
-However, they can be reassigned afterwards to any runtime expression:
+Using a global that is initialized later, or the global itself, is a compile error:
 ```cy
-global b int = 0
+global b int = a + 1
+--> error: The initializer of `b` accesses the global `a`. `a` is initialized after `b`.
 
-b = a
+global a int = 123
 ```
 
 Global variables are initialized before the main block runs, in a fixed order. The globals of a module are initialized in the order that they are declared.
@@ -236,7 +236,7 @@ global b int = load_b()
 
 A module is initialized after the modules that it imports with `use`, so a function of an imported module sees the globals of its module initialized. At the end of the program, modules are deinitialized in the reverse order.
 
-A function that an initializer calls can read and write the globals that are initialized before it. Reaching a global that is initialized later, or the global that is being initialized, is a compile error:
+The same rule holds for the functions that an initializer calls. They can read and write the globals that are initialized before it. Reaching a global that is initialized later, or the global that is being initialized, is a compile error:
 ```cy
 global a int = load_a()
 --> error: The initializer of `a` can reach `load_a`, which accesses the global `b`. `b` is initialized after `a`.
@@ -249,13 +249,15 @@ Declare `b` before `a` to fix the error.
 
 The check follows the functions that are called by name, including operators, `@init` and `@deinit`. It does not know the target of a call through a function value or a trait. When an initializer can reach such a call, every function that is used as a value (a lambda, a function assigned to a variable or passed as an argument, a generator) and every method that implements a trait counts as reachable. The check does not look at conditions either, so an access that never runs at initialization is still an error.
 
-Circular references are not possible because a global initializer cannot reference another global variable:
+Circular references between initializers are not possible. One of the two globals is initialized first, and its initializer can not use the other:
 ```cy
-global a = b
---> error: Initializer can not reference a global variable.
+global a int = b
+--> error: The initializer of `a` accesses the global `b`. `b` is initialized after `a`.
 
-global b = a     
+global b int = a
 ```
+
+An `#[extern]` global can not be used in a global initializer.
 
 ## Constants.
 Constants are declared with a const evaluated expression:

@@ -4302,9 +4302,8 @@ pub fn symbol2(c: *cy.Chunk, sym: *Sym, prefer_ct_sym: bool, opt_target: ?*cy.Ty
             return const_res;
         },
         .userVar => {
-            if (c.cur_sema_proc.global_init) {
-                return c.reportError("Cannot reference globals in a global initializer.", node);
-            }
+            // In a global initializer this is allowed for a global that is initialized earlier.
+            // `global_init.check` reports the others.
             const user_var = sym.cast(.userVar);
             try cy.global_init.recordGlobal(c, user_var);
             const src_chunk = c.compiler.chunks.items[user_var.head.declNode().src()];
@@ -4316,7 +4315,8 @@ pub fn symbol2(c: *cy.Chunk, sym: *Sym, prefer_ct_sym: bool, opt_target: ?*cy.Ty
         },
         .extern_var => {
             if (c.cur_sema_proc.global_init) {
-                return c.reportError("Cannot reference globals in a global initializer.", node);
+                // Extern globals are bound after the global initializers run (`@initBindLib`).
+                return c.reportError("Cannot reference an extern global in a global initializer.", node);
             }
             const extern_var = sym.cast(.extern_var);
             const expr = try c.ir.newExpr(.global, extern_var.type, node, .{ .sym = sym });
@@ -4325,9 +4325,7 @@ pub fn symbol2(c: *cy.Chunk, sym: *Sym, prefer_ct_sym: bool, opt_target: ?*cy.Ty
             return res;
         },
         .hostVar => {
-            if (c.cur_sema_proc.global_init) {
-                return c.reportError("Cannot reference globals in a global initializer.", node);
-            }
+            // The host binds its globals when the module loads, before any initializer runs.
             const host_var = sym.cast(.hostVar);
             const loc = try c.ir.newExpr(.global, host_var.type, node, .{ .sym = sym });
             var res = ExprResult.initCustom(loc, .varSym, host_var.type, .{ .varSym = sym });

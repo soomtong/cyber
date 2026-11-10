@@ -81,13 +81,26 @@ CompileError: The initializer of `a` can reach `foo`, which accesses `a` before 
 - 호스트 함수가 인자로 받지 않은 스크립트 함수를 부르는 경우(객체 필드에 든 함수 값, 호스트가 따로 쥔 콜백)는 보지 않는다.
 - `spawn`한 스레드가 초기화 중에 전역을 건드리는 경우는 보지 않는다.
 - 호스트 전역(`hostVar`)과 `extern` 전역은 대상이 아니다(호스트 · 링커가 초기화).
-- 초기화식 안의 직접 참조 금지(`Cannot reference globals in a global initializer.`)는 그대로다. 앞에 선언된 전역이라도 이름으로는
-  못 쓰고 함수를 거쳐야 한다. 이 불균형을 푸는 것은 별도 결정이다.
+- `#[extern]` 전역은 초기화식에서 이름으로 쓸 수 없다(`Cannot reference an extern global in a global initializer.`). extern 심볼은
+  모든 `@init` 뒤의 `@initBindLib`에서 묶인다. 초기화식이 부른 함수가 extern 전역 · extern 함수를 쓰는 경우는 검사하지 않는다.
 - 순환 import에서 양쪽 초기화식이 서로의 전역에 닿으면 한쪽은 반드시 오류다.
+
+## 초기화식의 직접 참조 (같은 날 추가, 사용자 결정)
+
+검사가 생기기 전에는 초기화식 안에서 전역을 이름으로 쓰는 것을 통째로 막았다(`Cannot reference globals in a global initializer.`).
+앞에 선언된 전역도 함수를 거쳐야만 읽을 수 있어 규칙이 어긋났다. 이제 같은 기준 하나로 본다.
+
+- 초기화식이 이름으로 쓴 사용자 전역은 `UserVar.init_deps.globals`에 적힌다(함수 본문과 같은 `recordGlobal`).
+- `check`가 초기화식의 직접 참조를 먼저 본다. 더 늦게 초기화되는 전역이면
+  ``The initializer of `b` accesses the global `a`. `a` is initialized after `b`.``, 자기 자신이면
+  ``The initializer of `a` accesses `a` before it is initialized.``
+- 가져온 모듈의 전역(`lib.x`)은 먼저 초기화되므로 쓸 수 있다. 앞선 eval의 전역도 쓸 수 있다.
+- 호스트 전역(`#[bind] global`)은 모듈 로드 때 묶이므로 허용한다.
+- 오류 위치는 참조한 식이 아니라 초기화식 전체다(참조 노드를 따로 적지 않는다).
 
 ## 테스트
 
-- behavior: `vars/global_init_call.cy`(앞선 전역 읽기 · 쓰기, 함수 값, 제너레이터, 콜백, trait, 가져온 모듈의 전역),
+- behavior: `vars/global_init_ref_error.cy` · `global_init_ref_self_error.cy`(직접 참조), `vars/global_init_call.cy`(이름으로 쓰기, 앞선 전역 읽기 · 쓰기, 함수 값, 제너레이터, 콜백, trait, 가져온 모듈의 전역),
   `vars/global_init_call_error.cy`(전이 호출), `…_self_error.cy`, `…_lambda_error.cy`, `…_trait_error.cy`, `…_deinit_error.cy`,
   테스트 모듈 `modules/test_mods/ginit.cy`.
 - lib: `A global initializer can call a function that reads a global of an earlier eval.`(`persist_main` 세션, 오류 뒤 세션 유지).

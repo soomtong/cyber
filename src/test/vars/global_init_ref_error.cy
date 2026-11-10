@@ -1,10 +1,10 @@
+global b int = a + 1
 global a int = 123
-global b int = a
 
 --cytest: error
---CompileError: Cannot reference globals in a global initializer.
+--CompileError: The initializer of `b` accesses the global `a`. `a` is initialized after `b`.
 --
---@MainPath():2:16:
---global b int = a
---               ^
+--@MainPath():1:16:
+--global b int = a + 1
+--               ^~~~~
 --

@@ -442,6 +442,7 @@ fn test_vars(run: *Runner) void {
     run.case("vars/global_init_call_deinit_error.cy");
     run.case("vars/global_init_capture_error.cy");
     run.case("vars/global_init_ref_error.cy");
+    run.case("vars/global_init_ref_self_error.cy");
     run.case("vars/global_init_type_error.cy");
 }
 

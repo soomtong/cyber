@@ -1,6 +1,18 @@
 use t 'test'
 use lib '../modules/test_mods/ginit.cy'
 
+-- An initializer can name a global declared before it.
+global first_named int = 40
+global second_named int = first_named + 2
+global named_str str = 'ab'.upper()
+global named_pair []int = []int{first_named, second_named}
+global named_ptr Ptr[int] = *first_named
+t.eq(42, second_named)
+t.eq('AB', named_str)
+t.eq(2, named_pair.len())
+t.eq(42, named_pair[1])
+t.eq(40, named_ptr.*)
+
 -- An initializer can call a function that reads a global declared before it.
 global base int = 7
 global from_base int = add_base(1)
@@ -70,5 +82,9 @@ global from_lib_str str = lib.label()
 t.eq(101, from_lib)
 t.eq('LIB!', from_lib_str)
 t.eq(101, lib.last_id)
+
+-- An initializer can name a global of an imported module.
+global lib_named int = lib.last_id + 1
+t.eq(102, lib_named)
 
 --cytest: pass

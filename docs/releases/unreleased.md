@@ -51,6 +51,11 @@
   컴파일이 실패했다. `(-8).asr(1)`은 `-4`다(`-8 >> 1`은 0을 채우는 logical shift라 큰 양수). `i8` · `i16` · `i32`는 자기 폭의 부호 비트에서
   시프트하고, 시프트 양이 부호 비트를 넘으면 부호만 남는다(음수는 `-1`, 아니면 `0`). VM에 `ASR` opcode를 더했다. C 백엔드(`cgen`)에는 아직 없다.
 
+- 전역 초기화식에서 먼저 초기화되는 전역을 이름으로 쓸 수 있다(F-88). `global a int = 123` 뒤의 `global b int = a + 1`,
+  가져온 모듈의 전역 `lib.x`, 호스트 전역이 된다. 이전에는 모두 `Cannot reference globals in a global initializer.`였고 함수를
+  거쳐야 했다. 뒤에 선언된 전역이나 자기 자신을 쓰면
+  ``The initializer of `b` accesses the global `a`. `a` is initialized after `b`.`` `#[extern]` 전역은 여전히 쓸 수 없다.
+
 - (F-87) `Map`의 키로 `i8` · `i16` · `i32`, `byte` · `r16` · `r32` · `r64`, `bool`, `symbol`, `error`, `f32`를 쓸 수 있다. 이전에는 `Map[i8, int]{}`가
   `core.cy`의 `AutoHash`에서 `CompileError: Unsupported: i8`이었다(`int` · `str` · `float` · enum · `Object` · `^T`만 됐다).
   좁은 정수 키는 자기 폭의 값으로 해시하므로 넘친 값(`i8(100) + i8(100)`)과 `i8(-56)`은 같은 키다.

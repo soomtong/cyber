@@ -203,6 +203,36 @@ t.eq(7.umod(4), 3)
 t.eq(3.umul(4), 12)
 t.eq((-1).umul(2), -2)
 
+-- Int.asr() keeps the sign, `>>` shifts in zeros.
+t.eq((-8).asr(1), -4)
+t.eq(-8 >> 1, int.max - 3)
+t.eq((-17).asr(2), -5)
+t.eq(8.asr(2), 2)
+t.eq((-8).asr(0), -8)
+t.eq((-1).asr(63), -1)
+t.eq(int.min.asr(63), -1)
+t.eq(int.max.asr(62), 1)
+
+-- Int.asr(), an amount past the sign bit leaves only the sign.
+t.eq((-8).asr(64), -1)
+t.eq(8.asr(200), 0)
+
+-- Int.asr(), narrow ints shift from their own sign bit.
+t.eq(i8(-8).asr(i8(1)), i8(-4))
+t.eq(i8(100).asr(i8(2)), i8(25))
+t.eq((i8(100) + i8(100)).asr(i8(1)), i8(-28))
+t.eq(i16(-8).asr(i16(2)), i16(-2))
+t.eq(i32(-8).asr(i32(1)), i32(-4))
+t.eq(i32.min.asr(i32(31)), i32(-1))
+
+-- Int.asr(), the result can be assigned over either operand.
+asr_x := -1024
+asr_n := 3
+asr_x = asr_x.asr(asr_n)
+t.eq(asr_x, -128)
+asr_n = asr_x.asr(asr_n)
+t.eq(asr_n, -16)
+
 -- Int.unsigned(), the source bits are zero extended or kept as is.
 t.eq(int.unsigned(i8(-1)), 255)
 t.eq(int.unsigned(i32(-1)), 0xFFFFFFFF)

@@ -550,6 +550,7 @@ ResultCode execBytecode(ZThread* t) {
         JENTRY(NOT),
         JENTRY(LSL),
         JENTRY(LSR),
+        JENTRY(ASR),
         JENTRY(Add),
         JENTRY(AddI16),
         JENTRY(AddMulI16),
@@ -1563,6 +1564,20 @@ beginSwitch:
         UINT_BINOP(
             stack[dst] = left >> (right & 0xff);
         )
+    }
+    CASE(ASR): {
+        // dst = sext(left, bits) >> right. The bits above `bits` are undefined in a narrow int register.
+        u16 dst = pc[1];
+        u8 ext = 64 - pc[4];
+        i64 left = (i64)(stack[pc[2]] << ext) >> ext;
+        // The shift amount has the same width. An amount past the sign bit leaves only the sign.
+        u64 amt = (stack[pc[3]] << ext) >> ext;
+        if (amt > 63) {
+            amt = 63;
+        }
+        stack[dst] = BITCAST(u64, left >> amt);
+        pc += 5;
+        NEXT();
     }
     CASE(Add): {
         UINT_BINOP(stack[dst] = left + right)

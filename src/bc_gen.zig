@@ -516,6 +516,7 @@ fn genExpr(c: *Chunk, expr: *ir.Expr, cstr: Cstr) anyerror!GenValue {
     const res = try switch (expr.code) {
         .add                => gen_add(c, expr.cast(.add), cstr, node),
         .address_of         => gen_addr_of(c, expr.cast(.address_of), cstr, node),
+        .asr                => gen_asr(c, expr.cast(.asr), cstr, node),
         .and_op             => gen_and(c, expr.cast(.and_op), cstr, node),
         .binary_op          => genBinOp(c, expr.cast(.binary_op), cstr, node),
         .bitcast            => gen_bitcast(c, expr.cast(.bitcast), cstr, node),
@@ -2424,6 +2425,19 @@ fn genBinOp2(c: *Chunk, expr: *ir.BinOp2, op: cy.OpCode, cstr: Cstr, node: *ast.
     const leftv = try genExpr(c, expr.left, Cstr.localOrTemp());
     const rightv = try genExpr(c, expr.right, Cstr.localOrTemp());
     try pushInlineBinExpr(c, op, dst, leftv.reg, rightv.reg, node);
+    try pop_temp_value(c, rightv, node);
+    try pop_temp_value(c, leftv, node);
+    return dst;
+}
+
+/// Arithmetic shift right. The instruction sign extends from the int's width since the upper bits
+/// of a narrow int register are undefined.
+fn gen_asr(c: *Chunk, expr: *ir.BinOp2, cstr: Cstr, node: *ast.Node) !GenValue {
+    const bits = expr.base.type.cast(.int).bits;
+    const dst = try bc.selectReg(c, expr.base.type, cstr, node);
+    const leftv = try genExpr(c, expr.left, Cstr.localOrTemp());
+    const rightv = try genExpr(c, expr.right, Cstr.localOrTemp());
+    try c.pushCode2(.asr, dst.isTemp(), &.{ dst.reg, leftv.reg, rightv.reg, @intCast(bits) }, node);
     try pop_temp_value(c, rightv, node);
     try pop_temp_value(c, leftv, node);
     return dst;

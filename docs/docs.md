@@ -391,6 +391,10 @@ a ~ b
 -- logical right shift: a's bits are shifted b bits to the least significant end. 
 a >> b
 
+-- arithmetic right shift: like `>>` but the sign bit fills the vacated bits. `(-8).asr(1)` is `-4`, `-8 >> 1` is a large positive integer.
+-- A shift amount past the sign bit leaves only the sign: `-1` for a negative integer, otherwise `0`.
+a.asr(b)
+
 -- logical left shift: a's bits are shifted b bits to the most significant end. This does not perform sign-extension on the 32-bit integer.
 a << b
 

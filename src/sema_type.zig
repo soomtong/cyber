@@ -85,7 +85,7 @@ fn resolveCustomTypeResult(c: *cy.Chunk, decl: *ast.CustomTypeDecl, binding: C.B
     switch (binding.type) {
         C.BindTypeCreate => {
             const ctype = binding.data.create.create_fn.?(@ptrCast(c.vm), c.sym.head.toC(), ast.Node.to_c(@ptrCast(decl))) orelse {
-                return error.CompileError;
+                return c.compiler.host_error orelse error.CompileError;
             };
             return @ptrCast(@alignCast(ctype));
         },
@@ -738,7 +738,10 @@ pub fn reifyStructType(c: *cy.Chunk, struct_t: *cy.types.Struct, user_fields: []
         }
 
         const name_dup = try c.alloc.dupe(u8, field_name);
-        try c.parser.ast.strs.append(c.alloc, name_dup);
+        c.parser.ast.strs.append(c.alloc, name_dup) catch |err| {
+            c.alloc.free(name_dup);
+            return err;
+        };
         const sym = try c.declareField(@ptrCast(struct_t.base.sym()), name_dup, i, field_t, node);
         fields[i] = .{
             .sym = @ptrCast(sym),
@@ -814,6 +817,11 @@ pub fn resolveStructType(c: *cy.Chunk, struct_t: *cy.types.Struct, node: *ast.No
         decl = sym.decl.?.cast(.struct_decl);
     }
     try resolve_type_impls(c, &struct_t.base, decl.impls.slice());
+    // An unresolved struct does not free its impls.
+    errdefer {
+        c.alloc.free(struct_t.impls());
+        struct_t.impls_len = cy.NullId;
+    }
     try resolveStructFields(c, struct_t, decl); 
     struct_t.base.info.resolved = true;
 
@@ -1274,11 +1282,15 @@ pub fn resolveAnyParamType(c: *cy.Chunk, param_idx: usize, resolve_new_type: boo
     if (res.is_generic()) {
         if (!variant) {
             // Push a canonical name based on the param index.
-            try c.func_template_param_stack.append(c.alloc, .{
+            const anonymous_name = try c.alloc.print("{}", .{param_idx});
+            c.func_template_param_stack.append(c.alloc, .{
                 .anonymous = true,
-                .name = try c.alloc.print("{}", .{param_idx}),
+                .name = anonymous_name,
                 .type_idx = undefined,
-            });
+            }) catch |err| {
+                c.alloc.free(anonymous_name);
+                return err;
+            };
         } else {
             // Lookup anonymous parameter.
             var buf: [2]u8 = undefined;

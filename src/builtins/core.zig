@@ -242,7 +242,10 @@ pub fn bind(_: *C.VM, mod: *C.Sym) callconv(.c) C.Bytes {
 }
 
 fn onLoad(vm: ?*C.VM, mod: ?*C.Sym) callconv(.c) void {
-    onLoadZ(@ptrCast(@alignCast(vm)), @ptrCast(@alignCast(mod))) catch @panic("error");
+    const vm_: *cy.VM = @ptrCast(@alignCast(vm));
+    onLoadZ(vm_, @ptrCast(@alignCast(mod))) catch |err| {
+        vm_.compiler.host_error = err;
+    };
 }
 
 fn onLoadZ(vm: *cy.VM, mod: *cy.Sym) !void {
@@ -296,7 +299,9 @@ pub fn zErrConstEvalFunc2(comptime f: fn(*cy.Chunk, *cy.ConstEvalContext) anyerr
                     std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);
                 }
                 if (err != error.CompileError) {
-                    _ = c.addReportFmt("error.{}", &.{v(err)}, ctx.node) catch @panic("");
+                    _ = c.addReportFmt("error.{}", &.{v(err)}, ctx.node) catch |e| {
+                        c.compiler.host_error = e;
+                    };
                 }
                 return cy.TypeValue{ .type = &cy.types.NullType, .value = Value.Void };
             };
@@ -338,7 +343,9 @@ pub fn zErrBuiltinFunc2(comptime f: fn(*cy.Chunk, *cy.BuiltinContext, *sema.Expr
                     std.debug.print("evalFunc: {}\n", .{err});
                 }
                 if (err != error.CompileError) {
-                    _ = c.addReportFmt("error.{}", &.{v(err)}, ctx.node) catch @panic("");
+                    _ = c.addReportFmt("error.{}", &.{v(err)}, ctx.node) catch |e| {
+                        c.compiler.host_error = e;
+                    };
                 }
                 return false;
             };
@@ -356,7 +363,9 @@ pub fn zErrBuiltinEvalFunc(comptime f: fn(*cy.Chunk, *cy.BuiltinContext) anyerro
                     std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);
                 }
                 if (err != error.CompileError) {
-                    _ = c.addReportFmt("error.{}", &.{v(err)}, ctx.node) catch @panic("");
+                    _ = c.addReportFmt("error.{}", &.{v(err)}, ctx.node) catch |e| {
+                        c.compiler.host_error = e;
+                    };
                 }
                 return cy.TypeValue{ .type = &cy.types.NullType, .value = Value.Void };
             };
@@ -421,7 +430,7 @@ pub fn prepPanicZError(t: *cy.Thread, err: anyerror, optTrace: ?*std.lang.StackT
     return t.ret_panic(@errorName(err));
 }
 
-fn createFuncSymType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createFuncSymType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = decl;
     _ = vm;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
@@ -431,7 +440,7 @@ fn createFuncSymType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C
     const instance = ctx.data.sym.instance().?;
     const sig = instance.getParamValue("SIG").?.asPtr(*cy.FuncSig);
 
-    const new_t = c.sema.createType(.func_sym, .{ .sig = sig }) catch @panic("error");
+    const new_t = c.sema.createType(.func_sym, .{ .sig = sig }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
@@ -453,7 +462,7 @@ fn createOpaqueFuncType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c)
     }
     const sig = fn_t.cast(.func_ptr).sig;
 
-    const new_t = c.sema.createType(.func, .{ .sig = sig, .opaque_ = true }) catch @panic("error");
+    const new_t = c.sema.createType(.func, .{ .sig = sig, .opaque_ = true }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
@@ -475,11 +484,11 @@ fn createFuncType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.T
     }
     const sig = fn_t.cast(.func_ptr).sig;
 
-    const new_t = c.sema.createType(.func, .{ .sig = sig }) catch @panic("error");
+    const new_t = c.sema.createType(.func, .{ .sig = sig }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createExternFuncPtrType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createExternFuncPtrType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = decl;
     _ = vm;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
@@ -489,29 +498,29 @@ fn createExternFuncPtrType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(
     const instance = ctx.data.sym.instance().?;
     const sig = instance.getParamValue("SIG").?.asPtr(*cy.FuncSig);
 
-    const new_t = c.sema.createType(.func_ptr, .{ .sig = sig, .extern_ = true }) catch @panic("error");
+    const new_t = c.sema.createType(.func_ptr, .{ .sig = sig, .extern_ = true }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn create_thread_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn create_thread_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
-    const new_t = c.sema.createTypeWithId(.pointer, bt.Thread, .{ .ref = false, .child_t = c.sema.void_t }) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.pointer, bt.Thread, .{ .ref = false, .child_t = c.sema.void_t }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createFuncSigType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createFuncSigType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
-    const new_t = c.sema.createTypeWithId(.pointer, bt.FuncSig, .{ .ref = false, .child_t = c.sema.void_t }) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.pointer, bt.FuncSig, .{ .ref = false, .child_t = c.sema.void_t }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createFuncPtrType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createFuncPtrType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = decl;
     _ = vm;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
@@ -521,7 +530,7 @@ fn createFuncPtrType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C
     const instance = ctx.data.sym.instance().?;
     const sig = instance.getParamValue("SIG").?.asPtr(*cy.FuncSig);
 
-    const new_t = c.sema.createType(.func_ptr, .{ .sig = sig }) catch @panic("error");
+    const new_t = c.sema.createType(.func_ptr, .{ .sig = sig }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
@@ -538,11 +547,11 @@ fn create_dyn_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.
         return null;
     }
 
-    const new_t = c.sema.createType(.dyn_trait, .{ .generic = child_t.cast(.generic_trait) }) catch @panic("error");
+    const new_t = c.sema.createType(.dyn_trait, .{ .generic = child_t.cast(.generic_trait) }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createRefType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createRefType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = decl;
     _ = vm;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
@@ -551,15 +560,15 @@ fn createRefType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Typ
     const instance = ctx.data.sym.instance().?;
     const child_t = instance.getParamValue("T").?.asPtr(*cy.Type);
     if (child_t.kind() == .dyn_trait) {
-        const new_t = c.sema.createType(.ref_trait, .{ .generic = child_t.cast(.dyn_trait).generic }) catch @panic("error");
+        const new_t = c.sema.createType(.ref_trait, .{ .generic = child_t.cast(.dyn_trait).generic }) catch |err| return cy.compiler.failCreateType(c, err);
         return @ptrCast(new_t);
     }
 
-    const new_t = c.sema.createType(.pointer, .{ .ref = true, .child_t = child_t }) catch @panic("error");
+    const new_t = c.sema.createType(.pointer, .{ .ref = true, .child_t = child_t }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createExBorrowType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createExBorrowType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = decl;
     _ = vm;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
@@ -571,11 +580,11 @@ fn createExBorrowType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *
         @panic("TODO");
     }
 
-    const new_t = c.sema.createType(.ex_borrow, .{ .child_t = child_t }) catch @panic("error");
+    const new_t = c.sema.createType(.ex_borrow, .{ .child_t = child_t }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createBorrowType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createBorrowType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = decl;
     _ = vm;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
@@ -584,15 +593,15 @@ fn createBorrowType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.
     const instance = ctx.data.sym.instance().?;
     const child_t = instance.getParamValue("T").?.asPtr(*cy.Type);
     if (child_t.kind() == .dyn_trait) {
-        const new_t = c.sema.createType(.borrow_trait, .{ .generic = child_t.cast(.dyn_trait).generic }) catch @panic("error");
+        const new_t = c.sema.createType(.borrow_trait, .{ .generic = child_t.cast(.dyn_trait).generic }) catch |err| return cy.compiler.failCreateType(c, err);
         return @ptrCast(new_t);
     }
 
-    const new_t = c.sema.createType(.borrow, .{ .child_t = child_t }) catch @panic("error");
+    const new_t = c.sema.createType(.borrow, .{ .child_t = child_t }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createPtrType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createPtrType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = decl;
     _ = vm;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
@@ -601,11 +610,11 @@ fn createPtrType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Typ
     const instance = ctx.data.sym.instance().?;
     const child_t = instance.getParamValue("T").?.asPtr(*cy.Type);
 
-    const new_t = c.sema.createType(.pointer, .{ .ref = false, .child_t = child_t }) catch @panic("error");
+    const new_t = c.sema.createType(.pointer, .{ .ref = false, .child_t = child_t }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createRawType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createRawType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
@@ -623,29 +632,29 @@ fn createRawType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Typ
             std.debug.panic("Unsupported. `{}` bits is not supported for `Byte`.", .{bits});
         },
     };
-    const new_t = c.sema.createTypeWithId(.raw, type_id, .{ .bits = @intCast(bits), .distinct = false }) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.raw, type_id, .{ .bits = @intCast(bits), .distinct = false }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createErrorType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createErrorType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
-    const new_t = c.sema.createTypeWithId(.raw, bt.Error, .{ .bits = 64, .distinct = true }) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.raw, bt.Error, .{ .bits = 64, .distinct = true }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createSymbolType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createSymbolType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
-    const new_t = c.sema.createTypeWithId(.raw, bt.Symbol, .{ .bits = 64, .distinct = true }) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.raw, bt.Symbol, .{ .bits = 64, .distinct = true }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createIntType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createIntType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
@@ -663,44 +672,44 @@ fn createIntType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Typ
             std.debug.panic("Unsupported. `{}` bits is not supported for `Int`.", .{bits});
         },
     };
-    const new_t = c.sema.createTypeWithId(.int, type_id, .{ .bits = @intCast(bits) }) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.int, type_id, .{ .bits = @intCast(bits) }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn create_eval_str_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn create_eval_str_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    const new_t = c.sema.createTypeWithId(.eval_ref, bt.EvalStr, .{}) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.eval_ref, bt.EvalStr, .{}) catch |err| return cy.compiler.failCreateType(c, err);
     new_t.info.ct = true;
     return @ptrCast(new_t);
 }
 
-fn create_eval_buffer_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn create_eval_buffer_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    const new_t = c.sema.createType(.eval_ref, .{}) catch @panic("error");
+    const new_t = c.sema.createType(.eval_ref, .{}) catch |err| return cy.compiler.failCreateType(c, err);
     new_t.info.ct = true;
     return @ptrCast(new_t);
 }
 
-fn create_eval_int_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn create_eval_int_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    const new_t = c.sema.createTypeWithId(.eval_int, bt.EvalInt, .{}) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.eval_int, bt.EvalInt, .{}) catch |err| return cy.compiler.failCreateType(c, err);
     new_t.info.ct = true;
     return @ptrCast(new_t);
 }
 
-fn createFloatType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createFloatType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
@@ -716,75 +725,75 @@ fn createFloatType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.T
             std.debug.panic("Unsupported. `{}` bits is not supported for `Float`.", .{bits});
         },
     };
-    const new_t = c.sema.createTypeWithId(.float, type_id, .{ .bits = @intCast(bits) }) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.float, type_id, .{ .bits = @intCast(bits) }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createNeverType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createNeverType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    const new_t = c.sema.createTypeWithId(.never, bt.Never, .{}) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.never, bt.Never, .{}) catch |err| return cy.compiler.failCreateType(c, err);
     c.sema.never_t = new_t;
     return @ptrCast(new_t);
 }
 
-fn createVoidType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createVoidType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    const new_t = c.sema.createTypeWithId(.void, bt.Void, .{}) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.void, bt.Void, .{}) catch |err| return cy.compiler.failCreateType(c, err);
     c.sema.void_t = new_t;
     return @ptrCast(new_t);
 }
 
-fn createBoolType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createBoolType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    const new_t = c.sema.createTypeWithId(.bool, bt.Bool, .{}) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.bool, bt.Bool, .{}) catch |err| return cy.compiler.failCreateType(c, err);
     c.sema.bool_t = new_t;
     return @ptrCast(new_t);
 }
 
-fn createInferType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createInferType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    const new_t = c.sema.createTypeWithId(.generic, bt.Infer, .{}) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.generic, bt.Infer, .{}) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createDependentType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createDependentType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    const new_t = c.sema.createTypeWithId(.generic, bt.Dependent, .{}) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.generic, bt.Dependent, .{}) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn create_any_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn create_any_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    const new_t = c.sema.createTypeWithId(.generic, bt.Any, .{}) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.generic, bt.Any, .{}) catch |err| return cy.compiler.failCreateType(c, err);
     new_t.info.generic = true;
     return @ptrCast(new_t);
 }
 
-fn createResultType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createResultType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = decl;
     _ = vm;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
@@ -796,11 +805,11 @@ fn createResultType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.
 
     const new_t = c.sema.createType(.result, .{
         .child_t = child_t,
-    }) catch @panic("error");
+    }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createOptionType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createOptionType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = decl;
     _ = vm;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
@@ -814,7 +823,7 @@ fn createOptionType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.
     const new_t = c.sema.createType(.option, .{
         .child_t = child_t,
         .zero_union = zero_union,
-    }) catch @panic("error");
+    }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
@@ -827,7 +836,7 @@ fn createGenericVectorType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(
     var ctx = sema.getResolveContext(c);
     const instance = ctx.data.sym.cast(.type).instance.?;
     const elem_t = instance.getParamValue("T").?.asPtr(*cy.Type);
-    const new_t = c.sema.createType(.generic_vector, .{ .elem_t = elem_t }) catch @panic("error");
+    const new_t = c.sema.createType(.generic_vector, .{ .elem_t = elem_t }) catch |err| return cy.compiler.failCreateType(c, err);
 
     return @ptrCast(new_t);
 }
@@ -842,7 +851,7 @@ fn createPartialVectorType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(
     const instance = ctx.data.sym.cast(.type).instance.?;
     const n: usize = @intCast(instance.getParamValue("N").?.asInt());
     const elem_t = instance.getParamValue("T").?.asPtr(*cy.Type);
-    const new_t = c.sema.createType(.partial_vector, .{ .n = n, .elem_t = elem_t }) catch @panic("error");
+    const new_t = c.sema.createType(.partial_vector, .{ .n = n, .elem_t = elem_t }) catch |err| return cy.compiler.failCreateType(c, err);
 
     return @ptrCast(new_t);
 }
@@ -857,7 +866,7 @@ fn createVectorType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C
     const instance = ctx.data.sym.cast(.type).instance.?;
     const n: usize = @intCast(instance.getParamValue("N").?.asInt());
     const elem_t = instance.getParamValue("T").?.asPtr(*cy.Type);
-    const new_t = c.sema.createType(.vector, .{ .n = n, .elem_t = elem_t }) catch @panic("error");
+    const new_t = c.sema.createType(.vector, .{ .n = n, .elem_t = elem_t }) catch |err| return cy.compiler.failCreateType(c, err);
 
     return @ptrCast(new_t);
 }
@@ -1553,11 +1562,13 @@ pub fn trackMainLocal(t: *cy.Thread) !C.Ret {
         .stack_off = @divExact(@intFromPtr(val) - @intFromPtr(t.c.stack_ptr), @sizeOf(Value)),
         .reg_size = (val_t.size() + 7) >> 3,
     };
+    errdefer t.alloc.free(save.name);
+    try t.c.vm.env_local_saves.ensureUnusedCapacity(t.alloc, 1);
     const res = try t.c.vm.env_local_saves_map.getOrPut(t.alloc, name);
     if (!res.found_existing) {
         res.key_ptr.* = save.name;
         res.value_ptr.* = t.c.vm.env_local_saves.items.len;
-        try t.c.vm.env_local_saves.append(t.alloc, save);
+        t.c.vm.env_local_saves.appendAssumeCapacity(save);
     } else {
         // A restored or redeclared local replaces the previous save. Its value was already moved
         // into the local, so only the copy is freed.

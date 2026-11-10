@@ -35,6 +35,8 @@ VM의 메모리를 자기 아레나 · 풀 · 계수기로 돌릴 방법이 없�
 6. `alloc`이 `NULL`을 돌려주는 것은 `cl_vm_initx`에 실패하는 할당자를 넘긴 것과 같다. 런타임의 힙 · 스택 성장에서는
    `panic: OutOfMemory`가 되지만 컴파일 단계에서는 정의된 동작이 아니다(`project_memory_limit.md`의 퍼즈). 스크립트의
    메모리를 묶는 수단은 `cl_vm_set_memory_limit`이고, 헤더에 그렇게 적는다.
+   갱신(같은 날): eval 중의 `NULL`은 이제 컴파일 단계에서도 그 eval의 오류다(`project_compile_alloc_failure.md`). 컴파일이
+   메모리 부족으로 끝나면 세션이 reset되므로 상한의 수단은 여전히 `cl_vm_set_memory_limit`이다.
 7. VM을 만들 때의 할당 실패는 `cl_vm_init` · `cl_vm_initx`와 같이 `fatal`이다.
 
 ## 구현 메모
@@ -56,4 +58,5 @@ VM의 메모리를 자기 아레나 · 풀 · 계수기로 돌릴 방법이 없�
 ## 남은 것
 
 - 제자리 성장(`realloc`) 훅.
-- `alloc`의 `NULL`을 컴파일 단계에서도 깨끗한 오류로 만드는 일(컴파일러의 할당 실패 처리 전반).
+- `alloc`의 `NULL`을 컴파일 단계에서도 깨끗한 오류로 만드는 일은 했다(`project_compile_alloc_failure.md`). VM을 만드는 중의
+  `NULL`(결정 7)과 값 생성 API의 `fatal`은 남았다.

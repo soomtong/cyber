@@ -1863,7 +1863,10 @@ pub const Ast = struct {
 
     pub fn genIdentNode(self: *Ast, alloc: std.mem.Allocator, name: []const u8) !*Ident {
         const dup = try alloc.dupe(u8, name);
-        try self.strs.append(alloc, dup);
+        self.strs.append(alloc, dup) catch |err| {
+            alloc.free(dup);
+            return err;
+        };
         const span = try self.newNode(.ident, .{
             .src = self.src_id,
             .pos = cy.NullId,

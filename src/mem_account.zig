@@ -16,6 +16,11 @@ pub const MemAccount = struct {
     /// Zero means no limit.
     limit: std.atomic.Value(usize) = .init(0),
 
+    /// Allocations the host's allocator refused. A compile that fails while this moves leaves compiler state
+    /// that is not trusted again (`Compiler.alloc_failed`). A refused `resize` or `remap` is not counted, the
+    /// caller falls back to `alloc`.
+    failed: std.atomic.Value(usize) = .init(0),
+
     pub fn allocator(self: *MemAccount) std.mem.Allocator {
         return .{ .ptr = self, .vtable = &vtable };
     }
@@ -48,7 +53,10 @@ pub const MemAccount = struct {
 
     fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
         const self: *MemAccount = @ptrCast(@alignCast(ctx));
-        const ptr = self.child.rawAlloc(len, alignment, ret_addr) orelse return null;
+        const ptr = self.child.rawAlloc(len, alignment, ret_addr) orelse {
+            _ = self.failed.fetchAdd(1, .monotonic);
+            return null;
+        };
         _ = self.used.fetchAdd(len, .monotonic);
         return ptr;
     }

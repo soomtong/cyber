@@ -125,7 +125,11 @@ pub const ByteCodeBuffer = struct {
     pub fn getOrPushConstString(self: *ByteCodeBuffer, str: []const u8) !ConstString {
         const res = try self.const_string_map.getOrPut(self.alloc, str);
         if (!res.found_existing) {
-            res.key_ptr.* = try self.alloc.dupeSentinel(u8, str, 0);
+            // The new key still points at the caller's `str`. It must not stay in the map, `deinit` frees every key.
+            res.key_ptr.* = self.alloc.dupeSentinel(u8, str, 0) catch |err| {
+                self.const_string_map.removeByPtr(res.key_ptr);
+                return err;
+            };
             res.value_ptr.* = cy.string.isAstring(str);
         }
         return .{

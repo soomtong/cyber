@@ -31,6 +31,22 @@
   `malloc`의 보장보다 클 수 있고, 두 함수는 스레드에 안전해야 한다(`spawn`). 제자리 성장 함수는 없다. 스크립트의 메모리 상한은 `NULL`을
   돌려주는 `alloc`이 아니라 `cl_vm_set_memory_limit`으로 건다. `examples/libcyber/host_tool.c`가 이 방식으로 바뀌었다
   (`docs/decisions/project_c_mem_funcs.md`).
+- 호스트 할당자가 eval 중에 실패해도(`cl_vm_init_mem`의 `alloc`이 `NULL`, `cl_vm_initx`에 준 할당자의 실패) eval은 오류를 돌려주고
+  VM은 계속 쓸 수 있다(F-41). 이전에는 실패한 지점에 따라 프로세스 abort · SEGV · 누수였다(`docs/decisions/project_compile_alloc_failure.md`).
+  - 컴파일러에서 실패: `CL_ERROR_COMPILE`. 요약은 `CompileError: OutOfMemory` 계열(텍스트 writer 뒤의 실패는 `WriteFailed`)이거나,
+    리포트를 만들 메모리도 없으면 비어 있다.
+    다음 eval · validate는 `cl_vm_reset`처럼 VM을 reset한 뒤 시작한다. `persist_main` 세션이 쥐고 있던 지역 변수와 선언은 사라진다.
+    호스트 설정(연료, 스택 · 메모리 한도, 프린터, user data)은 남는다.
+  - 스크립트 실행 중 실패: `CL_ERROR_PANIC`, `panic: OutOfMemory`. 다른 panic의 메시지를 할당하지 못하면 메시지가 `OutOfMemory`로
+    바뀌고, 스택 트레이스를 기록하지 못하면 트레이스가 비어 있다. 어느 경우에도 스레드의 힙은 해제된다.
+  - 실행 뒤 정리(결과 값 복사, `persist_main`의 지역 변수 이월)에서 실패: `CL_ERROR_UNKNOWN`, 요약 없음.
+  - `cl_vm_error_summary` · `cl_vm_compile_error_summary` · `cl_thread_panic_summary`는 문자열을 할당하지 못하면 null `CLBytes`를
+    돌려준다. `cl_vm_freeb`에 그대로 넘겨도 된다.
+  - `cl_mod_add_func` · `cl_mod_add_type` · `cl_mod_add_global`과 타입 생성 콜백(`CLCreateTypeFn`의 `NULL` 반환)의 실패는 그 모듈을
+    로드하던 컴파일의 실패가 된다. `clExpandTypeTemplate` · `cl_find_type`은 `NULL`을 돌려준다.
+  - 그대로인 것: VM을 만드는 중(`cl_vm_init` · `cl_vm_initx` · `cl_vm_init_mem`)과 호스트가 값을 만드는 함수(`cl_str_init`,
+    `cl_array_empty`, `cl_map_empty`, `cl_vm_alloc` 등)의 할당 실패는 여전히 프로세스를 abort한다. 스크립트의 메모리 상한은
+    실패하는 할당자가 아니라 `cl_vm_set_memory_limit`으로 건다.
 - `cl_vm_allocator`가 돌려주는 할당자는 호스트가 `cl_vm_initx`에 준 것이 아니라 그 위의 계수 래퍼다. 거기서 받은 메모리는 같은
   할당자로 돌려줘야 하고, `cl_vm_deinit` 뒤에는 쓸 수 없다.
 - panic으로 끝난 eval은 힙 페이지(첫 페이지 제외)와 main 스레드의 커진 스택을 할당자에 돌려준다. 이전에는 VM이 끝날 때까지 쥐고 있었다.

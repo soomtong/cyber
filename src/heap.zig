@@ -141,6 +141,29 @@ pub const Heap = struct {
         self.buffers.clearRetainingCapacity();
     }
 
+    /// Frees every live object and every registered raw buffer without following references, like
+    /// `thread.freeHeapPages` does for a thread's heap. For the compile-time heap of a failed compile.
+    pub fn sweep(self: *Heap) void {
+        for (self.heapPages.items) |page| {
+            var i: u32 = 0;
+            while (i < page.objects.len) : (i += 1) {
+                const pobj = &page.objects[i];
+                if (pobj.head.free_span.meta == cy.NullId) {
+                    continue;
+                }
+                var obj: *HeapObject = @ptrCast(&pobj.data);
+                if (pobj.head.free_span.meta == BigObjectPtrType) {
+                    obj = @ptrCast(@alignCast(obj.pointer.ptr));
+                }
+                if (cy.Trace) {
+                    self.c.refCounts -= obj.rc();
+                }
+                self.destroyObject(obj, true);
+            }
+        }
+        self.freeAllBuffers();
+    }
+
     pub fn next_trace_event(self: *Heap) u64 {
         defer self.c.trace_event += 1;
         if (cy.Trace and self.c.trace_panic_at_event == self.c.trace_event) {
@@ -1031,11 +1054,25 @@ pub fn allocBigObject(self: *Heap, type_id: cy.TypeId, size: usize) !*HeapObject
 
     log.tracevIf(log_mem, "0 +1 alloc big object: {*} type={} size={} evt={}", .{obj, type_id, size, cy.event_id});
     if (cy.Trace) {
+        traceAlloc(self, obj) catch |err| {
+            self.alloc.free(slice);
+            self.freePoolObject(ptr_obj);
+            return err;
+        };
         self.c.refCounts += 1;
         self.c.numRetains += 1;
-        try traceAlloc(self, obj);
     }
     return obj;
+}
+
+/// Trace only. The record of a slot just taken from the head of the free list could not be stored. Puts the slot
+/// back, or the sweep after a panic would visit a slot with no object.
+fn untakePoolObject(self: *Heap, ptr: *HeapObject) void {
+    ptr.header().free_span = .{
+        .meta = NullId,
+        .len = 0,
+    };
+    self.heapFreeHead = ptr;
 }
 
 pub fn allocBigObjectPtr(self: *Heap) !*HeapObject {
@@ -1056,7 +1093,10 @@ pub fn allocBigObjectPtr(self: *Heap) !*HeapObject {
     };
 
     if (cy.Trace) {
-        try traceAlloc(self, ptr);
+        traceAlloc(self, ptr) catch |err| {
+            untakePoolObject(self, ptr);
+            return err;
+        };
         if (self.heapFreeTail == ptr) {
             // Ensure tail is updated if it was the same segment as head.
             self.heapFreeTail = self.heapFreeHead;
@@ -1087,7 +1127,10 @@ pub fn allocPoolObject(self: *Heap, type_id: cy.TypeId) !*HeapObject {
 
     log.tracevIf(log_mem, "0 +1 alloc pool object: {*} type={} {s} evt={}", .{ptr, type_id, self.sema.types.items[type_id].name(), cy.event_id});
     if (cy.Trace) {
-        try traceAlloc(self, ptr);
+        traceAlloc(self, ptr) catch |err| {
+            untakePoolObject(self, ptr);
+            return err;
+        };
         if (self.heapFreeTail == ptr) {
             // Ensure tail is updated if it was the same segment as head.
             self.heapFreeTail = self.heapFreeHead;
@@ -1101,6 +1144,7 @@ pub fn allocPoolObject(self: *Heap, type_id: cy.TypeId) !*HeapObject {
 pub fn new_eval_buffer_undef(self: *Heap, buffer_t: *cy.Type, len: usize) !Value {
     const elem_t = buffer_t.sym().instance.?.params[0].asPtr(*cy.Type);
     const ptr = try self.new_byte_buffer(elem_t.size() * len);
+    errdefer self.free_byte_buffer(ptr);
 
     const object = try self.new_object_undef(buffer_t.id(), @sizeOf(EvalBuffer));
     object.eval_buffer = .{
@@ -1113,6 +1157,7 @@ pub fn new_eval_buffer_undef(self: *Heap, buffer_t: *cy.Type, len: usize) !Value
 pub fn new_buffer_undef(self: *Heap, buffer_t: *cy.Type, len: usize) !Value {
     const elem_t = buffer_t.sym().instance.?.params[0].asPtr(*cy.Type);
     const ptr = try self.new_byte_buffer(elem_t.size() * len);
+    errdefer self.free_byte_buffer(ptr);
     return self.newInstance(buffer_t, &.{
         field_init("base", Value.initPtr(ptr)),
         field_init("length", Value.initInt(@intCast(len))),
@@ -1123,6 +1168,7 @@ pub fn new_buffer_undef(self: *Heap, buffer_t: *cy.Type, len: usize) !Value {
 pub fn new_buffer_empty(self: *Heap, buffer_t: *cy.Type, cap: usize) !Value {
     const elem_t = buffer_t.sym().instance.?.params[0].asPtr(*cy.Type);
     const ptr = try self.new_byte_buffer(elem_t.size() * cap);
+    errdefer self.free_byte_buffer(ptr);
     return self.newInstance(buffer_t, &.{
         field_init("base", Value.initPtr(ptr)),
         field_init("length", Value.initInt(0)),
@@ -1137,6 +1183,7 @@ pub fn field_init(name: []const u8, val: Value) C.FieldInit {
 pub fn new_buffer(self: *Heap, buffer_t: *cy.Type, args: []Value) !Value {
     const elem_t = buffer_t.sym().instance.?.params[0].asPtr(*cy.Type);
     const ptr = try self.new_byte_buffer(elem_t.size() * args.len);
+    errdefer self.free_byte_buffer(ptr);
     for (args, 0..) |arg, i| {
         const dst: [*]u8 = @ptrCast(ptr + i * elem_t.size());
         try self.copyValueTo2(elem_t, dst, arg);
@@ -1674,13 +1721,13 @@ pub const MaxPoolObjectUserBytes = @sizeOf(PoolObject) - 8;
 pub fn traceAlloc(self: *Heap, ptr: *HeapObject) !void {
     // log.tracev("alloc {*} {} {}", .{ptr, ptr.getTypeId(), vm.c.debugPc});
     const event_id = self.next_trace_event();
-    self.objectTraceMap.put(self.alloc, ptr, .{
+    try self.objectTraceMap.put(self.alloc, ptr, .{
         .alloc_event = event_id,
         .alloc_ctx = self.c.ctx,
         .free_ctx = null,
         .free_type = null,
         .free_event = 0,
-    }) catch cy.fatal();
+    });
 }
 
 pub fn getObjectAllocEvent(vm: *Heap, ptr: *HeapObject) u64 {

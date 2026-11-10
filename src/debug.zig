@@ -303,6 +303,8 @@ pub fn reportLoc(c: *const cy.Compiler, report: cy.Report) ReportLoc {
             const addr: usize = @intCast(report.loc);
             const node: *ast.Node = @as(?*ast.Node, @ptrFromInt(addr)) orelse return res;
             const start_pos = node.pos();
+            // A node that the compiler generated (a hidden function like `@init`) has no place in the source.
+            if (start_pos == cy.NullId) return res;
             chunk.ast.computeLinePos(start_pos, &res.line, &res.col, &line_pos);
             const line_end = std.mem.findScalarPos(u8, chunk.src, line_pos, '\n') orelse chunk.src.len;
             const end_pos = @min(node.end(), line_end);
@@ -346,7 +348,9 @@ pub fn write_user_error(c: *const cy.Compiler, w: *std.Io.Writer, title: []const
 pub fn writeUserErrorTrace2(c: *const cy.Compiler, w: *std.Io.Writer, chunk_id: u32, opt_node: ?*ast.Node) !void {
     if (chunk_id != cy.NullId) {
         const chunk = c.chunks.items[chunk_id];
-        if (opt_node) |node| {
+        // A node that the compiler generated (a hidden function like `@init`) has no place in the source.
+        const src_node: ?*ast.Node = if (opt_node) |node| (if (node.pos() == cy.NullId) null else node) else null;
+        if (src_node) |node| {
             var line: u32 = undefined;
             var col: u32 = undefined;
             var line_pos: u32 = undefined;
@@ -456,7 +460,10 @@ pub fn allocPanicMsg(t: *cy.Thread) ![]const u8 {
             const len: usize = @intCast(t.c.panic_payload >> 48);
             return t.alloc.dupe(u8, @as([*]const u8, @ptrFromInt(ptr))[0..len]);
         },
-        .inflightOom,
+        .inflightOom => {
+            // The message could not be allocated when the panic was raised.
+            return t.alloc.dupe(u8, "OutOfMemory");
+        },
         .none => {
             cy.panicFmt("Unexpected panic type. {}", .{t.c.panic_type});
         },

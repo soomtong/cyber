@@ -308,6 +308,39 @@ pub const VariantKeyContext = struct {
 //     }
 // }
 
+/// Copies the arguments into a new instance. `type` and `data` are the caller's to set. The instance is not in a
+/// template's `instances` yet, a caller that fails before that releases it with `destroyInstance`.
+fn createInstance(c: *cy.Chunk, arg_types: []const *cy.Type, args: []const cy.Value) !*Instance {
+    const params = try c.alloc.alloc(cy.Value, args.len);
+    errdefer c.alloc.free(params);
+    var ncopied: usize = 0;
+    errdefer for (params[0..ncopied], 0..) |param, i| {
+        c.heap.destructValue2(arg_types[i], param);
+    };
+    for (0..params.len) |i| {
+        params[i] = try c.heap.copyValue2(arg_types[i], args[i]);
+        ncopied += 1;
+    }
+    const param_types = try c.alloc.dupe(*cy.Type, arg_types);
+    errdefer c.alloc.free(param_types);
+
+    const instance = try c.alloc.create(Instance);
+    instance.* = .{
+        .type = undefined,
+        .param_types = param_types,
+        .params = params,
+        // What `deinitValues` expects for this number of params.
+        .map = if (params.len > 2) .{ .map = .empty } else .{ .two = undefined },
+        .data = undefined,
+    };
+    return instance;
+}
+
+fn destroyInstance(c: *cy.Chunk, instance: *Instance) void {
+    Instance.deinitValues(c.heap, instance);
+    c.alloc.destroy(instance);
+}
+
 pub fn expand_template(c: *cy.Chunk, template: *cy.sym.Template, arg_types: []const *cy.Type, args: []const cy.Value) anyerror!*cy.Sym {
     return expand_template2(c, template, arg_types, args, true, null);
 }
@@ -319,29 +352,24 @@ pub fn expand_template2(c: *cy.Chunk, template: *cy.sym.Template, arg_types: []c
     const key = VariantKey{ .param_types = arg_types, .params = args };
     const res = try template.instance_cache.getOrPutContext(c.alloc, key, .{});
     if (!res.found_existing) {
-        // Copy args.
-        const params = try c.alloc.alloc(cy.Value, args.len);
-        for (0..params.len) |i| {
-            params[i] = try c.heap.copyValue2(arg_types[i], args[i]);
-        }
-        const param_types = try c.alloc.dupe(*cy.Type, arg_types);
-
         // Generate type instance.
-        const instance = try c.alloc.create(Instance);
-        instance.* = .{
-            .type = .sym,
-            .param_types = param_types,
-            .params = &.{},
-            .map = undefined,
-            .data = .{ .sym = .{
+        const instance = blk: {
+            // The new slot's key still points at the caller's arguments. It leaves the cache unless an instance fills it.
+            errdefer template.instance_cache.removeByPtr(res.key_ptr);
+            try template.instances.ensureUnusedCapacity(c.alloc, 1);
+            const instance = try createInstance(c, arg_types, args);
+            errdefer destroyInstance(c, instance);
+            instance.type = .sym;
+            instance.data = .{ .sym = .{
                 .template = template,
                 .sym = undefined,
-            }},
+            }};
+            try instance.initParams(c.alloc, instance.params, template.params);
+            break :blk instance;
         };
-        try instance.initParams(c.alloc, params, template.params);
-        res.key_ptr.* = .{ .param_types = param_types, .params = params };
+        res.key_ptr.* = .{ .param_types = instance.param_types, .params = instance.params };
         res.value_ptr.* = instance;
-        try template.instances.append(c.alloc, instance);
+        template.instances.appendAssumeCapacity(instance);
 
         const new_sym = try sema_type.reserve_template_instance(c, template, template.decl.child_decl, instance);
 
@@ -412,14 +440,18 @@ pub fn resolveTemplateArgs(c: *cy.Chunk, args: []const *ast.Node, template: *cy.
             try check_const_param_type(c, param_t, eff_param.type.?);
         }
 
+        // Both slots are reserved first. The caller's cleanup walks the two stacks as pairs, and a value that
+        // fails to land on its stack would not be destructed.
+        try c.valueStack.ensureUnusedCapacity(c.alloc, 1);
+        try c.typeStack.ensureUnusedCapacity(c.alloc, 1);
         const res = try evalParamValueCheck(c, arg, param_t, eff_param.const_param);
 
-        try c.valueStack.append(c.alloc, res.value);
+        c.valueStack.appendAssumeCapacity(res.value);
 
         if (eff_param.const_param) {
-            try c.typeStack.append(c.alloc, param_t);
+            c.typeStack.appendAssumeCapacity(param_t);
         } else {
-            try c.typeStack.append(c.alloc, c.sema.type_t);
+            c.typeStack.appendAssumeCapacity(c.sema.type_t);
         }
 
         // Persist for subsequent parameters that depend on previously resolved parameters.
@@ -547,13 +579,16 @@ pub fn expandTemplateFuncForArgs(c: *cy.Chunk, template: *cy.sym.FuncTemplate, a
         if (decl.params[type_idx].const_param) {
             try check_const_param_type(c, param_t, decl.params[type_idx].type.?);
         }
+        // Both slots are reserved first, see `resolveTemplateArgs`.
+        try c.valueStack.ensureUnusedCapacity(c.alloc, 1);
+        try c.typeStack.ensureUnusedCapacity(c.alloc, 1);
         const res = try evalParamValueCheck(c, arg, param_t, decl.params[type_idx].const_param);
-        try c.valueStack.append(c.alloc, res.value);
+        c.valueStack.appendAssumeCapacity(res.value);
 
         if (decl.params[type_idx].const_param) {
-            try c.typeStack.append(c.alloc, param_t);
+            c.typeStack.appendAssumeCapacity(param_t);
         } else {
-            try c.typeStack.append(c.alloc, c.sema.type_t);
+            c.typeStack.appendAssumeCapacity(c.sema.type_t);
         }
     }
 
@@ -575,49 +610,46 @@ pub fn expandResolvedFuncTemplate(
     const key = VariantKey{ .param_types = arg_types, .params = args };
     const res = try template.instance_cache.getOrPutContext(c.alloc, key, .{});
     if (!res.found_existing) {
-        // Dupe args and copy.
-        const params = try c.alloc.alloc(cy.Value, args.len);
-        for (0..params.len) |i| {
-            params[i] = try c.heap.copyValue2(arg_types[i], args[i]);
-        }
-        const param_types = try c.alloc.dupe(*cy.Type, arg_types);
+        const variant = blk: {
+            // The new slot's key still points at the caller's arguments. It leaves the cache unless a variant fills it.
+            errdefer template.instance_cache.removeByPtr(res.key_ptr);
+            try template.instances.ensureUnusedCapacity(c.alloc, 1);
 
-        if (template.with_cstrs.len > 0) {
-            for (template.with_cstrs, 0..) |cstr, i| {
-                _ = cstr;
-                _ = i;
-                return error.TODO;
-                // if (!param_types[i].implements(cstr.cast(.generic_trait))) {
-                //     const impl_name = try c.sema.allocTypeName(param_types[i]);
-                //     defer c.alloc.free(impl_name);
-                //     const trait_name = try c.sema.allocTypeName(cstr);
-                //     defer c.alloc.free(trait_name);
-                //     return c.reportErrorFmt("Expected `{}` to implement `{}`.", &.{v(impl_name), v(trait_name)}, node);
-                // }
+            // Generate variant type.
+            const variant = try createInstance(c, arg_types, args);
+            errdefer destroyInstance(c, variant);
+
+            if (template.with_cstrs.len > 0) {
+                for (template.with_cstrs, 0..) |cstr, i| {
+                    _ = cstr;
+                    _ = i;
+                    return error.TODO;
+                    // if (!param_types[i].implements(cstr.cast(.generic_trait))) {
+                    //     const impl_name = try c.sema.allocTypeName(param_types[i]);
+                    //     defer c.alloc.free(impl_name);
+                    //     const trait_name = try c.sema.allocTypeName(cstr);
+                    //     defer c.alloc.free(trait_name);
+                    //     return c.reportErrorFmt("Expected `{}` to implement `{}`.", &.{v(impl_name), v(trait_name)}, node);
+                    // }
+                }
             }
-        }
 
-        // Generate variant type.
-        const variant = try c.alloc.create(Instance);
-        variant.* = .{
-            .type = .func,
-            .param_types = param_types,
-            .params = &.{},
-            .map = undefined,
-            .data = .{ .func = .{
+            variant.type = .func;
+            variant.data = .{ .func = .{
                 .template = template,
                 .func = undefined,
-            }},
-        };
-        try variant.initFuncParams(c.alloc, params, template.params);
+            }};
+            try variant.initFuncParams(c.alloc, variant.params, template.params);
 
-        const new_func = try sema.reserve_func_instance(c, template, variant);
+            variant.data.func.func = try sema.reserve_func_instance(c, template, variant);
+            break :blk variant;
+        };
+        const new_func = variant.data.func.func;
 
         // Allow circular reference by resolving after the new symbol has been added to the cache.
-        variant.data.func.func = new_func;
-        res.key_ptr.* = .{ .param_types = param_types, .params = params };
+        res.key_ptr.* = .{ .param_types = variant.param_types, .params = variant.params };
         res.value_ptr.* = variant;
-        try template.instances.append(c.alloc, variant);
+        template.instances.appendAssumeCapacity(variant);
 
         try sema.resolveFuncVariant(c, new_func, resolve_new_types, node);
 

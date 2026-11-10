@@ -108,6 +108,16 @@ pub const Compiler = struct {
     /// The first compile of this VM (or since a reset) failed. The next `VM.eval` resets the VM before compiling.
     first_compile_failed: bool,
 
+    /// A compile ended on an allocation the host refused, or on an error that is not a compile error. What it
+    /// left behind (chunks, symbols, types, bytecode) can be half built in ways a compile error never leaves, so
+    /// the next `VM.eval` or `VM.validate` resets the VM first, like after a failed first compile. Persisted
+    /// locals and declarations of earlier evals are lost.
+    alloc_failed: bool = false,
+
+    /// Set by a host callback that cannot return an error: a C API function that binds into a module
+    /// (`cl_mod_add_func`) or a builtin type creator. The compile that called it fails with this error.
+    host_error: ?anyerror = null,
+
     /// The previous compile failed. Its main chunk's own declarations are not carried over by `persist_main`.
     last_compile_failed: bool,
 
@@ -186,6 +196,12 @@ pub const Compiler = struct {
 
         for (self.chunks.items) |chunk| {
             chunk.deinitCtValues();
+        }
+        if (self.alloc_failed) {
+            // A compile that ran out of memory can abandon a compile-time value half built: a string or a
+            // buffer whose owner was never created. Every value that a sym owns is released by now, and the
+            // types that give each object's size are still alive.
+            self.heap.sweep();
         }
         for (self.chunks.items) |chunk| {
             log.tracev("Deinit chunk `{s}`", .{chunk.srcUri});
@@ -300,8 +316,18 @@ pub const Compiler = struct {
         const first_compile = !self.cont;
         // `VM.validate` sets this again after the compile.
         defer self.main_discarded = false;
-        const res = self.compileInner(uri, src, config) catch |err| {
+        const acct = cy.MemAccount.of(self.alloc);
+        const failed_allocs = if (acct) |a| a.failed.load(.monotonic) else 0;
+        self.host_error = null;
+        const res = self.compileInner2(uri, src, config) catch |err_| {
+            // A callback that could not return its error ended the compile with a bare `CompileError` or null.
+            const err = self.host_error orelse err_;
             self.last_compile_failed = true;
+            // A refused allocation can surface as any error, including a compile error reported by a comptime
+            // function (`error.OutOfMemory`), so the allocator is asked rather than the error.
+            if (err != error.CompileError or (acct != null and acct.?.failed.load(.monotonic) != failed_allocs)) {
+                self.alloc_failed = true;
+            }
             // A failed first compile leaves core types, the core chunk and a main chunk half built while `cont`
             // stays false. Compiling again on top of that loaded core twice (SIGSEGV after a syntax error,
             // `@program_init has already been declared` after a sema error, F-04). `VM.eval` resets the VM first.
@@ -314,12 +340,13 @@ pub const Compiler = struct {
             if (err == error.CompileError) {
                 return err;
             }
+            // Without memory for the report the compile still ends in a compile error. Its summary is empty.
             if (self.chunks.items.len > 0) {
                 // Report other errors using the main chunk.
-                _ = try self.main_chunk.addReportFmt("Error: {}", &.{v(err)}, null);
+                _ = self.main_chunk.addReportFmt("Error: {}", &.{v(err)}, null) catch 0;
                 return error.CompileError;
             } else {
-                _ = try self.addReportFmt(.compile_err, "Error: {}", &.{v(err)}, null, 0);
+                _ = self.addReportFmt(.compile_err, "Error: {}", &.{v(err)}, null, 0) catch 0;
                 return error.CompileError;
             }
         };
@@ -327,6 +354,16 @@ pub const Compiler = struct {
         // Successful.
         self.cont = true;
         self.last_compile_failed = false;
+        return res;
+    }
+
+    fn compileInner2(self: *Compiler, uri: []const u8, src_opt: ?[]const u8, config: C.CompileConfig) !CompileResult {
+        const res = try self.compileInner(uri, src_opt, config);
+        // A callback failed without a way to say so and the compile went on. Nothing was run yet.
+        if (self.host_error) |err| {
+            if (config.backend != C.BackendVM and !config.skip_codegen) res.aot.deinit(self.alloc);
+            return err;
+        }
         return res;
     }
 
@@ -353,6 +390,7 @@ pub const Compiler = struct {
         const r_uri = try resolveModuleUri(self, &buf, uri);
         if (src_opt) |src_temp| {
             const src_dup = try self.alloc.dupe(u8, src_temp);
+            errdefer self.alloc.free(src_dup);
             mainChunk = try ensureModule2(self, r_uri, src_dup);
         } else {
             mainChunk = try ensureModule(self, r_uri);
@@ -545,8 +583,9 @@ pub const Compiler = struct {
         return self.addReportConsume(report_t, msg, chunk, loc);
     }
 
-    /// Assumes `msg` is heap allocated.
+    /// Assumes `msg` is heap allocated. It is freed when the report can not be added.
     pub fn addReportConsume(self: *Compiler, report_t: ReportType, msg: []const u8, chunk: ?cy.ChunkId, loc: u64) !usize {
+        errdefer self.alloc.free(msg);
         const id = self.reports.items.len;
         try self.reports.append(self.alloc, .{
             .type = report_t,
@@ -1102,6 +1141,8 @@ pub fn loadChunk(c: *cy.Chunk) !void {
         c.src = C.from_bytes(res.src);
         c.manage_src = res.manage_src;
         c.pending_load_src = false;
+        // A binding the loader could not add (`cl_mod_add_*`).
+        if (c.compiler.host_error) |err| return err;
     }
 
     log.tracev("chunk parse: {}", .{c.id});
@@ -1139,10 +1180,23 @@ pub fn ensureModule2(self: *Compiler, r_uri: []const u8, src: ?[]const u8) !*cy.
         return cache.value_ptr.*;
     }
 
+    // The new entry's key is still the caller's buffer. It leaves the map again unless the chunk is registered.
+    errdefer self.chunk_map.removeByPtr(cache.key_ptr);
+    try self.chunks.ensureUnusedCapacity(self.alloc, 1);
+
     const r_uri_dupe = try self.alloc.dupe(u8, r_uri);
     const chunk_id: u32 = @intCast(self.chunks.items.len);
-    const chunk = try self.alloc.create(cy.Chunk);
-    try chunk.init(self, chunk_id, r_uri_dupe, src);
+    const chunk = self.alloc.create(cy.Chunk) catch |err| {
+        self.alloc.free(r_uri_dupe);
+        return err;
+    };
+    errdefer self.alloc.destroy(chunk);
+    chunk.init(self, chunk_id, r_uri_dupe, src) catch |err| {
+        self.alloc.free(r_uri_dupe);
+        return err;
+    };
+    // Frees `r_uri_dupe` as the chunk's uri. `src` stays with the caller.
+    errdefer chunk.deinit();
 
     var name = std.Io.Dir.path.basename(r_uri_dupe);
     if (std.mem.findScalarLast(u8, name, '.')) |idx| {
@@ -1150,7 +1204,7 @@ pub fn ensureModule2(self: *Compiler, r_uri: []const u8, src: ?[]const u8) !*cy.
     }
 
     chunk.sym = try chunk.createChunkSym(name);
-    try self.chunks.append(self.alloc, chunk);
+    self.chunks.appendAssumeCapacity(chunk);
     cache.key_ptr.* = r_uri_dupe;
     cache.value_ptr.* = chunk;
     return chunk;
@@ -1393,7 +1447,16 @@ fn resolveChunkSyms(c: *cy.Chunk) !void {
 
     if (c.on_load) |onLoad| {
         onLoad(@ptrCast(c.vm), @ptrCast(c.sym));
+        // The callback cannot return an error. A failed one leaves the module half loaded, and the rest of the
+        // compile would read what it did not set.
+        if (c.compiler.host_error) |err| return err;
     }
+}
+
+/// For a builtin type creator (`C.CreateTypeFn`), which can only return null: the compile fails with `err`.
+pub fn failCreateType(c: *cy.Chunk, err: anyerror) ?*C.Type {
+    c.compiler.host_error = err;
+    return null;
 }
 
 pub const CompileResult = union {

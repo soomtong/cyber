@@ -454,23 +454,23 @@ fn performRtRelocations(compiler: *cy.Compiler) void {
     }
 }
 
-fn createVariadicType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createVariadicType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    const new_t = c.sema.createType(.c_variadic, .{}) catch @panic("error");
+    const new_t = c.sema.createType(.c_variadic, .{}) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createU32Type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createU32Type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    const new_t = c.sema.createType(.int, .{ .bits = 32 }) catch @panic("error");
+    const new_t = c.sema.createType(.int, .{ .bits = 32 }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 

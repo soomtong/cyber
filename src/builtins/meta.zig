@@ -156,32 +156,32 @@ fn resolveResultChild(c_: ?*C.VM, sym_: ?*C.Sym) callconv(.c) ?*C.Sym {
     return @ptrCast(type_.cast(.result).child_t.sym());
 }
 
-fn create_partial_struct_layout_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn create_partial_struct_layout_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
-    const new_t = c.sema.createTypeWithId(.pointer, bt.PartialStructLayout, .{ .ref = false, .child_t = c.sema.void_t }) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.pointer, bt.PartialStructLayout, .{ .ref = false, .child_t = c.sema.void_t }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 
-fn createCodeType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createCodeType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
-    const new_t = c.sema.createTypeWithId(.pointer, bt.Code, .{ .ref = false, .child_t = c.sema.void_t }) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.pointer, bt.Code, .{ .ref = false, .child_t = c.sema.void_t }) catch |err| return cy.compiler.failCreateType(c, err);
     new_t.info.ct = true;
     return @ptrCast(new_t);
 }
 
-fn createTypeType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn createTypeType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    const new_t = c.sema.createTypeWithId(.raw, bt.Type, .{ .bits = 64, .distinct = false }) catch @panic("error");
+    const new_t = c.sema.createTypeWithId(.raw, bt.Type, .{ .bits = 64, .distinct = false }) catch |err| return cy.compiler.failCreateType(c, err);
     new_t.info.ct = true;
     return @ptrCast(new_t);
 }

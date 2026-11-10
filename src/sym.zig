@@ -427,6 +427,15 @@ const Metadata = packed struct {
     padding: u14,
 };
 
+/// Hands a new sym to its chunk, which destroys it at deinit. The sym owns nothing else yet, so a failed
+/// append frees it here.
+fn trackSym(c: *cy.Chunk, sym: anytype) !void {
+    c.syms.append(c.alloc, @ptrCast(sym)) catch |err| {
+        c.alloc.destroy(sym);
+        return err;
+    };
+}
+
 pub fn createSym(alloc: std.mem.Allocator, comptime symT: SymType, init: SymChild(symT)) !*SymChild(symT) {
     const sym = try alloc.create(SymChild(symT));
     sym.* = init;
@@ -1149,7 +1158,7 @@ pub fn createCtValue(c: *cy.Chunk, parent: *Sym, name: []const u8, variant: *cy.
         .decl = decl,
         .instance = variant,
     });
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 }
 
@@ -1157,16 +1166,18 @@ pub fn createTypeSym(c: *cy.Chunk, parent: *Sym, name: []const u8, opt_type: ?*c
     const sym = try createSym(c.alloc, .type, .{
         .head = Sym.init(.type, parent, name),
         .decl = decl,
-        .type = opt_type orelse undefined,
+        // A custom type is filled in by its creator. Until then the sym must not hold an undefined pointer,
+        // `deinit_sym_ct_values` reads it when a failed compile is torn down.
+        .type = opt_type orelse &cy.types.NullType,
         .instance = null,
         .impls_ = .empty,
         .mod = undefined,
     });
+    @as(*cy.Module, @ptrCast(&sym.mod)).* = cy.Module.init();
+    try trackSym(c, sym);
     if (opt_type) |type_| {
         type_.sym_ = sym;
     }
-    @as(*cy.Module, @ptrCast(&sym.mod)).* = cy.Module.init();
-    try c.syms.append(c.alloc, @ptrCast(sym));
     return sym;
 }
 
@@ -1176,7 +1187,7 @@ pub fn createField(c: *cy.Chunk, parent: *Sym, name: []const u8, idx: usize, typ
         .idx = @intCast(idx),
         .type = type_,
     });
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 }
 
@@ -1186,7 +1197,7 @@ pub fn createEnumCase(c: *cy.Chunk, parent: *Sym, name: []const u8, type_: *cy.T
         .type = type_,
         .val = val,
     });
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 }
 
@@ -1199,7 +1210,7 @@ pub fn createChoiceCase(c: *cy.Chunk, parent: *Sym, name: []const u8, type_: *cy
         .payload_t = payload_t,
         .idx = idx,
     });
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 }
 
@@ -1211,7 +1222,7 @@ pub fn createUnionCase(c: *cy.Chunk, parent: *Sym, name: []const u8, type_: *cy.
         .payload_t = payload_t,
         .idx = idx,
     });
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 }
 
@@ -1225,7 +1236,7 @@ pub fn createConst(c: *cy.Chunk, parent: *Sym, name: []const u8, decl: ?*ast.Con
         .resolved = false,
         .resolving_init = false,
     });
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 }
 
@@ -1238,7 +1249,7 @@ pub fn createUserVar(c: *cy.Chunk, parent: *Sym, name: []const u8, decl: ?*ast.G
         .emitted = false,
         .resolving_init = false,
     });
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 }
 
@@ -1249,7 +1260,7 @@ pub fn createHostVar(c: *cy.Chunk, parent: *Sym, name: []const u8, decl: ?*ast.G
         .decl = decl,
         .type = &cy.types.NullType,
     });
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 }
 
@@ -1262,7 +1273,7 @@ pub fn createExternVar(c: *cy.Chunk, parent: *Sym, name: []const u8, decl: ?*ast
         .extern_name_len = 0,
         .resolved = false,
     });
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 }
 
@@ -1283,7 +1294,7 @@ pub fn createFuncTemplate(c: *cy.Chunk, parent: *Sym, name: []const u8, callable
         .mod = undefined,
     });
     sym.getMod().* = cy.Module.init();
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 }
 
@@ -1299,7 +1310,7 @@ pub fn createTemplate(c: *cy.Chunk, parent: *Sym, name: []const u8,
         .mod = undefined,
     });
     sym.getMod().* = cy.Module.init();
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 }
 
@@ -1311,7 +1322,7 @@ pub fn createChunkSym(c: *cy.Chunk, name: []const u8) !*Chunk {
     });
     sym.head.getMetadata().private = true;
     @as(*cy.Module, @ptrCast(&sym.mod)).* = cy.Module.init();
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 }
 
@@ -1325,7 +1336,7 @@ pub fn createVariantFunc(c: *cy.Chunk, parent: *Sym, name: []const u8, decl: *as
         },
         .rest_ = .init(),
     });
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 } 
 
@@ -1334,7 +1345,7 @@ pub fn createVariantMember(c: *cy.Chunk, parent: *Sym, name: []const u8, decl: *
         .head = Sym.init(.variant_member, parent, name),
         .decl = decl,
     });
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 } 
 
@@ -1349,7 +1360,7 @@ pub fn createTypeConst(c: *cy.Chunk, parent: *Sym, name: []const u8, private: bo
     });
     sym.getMod().* = cy.Module.init();
     sym.head.getMetadata().private = private;
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 } 
 
@@ -1362,7 +1373,7 @@ pub fn createTypeAlias(c: *cy.Chunk, parent: *Sym, name: []const u8, private: bo
         .resolved = false,
     });
     sym.head.getMetadata().private = private;
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 } 
 
@@ -1374,11 +1385,13 @@ pub fn createUseAlias(c: *cy.Chunk, parent: *Sym, name: []const u8, decl: ?*ast.
         .resolved = false,
     });
     sym.head.getMetadata().private = true;
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 } 
 
 pub fn createFunc(c: *cy.Chunk, ftype: FuncKind, parent: *Sym, config: FuncConfig, decl: ?*ast.Node) !*Func {
+    // Callers append the func to `c.funcs` next. The slot is reserved first so that append cannot fail and leak it.
+    try c.funcs.ensureUnusedCapacity(c.alloc, 1);
     const func = try c.alloc.create(Func);
     func.* = .{
         .type = ftype,
@@ -1411,7 +1424,7 @@ pub fn createFuncSym(c: *cy.Chunk, parent: *Sym, name: []const u8) !*FuncSym {
         .first = undefined,
         .last = undefined,
     });
-    try c.syms.append(c.alloc, @ptrCast(sym));
+    try trackSym(c, sym);
     return sym;
 }
 

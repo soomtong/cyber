@@ -4128,6 +4128,19 @@ cfg.deny_raw_ptrs = true;
 cl_vm_evalx(vm, CL_BYTES("turn"), src, cfg, &res);
 ```
 
+### Allocation failure.
+A host can give the VM its own allocator (`cl_vm_init_mem`, `cl_vm_initx`). When that allocator fails during an eval, the eval returns an error and the VM can be used again:
+
+| Where | Result |
+| -- | -- |
+| In the compiler | `CL_ERROR_COMPILE`. The summary names `OutOfMemory`, or `WriteFailed` when the allocation was behind a text writer, or it is empty without memory for the report. The next eval starts from a reset VM, like `cl_vm_reset`: locals and declarations persisted by earlier evals (`persist_main`) are gone. |
+| In the script | `CL_ERROR_PANIC` with `panic: OutOfMemory`. Without memory for the message or the stack trace of another panic, its message is replaced by `OutOfMemory` and its trace is empty. |
+| After the run (the result value, the persisted locals) | `CL_ERROR_UNKNOWN`, with no summary. |
+
+A summary function returns the null string if there is no memory for the text. Creating a VM (`cl_vm_init`, `cl_vm_initx`, `cl_vm_init_mem`) still aborts the process if the allocator fails, and so do the functions a host calls to create values (`cl_str_init`, `cl_array_empty`, ...).
+
+To bound the memory of a script use `cl_vm_set_memory_limit` and not an allocator that fails: a limit ends in `panic: OutOfMemory` only where the script grows its heap or a stack, and it never stops the compiler part way.
+
 ## Function binding.
 A function binding describes how to load a `#[bind]` function.
 

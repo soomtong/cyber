@@ -46,7 +46,7 @@ pub fn panic(t: *Thread, err: cy.Value) !void {
 
     // TODO: Run stack error destructors.
 
-    var cx = t.getFiberContext();
+    const cx = t.getFiberContext();
 
     if (cy.Trace and c.verbose()) {
         if (cx.pc) |pc| {
@@ -62,7 +62,22 @@ pub fn panic(t: *Thread, err: cy.Value) !void {
             @panic("TODO");
         }
     }
-    cx = try t.unwindStack(t.c.stack(), cx);
+    recordPanicTrace(t, cx) catch |trace_err| {
+        if (trace_err != error.OutOfMemory) return trace_err;
+        // The trace is a record of the panic. With no memory for it the panic goes on without one: the
+        // thread's heap still has to be released, or the objects of this run stay until the VM is destroyed.
+        t.stack_trace.deinit(t.alloc);
+        t.compact_trace.clearAndFree(t.alloc);
+    };
+
+    _ = try freeHeapPages(t);
+    // Nothing is left on the heap. Give back the pages it grew to, so that a heap that ran into the memory
+    // limit starts the next eval empty.
+    t.heap.releaseFreePages();
+}
+
+fn recordPanicTrace(t: *Thread, cx: PcFpOff) !void {
+    _ = try t.unwindStack(t.c.stack(), cx);
 
     // Build detailed stack trace from compact trace.
     const frames = try cy.debug.allocStackTraceCapped(t.c.vm, t.c.stack(), t.compact_trace.items);
@@ -70,11 +85,6 @@ pub fn panic(t: *Thread, err: cy.Value) !void {
     t.stack_trace.frames = frames;
     // One entry per unwound frame. Deep recursion leaves a list that is not needed again.
     t.compact_trace.clearAndFree(t.alloc);
-
-    _ = try freeHeapPages(t);
-    // Nothing is left on the heap. Give back the pages it grew to, so that a heap that ran into the memory
-    // limit starts the next eval empty.
-    t.heap.releaseFreePages();
 }
 
 pub fn patch_frame_ptrs(t: *cy.Thread, fp: usize, layout: []bool, new_stack: [*]cy.Value) void {
@@ -832,15 +842,24 @@ pub const Thread = struct {
 
     pub fn ret_panic_fmt(self: *cy.Thread, format: []const u8, args: []const fmt.FmtValue) c.Ret {
         @branchHint(.cold);
-        const msg = fmt.allocFormat(self.alloc, format, args) catch cy.fatal();
+        const msg = fmt.allocFormat(self.alloc, format, args) catch return self.ret_panic_no_msg();
         self.c.panic_payload = (@as(u64, @intCast(@intFromPtr(msg.ptr))) & 0xffffffffffff) | (@as(u64, msg.len) << 48);
         self.c.panic_type = vmc.PANIC_MSG;
         return c.RetInterrupt;
     }
 
+    /// There is no memory for the message of a panic. The panic goes on with a static message, which masks the
+    /// original one.
+    fn ret_panic_no_msg(self: *cy.Thread) c.Ret {
+        const msg: []const u8 = "OutOfMemory";
+        self.c.panic_payload = (@as(u64, @intCast(@intFromPtr(msg.ptr))) & 0xffffffffffff) | (@as(u64, msg.len) << 48);
+        self.c.panic_type = vmc.PANIC_STATIC_MSG;
+        return c.RetInterrupt;
+    }
+
     pub fn ret_panic(self: *cy.Thread, msg: []const u8) c.Ret {
         @branchHint(.cold);
-        const dupe = self.alloc.dupe(u8, msg) catch cy.fatal();
+        const dupe = self.alloc.dupe(u8, msg) catch return self.ret_panic_no_msg();
         self.c.panic_payload = (@as(u64, @intCast(@intFromPtr(dupe.ptr))) & 0xffffffffffff) | (@as(u64, dupe.len) << 48);
         self.c.panic_type = vmc.PANIC_MSG;
         return c.RetInterrupt;

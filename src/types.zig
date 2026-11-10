@@ -1255,6 +1255,7 @@ pub fn getType(s: *cy.Sema, id: TypeId) *cy.Type {
 /// Some helpers at compile-time rely on an updated runtime type table. 
 pub fn createType(s: *cy.Sema, comptime kind: TypeKind, data: TypeImpl(kind)) !*Type {
     const new = try s.alloc.create(TypeImpl(kind));
+    errdefer s.alloc.destroy(new);
     new.* = data;
     const id = s.types.items.len;
     new.base = .{
@@ -1274,6 +1275,7 @@ pub fn createType(s: *cy.Sema, comptime kind: TypeKind, data: TypeImpl(kind)) !*
 
 pub fn createTypeWithId(s: *cy.Sema, comptime kind: TypeKind, id: TypeId, data: TypeImpl(kind)) !*Type {
     const new = try s.alloc.create(TypeImpl(kind));
+    errdefer s.alloc.destroy(new);
     new.* = data;
     new.base = .{
         .sym_ = undefined,

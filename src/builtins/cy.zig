@@ -11,13 +11,13 @@ const ast = cy.ast;
 const Src = @embedFile("cy.cy");
 const zErrFunc = cy.core.zErrFunc;
 
-fn create_vm_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) *C.Type {
+fn create_vm_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    const new_t = c.sema.createType(.pointer, .{ .ref = false, .child_t = c.sema.void_t }) catch @panic("error");
+    const new_t = c.sema.createType(.pointer, .{ .ref = false, .child_t = c.sema.void_t }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
 }
 

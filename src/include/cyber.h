@@ -203,6 +203,7 @@ typedef enum {
     CL_BIND_TYPE_ALIAS,
 } CLBindTypeKind;
 
+// Creates the type of a `#[bind]` declaration. NULL fails the compile.
 typedef CLType* (*CLCreateTypeFn)(CLVM* vm, CLSym* ctx_chunk, CLNode* decl);
 typedef CLSym* (*CLResolveAliasFn)(CLVM* vm, CLSym* sym);
 
@@ -369,9 +370,9 @@ CLVM* cl_vm_initx(CLAllocator allocator);
 
 // Create a new VM that takes all of its memory from the functions of the host, including the `CLVM` object.
 // `cl_vm_deinit` returns every block.
-// To bound the memory of a script use `cl_vm_set_memory_limit` and not an `alloc` that returns NULL: a failed
-// allocation ends in an `OutOfMemory` panic only where a script grows the heap or a stack, and is not handled
-// everywhere in the compiler.
+// To bound the memory of a script use `cl_vm_set_memory_limit` and not an `alloc` that returns NULL: a limit
+// ends the script alone, in an `OutOfMemory` panic. An `alloc` that returns NULL during an eval fails that eval
+// (see `cl_vm_eval`), and while the VM is created (`cl_vm_init_mem` itself) it aborts the process.
 CLVM* cl_vm_init_mem(CLMemFuncs funcs);
 
 // Deinitializes the VM and frees all memory associated with it. Any operation on `vm` afterwards is undefined.
@@ -417,6 +418,13 @@ void cl_vm_reset(CLVM* vm);
 // On `CL_SUCCESS`, `res` holds the value that `fn main() -> T` returned, or with `persist_main` the value of
 // the script's last statement if that is a bare expression. `res->res_t` is `CL_TYPE_VOID` when there is no value.
 // On any other result code `res` is not set.
+// When the allocator of the VM fails during an eval, the eval returns an error and the VM can be used again:
+// - In the compiler: `CL_ERROR_COMPILE`. The summary names `OutOfMemory` or `WriteFailed`, or it is empty without
+//   memory for the report. The compiler was stopped at an arbitrary point, so the next eval starts from a reset
+//   VM, like `cl_vm_reset`: persisted locals and declarations of earlier evals are gone.
+// - In the script: `CL_ERROR_PANIC` with `panic: OutOfMemory`. Without memory for a panic's own message or
+//   stack trace, the message is `OutOfMemory` and the trace is empty.
+// - In the bookkeeping after the run (the result, the persisted locals): `CL_ERROR_UNKNOWN`, with no summary.
 CLResultCode cl_vm_eval(CLVM* vm, CLBytes src, CLEvalResult* res);
 
 // Accepts a `uri` and EvalConfig.
@@ -477,7 +485,8 @@ CLBytes cl_vm_error_summary(CLVM* vm);
 /// Returns the compile error summary: the message, the source line and a marker under the reported range,
 /// followed by the context the compiler attached (an earlier declaration, the call sites of a template).
 /// The compiler stops at its first error, so there is one error per compile.
-/// Returns the null string if no compile error is recorded. Must be freed with `cl_vm_freeb`.
+/// Returns the null string if no compile error is recorded, or if there is no memory for the summary.
+/// Must be freed with `cl_vm_freeb`.
 /// The text has no terminal escape codes unless `cl_vm_set_error_color` turned them on.
 CLBytes cl_vm_compile_error_summary(CLVM* vm);
 
@@ -575,8 +584,8 @@ typedef struct CLStackTrace {
 
 CLStackTrace cl_thread_panic_trace(CLThread* t);
 
-/// Returns runtime panic summary, or the null string if the thread's last run did not panic.
-/// Must be freed with `cl_vm_freeb`.
+/// Returns runtime panic summary, or the null string if the thread's last run did not panic or if there is no
+/// memory for the summary. Must be freed with `cl_vm_freeb`.
 CLBytes cl_thread_panic_summary(CLThread* t);
 
 /// Return and parameters for host functions.
@@ -638,6 +647,7 @@ CLTraceInfo cl_thread_trace_info(CLThread* t);
 
 void cl_mod_set_data(CLSym* mod, void* data);
 void* cl_mod_get_data(CLSym* mod);
+// Adds a binding from a module loader. Without memory for it, the compile that is loading the module fails.
 void cl_mod_add_func(CLSym* mod, CLBytes name, CLBindFunc binding);
 void cl_mod_add_type(CLSym* mod, CLBytes name, CLBindType binding);
 void cl_mod_add_global(CLSym* mod, CLBytes name, CLBindGlobal binding);
@@ -661,11 +671,14 @@ CLBytes cl_mod_bind_test(CLVM* vm, CLSym* mod);
 // -----------------------------------
 
 // Expand type template for given arguments.
+// Returns `NULL` if the expansion fails. During a compile (called from a module loader or a `CLCreateTypeFn`)
+// the compile then fails with that error.
 CLType* clExpandTypeTemplate(CLVM* vm, CLSym* type_t, const CLType* param_types, const CLValue* args, size_t nargs);
 
 // Find and return the type from a given type specifier (a symbol name in main, then in the builtins).
 // Returns `NULL` before the first compile, if the symbol could not be found or the symbol is not a type.
 // Returns `NULL` for a template expansion that doesn't already exist. Use `clExpandTypeTemplate` to create one.
+// Also `NULL` if the allocator of the VM fails.
 // If a type is returned, the type specifier is memoized to return the same result.
 CLType* cl_find_type(CLVM* vm, CLBytes spec);
 

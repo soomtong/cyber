@@ -112,10 +112,13 @@ pub fn genAll(c: *cy.Compiler) !void {
                         // rt funcs have been reserved. Create impl vtables.
                         const struct_t = type_sym.type.cast(.struct_t);
                         for (struct_t.impls()) |impl| {
+                            // Reserved first, so that a vtable that was allocated is always handed to `vm.vtables`.
+                            try c.vm.vtables.ensureUnusedCapacity(c.alloc, 1);
+                            try c.gen_vtables.ensureUnusedCapacity(c.alloc, 1);
                             const vtable = try c.alloc.alloc(u64, impl.funcs.len);
                             const vtable_idx = c.vm.vtables.items.len;
-                            try c.vm.vtables.append(c.alloc, vtable);
-                            try c.gen_vtables.put(c.alloc, VtableKey{ .type = struct_t.base.id(), .trait = impl.trait.base.id() }, @intCast(vtable_idx));
+                            c.vm.vtables.appendAssumeCapacity(vtable);
+                            c.gen_vtables.putAssumeCapacity(VtableKey{ .type = struct_t.base.id(), .trait = impl.trait.base.id() }, @intCast(vtable_idx));
                         }
                     }
                 },
@@ -184,12 +187,15 @@ pub fn genAll(c: *cy.Compiler) !void {
 
         if (c.vm.types.items.len == 0) {
             // Reserve null type.
+            try c.vm.types.ensureUnusedCapacity(c.alloc, 1);
             const name = try c.alloc.dupe(u8, "<null>");
-            try c.vm.types.append(c.alloc, .{ .name_ptr = name.ptr, .name_len = name.len });
+            c.vm.types.appendAssumeCapacity(.{ .name_ptr = name.ptr, .name_len = name.len });
         }
+        // Reserved first, so that a name that was allocated is always handed to `vm.types`.
+        try c.vm.types.ensureUnusedCapacity(c.alloc, c.newTypes().len);
         for (c.newTypes()) |type_| {
             const name = try c.sema.allocTypeName(type_);
-            try c.vm.types.append(c.alloc, .{ .name_ptr = name.ptr, .name_len = name.len });
+            c.vm.types.appendAssumeCapacity(.{ .name_ptr = name.ptr, .name_len = name.len });
         }
 
         c.vm.c.types_ptr = @ptrCast(c.vm.types.items.ptr);
@@ -204,31 +210,40 @@ pub fn genAll(c: *cy.Compiler) !void {
 fn prepareSym(c: *cy.Compiler, sym: *cy.Sym) !void {
     log.tracev("prep sym: {s}", .{sym.name()});
     switch (sym.type) {
+        .hostVar, .extern_var, .userVar => {
+            // Reserved first, so that a global that was created is always handed to `vm.globals`, its owner.
+            try c.vm.globals.ensureUnusedCapacity(c.alloc, 1);
+            try c.genSymMap.ensureUnusedCapacity(c.alloc, 1);
+        },
+        else => {},
+    }
+    switch (sym.type) {
         .hostVar => {
             const id = c.vm.globals.items.len;
             const global_sym = try c.alloc.create(cy.vm.GlobalSym);
             var val: []align(8) u8 = &.{};
             val.ptr = @ptrCast(@alignCast(sym.cast(.hostVar).val.?));
             global_sym.* = .init(val, sym);
-            try c.vm.globals.append(c.alloc, global_sym);
-            try c.genSymMap.putNoClobber(c.alloc, sym, .{ .varSym = .{ .id = @intCast(id) }});
+            c.vm.globals.appendAssumeCapacity(global_sym);
+            c.genSymMap.putAssumeCapacityNoClobber(sym, .{ .varSym = .{ .id = @intCast(id) }});
         },
         .extern_var => {
             const id = c.vm.globals.items.len;
             const global_sym = try c.alloc.create(cy.vm.GlobalSym);
             // value ptr is relocated at runtime.
             global_sym.* = .init(&.{}, sym);
-            try c.vm.globals.append(c.alloc, global_sym);
-            try c.genSymMap.putNoClobber(c.alloc, sym, .{ .varSym = .{ .id = @intCast(id) }});
+            c.vm.globals.appendAssumeCapacity(global_sym);
+            c.genSymMap.putAssumeCapacityNoClobber(sym, .{ .varSym = .{ .id = @intCast(id) }});
         },
         .userVar => {
             const id = c.vm.globals.items.len;
             const global_sym = try c.alloc.create(cy.vm.GlobalSym);
+            errdefer c.alloc.destroy(global_sym);
             const global_t = sym.getValueType().?;
             const value = try c.alloc.alignedAlloc(u8, .@"8", global_t.size());
             global_sym.* = .init(value, sym);
-            try c.vm.globals.append(c.alloc, global_sym);
-            try c.genSymMap.putNoClobber(c.alloc, sym, .{ .varSym = .{ .id = @intCast(id) }});
+            c.vm.globals.appendAssumeCapacity(global_sym);
+            c.genSymMap.putAssumeCapacityNoClobber(sym, .{ .varSym = .{ .id = @intCast(id) }});
         },
         .func,
         .const_,
@@ -3477,9 +3492,12 @@ fn get_uniq_ptr_layout(c: *cy.Chunk, layout: []const bool) !usize {
 
     const res = try c.buf.ptr_layout_map.getOrPut(c.alloc, layout);
     if (!res.found_existing) {
+        // The new entry's key still points at the caller's `layout`.
+        errdefer c.buf.ptr_layout_map.removeByPtr(res.key_ptr);
+        try c.buf.ptr_layouts.ensureUnusedCapacity(c.alloc, 1);
         const dupe = try c.alloc.dupe(bool, layout);
         const id = c.buf.ptr_layouts.items.len;
-        try c.buf.ptr_layouts.append(c.alloc, dupe);
+        c.buf.ptr_layouts.appendAssumeCapacity(dupe);
         res.key_ptr.* = dupe;
         res.value_ptr.* = id;
     }

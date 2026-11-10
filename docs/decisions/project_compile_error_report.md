@@ -57,6 +57,8 @@
 - CLI 옵션(`--color`). 환경 변수로 충분하다.
 - `PANIC_INFLIGHT_OOM` 상태의 `cl_thread_panic_summary`. `allocPanicMsg`가 여전히 `cy.panicFmt`로 끝난다. 이 상태는
   `z_panic_unexpected_choice`가 메시지를 할당하지 못했을 때만 생기고, 컴파일 · 런타임의 할당 실패 처리(F-41 남은 것)와 같이 다룬다.
+  갱신(같은 날): 그 작업에서 고쳤다. `z_panic_unexpected_choice`는 정적 `OutOfMemory` 메시지를 쓰고 요약은 abort하지 않는다
+  (`project_compile_alloc_failure.md`).
 
 ## 확인
 

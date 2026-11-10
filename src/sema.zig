@@ -2578,7 +2578,13 @@ pub fn reserveTemplate(c: *cy.Chunk, node: *ast.TemplateDecl) !*cy.sym.Template 
 
 pub fn resolveGenericFunc(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig, params: []cy.sym.FuncTemplateParam) !void {
     const decl = func.decl.?.cast(.funcDecl);
-    const template = try c.alloc.create(cy.sym.FuncTemplate);
+    const template = c.alloc.create(cy.sym.FuncTemplate) catch |err| {
+        for (params) |param| {
+            param.deinit(c.alloc);
+        }
+        c.alloc.free(params);
+        return err;
+    };
     template.* = .{
         .head = cy.Sym.init(.func_template, func.parent.parent.?, func.name()),
         .func_params = decl.params.slice(),
@@ -2593,6 +2599,9 @@ pub fn resolveGenericFunc(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig, params
         .instances = .empty,
         .mod = undefined,
     };
+    // The kind changes together with its payload. `Func.destroy` and `deinit_func_ct_values` read `data.generic`
+    // from the kind alone.
+    func.type = .generic;
     func.data = .{ .generic = template };
     try c.resolveFunc(func, sig);
 }
@@ -3124,7 +3133,6 @@ pub fn ensure_resolved_func(c: *cy.Chunk, func: *cy.Func, resolve_new_types: boo
     var generic: GenericFuncResult = undefined;
     var sig = try resolveFuncSig(c, func, resolve_new_types, &generic, false);
     if (generic.generic) {
-        func.type = .generic;
         try resolveGenericFunc(c, func, sig, generic.params);
     } else {
         if (bind_attr != null) {
@@ -4685,6 +4693,10 @@ fn resolveFuncSig(c: *cy.Chunk, func: *cy.Func, resolve_new_types: bool, out_gen
 
     const template_start = c.func_template_param_stack.items.len;
     defer c.func_template_param_stack.items.len = template_start;
+    // An anonymous param owns its name until `out_generic.params` takes the entries over on success.
+    errdefer for (c.func_template_param_stack.items[template_start..]) |param| {
+        param.deinit(c.alloc);
+    };
 
     const sig_t = func_n.sig_t;
     if (sig_t == .infer) {
@@ -4786,12 +4798,17 @@ fn resolveFuncSig(c: *cy.Chunk, func: *cy.Func, resolve_new_types: bool, out_gen
 
     // Always write `generic`. Callers assert on it, and an undefined bool there lets optimized builds drop code.
     out_generic.generic = false;
+    errdefer if (out_generic.generic) {
+        c.alloc.free(out_generic.params);
+        out_generic.generic = false;
+    };
     if (!variant) {
         const generic_params = c.func_template_param_stack.items[template_start..];
         if (generic_params.len > 0) {
+            const params_dupe = try c.alloc.dupe(cy.sym.FuncTemplateParam, generic_params);
             out_generic.* = .{
                 .generic = true,
-                .params = try c.alloc.dupe(cy.sym.FuncTemplateParam, generic_params),
+                .params = params_dupe,
             };
         }
     }
@@ -8113,7 +8130,10 @@ pub fn semaStringAs(c: *cy.Chunk, lit: []const u8, type_: *cy.Type, node: *ast.N
     if (raw.ptr != lit.ptr) {
         // Dupe and track in ast.strs.
         const dupe = try c.alloc.dupe(u8, raw);
-        try c.parser.ast.strs.append(c.alloc, dupe);
+        c.parser.ast.strs.append(c.alloc, dupe) catch |err| {
+            c.alloc.free(dupe);
+            return err;
+        };
         return c.semaRawStringAs(dupe, type_, node);
     } else {
         return c.semaRawStringAs(raw, type_, node);
@@ -9936,8 +9956,12 @@ pub const Sema = struct {
         if (res.found_existing) {
             return s.func_sigs.items[res.value_ptr.*];
         } else {
+            // The new entry's key still points at the caller's `params`. It leaves the map unless the sig is created.
+            errdefer s.func_sig_map.removeByPtr(res.key_ptr);
+            try s.func_sigs.ensureUnusedCapacity(s.alloc, 1);
             const id: u32 = @intCast(s.func_sigs.items.len);
             const new = try s.alloc.dupe(FuncParam, params);
+            errdefer s.alloc.free(new);
             const sig = try s.alloc.create(FuncSig);
             sig.* = .{
                 .params_ptr = new.ptr,
@@ -9947,7 +9971,7 @@ pub const Sema = struct {
                 .extern_ = extern_,
                 .scope_param_idx = scope_param_idx orelse cy.NullU8,
             };
-            try s.func_sigs.append(s.alloc, sig);
+            s.func_sigs.appendAssumeCapacity(sig);
             res.value_ptr.* = id;
             res.key_ptr.* = .{
                 .params_ptr = new.ptr,

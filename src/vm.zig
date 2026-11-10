@@ -368,7 +368,7 @@ pub const VM = struct {
     /// first (`use math`) is complete; the next eval that runs initializes it (`emit_program_init_func`).
     pub fn validate(self: *VM, srcUri: []const u8, src: ?[]const u8, config: C.ValidateConfig) !void {
         _ = config;
-        if (self.compiler.first_compile_failed) {
+        if (self.compiler.first_compile_failed or self.compiler.alloc_failed) {
             // Same as `eval`: start over instead of compiling on top of the half-built first compile (F-04).
             try self.resetVM();
         }
@@ -416,6 +416,8 @@ pub const VM = struct {
         try self.compiler.reinitPerRun();
         self.compiler.cont = false;
         self.compiler.first_compile_failed = false;
+        self.compiler.alloc_failed = false;
+        self.compiler.host_error = null;
         self.compiler.last_compile_failed = false;
         self.compiler.main_discarded = false;
     }
@@ -440,11 +442,11 @@ pub const VM = struct {
     }
 
     /// Copies the main locals tracked during the last eval off the stack so the next eval can restore them.
-    fn copyMainLocalSaves(self: *VM) void {
+    fn copyMainLocalSaves(self: *VM) !void {
         const stack = self.main_thread.c.stack();
         for (self.env_local_saves.items) |*save| {
             if (save.owned) continue;
-            save.value = self.alloc.dupe(cy.Value, stack[save.stack_off..save.stack_off + save.reg_size]) catch cy.fatal();
+            save.value = try self.alloc.dupe(cy.Value, stack[save.stack_off..save.stack_off + save.reg_size]);
             save.owned = true;
         }
     }
@@ -472,9 +474,10 @@ pub const VM = struct {
     pub fn eval(self: *VM, src_uri: []const u8, src: ?[]const u8, config: C.EvalConfig) !C.EvalResult {
         var tt = cy.debug.timer();
 
-        if (self.compiler.first_compile_failed) {
+        if (self.compiler.first_compile_failed or self.compiler.alloc_failed) {
             // Start over instead of compiling on top of the half-built first compile (F-04). Nothing from a failed
             // first compile is worth keeping, and the host's settings (fuel, stack limit, printer, user data) survive.
+            // The same goes for a compile that ran out of memory at an arbitrary point (`Compiler.alloc_failed`).
             try self.resetVM();
         }
 
@@ -521,11 +524,20 @@ pub const VM = struct {
                 return err;
             };
             self.markChunksInited();
-            if (config.persist_main) self.copyMainLocalSaves();
+            if (config.persist_main) {
+                self.copyMainLocalSaves() catch |err| {
+                    // The program ran, but its main locals cannot be carried over. The next eval starts over.
+                    self.compiler.alloc_failed = true;
+                    return err;
+                };
+            }
             if (self.compiler.main_res) |*main_res| {
                 // Copied now, before another eval reuses the stack. The VM owns the copy until the next eval.
                 const stack = self.main_thread.c.stack();
-                main_res.value = try self.alloc.dupe(cy.Value, stack[main_res.stack_off..main_res.stack_off + main_res.reg_size]);
+                main_res.value = self.alloc.dupe(cy.Value, stack[main_res.stack_off..main_res.stack_off + main_res.reg_size]) catch |err| {
+                    self.compiler.main_res = null;
+                    return err;
+                };
                 return .{
                     .res = @ptrCast(main_res.value.ptr),
                     .res_t = main_res.val_t.id(),
@@ -681,8 +693,7 @@ pub const VM = struct {
         const main_mod = vm.compiler.main_chunk.sym.getMod();
         if (main_mod.getSym(spec)) |sym| {
             if (sym.getStaticType()) |type_| {
-                const spec_dup = try vm.alloc.dupe(u8, spec);
-                try vm.compiler.find_type_cache.put(vm.alloc, spec_dup, type_);
+                try vm.cacheFoundType(spec, type_);
                 return type_;
             }
         }
@@ -691,8 +702,7 @@ pub const VM = struct {
         const b_mod = vm.compiler.builtins_chunk.sym.getMod();
         if (b_mod.getSym(spec)) |sym| {
             if (sym.getStaticType()) |type_| {
-                const spec_dup = try vm.alloc.dupe(u8, spec);
-                try vm.compiler.find_type_cache.put(vm.alloc, spec_dup, type_);
+                try vm.cacheFoundType(spec, type_);
                 return type_;
             }
         }
@@ -700,20 +710,34 @@ pub const VM = struct {
         // Evaluate compile-time value.
         // Assumes that there is no dependency on api_chunk's source for subsequent use.
         const c = vm.compiler.api_chunk;
+        const src = try vm.alloc.dupe(u8, spec);
         vm.alloc.free(c.src);
-        c.src = try vm.alloc.dupe(u8, spec);
+        c.src = src;
         try parseTypeExpr(vm.compiler, c);
 
         try cy.sema.pushChunkResolveContext(c, null);
         defer cy.sema.popResolveContext(c);
 
         const expr_stmt = c.ast.root.?.stmts.ptr[0].cast(.exprStmt);
-        const ct_expr = cy.cte.evalExprInfer(c, expr_stmt.child) catch return null;
-        const res = cy.cte.deriveCtExprType2(c, ct_expr) catch return null;
-        const spec_dup = try vm.alloc.dupe(u8, spec);
-        try vm.compiler.find_type_cache.put(vm.alloc, spec_dup, res);
+        // A spec that does not name a type is "not found". A failed allocation is not: a caller that knows the type
+        // exists would unwrap the null.
+        const ct_expr = cy.cte.evalExprInfer(c, expr_stmt.child) catch |err| {
+            if (err == error.OutOfMemory) return err;
+            return null;
+        };
+        const res = cy.cte.deriveCtExprType2(c, ct_expr) catch |err| {
+            if (err == error.OutOfMemory) return err;
+            return null;
+        };
+        try vm.cacheFoundType(spec, res);
         return res;
-    } 
+    }
+
+    fn cacheFoundType(vm: *cy.VM, spec: []const u8, type_: *cy.Type) !void {
+        const spec_dup = try vm.alloc.dupe(u8, spec);
+        errdefer vm.alloc.free(spec_dup);
+        try vm.compiler.find_type_cache.put(vm.alloc, spec_dup, type_);
+    }
 
     pub fn parseTypeExpr(self: *cy.Compiler, chunk: *cy.Chunk) !void {
         _ = self;
@@ -1167,7 +1191,10 @@ fn zCheckRetainDanglingPointer(t: *cy.Thread, obj: *cy.HeapObject) callconv(.c) 
 fn z_panic_unexpected_choice(t: *cy.Thread, exp: i64, act: i64) callconv(.c) void {
     const msg = t.alloc.print("Expected active choice tag `{}`, found `{}`.", .{exp, act}) catch |err| {
         if (err == error.OutOfMemory) {
-            t.c.panic_type = vmc.PANIC_INFLIGHT_OOM;
+            // No memory for the message. A static one takes its place, as in `Thread.ret_panic_fmt`.
+            const oom: []const u8 = "OutOfMemory";
+            t.c.panic_payload = @as(u64, @intFromPtr(oom.ptr)) | (@as(u64, oom.len) << 48);
+            t.c.panic_type = vmc.PANIC_STATIC_MSG;
             return;
         } else {
             cy.panic("unexpected");

@@ -1127,7 +1127,9 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
   컴파일 단계와 호스트 함수의 할당은 세기만 하고 막지 않는다(`docs/decisions/project_memory_limit.md`).
   `cl_vm_init_mem(CLMemFuncs)` 는 `ctx` + `alloc(ctx, size, align)` + `free(ctx, ptr, size, align)` 로 VM 을 만든다. 이전에는 `cl_vm_initx(CLAllocator)` 뿐이었는데 `CLAllocator` 가
   Zig 의 `std.mem.Allocator`(`ptr` + `vtable`)와 같은 배치이고 vtable 함수들이 Zig 호출 규약이라 C 호스트가 채울 수 없었다(`docs/decisions/project_c_mem_funcs.md`).
-  `alloc` 이 `NULL` 을 돌려주는 것으로 상한을 걸지는 말 것: 컴파일 단계의 할당 실패는 정의된 동작이 아니다. 상한은 `cl_vm_set_memory_limit` 이다.
+  `alloc` 이 `NULL` 을 돌려줘도 호스트는 죽지 않는다(2026-11-10, `87248791`): 컴파일 중이면 `CL_ERROR_COMPILE`(요약은 `CompileError: OutOfMemory` 계열이거나 빈 문자열), 실행 중이면 `panic: OutOfMemory`,
+  실행 뒤 정리 중이면 `CL_ERROR_UNKNOWN` 이고 다음 eval 은 성공한다. 다만 컴파일이 메모리 부족으로 끝나면 다음 eval 이 VM 을 reset 하므로 `persist_main` 세션은 앞선 지역 변수와 선언을 잃는다.
+  세션을 지키려면 상한은 `NULL` 이 아니라 `cl_vm_set_memory_limit` 으로 건다. VM 생성(`cl_vm_init*`)과 값 생성 API(`cl_str_init*` 등)의 할당 실패는 여전히 abort 다(`docs/decisions/project_compile_alloc_failure.md`).
 - 없음: 호스트 함수 안에서 오래 막힌 호출을 끊는 수단, 호스트 함수에서 스크립트를 멈췄다가 나중에 재개하는 수단. `CL_AWAIT` 는 반환되지만 재개 API 는 주석 처리돼 있다(lib.zig:289-365).
 
 상태와 결과.

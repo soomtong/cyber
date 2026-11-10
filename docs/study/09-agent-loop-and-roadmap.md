@@ -264,7 +264,7 @@ class Session {
 | --- | --- | --- |
 | 1 | `examples/libcyber/host_tool.c` | 호스트 함수로 도구를 노출하고 panic에서 복구하는 최소 예 |
 | 2 | `src/include/cyber.h` | 에이전트 호스트가 쓰는 함수들만 추려서(`cl_vm_init`, `cl_vm_evalx`, `cl_vm_set_fuel`, `cl_vm_interrupt`, `cl_vm_set_loader`, `cl_mod_add_func`, `cl_thread_*`) |
-| 3 | `src/lib.zig`의 `cl_vm_evalx`와 하단 테스트 | 반복 eval, fuel, interrupt, persist_main의 테스트가 동작 명세 |
+| 3 | `src/lib.zig`의 `cl_vm_evalx`와 `src/lib_test/`의 테스트 | 반복 eval, fuel, interrupt, persist_main의 테스트가 동작 명세 |
 | 4 | `src/vm.c`의 `CHECKPOINT`, `CALL_HOST`, `AWAIT` | 끊을 수 있는 자리와 끊을 수 없는 자리 |
 | 5 | `src/vm.zig`의 `zAwait`, `exec_bytecode` | 대기 경로(길 2의 출발점) |
 | 6 | `src/thread.zig`의 `exec_auto`, `growStackAuto`, `freeHeapPages` | 스택 상한이 없는 곳, panic 시 정리 |

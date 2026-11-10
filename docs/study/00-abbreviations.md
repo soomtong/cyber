@@ -107,7 +107,7 @@ const cstr = sema.Cstr.initRequire(int_t);   // target_t = int, reqTypeCstr = tr
 | `cte` | compile-time evaluation | `cte.zig` | 1절 |
 | `ct_inline` | compile-time inline | `ct_inline.zig` | 1절 |
 | `capi` | C API | `capi.zig` | `cyber.h`의 Zig 쪽 미러. 소스에서는 보통 `const C = @import("capi.zig")` |
-| `lib` | library | `lib.zig` | `libcyber` 임베딩 진입점과 lib 테스트 |
+| `lib` | library | `lib.zig` | `libcyber` 임베딩 진입점. lib 테스트는 `lib_test/` |
 | `vm` | Virtual Machine | `vm.zig`, `vm.c`, `vm.h` | 인터프리터 루프는 C(`vm.c`) |
 | `aot` | Ahead-Of-Time | `aot.c`, `aot.h` | C 백엔드 런타임 지원 |
 | `jit` | Just-In-Time | `src/jit/` | 동작하지 않는 복사-패치 JIT. 컴파일 오류로 거절된다 |

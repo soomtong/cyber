@@ -53,6 +53,7 @@ pub fn isAot(backend: c.Backend) bool {
 }
 
 fn test_syntax(run: *Runner) void {
+    run.case("syntax/adjacent_stmt_error.cy");
     run.case("syntax/block_no_child_error.cy");
     run.case("syntax/change_to_spaces_error.cy");
     run.case("syntax/change_to_tabs_error.cy");
@@ -141,7 +142,6 @@ fn test_functions(run: *Runner) void {
     run.case("functions/struct_funcs.cy");
     run.case("functions/template_functions.cy");
     run.case("functions/template_method_error.cy");
-    // run.case("functions/void_param_error.cy");
 }
 
 fn test_memory(run: *Runner) void {
@@ -155,11 +155,6 @@ fn test_memory(run: *Runner) void {
     run.case("memory/slice_shared_buffer.cy");
     run.case("memory/future_resolver.cy");
     run.case("memory/return_local_move.cy");
-if (!is_wasm) {
-    // run.case("memory/default_memory.cy");
-}
-    // run.case("memory/gc_reference_cycle_unreachable.cy");
-    // run.case2(.{ .cleanupGC = true }, "memory/gc_reference_cycle_reachable.cy");
     run.case("memory/release_expr_stmt_return.cy");
     run.case("memory/release_scope_end.cy");
     run.case("memory/lift_borrow_error.cy");
@@ -192,6 +187,7 @@ if (!is_wasm) {
     run.case("memory/scope_param_missing_error.cy");
     run.case("memory/scope_too_many_params_error.cy");
     run.case("memory/scope_return_error.cy");
+    run.case("memory/scope_return_too_ephemeral_error.cy");
     run.case("memory/scope_return.cy");
     run.case("memory/scope_assign_shorter_span_lifetime_error.cy");
     run.case("memory/scope_assign_shorter_borrow_lifetime_error.cy");
@@ -328,13 +324,10 @@ if (!aot) {
         if (test_config.ffi and builtin.target.abi != .msvc) {
             run.case("modules/os.cy");
         }
-        // run.case("modules/io.cy");
     }
 }
 
 fn test_meta(run: *Runner) void {
-    // Disabled test: printing to stdout hangs test runner.
-    // run.case2(.{ .silent = true }, "meta/dump_locals.cy");
     run.case("meta/ct_eval_loop.cy");
     run.case("meta/type_const.cy");
     run.case("meta/ct_if.cy");
@@ -412,8 +405,6 @@ fn test_core(run: *Runner) void {
     run.case("core/strings_ascii.cy");
     run.case("core/strings_utf8.cy");
     run.case("core/symbols.cy");
-    // run.case("core/table.cy");
-    // run.case("core/table_access_panic.cy"); 
     run.case("core/Vector.cy");
     run.case("core/Vector_neg_oob_panic.cy");
     run.case("core/Vector_oob_panic.cy");
@@ -441,6 +432,7 @@ fn test_vars(run: *Runner) void {
     run.case("vars/set_undeclared_error.cy");
     run.case("vars/global_assign.cy");
     run.case("vars/global_init.cy");
+    // Disabled: the check does not exist. A function called from a global initializer can read a global that is not initialized yet (F-88).
     // run.case("vars/global_init_call_error.cy");
     run.case("vars/global_init_capture_error.cy");
     run.case("vars/global_init_ref_error.cy");
@@ -468,6 +460,7 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/try_block_capture_error.cy");
     run.case("control_flow/try_panic.cy");
     run.case("control_flow/unreachable.cy");
+    // Disabled: statements after an unreachable statement are allowed (sema.zig `semaStmt`).
     // run.case("control_flow/unreachable_error.cy");
     run.case("control_flow/while_cond.cy");
     run.case("control_flow/while_inf.cy");

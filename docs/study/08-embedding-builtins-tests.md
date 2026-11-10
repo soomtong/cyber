@@ -430,6 +430,7 @@ behavior-test 는 이 장의 핵심이다. 파일을 "발견"하지 않는다. �
 - 목록: `test_syntax`, `test_functions`, `test_memory`, `test_types`, `test_modules`, `test_meta`, `test_concurrency`, `test_core`, `test_vars`, `test_control_flow` 가
   `run.case("syntax/indentation.cy")` 식으로 경로를 등록한다(behavior_test.zig:55-417). 거기에 `../tokenizer.cy`(src/tokenizer.cy, Cyber 로 쓴 토크나이저)가 하나 더 붙는다(434행).
   `src/test` 아래 .cy 는 303개이고 `run.case` 로 등록된 것이 283개(+ tokenizer.cy 1개 = 경로 284개)이므로 20개가 목록 밖이다(5.6절에서 분류).
+  2026-11-10 현황(F-64 정리 뒤): .cy 358개, 등록된 경로 342개(tokenizer.cy 포함). 목록 밖은 주석으로 꺼 둔 2개(`control_flow/unreachable_error.cy`, `vars/global_init_call_error.cy`)와 테스트가 아닌 파일(`bench/*` 7개, `modules/test_mods/*` 5개, `main.cy`, `cli_test.cy`, 별도 러너의 `ffi/ffi.cy`)뿐이다. 0.3 문법의 죽은 테스트 10개는 삭제했다.
 - 실행: `test "Tests."`(419)가 목록을 돌며 `case2`(606)를 부른다. `failFast = true`(49)라 첫 실패에서 멈춘다.
 - 지시자: `case2` 는 파일 전체에서 첫 `cytest:` 문자열을 찾고(`std.mem.find(u8, contents, "cytest:")`, 없으면 `error.MissingTestDefinition`), 같은 줄의 단어로 분기한다.
 

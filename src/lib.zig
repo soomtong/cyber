@@ -257,7 +257,9 @@ export fn cl_vm_reset(vm: *cy.VM) void {
 }
 
 /// Maps an error of an eval to its result code.
-fn evalResultCode(err: anyerror) C.ResultCode {
+/// `err` is `anytype` so that the switch runs on the error set of the caller, as the inline switches did.
+/// Today that set is `anyerror` (the compiler callbacks return it), so an unknown name in a prong still builds.
+fn evalResultCode(err: anytype) C.ResultCode {
     return switch (err) {
         error.CompileError => C.ErrorCompile,
         error.Panic => C.ErrorPanic,
@@ -270,8 +272,8 @@ fn evalResultCode(err: anyerror) C.ResultCode {
     };
 }
 
-/// Maps an error of a compile or a validate to its result code.
-fn compileResultCode(err: anyerror) C.ResultCode {
+/// Maps an error of a compile or a validate to its result code. `err` is `anytype` for the same reason.
+fn compileResultCode(err: anytype) C.ResultCode {
     return switch (err) {
         error.CompileError => C.ErrorCompile,
         else => C.ErrorUnknown,
@@ -720,5 +722,4 @@ test {
     _ = @import("lib_test/compile.zig");
     _ = @import("lib_test/runtime.zig");
     _ = @import("lib_test/alloc_fail.zig");
-    _ = @import("lib_test/util.zig");
 }

@@ -1,17 +1,13 @@
 const std = @import("std");
 const build_config = @import("build_config");
-const builtin = @import("builtin");
 const stdx = @import("stdx");
 const fatal = cy.fatal;
-const mi = @import("mimalloc");
 const cy = @import("cyber.zig");
-const meta_mod = @import("builtins/meta.zig");
 const Value = cy.Value;
+// Unused here. src/tools/alloc_fuzz/probe.zig is appended to this file and uses this name.
 const zt = stdx.testing;
 const log = cy.log.scoped(.lib);
-const bt = cy.types.BuiltinTypes;
 const C = @import("capi.zig");
-const is_wasm = builtin.target.cpu.arch.isWasm();
 const vmc = cy.vmc;
 
 export var clVerbose = false;
@@ -260,6 +256,28 @@ export fn cl_vm_reset(vm: *cy.VM) void {
     vm.resetVM() catch cy.fatal();
 }
 
+/// Maps an error of an eval to its result code.
+fn evalResultCode(err: anyerror) C.ResultCode {
+    return switch (err) {
+        error.CompileError => C.ErrorCompile,
+        error.Panic => C.ErrorPanic,
+        error.Interrupted => C.ErrorInterrupt,
+        error.Await => C.Await,
+        else => b: {
+            log.tracev("{}", .{err});
+            break :b C.ErrorUnknown;
+        },
+    };
+}
+
+/// Maps an error of a compile or a validate to its result code.
+fn compileResultCode(err: anyerror) C.ResultCode {
+    return switch (err) {
+        error.CompileError => C.ErrorCompile,
+        else => C.ErrorUnknown,
+    };
+}
+
 export fn cl_vm_eval(vm: *cy.VM, src: C.Bytes, res: *C.EvalResult) C.ResultCode {
     const uri: []const u8 = "eval";
     return cl_vm_evalx(vm, C.to_bytes(uri), src, C.defaultEvalConfig(), res);
@@ -268,24 +286,7 @@ export fn cl_vm_eval(vm: *cy.VM, src: C.Bytes, res: *C.EvalResult) C.ResultCode 
 export fn cl_vm_evalx(vm: *cy.VM, uri: C.Bytes, src: C.Bytes, config: C.EvalConfig, out: *C.EvalResult) C.ResultCode {
     var res = C.Success;
     out.* = vm.eval(C.from_bytes(uri), C.from_bytes(src), config) catch |err| b: {
-        switch (err) {
-            error.CompileError => {
-                res = C.ErrorCompile;
-            },
-            error.Panic => {
-                res = C.ErrorPanic;
-            },
-            error.Interrupted => {
-                res = C.ErrorInterrupt;
-            },
-            error.Await => {
-                res = C.Await;
-            },
-            else => {
-                log.tracev("{}", .{err});
-                res = C.ErrorUnknown;
-            },
-        }
+        res = evalResultCode(err);
         break :b undefined;
     };
     vm.last_res = res;
@@ -319,107 +320,12 @@ export fn cl_vm_set_stack_limit(vm: *cy.VM, bytes: i64) void {
 export fn cl_vm_eval_path(vm: *cy.VM, uri: C.Bytes, config: C.EvalConfig, out: *C.EvalResult) C.ResultCode {
     var res = C.Success;
     out.* = vm.eval(C.from_bytes(uri), null, config) catch |err| b: {
-        switch (err) {
-            error.CompileError => {
-                res = C.ErrorCompile;
-            },
-            error.Panic => {
-                res = C.ErrorPanic;
-            },
-            error.Interrupted => {
-                res = C.ErrorInterrupt;
-            },
-            error.Await => {
-                res = C.Await;
-            },
-            else => {
-                log.tracev("{}", .{err});
-                res = C.ErrorUnknown;
-            },
-        }
+        res = evalResultCode(err);
         break :b undefined;
     };
     vm.last_res = res;
     return res;
 }
-
-// export fn cl_run_ready_tasks(t: *cy.Thread) C.ResultCode {
-//     var res = C.Success;
-//     runReadyTasks(t) catch |err| {
-//         switch (err) {
-//             error.CompileError => {
-//                 res = C.ErrorCompile;
-//             },
-//             error.Panic => {
-//                 res = C.ErrorPanic;
-//             },
-//             error.Await => {
-//                 res = C.Await;
-//             },
-//             else => {
-//                 log.tracev("{}", .{err});
-//                 res = C.ErrorUnknown;
-//             },
-//         }
-//     };
-//     t.last_res = res;
-//     return res;
-// }
-
-// fn runReadyTasks(t: *cy.Thread) anyerror!void {
-//     log.tracev("run ready tasks", .{});
-
-//     while (t.ready_tasks.readItem()) |task| {
-//         switch (task.type) {
-//             .cont => {
-//                 const cont = task.data.cont;
-//                 t.c.stack = @ptrCast(cont.stack.ptr);
-//                 t.c.stack_len = cont.stack.len;
-//                 t.c.stackEndPtr = t.c.stack + t.c.stack_len;
-//                 t.c.framePtr = t.c.stack + cont.fp;
-//                 t.c.pc = cont.pc;
-//                 @call(.never_inline, cy.Thread.evalLoopGrowStack, .{t.main_thread, true}) catch |err| {
-//                     if (err == error.Await) {
-//                         continue;
-//                     } else {
-//                         return err;
-//                     }
-//                 };
-
-//                 // Reached end. Free task's stack.
-//                 t.alloc.free(t.c.stack[0..t.c.stack_len]);
-//                 t.c.stack_len = 0;
-//             },
-//             .callback => {
-//                 // Create fiber.
-//                 const initial_stack_size: u32 = 16;
-//                 const stack = try t.heap.alloc.alloc(Value, initial_stack_size);
-//                 t.c.stack = @ptrCast(stack.ptr);
-//                 t.c.stack_len = stack.len;
-//                 t.c.stackEndPtr = @ptrCast(t.c.stack + t.c.stack_len);
-
-//                 // Indicate there is no previous fp.
-//                 t.c.framePtr = t.c.stackEndPtr;
-//                 _ = cy.vm.callUnion(t, task.data.callback, &.{}) catch |err| {
-//                     if (err == error.Await) {
-//                         return error.TODO;
-//                     } else if (err == error.Panic) {
-//                         try cy.vm.handleExecResult(t, vmc.RES_CODE_PANIC);
-//                     } else {
-//                         return err;
-//                     }
-//                 };
-
-//                 // Release callback.
-//                 t.heap.release(task.data.callback);
-
-//                 // Reached end. Free task's stack.
-//                 t.alloc.free(t.c.stack[0..t.c.stack_len]);
-//             },
-//             .dead => {},
-//         }
-//     }
-// }
 
 export fn clDefaultCompileConfig() C.CompileConfig {
     return .{
@@ -436,14 +342,7 @@ export fn clDefaultCompileConfig() C.CompileConfig {
 export fn cl_vm_compile_path(vm: *cy.VM, uri: C.Bytes, config: C.CompileConfig) C.ResultCode {
     var res = C.Success;
     _ = vm.compile(C.from_bytes(uri), null, config) catch |err| {
-        switch (err) {
-            error.CompileError => {
-                res = C.ErrorCompile;
-            },
-            else => {
-                res = C.ErrorUnknown;
-            },
-        }
+        res = compileResultCode(err);
     };
     vm.last_res = res;
     return res;
@@ -452,14 +351,7 @@ export fn cl_vm_compile_path(vm: *cy.VM, uri: C.Bytes, config: C.CompileConfig) 
 export fn cl_vm_compile(vm: *cy.VM, uri: C.Bytes, src: C.Bytes, config: C.CompileConfig) C.ResultCode {
     var res = C.Success;
     _ = vm.compile(C.from_bytes(uri), C.from_bytes(src), config) catch |err| {
-        switch (err) {
-            error.CompileError => {
-                res = C.ErrorCompile;
-            },
-            else => {
-                res = C.ErrorUnknown;
-            },
-        }
+        res = compileResultCode(err);
     };
     vm.last_res = res;
     return res;
@@ -468,14 +360,7 @@ export fn cl_vm_compile(vm: *cy.VM, uri: C.Bytes, src: C.Bytes, config: C.Compil
 export fn cl_vm_validate(vm: *cy.VM, src: C.Bytes) C.ResultCode {
     var res = C.Success;
     _ = vm.validate("main", C.from_bytes(src), .{}) catch |err| {
-        switch (err) {
-            error.CompileError => {
-                res = C.ErrorCompile;
-            },
-            else => {
-                res = C.ErrorUnknown;
-            },
-        }
+        res = compileResultCode(err);
     };
     vm.last_res = res;
     return res;
@@ -823,17 +708,6 @@ comptime {
     @export(&cy.compiler.default_resolver, .{ .name = "cl_default_resolver", .linkage = .strong });
     @export(&cy.compiler.default_loader, .{ .name = "cl_default_loader", .linkage = .strong });
 }
-
-// pub fn panic(msg: []const u8, trace: ?*std.lang.StackTrace, ret_addr: ?usize) noreturn {
-//     _ = trace;
-//     _ = ret_addr;
-//     // if (is_wasm) {
-//     //     std.debug.print("{s}", .{msg});
-//     //     @trap();
-//     // } else {
-//         // std.debug.defaultPanic(msg, @returnAddress());
-//     // }
-// }
 
 export fn cl_strlen(s: [*:0]const u8) usize {
     return std.mem.len(s);

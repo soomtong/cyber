@@ -29,7 +29,7 @@ The areas of focus for the language include:
 * Metaprogramming with templates, inline evaluation, and compiler hooks.
 * Concurrency. Channels, futures, and `await` to synchronize green threads. Fibers and generators for cooperative coroutines.
 * Compilation ahead-of-time to C or interpeted from its virtual machine.
-* Sandbox mode that restricts the language to only safe constructs.
+* Sandbox mode that restricts the language to only safe constructs. *Planned Feature*
 * Introspection. Much of the internals such as the builtin types and runtime is written in Cyber and can be inspected from the source code or the [API docs](api.html).
 
 These docs provide a reference manual for the language. It can be read in order or browsed from the navigation. Features that are marked `Incomplete`, `Planned`, or `TBD` have not been completed at the time of writing.
@@ -202,7 +202,7 @@ fn foo():
 ```
 
 ### `global` variables.
-Global variables live until the end of the program and can be accessed from any context (unless they have a private modifier). Globals are considered *unsafe* and are forbidden in sandbox mode.
+Global variables live until the end of the program and can be accessed from any context (unless they have a private modifier). Globals are considered *unsafe*. A sandbox mode that forbids them is planned.
 
 Global variables are declared with `global` and require a type specifier:
 ```cy
@@ -1093,7 +1093,6 @@ The following implicit casts are supported:
 | `error` | `!T` | wrap |
 | `T` | `!?T` | wrap |
 | `^T` | `&T` | reinterpret |
-| `^T` | `Object` | reinterpret |
 | `FuncPtr[Sig]` | `Func[Sig]` | wrap |
 | `&S` | `&Dyn[T] where S implements T` | wrap |
 | `^S` | `^Dyn[T] where S implements T` | wrap |
@@ -1273,7 +1272,7 @@ type Node:
 ```
 
 ### Type embedding.
-Type embedding facilitates type composition by using the namespace of a child field's type: *Planned Feature*
+Type embedding facilitates type composition by using the namespace of a child field's type:
 
 ```cy
 type Base:
@@ -2295,7 +2294,7 @@ fn set(m Map[%K, %V], key K, val V):
 [^top](#table-of-contents)
 
 Cyber provides memory safety by default by providing structured memory semantics.
-Manual memory is also supported but it's forbidden in safe mode.
+Manual memory is also supported. A safe mode that forbids it is planned. An embedding host can already reject raw pointers in scripts with the `deny_raw_ptrs` compile option.
 
 ## Structured memory.
 Cyber supports value ownership, borrowing, and deinitializers.
@@ -2741,7 +2740,7 @@ Currently, `mimalloc` is used as the default heap allocator for objects, but it 
 
 ### Cycle detection.
 When shared references form a reference cycle, it's considered a runtime error.
-In safe mode, cycle detection is dispatched at the end of a thread.
+Cycle detection is dispatched at the end of a thread.
 The thread will panic if a cycle is detected which subsequently begins the runtime's [fatal deinitialization procedure](#deinitializers).
 
 When enabled, the cycle detector can also be invoked manually `@check_cycles`: *TBD*
@@ -2999,15 +2998,21 @@ task := spawn(|_| -> int, {}):
     -- Do computation.
 ```
 
-`spawn` returns a `Result[Future[T]]` where `T` is the return type of the entry function. If the runtime could not dispatch the thread, a panic is raised.
-If the thread was dispatched, the wrapped `Future` contains the asynchronous result of the new thread.
+`spawn` returns a `Future[T]` where `T` is the return type of the entry function. If the runtime could not dispatch the thread, a panic is raised.
+The `Future` contains the asynchronous result of the new thread.
 
 ### `Sendable` values.
 Values that can be transferred from one thread to another must be types that implement `Sendable`.
 
-Here is a list of common types that implement `Sendable`:
-* Primitives types: `int`, `byte`, `bool`
-* `str`
+The arguments of `spawn` and the return value of the entry function are sent. These types can be sent:
+* Integers of any width: `int`, `i8`, `i16`, `i32`, `byte`, `r16`, `r32`, `r64`.
+* `bool`, `float`, `f32`, `symbol`, `error` and enums.
+* `str`. The string is copied to the receiving thread.
+* A struct that declares a `@send` method.
+
+Sending another type is a compile error: `Expected sendable: []int`.
+
+These types are planned to be `Sendable`: *Planned Feature*
 * `?T` if `T` is `Sendable`
 * `!T` if `T` is `Sendable`
 * `[]T` if `T` is `Sendable`. `[]T` is cloned when sending.
@@ -3085,6 +3090,8 @@ This abstraction allows the current thread to continue execution without waiting
 Futures can represent asynchronous work that is run in parallel or on a single thread.
 I/O bound work can be delegated to the operating system and CPU bound work can be run across multiple threads. A `Future` is not concerned with how the work is accomplished.
 
+The `aio` module in the examples below does not exist yet. *Planned Feature*
+
 If an API function is meant to do work asynchronously, it would return a `Future`:
 ```cy
 use aio
@@ -3106,10 +3113,7 @@ print(work)
 Futures can be created with a completed value:
 ```cy
 work := Future.complete(100)
-print(f)
---> Future[int]
-
-print(f.get().?)
+print(work.await())
 --> 100
 ```
 
@@ -3463,7 +3467,27 @@ m := IntMap[str, my_hash]{}
 `EvalInt` can be expanded to different integer types. Currently, it has the extent of an `int` type.
 
 ## Attributes.
-*TBD*
+An attribute annotates the declaration that follows it. It is written as `#[name]` or `#[name='value']`, on the line before the declaration or on the same line:
+```cy
+#[generator]
+fn count() -> int:
+    yield 1
+
+#[extern] global errno Ptr[int]
+```
+
+| Attribute | Applies to | Purpose |
+| -- | -- | -- |
+| `#[generator]` | function | The function is a [generator](#generators). |
+| `#[inline]` | function | Calls are inlined in bytecode with a larger size limit. |
+| `#[bind]` | function, type, global | The declaration is provided by the host or by a compiler hook. See [`#[bind]` hooks](#bind-hooks). |
+| `#[extern]` | function, global | The declaration is a C symbol. `#[extern='name']` gives the symbol name. See [FFI](#ffi). |
+| `#[unsafe]` | function | The function is exempt from checks on borrow containers. Used by the builtin modules. |
+| `#[consteval]` | function | The function is only evaluated at compile-time. Used by the builtin modules. |
+| `#[reserve]` | function | Reserves the name for a declaration that the compiler provides. Used by the builtin modules. |
+| `#[cond]`, `#[call]` | | Reserved. |
+
+An unknown attribute name is a parse error: `Unknown attribute.`
 
 # Modules.
 <table><tr>

@@ -9,6 +9,17 @@ test.eq(45, spawn(entry2, {10}).await())
 -- Sending `str`.
 test.eq('xyz', spawn(entry3, {'abc'}).await())
 
+-- Sending and returning value types without references.
+test.eq(true, spawn(echo_bool, {true}).await())
+test.eq(1.5, spawn(echo_float, {1.5}).await())
+test.eq(f32(2.5), spawn(echo_f32, {f32(2.5)}).await())
+test.eq(byte(200), spawn(echo_byte, {byte(200)}).await())
+test.eq(r64(0xffffffffffffffff), spawn(echo_r64, {~r64(0)}).await())
+test.eq(i8(-5), spawn(echo_i8, {i8(-5)}).await())
+test.eq(@red, spawn(echo_symbol, {@red}).await())
+test.eq(error.NotFound, spawn(echo_error, {error.NotFound}).await())
+test.eq(Color.green, spawn(echo_enum, {Color.green}).await())
+
 -- A spawned thread can `await` a future it spawned.
 test.eq(41, spawn(nested, {20}).await())
 test.eq('hi?!.', spawn(nested_str, {'hi'}).await())
@@ -62,5 +73,36 @@ fn fan(n int) -> int:
     b := spawn(inc, {n * 10})
     c := spawn(inc, {n * 100})
     return a.await() + b.await() + c.await()
+
+type Color enum:
+    case red
+    case green
+
+fn echo_bool(a bool) -> bool:
+    return a
+
+fn echo_float(a float) -> float:
+    return a
+
+fn echo_f32(a f32) -> f32:
+    return a
+
+fn echo_byte(a byte) -> byte:
+    return a
+
+fn echo_r64(a r64) -> r64:
+    return a
+
+fn echo_i8(a i8) -> i8:
+    return a
+
+fn echo_symbol(a symbol) -> symbol:
+    return a
+
+fn echo_error(a error) -> error:
+    return a
+
+fn echo_enum(a Color) -> Color:
+    return a
 
 --cytest: pass

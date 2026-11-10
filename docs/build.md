@@ -19,7 +19,7 @@ The first `zig build` fetches the [translate-c](https://codeberg.org/ziglang/tra
 zig build test
 
 # Runs just the tracing tests.
-zig build test-trace
+zig build trace-test
 
 # Test WASM/WASI target.
 zig build build-test -Doptimize=ReleaseSafe -Dtarget=wasm32-wasi

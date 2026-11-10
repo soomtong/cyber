@@ -2791,8 +2791,21 @@ fn @send(dst Thread, src Ptr[%T]) -> T:
                 -- return @copyStruct(T, src)
         #case .int:
             return src.*
+        #case .raw:
+            return src.*
+        #case .bool:
+            return src.*
+        #case .float:
+            return src.*
+        #case .enum:
+            return src.*
+        #case .error:
+            return src.*
         #else:
-            meta.error('Expected sendable: ' + type.name(T))
+            #if T == symbol:
+                return src.*
+            #else:
+                meta.error('Expected sendable: ' + type.name(T))
 
 --| Generic copy for any type.
 --| Marked unsafe to allow copying borrow containers.

@@ -58,6 +58,10 @@
 - `int(e)`가 enum 값을 case의 정수 값으로 바꾼다(F-77). 매뉴얼의 Enums 절 예제(`print(int(fruit))  --> 3`)가 `core.cy`의 `Int.@init`에서
   `CompileError: Unsupported: Fruit`였다. `i8` · `i16` · `i32`도 받는다.
 
+- `spawn`의 인자와 반환값으로 `bool`, `float`, `f32`, `byte` · `r16` · `r32` · `r64`, `symbol`, `error`, enum을 보낼 수 있다(F-65).
+  이전에는 정수(`int` · `i8` · `i16` · `i32`)와 `str`만 됐고 나머지는 `CompileError: Expected sendable: bool`이었다.
+  `?T`, 배열, 맵, `@send`를 선언하지 않은 struct는 여전히 보낼 수 없다.
+
 ## 임베딩 API
 
 - 메모리 한도: `cl_vm_set_memory_limit(vm, bytes)`와 `cl_vm_memory_used(vm)`(F-41). 한도는 VM이 할당자로 쥔 전체 바이트
@@ -132,6 +136,10 @@
 
 ## 문서
 
+- 매뉴얼과 실제 동작의 차이를 정리했다(F-65): `Sendable` 목록을 실제로 보낼 수 있는 타입과 계획된 타입으로 나눔, `spawn`의 반환 타입은
+  `Future[T]`(`Result[Future[T]]` 아님), 없는 `Future.get()` 예제를 `await()`로, `aio` 모듈 · 샌드박스 모드 · safe 모드는
+  *Planned Feature* 표시, 타입 임베딩(`b use Base`)의 *Planned Feature* 표시 삭제(동작한다), 암묵 변환 표의 `^T` → `Object` 행 삭제
+  (컴파일되지 않는다), Attributes 절 작성(속성 9개의 표), `docs/build.md`의 `zig build test-trace` → `trace-test`.
 - 매뉴얼(`docs/docs.md`)의 컴파일되지 않던 예제를 고쳤다(F-77): 비교 연산 절의 `{1, 2, 3}`은 `[]int{1, 2, 3}`(목표 타입 없는 `{...}`는
   `TODO: infer tuple type`), `case` fallthrough 예제의 마지막 `case 1000`에 `:`, 함수 유니온 타입 표기 `Func(FN)` → `Func[FN]`와
   그 예제(최상위 `fn`은 지역 변수를 잡지 못하므로 람다로), `!else` 블록은 끝에 도달할 수 없다는 문장.

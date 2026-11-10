@@ -76,7 +76,7 @@ TS/Node 개발자에게는 `ts.createScanner` → `parseSourceFile` → binder/c
 
 | 단계 | 파일 (줄 수) | 역할 |
 |---|---|---|
-| 진입 | `main.zig`(378), `lib.zig`(724), `capi.zig`(416), `cli.zig`(784) | CLI 인자 처리, 임베딩용 C API(`cl_vm_*`), 모듈 로더/리졸버 |
+| 진입 | `main.zig`(378), `lib.zig`(723), `capi.zig`(416), `cli.zig`(784) | CLI 인자 처리, 임베딩용 C API(`cl_vm_*`), 모듈 로더/리졸버 |
 | 프런트엔드 | `tokenizer.zig`(1218), `parser.zig`(4809), `ast.zig`(2097) | 이 챕터 |
 | 지휘 | `compiler.zig`(1516), `chunk.zig`(932) | 단계 지휘, 청크(파일 단위 컴파일 상태) |
 | 심볼/타입 | `sym.zig`(1750), `module.zig`(679), `types.zig`(1507), `sema_type.zig`(1339), `template.zig`(540) | 02 챕터 |

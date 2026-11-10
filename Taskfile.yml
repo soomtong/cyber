@@ -329,6 +329,11 @@ tasks:
       - task: test:release
       - task: build:release
 
+  verify:
+    desc: 'Run the 13-step verification before a commit (all optimize modes, lib tests, wasm32-wasi with wasmtime, ReleaseSafe CLI). Usage: task verify -- <log dir>'
+    cmds:
+      - src/tools/verify.sh {{.CLI_ARGS}}
+
   # -------------------------------------------------------------------- clean
 
   clean:

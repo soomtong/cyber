@@ -90,7 +90,7 @@ loader 는 (1) 그 모듈의 `cl_mod_add_func` 로 이름 -> 함수 포인터 �
 
 ```zig
 // src/lib.zig:260-294 (발췌)
-fn evalResultCode(err: anyerror) C.ResultCode {
+fn evalResultCode(err: anytype) C.ResultCode {
     return switch (err) {
         error.CompileError => C.ErrorCompile,
         error.Panic => C.ErrorPanic,

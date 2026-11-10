@@ -1,10 +1,9 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const stdx = @import("stdx");
 const cy = @import("../cyber.zig");
 const C = @import("../capi.zig");
 const zt = stdx.testing;
-const is_wasm = builtin.target.cpu.arch.isWasm();
+const is_wasm = @import("util.zig").is_wasm;
 
 test "cl_vm_set_stack_limit turns runaway recursion into a panic." {
     // F-40. Leak-checking allocator: the panic sweep frees the values left in the abandoned frames.

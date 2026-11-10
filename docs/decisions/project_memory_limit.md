@@ -1,6 +1,6 @@
 # VM 메모리 한도와 `OutOfMemory` panic (2026-11-10)
 
-상태: 구현됨. 발견 이슈 F-41의 메모리 한도 부분. C 친화 할당자 훅은 남아 있다.
+상태: 구현됨. 발견 이슈 F-41의 메모리 한도 부분. C 친화 할당자 훅은 `project_c_mem_funcs.md`.
 
 ## 배경
 
@@ -92,7 +92,6 @@ N번째 할당 한 번만 실패시킴, N = 1..8600)의 결과는 다음과 같�
 
 ## 남은 것
 
-- C 친화 할당자 훅: `CLAllocator`는 Zig `std.mem.Allocator` 모양(`ptr` + vtable)이라 C 호스트가 `malloc` 계열 함수 셋으로
-  넘길 수 없다. F-41의 나머지 절반.
+- C 친화 할당자 훅은 같은 날 `cl_vm_init_mem`으로 더했다(`project_c_mem_funcs.md`).
 - CLI 옵션(`cyber --memory-limit`)은 없다.
 - 컴파일 단계의 할당 실패 처리(퍼즈의 크래시 · 누수)는 손대지 않았다.

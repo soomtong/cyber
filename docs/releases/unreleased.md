@@ -16,6 +16,11 @@
   `CL_ERROR_PANIC`을 돌려준다. panic은 힙 페이지와 커진 스택을 반환하므로 같은 한도로 VM을 계속 쓸 수 있다. `spawn`한 스레드도
   같은 한도를 쓴다(`panic: Spawned thread panicked: OutOfMemory`). 컴파일 단계와 호스트 함수의 할당은 세기만 하고 막지 않는다
   (`docs/decisions/project_memory_limit.md`).
+- C 호스트용 메모리 함수: `cl_vm_init_mem(CLMemFuncs)`가 `ctx` · `alloc(ctx, size, align)` · `free(ctx, ptr, size, align)`로 VM을
+  만든다(F-41). `CLVM` 객체를 포함해 VM의 모든 메모리가 이 두 함수를 거치고 `cl_vm_deinit`이 전부 돌려준다. `align`은 2의 거듭제곱이며
+  `malloc`의 보장보다 클 수 있고, 두 함수는 스레드에 안전해야 한다(`spawn`). 제자리 성장 함수는 없다. 스크립트의 메모리 상한은 `NULL`을
+  돌려주는 `alloc`이 아니라 `cl_vm_set_memory_limit`으로 건다. `examples/libcyber/host_tool.c`가 이 방식으로 바뀌었다
+  (`docs/decisions/project_c_mem_funcs.md`).
 - `cl_vm_allocator`가 돌려주는 할당자는 호스트가 `cl_vm_initx`에 준 것이 아니라 그 위의 계수 래퍼다. 거기서 받은 메모리는 같은
   할당자로 돌려줘야 하고, `cl_vm_deinit` 뒤에는 쓸 수 없다.
 - panic으로 끝난 eval은 힙 페이지(첫 페이지 제외)와 main 스레드의 커진 스택을 할당자에 돌려준다. 이전에는 VM이 끝날 때까지 쥐고 있었다.

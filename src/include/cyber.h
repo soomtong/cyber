@@ -323,10 +323,25 @@ typedef struct CLValidateConfig {
     bool stub;
 } CLValidateConfig;
 
+// A Zig `std.mem.Allocator`. A C host passes its memory functions with `CLMemFuncs` instead.
 typedef struct CLAllocator {
     void* ptr;
     const void* vtable;
 } CLAllocator;
+
+// The memory functions of a C host for `cl_vm_init_mem`.
+// Both functions must be safe to call from several threads at once: the threads a script spawns allocate too.
+typedef struct CLMemFuncs {
+    // Passed back as the first argument of both functions.
+    void* ctx;
+
+    // Returns `size` bytes aligned to `align`, or NULL. `size` is not zero. `align` is a power of two and can be
+    // larger than the alignment `malloc` guarantees.
+    void* (*alloc)(void* ctx, size_t size, size_t align);
+
+    // Frees a block returned by `alloc`. `size` and `align` are the values the block was allocated with.
+    void (*free)(void* ctx, void* ptr, size_t size, size_t align);
+} CLMemFuncs;
 
 typedef struct CLFieldInit {
     CLBytes name;
@@ -349,7 +364,15 @@ CLBytes clResultName(CLResultCode code);
 // Create a new VM with `malloc` as the allocator.
 CLVM* cl_vm_init(void);
 
+// Create a new VM with a Zig allocator.
 CLVM* cl_vm_initx(CLAllocator allocator);
+
+// Create a new VM that takes all of its memory from the functions of the host, including the `CLVM` object.
+// `cl_vm_deinit` returns every block.
+// To bound the memory of a script use `cl_vm_set_memory_limit` and not an `alloc` that returns NULL: a failed
+// allocation ends in an `OutOfMemory` panic only where a script grows the heap or a stack, and is not handled
+// everywhere in the compiler.
+CLVM* cl_vm_init_mem(CLMemFuncs funcs);
 
 // Deinitializes the VM and frees all memory associated with it. Any operation on `vm` afterwards is undefined.
 void cl_vm_deinit(CLVM* vm);

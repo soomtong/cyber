@@ -216,6 +216,10 @@ pub fn vm_init() *VM {
 pub fn vm_initx(allocator: std.mem.Allocator) *VM {
     return c.cl_vm_initx(toAllocator(allocator)).?;
 }
+pub const MemFuncs = c.CLMemFuncs;
+pub fn vm_init_mem(funcs: MemFuncs) *VM {
+    return c.cl_vm_init_mem(funcs).?;
+}
 pub const vm_reset = c.cl_vm_reset;
 pub const vm_deinit = c.cl_vm_deinit;
 pub const vm_interrupt = c.cl_vm_interrupt;

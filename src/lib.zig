@@ -38,9 +38,59 @@ export fn cl_vm_initx(allocator: C.Allocator) *cy.VM {
     return @ptrCast(vm);
 }
 
+/// The allocator of a VM created with `cl_vm_init_mem`: the two C functions of the host as a `std.mem.Allocator`.
+/// There is no in-place growth, so `resize` and `remap` decline and the caller allocates, copies and frees.
+const HostMem = struct {
+    funcs: C.MemFuncs,
+
+    fn allocator(self: *HostMem) std.mem.Allocator {
+        return .{ .ptr = self, .vtable = &vtable };
+    }
+
+    /// The `HostMem` behind `a`, when `a` came from `cl_vm_init_mem`.
+    fn of(a: std.mem.Allocator) ?*HostMem {
+        if (a.vtable != &vtable) return null;
+        return @ptrCast(@alignCast(a.ptr));
+    }
+
+    fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, _: usize) ?[*]u8 {
+        const self: *HostMem = @ptrCast(@alignCast(ctx));
+        return @ptrCast(self.funcs.alloc.?(self.funcs.ctx, len, alignment.toByteUnits()));
+    }
+
+    fn free(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, _: usize) void {
+        const self: *HostMem = @ptrCast(@alignCast(ctx));
+        self.funcs.free.?(self.funcs.ctx, memory.ptr, memory.len, alignment.toByteUnits());
+    }
+
+    const vtable: std.mem.Allocator.VTable = .{
+        .alloc = alloc,
+        .resize = std.mem.Allocator.noResize,
+        .remap = std.mem.Allocator.noRemap,
+        .free = free,
+    };
+};
+
+export fn cl_vm_init_mem(funcs: C.MemFuncs) *cy.VM {
+    // The `HostMem` lives in the host's memory too, so that the host sees nothing left after `cl_vm_deinit`.
+    const mem_ptr = funcs.alloc.?(funcs.ctx, @sizeOf(HostMem), @alignOf(HostMem)) orelse fatal();
+    const mem: *HostMem = @ptrCast(@alignCast(mem_ptr));
+    mem.* = .{ .funcs = funcs };
+    const alloc = mem.allocator();
+    const vm = alloc.create(cy.VM) catch fatal();
+    vm.init(alloc) catch fatal();
+    return @ptrCast(vm);
+}
+
 export fn cl_vm_deinit(vm: *cy.VM) void {
     vm.deinit(false);
-    vm.alloc.destroy(vm); 
+    // `deinit` put back the allocator the VM was created with.
+    const alloc = vm.alloc;
+    alloc.destroy(vm);
+    if (HostMem.of(alloc)) |mem| {
+        const funcs = mem.funcs;
+        funcs.free.?(funcs.ctx, mem, @sizeOf(HostMem), @alignOf(HostMem));
+    }
 }
 
 export fn cl_thread_vm(t: *cy.Thread) *cy.VM {
@@ -1496,6 +1546,96 @@ test "cl_vm_set_memory_limit covers spawned threads." {
         \\  return a.len()
         \\test.eq(1000, spawn(grow, {1000}).await())
     , &res));
+}
+
+/// The memory functions of a C host, on top of an allocator that checks the size and alignment of every free.
+const CMem = struct {
+    child: std.mem.Allocator,
+    held: std.atomic.Value(usize) = .init(0),
+    blocks: std.atomic.Value(usize) = .init(0),
+    allocs: std.atomic.Value(usize) = .init(0),
+    max_align: std.atomic.Value(usize) = .init(0),
+
+    fn funcs(self: *CMem) C.MemFuncs {
+        return .{ .ctx = self, .alloc = alloc, .free = free };
+    }
+
+    fn alloc(ctx: ?*anyopaque, size: usize, alignment: usize) callconv(.c) ?*anyopaque {
+        const self: *CMem = @ptrCast(@alignCast(ctx));
+        if (size == 0 or !std.math.isPowerOfTwo(alignment)) return null;
+        const ptr = self.child.rawAlloc(size, .fromByteUnits(alignment), @returnAddress()) orelse return null;
+        _ = self.held.fetchAdd(size, .monotonic);
+        _ = self.blocks.fetchAdd(1, .monotonic);
+        _ = self.allocs.fetchAdd(1, .monotonic);
+        _ = self.max_align.fetchMax(alignment, .monotonic);
+        return ptr;
+    }
+
+    fn free(ctx: ?*anyopaque, ptr: ?*anyopaque, size: usize, alignment: usize) callconv(.c) void {
+        const self: *CMem = @ptrCast(@alignCast(ctx));
+        const bytes: [*]u8 = @ptrCast(ptr.?);
+        self.child.rawFree(bytes[0..size], .fromByteUnits(alignment), @returnAddress());
+        _ = self.held.fetchSub(size, .monotonic);
+        _ = self.blocks.fetchSub(1, .monotonic);
+    }
+};
+
+test "cl_vm_init_mem runs a VM on the C memory functions of a host." {
+    // F-41. A C host can not fill in a `CLAllocator`, which is a Zig vtable.
+    var host = CMem{ .child = zt.alloc };
+    {
+        const vm = C.vm_init_mem(host.funcs());
+        defer C.vm_deinit(vm);
+        C.setSilent(true);
+        defer C.setSilent(false);
+
+        var res: C.EvalResult = undefined;
+        // Buffers that grow are reallocated: without in-place growth that is a new block, a copy and a free.
+        try zt.eq(C.Success, C.vm_eval(vm,
+            \\use test
+            \\a := Array[str]{}
+            \\m := Map[int, int]{}
+            \\s := ''
+            \\for 0..20000 |i|:
+            \\  a << str(i)
+            \\  m[i] = i
+            \\  s += 'x'
+            \\test.eq(20000, a.len())
+            \\test.eq(20000, m.size())
+            \\test.eq(20000, s.len())
+        , &res));
+        try zt.expect(host.allocs.load(.monotonic) > 1000);
+
+        // The host holds what the VM counts, and the `VM` object, the counter and the functions on top.
+        const used = C.vm_memory_used(vm);
+        try zt.expect(used > 1024 * 1024);
+        try zt.expect(used < host.held.load(.monotonic));
+        try zt.expect(host.held.load(.monotonic) - used < 64 * 1024);
+
+        // The memory limit works the same on top of the host's functions.
+        C.vm_set_memory_limit(vm, @intCast(used + 4 * 1024 * 1024));
+        try zt.eq(C.ErrorPanic, C.vm_eval(vm,
+            \\a := Array[int]{}
+            \\for 0..100000000 |i|:
+            \\  a << i
+        , &res));
+        {
+            const report = C.vm_error_summary(vm);
+            defer C.vm_freeb(vm, report);
+            try zt.eq(true, std.mem.startsWith(u8, report, "panic: OutOfMemory\n"));
+        }
+        try zt.eq(C.Success, C.vm_eval(vm, "print('still alive')", &res));
+
+        // Memory a host function takes from the VM comes from the same functions.
+        const before = host.held.load(.monotonic);
+        const buf = C.vm_allocb(vm, 4096);
+        try zt.eq(before + 4096, host.held.load(.monotonic));
+        C.vm_freeb(vm, buf);
+        try zt.eq(before, host.held.load(.monotonic));
+    }
+    // `cl_vm_deinit` returned everything, the `VM` object and the functions included.
+    try zt.eq(@as(usize, 0), host.blocks.load(.monotonic));
+    try zt.eq(@as(usize, 0), host.held.load(.monotonic));
 }
 
 test "cl_vm_set_fuel stops runaway loops and recursion." {

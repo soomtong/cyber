@@ -52,6 +52,10 @@ pub const Compiler = struct {
     main_res: ?cy.vm.MainResult = null,
 
     reports: std.ArrayList(Report),
+
+    /// Whether a compile error summary marks the reported source range with ANSI escape codes
+    /// (`cl_vm_set_error_color`). Off by default: a host that logs or parses the summary gets plain text.
+    report_color: bool = false,
     
     /// Sema model resulting from the sema pass.
     sema: sema.Sema,

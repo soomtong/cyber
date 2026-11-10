@@ -6,6 +6,10 @@
 
 ## 버그 수정
 
+- 스크립트가 호스트 프로세스를 끝낼 수 있던 경로 둘을 막았다(F-52). 실패한 적 없는 `cy.VM`에 `compile_error_summary()`를 부르면
+  `panic: No report.`, `panic_summary()`를 부르면 `panic: Unexpected panic type.`으로 프로세스가 abort했다(종료 코드 134).
+  이제 빈 문자열을 돌려준다.
+
 ## 언어와 표준 라이브러리
 
 ## 임베딩 API
@@ -34,9 +38,26 @@
   `CLBindType`을 만드는 `CL_BIND_DECL_TYPE(id)` · `CL_BIND_CREATE_TYPE(fn)` · `CL_BIND_ALIAS_TYPE(fn)`으로 바꿨다. 주석의 옛 이름
   (`cl_free` → `cl_vm_freeb` 등)을 고쳤다. 헤더에 없던 export `clAlloc` · `clGetAllocator`는 지웠다(`cl_vm_alloc` · `cl_vm_allocator` 사용).
   lib 테스트가 헤더의 모든 `cl*` 함수 선언이 export되는지 링크로 검사한다.
+- 컴파일 오류 요약(`cl_vm_error_summary` · `cl_vm_compile_error_summary`)에 터미널 이스케이프 코드가 없다(F-52). 이전에는 표시 줄이
+  호스트가 무엇이든 `\x1b[31m^~~~\x1b[0m`이었다. 색이 필요한 호스트는 `cl_vm_set_error_color(vm, true)`로 켠다. 설정은 `cl_vm_reset`을
+  넘어 유지되고, 스크립트가 만든 `cy.VM`은 부모 VM의 설정을 물려받는다.
+- `cl_vm_compile_error(vm, &err)`가 마지막 eval · compile · validate의 컴파일 오류를 `CLCompileError`로 준다(F-52). `kind`
+  (`CL_REPORT_TOKEN_ERROR` · `CL_REPORT_PARSE_ERROR` · `CL_REPORT_COMPILE_ERROR`), `msg`(위치 없는 메시지), `uri`, `has_loc`, `line` ·
+  `col`(0부터, `col`은 바이트), `len`(그 줄에서 표시되는 바이트 수, 토큰 · 파싱 오류는 1). 마지막 결과가 `CL_ERROR_COMPILE`이 아니면
+  false를 돌려주고 `err`를 0으로 채운다. `msg` · `uri`는 VM 소유이고 다음 eval · compile · validate · reset 전까지 유효하다. 컴파일러는
+  첫 오류에서 멈추므로 오류는 컴파일당 하나다. 문맥(이전 선언 · 템플릿 호출 지점)은 요약 문자열에만 있다
+  (`docs/decisions/project_compile_error_report.md`).
+- `cl_vm_compile_error_summary`는 기록된 컴파일 오류가 없으면, `cl_thread_panic_summary`는 스레드의 마지막 실행이 panic하지 않았으면
+  빈 `CLBytes`를 돌려준다. 이전에는 호스트 프로세스를 abort했다. 빈 결과는 `cl_vm_freeb`에 그대로 넘겨도 된다.
+- `cl_vm_eval`의 헤더 주석을 실제 동작으로 고쳤다. `res`는 `fn main() -> T`의 반환값이거나 `persist_main`에서 마지막 맨 표현식의
+  값이고, 값이 없으면 `res_t`가 `CL_TYPE_VOID`다. 성공이 아니면 `res`는 채워지지 않는다. 이전 주석은 설정과 무관하게 마지막 표현식의
+  값을 준다고 적었다.
 
 ## 변경
 
+- `cyber`가 찍는 컴파일 오류의 표시 줄(`^~~~`)은 stderr가 ANSI 터미널일 때만 빨강이다(F-52). 파이프나 파일로 넘기면
+  (`cyber bad.cy 2> err.txt`) 이스케이프 코드가 들어가지 않는다. `NO_COLOR`(비어 있지 않으면 끔)와 `CLICOLOR_FORCE`(비어 있지 않으면
+  터미널이 아니어도 켬)를 따르고 둘 다 있으면 `NO_COLOR`가 이긴다. REPL도 같다.
 - `cyber compile` 덤프의 `addr` 명령 표기를 `%dst = *%src`에서 `%dst = &%src`로 바꿨다. 이 명령은 레지스터 `src`의 스택 주소를 `dst`에
   넣는 것이라 옛 표기가 역참조로 읽혔다(`docs/decisions/project_ex_borrow_field_addr.md`).
 - 빌드 버전 문자열(`cyber version`의 `build-N-xxxxxxx`)을 `zig build -Dbuild=N -Dcommit=xxxxxxx` 옵션으로 넘긴다. `BUILD` · `COMMIT` 환경

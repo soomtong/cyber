@@ -265,6 +265,54 @@ pub fn allocReportSummary(c: *const cy.Compiler, report: cy.Report) ![]const u8 
     return buf.toOwnedSlice();
 }
 
+/// Where a report points, as data. The summary formats the same location as text.
+pub const ReportLoc = struct {
+    /// Empty if the report does not belong to a source file.
+    uri: []const u8 = "",
+
+    /// Whether `line`, `col` and `len` are set.
+    has_pos: bool = false,
+
+    /// Starts at 0.
+    line: u32 = 0,
+
+    /// Byte offset in the line. Starts at 0.
+    col: u32 = 0,
+
+    /// Bytes of the reported range that lie on `line`. 1 for a token or parse error, which reports a position.
+    len: u32 = 0,
+};
+
+pub fn reportLoc(c: *const cy.Compiler, report: cy.Report) ReportLoc {
+    if (report.chunk == cy.NullId) {
+        return .{};
+    }
+    const chunk = c.chunks.items[report.chunk];
+    var res: ReportLoc = .{ .uri = chunk.srcUri };
+    var line_pos: u32 = undefined;
+    switch (report.type) {
+        .token_err, .parse_err => {
+            const pos: u32 = @intCast(report.loc);
+            if (pos == cy.NullId) {
+                return res;
+            }
+            chunk.ast.computeLinePos(pos, &res.line, &res.col, &line_pos);
+            res.len = 1;
+        },
+        .compile_err, .context => {
+            const addr: usize = @intCast(report.loc);
+            const node: *ast.Node = @as(?*ast.Node, @ptrFromInt(addr)) orelse return res;
+            const start_pos = node.pos();
+            chunk.ast.computeLinePos(start_pos, &res.line, &res.col, &line_pos);
+            const line_end = std.mem.findScalarPos(u8, chunk.src, line_pos, '\n') orelse chunk.src.len;
+            const end_pos = @min(node.end(), line_end);
+            res.len = @intCast(end_pos -| start_pos);
+        },
+    }
+    res.has_pos = true;
+    return res;
+}
+
 fn writeCompileErrorSummary(c: *const cy.Compiler, w: *std.Io.Writer, report: cy.Report) !void {
     try w.print("CompileError: {s}\n\n", .{report.msg});
     var addr: usize = @intCast(report.loc);
@@ -321,13 +369,15 @@ pub fn writeUserErrorTrace2(c: *const cy.Compiler, w: *std.Io.Writer, chunk_id: 
                 v(chunk.src[line_pos..line_end]),
             });
             try w.splatByteAll(' ', col);
-            // TODO: Should not emit escape codes. Instead, expose stack trace as data for consumer.
-            try w.writeAll("\x1b[31m");
+            // Escape codes only when the host asked for them (`Compiler.report_color`). The location is also
+            // available as data: `reportLoc`.
+            if (c.report_color) try w.writeAll("\x1b[31m");
             try w.writeAll("^");
             // NOTE: This does not consider grapheme clusters.
             const cp_len = std.unicode.utf8CountCodepoints(chunk.src[start_pos..end_pos]) catch end_pos - start_pos;
-            try w.splatByteAll('~', cp_len - 1);
-            try w.writeAll("\x1b[0m");
+            // A node that reports an empty range still gets its caret.
+            try w.splatByteAll('~', cp_len -| 1);
+            if (c.report_color) try w.writeAll("\x1b[0m");
             try w.writeAll("\n");
         } else {
             try fmt.format(w,

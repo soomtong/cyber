@@ -82,6 +82,8 @@ pub fn UserVM_init(t: *cy.Thread) anyerror!C.Ret {
     C.vm_set_printer(new, C.vm_printer(@ptrCast(t.c.vm)));
     C.vm_set_eprinter(new, C.vm_eprinter(@ptrCast(t.c.vm)));
     C.vm_set_logger(new, C.vm_logger(@ptrCast(t.c.vm)));
+    // Its compile error summaries go to the same place (the REPL prints them with `eprint`).
+    C.vm_set_error_color(new, t.c.vm.compiler.report_color);
 
     const ret = t.ret(UserVM);
     ret.* = .{ .vm = @ptrCast(@alignCast(new)) };

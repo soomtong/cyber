@@ -148,6 +148,20 @@ const Command = enum {
     repl,
 };
 
+/// Whether compile error summaries written to stderr should color the reported range: only when stderr is
+/// a terminal that takes ANSI escape codes. `NO_COLOR` turns it off, `CLICOLOR_FORCE` turns it on for a pipe.
+fn stderrTakesColor(alloc: std.mem.Allocator) bool {
+    const mode = std.Io.Terminal.Mode.detect(stdx.io(), std.Io.File.stderr(), envIsSet(alloc, "NO_COLOR"), envIsSet(alloc, "CLICOLOR_FORCE")) catch return false;
+    return mode == .escape_codes;
+}
+
+/// Present and not empty.
+fn envIsSet(alloc: std.mem.Allocator, key: []const u8) bool {
+    const val = stdx.getEnvVarOwned(alloc, key) catch return false;
+    defer alloc.free(val);
+    return val.len > 0;
+}
+
 fn compilePath(alloc: std.mem.Allocator, path: []const u8) !void {
     c.setVerbose(verbose);
 
@@ -155,6 +169,7 @@ fn compilePath(alloc: std.mem.Allocator, path: []const u8) !void {
     defer c.vm_deinit(vm);
     gvm = vm;
     try cli.init_cli(vm, alloc);
+    c.vm_set_error_color(vm, stderrTakesColor(alloc));
     defer cli.deinit_cli(vm);
 
     var config = c.defaultCompileConfig();
@@ -187,6 +202,7 @@ fn repl(alloc: std.mem.Allocator) !void {
     gvm = vm;
 
     try cli.init_cli(vm, alloc);
+    c.vm_set_error_color(vm, stderrTakesColor(alloc));
     defer cli.deinit_cli(vm);
 
     const a: *cli.App = @ptrCast(@alignCast(c.vm_user_data(vm)));
@@ -260,6 +276,7 @@ fn evalPath(alloc: std.mem.Allocator, path: []const u8) !void {
     gvm = vm;
 
     try cli.init_cli(vm, alloc);
+    c.vm_set_error_color(vm, stderrTakesColor(alloc));
     defer cli.deinit_cli(vm);
 
     const a: *cli.App = @ptrCast(@alignCast(c.vm_user_data(vm)));

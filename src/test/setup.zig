@@ -181,17 +181,12 @@ pub const VMrunner = struct {
         const report = try self.getErrorSummary(res.code);
         defer c.vm_freeb(self.vm, report);
 
-        const report2 = try std.mem.replaceOwned(u8, t.alloc, report, "\x1b[31m", "");
-        defer t.alloc.free(report2);
-        const report3 = try std.mem.replaceOwned(u8, t.alloc, report2, "\x1b[0m", "");
-        defer t.alloc.free(report3);
-
         if (starts_with) {
-            try std.testing.expectStringStartsWith(expReport, report3);
+            try std.testing.expectStringStartsWith(expReport, report);
         } else {
             const final_exp = try expand_tmpl_macros(self.main_path, expReport);
             defer t.alloc.free(final_exp);
-            try t.eqStr(final_exp, report3);
+            try t.eqStr(final_exp, report);
         }
 
         if (errorMismatch) {

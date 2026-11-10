@@ -4026,7 +4026,7 @@ if (code == CL_SUCCESS) {
     printf("Success!\n");
 } else {
     CLBytes summary = cl_vm_error_summary(vm);
-    printf("%.*s\n", (int)summary.len, summary.buf);
+    printf("%.*s\n", (int)summary.len, summary.ptr);
     cl_vm_freeb(vm, summary);
 }
 ```
@@ -4036,17 +4036,33 @@ if (code == CL_SUCCESS) {
 To return a value back to the host, a main function with a return type is required:
 ```c
 CLBytes src = CL_BYTES(
-    "fn main() -> int:"
+    "fn main() -> int:\n"
     "  a := 1\n"
     "  return a + 2\n"
 );
 
 CLEvalResult res;
-cl_vm_eval(vm, src, &res);
+CLResultCode code = cl_vm_eval(vm, src, &res);
 if (code == CL_SUCCESS) {
     printf("returned %lld\n", *(int64_t*)res.res);
 }
 ```
+
+### Compile errors.
+When the result code is `CL_ERROR_COMPILE`, `cl_vm_compile_error_summary` returns the message, the source line and a marker under the reported range. The compiler stops at its first error, so there is one error per compile. The text has no terminal escape codes. A host that prints to a terminal can color the marker with `cl_vm_set_error_color(vm, true)`.
+
+`cl_vm_compile_error` returns the same error as data, so that a host does not parse the summary:
+```c
+CLCompileError err;
+if (cl_vm_compile_error(vm, &err)) {
+    // `line` and `col` start at 0. `col` and `len` count bytes.
+    if (err.has_loc) {
+        printf("%.*s:%u:%u: ", (int)err.uri.len, err.uri.ptr, err.line + 1, err.col + 1);
+    }
+    printf("%.*s\n", (int)err.msg.len, err.msg.ptr);
+}
+```
+`msg` and `uri` are owned by the VM and stay valid until its next eval, compile, validate or reset. `kind` is `CL_REPORT_TOKEN_ERROR`, `CL_REPORT_PARSE_ERROR` or `CL_REPORT_COMPILE_ERROR`. `cl_vm_compile_error` returns false if the last result was not `CL_ERROR_COMPILE`.
 
 ### Checking a script without running it.
 `cl_vm_validate` compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (`persist_main`) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (`use math`) is initialized by the next eval that runs.
@@ -4054,7 +4070,7 @@ if (code == CL_SUCCESS) {
 CLResultCode code = cl_vm_validate(vm, src);
 if (code == CL_ERROR_COMPILE) {
     CLBytes summary = cl_vm_compile_error_summary(vm);
-    printf("%.*s\n", (int)summary.len, summary.buf);
+    printf("%.*s\n", (int)summary.len, summary.ptr);
     cl_vm_freeb(vm, summary);
 }
 ```

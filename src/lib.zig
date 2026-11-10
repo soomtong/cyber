@@ -520,13 +520,45 @@ export fn cl_vm_error_summary(vm: *cy.VM) C.Bytes {
 
 export fn cl_vm_compile_error_summary(vm: *cy.VM) C.Bytes {
     if (vm.compiler.reports.items.len == 0) {
-        cy.panic("No report.");
+        // Asking without an error is not a reason to end the host process.
+        return C.NullStr;
     }
     const str = cy.debug.allocReportSummary(vm.compiler, vm.compiler.reports.items[0]) catch fatal();
     return C.to_bytes(str);
 }
 
+export fn cl_vm_set_error_color(vm: *cy.VM, enabled: bool) void {
+    vm.compiler.report_color = enabled;
+}
+
+export fn cl_vm_compile_error(vm: *cy.VM, out: *C.CompileError) bool {
+    out.* = std.mem.zeroes(C.CompileError);
+    // `last_res` rather than the report list alone: the list is only cleared when the next compile starts.
+    if (vm.last_res != C.ErrorCompile or vm.compiler.reports.items.len == 0) {
+        return false;
+    }
+    const report = vm.compiler.reports.items[0];
+    const loc = cy.debug.reportLoc(vm.compiler, report);
+    out.* = .{
+        .kind = switch (report.type) {
+            .token_err => C.ReportTokenError,
+            .parse_err => C.ReportParseError,
+            .compile_err, .context => C.ReportCompileError,
+        },
+        .msg = C.to_bytes(report.msg),
+        .uri = C.to_bytes(loc.uri),
+        .has_loc = loc.has_pos,
+        .line = loc.line,
+        .col = loc.col,
+        .len = loc.len,
+    };
+    return true;
+}
+
 export fn cl_thread_panic_summary(t: *cy.Thread) C.Bytes {
+    if (t.c.panic_type == vmc.PANIC_NONE) {
+        return C.NullStr;
+    }
     const summary = cy.debug.allocLastUserPanicError(t) catch fatal();
     return C.to_bytes(summary);
 }
@@ -3032,6 +3064,216 @@ test "print and eprint callbacks receive the running thread." {
     try zt.eq(@as(u32, 3), S.eprint_calls);
     try zt.expect(S.print_ok);
     try zt.expect(S.eprint_ok);
+}
+
+test "Compile error summaries have no escape codes unless the host asks." {
+    // The marker line used to be wrapped in `\x1b[31m` .. `\x1b[0m` for every host (F-52).
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    const src = "a := 1\nprint(nope)";
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
+    {
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.eqStr(
+            \\CompileError: Undeclared variable `nope`.
+            \\
+            \\eval:2:7:
+            \\print(nope)
+            \\      ^~~~
+            \\
+        , summary);
+    }
+
+    C.vm_set_error_color(vm, true);
+    {
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.endsWith(u8, summary, "print(nope)\n      \x1b[31m^~~~\x1b[0m\n"));
+    }
+
+    // The setting is the host's, like the printer: a reset keeps it.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
+    {
+        const summary = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.endsWith(u8, summary, "print(nope)\n      \x1b[31m^~~~\x1b[0m\n"));
+    }
+
+    // A VM that a script creates reports to the same place, so it takes the setting of its parent.
+    const S = struct {
+        var escapes: usize = 0;
+        var markers: usize = 0;
+        fn printer(_: ?*C.Thread, str: C.Bytes) callconv(.c) void {
+            const bytes = C.from_bytes(str);
+            escapes += std.mem.count(u8, bytes, "\x1b[31m");
+            markers += std.mem.count(u8, bytes, "^~~~");
+        }
+    };
+    C.vm_set_printer(vm, &S.printer);
+    const child_src =
+        \\use cy
+        \\vm := cy.VM()
+        \\_ = vm.eval('print(nope)')
+        \\print(vm.compile_error_summary())
+    ;
+    C.vm_reset(vm);
+    try zt.eq(C.Success, C.vm_eval(vm, child_src, &res));
+    try zt.eq(@as(usize, 1), S.markers);
+    try zt.eq(@as(usize, 1), S.escapes);
+
+    C.vm_set_error_color(vm, false);
+    C.vm_reset(vm);
+    try zt.eq(C.Success, C.vm_eval(vm, child_src, &res));
+    try zt.eq(@as(usize, 2), S.markers);
+    try zt.eq(@as(usize, 1), S.escapes);
+}
+
+test "cl_vm_compile_error returns the location of a compile error." {
+    // A host had to parse `uri:line:col` out of the summary text (F-52).
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    var err: C.CompileError = undefined;
+
+    // Nothing was compiled yet.
+    try zt.expect(!C.vm_compile_error(vm, &err));
+    try zt.eq(@as(usize, 0), err.msg.len);
+
+    // A compile error reports the range of a node. `line` and `col` start at 0.
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "a := 1\nprint(nope)", &res));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eq(C.ReportCompileError, err.kind);
+    try zt.eqStr("Undeclared variable `nope`.", C.from_bytes(err.msg));
+    try zt.eqStr("eval", C.from_bytes(err.uri));
+    try zt.expect(err.has_loc);
+    try zt.eq(@as(u32, 1), err.line);
+    try zt.eq(@as(u32, 6), err.col);
+    try zt.eq(@as(u32, 4), err.len);
+
+    // `col` counts bytes: the summary prints column 17 here, and `한글` is 6 bytes.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "x := '한글' + nope", &res));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eq(@as(u32, 0), err.line);
+    try zt.eq(@as(u32, 16), err.col);
+    try zt.eq(@as(u32, 4), err.len);
+
+    // A node that continues on later lines is cut at the end of its first line, like the marker in the summary.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "fn a():\n  pass\nfn a():\n  pass", &res));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eq(@as(u32, 2), err.line);
+    try zt.eq(@as(u32, 0), err.col);
+    try zt.eq(@as(u32, 7), err.len);
+
+    // A parse error and a token error report a position.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "a := 1\nb := a +\n", &res));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eq(C.ReportParseError, err.kind);
+    try zt.eqStr("Expected right operand.", C.from_bytes(err.msg));
+    try zt.expect(err.has_loc);
+    try zt.eq(@as(u32, 2), err.line);
+    try zt.eq(@as(u32, 0), err.col);
+    try zt.eq(@as(u32, 1), err.len);
+
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "a := 'abc", &res));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eq(C.ReportTokenError, err.kind);
+    try zt.expect(err.has_loc);
+    try zt.eq(@as(u32, 0), err.line);
+    try zt.eq(@as(u32, 6), err.col);
+    try zt.eq(@as(u32, 1), err.len);
+
+    // `cl_vm_validate` records its error the same way.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "print(nope)"));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eq(C.ReportCompileError, err.kind);
+    try zt.eq(@as(u32, 6), err.col);
+
+    // An error that does not belong to a source has no location.
+    C.vm_reset(vm);
+    var config = C.defaultEvalConfig();
+    config.backend = C.BackendJIT;
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "a := 1", config, &res));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eq(C.ReportCompileError, err.kind);
+    try zt.expect(std.mem.startsWith(u8, C.from_bytes(err.msg), "The JIT backend is not supported."));
+    try zt.eq(@as(usize, 0), err.uri.len);
+    try zt.expect(!err.has_loc);
+    {
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.startsWith(u8, summary, "CompileError: The JIT backend is not supported."));
+    }
+
+    // The error is that of the last compile: a panic or a success does not leave the earlier one behind.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "print(nope)", &res));
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm, "panic('boom')", &res));
+    try zt.expect(!C.vm_compile_error(vm, &err));
+    try zt.eq(@as(usize, 0), err.msg.len);
+    try zt.expect(!err.has_loc);
+    try zt.eq(C.Success, C.vm_eval(vm, "a := 1", &res));
+    try zt.expect(!C.vm_compile_error(vm, &err));
+}
+
+test "Error summaries are empty when there is no error." {
+    // `cl_vm_compile_error_summary` and `cl_thread_panic_summary` used to end the host process when asked
+    // without an error, and a script could ask through `cy.VM` (F-52).
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    const S = struct {
+        fn expectEmpty(vm_: *C.VM) !void {
+            // The null string can be passed to `cl_vm_freeb` like any other result.
+            const compile_summary = C.vm_compile_error_summary(vm_);
+            defer C.vm_freeb(vm_, compile_summary);
+            try zt.eq(@as(usize, 0), compile_summary.len);
+
+            const panic_summary = C.thread_panic_summary(C.vm_main_thread(vm_));
+            defer C.vm_freeb(vm_, panic_summary);
+            try zt.eq(@as(usize, 0), panic_summary.len);
+
+            const summary = C.vm_error_summary(vm_);
+            defer C.vm_freeb(vm_, summary);
+            try zt.eq(@as(usize, 0), summary.len);
+        }
+    };
+
+    // Before the first eval.
+    try S.expectEmpty(vm);
+
+    // After a success.
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_eval(vm, "a := 1", &res));
+    try S.expectEmpty(vm);
+
+    // A success after a compile error and after a panic.
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "print(nope)", &res));
+    try zt.eq(C.Success, C.vm_eval(vm, "b := 1", &res));
+    try S.expectEmpty(vm);
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm, "panic('boom')", &res));
+    try zt.eq(C.Success, C.vm_eval(vm, "c := 1", &res));
+    try S.expectEmpty(vm);
+
+    // From a script, on a VM that has not failed.
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use cy
+        \\vm := cy.VM()
+        \\if vm.compile_error_summary().len() != 0: panic('compile summary')
+        \\if vm.panic_summary().len() != 0: panic('panic summary')
+        \\_ = vm.eval('a := 1')
+        \\if vm.compile_error_summary().len() != 0: panic('compile summary after eval')
+        \\if vm.panic_summary().len() != 0: panic('panic summary after eval')
+    , &res));
 }
 
 test "Every function declared in cyber.h is exported." {

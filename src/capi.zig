@@ -260,6 +260,14 @@ pub fn vm_compile_error_summary(vm: *VM) []const u8 {
     return from_bytes(c.cl_vm_compile_error_summary(vm));
 }
 
+pub const CompileError = c.CLCompileError;
+pub const ReportKind = c.CLReportKind;
+pub const ReportTokenError: ReportKind = c.CL_REPORT_TOKEN_ERROR;
+pub const ReportParseError: ReportKind = c.CL_REPORT_PARSE_ERROR;
+pub const ReportCompileError: ReportKind = c.CL_REPORT_COMPILE_ERROR;
+pub const vm_set_error_color = c.cl_vm_set_error_color;
+pub const vm_compile_error = c.cl_vm_compile_error;
+
 pub const thread_panic_trace = c.cl_thread_panic_trace;
 
 pub fn thread_panic_summary(t: *Thread) []const u8 {

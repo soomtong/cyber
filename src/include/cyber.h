@@ -414,7 +414,9 @@ void cl_vm_reset(CLVM* vm);
 
 // Evalutes the source code and returns the result code.
 // Subsequent evals will reuse the same compiler and runtime state.
-// If the last statement of the script is an expression, `outVal` will contain the value.
+// On `CL_SUCCESS`, `res` holds the value that `fn main() -> T` returned, or with `persist_main` the value of
+// the script's last statement if that is a bare expression. `res->res_t` is `CL_TYPE_VOID` when there is no value.
+// On any other result code `res` is not set.
 CLResultCode cl_vm_eval(CLVM* vm, CLBytes src, CLEvalResult* res);
 
 // Accepts a `uri` and EvalConfig.
@@ -472,8 +474,51 @@ CLResultCode cl_vm_validate(CLVM* vm, CLBytes src);
 /// or the null string.
 CLBytes cl_vm_error_summary(CLVM* vm);
 
-/// Returns first compile-time error summary. Must be freed with `cl_vm_freeb`.
+/// Returns the compile error summary: the message, the source line and a marker under the reported range,
+/// followed by the context the compiler attached (an earlier declaration, the call sites of a template).
+/// The compiler stops at its first error, so there is one error per compile.
+/// Returns the null string if no compile error is recorded. Must be freed with `cl_vm_freeb`.
+/// The text has no terminal escape codes unless `cl_vm_set_error_color` turned them on.
 CLBytes cl_vm_compile_error_summary(CLVM* vm);
+
+/// Whether a compile error summary colors the marker under the reported range with ANSI escape codes.
+/// Off by default. Survives `cl_vm_reset`.
+void cl_vm_set_error_color(CLVM* vm, bool enabled);
+
+/// Matches the title of the summary: `TokenError`, `ParseError` or `CompileError`.
+typedef enum {
+    CL_REPORT_TOKEN_ERROR = 0,
+    CL_REPORT_PARSE_ERROR,
+    CL_REPORT_COMPILE_ERROR,
+} CLReportKind;
+
+typedef struct CLCompileError {
+    CLReportKind kind;
+
+    /// The message without the location. Owned by the VM.
+    CLBytes msg;
+
+    /// The source that the error is in. Empty if the error does not belong to a source. Owned by the VM.
+    CLBytes uri;
+
+    /// Whether `line`, `col` and `len` are set. An error can belong to a source without a position in it.
+    bool has_loc;
+
+    /// Starts at 0.
+    uint32_t line;
+
+    /// Byte offset in the line. Starts at 0.
+    uint32_t col;
+
+    /// Bytes of the reported range on `line`. A range that continues on later lines ends at the end of `line`.
+    /// A token or parse error reports a position: `len` is 1.
+    uint32_t len;
+} CLCompileError;
+
+/// Writes the compile error of the last `cl_vm_eval`, `cl_vm_compile` or `cl_vm_validate` to `out` and
+/// returns true. Returns false and zeroes `out` if the last result was not `CL_ERROR_COMPILE`.
+/// `msg` and `uri` stay valid until the next eval, compile, validate or reset of the VM.
+bool cl_vm_compile_error(CLVM* vm, CLCompileError* out);
 
 // For embedded, Cyber by default uses malloc (it can be configured to use the high-perf mimalloc).
 // If the host uses a different allocator than Cyber, use `cl_vm_alloc` to allocate memory
@@ -530,7 +575,8 @@ typedef struct CLStackTrace {
 
 CLStackTrace cl_thread_panic_trace(CLThread* t);
 
-/// Returns runtime panic summary. Must be freed with `cl_vm_freeb`.
+/// Returns runtime panic summary, or the null string if the thread's last run did not panic.
+/// Must be freed with `cl_vm_freeb`.
 CLBytes cl_thread_panic_summary(CLThread* t);
 
 /// Return and parameters for host functions.

@@ -256,9 +256,7 @@ export fn cl_vm_reset(vm: *cy.VM) void {
     vm.resetVM() catch cy.fatal();
 }
 
-/// Maps an error of an eval to its result code.
-/// `err` is `anytype` so that the switch runs on the error set of the caller, as the inline switches did.
-/// Today that set is `anyerror` (the compiler callbacks return it), so an unknown name in a prong still builds.
+/// Maps an error of an eval to its result code. `anytype` keeps the switch on the error set of the caller (`anyerror` today).
 fn evalResultCode(err: anytype) C.ResultCode {
     return switch (err) {
         error.CompileError => C.ErrorCompile,

@@ -3120,6 +3120,14 @@ fn AutoHash[K Any](key K) -> int:
         return as[int] x
     #else K == float:
         return @bitCast(int, key)
+    #else K == f32:
+        return splitmix64_hash(int(@bitCast(r32, key)))
+    #else K == bool:
+        return splitmix64_hash(int(key))
+    #else K == symbol:
+        return splitmix64_hash(int(key))
+    #else K == error:
+        return splitmix64_hash(int(key))
     #else K == Object:
         return splitmix64_hash(as key)
     #else type.is_instance_of(K, Array):
@@ -3130,6 +3138,11 @@ fn AutoHash[K Any](key K) -> int:
         #switch type.info(K):
             #case .enum:
                 return splitmix64_hash(key)
+            #case .int:
+                -- Extends from the width of `K`. The upper bits of a narrow int are undefined.
+                return splitmix64_hash(int(key))
+            #case .raw:
+                return splitmix64_hash(int(key))
             #case .ref:
                 return splitmix64_hash(@ref_addr(key))
             #else:

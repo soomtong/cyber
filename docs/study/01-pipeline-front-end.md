@@ -432,7 +432,7 @@ outCol.* = pos - lineStart;      // 바이트 단위 열
 토크나이저/파서는 로그가 없으므로(`parser.zig`와 `tokenizer.zig`의 `log.tracev`는 오류 경로뿐이다) 눈으로 보려면 두 가지 도구가 있다.
 
 - `cy.parse(src)`(`builtins/cy.cy:1170`): 파서를 그대로 돌려 AST를 `ParseResult{src, root, comments}`로 돌려준다. 문서 생성기 `docs/gen-docs.cy`가 이 API로 `.cy` 파일의 선언과 `--|` 문서 주석을 추출한다(`docs/gen-docs.cy:548`). 이 기능을 위해 `builtins/cy.zig:275`는 `parseComments = true`로 파서를 돌린다. 한계가 있다. Zig의 `NodeType` 순서와 `cy.cy`의 `Node` 선택 타입 순서가 정확히 같아야 하고(`ZNode.type()`이 태그 바이트를 곧바로 `Node.Tag`로 해석한다, `cy.cy:642-644`; 120개 모두 이름이 순서대로 대응함을 확인했다), 일부 노드의 `pos()`는 `panic: TODO pos: Node.Tag.var_decl`로 끝난다.
-- `src/tokenizer.cy`(1046줄): 토크나이저의 Cyber 포팅이다. 내장된 샘플 소스를 토큰화해 `토큰이름, 위치`를 `eprint`한다. `behavior_test.zig:434`가 테스트로 돌린다. 정확한 오라클은 아니다. 예를 들어 `:`를 만나면 `colon_equal`을 내보내고도 `advance()`를 빠뜨려(`tokenizer.cy:408-409`) `=`가 `equal` 토큰으로 한 번 더 나온다. Zig 토크나이저(`tokenizer.zig:389-399`)는 `advance(t)`를 한다.
+- `src/tokenizer.cy`(1046줄): 토크나이저의 Cyber 포팅이다. 내장된 샘플 소스를 토큰화해 `토큰이름, 위치`를 `eprint`한다. `behavior_test.zig:434`가 테스트로 돌린다. 정확한 오라클은 아니었다. `:`를 만나면 `colon_equal`(또는 `colon2`)을 내보내고도 `advance()`를 빠뜨려 `=`가 `equal` 토큰으로 한 번 더 나왔다(F-78, 2026-11-10 수정. 샘플 끝의 검사가 `colon_equal` 뒤의 `equal`을 panic으로 잡는다). Zig 토크나이저(`tokenizer.zig:389-399`)는 `advance(t)`를 한다.
 
 ### 3.7 `cyber fmt`와 에디터 지원
 
@@ -641,10 +641,10 @@ exprStmt
 ```
 fn_k, 0  ident, 3  left_paren, 6  ident, 7  comma, 8  ident, 10  ident, 12  right_paren, 15
 minus_right_angle, 17  ident, 20  colon, 23  new_line, 24  indent, 25  return_k, 29  ident, 36
-plus, 38  ident, 40  new_line, 41  ident, 42  colon_equal, 44  equal, 45  ident, 47 ...
+plus, 38  ident, 40  new_line, 41  ident, 42  colon_equal, 44  ident, 47 ...
 ```
 
-읽을 포인트: 위치 24의 `new_line` 다음에 위치 25의 `indent`가 한 번 나오고, 들여쓰기 없는 다음 줄(`x := ...`)은 위치 41의 `new_line` 직후 곧바로 위치 42의 `ident`다. dedent 토큰은 없다(3.2절). `colon_equal, 44` 다음에 `equal, 45`가 하나 더 나오는 것은 3.6절에서 본 포팅 버그다. Zig 토크나이저라면 `colon_equal` 하나다.
+읽을 포인트: 위치 24의 `new_line` 다음에 위치 25의 `indent`가 한 번 나오고, 들여쓰기 없는 다음 줄(`x := ...`)은 위치 41의 `new_line` 직후 곧바로 위치 42의 `ident`다. dedent 토큰은 없다(3.2절). 2026-11-10 전에는 `colon_equal, 44` 다음에 `equal, 45`가 하나 더 나왔다(3.6절의 포팅 버그 F-78, 수정됨).
 
 ### 5.5 문법 변형 실험
 
@@ -781,7 +781,7 @@ print(x)
 3. 토큰 시작 위치는 24비트다(`tokenizer.zig:176,193`). 16 MiB 이상 소스에서 위치가 잘릴 가능성이 있다(추정).
 4. `compiler.zig:560-571`의 `resolveCopyCtor`/`resolveFuncTemplate`는 호출하는 곳이 없고 존재하지 않는 `cy.generics`를 참조하는 죽은 코드다(Zig는 쓰이지 않는 함수를 컴파일하지 않아 빌드가 통과한다). 2026-11-06에 삭제했다(F-61).
 5. `compileInner`의 TODO(322-324)가 말하듯 "타입/시그니처 패스"와 "함수 본문 패스"를 나누는 일은 아직 되어 있지 않다. 같은 `loadChunk` 안에서 심볼 예약과 시그니처 해석이 섞인다.
-6. `src/tokenizer.cy`가 `colon_equal` 뒤 `advance()`를 빠뜨려 `=` 토큰을 중복 내보낸다(`tokenizer.cy:408-409`). 테스트가 토큰 내용을 검증하지 않아 통과한다.
+6. `src/tokenizer.cy`가 `colon_equal` 뒤 `advance()`를 빠뜨려 `=` 토큰을 중복 내보냈다. 테스트가 토큰 내용을 검증하지 않아 통과했다(F-78, 2026-11-10 수정. `::`도 같았다).
 7. `cy.cy`의 `Node` 선택 타입 순서가 `ast.NodeType`과 어긋나면 `cy.parse`가 조용히 잘못된 태그를 읽는다. 둘을 비교하는 테스트는 보이지 않았다(미확인: `rg`로 `NodeType`과 `cy.cy` 비교 코드를 찾지 못함). `Node.pos()`는 `var_decl` 등에서 `TODO pos` 패닉이 난다.
 8. 키워드 처리가 불균일하다. `struct := 1`, `void := 1`은 통과하고 `scope := 1`은 `Unknown token: scope_k`. `TokenType.mod_k`는 키워드 표에 없는 죽은 값이다.
 9. 복합 대입은 `op`와 `=`가 붙어 있는지 검사하지 않아 `a + = 2`가 동작하고, `%=`와 별표 두 개 복합 대입은 지원되지 않는다(`parser.zig:4473-4486`).

@@ -40,6 +40,10 @@
   컴파일이 실패했다. `(-8).asr(1)`은 `-4`다(`-8 >> 1`은 0을 채우는 logical shift라 큰 양수). `i8` · `i16` · `i32`는 자기 폭의 부호 비트에서
   시프트하고, 시프트 양이 부호 비트를 넘으면 부호만 남는다(음수는 `-1`, 아니면 `0`). VM에 `ASR` opcode를 더했다. C 백엔드(`cgen`)에는 아직 없다.
 
+- (F-87) `Map`의 키로 `i8` · `i16` · `i32`, `byte` · `r16` · `r32` · `r64`, `bool`, `symbol`, `error`, `f32`를 쓸 수 있다. 이전에는 `Map[i8, int]{}`가
+  `core.cy`의 `AutoHash`에서 `CompileError: Unsupported: i8`이었다(`int` · `str` · `float` · enum · `Object` · `^T`만 됐다).
+  좁은 정수 키는 자기 폭의 값으로 해시하므로 넘친 값(`i8(100) + i8(100)`)과 `i8(-56)`은 같은 키다.
+
 ## 임베딩 API
 
 - 메모리 한도: `cl_vm_set_memory_limit(vm, bytes)`와 `cl_vm_memory_used(vm)`(F-41). 한도는 VM이 할당자로 쥔 전체 바이트

@@ -15,6 +15,11 @@ tokenizer.tokenize()!
 for tokenizer.tokens |token|:
     eprint('%{meta.enum_name(token.tag())}, %{token.pos()}')
 
+-- `:=` is one token. No `equal` token follows it.
+for 1..tokenizer.tokens.len() |i|:
+    if tokenizer.tokens[i - 1].tag() == .colon_equal and tokenizer.tokens[i].tag() == .equal:
+        panic('Expected one token for `:=`.')
+
 type TokenType enum:
     -- Used to indicate no token.
     case null
@@ -406,8 +411,10 @@ fn (&Tokenizer) tokenizeOne(state TokenizeState) -> !TokenizeState:
 
         case ':':
             if self.peek() == '=':
+                self.advance()
                 self.pushToken(.colon_equal, start)
             else self.peek() == ':':
+                self.advance()
                 self.pushToken(.colon2, start)
             else:
                 self.pushToken(.colon, start)

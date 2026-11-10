@@ -186,4 +186,56 @@ t.eq(0, km_int.keys().len())
 km_int[7] = 'x'
 t.eq(0, km_int.keys().index(7).?)
 
+-- Narrow int keys. A wrapped key is the same key as its wrapped value.
+m_i8 := Map[i8, int]{}
+m_i8[i8(-56)] = 1
+m_i8[i8(100) + i8(100)] = 2
+t.eq(1, m_i8.size())
+t.eq(2, m_i8[i8(-56)])
+t.eq(true, m_i8.contains(i8(100) + i8(100)))
+t.eq(false, m_i8.contains(i8(56)))
+m_i16 := Map[i16, int]{}
+m_i16[i16(-3)] = 3
+t.eq(3, m_i16[i16(-3)])
+m_i32 := Map[i32, int]{}
+m_i32[i32.max + i32(1)] = 4
+t.eq(4, m_i32[i32.min])
+
+-- Raw int keys.
+m_byte := Map[byte, int]{}
+m_byte[byte(44)] = 1
+m_byte[byte(200) + byte(100)] = 2
+t.eq(1, m_byte.size())
+t.eq(2, m_byte[byte(44)])
+m_r16 := Map[r16, int]{}
+m_r16[r16(0xffff)] = 5
+t.eq(5, m_r16[~r16(0)])
+m_r32 := Map[r32, int]{}
+m_r32[r32(7)] = 6
+t.eq(6, m_r32[r32(7)])
+m_r64 := Map[r64, int]{}
+m_r64[r64(0xffffffffffffffff)] = 7
+t.eq(7, m_r64[~r64(0)])
+
+-- bool, symbol, error and f32 keys.
+m_bool := Map[bool, int]{}
+m_bool[true] = 1
+m_bool[false] = 2
+t.eq(1, m_bool[true])
+t.eq(2, m_bool[false])
+m_sym := Map[symbol, int]{}
+m_sym[@red] = 1
+m_sym[@blue] = 2
+t.eq(1, m_sym[@red])
+t.eq(2, m_sym[@blue])
+t.eq(false, m_sym.contains(@green))
+m_err := Map[error, int]{}
+m_err[error.NotFound] = 1
+t.eq(1, m_err[error.NotFound])
+t.eq(false, m_err.contains(error.Other))
+m_f32 := Map[f32, int]{}
+m_f32[f32(1.5)] = 1
+t.eq(1, m_f32[f32(1.5)])
+t.eq(false, m_f32.contains(f32(2.5)))
+
 --cytest: pass

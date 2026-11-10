@@ -1014,6 +1014,7 @@ arr = arr.remove(1)
 ## Maps.
 A `Map` type is a dynamic data structure that stores key value pairs in a lookup table governed by hashing functions (key hash and equality functions).
 `Map` provides default hashing functions while `HashMap` requires custom hash functions.
+The default functions accept these key types: `str`, integers (`Int` and `Raw` of any width), `float`, `f32`, `bool`, `symbol`, `error`, enums, `Object` and references (`^T`, hashed by address). Another key type is a compile error.
 
 Maps are constructed with the initializer expression:
 ```cy

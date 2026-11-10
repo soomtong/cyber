@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.4-dev 738-f45be74</div>
+    <div class="sub-title">v0.4.4-dev 749-7ef3baa</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -2010,6 +2010,7 @@ type Vec2:
     x float
     y float
 </code></pre>
+<p>Field names are unique in a type. Declaring a second field with the same name is a compile error.</p>
 <a href="#custom-types">^topic</a>
 <h3 id="initialize-struct">Initialize struct. <a href="#initialize-struct">#</a></h3>
 <p>Structs are constructed from an initializer expression:</p>
@@ -2298,6 +2299,7 @@ print(fruit)       --> Fruit.kiwi
 print(int(fruit))  --> 3
 </code></pre>
 <p>The memory representation of an enum defaults to <code>int</code>. Each case has an increasing value starting from 0.</p>
+<p>Case names are unique in an enum. Declaring a second case with the same name is a compile error. The same holds for the cases of a choice and of a C union.</p>
 <p>A dot literal can infer a target enum type:</p>
 <pre><code class="language-cy">fruit := Fruit.kiwi
 fruit = .orange
@@ -4463,7 +4465,7 @@ if (code == CL_SUCCESS) {
     printf("Success!\n");
 } else {
     CLBytes summary = cl_vm_error_summary(vm);
-    printf("%.*s\n", (int)summary.len, summary.buf);
+    printf("%.*s\n", (int)summary.len, summary.ptr);
     cl_vm_freeb(vm, summary);
 }
 </code></pre>
@@ -4472,24 +4474,38 @@ if (code == CL_SUCCESS) {
 <h3 id="eval-return">Eval return. <a href="#eval-return">#</a></h3>
 <p>To return a value back to the host, a main function with a return type is required:</p>
 <pre><code class="language-c">CLBytes src = CL_BYTES(
-    "fn main() -> int:"
+    "fn main() -> int:\n"
     "  a := 1\n"
     "  return a + 2\n"
 );
 
 CLEvalResult res;
-cl_vm_eval(vm, src, &res);
+CLResultCode code = cl_vm_eval(vm, src, &res);
 if (code == CL_SUCCESS) {
     printf("returned %lld\n", *(int64_t*)res.res);
 }
 </code></pre>
+<a href="#libcyber">^topic</a>
+<h3 id="compile-errors">Compile errors. <a href="#compile-errors">#</a></h3>
+<p>When the result code is <code>CL_ERROR_COMPILE</code>, <code>cl_vm_compile_error_summary</code> returns the message, the source line and a marker under the reported range. The compiler stops at its first error, so there is one error per compile. The text has no terminal escape codes. A host that prints to a terminal can color the marker with <code>cl_vm_set_error_color(vm, true)</code>.</p>
+<p><code>cl_vm_compile_error</code> returns the same error as data, so that a host does not parse the summary:</p>
+<pre><code class="language-c">CLCompileError err;
+if (cl_vm_compile_error(vm, &err)) {
+    // `line` and `col` start at 0. `col` and `len` count bytes.
+    if (err.has_loc) {
+        printf("%.*s:%u:%u: ", (int)err.uri.len, err.uri.ptr, err.line + 1, err.col + 1);
+    }
+    printf("%.*s\n", (int)err.msg.len, err.msg.ptr);
+}
+</code></pre>
+<p><code>msg</code> and <code>uri</code> are owned by the VM and stay valid until its next eval, compile, validate or reset. <code>kind</code> is <code>CL_REPORT_TOKEN_ERROR</code>, <code>CL_REPORT_PARSE_ERROR</code> or <code>CL_REPORT_COMPILE_ERROR</code>. <code>cl_vm_compile_error</code> returns false if the last result was not <code>CL_ERROR_COMPILE</code>.</p>
 <a href="#libcyber">^topic</a>
 <h3 id="checking-a-script-without-running-it">Checking a script without running it. <a href="#checking-a-script-without-running-it">#</a></h3>
 <p><code>cl_vm_validate</code> compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (<code>persist_main</code>) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (<code>use math</code>) is initialized by the next eval that runs.</p>
 <pre><code class="language-c">CLResultCode code = cl_vm_validate(vm, src);
 if (code == CL_ERROR_COMPILE) {
     CLBytes summary = cl_vm_compile_error_summary(vm);
-    printf("%.*s\n", (int)summary.len, summary.buf);
+    printf("%.*s\n", (int)summary.len, summary.ptr);
     cl_vm_freeb(vm, summary);
 }
 </code></pre>
@@ -4540,6 +4556,11 @@ int main() {
 cfg.deny_raw_ptrs = true;
 cl_vm_evalx(vm, CL_BYTES("turn"), src, cfg, &res);
 </code></pre>
+<a href="#libcyber">^topic</a>
+<h3 id="allocation-failure">Allocation failure. <a href="#allocation-failure">#</a></h3>
+<p>A host can give the VM its own allocator (<code>cl_vm_init_mem</code>, <code>cl_vm_initx</code>). When that allocator fails during an eval, the eval returns an error and the VM can be used again:</p>
+<table><thead><tr><th>Where</th><th>Result</th></tr></thead><tbody><tr><td>In the compiler</td><td><code>CL_ERROR_COMPILE</code>. The summary names <code>OutOfMemory</code>, or <code>WriteFailed</code> when the allocation was behind a text writer, or it is empty without memory for the report. The next eval starts from a reset VM, like <code>cl_vm_reset</code>: locals and declarations persisted by earlier evals (<code>persist_main</code>) are gone.</td></tr><tr><td>In the script</td><td><code>CL_ERROR_PANIC</code> with <code>panic: OutOfMemory</code>. Without memory for the message or the stack trace of another panic, its message is replaced by <code>OutOfMemory</code> and its trace is empty.</td></tr><tr><td>After the run (the result value, the persisted locals)</td><td><code>CL_ERROR_UNKNOWN</code>, with no summary.</td></tr></tbody></table><p>A summary function returns the null string if there is no memory for the text. Creating a VM (<code>cl_vm_init</code>, <code>cl_vm_initx</code>, <code>cl_vm_init_mem</code>) still aborts the process if the allocator fails, and so do the functions a host calls to create values (<code>cl_str_init</code>, <code>cl_array_empty</code>, ...).</p>
+<p>To bound the memory of a script use <code>cl_vm_set_memory_limit</code> and not an allocator that fails: a limit ends in <code>panic: OutOfMemory</code> only where the script grows its heap or a stack, and it never stops the compiler part way.</p>
 <a href="#libcyber">^topic</a>
 <h2 id="function-binding">Function binding. <a href="#function-binding">#</a></h2>
 <p>A function binding describes how to load a <code>#[bind]</code> function.</p>

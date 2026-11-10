@@ -357,13 +357,18 @@ pub fn reserveFunc(
     c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: *ast.FuncDecl,
 ) !?*cy.Func {
     const mod = parent.getMod().?;
-    const sym = try prepareFuncSym(c, parent, mod, name, decl);
 
     var extern_ = false;
     for (decl.attrs.slice()) |attr| {
         if (attr.type == .extern_) {
             extern_ = true;
         } else if (attr.type == .cond) {
+            // The condition of a template member can name the template parameters of the instance.
+            const in_instance = parent.instance() != null;
+            if (in_instance) {
+                try sema.pushSymResolveContext(c, parent, attr.value.?);
+            }
+            defer if (in_instance) sema.popResolveContext(c);
             const res = try cy.cte.evalCheck(c, attr.value.?, c.sema.bool_t);
             if (!res.value.asBool()) {
                 // Skip.
@@ -371,6 +376,9 @@ pub fn reserveFunc(
             }
         }
     }
+
+    // After the `#[cond]` check. A skipped declaration must not leave a function symbol without a function.
+    const sym = try prepareFuncSym(c, parent, mod, name, decl);
 
     const config = cy.sym.FuncConfig{
         .is_method = decl.sig_t == .method,
@@ -567,18 +575,20 @@ pub fn getResolvedSym(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *as
                 if (func_sym.decl.with_cstrs.len > 0) {
                     try sema.check_instance_func_cstr(c, variant, &func_sym.decl, node);
                 }
-                var func = (try c.reserveFunc(modSym, sym.name(), func_sym.decl.decl)) orelse return null;
-                try sema.ensure_resolved_func(c, func, true, node);
+                // An overload that is skipped by `#[cond]` does not hide the overloads that follow it.
+                if (try c.reserveFunc(modSym, sym.name(), func_sym.decl.decl)) |func| {
+                    try sema.ensure_resolved_func(c, func, true, node);
+                }
 
                 for (func_sym.rest().items) |*decl| {
                     try sema.ensure_resolved_instance_func_decl(c, decl);
-                    if (func_sym.decl.with_cstrs.len > 0) {
+                    if (decl.with_cstrs.len > 0) {
                         try sema.check_instance_func_cstr(c, variant, decl, node);
                     }
-                    func = (try c.reserveFunc(modSym, sym.name(), decl.decl)) orelse continue;
+                    const func = (try c.reserveFunc(modSym, sym.name(), decl.decl)) orelse continue;
                     try sema.ensure_resolved_func(c, func, true, node);
                 }
-                const res = mod.getSym(name).?;
+                const res = mod.getSym(name) orelse return null;
                 try check_sym_visible(c, res, node);
                 return res;
             } else if (sym.type == .variant_member) {

@@ -3503,9 +3503,31 @@ fn count() -> int:
 | `#[unsafe]` | function | The function is exempt from checks on borrow containers. Used by the builtin modules. |
 | `#[consteval]` | function | The function is only evaluated at compile-time. Used by the builtin modules. |
 | `#[reserve]` | function | Reserves the name for a declaration that the compiler provides. Used by the builtin modules. |
-| `#[cond]`, `#[call]` | | Reserved. |
+| `#[cond=expr]` | function, global, `use` | The declaration exists only when the compile-time condition is `true`. |
+| `#[call]` | | Reserved. |
 
 An unknown attribute name is a parse error: `Unknown attribute.`
+
+A declaration that `#[cond]` skips is not declared. Using its name is a compile error unless another declaration of that name exists:
+```cy
+#[cond=meta.system() == .windows]
+fn sep() -> str:
+    return '\\'
+
+#[cond=meta.system() != .windows]
+fn sep() -> str:
+    return '/'
+```
+
+The condition of a method of a template type can use the template parameters. The method exists only in the instances that satisfy the condition:
+```cy
+type Box[T Any] struct:
+    x T
+
+#[cond=type.is_copyable(T)]
+fn (&Box[]) dup() -> T:
+    return self.x
+```
 
 # Modules.
 <table><tr>

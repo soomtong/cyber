@@ -200,4 +200,19 @@ t.eq(true, idx_arr.index(9) == none)
 t.eq(true, idx_arr.contains(2))
 t.eq(false, idx_arr.contains(9))
 
+-- F-90: append(Slice) and `<<` with a slice. Recursed until the stack overflowed.
+sl_arr := Array[int]{1}
+sl := []int{2, 3}
+sl_arr.append(sl)
+sl_arr << sl
+sl_arr.append(sl[1..])
+t.eq_span([&]int{1, 2, 3, 2, 3, 3}, sl_arr[..])
+sl_str := Array[str]{}
+sl_strs := []str{'x', 'y'}
+sl_str << sl_strs
+sl_str.append(sl_strs)
+t.eq(sl_str.len(), 4)
+t.eq(sl_str[3], 'y')
+t.eq(sl_strs[1], 'y')
+
 --cytest: pass

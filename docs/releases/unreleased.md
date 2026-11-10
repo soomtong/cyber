@@ -35,6 +35,12 @@
   이제 `CompileError: Expected key value pair.`(`const` 초기화식도 같다).
   (4) choice가 아닌 값의 `switch`에서 payload 캡처: `case 1 |a|:`는 `panic: attempt to use null value`였다.
   이제 `CompileError: Only a case of a choice can capture a payload.`
+- `Array`에 `Slice`를 붙이면 스택이 넘치던 것을 고쳤다(F-90). `a := Array[int]{}` · `s := []int{2, 3}` 뒤 `a.append(s)`와
+  `a << s`는 `panic: Stack overflow.`였다. `append(arr AsSpan[T])`가 `arr[..]`로 자기 자신을 다시 불렀다(`Slice`를 자른 값은
+  다시 `Slice`다). 이제 `arr.span()`으로 원소를 붙인다. `a.append(s[..])`도 같은 경로였다.
+- `#[cond=false]`로 빠진 선언이 그 이름의 유일한 선언일 때 그 이름을 쓰면 컴파일러가 죽던 것을 고쳤다(F-91).
+  `#[cond=false] fn foo()` 뒤 `foo()`, 메서드 `a.foo()`는 Segmentation fault(종료 코드 134)였다. 빠진 선언이 함수 없는
+  빈 심볼을 남겼다. 이제 ``Undeclared variable `foo`.`` · ``Can not find the symbol `foo` in `A`.``다.
 
 ## 언어와 표준 라이브러리
 
@@ -75,6 +81,10 @@
 - `spawn`의 인자와 반환값으로 `bool`, `float`, `f32`, `byte` · `r16` · `r32` · `r64`, `symbol`, `error`, enum을 보낼 수 있다(F-65).
   이전에는 정수(`int` · `i8` · `i16` · `i32`)와 `str`만 됐고 나머지는 `CompileError: Expected sendable: bool`이었다.
   `?T`, 배열, 맵, `@send`를 선언하지 않은 struct는 여전히 보낼 수 없다.
+- (F-91) 템플릿 타입의 메서드에 붙인 `#[cond=…]`가 그 인스턴스의 타입 매개변수를 볼 수 있다.
+  `#[cond=type.is_copyable(T)] fn (&Box[]) dup() -> T`는 ``Could not find the symbol `T`.``였다. 조건이 거짓인 인스턴스에는
+  그 메서드가 없다(``Can not find the symbol `dup` in `Box[R]`.``). 같은 이름의 오버로드 가운데 첫 선언이 빠져도 뒤의 선언은
+  남는다(이전에는 템플릿 인스턴스에서 첫 선언이 빠지면 이름 전체가 사라졌다). `NoCopy` 원소 컨테이너(F-26)의 준비 단계다.
 
 ## 임베딩 API
 

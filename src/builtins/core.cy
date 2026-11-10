@@ -1913,7 +1913,7 @@ fn (&&Array[]) append(span [&]T):
 
 --| Appends the elements of a `AsSpan` to the end of this array.
 fn (&&Array[]) append(arr AsSpan[T]):
-    self.append(arr[..])
+    self.append(arr.span())
 
 fn (&Array[]) cap() -> int:
     return self.header && ~(3 << 62)

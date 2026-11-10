@@ -435,7 +435,7 @@ behavior-test 는 이 장의 핵심이다. 파일을 "발견"하지 않는다. �
 | `--cytest: error` | 116 | 다음 줄들의 `--` 접두어를 지운 텍스트를 기대 리포트로 보고, 컴파일 에러(또는 panic) 요약과 전체 일치 비교 |
 | `--cytest: panic` | 23 | 기대 텍스트 안의 `[trace]` 줄을 경계로 앞부분은 "시작 일치", 뒷부분은 "끝 일치"를 비교(AOT 백엔드는 앞부분만) |
 
-- 기대 텍스트의 `@MainPath()` 는 테스트 파일의 해석된 절대 경로로, `@AbsPath(상대경로)` 는 cwd 기준 절대 경로로 바뀐다(setup.zig:451-491). 요약의 빨간색 ANSI 코드는 하네스가 먼저 지운다(setup.zig:185-187).
+- 기대 텍스트의 `@MainPath()` 는 테스트 파일의 해석된 절대 경로로, `@AbsPath(상대경로)` 는 cwd 기준 절대 경로로 바뀐다(setup.zig:451-491). 요약의 빨간색 ANSI 코드는 하네스가 먼저 지웠다(setup.zig:185-187). 2026-11-10부터 요약에 이스케이프 코드가 없어 이 두 줄은 삭제됐다(F-52 수정 `ea06b925`).
   이 지운다는 사실이 "에러 요약에 이스케이프 코드가 들어간다"는 반증이다(7.2절).
 - 개별 eval 은 `setup.VMrunner.eval`(setup.zig:239)이 감싼다. `c.vm_reset(vm)`으로 VM 을 초기화하고(292행), 끝나면 `thread_count_objects != 0` 이면 `unfreed objects: N` 으로 panic 하며,
   Trace 빌드에서는 전역 참조 카운트(`thread_rc`)가 0 이 아니어도 panic 한다(setup.zig:300-314). 누수는 곧 테스트 실패다.
@@ -508,7 +508,7 @@ behavior-test 는 이 장의 핵심이다. 파일을 "발견"하지 않는다. �
 |---|---|---|
 | `CL_SUCCESS` | 0 | 정상 |
 | `CL_AWAIT` | 1 | main 이 끝나지 않은 future 를 기다리다 멈춤(vm.c:1500, lib.zig:240). 이어 실행하는 API(`cl_run_ready_tasks`)는 주석 처리돼 있다 |
-| `CL_ERROR_COMPILE` | 2 | 파싱/의미 오류. `cl_vm_error_summary` 가 첫 리포트를 돌려줌 |
+| `CL_ERROR_COMPILE` | 2 | 파싱/의미 오류. `cl_vm_error_summary` 가 요약을 돌려줌(컴파일러는 첫 오류에서 멈춘다). 2026-11-10부터 `cl_vm_compile_error` 가 종류 · 메시지 · uri · 줄 · 열 · 길이를 구조체로 준다 |
 | `CL_ERROR_PANIC` | 3 | 런타임 panic. 스택 트레이스 포함 요약 |
 | `CL_ERROR_UNKNOWN` | 4 | 위에 속하지 않는 Zig 에러(OOM 등). 요약 없음 |
 | `CL_ERROR_INTERRUPT` | 5 | `cl_vm_interrupt` 또는 fuel 소진. 요약은 `panic: Interrupted.` / `panic: Out of fuel.` |
@@ -669,7 +669,7 @@ My print: 12300
 MyNode deinit.
 Success!
 Live objects: 0
-$ ./host_tool        (요약은 ANSI 색 코드를 지운 형태)
+$ ./host_tool        (요약은 ANSI 색 코드를 지운 형태. 2026-11-10부터 요약에 색 코드가 없다)
 My print: {"tool":"read_file","args":{"path":"/etc/hosts"},"ok":true}
 tool call: Success!
 compile error: CompileError: Undeclared variable `undefined_thing`.
@@ -748,6 +748,7 @@ static bool loader(CLVM* vm, CLSym* mod, CLBytes uri, CLLoaderResult* res) {
     return false;
 }
 
+// 2026-11-10부터 필요 없다: 요약에 이스케이프 코드가 없다(F-52 수정). 실험 당시의 코드로 남긴다.
 static void strip_ansi(CLBytes s, char* dst, size_t cap) {      // 에러 요약의 ESC[31m ... ESC[0m 제거
     size_t n = 0;
     for (size_t i = 0; i < s.len && n + 1 < cap; i++) {
@@ -937,7 +938,7 @@ $ cyber src/test/core/panic_panic.cy                           -> exit 1, "panic
 #!/bin/sh
 # cytest.sh file.cy : `--cytest: error` 뒤 `--` 주석을 기대 리포트로 보고 CLI 출력과 diff
 f="$1"; T=$(mktemp -d); abs=$(cd "$(dirname "$f")" && pwd)/$(basename "$f")
-cyber "$f" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' > "$T/actual"                       # ANSI 제거 (하네스와 같음)
+cyber "$f" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' > "$T/actual"                       # ANSI 제거 (2026-11-10부터 파이프 출력에는 색 코드가 없어 sed 는 없어도 된다)
 sed -n '/^--cytest:/,$p' "$f" | tail -n +2 | sed 's/^--//' | sed "s#@MainPath()#$abs#" > "$T/expected"
 diff "$T/expected" "$T/actual" && echo MATCH; rm -rf "$T"
 ```
@@ -1071,7 +1072,7 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
 
 | 항목 | 문서/헤더가 말하는 것 | 코드/실행 결과 |
 |---|---|---|
-| 마지막 표현식의 값 | cyber.h:383-385 "마지막 문장이 표현식이면 `outVal` 에 값이 담긴다" | 표현식 문장은 컴파일 에러(`1 + 2` -> `Expected assignment to a variable or placeholder for int`). 값은 `fn main() -> T` 반환에서만 나온다 |
+| 마지막 표현식의 값 | cyber.h:383-385 "마지막 문장이 표현식이면 `outVal` 에 값이 담긴다" | 표현식 문장은 컴파일 에러(`1 + 2` -> `Expected assignment to a variable or placeholder for int`). 값은 `fn main() -> T` 반환에서만 나온다. 2026-11-04부터 `persist_main` eval은 마지막 맨 표현식의 값을 돌려주고, 2026-11-10에 헤더 주석을 이 동작으로 고쳤다(F-52) |
 | 구현이 없는 선언 | cyber.h:569 `clResolveType`, 613 `cl_array_empty_new`, 615 `cl_map_empty_new` | lib.zig 에는 없고 대신 `cl_array_empty`(643), `cl_map_empty`(647)가 `export` 됨(헤더에는 없음). 링크하면 undefined symbol. 2026-11-10 수정(F-51): 헤더가 `cl_array_empty` · `cl_map_empty` 를 선언하고 `clResolveType` 은 삭제 |
 | 시그니처 불일치 | cyber.h:605 `cl_type_from_id(CLTypeId id)` | lib.zig:734 는 `(vm, type_id)` 두 인자. 헤더대로 부르면 id 가 vm 자리로 들어간다. 2026-11-10 수정: 헤더도 `(CLVM* vm, CLTypeId id)` |
 | 없는 함수 이름 | cyber.h:411 `cl_new_compile_error_summary`, 416 · 474 `cl_free` | 실제 이름은 `cl_vm_compile_error_summary`, `cl_vm_freeb`. 헤더 420 의 `clAlloc` 은 lib.zig:89 에 있으나 헤더 선언은 `cl_vm_alloc`. 2026-11-10 수정: 주석을 현재 이름으로, 헤더에 없던 export `clAlloc` · `clGetAllocator` 삭제 |
@@ -1136,6 +1137,9 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
   error 값은 만든다) 도구 실패가 곧 세션 상태 손실이다. 도구 실패를 스크립트가 처리하려면 반환 타입에 오류 정보를 담는 설계(예: 상태 코드가 든 구조체나 `str`)를 호스트가 따로 정해야 한다.
 - 컴파일 에러는 첫 리포트 하나만(`reports.items[0]`, lib.zig:463-469) 문자열로 나온다. 구조화된 위치 정보는 panic 쪽만 `cl_thread_panic_trace`(`CLStackFrame {name, line, col, line_pos, chunk}`)로 있다.
   요약에는 ANSI 색 코드가 섞인다.
+  2026-11-10 수정(F-52, `ea06b925`): 요약은 이스케이프 코드 없는 텍스트이고 색은 호스트가 `cl_vm_set_error_color` 로 켠다. 위치는 `cl_vm_compile_error`(`CLCompileError {kind, msg, uri, has_loc, line, col, len}`)로 받는다.
+  리포트가 하나인 것은 API가 나머지를 버려서가 아니라 `reportError` 가 곧바로 `error.CompileError` 를 돌려주어 컴파일러가 첫 오류에서 멈추기 때문이다(오류 복구 없음, F-78).
+  오류 없이 부른 `cl_vm_compile_error_summary` · `cl_thread_panic_summary` 는 프로세스를 abort 했고, 스크립트도 `cy.VM().compile_error_summary()` 로 닿을 수 있었다. 이제 빈 문자열을 돌려준다.
 
 타입과 ABI.
 - 호스트가 새 타입(불투명 핸들 객체)을 `#[bind] type` 으로 만드는 C 경로는 없다. `CLCreateTypeFn` 이 컴파일러 내부 `Type` 을 만들어야 하기 때문이다. 대안은 bind_module.c 처럼 값 구조체나 `Ptr[void]` 필드를 가진
@@ -1150,6 +1154,7 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
 A: `fn main() -> T` 의 반환 값이다. `VM.eval` 은 `main_func` 가 있을 때만 반환 타입 id 를 `res_t` 로 주고 값 포인터는 main 스레드 스택의 `%1` 슬롯이다(vm.zig:477-480, 609).
 Cyber 0.4 는 표현식 문장 자체를 허용하지 않아(`Expected assignment to a variable or placeholder`) 마지막 표현식이라는 개념이 없고, 값이 정적 타입의 unboxed 슬롯이라 타입 id 없이는 해석할 수 없다.
 cyber.h:383 의 주석은 0.3 시절 동작을 설명한 낡은 문구다(5.3절 실험).
+2026-11-04부터 `persist_main` eval은 마지막 맨 표현식의 값도 `CLEvalResult` 로 돌려준다(`project_repl_result.md`). 헤더 주석은 2026-11-10에 두 경로를 적도록 고쳤다(F-52).
 
 ### Q2. 호스트 함수는 왜 인자보다 `cl_thread_ret` 를 먼저 불러야 하는가?
 

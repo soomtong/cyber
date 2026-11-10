@@ -46,4 +46,5 @@ Zig는 참조되지 않는 extern 선언을 분석하지 않으므로 헤더의 
 ## 남은 것
 
 - `examples/android/ndk_app/cyber.h`는 옛 API(`CLHostTypeEntry` · `clAlloc`)의 사본이라 현재 헤더와 다르다. 그 예제를 살릴 때 교체한다.
-- F-52(비-`persist_main`의 "마지막 표현식 값" 주석 · ANSI 색) · F-41(C용 할당자 훅)은 별개.
+- F-52(비-`persist_main`의 "마지막 표현식 값" 주석 · ANSI 색) · F-41(C용 할당자 훅)은 별개. 둘 다 2026-11-10에 닫혔다
+  (`project_compile_error_report.md` · `project_c_mem_funcs.md`).

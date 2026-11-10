@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.4-dev 733-5850ba9</div>
+    <div class="sub-title">v0.4.4-dev 738-f45be74</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -4423,7 +4423,7 @@ int main() {
 <h2 id="override-print">Override <code>print</code>. <a href="#override-print">#</a></h2>
 <p>The builtin <code>print</code> function does nothing by default, so it needs to be overrided to print to stdout for example:</p>
 <pre><code class="language-c">void printer(CLThread* t, CLBytes str) {
-    printf("Invoked printer: %.*s\n", (int)str.len, str.buf);
+    printf("Invoked printer: %.*s\n", (int)str.len, str.ptr);
 }
 
 int main() {
@@ -4434,12 +4434,12 @@ int main() {
 </code></pre>
 <p>Note that <code>prints</code> invokes printer once. But <code>print</code> invokes the printer twice, once for the value's string and another for the new line character.</p>
 <p>Similarly, <code>eprint</code>, and <code>log</code> can also be overridden:</p>
-<pre><code class="language-c">void eprinter(CLThread* vm, CLBytes str) {
-    fprintf(stderr, "Invoked eprinter: %.*s\n", (int)str.len, str.buf);
+<pre><code class="language-c">void eprinter(CLThread* t, CLBytes str) {
+    fprintf(stderr, "Invoked eprinter: %.*s\n", (int)str.len, str.ptr);
 }
 
-void logger(CLThread* vm, CLBytes str) {
-    fprintf(stderr, "Invoked log: %.*s\n", (int)str.len, str.buf);
+void logger(CLVM* vm, CLBytes str) {
+    fprintf(stderr, "Invoked log: %.*s\n", (int)str.len, str.ptr);
 }
 
 int main() {

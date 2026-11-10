@@ -221,6 +221,8 @@ pub const vm_deinit = c.cl_vm_deinit;
 pub const vm_interrupt = c.cl_vm_interrupt;
 pub const vm_set_fuel = c.cl_vm_set_fuel;
 pub const vm_set_stack_limit = c.cl_vm_set_stack_limit;
+pub const vm_set_memory_limit = c.cl_vm_set_memory_limit;
+pub const vm_memory_used = c.cl_vm_memory_used;
 
 pub fn vm_compile(vm: *VM, uri: []const u8, src: []const u8, config: CompileConfig) ResultCode {
     return c.cl_vm_compile(vm, to_bytes(uri), to_bytes(src), config);

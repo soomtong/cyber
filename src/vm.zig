@@ -126,7 +126,14 @@ pub const VM = struct {
     /// from a the previous bytecode buffer.
     num_cont_evals: u32,
 
-    pub fn init(self: *VM, alloc: std.mem.Allocator) !void {
+    /// `child` is the host's allocator. Everything the VM allocates goes through a `MemAccount` on top of it,
+    /// which `deinit` frees again and replaces with `child` (the host frees the VM itself with it).
+    pub fn init(self: *VM, child: std.mem.Allocator) !void {
+        const acct = try child.create(cy.MemAccount);
+        errdefer child.destroy(acct);
+        acct.* = .{ .child = child };
+        const alloc = acct.allocator();
+
         var num_cpus: usize = 1;
         if (build_config.threads) {
             num_cpus = try std.Thread.getCpuCount();
@@ -343,6 +350,16 @@ pub const VM = struct {
 
         self.alloc.free(self.last_exe_error);
         self.last_exe_error = "";
+
+        if (!reset) {
+            const acct = cy.MemAccount.of(self.alloc).?;
+            self.alloc = acct.child;
+            self.alloc.destroy(acct);
+        }
+    }
+
+    pub fn memAccount(self: *const VM) *cy.MemAccount {
+        return cy.MemAccount.of(self.alloc).?;
     }
 
     /// Checks `src` against the current session: the persisted locals and the declarations of earlier evals are
@@ -499,6 +516,8 @@ pub const VM = struct {
                 self.markChunksInited();
                 if (config.persist_main) self.dropMainLocalSaves();
                 self.dropMainResult(false);
+                // The main thread unwound and freed its heap. Its stack goes back to the initial size as well.
+                if (err == error.Panic or err == error.Interrupted) self.main_thread.resetStack();
                 return err;
             };
             self.markChunksInited();
@@ -912,14 +931,22 @@ pub fn zDumpObjectTrace(t: *cy.Thread, obj: *HeapObject) callconv(.c) void {
     t.c.vm.log(w.written());
 }
 
+/// An allocation the interpreter asked for failed. Out of memory becomes the panic a host function reports for
+/// the same error (`panic: OutOfMemory`), so the memory limit ends the same way wherever it is hit.
+fn allocFailed(t: *cy.Thread, err: anyerror) vmc.ResultCode {
+    if (err != error.OutOfMemory) return vmc.RES_UNKNOWN;
+    _ = t.ret_panic("OutOfMemory");
+    return vmc.RES_PANIC;
+}
+
 // `Value` crosses the C ABI as `uint64_t` (vm.h). The Zig union would be passed
 // indirectly on wasm32, so these entry points take the raw bits.
 fn zAllocFuncUnion(t: *cy.Thread, type_id: cy.TypeId, func_ptr_bits: u64) callconv(.c) vmc.ValueResult {
     const func_ptr: Value = .{ .val = func_ptr_bits };
-    const func_union = t.heap.allocFunc(type_id, func_ptr) catch {
+    const func_union = t.heap.allocFunc(type_id, func_ptr) catch |err| {
         return .{
             .val = undefined,
-            .code = vmc.RES_UNKNOWN,
+            .code = allocFailed(t, err),
         };
     };
     return .{
@@ -929,10 +956,10 @@ fn zAllocFuncUnion(t: *cy.Thread, type_id: cy.TypeId, func_ptr_bits: u64) callco
 }
 
 fn zAllocClosure(t: *cy.Thread, fp: [*]cy.Value, func_pc: [*]cy.Inst, union_t: cy.TypeId, captures: [*]cy.Inst, ncaptures: u16, pinned_closure: bool) callconv(.c) vmc.ValueResult {
-    const func_union = t.heap.allocClosure(fp, func_pc, union_t, captures, ncaptures, pinned_closure) catch {
+    const func_union = t.heap.allocClosure(fp, func_pc, union_t, captures, ncaptures, pinned_closure) catch |err| {
         return .{
             .val = undefined,
-            .code = vmc.RES_UNKNOWN,
+            .code = allocFailed(t, err),
         };
     };
     return .{
@@ -942,8 +969,8 @@ fn zAllocClosure(t: *cy.Thread, fp: [*]cy.Value, func_pc: [*]cy.Inst, union_t: c
 }
 
 fn z_ret_generator(t: *cy.Thread, type_id: cy.TypeId, ret_size: u16, fp: [*]Value, reg_end: usize, resume_pc: ?*cy.Inst, deinit_pc: ?*cy.Inst) callconv(.c) vmc.ResultCode {
-    cy.thread.ret_generator(&t.heap, type_id, ret_size, fp[0..reg_end], resume_pc, deinit_pc) catch {
-        return vmc.RES_UNKNOWN;
+    cy.thread.ret_generator(&t.heap, type_id, ret_size, fp[0..reg_end], resume_pc, deinit_pc) catch |err| {
+        return allocFailed(t, err);
     };
     return vmc.RES_SUCCESS;
 }
@@ -1061,10 +1088,10 @@ fn zCallUnion(t: *cy.Thread, pc: [*]cy.Inst, framePtr: [*]Value, base: u16) call
 }
 
 fn zAllocPoolObject(t: *cy.Thread, type_id: cy.TypeId) callconv(.c) vmc.HeapObjectResult {
-    const obj = t.heap.allocPoolObject(type_id) catch {
+    const obj = t.heap.allocPoolObject(type_id) catch |err| {
         return .{
             .obj = undefined,
-            .code = vmc.RES_UNKNOWN,
+            .code = allocFailed(t, err),
         };
     };
     if (cy.Trace) {
@@ -1082,10 +1109,10 @@ fn zAllocPoolObject(t: *cy.Thread, type_id: cy.TypeId) callconv(.c) vmc.HeapObje
 }
 
 fn zAllocBigObject(t: *cy.Thread, type_id: cy.TypeId, size: usize) callconv(.c) vmc.HeapObjectResult {
-    const obj = t.heap.allocBigObject(type_id, size) catch {
+    const obj = t.heap.allocBigObject(type_id, size) catch |err| {
         return .{
             .obj = undefined,
-            .code = vmc.RES_UNKNOWN,
+            .code = allocFailed(t, err),
         };
     };
     if (cy.Trace) {

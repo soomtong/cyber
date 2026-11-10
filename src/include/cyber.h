@@ -354,6 +354,9 @@ CLVM* cl_vm_initx(CLAllocator allocator);
 // Deinitializes the VM and frees all memory associated with it. Any operation on `vm` afterwards is undefined.
 void cl_vm_deinit(CLVM* vm);
 
+// The allocator the VM allocates with. It counts every byte for `cl_vm_memory_used` on top of the allocator
+// given to `cl_vm_initx`, so memory taken from it must be returned to it and not to the host's allocator.
+// It is freed by `cl_vm_deinit`.
 CLAllocator cl_vm_allocator(CLVM* vm);
 CLThread* cl_vm_main_thread(CLVM* vm);
 
@@ -407,6 +410,21 @@ void cl_vm_set_fuel(CLVM* vm, int64_t fuel);
 // The default is 128 MiB. A call that needs more stack panics with `Stack overflow.` and the eval returns
 // `CL_ERROR_PANIC`; the VM can be used again. Zero or less removes the limit.
 void cl_vm_set_stack_limit(CLVM* vm, int64_t bytes);
+
+// Limits the memory of the VM to `bytes`. Zero or less removes the limit, which is the default.
+// The limit covers everything the VM holds through its allocator (`cl_vm_memory_used`): the compiler and the
+// loaded modules, about 2 MiB for a VM that has run a first eval, as well as the heap and the stacks of its
+// threads. A host that wants to give a script N bytes sets `cl_vm_memory_used(vm) + N`.
+// The limit is enforced where a script makes the heap or a stack grow: a new object, string or buffer that
+// does not fit panics with `OutOfMemory` and the eval returns `CL_ERROR_PANIC`. The panic frees the heap
+// and returns its pages and the grown stack, so the VM can be used again under the same limit.
+// Memory the compiler or a host function allocates on its own is counted but not refused. It is seen by the
+// next growth of the heap. A limit below what the VM already holds therefore still compiles a script and
+// runs it until its first allocation.
+void cl_vm_set_memory_limit(CLVM* vm, int64_t bytes);
+
+// Bytes the VM currently holds through its allocator. Does not include the `CLVM` object itself.
+size_t cl_vm_memory_used(CLVM* vm);
 
 // Uses a `uri` to load the source code.
 CLResultCode cl_vm_eval_path(CLVM* vm, CLBytes uri, CLEvalConfig config, CLEvalResult* res);

@@ -394,21 +394,42 @@ pub const Heap = struct {
         return Value.initPtr(new);
     }
 
-    /// Returns the first free HeapObject.
+    /// The memory account of the VM, when this is the heap of a thread. The heap the compiler evaluates
+    /// compile-time values on has none: the compiler is not prepared to stop at an arbitrary allocation.
+    fn limitAccount(self: *const Heap) ?*cy.MemAccount {
+        if (self.c.thread == null) return null;
+        return cy.MemAccount.of(self.alloc);
+    }
+
+    /// Fails a growth of `size` bytes that would take the VM over its memory limit (`cl_vm_set_memory_limit`).
+    /// Callers turn the error into `panic: OutOfMemory`.
+    pub fn reserve(self: *const Heap, size: usize) error{OutOfMemory}!void {
+        const acct = self.limitAccount() orelse return;
+        if (!acct.fits(size)) return error.OutOfMemory;
+    }
+
+    /// Adds up to `numPages` pages and returns their free slots as one list. Fewer pages are added when the
+    /// memory limit or the allocator has no room for all of them. Fails when not even one page fits.
     pub fn growHeapPages(self: *Heap, numPages: usize) !HeapObjectList {
-        var idx = self.heapPages.items.len;
-        try self.heapPages.resize(self.alloc, self.heapPages.items.len + numPages);
+        var num_pages = numPages;
+        if (self.limitAccount()) |acct| {
+            if (acct.room()) |room| {
+                num_pages = @min(num_pages, room / @sizeOf(HeapPage));
+                if (num_pages == 0) return error.OutOfMemory;
+            }
+        }
+        try self.heapPages.ensureUnusedCapacity(self.alloc, num_pages);
 
         // Allocate first page.
         var page = try self.alloc.create(HeapPage);
-        self.heapPages.items[idx] = page;
+        self.heapPages.appendAssumeCapacity(page);
 
         const first = initHeapPage(page);
         var last = first;
-        idx += 1;
-        while (idx < self.heapPages.items.len) : (idx += 1) {
-            page = try self.alloc.create(HeapPage);
-            self.heapPages.items[idx] = page;
+        var i: usize = 1;
+        while (i < num_pages) : (i += 1) {
+            page = self.alloc.create(HeapPage) catch break;
+            self.heapPages.appendAssumeCapacity(page);
             const next = initHeapPage(page);
             last.tail.free_span.next = next.head;
             last = next;
@@ -417,6 +438,22 @@ pub const Heap = struct {
             .head = first.head,
             .tail = last.tail,
         };
+    }
+
+    /// Returns every page but the first to the allocator. Every pool slot must be free, which holds after
+    /// `thread.freeHeapPages`. A heap that grew until a panic stopped it (the memory limit in particular) would
+    /// otherwise keep its pages, and their bytes would count against the limit of every later eval.
+    pub fn releaseFreePages(self: *Heap) void {
+        const pages = self.heapPages.items;
+        for (pages[1..]) |page| {
+            self.alloc.destroy(page);
+        }
+        self.heapPages.shrinkAndFree(self.alloc, 1);
+        const list = initHeapPage(self.heapPages.items[0]);
+        self.heapFreeHead = list.head;
+        if (cy.Trace) {
+            self.heapFreeTail = list.tail;
+        }
     }
 
     pub const init_str = Root.init_str;
@@ -969,14 +1006,20 @@ const HeapObjectList = struct {
 pub const BigObjectPtrType = cy.NullId - 1;
 
 pub fn allocBigObject(self: *Heap, type_id: cy.TypeId, size: usize) !*HeapObject {
-    // Allocate pointer object to keep track of the big object.
-    const ptr_obj = try allocBigObjectPtr(self);
-
     // Meta type field, rc field, and a pointer to the pointer object.
     const HeaderSize = 8 + 8;
 
+    try self.reserve(size + HeaderSize);
+
+    // Allocate pointer object to keep track of the big object.
+    const ptr_obj = try allocBigObjectPtr(self);
+
     // Align with HeapObject so it can be casted.
-    const slice = try self.alloc.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(@alignOf(HeapObject)), size + HeaderSize);
+    const slice = self.alloc.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(@alignOf(HeapObject)), size + HeaderSize) catch |err| {
+        // The slot has no object to point at. Left as is, the sweep after a panic would follow its pointer.
+        self.freePoolObject(ptr_obj);
+        return err;
+    };
     const obj: *HeapObject = @ptrFromInt(@intFromPtr(slice.ptr) + HeaderSize);
     const header: *BigObjectHeader = @ptrCast(slice.ptr);
     header.* = .{
@@ -1203,7 +1246,9 @@ pub fn newStringBufferUndef(self: *Heap, nbytes: usize) !*cy.HeapObject {
 
 /// Allocates a raw byte buffer. Does not have reference counting unlike `RawBuffer`.
 pub fn new_byte_buffer(self: *Heap, size: usize) ![*]align(8) u8 {
+    try self.reserve(size);
     const slice = try self.alloc.alignedAlloc(u8, .@"8", size);
+    errdefer self.alloc.free(slice);
     // @as(*u64, @ptrCast(slice.ptr)).* = size;
     // self.num_ex_buffers += 1;
     // return slice.ptr + 8;
@@ -1294,6 +1339,7 @@ pub fn init_empty_str(self: *Heap) !Str {
 
 pub fn init_eval_str_undef(self: *Heap, len: usize, ascii: bool) !*EvalStr {
     const buf = try self.alloc.alloc(u8, len);
+    errdefer self.alloc.free(buf);
     const obj = try allocPoolObject(self, bt.EvalStr);
     obj.eval_str = .{
         .ptr = @intFromPtr(buf.ptr),

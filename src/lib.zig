@@ -250,6 +250,14 @@ export fn cl_vm_set_fuel(vm: *cy.VM, fuel: i64) void {
     vm.main_thread.c.fuel_limit = fuel;
 }
 
+export fn cl_vm_set_memory_limit(vm: *cy.VM, bytes: i64) void {
+    vm.memAccount().limit.store(if (bytes <= 0) 0 else @intCast(@min(bytes, std.math.maxInt(usize))), .monotonic);
+}
+
+export fn cl_vm_memory_used(vm: *cy.VM) usize {
+    return vm.memAccount().used.load(.monotonic);
+}
+
 export fn cl_vm_set_stack_limit(vm: *cy.VM, bytes: i64) void {
     if (bytes <= 0) {
         vm.main_thread.c.stack_limit = std.math.maxInt(usize);
@@ -1275,6 +1283,218 @@ test "cl_vm_set_stack_limit turns runaway recursion into a panic." {
         \\  return depth(n - 1) + 1
         \\use test
         \\test.eq(200000, depth(200000))
+    , &res));
+}
+
+/// Host allocator of the memory limit tests: records the most bytes the VM held at once.
+const PeakAlloc = struct {
+    child: std.mem.Allocator,
+    held: std.atomic.Value(usize) = .init(0),
+    peak: std.atomic.Value(usize) = .init(0),
+
+    fn allocator(self: *PeakAlloc) std.mem.Allocator {
+        return .{ .ptr = self, .vtable = &.{ .alloc = alloc, .resize = resize, .remap = remap, .free = free } };
+    }
+
+    fn grew(self: *PeakAlloc, old_len: usize, new_len: usize) void {
+        if (new_len >= old_len) {
+            const now = self.held.fetchAdd(new_len - old_len, .monotonic) + (new_len - old_len);
+            _ = self.peak.fetchMax(now, .monotonic);
+        } else {
+            _ = self.held.fetchSub(old_len - new_len, .monotonic);
+        }
+    }
+
+    fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+        const self: *PeakAlloc = @ptrCast(@alignCast(ctx));
+        const ptr = self.child.rawAlloc(len, alignment, ret_addr) orelse return null;
+        self.grew(0, len);
+        return ptr;
+    }
+
+    fn resize(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+        const self: *PeakAlloc = @ptrCast(@alignCast(ctx));
+        if (!self.child.rawResize(memory, alignment, new_len, ret_addr)) return false;
+        self.grew(memory.len, new_len);
+        return true;
+    }
+
+    fn remap(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        const self: *PeakAlloc = @ptrCast(@alignCast(ctx));
+        const ptr = self.child.rawRemap(memory, alignment, new_len, ret_addr) orelse return null;
+        self.grew(memory.len, new_len);
+        return ptr;
+    }
+
+    fn free(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+        const self: *PeakAlloc = @ptrCast(@alignCast(ctx));
+        self.child.rawFree(memory, alignment, ret_addr);
+        self.grew(memory.len, 0);
+    }
+};
+
+test "cl_vm_set_memory_limit turns runaway allocation into a panic." {
+    // F-41. Leak-checking allocator below the VM: the panic frees what the script allocated.
+    var host = PeakAlloc{ .child = zt.alloc };
+    const vm = C.vm_initx(host.allocator());
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var res: C.EvalResult = undefined;
+    // The first eval loads `core`. The limit is set on top of what the VM holds after it.
+    try zt.eq(C.Success, C.vm_eval(vm, "a := 1", &res));
+    // The count is the host allocator's, less the `VM` object and the counter itself.
+    try zt.expect(C.vm_memory_used(vm) > 1024 * 1024);
+    try zt.expect(C.vm_memory_used(vm) < host.held.load(.monotonic));
+    try zt.expect(host.held.load(.monotonic) - C.vm_memory_used(vm) < 64 * 1024);
+
+    const room = 4 * 1024 * 1024;
+    const srcs = [_][]const u8{
+        // Array buffer.
+        \\a := Array[int]{}
+        \\for 0..100000000 |i|:
+        \\  a << i
+        ,
+        // Map buffers.
+        \\m := Map[int, int]{}
+        \\for 0..100000000 |i|:
+        \\  m[i] = i
+        ,
+        // One string that doubles, and many strings that stay.
+        \\s := 'abcdefgh'
+        \\for 0..100 |i|:
+        \\  s += s
+        ,
+        \\a := Array[str]{}
+        \\for 0..100000000 |i|:
+        \\  a << str(i)
+        ,
+        // Pool objects: the heap pages.
+        \\type Node:
+        \\  value int
+        \\  next ?^Node
+        \\head := ?^Node(none)
+        \\for 0..100000000 |i|:
+        \\  head = ^Node{value=i, next=head}
+        ,
+        // Objects larger than a pool slot.
+        \\type Big:
+        \\  a int
+        \\  b int
+        \\  c int
+        \\  d int
+        \\  e int
+        \\  next ?^Big
+        \\head := ?^Big(none)
+        \\for 0..100000000 |i|:
+        \\  head = ^Big{a=i, b=i, c=i, d=i, e=i, next=head}
+        ,
+        // The stack.
+        \\fn f(n int) -> int:
+        \\  return f(n + 1) + 1
+        \\_ = f(0)
+        ,
+    };
+    for (srcs) |src| {
+        const before = C.vm_memory_used(vm);
+        const limit = before + room;
+        C.vm_set_memory_limit(vm, @intCast(limit));
+        host.peak.store(0, .monotonic);
+        try zt.eq(C.ErrorPanic, C.vm_eval(vm, src, &res));
+        {
+            const report = C.vm_error_summary(vm);
+            defer C.vm_freeb(vm, report);
+            try zt.eq(true, std.mem.startsWith(u8, report, "panic: OutOfMemory\n"));
+        }
+        if (!cy.Trace) {
+            // The host never held much more than the limit. The slack is what a panic records (the frames of the
+            // runaway recursion) and what the compiler allocated for this eval.
+            try zt.expect(host.peak.load(.monotonic) < limit + room / 2);
+            // The script got most of its room before it was stopped.
+            try zt.expect(host.peak.load(.monotonic) > before + room / 4);
+            // The panic gave back the heap pages and the stack.
+            try zt.expect(C.vm_memory_used(vm) < before + 256 * 1024);
+        }
+        // A Trace build keeps a record of every object that was allocated, and the records count as well.
+        if (cy.Trace) C.vm_set_memory_limit(vm, @intCast(C.vm_memory_used(vm) + room));
+        // The VM is usable with the limit still in place.
+        try zt.eq(C.Success, C.vm_eval(vm,
+            \\use test
+            \\a := Array[str]{}
+            \\for 0..1000 |i|:
+            \\  a << str(i)
+            \\test.eq(1000, a.len())
+        , &res));
+    }
+
+    // A limit below what the VM already holds: the script can not allocate, and the compiler is not refused.
+    C.vm_set_memory_limit(vm, 1);
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm,
+        \\a := Array[int]{}
+        \\for 0..100000 |i|:
+        \\  a << i
+    , &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try zt.eq(true, std.mem.startsWith(u8, report, "panic: OutOfMemory\n"));
+    }
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use test
+        \\fn add(a int, b int) -> int:
+        \\  return a + b
+        \\test.eq(3, add(1, 2))
+    , &res));
+
+    // Zero or less removes the limit.
+    for ([_]i64{ 0, -1 }) |no_limit| {
+        C.vm_set_memory_limit(vm, 1);
+        C.vm_set_memory_limit(vm, no_limit);
+        try zt.eq(C.Success, C.vm_eval(vm,
+            \\use test
+            \\a := Array[int]{}
+            \\for 0..1000000 |i|:
+            \\  a << i
+            \\test.eq(1000000, a.len())
+        , &res));
+    }
+}
+
+test "cl_vm_set_memory_limit covers spawned threads." {
+    if (is_wasm) return;
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_eval(vm, "a := 1", &res));
+    const src =
+        \\fn grow(n int) -> int:
+        \\  a := Array[int]{}
+        \\  for 0..n |i|:
+        \\    a << i
+        \\  return a.len()
+        \\use test
+        \\test.eq(1000, spawn(grow, {1000}).await())
+        \\_ = spawn(grow, {100000000}).await()
+    ;
+    C.vm_set_memory_limit(vm, @intCast(C.vm_memory_used(vm) + 4 * 1024 * 1024));
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm, src, &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try zt.eq(true, std.mem.startsWith(u8, report, "panic: Spawned thread panicked: OutOfMemory\n"));
+    }
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use test
+        \\fn grow(n int) -> int:
+        \\  a := Array[int]{}
+        \\  for 0..n |i|:
+        \\    a << i
+        \\  return a.len()
+        \\test.eq(1000, spawn(grow, {1000}).await())
     , &res));
 }
 

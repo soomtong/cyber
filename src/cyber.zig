@@ -63,6 +63,7 @@ pub const vm = @import("vm.zig");
 pub const VM = vm.VM;
 
 pub const heap = @import("heap.zig");
+pub const MemAccount = @import("mem_account.zig").MemAccount;
 pub const Heap = heap.Heap;
 pub const HeapObject = heap.HeapObject;
 pub const MapValue = heap.MapValue;

@@ -2602,7 +2602,7 @@ fn genFuncUnion(c: *Chunk, expr: *ir.Func, cstr: Cstr, node: *ast.Node) !GenValu
     const dst = try bc.selectReg(c, expr.base.type, cstr, node);
     const childv = try genExpr(c, expr.expr, Cstr.localOrTemp());
 
-    try c.pushCode(.fn_union, &.{ dst.reg, childv.reg, @intCast(expr.base.type.id()) }, node);
+    try c.pushFCode(.fn_union, &.{ dst.reg, childv.reg, @intCast(expr.base.type.id()) }, node);
     try pop_temp_value(c, childv, node);
     return dst;
 }
@@ -3205,7 +3205,8 @@ fn gen_lambda(c: *Chunk, expr: *ir.Lambda, cstr: Cstr, node: *ast.Node) !GenValu
         const captures = expr.captures[0..expr.numCaptures];
         const start = c.buf.ops.items.len;
         const len_data: u16 = @as(u16, @intCast(captures.len)) | (@as(u16, @intFromBool(expr.pinned_closure)) << 15);
-        try c.pushCodeExt(.closure, &.{
+        // Allocates, so it can panic with `OutOfMemory`: the trace needs its debug sym.
+        try c.pushFCodeExt(.closure, &.{
             dst.reg, @intCast(expr.base.type.id()), 0, 0, 0, len_data, 
         }, captures.len, node);
         try c.relocations.append(c.alloc, .{.kind = .func, .pc = start + 3, .data = .{.func = func}});
@@ -3591,7 +3592,8 @@ fn getIntOpCode(op: cy.BinaryExprOp) cy.OpCode {
 }
 
 fn push_new(c: *cy.Chunk, dst: Reg, type_: *cy.Type, val_size: u16, node: *ast.Node) !void {
-    try c.pushCode(.new, &.{ dst, @intCast(type_.id()), val_size }, node);
+    // Failable: the allocation panics with `OutOfMemory` when the heap can not grow.
+    try c.pushFCode(.new, &.{ dst, @intCast(type_.id()), val_size }, node);
 }
 
 fn push_struct_init_to(c: *cy.Chunk, dst_ptr: Reg, fields: []const cy.types.Field, args: []const Reg, node: *ast.Node) !void {
@@ -3601,7 +3603,7 @@ fn push_struct_init_to(c: *cy.Chunk, dst_ptr: Reg, fields: []const cy.types.Fiel
 }
 
 fn push_new_init(c: *cy.Chunk, dst: Reg, type_: *cy.Type, val_size: u16, fields: []const cy.types.Field, args: []const Reg, node: *ast.Node) !void {
-    try c.pushCode(.new, &.{ dst, @intCast(type_.id()), val_size }, node);
+    try c.pushFCode(.new, &.{ dst, @intCast(type_.id()), val_size }, node);
     for (fields, 0..) |field, i| {
         try push_store(c, dst, @intCast(field.offset), args[i], field.type, node);
     }

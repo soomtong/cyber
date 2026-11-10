@@ -649,8 +649,21 @@ pub const Chunk = struct {
     }
 
     pub fn pushCodeExt(c: *Chunk, code: cy.OpCode, args: []const u16, operands: usize, node: *ast.Node) !void {
+        return c.pushCodeExt2(code, false, args, operands, node);
+    }
+
+    /// `pushCodeExt` for an instruction that can fail.
+    pub fn pushFCodeExt(c: *Chunk, code: cy.OpCode, args: []const u16, operands: usize, node: *ast.Node) !void {
+        return c.pushCodeExt2(code, true, args, operands, node);
+    }
+
+    fn pushCodeExt2(c: *Chunk, code: cy.OpCode, failable: bool, args: []const u16, operands: usize, node: *ast.Node) !void {
         log.tracev("pushCode: {s} {}", .{@tagName(code), c.buf.ops.items.len});
-        try c.pushOptionalDebugSym(node);
+        if (failable) {
+            try c.pushFailableDebugSym(node);
+        } else {
+            try c.pushOptionalDebugSym(node);
+        }
         try c.buf.pushOpSlice(code, args);
         _ = try c.buf.reserveData(operands);
         if (cy.Trace) {

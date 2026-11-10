@@ -35,6 +35,9 @@ pub fn ret_generator(heap: *cy.Heap, type_id: cy.TypeId, ret_size: u16, frame: [
     frame[0] = Value.initPtr(obj);
 }
 
+/// Length of a new stack in values (4 KiB).
+const InitStackLen = 511;
+
 /// Panic. Unwinds to record the stack trace. Then releases all memory tied to the thread.
 pub fn panic(t: *Thread, err: cy.Value) !void {
     _ = err;
@@ -65,8 +68,13 @@ pub fn panic(t: *Thread, err: cy.Value) !void {
     const frames = try cy.debug.allocStackTraceCapped(t.c.vm, t.c.stack(), t.compact_trace.items);
     t.stack_trace.deinit(t.alloc);
     t.stack_trace.frames = frames;
+    // One entry per unwound frame. Deep recursion leaves a list that is not needed again.
+    t.compact_trace.clearAndFree(t.alloc);
 
     _ = try freeHeapPages(t);
+    // Nothing is left on the heap. Give back the pages it grew to, so that a heap that ran into the memory
+    // limit starts the next eval empty.
+    t.heap.releaseFreePages();
 }
 
 pub fn patch_frame_ptrs(t: *cy.Thread, fp: usize, layout: []bool, new_stack: [*]cy.Value) void {
@@ -264,7 +272,7 @@ pub const Thread = struct {
         self.c.interrupt = &self.c.interrupt_flag;
 
         // 4KB default stack size. 
-        try self.stackEnsureTotalCapacityPrecise(511);
+        try self.stackEnsureTotalCapacityPrecise(InitStackLen);
         self.c.fp = self.c.stack_ptr;
 
         if (cy.Trace) {
@@ -838,6 +846,18 @@ pub const Thread = struct {
         return c.RetInterrupt;
     }
 
+    /// Gives back the stack a thread grew to. For a thread that has unwound to its base and whose frames are
+    /// dead, which is the main thread after an eval that panicked or was stopped: deep recursion would otherwise
+    /// keep counting against the memory limit in every later eval.
+    pub fn resetStack(self: *cy.Thread) void {
+        if (self.c.stack_len <= InitStackLen) return;
+        const new_stack = self.alloc.realloc(self.c.stack(), InitStackLen) catch return;
+        self.c.stack_ptr = new_stack.ptr;
+        self.c.stack_len = new_stack.len;
+        self.c.stack_end = self.c.stack_ptr + new_stack.len;
+        self.c.fp = self.c.stack_ptr;
+    }
+
     pub inline fn stackEnsureTotalCapacity(self: *cy.Thread, newCap: usize) !void {
         if (newCap > self.c.stack_len) {
             try stackGrowTotalCapacity(self, newCap);
@@ -883,7 +903,9 @@ pub const Thread = struct {
     pub fn growStackAuto(self: *Thread, handle_panic: bool) !void {
         @branchHint(.cold);
         if (self.c.stack_len >= self.c.stack_limit) {
-            return self.stack_overflow(handle_panic);
+            var buf: [96]u8 = undefined;
+            const msg = std.fmt.bufPrint(&buf, "Stack overflow. The stack limit is {} bytes.", .{self.c.stack_limit * @sizeOf(Value)}) catch unreachable;
+            return self.stack_panic(handle_panic, msg);
         }
         // Grow by 50% with minimum of 16.
         var growSize = self.c.stack_len / 2;
@@ -894,15 +916,25 @@ pub const Thread = struct {
         if (newCap > self.c.stack_limit) {
             newCap = self.c.stack_limit;
         }
+        if (cy.MemAccount.of(self.alloc)) |acct| {
+            // The stack counts against the memory limit of the VM like the heap does.
+            if (!acct.fits((newCap - self.c.stack_len) * @sizeOf(Value))) {
+                return self.stack_panic(handle_panic, "OutOfMemory");
+            }
+        }
         logger.tracev("grow stack to size={}", .{newCap});
-        try self.growStackPrecise(newCap);
+        self.growStackPrecise(newCap) catch |err| switch (err) {
+            // Nothing was changed. The frame is abandoned like any other that does not fit.
+            error.OutOfMemory => return self.stack_panic(handle_panic, "OutOfMemory"),
+        };
     }
 
-    /// The stack is at `stack_limit` and the current frame still does not fit. Unwinds like a panic.
+    /// The stack is at `stack_limit`, or growing it would pass the memory limit, and the current frame still does
+    /// not fit. Unwinds like a panic.
     /// At `CHK_STK` the callee frame has no debug symbol yet (its first failable instruction has not run), so the
     /// panic is attributed to the call site: `pc` and `fp` are moved to the caller's context. `GEN_NEXT` / `GEN_END`
     /// are failable instructions in the caller and are left alone.
-    fn stack_overflow(self: *Thread, handle_panic: bool) !void {
+    fn stack_panic(self: *Thread, handle_panic: bool, msg: []const u8) !void {
         @branchHint(.cold);
         if (self.c.pc[0].opcode() == .chk_stk) {
             const fp_off = getStackOffset(self.c.stack_ptr, self.c.fp);
@@ -913,8 +945,6 @@ pub const Thread = struct {
                 self.c.fp = prev.fp;
             }
         }
-        var buf: [96]u8 = undefined;
-        const msg = std.fmt.bufPrint(&buf, "Stack overflow. The stack limit is {} bytes.", .{self.c.stack_limit * @sizeOf(Value)}) catch unreachable;
         _ = self.ret_panic(msg);
         if (handle_panic) {
             try handleInterrupt(self);
@@ -922,7 +952,7 @@ pub const Thread = struct {
         return error.Panic;
     }
 
-    fn growStackPrecise(self: *Thread, newCap: usize) !void {
+    fn growStackPrecise(self: *Thread, newCap: usize) error{OutOfMemory}!void {
         // The overflow is reported by a `CHK_STK` (function entry) or by `GEN_NEXT` / `GEN_END`
         // (resuming a generator frame). `CHK_STK` has already moved `fp` down to the ret slots and runs
         // again after the growth, so `fp` is reverted to the frame base. The generator insts leave `fp` alone.
@@ -941,6 +971,10 @@ pub const Thread = struct {
                 self.c.fp += ret_size;
             }
         } else {
+            // The stack moves: the old and the new one are held until the copy is done.
+            if (cy.MemAccount.of(self.alloc)) |acct| {
+                if (!acct.fits(newCap * @sizeOf(Value))) return error.OutOfMemory;
+            }
             const newStack = try self.alloc.alloc(Value, newCap);
 
             // Copy to new stack.

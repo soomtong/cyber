@@ -52,5 +52,10 @@ rvalue를 넘겨도 `@deinit`이 삽입마다 한 번(임시), 성장 때 옛 �
 - `NoCopy` 원소는 여전히 `Array[R]{}` 자체가 컴파일되지 않는다. 템플릿 인스턴스의 다른 메서드(`PtrSpan.init(val T)` 채우기,
   `set(val T)`, `@init(n, val)`, `size_up`, 값을 돌려주는 `@index`)가 원소를 복사하기 때문이다. `append`만 고쳐서는 오류 위치가
   옮겨갈 뿐이다. 허용하려면 복사하는 메서드를 `type.is_copyable(T)`로 조건부 선언하는 수단이 필요하다(core에 `#[cond]`는 쓰이지 않음).
+  2026-11-11: 그 수단은 생겼다. 템플릿 메서드의 `#[cond=type.is_copyable(T)]`가 타입 매개변수를 보고, 빠진 오버로드가 나머지를
+  가리지 않는다(F-91). 인스턴스의 메서드는 이름으로 처음 찾을 때 그 이름의 오버로드만 컴파일되므로, 복사하는 오버로드에 조건을
+  붙이면 `append(val T)`는 `NoCopy` 원소에서도 컴파일된다(실험으로 확인, core에는 아직 붙이지 않음). 그래도 `Array[R]{}`는
+  `@init_sequence(init [&]T)`가 `PtrSpan.init(o Self)`로 원소를 복사해 막힌다. 남은 결정은 언어 쪽이다: 리터럴의 원소를
+  옮겨 받는 초기화, 원소를 값으로 돌려주는 `a[i]`(`@index`) 대신 빌림으로 읽는 방법, `for a |r|`의 복사.
 - `for a |r|`은 원소를 복사해 `r`에 넣는다(순회마다 `@deinit` 2회). 빌림 순회(`for a |&r|`)는 별개 과제.
 - `Slice.append(val)` · `insert`도 같은 `@ptr_init(…, val)` 복사다. `Slice`는 버퍼 공유(`project_slice_append_aliasing.md`)라 따로 본다.

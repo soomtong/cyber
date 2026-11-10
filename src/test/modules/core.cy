@@ -119,4 +119,129 @@ t.eq(dump_str(&Array[str]{}), 'Array[str]{}')
 t.eq(dump_str(&store), 'ArrayStore[int]{\n  7\n}')
 t.eq(dump_str(&pt), 'Point{\n  x: 1\n  y: 2\n}')
 
+-- assert()
+assert(true)
+assert(1 + 1 == 2)
+assert(3, 1 + 2)
+assert('ab', 'a' + 'b')
+
+-- min(), max()
+t.eq(min(1, 2), 1)
+t.eq(min(2, 1), 1)
+t.eq(min(-3, -3), -3)
+t.eq(max(1, 2), 2)
+t.eq(max(2, 1), 2)
+t.eq(min(1.5, -2.5), -2.5)
+t.eq(max(1.5, -2.5), 1.5)
+t.eq(min(byte(3), byte(200)), byte(3))
+t.eq(max(byte(3), byte(200)), byte(200))
+
+-- binary_search()
+fn search(xs &[]int, needle int) -> ?int:
+    res := binary_search(xs.len(), needle, &|n, idx|):
+        if n < xs[idx]:
+            return .lt
+        else n > xs[idx]:
+            return .gt
+        else:
+            return .eq
+    return res
+sorted := []int{1, 3, 5, 7, 9}
+t.eq(search(&sorted, 1).?, 0)
+t.eq(search(&sorted, 5).?, 2)
+t.eq(search(&sorted, 9).?, 4)
+t.eq(search(&sorted, 0), none)
+t.eq(search(&sorted, 4), none)
+t.eq(search(&sorted, 10), none)
+t.eq(search(&[]int{}, 5), none)
+t.eq(search(&[]int{5}, 5).?, 0)
+
+-- binary_search_lower()
+fn search_lower(xs &[]int, needle int) -> int:
+    res := binary_search_lower(xs.len(), needle, &|n, idx|):
+        if n < xs[idx]:
+            return .lt
+        else n > xs[idx]:
+            return .gt
+        else:
+            return .eq
+    return res
+t.eq(search_lower(&sorted, 0), 0)
+t.eq(search_lower(&sorted, 1), 0)
+t.eq(search_lower(&sorted, 4), 2)
+t.eq(search_lower(&sorted, 5), 2)
+t.eq(search_lower(&sorted, 9), 4)
+t.eq(search_lower(&sorted, 10), 5)
+t.eq(search_lower(&[]int{}, 5), 0)
+-- With duplicates, the lowest matching index is returned.
+t.eq(search_lower(&[]int{1, 2, 2, 2, 3}, 2), 1)
+
+-- str.compare()
+t.eq('abc'.compare('abc'), CompareOrder.eq)
+t.eq('abc'.compare('abd'), CompareOrder.lt)
+t.eq('abd'.compare('abc'), CompareOrder.gt)
+t.eq('ab'.compare('abc'), CompareOrder.lt)
+t.eq('abc'.compare('ab'), CompareOrder.gt)
+t.eq(''.compare(''), CompareOrder.eq)
+
+-- Int unsigned comparisons.
+t.eq((-1).ult(1), false)
+t.eq(1.ult(-1), true)
+t.eq(1.ult(1), false)
+t.eq(1.ule(1), true)
+t.eq((-1).ule(1), false)
+t.eq((-1).ugt(1), true)
+t.eq(1.ugt(1), false)
+t.eq(1.uge(1), true)
+t.eq(1.uge(-1), false)
+
+-- Int unsigned arithmetic.
+t.eq((-1).udiv(2), int.max)
+t.eq(7.udiv(2), 3)
+t.eq((-1).umod(16), 15)
+t.eq(7.umod(4), 3)
+t.eq(3.umul(4), 12)
+t.eq((-1).umul(2), -2)
+
+-- Int.unsigned(), the source bits are zero extended or kept as is.
+t.eq(int.unsigned(i8(-1)), 255)
+t.eq(int.unsigned(i32(-1)), 0xFFFFFFFF)
+t.eq(int.unsigned(true), 1)
+t.eq(int.unsigned(false), 0)
+t.eq(i8.unsigned(255), i8(-1))
+t.eq(int(i8(-1)), -1)
+
+-- Int.ufmt()
+t.eq(123.ufmt(), '123')
+t.eq((-1).ufmt(), '18446744073709551615')
+t.eq((-1).ufmt(.hex), '0xffffffffffffffff')
+t.eq(5.ufmt(.bin), '0b101')
+t.eq(8.ufmt(.oct), '0o10')
+
+-- Raw.fmt() defaults to hex.
+t.eq(r32(255).fmt(), '0xff')
+
+-- Raw.zero, Raw.ones
+t.eq(byte.zero, byte(0))
+t.eq(byte.ones, byte(255))
+t.eq(r16.ones, r16(0xFFFF))
+
+-- Buffer
+buf := Buffer[int](4)
+t.eq(buf.len(), 0)
+t.eq(buf.cap(), 4)
+buf << 1
+buf << 2
+buf << 3
+t.eq(buf.len(), 3)
+t.eq(buf[0], 1)
+t.eq(buf.last(), 3)
+sum := 0
+for buf |x|:
+    sum += x
+t.eq(sum, 6)
+t.eq(buf[1..].len(), 2)
+buf.size_down(1)
+t.eq(buf.len(), 1)
+
 --cytest: pass

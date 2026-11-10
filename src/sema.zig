@@ -271,6 +271,9 @@ pub const Proc = struct {
 
     global_init: bool,
 
+    /// The global whose initializer is being analyzed. Its calls are recorded for `global_init.check`.
+    global_init_var: ?*cy.sym.UserVar = null,
+
     /// Innermost enclosing `try` block of this proc. `!` inside it jumps to the `else` block
     /// instead of returning or panicking. A lambda starts a new proc, so it does not inherit it.
     try_ctx: ?TryCtx = null,
@@ -2771,6 +2774,7 @@ pub fn declareUseImport(c: *cy.Chunk, node: *ast.ImportStmt) !void {
     const uri = try cy.compiler.resolveModuleUriFrom(c, &buf, specPath, node.spec);
 
     const import_c = try cy.compiler.ensureModule(c.compiler, uri);
+    try c.imports.append(c.alloc, import_c);
     if (import_c.importer == null) {
         import_c.importer = @ptrCast(node);
     }
@@ -3497,6 +3501,8 @@ pub fn semaUserVarInit(c: *cy.Chunk, sym: *cy.sym.UserVar, ref_node: ?*ast.Node)
 
     c.cur_sema_proc.global_init = true;
     defer c.cur_sema_proc.global_init = false;
+    c.cur_sema_proc.global_init_var = sym;
+    defer c.cur_sema_proc.global_init_var = null;
 
     // Wrap in block to keep the same local state when loading each static variable.
     _ = try sema.pushBlock(c, @ptrCast(node));
@@ -4250,6 +4256,7 @@ pub fn sema_func_sym(c: *cy.Chunk, func: *cy.Func, prefer_ct_sym: bool, opt_targ
     if (prefer_ct_sym) {
         return ExprResult.initCustom(undefined, .func, ptr_t, .{ .func = func });
     }
+    func.info.escaped = true;
     var loc = try c.ir.newExpr(.func_ptr, ptr_t, node, .{ .func = func });
     var res = ExprResult.initCustom(loc, .func, ptr_t, .{ .func = func });
     if (opt_target) |target_t| {
@@ -4299,6 +4306,7 @@ pub fn symbol2(c: *cy.Chunk, sym: *Sym, prefer_ct_sym: bool, opt_target: ?*cy.Ty
                 return c.reportError("Cannot reference globals in a global initializer.", node);
             }
             const user_var = sym.cast(.userVar);
+            try cy.global_init.recordGlobal(c, user_var);
             const src_chunk = c.compiler.chunks.items[user_var.head.declNode().src()];
             try resolveUserVar(src_chunk, user_var, );
             const loc = try c.ir.newExpr(.global, user_var.type, node, .{ .sym = sym });
@@ -6450,6 +6458,7 @@ pub fn semaCallFuncSymRec2(c: *cy.Chunk, sym: *cy.sym.FuncSym, args: []const Arg
         // Trait function will always match first argument.
         const rec_arg = args[0];
         const res = try sema_func.matchFuncSym(c, sym, args, &.{}, false, node);
+        try cy.global_init.recordIndirectCall(c);
         const loc = try c.ir.newExpr(.call_trait, res.func.sig.ret, node, .{
             .trait = rec_arg.data.receiver.ir,
             .vtable_idx = @intCast(res.func.data.trait.vtable_idx),
@@ -6468,6 +6477,7 @@ pub fn semaCallFuncSymRec(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, re
     if (sym.first.type == .trait) {
         // Trait function will always match first argument.
         const res = try sema_func.matchFuncSym(c, sym, &.{rec_arg}, args, false, node);
+        try cy.global_init.recordIndirectCall(c);
         const loc = try c.ir.newExpr(.call_trait, res.func.sig.ret, node, .{
             .trait = rec_res.ir,
             .vtable_idx = @intCast(res.func.data.trait.vtable_idx),
@@ -6490,6 +6500,7 @@ pub fn markHotCall(c: *cy.Chunk, func: *cy.Func) void {
 
 pub fn sema_call_ir(c: *cy.Chunk, func: *cy.Func, args: []const *ir.Expr, node: *ast.Node) !ExprResult {
     markHotCall(c, func);
+    try cy.global_init.recordCall(c, func);
     const expr = try c.ir.newExpr(.call, func.sig.ret, node, .{ 
         .func = func, .numArgs = @intCast(args.len), .args = args.ptr,
     });
@@ -6520,6 +6531,7 @@ pub fn semaCallPtr(c: *cy.Chunk, func: ExprResult, sig: *FuncSig, args: []*ast.N
     if (sig.extern_) {
         func.type.cast(.func_ptr).extern_is_called = true;
     }
+    try cy.global_init.recordIndirectCall(c);
     const loc = try c.ir.newExpr(.call_ptr, sig.ret, node, .{
         .callee = func.ir,
         .nargs = @intCast(ir_args.len),
@@ -6536,6 +6548,7 @@ pub fn semaCallUnion(c: *cy.Chunk, func: ExprResult, func_n: *ast.Node, sig: *Fu
     _ = (try sema_func.matchFuncSig(c, sig, &.{}, args, ir_args, false, false, &match_err)) orelse {
         return sema_func.reportCallFuncMismatch(c, &.{}, args, "", sig, match_err, node);
     };
+    try cy.global_init.recordIndirectCall(c);
     const loc = try c.ir.newExpr(.call_union, sig.ret, node, .{
         .callee = managed.ir,
         .nargs = @intCast(ir_args.len),
@@ -7858,6 +7871,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                     const template = left.data.sym.cast(.func_template);
                     const func_res = try cy.template.expandTemplateFuncForArgs(c, template, index_expr.args.slice(), node);
                     const typeId = try cy.sema.getFuncPtrType(c, func_res.sig);
+                    func_res.info.escaped = true;
                     const loc = try c.ir.newExpr(.func_ptr, typeId, node, .{ .func = func_res });
                     return ExprResult.initCustom(loc, .func, typeId, .{ .func = func_res });
                 } else {
@@ -9568,6 +9582,7 @@ fn popLambdaProc(c: *cy.Chunk) !*ir.Expr {
     };
 
     proc.func.?.info.emitted = true;
+    proc.func.?.info.escaped = true;
     proc.func.?.data = .{ .userLambda = .{
         .func_block_ir = proc.ir,
         .is_closure = captures.len > 0,

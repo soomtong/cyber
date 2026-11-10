@@ -48,6 +48,9 @@ pub const Chunk = struct {
 
     importer: ?*ast.Node,
 
+    /// The chunks that this chunk imports with `use`. Their globals are initialized first (`global_init.zig`).
+    imports: std.ArrayListUnmanaged(*cy.Chunk),
+
     /// Read-only view of the AST.
     ast: cy.ast.AstView,
 
@@ -248,6 +251,7 @@ pub const Chunk = struct {
             .pending_load_src = src == null,
             .loaded = false,
             .importer = null,
+            .imports = .empty,
             .has_extern_func = false,
             .bc_local_map = .empty,
             .relocations = .empty,
@@ -298,6 +302,7 @@ pub const Chunk = struct {
         self.resolve_stack.deinit(self.alloc);
 
         self.fallback_modules.deinit(self.alloc);
+        self.imports.deinit(self.alloc);
 
         for (self.funcs.items) |func| {
             func.destroy(self.alloc);

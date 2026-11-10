@@ -14,6 +14,7 @@ pub const ParseResultView = parser.ResultView;
 
 pub const sema = @import("sema.zig");
 pub const sema_func = @import("sema_func.zig");
+pub const global_init = @import("global_init.zig");
 pub const sema_type = @import("sema_type.zig");
 pub const ct_inline = @import("ct_inline.zig");
 pub const Sema = sema.Sema;

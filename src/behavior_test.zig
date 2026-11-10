@@ -432,8 +432,14 @@ fn test_vars(run: *Runner) void {
     run.case("vars/set_undeclared_error.cy");
     run.case("vars/global_assign.cy");
     run.case("vars/global_init.cy");
-    // Disabled: the check does not exist. A function called from a global initializer can read a global that is not initialized yet (F-88).
-    // run.case("vars/global_init_call_error.cy");
+    if (!is_wasm) {
+        run.case("vars/global_init_call.cy");
+    }
+    run.case("vars/global_init_call_error.cy");
+    run.case("vars/global_init_call_self_error.cy");
+    run.case("vars/global_init_call_lambda_error.cy");
+    run.case("vars/global_init_call_trait_error.cy");
+    run.case("vars/global_init_call_deinit_error.cy");
     run.case("vars/global_init_capture_error.cy");
     run.case("vars/global_init_ref_error.cy");
     run.case("vars/global_init_type_error.cy");

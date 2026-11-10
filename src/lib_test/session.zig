@@ -105,6 +105,26 @@ test "Private symbols of an earlier eval stay visible to the next eval of the sa
     try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use test\nf := Foo{}\ntest.eq(f.m() + f.b + s(), 6)", config, &res));
 }
 
+test "A global initializer can call a function that reads a global of an earlier eval." {
+    // F-88. The globals of an earlier eval are initialized, so the check of global initializers does not count them.
+    // An initializer that reaches a global of its own eval too early is a compile error, and the session goes on.
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var res: C.EvalResult = undefined;
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "global base int = 7\nfn get() -> int:\n  return base", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use test\nglobal next int = get() + 1\ntest.eq(8, next)", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "global a int = peek()\nglobal b int = 1\nfn peek() -> int:\n  return b", config, &res));
+    const summary = C.vm_compile_error_summary(vm);
+    defer C.vm_freeb(vm, summary);
+    try zt.expect(std.mem.indexOf(u8, summary, "The initializer of `a` can reach `peek`") != null);
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use test\ntest.eq(8, next)\ntest.eq(7, get())", config, &res));
+}
+
 test "cl_vm_validate checks against the session without resetting it." {
     // F-05. `cl_vm_validate` used to call `resetVM`: the persisted locals and declarations of a REPL session were
     // gone, and a validate that failed left the half-built first compile for the next eval (F-04's crash).

@@ -552,6 +552,9 @@ pub const Compiler = struct {
             }
         }
 
+        // A global initializer must not reach a global that is not initialized yet (F-88).
+        try cy.global_init.check(self);
+
         if (!config.skip_codegen) {
             log.tracev("Perform codegen.", .{});
 
@@ -770,14 +773,16 @@ fn emit_program_init_func(c: *cy.Chunk, start: *cy.Func) !void {
 
     _ = try sema.pushFuncProc(c, start);
 
+    // A chunk is initialized after the chunks that it imports (`global_init.initOrder`).
+    var order: std.ArrayListUnmanaged(*cy.Chunk) = .empty;
+    defer order.deinit(c.alloc);
+    try cy.global_init.initOrder(c.compiler, &order);
+
     var has_extern_func = false;
-    for (c.compiler.chunks.items, 0..) |chunk, id| {
+    for (order.items) |chunk| {
         // Besides the chunks of this compile, a chunk compiled earlier by `VM.validate` is initialized here
         // if no program has run since (F-05). Its `@init` already exists and has bytecode.
-        const pending = id < c.compiler.chunk_start;
-        if (pending and !chunk_init_pending(chunk)) {
-            continue;
-        }
+        const pending = chunk.id < c.compiler.chunk_start;
         if (chunk.has_extern_func) {
             has_extern_func = true;
         }
@@ -802,12 +807,6 @@ fn emit_program_init_func(c: *cy.Chunk, start: *cy.Func) !void {
 
     try sema.procPrologue(c);
     try sema.popFuncBlock(c);
-}
-
-/// A chunk from an earlier compile whose code was generated but whose `@init` never ran: it was loaded by a
-/// `VM.validate`, or by evals since then that did not run either. `VM.eval` marks chunks after a program ran.
-fn chunk_init_pending(chunk: *cy.Chunk) bool {
-    return chunk.rt_ready and !chunk.rt_inited;
 }
 
 fn reserve_hidden_func(c: *cy.Chunk, name: []const u8) !*cy.Func {
@@ -891,12 +890,17 @@ fn emit_program_deinit_func(c: *cy.Chunk, end_fn: *cy.Func) !void {
     defer sema.popResolveContext(c);
 
     _ = try sema.pushFuncProc(c, end_fn);
-    for (c.compiler.chunks.items, 0..) |chunk, id| {
-        // Same chunks as `emit_program_init_func`.
-        const pending = id < c.compiler.chunk_start;
-        if (pending and !chunk_init_pending(chunk)) {
-            continue;
-        }
+    // Same chunks as `emit_program_init_func`, in the reverse order: a chunk is deinitialized before the
+    // chunks that it imports.
+    var order: std.ArrayListUnmanaged(*cy.Chunk) = .empty;
+    defer order.deinit(c.alloc);
+    try cy.global_init.initOrder(c.compiler, &order);
+
+    var i = order.items.len;
+    while (i > 0) {
+        i -= 1;
+        const chunk = order.items[i];
+        const pending = chunk.id < c.compiler.chunk_start;
         if (!chunk.has_static_init) {
             continue;
         }

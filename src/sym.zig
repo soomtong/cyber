@@ -507,13 +507,15 @@ pub const UserVar = struct {
     /// Used to detect circular reference while resolving `ir`.
     resolving_init: bool,
 
+    /// The functions that the initializer calls (`global_init.zig`).
+    init_deps: cy.global_init.Deps = .{},
+
     pub fn isResolved(self: *UserVar) bool {
         return self.resolved;
     }
 
     pub fn deinit(self: *UserVar, alloc: std.mem.Allocator) void {
-        _ = self;
-        _ = alloc;
+        self.init_deps.deinit(alloc);
     }
 };
 
@@ -926,7 +928,10 @@ const FuncInfo = packed struct {
     /// Some call site is inside a loop. bc_gen then treats the sites in this function's body as hot.
     bc_hot: bool = false,
 
-    padding: u3 = undefined,
+    /// The function is used as a value, so a call through a function value can reach it (`global_init.zig`).
+    escaped: bool = false,
+
+    padding: u2 = undefined,
 };
 
 pub const FuncConfig = struct {
@@ -982,7 +987,14 @@ pub const Func = struct {
     instance: ?*cy.Instance,
     info: FuncInfo,
 
+    /// The globals and functions that the body uses. Null if it uses none (`global_init.zig`).
+    deps: ?*cy.global_init.Deps = null,
+
     pub fn destroy(self: *Func, alloc: std.mem.Allocator) void {
+        if (self.deps) |deps| {
+            deps.deinit(alloc);
+            alloc.destroy(deps);
+        }
         if (self.type == .generic) {
             self.data.generic.deinit(alloc);
             alloc.destroy(self.data.generic);
@@ -1727,10 +1739,10 @@ test "sym internals" {
     // `Func` holds a bare union, which carries a hidden tag only with runtime safety.
     if (cy.is32Bit) {
         try t.eq(16, @sizeOf(Sym));
-        try t.eq(if (std.debug.runtime_safety) 36 else 32, @sizeOf(Func));
+        try t.eq(if (std.debug.runtime_safety) 40 else 36, @sizeOf(Func));
     } else {
         try t.eq(24, @sizeOf(Sym));
-        try t.eq(if (std.debug.runtime_safety) 72 else 64, @sizeOf(Func));
+        try t.eq(if (std.debug.runtime_safety) 80 else 72, @sizeOf(Func));
     }
 
     try t.eq(@offsetOf(Template, "head"), 0);

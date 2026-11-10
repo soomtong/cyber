@@ -227,12 +227,27 @@ global b int = 0
 b = a
 ```
 
-Global variable initializers have a natural order based on when it was encountered by the compiler.
+Global variables are initialized before the main block runs, in a fixed order. The globals of a module are initialized in the order that they are declared.
 The following would invoke `load_a` before `load_b`:
 ```cy
 global a int = load_a()
 global b int = load_b()
 ```
+
+A module is initialized after the modules that it imports with `use`, so a function of an imported module sees the globals of its module initialized. At the end of the program, modules are deinitialized in the reverse order.
+
+A function that an initializer calls can read and write the globals that are initialized before it. Reaching a global that is initialized later, or the global that is being initialized, is a compile error:
+```cy
+global a int = load_a()
+--> error: The initializer of `a` can reach `load_a`, which accesses the global `b`. `b` is initialized after `a`.
+global b int = 123
+
+fn load_a() -> int:
+    return b + 1
+```
+Declare `b` before `a` to fix the error.
+
+The check follows the functions that are called by name, including operators, `@init` and `@deinit`. It does not know the target of a call through a function value or a trait. When an initializer can reach such a call, every function that is used as a value (a lambda, a function assigned to a variable or passed as an argument, a generator) and every method that implements a trait counts as reachable. The check does not look at conditions either, so an access that never runs at initialization is still an error.
 
 Circular references are not possible because a global initializer cannot reference another global variable:
 ```cy

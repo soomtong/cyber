@@ -597,6 +597,7 @@ pub fn matchFuncSym2(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const 
         },
         else => {
             sema.markHotCall(c, res.func);
+            try cy.global_init.recordCall(c, res.func);
             const expr = try c.ir.newExpr(.call, res.func.sig.ret, node, .{ 
                 .func = res.func,
                 .numArgs = @as(u8, @intCast(res.data.rt.nargs)),

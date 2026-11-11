@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.4-dev 770-d38b8a0</div>
+    <div class="sub-title">v0.4.4-dev 778-c17be32</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1901,6 +1901,10 @@ for arr |it|:
 -- Remove an element at a specific index.
 arr = arr.remove(1)
 </code></pre>
+<p>An index or a length that is out of range panics. This holds for <code>Array</code>, <code>Slice</code>, spans and <code>Buffer</code>:
+<code>remove</code> and <code>insert</code> need a valid index, the start and the end of a slice expression can not be negative,
+and a negative or too large length (<code>[]int(n, 0)</code>, <code>size_up</code>) panics with <code>Invalid allocation length</code>.
+<code>str.repeat</code> panics with <code>InvalidArgument</code> when the result would be longer than 4 GiB.</p>
 <a href="#basic-types">^topic</a>
 <h2 id="maps">Maps. <a href="#maps">#</a></h2>
 <p>A <code>Map</code> type is a dynamic data structure that stores key value pairs in a lookup table governed by hashing functions (key hash and equality functions).
@@ -2037,6 +2041,10 @@ print(v.x)      --> 30
 </code></pre>
 <p>An initializer literal can infer the target struct type:</p>
 <pre><code class="language-cy">var v Vec2 = {x=30, y=40}
+</code></pre>
+<p>Every entry of a struct initializer is a <code>name = value</code> pair. An entry without a field name is a compile error:</p>
+<pre><code class="language-cy">v := Vec2{x=30, 40}
+--> error: Expected key value pair.
 </code></pre>
 <p>Structs by default are copyable (unless a child member is not):</p>
 <pre><code class="language-cy">v := Vec2{x=30, y=40}
@@ -2382,6 +2390,14 @@ s = Shape.line(20)
     else:
         print('Unsupported.')
 </code></pre>
+<p>Only a case of a choice has a payload to capture. A capture clause in a <code>switch</code> on another type is a compile error:</p>
+<pre><code class="language-cy">switch 1:
+    case 1 |a|:
+        pass
+    else:
+        pass
+--> error: Only a case of a choice can capture a payload.
+</code></pre>
 <a href="#custom-types">^topic</a>
 <h3 id="unwrap-choice">Unwrap choice. <a href="#unwrap-choice">#</a></h3>
 <p>A choice can be unwrapped with the <code>.!</code> operator. This will either return the payload or signals a thread panic if the expected case is not active:</p>
@@ -2621,6 +2637,15 @@ for map |entry|:
 for arr |i, val|:
     print('index %{i}, value %{val}')
 </code></pre>
+<p>The each variable receives a copy of the element. <code>&</code> before the name iterates by borrow instead. The variable is a borrow (<code>&T</code>) of the element and nothing is copied:</p>
+<pre><code class="language-cy">arr := Array[str]{'a', 'bc'}
+for arr |&val|:
+    print(val.len())
+
+for arr |i, &val|:
+    print('index %{i}, length %{val.len()}')
+</code></pre>
+<p>Iteration by borrow is required when the element type can not be copied. <code>Array</code> and <code>Slice</code> support it. A type supports it by declaring <code>next_borrow(idx &int) -> scope ?&T</code> next to <code>next</code>. The iterable is borrowed during the loop, so it can not be modified in the loop body.</p>
 <a href="#control-flow">^topic</a>
 <h3 id="break-statement"><code>break</code> statement. <a href="#break-statement">#</a></h3>
 <p>The <code>break</code> statement exits the current parent loop prematurely:</p>
@@ -3073,6 +3098,21 @@ f := Foo{a=123}
 g := f
 --> error: `Foo` is not copyable.
 </code></pre>
+<p>An <code>Array</code> can hold elements that are not copyable. The elements are moved into the array, read by borrow and deinitialized once:</p>
+<pre><code class="language-cy">a := Array[Foo]{Foo{a=1}, Foo{a=2}}   -- A literal moves its elements.
+f := Foo{a=3}
+a << move f                           -- A variable is moved explicitly.
+a[0] = Foo{a=4}                       -- The old element is deinitialized.
+
+print(a[1].a)       --> 2
+r := &a[0]          -- Borrow an element.
+for a |&e|:         -- Iterate by borrow.
+    print(e.a)
+
+x := a[0]
+--> error: Cannot copy `Foo`, type implements `NoCopy`.
+</code></pre>
+<p>The methods that copy an element, such as <code>clone</code>, <code>last</code>, <code>contains</code> and <code>index</code>, do not exist for such an array. This includes an array of arrays: <code>Array[Array[int]]{{1}, {2, 3}}</code>.</p>
 <p>Some types such as <code>Array</code> disallows copying but can still be <a href="#cloning" title="">cloned</a> or <a href="#moving" title="">moved</a>.</p>
 <a href="#memory">^topic</a>
 <h3 id="cloning">Cloning. <a href="#cloning">#</a></h3>
@@ -4015,7 +4055,24 @@ fn count() -> int:
 
 #[extern] global errno Ptr[int]
 </code></pre>
-<table><thead><tr><th>Attribute</th><th>Applies to</th><th>Purpose</th></tr></thead><tbody><tr><td><code>#[generator]</code></td><td>function</td><td>The function is a <a href="#generators" title="">generator</a>.</td></tr><tr><td><code>#[inline]</code></td><td>function</td><td>Calls are inlined in bytecode with a larger size limit.</td></tr><tr><td><code>#[bind]</code></td><td>function, type, global</td><td>The declaration is provided by the host or by a compiler hook. See <a href="#bind-hooks" title=""><code>#[bind]</code> hooks</a>.</td></tr><tr><td><code>#[extern]</code></td><td>function, global</td><td>The declaration is a C symbol. <code>#[extern='name']</code> gives the symbol name. See <a href="#ffi" title="">FFI</a>.</td></tr><tr><td><code>#[unsafe]</code></td><td>function</td><td>The function is exempt from checks on borrow containers. Used by the builtin modules.</td></tr><tr><td><code>#[consteval]</code></td><td>function</td><td>The function is only evaluated at compile-time. Used by the builtin modules.</td></tr><tr><td><code>#[reserve]</code></td><td>function</td><td>Reserves the name for a declaration that the compiler provides. Used by the builtin modules.</td></tr><tr><td><code>#[cond]</code>, <code>#[call]</code></td><td></td><td>Reserved.</td></tr></tbody></table><p>An unknown attribute name is a parse error: <code>Unknown attribute.</code></p>
+<table><thead><tr><th>Attribute</th><th>Applies to</th><th>Purpose</th></tr></thead><tbody><tr><td><code>#[generator]</code></td><td>function</td><td>The function is a <a href="#generators" title="">generator</a>.</td></tr><tr><td><code>#[inline]</code></td><td>function</td><td>Calls are inlined in bytecode with a larger size limit.</td></tr><tr><td><code>#[bind]</code></td><td>function, type, global</td><td>The declaration is provided by the host or by a compiler hook. See <a href="#bind-hooks" title=""><code>#[bind]</code> hooks</a>.</td></tr><tr><td><code>#[extern]</code></td><td>function, global</td><td>The declaration is a C symbol. <code>#[extern='name']</code> gives the symbol name. See <a href="#ffi" title="">FFI</a>.</td></tr><tr><td><code>#[unsafe]</code></td><td>function</td><td>The function is exempt from checks on borrow containers. Used by the builtin modules.</td></tr><tr><td><code>#[consteval]</code></td><td>function</td><td>The function is only evaluated at compile-time. Used by the builtin modules.</td></tr><tr><td><code>#[reserve]</code></td><td>function</td><td>Reserves the name for a declaration that the compiler provides. Used by the builtin modules.</td></tr><tr><td><code>#[cond=expr]</code></td><td>function, global, <code>use</code></td><td>The declaration exists only when the compile-time condition is <code>true</code>.</td></tr><tr><td><code>#[call]</code></td><td></td><td>Reserved.</td></tr></tbody></table><p>An unknown attribute name is a parse error: <code>Unknown attribute.</code></p>
+<p>A declaration that <code>#[cond]</code> skips is not declared. Using its name is a compile error unless another declaration of that name exists:</p>
+<pre><code class="language-cy">#[cond=meta.system() == .windows]
+fn sep() -> str:
+    return '\\'
+
+#[cond=meta.system() != .windows]
+fn sep() -> str:
+    return '/'
+</code></pre>
+<p>The condition of a method of a template type can use the template parameters. The method exists only in the instances that satisfy the condition:</p>
+<pre><code class="language-cy">type Box[T Any] struct:
+    x T
+
+#[cond=type.is_copyable(T)]
+fn (&Box[]) dup() -> T:
+    return self.x
+</code></pre>
 <a href="#metaprogramming">^topic</a>
 <h1 id="modules">Modules. <a href="#modules">#</a></h1>
 <table><tr>

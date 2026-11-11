@@ -93,13 +93,13 @@ contexts:
     - match: '\b(use)\b'
       scope: keyword.module.cyber
 
-    - match: '\b0x[0-9a-fA-F]+\b'
+    - match: '\b0x[0-9a-fA-F]+(_[0-9a-fA-F]+)*\b'
       scope: constant.numeric.cyber
 
-    - match: '\b[0-9]+u\b'
+    - match: '\b[0-9]+(_[0-9]+)*u\b'
       scope: constant.numeric.cyber
 
-    - match: '\b(-)?[0-9]+(.[0-9]+)?\b'
+    - match: '\b(-)?[0-9]+(_[0-9]+)*(\.[0-9]+(_[0-9]+)*)?\b'
       scope: constant.numeric.cyber
 
     - match: '\b(true|false|none|undef)\b'

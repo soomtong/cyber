@@ -505,6 +505,14 @@ a = 0o17      -- Octal.
 a = 0b1010    -- Binary.
 ```
 
+An underscore can separate digits to make a long literal easier to read. It is optional and does not change the value. It must have a digit on both sides:
+```cy
+const PARAM_CAP r32 = 100_000
+mask := 0xff_ff_00_00
+bits := 0b1111_0000
+ratio := 1_000.000_5
+```
+
 A decimal literal must fit in the target integer type. Without a target type that is `int` (64-bit signed), so `9223372036854775808` is a compile error instead of wrapping around. Hexadecimal, octal and binary literals, and decimals with a `u` suffix, are 64-bit patterns:
 ```cy
 a := 0xFFFFFFFFFFFFFFFF      -- -1

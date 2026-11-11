@@ -165,7 +165,7 @@ Try and begin
 
 try:
     risky()!
-else err:
+else |err|:
     print(err)
 
 begin:

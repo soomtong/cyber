@@ -22,6 +22,18 @@ t.eq(0o77, 63)
 -- Binary notation.
 t.eq(0b11, 3)
 
+-- `_` between digits is ignored.
+t.eq(100_000, 100000)
+t.eq(1_2_3, 123)
+t.eq(0xff_ff, 65535)
+t.eq(0o7_7, 63)
+t.eq(0b1111_0000, 240)
+t.eq(1_000u, 1000u)
+const PARAM_CAP r32 = 100_000
+t.eq(PARAM_CAP, r32(100000))
+t.eq(-1_000, -1000)
+t.eq(1_000.fmt(), '1000')
+
 -- Infer UTF-8 code point.
 t.eq(97, 'a')
 t.eq(65, 'A')

@@ -67,9 +67,10 @@ cp queries/*.scm ~/.config/nvim/queries/cyber/
 
 ## Coverage
 
-All `.cy` files in this repository (333 files) were parsed. 311 parse without an
-error node. The other 22 are tests that expect a parse error (`*_error.cy`,
-`src/test/syntax/`) or files that still use the old syntax (`var a = 1`, `func`).
+Every `.cy` file in this repository that the compiler parses (417 files, checked
+with `cyber fmt --check`) parses without an error node. The remaining 28 files are
+tests that expect a parse error (`*_error.cy`, `src/test/syntax/`) or files that
+still use the old syntax (`var a = 1`, `func`). Last checked for Cyber 0.4.6.
 
 Known differences from the compiler parser:
 

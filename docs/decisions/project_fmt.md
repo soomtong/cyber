@@ -60,8 +60,8 @@ upstream에도 없다. upstream의 도구 관련 논의는 fubark/cyber#86(2024-
 
 ## 확인
 
-- 저장소 `.cy` 444개(`src` · `examples` · `docs` · `exts`): 416개 포맷, 28개는 구문 오류(오류 기대 테스트 26개, 옛 문법
-  `src/web.cy` · `src/test/cli_test.cy`). 416개 모두 검증 통과, 두 번 포맷한 결과가 같다. Debug와 ReleaseFast 출력이 같다.
+- 저장소 `.cy` 445개(`src` · `examples` · `docs` · `exts`): 417개 포맷, 28개는 구문 오류(오류 기대 테스트 26개, 옛 문법
+  `src/web.cy` · `src/test/cli_test.cy`). 417개 모두 검증 통과, 두 번 포맷한 결과가 같다. Debug와 ReleaseFast 출력이 같다.
 - `core.cy`(4649줄) `--check`가 ReleaseFast에서 12 ms.
 - lib 테스트 `fmt: …` 13개와 `cl_vm_format()`. `zig build test` 통과.
 - 교차 빌드: `x86_64-windows-gnu` · `aarch64-macos-none` · `wasm32-wasi` CLI, `wasm32-wasi` build-test.

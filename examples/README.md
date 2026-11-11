@@ -6,3 +6,4 @@ Notable examples will be listed here:
 - [asteroids.cy](https://github.com/fubark/ray-cyber/blob/master/examples/asteroids.cys) - The classic asteroids game.
 - [cyber-tack](https://github.com/sts10/cyber-tack) - Tic tac toe with a Cyber tutorial.
 - [snake.cy](https://github.com/fubark/ray-cyber/blob/master/examples/snake.cys) - The classic snake game ported from RayLib's game demo site.
+- [fmt.cy](fmt.cy) - A source formatter for Cyber written in Cyber. A token-based sibling of the built-in `cyber fmt`.

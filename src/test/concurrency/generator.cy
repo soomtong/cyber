@@ -1,16 +1,14 @@
 use test
 
 -- Init generator without starting.
-#[generator]
-fn foo(list ^ArrayStore[int]) -> int:
+generator fn foo(list ^ArrayStore[int]) -> int:
     list << 123
 list := ^ArrayStore[int]{}
 gen := foo(list)
 test.eq(list.len(), 0)
 
 -- Start generator with yield at start.
-#[generator]
-fn foo2(list ^ArrayStore[int]) -> int:
+generator fn foo2(list ^ArrayStore[int]) -> int:
     yield list.len()
     list << 123
 gen = foo2(list)
@@ -18,8 +16,7 @@ test.eq(0, gen.next().?)
 test.eq(list.len(), 0)
 
 -- Generator with managed type.
-#[generator]
-fn foo3(list ^ArrayStore[int]) -> ^int:
+generator fn foo3(list ^ArrayStore[int]) -> ^int:
     yield ^list.len()
     list << 123
 list = ^{}
@@ -27,16 +24,14 @@ gen2 := foo3(list)
 test.eq(0, gen2.next().?.*)
 
 -- Start generator without yield.
-#[generator]
-fn foo4(list ^ArrayStore[int]) -> int:
+generator fn foo4(list ^ArrayStore[int]) -> int:
     list << 123
 list = ^{}
 gen = foo4(list)
 test.eq(?int(none), gen.next())
 
 -- next() returns final value.
-#[generator]
-fn foo5(list ^ArrayStore[int]) -> int:
+generator fn foo5(list ^ArrayStore[int]) -> int:
     list << 123
     return list[0]
 list = ^{}
@@ -56,8 +51,7 @@ test.eq(123, gen.next().?)
 -- test.eq(list.len(), 0)
 
 -- Continue to resume generator.
-#[generator]
-fn foo6(list ^ArrayStore[int]) -> int:
+generator fn foo6(list ^ArrayStore[int]) -> int:
     list << 123
     yield list.len()
     list << 234
@@ -68,8 +62,7 @@ test.eq(1, gen.next().?)
 test.eq(2, gen.next().?)
 
 -- Generator status.
-#[generator]
-fn foo7() -> int:
+generator fn foo7() -> int:
     test.eq(static_gen.status(), .running)
 type Fn7 = fn() -> int
 global static_gen ^Generator[Fn7] = foo7()
@@ -78,8 +71,7 @@ _ = static_gen.next()
 test.eq(static_gen.status(), .done)
 
 -- Resuming after generator is done is a nop.
-#[generator]
-fn foo8() -> int:
+generator fn foo8() -> int:
     yield 123
 gen3 := foo8()
 _ = gen3.next()
@@ -93,8 +85,7 @@ fn sum(n int) -> int:
     if n == 0:
         return 0
     return n + sum(n - 1)
-#[generator]
-fn genSum(n int) -> int:
+generator fn genSum(n int) -> int:
     yield sum(n)
 gen4 := genSum(20)
 test.eq(210, gen4.next().?)
@@ -104,8 +95,7 @@ fn deep(n int) -> int:
     if n == 0:
         return 0
     return 1 + deep(n - 1)
-#[generator]
-fn counter() -> int:
+generator fn counter() -> int:
     i := 10
     yield i
     i += 1
@@ -120,12 +110,10 @@ _ = deep(30)
 test.eq(12, gen5.next().?)
 test.eq(?int(none), gen5.next())
 
-#[generator]
-fn range_gen(n int) -> int:
+generator fn range_gen(n int) -> int:
     for 0..n |i|:
         yield i * 10
-#[generator]
-fn while_gen(n int) -> int:
+generator fn while_gen(n int) -> int:
     i := 0
     while i < n:
         yield i
@@ -153,8 +141,7 @@ test.eq(11, b8)
 test.eq(12, c8)
 
 -- A managed local is yielded as a copy and keeps changing in the generator.
-#[generator]
-fn words(n int) -> str:
+generator fn words(n int) -> str:
     s := 'w'
     for 0..n |i|:
         s = s + '-%{i}'
@@ -184,8 +171,7 @@ test.eq(10, resume_deep(gen10, 5000))
 test.eq(11, resume_deep(gen10, 9000))
 
 -- A wide generator frame resumed at every depth hits the stack end in `next()` itself.
-#[generator]
-fn wide() -> int:
+generator fn wide() -> int:
     var a [200]int = undef
     a[0] = 7
     a[199] = 9
@@ -204,14 +190,12 @@ for 0..300 |d|:
 test.eq(4800, wide_total)
 
 -- The stack grows while generator frames are running (nested generators, deep call inside).
-#[generator]
-fn inner_gen(n int) -> int:
+generator fn inner_gen(n int) -> int:
     k := n
     yield deep(k)
     k = k * 2
     yield deep(k)
-#[generator]
-fn outer_gen() -> int:
+generator fn outer_gen() -> int:
     total := 0
     gi := inner_gen(8000)
     while gi.next() |v|:
@@ -223,8 +207,7 @@ test.eq(24000, gen11.next().?)
 test.eq(?int(none), gen11.next())
 
 -- `for` iterates a generator until it is done.
-#[generator]
-fn count_gen(n int) -> int:
+generator fn count_gen(n int) -> int:
     for 0..n |i|:
         yield i * 10
 for_total := 0
@@ -255,8 +238,7 @@ for gen13 |v|:
 test.eq(60, for_total)
 
 -- `for` over a generator of managed values.
-#[generator]
-fn str_gen() -> str:
+generator fn str_gen() -> str:
     yield 'a'
     yield 'bc'
 joined := ''

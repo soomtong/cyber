@@ -6,7 +6,7 @@ g := gen()
 print(g)
 
 --cytest: error
---CompileError: `yield` is only allowed in a `#[generator]` function.
+--CompileError: `yield` is only allowed in a `generator fn`.
 --
 --@MainPath():2:5:
 --    yield 1

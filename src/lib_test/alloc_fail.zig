@@ -114,8 +114,7 @@ const failing_alloc_src =
     \\  switch s:
     \\    case .circle |r|: return r * r * 3.0
     \\    case .rect |w|: return float(w)
-    \\#[generator]
-    \\fn gen(n int) -> int:
+    \\generator fn gen(n int) -> int:
     \\  for 0..n |i|:
     \\    yield i
     \\names := Array[str]{}

@@ -822,6 +822,7 @@ fn reserve_hidden_func(c: *cy.Chunk, name: []const u8) !*cy.Func {
         .pos = cy.NullId,
         .sig_t = .func,
         .hidden = true,
+        .generator = false,
         .scope_ret = false,
     });
     c.updateAstView(c.parser.ast.view());

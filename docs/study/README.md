@@ -20,7 +20,7 @@ tags:
 
 | | 0.3 | 0.4 |
 | --- | --- | --- |
-| 모델 | fiber 하나. `coinit`/`coresume`/`coyield`. 각자 스택을 가진 stackful 코루틴 | 둘로 갈랐다. 값을 조금씩 내는 쪽은 `#[generator]`와 `yield`(stackless, 프레임 하나만 힙에 저장), 독립 실행은 `spawn`한 Thread + `Future` |
+| 모델 | fiber 하나. `coinit`/`coresume`/`coyield`. 각자 스택을 가진 stackful 코루틴 | 둘로 갈랐다. 값을 조금씩 내는 쪽은 `generator fn`와 `yield`(stackless, 프레임 하나만 힙에 저장), 독립 실행은 `spawn`한 Thread + `Future` |
 | 장점 | 호출 중간 어디서든 멈출 수 있다. 호스트 경계에서 멈췄다 재개하기에 가장 가까운 모델 | 가볍다(제너레이터 하나 약 146바이트, `next()` 왕복 약 32ns, 실측). 정적 타입과 어울린다. 스택 관리가 필요 없다 |
 | 단점 | 객체마다 스택을 가져 무겁고, 동적 타입(`dyn`)에 묶여 있었다 | 호출 중간에서 yield 불가, 함수에 색이 생김, Thread는 int/str만 보낼 수 있고 협력 스케줄링이 없음 |
 | 현재 구현 상태 | 삭제됨(`src/fiber.zig`는 죽은 코드) | 제너레이터의 로컬 변수 보존이 구현되지 않아 이 fork에서 실제 스크립트에 쓰면 틀린 결과가 나온다(아래 "가장 중요한 발견") |

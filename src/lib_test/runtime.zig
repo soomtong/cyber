@@ -26,8 +26,7 @@ test "single_run frees big heap objects at deinit." {
     config.single_run = true;
     var res: C.EvalResult = undefined;
     try zt.eq(C.Success, C.vm_evalx(vm, "t",
-        \\#[generator]
-        \\fn inc() -> int:
+        \\generator fn inc() -> int:
         \\  yield 0
         \\
         \\type IncFn = fn() -> int
@@ -55,8 +54,7 @@ test "Generator frames keep locals across yields and free them." {
         \\    return 0
         \\  return 1 + deep(n - 1)
         \\
-        \\#[generator]
-        \\fn words(n int) -> str:
+        \\generator fn words(n int) -> str:
         \\  s := 'w-padding-padding-padding-padding'
         \\  for 0..n |i|:
         \\    s = s + '-%{i}'
@@ -108,8 +106,7 @@ test "Panics inside generators unwind through the generator frame." {
 
     var res: C.EvalResult = undefined;
     try zt.eq(C.ErrorPanic, C.vm_eval(vm,
-        \\#[generator]
-        \\fn walker() -> int:
+        \\generator fn walker() -> int:
         \\  panic('boom in generator')
         \\  yield 1
         \\
@@ -131,8 +128,7 @@ test "Panics inside generators unwind through the generator frame." {
         \\    panic('boom at %{n}')
         \\  return n
         \\
-        \\#[generator]
-        \\fn walker() -> str:
+        \\generator fn walker() -> str:
         \\  for 0..5 |i|:
         \\    yield 'v%{fail(i)}'
         \\
@@ -152,8 +148,7 @@ test "Panics inside generators unwind through the generator frame." {
     // Stopping inside a generator body unwinds the same way.
     C.vm_set_fuel(vm, 10000);
     try zt.eq(C.ErrorInterrupt, C.vm_eval(vm,
-        \\#[generator]
-        \\fn forever() -> int:
+        \\generator fn forever() -> int:
         \\  i := 0
         \\  while true:
         \\    i += 1
@@ -202,8 +197,7 @@ test "stack_trace() lists the frames from the caller to main." {
         \\expect_in_order(t1, ' show:', ' mid:', ' main:')
         \\
         \\-- Through a running generator frame (`?int` ret slot).
-        \\#[generator]
-        \\fn walker() -> int:
+        \\generator fn walker() -> int:
         \\  t := show()
         \\  expect_in_order(t, ' show:', ' walker:', ' Generator.next:')
         \\  test.eq(true, pos(t, ' Generator.next:') < pos(t, ' main:'))

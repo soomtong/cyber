@@ -4,6 +4,8 @@
 
 ## 배경
 
+이 문서의 `#[generator]`는 적을 당시의 문법이다. 2026-11-11부터 선언은 `generator fn f(...)`이고 `#[generator]` 속성은 없어졌다(`docs/decisions/project_coroutines.md`의 "선언 모양 변경과 구현" 절). 오류 문구도 ``A `generator fn` can not take the borrow type ...``로 바뀌었다.
+
 `#[generator]` 함수를 호출하면 본문이 바로 돌지 않고 `^Generator[Fn]`이 돌아온다. 매개변수와 지역은 힙 스냅샷에 들어가고
 `next()`마다 소비자 스택 위로 복사되어 이어서 돈다. 그래서 제너레이터는 자기를 만든 호출보다 오래 산다.
 빌림 `&int` 매개변수는 호출자 스택의 주소다. `fn make(): local := 41; return watch(&local)`처럼 호출자가 끝난 뒤 `next()`를

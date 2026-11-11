@@ -962,7 +962,7 @@ print(#{f()})       # 컴파일타임 평가: 5
 - 캐스트: `n := 300` 일 때 `a := as[i8] n` 은 `Int[].@init` 호출이 되어 실행 중 "panic: Lossy conversion from `300` to `i8`" (`core.cy:433`)로 죽는다. `f := as[float] n` 은 호출 없이 `i2f` 노드다.
 - 함수 밖 최상위에서 `#if meta.system() == .macos:` 아래에 `print('macos')` 를 두면 "Only compile-time statements are allowed in this context." 에러다(`ct_inline.zig:274`). 같은 `#if` 를 함수 안에 두면 실행된다.
 - `none.?`: `?int`, `?str`, `?^Foo` 반환값에 `.?` 를 붙여 실행하면 세 경우 모두 `panic: Expected active choice tag `1`, found `0`.` 이다. `cyber compile` 덤프에서 `?int` 는 `unwrap_addr`, `?^Foo`(zero_union)는 `unwrap_nz` 명령이 나왔다.
-- 제너레이터: `#[generator] fn count(n int) -> int:` (`i := 0; while i < n: yield i; i += 1`)에서 `g.next().?` 를 세 번 출력하면 `0`, `-9223372036854775806`, `-9223372036854775787` 이 나왔다. `.?` 의 문제가 아니라 제너레이터가 돌려주는 값 자체가 틀린 것으로 보인다(추정, 07 챕터).
+- 제너레이터: `generator fn count(n int) -> int:` (`i := 0; while i < n: yield i; i += 1`)에서 `g.next().?` 를 세 번 출력하면 `0`, `-9223372036854775806`, `-9223372036854775787` 이 나왔다. `.?` 의 문제가 아니라 제너레이터가 돌려주는 값 자체가 틀린 것으로 보인다(추정, 07 챕터).
 - `cyber -cc x.cy` 와 `-tcc`: `CompileError: Expected function implementation.` (core.cy 의 첫 `#[bind]` 에서, `sema.zig:2870`).
 - 컴파일타임 평가에서 지원하지 않는 식: `const x = f(1)` 의 `f` 안에 문자열 보간(`'a%{n}'`)을 쓰면 "Unsupported compile-time expression: `stringt`", 람다(`fn(a int) => a + n`)를 쓰면 `lambda_expr` 로 같은 에러가 난다.
 - `if false: this_function_does_not_exist()` 는 `Undeclared variable` 에러. `#if false:` 는 에러가 없다. 런타임 `if` 는 죽은 분기도 sema 하지만 `#if` 는 아니다.

@@ -100,10 +100,10 @@ t.eq(?str(none), repl.read(repl_read))
 t.eq_slice([]str{'> ', '    | ', '        | ', '        | ', '    | ', '> '}, repl_prefixes)
 
 -- An attribute line is held until the declaration it annotates is complete.
-repl_lines = []str{'#[generator]', 'fn g() -> int:', 'yield 1', '', '.exit'}
+repl_lines = []str{'#[inline]', 'fn g() -> int:', 'return 1', '', '.exit'}
 repl_pos = 0
 repl_prefixes = []str{}
-t.eq("#[generator]\nfn g() -> int:\n    yield 1", repl.read(repl_read).?)
+t.eq("#[inline]\nfn g() -> int:\n    return 1", repl.read(repl_read).?)
 t.eq(?str(none), repl.read(repl_read))
 t.eq_slice([]str{'> ', '| ', '    | ', '    | ', '> '}, repl_prefixes)
 

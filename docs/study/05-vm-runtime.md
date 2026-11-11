@@ -1075,8 +1075,7 @@ n=17000 (offset > 65535): 컴파일 단계에서 같은 패닉
 (6d) 제너레이터 본문 안에서 패닉하면 언와인드가 죽는다(genpanic.cy).
 
 ```
-#[generator]
-fn gen() -> int:
+generator fn gen() -> int:
     yield 1
     panic('inside generator')
 g := gen()

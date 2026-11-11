@@ -8,6 +8,27 @@
 
 ## 언어와 표준 라이브러리
 
+- 제너레이터 선언이 `#[generator]` 속성에서 `generator fn` 선언으로 바뀌었다. 호환되지 않는 변경이다.
+  ```cy
+  -- 이전
+  #[generator]
+  fn count() -> int:
+      yield 1
+
+  -- 이후
+  generator fn count() -> int:
+      yield 1
+  ```
+  - `generator`는 예약어가 아니다. 바로 뒤에 `fn`이 올 때만 수식어이고, 그 밖에는 이름으로 쓸 수 있다.
+  - 숨김 선언은 `-generator fn`, 속성은 수식어 앞에 둔다(`#[inline] generator fn`).
+  - `#[generator]`는 ``ParseError: The `#[generator]` attribute was replaced by `generator fn`.``이다.
+  - 오류 문구가 바뀌었다: `` `yield` is only allowed in a `generator fn`. ``,
+    ``A `generator fn` can not take the borrow type `&int` as a parameter. ...``
+  - `cy` 모듈의 `FuncDecl`에 `generator bool` 필드가 생기고 `AttributeKind.generator`가 없어졌다.
+  - tree-sitter 문법에 `generator_fn` 노드를 더했다(`generator fn`이 한 토큰). 속성 형태는 더 이상 제너레이터로 읽지 않는다.
+  - 근거와 `generator f()` 대신 `generator fn f()`를 고른 이유는 `docs/decisions/project_coroutines.md`의
+    "선언 모양 변경과 구현 (2026-11-11)" 절.
+
 ## 임베딩 API
 
 ## 변경

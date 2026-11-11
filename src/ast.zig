@@ -158,7 +158,6 @@ pub const AttributeType = enum(u8) {
     bind,
     extern_,
     call,
-    generator,
     cond,
     unsafe,
     consteval,
@@ -657,6 +656,8 @@ pub const FuncDecl = extern struct {
     ret: ?*Node,
     scope_ret: bool,
     hidden: bool,
+    /// Declared with `generator fn`.
+    generator: bool,
     stmts: Slice(*Node),
     sig_t: FuncSigType,
     pos: u32,

@@ -134,6 +134,8 @@
   "fnsym"
 ] @keyword.function
 
+(generator_fn) @keyword.function
+
 [
   "type"
   "struct"

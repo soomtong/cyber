@@ -784,8 +784,7 @@ type Grid[T Any, const N int]:
 fn pick(%T type, a T, b T) -> T:
     return a
 
-#[generator]
-fn count() -> int:
+generator fn count() -> int:
     yield 1
     yield 2
 
@@ -1032,7 +1031,7 @@ panic: Expected active choice tag `1`, found `0`.
           ^
 ```
 
-제너레이터가 끝난 뒤 `g.next().?` 도 같은 패닉이다(`#[generator] fn g1() -> int: yield 1` 에서 두 번째 `.?`). 이제 검사 없는 접근을 쓴다.
+제너레이터가 끝난 뒤 `g.next().?` 도 같은 패닉이다(`generator fn g1() -> int: yield 1` 에서 두 번째 `.?`). 이제 검사 없는 접근을 쓴다.
 
 ```
 use meta

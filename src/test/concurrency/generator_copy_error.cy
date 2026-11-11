@@ -1,12 +1,11 @@
-#[generator]
-fn gen() -> int:
+generator fn gen() -> int:
     yield 1
 x := gen().*
 
 --cytest: error
 --CompileError: Cannot copy `Generator[fn() -> int]`, type implements `NoCopy`.
 --
---@MainPath():4:6:
+--@MainPath():3:6:
 --x := gen().*
 --     ^~~~~~~
 --

@@ -4,6 +4,8 @@
 
 ## 사실
 
+아래 기록의 `#[generator]`는 적을 당시의 문법이다. 2026-11-11부터 선언은 `generator fn f(...)`이고 `#[generator]` 속성은 없어졌다(아래 "선언 모양 변경과 구현" 절).
+
 - upstream 커밋 `b751ca6c`(2025-11-21, "[all] some updates")에서 tokenizer의 `coinit` · `coresume` · `coyield`
   키워드가 삭제되고 `yield`가 추가됐다. 옛 테스트 `test/concurrency/fibers.cy` · `test/functions/call_fiber_param.cy`도
   같이 지워졌다. 정적 타입 전환을 포함한 대규모 재설계 커밋이라 fiber만의 이유는 적혀 있지 않다.
@@ -132,14 +134,15 @@ REPL에서는 속성 줄이 `:`로 끝나지 않아 블록으로 묶이지 않�
 
 ## 설계 결정 (2026-11-07)
 
-`docs/specs/2026-11-03-generator-and-fiber-coexistence.md`를 검토해 다음을 결정했다. 구현은 아직 없고, 스펙 문서 5절의 코드가
-결정된 문법이다.
+`docs/specs/2026-11-03-generator-and-fiber-coexistence.md`를 검토해 다음을 결정했다. 스펙 문서 5절의 코드가 결정된 문법이다.
+2번의 제너레이터 선언은 2026-11-11에 모양을 `generator fn f(...)`로 바꿔 구현했다(아래 "선언 모양 변경과 구현" 절).
+`fiber` · `suspend`와 3번의 enum 개명은 아직 구현이 없다.
 
 1. 공존 방식은 역할 분리 병존이다. generator는 값을 내고, fiber는 기다린다. 둘 다 언어 내장 타입(`Generator`, `Fiber`)이다.
 2. 새 키워드 세 개: `generator` · `fiber` · `suspend`. upstream이 0.3의 `coinit` · `coresume` · `coyield`를 지운 자리에
    역할이 분명한 셋이 들어간다. 저장소 내 식별자 사용은 셋 모두 0건이다.
    - `generator f(...) -> T:`가 `#[generator]` 속성을 대체한다. 속성은 키워드 도입과 함께 제거한다(테스트 · 예제 · 문서 24곳).
-     `iter` · `gen`은 변수명으로 이미 쓰여(13건) 기각했다.
+     `iter` · `gen`은 변수명으로 이미 쓰여(13건) 기각했다. (2026-11-11: 모양을 `generator fn f(...) -> T:`로 바꿨다.)
    - `fiber f(args)`가 `Fiber(f, {args})` 생성자를 대체한다. Go의 `go f(x)`와 같은 "키워드 + 호출식"이다. 인자는 지금 평가하고
      호출은 첫 `resume()`에서 한다. 블록이 필요하면 `fiber:` 뒤에 본문을 둔다(트레일링 블록 람다와 같은 파싱, `^T`만 캡처).
    - `suspend`가 `Fiber.yield()`를 대체한다. 값을 싣지 않는 문장이다. 원칙: 수신자가 있는 조작은 메서드(`f.resume()`, `g.next()`),
@@ -157,3 +160,42 @@ REPL에서는 속성 줄이 `:`로 끝나지 않아 블록으로 묶이지 않�
    맞추는 일을 후속 작업으로 둔다.
 
 순서는 스펙 6절의 로드맵을 따른다. 단계 1.5(키워드 치환과 enum 개명)는 런타임 변경이 없어 먼저 할 수 있다.
+
+## 선언 모양 변경과 구현 (2026-11-11)
+
+2026-11-07 결정의 `generator f(...) -> T:`를 `generator fn f(...) -> T:`로 바꾸고 구현했다. 키워드 선택(`generator` ·
+`fiber` · `suspend`)은 그대로다.
+
+`fn`을 남긴 이유.
+
+1. fiber와 모양이 겹친다. `fiber f(args)`는 선언이 아니라 호출식인데, `generator count(n int) -> int:`와
+   `fiber count(3)`이 둘 다 "키워드 + 이름 + 괄호"가 된다. `fn`이 있으면 선언, 없으면 표현식으로 갈린다.
+2. 메서드 선언. 수신자가 이름 앞에 오므로 `fn`이 없으면 `generator (^Bag) items() -> int:`가 `generator`라는 함수의
+   호출처럼 보인다.
+3. 예약어가 필요 없다. `generator`는 바로 뒤에 `fn`이 올 때만 수식어다. `generator := 3`, `fn generator()`는 그대로 된다.
+4. 함수 선언에는 항상 `fn`이 있다는 규칙이 남는다. `-fn`(숨김), `#[...]` 속성, `with` 선언, `cyber fmt`, 검색이 기존 경로를 탄다.
+5. 제너레이터의 타입이 `Generator[fn() -> int]`로 함수 타입 위에 있어 "수식어가 붙은 함수"라는 모델이 구현과 맞는다.
+
+Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator f()`)은 짧지만 위 1 · 2 때문에 택하지 않았다.
+
+구현.
+
+- 파서(`src/parser.zig`): `isGeneratorFn(n)`이 "ident `generator` 다음에 `fn`"을 본다. 문장 머리, `-` 뒤, `#[...]` 뒤,
+  `with [...]` 뒤 네 곳에서 확인하고 `parseFuncDecl`에 `generator = true`를 넘긴다. 토크나이저에는 키워드를 더하지 않았다.
+- AST: `FuncDecl.generator: bool`(`src/ast.zig`, `cy` 모듈의 `FuncDecl`도 같은 자리). `AttributeType.generator`와
+  `cy` 모듈의 `AttributeKind.generator`는 지웠다. sema는 속성 대신 `decl.generator`를 본다.
+- `#[generator]`는 ``ParseError: The `#[generator]` attribute was replaced by `generator fn`.``
+- 오류 문구: `` `yield` is only allowed in a `generator fn`. ``, ``A `generator fn` can not take the borrow type ...``
+- tree-sitter: `generator_fn`은 `generator`와 `fn`을 묶은 한 토큰이다. 낱말 `generator`를 키워드로 두면 식별자로 쓸 수
+  없게 되기 때문이다. vim 구문 파일에는 `generator`를 키워드로 더했다(식별자로 써도 강조된다).
+- 치환: 테스트 · 예제 · lib 테스트 · 퍼즈 프로브의 `#[generator]` 선언 전부. REPL의 속성 줄 묶기 테스트
+  (`src/test/modules/cy.cy`)와 문서 예는 `#[inline]`으로 바꿨다.
+
+확인하면서 본 것(이 변경과 무관, 변경 전 빌드에서도 같음).
+
+- 메서드 제너레이터가 실행 중 죽는다. `generator fn (^Bag) items() -> int:`에서 `yield self.a`를 하고 `for b.items() |v|:`로
+  돌리면 `Segmentation fault at address 0xaaaaaaaaaaaaaaaa`(ReleaseSafe). 미해결.
+- 템플릿 제너레이터 `generator fn rep[T Any](x T, n int) -> T:`의 호출은 `Unsupported call from symbol: func_template`.
+- 함수 본문 안의 `generator fn`은 일반 `fn`과 같이 `` `fn` declarations are not allowed here. ``
+
+남은 것: `.paused` → `.suspended` 개명(단계 1.5의 나머지), `fiber` · `suspend`(단계 2).

@@ -4,7 +4,7 @@ syntax keyword cyberKeyword
     \ or and not
     \ var move const global
     \ fn return self
-    \ yield
+    \ yield generator
     \ type object struct cstruct cunion enum trait as
     \ true false none undef 
     \ catch error

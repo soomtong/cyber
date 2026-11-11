@@ -39,8 +39,7 @@ global late int = 5
 t.eq(5, getter())
 
 -- Creating a generator does not run its body. The body can read the global that holds it.
-#[generator]
-fn counter() -> int:
+generator fn counter() -> int:
     t.eq(gen.status(), .running)
     yield 1
 type CounterFn = fn() -> int

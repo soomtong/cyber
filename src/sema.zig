@@ -809,7 +809,7 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
             const proc_func = c.proc().func;
             if (proc_func == null or !proc_func.?.info.generator) {
                 // Without this, the return type below is cast as a generator pointer and the VM crashes at runtime.
-                return c.reportError("`yield` is only allowed in a `#[generator]` function.", node);
+                return c.reportError("`yield` is only allowed in a `generator fn`.", node);
             }
             const gen_t = c.proc().getReturnType(c.sema).cast(.pointer).child_t;
             const funcptr_t = gen_t.sym().instance.?.params[0].asPtr(*cy.Type);
@@ -3120,7 +3120,7 @@ pub fn ensure_resolved_func(c: *cy.Chunk, func: *cy.Func, resolve_new_types: boo
     const decl = func.decl.?.cast(.funcDecl);
     var bind_attr: ?*ast.Attribute = null;
     var extern_attr: ?*ast.Attribute = null;
-    var has_generator: bool = false;
+    const has_generator = decl.generator;
     for (decl.attrs.slice()) |attr| {
         switch (attr.type) {
             .bind => {
@@ -3128,9 +3128,6 @@ pub fn ensure_resolved_func(c: *cy.Chunk, func: *cy.Func, resolve_new_types: boo
             },
             .extern_ => {
                 extern_attr = attr;
-            },
-            .generator => {
-                has_generator = true;
             },
             .consteval => {
                 func.info.const_eval_only = true;
@@ -3209,7 +3206,7 @@ pub fn ensure_resolved_func(c: *cy.Chunk, func: *cy.Func, resolve_new_types: boo
                 if (param_t.info.borrow_only) {
                     const name = try c.sema.allocTypeName(param_t);
                     defer c.alloc.free(name);
-                    return c.reportErrorFmt("A `#[generator]` function can not take the borrow type `{}` as a parameter. The generator outlives the call, so pass an owned value or a `^T` pointer instead.", &.{v(name)}, @ptrCast(param));
+                    return c.reportErrorFmt("A `generator fn` can not take the borrow type `{}` as a parameter. The generator outlives the call, so pass an owned value or a `^T` pointer instead.", &.{v(name)}, @ptrCast(param));
                 }
             }
             func.info.generator = true;

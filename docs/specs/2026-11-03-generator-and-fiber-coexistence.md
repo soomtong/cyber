@@ -1,6 +1,6 @@
 # Generator와 Fiber를 함께 두는 설계 검토
 
-2026-11-03 작성, 2026-11-07 결정. 상태: 결정(미구현). 결정 항목은 `docs/decisions/project_coroutines.md`의
+2026-11-03 작성, 2026-11-07 결정, 2026-11-11 제너레이터 선언을 `generator fn`으로 바꿔 구현. 상태: 결정(제너레이터 선언만 구현, fiber · `suspend` · enum 개명은 미구현). 결정 항목은 `docs/decisions/project_coroutines.md`의
 "설계 결정 (2026-11-07)" 절에 있다. 이 문서의 코드는 그 결정을 반영한 제안 문법이다.
 앞선 판단 틀은 `docs/history/concurrency_model_fit.md`, 사실 근거는 `docs/study/07-coroutines-concurrency.md`이다.
 
@@ -61,7 +61,7 @@
 | | Generator | Fiber |
 | --- | --- | --- |
 | 목적 | 값을 만든다(지연 시퀀스, 파서 토큰, 순회) | 기다린다(호스트, I/O, Future, 다른 fiber) |
-| 선언 · 생성 | `generator f(...) -> T:` 선언, 호출하면 `Generator` | `fiber f(args)` 또는 `fiber:` 블록, 결과는 `Fiber` |
+| 선언 · 생성 | `generator fn f(...) -> T:` 선언, 호출하면 `Generator` | `fiber f(args)` 또는 `fiber:` 블록, 결과는 `Fiber` |
 | 멈춤 표기 | `yield v` 키워드, generator 본문에서만 | `suspend` 키워드, 어디서든 |
 | 밖에서 진행 | `g.next() -> ?T`, `for g \|v\|` | `f.resume() -> FiberStatus` (`.suspended` / `.done`) |
 | 상태 | `g.status()`: `.suspended` · `.running` · `.done` | `f.status()`: 같은 세 값 |
@@ -78,7 +78,8 @@
 표기 원칙(2026-11-07 결정). 수신자가 있는 조작은 메서드(`f.resume()`, `f.status()`, `g.next()`), 현재 실행 맥락을 멈추는
 조작은 키워드(`yield v`, `suspend`)다. `return` · `break`와 같은 분류다. upstream 문서의 `Fiber.yield()`는 수신자 없는 조작을
 정적 메서드로 흉내 낸 것이라 쓰지 않는다. 새 키워드는 `generator` · `fiber` · `suspend` 셋이고, `#[generator]` 속성은 키워드
-도입과 함께 제거한다(24곳). 상태 enum은 `.paused`를 `.suspended`로 바꿔 `suspend` → `.suspended` → `resume()`이 한 어휘가
+도입과 함께 제거한다(24곳). 제너레이터 선언은 `generator fn f(...)`다(2026-11-11). `fiber f(args)`가 호출식이라 `fn`으로
+선언과 표현식을 가른다. `generator`는 `fn` 앞에서만 수식어이고 예약어가 아니다. 상태 enum은 `.paused`를 `.suspended`로 바꿔 `suspend` → `.suspended` → `resume()`이 한 어휘가
 되게 한다(Lua의 `suspended` · `running` · `dead`와 같은 꼴).
 
 키워드 선택 근거.
@@ -174,7 +175,7 @@ Future를 "대기의 공통 인터페이스"로 정하면 두 모델과 Thread�
 ### 5.1 요구사항: 값을 조금씩 내는 쪽은 generator만 쓴다
 
 ~~~cy
-generator countdown(n int) -> int:
+generator fn countdown(n int) -> int:
     while n > 0:
         yield n
         n -= 1
@@ -187,7 +188,7 @@ type Tree:
     val  int
     kids []^Tree
 
-generator walk(t ^Tree) -> int:
+generator fn walk(t ^Tree) -> int:
     yield t.val
     for t.kids |k|:
         for walk(k) |v|:
@@ -197,7 +198,7 @@ generator walk(t ^Tree) -> int:
 type Cursor:
     i int
 
-generator chunks(c ^Cursor, paths []str) -> str:
+generator fn chunks(c ^Cursor, paths []str) -> str:
     while c.i < paths.len():
         yield paths[c.i]
         c.i += 1
@@ -311,7 +312,7 @@ f := fiber:
     for walk(tree) |v|: print(v)
 
 -- generator 본문의 await · suspend: 허용. 소비하는 fiber 전체가 멈추고 generator는 running으로 남는다.
-generator lines(path str) -> str:
+generator fn lines(path str) -> str:
     text := tool('read_file', path).await()
     for text.split('\n') |l|:
         yield l                         -- 값
@@ -353,7 +354,7 @@ f.resume()
 | --- | --- | --- | --- |
 | 0 | generator 지역 보존 수정(`RET_Y`에서 프레임 저장, 2026-11-04 완료), `.gen` 트레이스 결함 3개 수정(2026-11-04 완료) | 지금 있는 stackless가 믿을 만해짐 | 없음 |
 | 1 | 루트 맥락 중단 · 재개(`CL_AWAIT`, `cl_vm_resume`, 호스트 Future C API) | 에이전트 루프의 색 없는 도구 대기 | 0 권장 |
-| 1.5 | 문법 정리: `generator` 키워드로 `#[generator]` 대체(24곳), `.paused` → `.suspended`. 런타임 변경 없음 | 선언 머리에 역할이 보인다. fiber 문법과 어휘를 맞춘다 | 없음 |
+| 1.5 | 문법 정리: `generator fn`으로 `#[generator]` 대체(2026-11-11 완료), `.paused` → `.suspended`(남음). 런타임 변경 없음 | 선언 머리에 역할이 보인다. fiber 문법과 어휘를 맞춘다 | 없음 |
 | 2 | `fiber f(args)` · `fiber:` · `suspend` 키워드, `Fiber` 타입: 스택 교체, 성장, 트레이스의 fiber 경계, 빌림 sema 규칙 | 같은 힙에서 여러 실행 맥락 | 1, 1.5 |
 | 3 | fiber 안의 `Future.await()`를 yield로, 비-main 스레드 await를 같은 경로로 | `@panic("TODO")` 제거, 스레드마다 협력 스케줄링 | 2 |
 | 4 | (선택) 취소(소멸 시 정리), `spawn f(args)` 호출식 꼴, `Future.wait_any` | 구조적 동시성, 생성 표기 통일, spin 없는 스케줄러 | 2 |
@@ -377,7 +378,7 @@ f.resume()
 
 - 둘 다 갖는다(2026-11-07 결정). 역할 분리 병존(방식 A)으로 한다. generator는 값, fiber는 대기를 맡는다.
 - 멈춤은 키워드다. generator는 `yield v`, fiber는 `suspend`. `suspend`는 값을 싣지 않는다. 정적 타입과 충돌하지 않게 하는 핵심 장치다.
-- 선언 · 생성도 키워드다. `generator f(...) -> T:`가 `#[generator]`를 대체하고, `fiber f(args)` · `fiber:`가 `Fiber(f, {args})`를 대체한다.
+- 선언 · 생성도 키워드다. `generator fn f(...) -> T:`가 `#[generator]`를 대체하고(2026-11-11 구현), `fiber f(args)` · `fiber:`가 `Fiber(f, {args})`를 대체한다.
 - 위임 문법(`yield*`)은 두지 않는다. `for inner() |v|: yield v` 두 줄이 명시적이다.
 - Future를 공통 대기 인터페이스로 삼고, "루트 fiber가 호스트에 yield하기"(길 2)부터 만든다. 그 코드가 그대로 `Fiber`의 기반이 된다.
 - 먼저 할 일은 새 모델이 아니라 기존 generator를 고치는 것이다(단계 0).

@@ -700,7 +700,6 @@ type AttributeKind enum:
     case bind
     case extern
     case call
-    case generator
     case cond
     case unsafe
     case consteval
@@ -883,6 +882,7 @@ type FuncDecl:
     ret    ?^Node
     scope_ret bool
     hidden bool
+    generator bool
     stmts  []^Node
     sig_t  FuncSigKind
     pos    i32

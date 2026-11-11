@@ -25,7 +25,7 @@ tags:
 ## 오늘의 학습 목표
 
 - [ ] 0.3 의 fiber 가 스택과 pc 를 어떻게 들고 다녔는지 `coinit` / `coresume` / `coyield` 구현으로 설명할 수 있다.
-- [ ] `#[generator]` 가 sema 에서 시그니처를 바꾸고, IR(`ret_gen`, `yield`, `gen_next`, `gen_end`)과 명령어(`RET_GEN`, `RET_Y`, `GEN_NEXT`, `GEN_END`)로 내려가는 경로를 따라갈 수 있다.
+- [ ] `generator fn` 가 sema 에서 시그니처를 바꾸고, IR(`ret_gen`, `yield`, `gen_next`, `gen_end`)과 명령어(`RET_GEN`, `RET_Y`, `GEN_NEXT`, `GEN_END`)로 내려가는 경로를 따라갈 수 있다.
 - [ ] 제너레이터의 프레임이 `next()` 마다 소비자 스택으로 복사되는 방식을 그림으로 그리고, 지역 변수가 사라지는 이유를 덤프 한 장으로 증명할 수 있다.
 - [ ] 이 문제가 단위 테스트, 벤치, 예제에서 왜 보이지 않는지, 어떤 패턴이 안전한지 말할 수 있다.
 - [ ] `spawn` / `Future.await` / `Thread` 의 격리 모델과 현재 미완 지점(스케줄링, 전송 타입)을 안다. 비-main await 와 패닉 메시지 전달은 2026-11-08 에 고쳐졌다(아래 2.6).
@@ -204,14 +204,14 @@ $ rg -n 'Fiber' src/types.zig
 - `docs/docs.md:2787` 의 "Fibers." 절(`Fiber(fn, args)`, `f.resume()`, `Fiber.yield()`)은 본문에 `*TODO*` 가 붙은 설계 문서이고 소스 어디에도 `type Fiber` 가 없다.
 - `src/heap.zig:876~884` 의 `AsyncTaskType` 주석("Invoke callback on a new fiber", "Resumes a fiber")도 옛 모델의 흔적이다.
 
-정리하면 현재 빌드에 fiber 는 없다. 코루틴은 `#[generator]` 하나뿐이다.
+정리하면 현재 빌드에 fiber 는 없다. 코루틴은 `generator fn` 하나뿐이다.
 
 ### 2.3 0.4 의 generator: 프레임 하나를 힙에 복제해 두는 stackless 코루틴
 
 #### 2.3.1 컴파일 경로 한눈에
 
 ```text
- #[generator] fn count(n int) -> int:            (사용자 코드)
+ generator fn count(n int) -> int:            (사용자 코드)
         │
         │ parser.zig:24      속성 "generator" -> ast.zig:161
         ▼
@@ -257,7 +257,7 @@ if (has_generator) {
     const opt_t = try getOptionType(c, val_t);
 ```
 
-`yield` 가 있는 함수의 반환 타입이 `^Generator[...]` 라고 가정한 코드다. `#[generator]` 가 없는 함수에서 `yield` 를 쓰면 이 `.cast(.pointer)` 가 실패한다(실습 7 참고: 컴파일러가 죽는다).
+`yield` 가 있는 함수의 반환 타입이 `^Generator[...]` 라고 가정한 코드다. `generator` 가 없는 `fn`에서 `yield` 를 쓰면 이 `.cast(.pointer)` 가 실패한다(실습 7 참고: 컴파일러가 죽는다).
 `yield` 에 값이 없는 형태(`yield` 만)는 `return c.reportErrorFmt("TODO", ...)` 로 막혀 있다(`sema.zig:748`).
 
 #### 2.3.3 ret_gen: 호출은 본문을 실행하지 않고 제너레이터만 돌려준다
@@ -452,8 +452,7 @@ stack = gen->prev_fp;
 
 ```cy
 -- b1.cy: 직선 코드에서 지역 변수를 바꿔 가며 yield
-#[generator]
-fn b() -> int:
+generator fn b() -> int:
     i := 10
     yield i
     i += 1
@@ -525,7 +524,7 @@ $ cyber compile b1.cy        (함수 b 부분)
 
 ```text
 $ ../../trace-out/bin/cyber -v b1.cy > b1.trace 2>&1 ; rg -n 'reg_end=6|reserve reg: 6|declare local 0' b1.trace
-26926:bc_gen:     | ret_gen: `#[generator] fn b() -> int: ` reg_end=6
+26926:bc_gen:     | ret_gen: `generator fn b() -> int: ` reg_end=6
 26930:bc_gen:     | end ret_gen reg_end=6                  <- RET_GEN 이 받는 reg_end = 6
 26935:bc_gen:     | declare_local: `i` reg_end=6
 26936:bc_gen: reserve reg: 6 Int                           <- i 가 이제서야 6번을 받는다
@@ -583,8 +582,7 @@ $ cyber compile c1.cy
 
 ```cy
 -- e5.cy: 힙 문자열 지역을 yield 전에 만들고, 제너레이터를 중간에 버린다
-#[generator]
-fn g(n int) -> int:
+generator fn g(n int) -> int:
     s := 'item-%{n}-padding-padding-padding-padding'
     print(s)
     yield 1
@@ -856,7 +854,7 @@ print(r.await())
 | --- | --- | --- |
 | 스택형 코루틴(stackful coroutine) | 자기 호출 스택을 가져서 호출 중간에서 멈출 수 있다. 0.3 fiber, Lua coroutine, Go goroutine | 대응 없음. 가장 가까운 것은 (비표준) fiber 라이브러리 |
 | 스택리스 코루틴(stackless coroutine) | 프레임 하나(또는 상태 기계)만 저장한다. 해당 함수 본문에서만 멈출 수 있다 | `function*` / `async function` |
-| `#[generator]` | 함수를 호출하면 본문을 실행하지 않고 `^Generator[Fn]` 을 돌려주게 하는 속성 | `function*` 의 `*` (표기 위치는 반대: 반환 타입이 바뀜) |
+| `generator fn` | 함수를 호출하면 본문을 실행하지 않고 `^Generator[Fn]` 을 돌려주게 하는 선언 수식어(2026-11-11 전에는 `#[generator]` 속성) | `function*` 의 `*` (표기 위치는 반대: 반환 타입이 바뀜) |
 | `yield v` | 값을 `next()` 호출자에게 돌려주고 멈춘다. 호출자가 다시 `next()` 하면 다음 줄부터 이어 간다 | `yield v` (단 값을 되받는 `yield` 표현식은 없다) |
 | `g.next()` | `?T` 를 돌려준다. 끝나면 `none` | `g.next()` 의 `{value, done}` 대신 Option |
 | `g.status()` | `paused` / `running` / `done` | 대응 없음 |
@@ -877,7 +875,7 @@ print(r.await())
 ```text
                   어디서 멈출 수 있나        상태가 어디에 사는가              재개하려면
  0.3 fiber        호출 스택 어디서나        fiber 소유의 별도 스택            스택 포인터와 pc 교체 (O(1))
- 0.4 generator    #[generator] 본문에서만   소비자 스택 위에 펼친 프레임      스냅샷 복사 + 재개 pc 로 점프
+ 0.4 generator    generator fn 본문에서만   소비자 스택 위에 펼친 프레임      스냅샷 복사 + 재개 pc 로 점프
                   (현재: 매개변수만 스냅샷)  (지역은 힙에 저장되지 않음)
  0.4 Thread       (멈추지 않는다)           별도 VM 스레드(힙 + 스택)         OS 워커가 계속 실행, 결과는 Future 로
 ```
@@ -925,8 +923,7 @@ git show 0.3:src/vm.c | rg -n 'Coinit|Coyield|Coresume|Coreturn'           # 0.3
 
 ```cy
 -- g0.cy
-#[generator]
-fn iterate() -> int:
+generator fn iterate() -> int:
     yield 123
     yield 456
 
@@ -972,8 +969,7 @@ $ cyber compile g0.cy       (fn iterate 부분)
 type Cursor:
     n int
 
-#[generator]
-fn count_to(cur ^Cursor, limit int) -> int:
+generator fn count_to(cur ^Cursor, limit int) -> int:
     while cur.n < limit:
         yield cur.n
         cur.n += 1
@@ -1059,8 +1055,7 @@ deep(30): D2 total=882 n=3
 
 ```cy
 -- pm1.cy
-#[generator]
-fn g(n int) -> int:
+generator fn g(n int) -> int:
     n += 1
     yield n
     yield n
@@ -1170,8 +1165,7 @@ with a gap   :  88.7 ms
 -- m1.cy
 use os
 
-#[generator]
-fn inc() -> int:
+generator fn inc() -> int:
     yield 1
     yield 2
 
@@ -1207,8 +1201,7 @@ $ (같은 스크립트에서 n := 0)
 
 ```cy
 -- m2.cy (발췌)
-#[generator]
-fn count(n int) -> int:
+generator fn count(n int) -> int:
     st := ^ArrayStore[int]{}
     st << 0
     while st[0] < n:
@@ -1230,8 +1223,7 @@ generator: 159.9 ms (12499997500000), plain loop: 15.1 ms (12499997500000)      
 
 ```cy
 -- st4.cy (-> int)                          -- st3.cy (-> ^int)
-#[generator]                                #[generator]
-fn walker() -> int:                         fn walker() -> ^int:
+generator fn walker() -> int:               generator fn walker() -> ^int:
     panic('first next panics')                  panic('first next panics')
     yield 1                                     yield ^1
 g := walker()                               g := walker()
@@ -1256,7 +1248,7 @@ _ = g.next()
 ```
 
 `-> int` 는 abort, `-> ^int` 는 릴리스에서 `unexpected 4`, 트레이스 빌드에서만 정상 트레이스. 2.5 의 (1)(2)와 연결해 보라. 끝난 제너레이터에 `next()` 를 한 번 더 부르는 dn1.cy 도 릴리스에서 `unexpected 4` 를 낸다.
-`#[generator]` 없는 함수에서 `yield` 를 쓰면(y4.cy: `fn plain() -> int: yield 1 ...`) 컴파일러가 죽는다.
+`generator` 없는 `fn`에서 `yield` 를 쓰면(y4.cy: `fn plain() -> int: yield 1 ...`) 컴파일러가 죽는다.
 
 ```text
 $ cyber y4.cy
@@ -1300,8 +1292,7 @@ $ trace-out/bin/cyber -v s1.cy > s1.trace 2>&1 ; rg -c 'grow stack to size' s1.t
 
 ```cy
 -- br2.cy
-#[generator]
-fn watch(p &int) -> int:
+generator fn watch(p &int) -> int:
     yield p.*
     yield p.*
 
@@ -1349,7 +1340,7 @@ upstream 은 "코루틴"을 둘로 갈랐다. 값을 조금씩 내는 쪽은 sta
 | --- | --- | --- | --- |
 | 메모리 | `Fiber` 88바이트 + 별도 스택 최소 16슬롯(128바이트). 둘 다 따로 할당 (`0.3:src/fiber.zig`, `0.3:src/bc_gen.zig:377`) | 객체 48바이트 + 매개변수 스냅샷. 100만 개 RSS 증가 약 146바이트/개 (실측, 실습 6) | Thread 구조체 + 힙 + 스택 511슬롯(4KB) (`thread.zig:256`). 워커 OS 스레드는 최대 CPU 수 - 1 개, 스택 16MB (`worker.zig:76`) |
 | 컨텍스트 전환 | 스택/pc 포인터 교환 O(1) (`zPushFiber` / `zPopFiber`). 수치는 미측정 | `next()` 한 번 약 30 ns (실측, 힙 접근 포함). 복사량은 O(스냅샷 크기) | spawn + await 한 번 약 1.8~2.1 µs (실측). 이후는 OS 스케줄 |
-| 호출 깊이 중간에서 yield | 가능 (`0.3:test/fiber_test.cy` 의 "yield in nested function") | 불가. `#[generator]` 본문에서만. 위임(`yield*`)은 `generator.cy` 에 주석 처리된 TODO | 해당 없음 (멈춤이 아니라 병렬 실행) |
+| 호출 깊이 중간에서 yield | 가능 (`0.3:test/fiber_test.cy` 의 "yield in nested function") | 불가. `generator fn` 본문에서만. 위임(`yield*`)은 `generator.cy` 에 주석 처리된 TODO | 해당 없음 (멈춤이 아니라 병렬 실행) |
 | 함수 색 | 없음 | 있음 (속성이 반환 타입을 바꾸고, 호출자는 `next()` 로 구동해야 함) | `await` 는 colorless. 어느 스레드에서나 블록 (비-main abort 는 2026-11-08 수정) |
 | 소유권 / 빌림 | 스택이 fiber 에 고정되고 성장 때만 이동. 0.3 에는 빌림 개념이 없었다 | 프레임이 `next()` 마다 소비자 스택 위치로 옮겨 다니고 스냅샷은 힙에 있다. 스택 주소를 담은 값이 무효화되고, 빌림 매개변수가 `semaLift` 검사를 우회한다 (br2) | 격리. 인자/결과는 `@send` 로 복사. 빌림은 전송 불가 (문서) |
 | 호스트 경계(임베딩, 에이전트) | 호스트 함수 안 yield 는 0.3 소스에서 확인하지 못함(미확인). VM 스택 전체가 보존되므로 호스트 경계 재개에 가장 가까운 모델 | 호스트 함수/중첩 호출 안에서 불가. 지역 소실 버그로 "요청 스트림" 패턴도 제한 | interrupt / fuel 은 전파됨. 호스트가 future 를 만들거나 완료시킬 C API 없음. 호스트 함수 안에서 대기 중이면 못 끊음 |
@@ -1389,7 +1380,7 @@ CodeAct 루프의 이상적인 모양은 이렇다. 스크립트가 `r := tool('
 - 호스트 함수 안에서 막히면 `cl_vm_interrupt` 로 못 끊는다(`project_vm_interrupt.md` "미정").
 - `AWAIT` -> `RES_AWAIT` -> `error.Await` -> `CL_AWAIT` 의 반환 경로는 끝까지 이어져 있다(2.6). 그러나 `RES_AWAIT` 를 만드는 곳이 없다(`vm.zig:1025` 주석).
 - 호스트가 Future 를 만들거나 완료시킬 C API 가 없다(`include/cyber.h` 에 future 관련 선언이 없다). `@new_shared_state` 는 스크립트 안에서만 쓰인다.
-- generator 의 `yield` 는 `#[generator]` 본문 직접 문장으로만 쓸 수 있다. 호스트 함수 호출 지점도 그 본문 안에 있어야 한다.
+- generator 의 `yield` 는 `generator fn` 본문 직접 문장으로만 쓸 수 있다. 호스트 함수 호출 지점도 그 본문 안에 있어야 한다.
 
 #### 길 1. 동기 호스트 함수 + VM 당 OS 스레드 (지금 가능)
 
@@ -1423,7 +1414,7 @@ CodeAct 루프의 이상적인 모양은 이렇다. 스크립트가 `r := tool('
 
 #### 길 4. generator 를 "요청 스트림"으로 쓰기
 
-스크립트 본문을 `#[generator]` 로 만들고 도구 호출을 `yield` 로 호스트에 넘기는 패턴이다. 호스트는 `next()` 로 요청을 받아 처리하고 응답을 힙 객체(우편함)에 쓴 뒤 다시 `next()` 한다.
+스크립트 본문을 `generator fn` 로 만들고 도구 호출을 `yield` 로 호스트에 넘기는 패턴이다. 호스트는 `next()` 로 요청을 받아 처리하고 응답을 힙 객체(우편함)에 쓴 뒤 다시 `next()` 한다.
 제약이 둘 있다. (1) stackless 라 모델이 정의한 헬퍼 함수 안에서 도구를 부르면 yield 할 수 없다(색이 퍼진다). (2) 2.4 의 버그 때문에 yield 를 넘는 지역은 쓸 수 없고, 상태는 전부 힙 객체에 둬야 한다. 지금 형태로는 에이전트 스크립트에 권할 수 없다.
 
 #### 길 5. Future 만으로
@@ -1484,7 +1475,7 @@ CodeAct 루프의 이상적인 모양은 이렇다. 스크립트가 `r := tool('
 
 - upstream 은 정적 타입 전환과 함께 "yield 가 반환 타입을 갖는 코루틴"만 남기고 나머지를 Thread 로 보냈다. 이 판단 자체는 일관되지만, generator 의 프레임 모델이 완성되지 않은 채 멈췄다.
   `ret_generator` 의 주석("Only persists the locals", "Assumes generator is 1 reg return")과 `core.cy` 의 "store the generator handle in frame[3]" 은 같은 가정에서 나온다. 반환 슬롯은 1개이고 지역은 어딘가에 보존된다는 가정이다. 둘 다 `?int` 에서 깨진다.
-- 이 fork 가 코루틴 계층에서 먼저 해야 할 일은 새 기능이 아니라 안전이다. 우선순위(제안): (1) generator 지역 보존(6.5), (2) `unwindStack` / `recordCurFrames` / debug sym 의 gen 프레임 처리, (3) `yield` 가 `#[generator]` 밖에서 컴파일러를 죽이는 문제, (4) 비-main `await` 의 `@panic("TODO")`.
+- 이 fork 가 코루틴 계층에서 먼저 해야 할 일은 새 기능이 아니라 안전이다. 우선순위(제안): (1) generator 지역 보존(6.5), (2) `unwindStack` / `recordCurFrames` / debug sym 의 gen 프레임 처리, (3) `yield` 가 `generator fn` 밖에서 컴파일러를 죽이는 문제, (4) 비-main `await` 의 `@panic("TODO")`.
   (4)는 임베딩에서 스크립트 한 줄로 호스트를 죽이는 경로라 에이전트 루프에 가장 직접적이었고 2026-11-08 에 고쳐졌다(2.6).
 - 에이전트 루프에 필요한 "호스트에서 멈추고 재개"는 길 2(VM 루프 탈출)가 가장 싸다. `Fiber` 는 그 위에서 같은 힙의 여러 실행 맥락이 정말 필요해질 때 검토해도 늦지 않다. 이는 판단이 아니라 6.4 의 변경 크기 비교다.
 - 문서와 코드가 어긋나는 곳이 많다(7.2). 이 영역은 문서를 믿지 말고 `rg` 로 소스 존재 여부부터 확인하는 습관이 필요하다.
@@ -1501,7 +1492,7 @@ CodeAct 루프의 이상적인 모양은 이렇다. 스크립트가 `r := tool('
 | 4 | `unwindStack` 의 `.gen` 분기가 반환 슬롯 1개를 가정 (`thread.zig:1006~1009`) | `-> int` generator 안 panic 이 호스트를 abort (exit 134) | 실습 7 (st4) | 실행으로 재현 |
 | 5 | `gen_next` / `gen_end` 에 debug sym 이 없음 (`bc_gen.zig:720, 733`) | 릴리스에서 generator 관련 panic 이 `unexpected 4`(`CL_ERROR_UNKNOWN`) | 실습 7 (st3, dn1) | 증상 재현, 원인은 추정 |
 | 6 | `recordCurFrames` 에 `.gen` 분기 없음 (`thread.zig:930`) | generator 안에서 `meta.stack_trace()` 가 호스트 abort | `stt1.cy` (exit 134) | 실행으로 재현 |
-| 7 | `yield` 를 `#[generator]` 없이 쓰면 sema 가 `.cast(.pointer)` 에서 죽음 (`sema.zig:711`) | 컴파일러 segfault / 임베딩 시 호스트 abort | 실습 7 (y4) | 실행으로 재현 |
+| 7 | `yield` 를 `generator fn` 이 아닌 함수에서 쓰면 sema 가 `.cast(.pointer)` 에서 죽음 (`sema.zig:711`) | 컴파일러 segfault / 임베딩 시 호스트 abort | 실습 7 (y4) | 실행으로 재현 |
 | 8 | 비-main 스레드의 `Future.await` 가 `@panic("TODO")` (`vm.zig:1026`) | 스크립트가 호스트를 abort (exit 134) | 실습 5 (t7) | 실행으로 재현. 2026-11-08 수정 `56af553f` (F-07, 2.6) |
 | 9 | 연달아 `spawn` 하면 한 워커에 쌓여 직렬 실행될 수 있음 (`worker.zig:69~72`) | 병렬성 저하 | 실습 5 (sp4) | 증상 재현, 원인은 추정 |
 | 10 | 스레드 패닉의 원래 메시지가 소실됨 (`worker.zig:153~163`) | 디버깅 곤란 | 실습 5 (t4) | 실행으로 재현. 2026-11-08 수정 `56af553f` (`Spawned thread panicked: <msg>`) |

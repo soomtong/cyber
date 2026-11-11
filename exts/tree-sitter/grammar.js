@@ -256,7 +256,7 @@ module.exports = grammar({
     function_definition: ($) =>
       seq(
         optional($.visibility),
-        'fn',
+        choice('fn', $.generator_fn),
         choice(
           seq(field('receiver', $.receiver), field('name', $._decl_name)),
           seq($._qualified_name, optional(field('template', $.template_parameters))),
@@ -265,6 +265,10 @@ module.exports = grammar({
         optional(field('return_type', $.return_type)),
         choice(seq(':', field('body', $._suite)), $._newline),
       ),
+
+    // `generator fn count() -> int:`. `generator` is not a reserved word. It is a modifier only
+    // when `fn` follows it, so the two words are one token.
+    generator_fn: (_) => token(seq('generator', /[ \t]+/, 'fn')),
 
     // `fn (&Account) deposit(...)`
     receiver: ($) => seq('(', optional(choice('scope', 'sink')), field('type', $._type), ')'),

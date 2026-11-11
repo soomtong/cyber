@@ -176,8 +176,7 @@ fn eq(exp %T, act T):
 #[bind='Wyhash.hash']
 fn hash_str(s str, seed int) -> int
 
-#[generator]
-fn go() -> int:
+generator fn go() -> int:
     yield 0
 
 ------------------------------------------------------------
@@ -232,18 +231,15 @@ fn go() -> int:
           (identifier)))
       (return_type
         (identifier))))
-  (decorated_definition
-    (attribute_list
-      (attribute
-        (identifier)))
-    (function_definition
-      (identifier)
-      (parameters)
-      (return_type
-        (identifier))
-      (block
-        (yield_statement
-          (number))))))
+  (function_definition
+    (generator_fn)
+    (identifier)
+    (parameters)
+    (return_type
+      (identifier))
+    (block
+      (yield_statement
+        (number)))))
 
 ============================================================
 Constants and globals

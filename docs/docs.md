@@ -286,7 +286,7 @@ There are `23` general keywords. This list categorizes them:
 - [Variables](#variables): [`var`](#local-variables) [`global`](#global-variables)
 - [Functions](#functions): `fn` `return`
 - [Ownership](#value-ownership): [`move`](#moving)
-- [Concurrency](#concurrency): [`yield`](#generators)
+- [Concurrency](#concurrency): [`yield`](#generators). `generator` is a modifier in front of `fn` and is not reserved.
 - [Types](#custom-types): `type` `with`
 - [Error handling](#error-handling): [`try`](#unwrap-block)
 - [Modules](#modules): `use`
@@ -3244,10 +3244,9 @@ print(v)
 
 ## Generators.
 Generators are stackless coroutines that are intended to yield values incrementally.
-A function annotated with `#[generator]` returns a `Generator[Fn]` when invoked:
+A function declared with `generator fn` returns a `Generator[Fn]` when invoked. The return type in the signature is the type of the yielded values:
 ```
-#[generator]
-fn iterate() -> int:
+generator fn iterate() -> int:
     yield 123
     yield 456
 
@@ -3259,14 +3258,16 @@ print(gen)
 
 A generator outlives the call that created it, so its parameters (including a method's receiver) can not be borrow types such as `&T`, `[&]T`, `?&T` or a struct that holds a borrow. Pass a value or a `^T` pointer instead:
 ```cy
-#[generator]
-fn watch(p &int) -> int:    --> CompileError: A `#[generator]` function can not take the borrow type `&int` as a parameter.
+generator fn watch(p &int) -> int:    --> CompileError: A `generator fn` can not take the borrow type `&int` as a parameter.
     yield p.*
 
-#[generator]
-fn watch(p ^int) -> int:    -- OK
+generator fn watch(p ^int) -> int:    -- OK
     yield p.*
 ```
+
+`generator` is not a reserved word. It is a modifier only when `fn` follows it, so it can still be used as a name. A hidden generator is written `-generator fn`, and attributes go before the modifier (`#[inline] generator fn`). `yield` outside a `generator fn` is a compile error.
+
+The `#[generator]` attribute of earlier versions was removed. It is a parse error that names the replacement: ``The `#[generator]` attribute was replaced by `generator fn`.``
 
 A generator begins and resumes execution with `next` which returns the next yielded value as an optional:
 ```cy
@@ -3528,16 +3529,15 @@ m := IntMap[str, my_hash]{}
 ## Attributes.
 An attribute annotates the declaration that follows it. It is written as `#[name]` or `#[name='value']`, on the line before the declaration or on the same line:
 ```cy
-#[generator]
-fn count() -> int:
-    yield 1
+#[inline]
+fn add(a int, b int) -> int:
+    return a + b
 
 #[extern] global errno Ptr[int]
 ```
 
 | Attribute | Applies to | Purpose |
 | -- | -- | -- |
-| `#[generator]` | function | The function is a [generator](#generators). |
 | `#[inline]` | function | Calls are inlined in bytecode with a larger size limit. |
 | `#[bind]` | function, type, global | The declaration is provided by the host or by a compiler hook. See [`#[bind]` hooks](#bind-hooks). |
 | `#[extern]` | function, global | The declaration is a C symbol. `#[extern='name']` gives the symbol name. See [FFI](#ffi). |
@@ -4378,13 +4378,13 @@ When the first input ends with `:`, the REPL will automatically indent the next 
 hello!
 ```
 
-An attribute line such as `#[generator]` is held until the declaration it annotates is complete. A one line declaration after an attribute is submitted with an empty input:
+An attribute line such as `#[inline]` is held until the declaration it annotates is complete. A one line declaration after an attribute is submitted with an empty input:
 ```bash
-> #[generator]
-| fn gen() -> int:
-    | yield 1
+> #[inline]
+| fn one() -> int:
+    | return 1
     | 
-> gen().next().?
+> one()
 `int` 1
 ```
 

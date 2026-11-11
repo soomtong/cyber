@@ -981,7 +981,7 @@ $ cyber main.cy
 | 속성 | 의미 | 확인한 곳 |
 |---|---|---|
 | `#[bind]` | 본문 대신 호스트(Zig) 구현에 연결 | `sema.zig:2794,2841`, `core.cy` 곳곳 |
-| `#[generator]` | 함수를 제너레이터로 만든다 | `sema.zig:2847`, `src/test/concurrency/generator.cy` |
+| `generator fn` | 함수를 제너레이터로 만든다. 속성이 아니라 `fn` 앞의 수식어다(2026-11-11 전에는 `#[generator]`) | `sema.zig:2847`, `src/test/concurrency/generator.cy` |
 | `#[consteval]` | 컴파일 타임에만 호출 가능 | `sema.zig:2850` |
 | `#[reserve]` | 빌트인 연산자 슬롯 예약(본문 없음) | `sema.zig:2853`, `core.cy:247,359` |
 | `#[extern]` | C ABI 함수(FFI) | `sema.zig:2844` |
@@ -1010,7 +1010,7 @@ panic: Expected `5`, found `4`.
 
 ### 3.18 제너레이터, `spawn`, `Future` 맛보기
 
-- `#[generator] fn`은 호출하면 본문을 실행하지 않고 `Generator[...]`를 돌려준다. `yield 값`으로 내보내고 `while g.next() |v|:`로 소비한다. `next()`는 `?T`다(`core.cy:4319-4351`).
+- `generator fn`은 호출하면 본문을 실행하지 않고 `Generator[...]`를 돌려준다. `yield 값`으로 내보내고 `while g.next() |v|:`로 소비한다. `next()`는 `?T`다(`core.cy:4319-4351`).
 - `spawn(함수, {인자...})`는 새 스레드에서 실행하고 `Future[T]`를 돌려준다. `.await()`로 결과를 기다린다(`core.cy:4381`). 인자는 튜플 리터럴이다. `Future.complete(값)`은 이미 끝난 Future다.
 - 주의: 이 투어는 제너레이터의 상태를 힙 객체(`^State`)에 둔 예제만 쓴다. 제너레이터 본문의 지역 변수는 `yield` 사이에 값이 보존되지 않는 문제가 있어(`i := 10; yield i; i += 1; yield i`가 `10, 11, 11`) [07-coroutines-concurrency.md](07-coroutines-concurrency.md)에서 따로 다룬다.
 
@@ -1019,8 +1019,7 @@ type State:
     cur int
     limit int
 
-#[generator]
-fn squares(s ^State) -> int:
+generator fn squares(s ^State) -> int:
     while s.cur < s.limit:
         yield s.cur * s.cur
         s.cur += 1
@@ -1070,7 +1069,7 @@ print(Future.complete(100).await())
 | `for (let i=0; i<n; i++)` | `for 0..n \|i\|:` |
 | `import m from './m'` | `use m 'm.cy'`, 표준은 `use math` |
 | `function f<T>(x: T)` | `fn f[T Any](x T)` 또는 `fn f(x %T)` |
-| `function*` / `yield` | `#[generator] fn` + `yield`. 소비는 `while g.next() \|v\|:` |
+| `function*` / `yield` | `generator fn` + `yield`. 소비는 `while g.next() \|v\|:` |
 | `async`/`await`, Promise | `spawn(f, {인자})` -> `Future[T]`, `.await()` |
 | `console.log(a, b)` | `print(x)` (인자 하나, 문자열 보간으로 합친다) |
 | `process.argv` | `os.args()` |
@@ -1344,7 +1343,7 @@ print(total)
 | `type Node object:` | `type Node:` (struct, 값 타입) |
 | `'$(name)'` 보간 | `'%{name}'` |
 | `throw` / `try` / `catch` | `!T`, `error.X`, `!`, `!else`, `panic` |
-| `coinit` / `coresume` / `coyield` | `#[generator]` + `yield`, `spawn`/`Future` |
+| `coinit` / `coresume` / `coyield` | `generator fn` + `yield`, `spawn`/`Future` |
 | 동적 타입 `dyn`, `any` | 정적 타입. 동적 디스패치는 `^Dyn[Trait]` |
 
 설계 철학은 "실패와 소유권을 타입에 드러낸다"로 요약된다. `Option`/`Result`/`move`/`^T`/`&T`가 모두 타입 시스템 안의 값이라서, 코딩 에이전트처럼 생성된 코드를 자동 실행하는 환경에서는 컴파일 타임에 거를 수 있는 오류 범위가 넓다는 이점이 있다(추정. 05 챕터의 패닉/인터럽트와 함께 평가해야 한다).

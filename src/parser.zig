@@ -21,7 +21,6 @@ const attributes = std.StaticStringMap(cy.ast.AttributeType).initComptime(.{
     .{ "extern", .extern_ },
     .{ "reserve", .reserve },
     .{ "call", .call },
-    .{ "generator", .generator },
     .{ "cond", .cond },
     .{ "unsafe", .unsafe },
     .{ "consteval", .consteval },
@@ -1555,6 +1554,13 @@ pub const Parser = struct {
             .fn_k => {
                 return self.parseFuncDecl(start, .{ .with = with, .attrs = attrs, .hidden = false, .allow_decl = true});
             },
+            .ident => {
+                if (self.isGeneratorFn(0)) {
+                    self.advance();
+                    return self.parseFuncDecl(start, .{ .with = with, .attrs = attrs, .hidden = false, .allow_decl = true, .generator = true });
+                }
+                return self.reportError("Unsupported `with` declaration.", &.{});
+            },
             else => {
                 return self.reportError("Unsupported `with` declaration.", &.{});
             },
@@ -1566,7 +1572,21 @@ pub const Parser = struct {
         with: ?*ast.With = null,
         hidden: bool,
         allow_decl: bool,
+        generator: bool = false,
     }; 
+
+    /// Whether the token `n` ahead is the `generator` modifier of a `generator fn` declaration.
+    /// `generator` is not a reserved word: it is only a modifier when `fn` follows it.
+    fn isGeneratorFn(self: *Parser, n: u32) bool {
+        const token = self.peekAhead(n);
+        if (token.tag() != .ident) {
+            return false;
+        }
+        if (self.peekAhead(n + 1).tag() != .fn_k) {
+            return false;
+        }
+        return std.mem.eql(u8, self.ast.src[token.pos()..token.data.end], "generator");
+    }
 
     fn parseFuncDecl(self: *Parser, start: u32, config: FuncDeclConfig) !*ast.Node {
         if (!config.allow_decl) {
@@ -1656,6 +1676,7 @@ pub const Parser = struct {
                 .stmts = .{ .ptr = stmts.ptr, .len = stmts.len },
                 .sig_t = .method,
                 .hidden = config.hidden,
+                .generator = config.generator,
                 .pos = self.tokenPos(start),
             });
             if (ret) |unwrap| {
@@ -1725,6 +1746,7 @@ pub const Parser = struct {
             .stmts = .{ .ptr = stmts.ptr, .len = stmts.len },
             .sig_t = .func,
             .hidden = config.hidden,
+            .generator = config.generator,
             .pos = self.tokenPos(start),
         });
         if (ret) |unwrap| {
@@ -2635,6 +2657,10 @@ pub const Parser = struct {
         switch (self.peek().tag()) {
             .ident => {
                 const token2 = self.peekAhead(1);
+                if (token2.tag() == .fn_k and self.isGeneratorFn(0)) {
+                    self.advance();
+                    return self.parseFuncDecl(start, .{ .attrs = &.{}, .hidden = false, .allow_decl = config.allow_decls, .generator = true });
+                }
                 if (token2.tag() == .colon) {
                     // return try self.parseBlock();
                     return self.reportError("Unsupported block statement.", &.{});
@@ -2682,6 +2708,18 @@ pub const Parser = struct {
                             .hidden = true,
                             .allow_decl = config.allow_decls,
                         });
+                    },
+                    .ident => {
+                        if (self.isGeneratorFn(1)) {
+                            self.advance();
+                            self.advance();
+                            return self.parseFuncDecl(start, .{
+                                .attrs = &.{},
+                                .hidden = true,
+                                .allow_decl = config.allow_decls,
+                                .generator = true,
+                            });
+                        }
                     },
                     .const_k => {
                         self.advance();
@@ -2844,6 +2882,9 @@ pub const Parser = struct {
         }
         const name = arg.as_name();
         const attr_t = attributes.get(name) orelse {
+            if (std.mem.eql(u8, name, "generator")) {
+                return self.reportError("The `#[generator]` attribute was replaced by `generator fn`.", &.{});
+            }
             return self.reportError("Unknown attribute.", &.{});
         };
 
@@ -2897,6 +2938,9 @@ pub const Parser = struct {
         }
         if (self.peek().tag() == .fn_k) {
             return self.parseFuncDecl(start, .{ .hidden = hidden, .attrs = attrs, .allow_decl = allow_decls });
+        } else if (self.isGeneratorFn(0)) {
+            self.advance();
+            return self.parseFuncDecl(start, .{ .hidden = hidden, .attrs = attrs, .allow_decl = allow_decls, .generator = true });
         } else if (self.peek().tag() == .global_k) {
             return try self.parseGlobalDecl(start, .{ .hidden = hidden, .attrs = attrs, .allow_static = allow_decls });
         } else if (self.peek().tag() == .use_k) {

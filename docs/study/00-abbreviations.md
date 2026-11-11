@@ -206,7 +206,7 @@ const cstr = sema.Cstr.initRequire(int_t);   // target_t = int, reqTypeCstr = tr
 | `Z` | C 쪽에서 본 Zig 구조체 | `ZThread`, `ZVM` (`vm.h`) |
 | `RES_` | VM 실행 결과 코드(C) | `RES_AWAIT`, `RES_INTERRUPT` |
 | `@` (Cyber 소스) | 컴파일러 · 런타임 내부 함수 | `@send`, `@await_`, `@program_init` |
-| `#` (Cyber 소스) | 컴파일 타임 구문 | `#if`, `#for`, `#[generator]` |
+| `#` (Cyber 소스) | 컴파일 타임 구문 | `#if`, `#for`, `#[inline]` |
 | `#[bind]` | Zig/C 구현과 연결되는 선언 | `#[bind] fn @new_thread() -> Thread` |
 
 ---

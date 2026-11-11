@@ -6,8 +6,7 @@ start := os.now()!
 -- replacement: each one is resumed once when created and once more in the second loop.
 global count int = 0
 
-#[generator]
-fn inc() -> int:
+generator fn inc() -> int:
     count += 1
     yield 0
     count += 1

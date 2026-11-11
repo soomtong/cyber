@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.5-dev 782-37d7dc4</div>
+    <div class="sub-title">v0.4.6-dev 789-dc2fc34</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1499,6 +1499,12 @@ It's encoded as 64-bit two's complement and represents integers in the range -(2
 <pre><code class="language-cy">a := 0xFF     -- Hexidecimal.
 a = 0o17      -- Octal.
 a = 0b1010    -- Binary.
+</code></pre>
+<p>An underscore can separate digits to make a long literal easier to read. It is optional and does not change the value. It must have a digit on both sides:</p>
+<pre><code class="language-cy">const PARAM_CAP r32 = 100_000
+mask := 0xff_ff_00_00
+bits := 0b1111_0000
+ratio := 1_000.000_5
 </code></pre>
 <p>A decimal literal must fit in the target integer type. Without a target type that is <code>int</code> (64-bit signed), so <code>9223372036854775808</code> is a compile error instead of wrapping around. Hexadecimal, octal and binary literals, and decimals with a <code>u</code> suffix, are 64-bit patterns:</p>
 <pre><code class="language-cy">a := 0xFFFFFFFFFFFFFFFF      -- -1
@@ -4694,6 +4700,7 @@ typedef struct MyNode {
 <li><a href="#run-program" title="">Run program.</a></li>
 <li><a href="#help" title="">Help.</a></li>
 <li><a href="#repl" title="">REPL.</a></li>
+<li><a href="#format-source" title="">Format source.</a></li>
 <li><a href="#jit-compiler" title="">JIT compiler.</a></li>
 <li><a href="#c-backend" title="">C backend.</a></li>
 </ul>
@@ -4766,6 +4773,47 @@ hello!
 > ?int(none)
 `?int` none
 </code></pre>
+<a href="#cli">^topic</a>
+<h2 id="format-source">Format source. <a href="#format-source">#</a></h2>
+<p><code>cyber fmt</code> rewrites source files in one fixed style and prints the paths that changed. There are no options for the style.</p>
+<pre><code class="language-bash">cyber fmt main.cy            # Rewrite one file.
+cyber fmt src examples       # Rewrite every `.cy` file under the directories.
+cyber fmt --check src        # Write nothing. Print the paths that would change and exit with 1 if there are any.
+cyber fmt --stdout main.cy   # Print the result instead of writing the file.
+cat main.cy | cyber fmt      # Read stdin, write stdout.
+</code></pre>
+<p>The formatter changes whitespace only. It never joins or splits lines, and it never moves or rewrites a token or a comment:</p>
+<pre><code class="language-cy">-- Before.
+use   math
+nouns:=[]str{'World','mundo'}   -- Trailing comment.
+
+
+for nouns |n|:
+  print( 'Hello, %{n}!' )
+  total+=n.len()*2
+
+-- After.
+use math
+nouns := []str{'World', 'mundo'}   -- Trailing comment.
+
+for nouns |n|:
+    print('Hello, %{n}!')
+    total += n.len() * 2
+</code></pre>
+<ul>
+<li>Blocks are indented by 4 spaces. Tabs and other widths are converted.</li>
+<li>A line inside open brackets is indented 4 spaces from the line that opened the bracket. A line that starts with the closing bracket lines up with it. Other continuation lines, such as the right side of an operator, keep their indentation relative to the statement.</li>
+<li>Binary operators, <code>:=</code>, <code>-></code>, <code>=></code> and assignments have one space on each side. Unary operators have none after them. An operator inside a range bound is kept as written: <code>a[i..i+n]</code>.</li>
+<li><code>=</code> inside brackets is kept as written: <code>Vec2{x=1}</code>, <code>Vec2{x = 1}</code> and <code>#[extern='puts']</code> all stay.</li>
+<li>There is no space inside brackets, none before <code>,</code> and <code>:</code>, and one after them.</li>
+<li>Any other run of spaces becomes one space, so columns that were aligned by hand are not kept. The gap before a trailing comment is kept.</li>
+<li>Trailing whitespace is removed, several blank lines become one, and the file ends with one new line.</li>
+<li>The contents of strings, including multi-line strings and the expressions in a string template, are not touched.</li>
+</ul>
+<p>A file with a syntax error is reported as <code>path:line:col: error: message</code> and left alone. Before anything is written, the result is parsed again and compared with the original syntax tree and comments. If they differ the file is left alone and an internal error is reported.</p>
+<p>A directory search skips directories whose name starts with <code>.</code> (such as <code>.git</code> and <code>.zig-cache</code>), <code>zig-out</code> and <code>node_modules</code>, and it does not follow symbolic links. A path that is named on the command line is always formatted. A file or directory that can not be read or written is reported as <code>path: error: Name</code>, the other files are still formatted, and the exit code is 1.</p>
+<p>A file is rewritten in place, it is not replaced by a new file. A symbolic link stays a link and its target is rewritten, hard links stay linked, the permission bits are kept, and a read-only file is reported as an error.</p>
+<p>Hosts that embed <code>libcyber</code> call the same formatter with <code>cl_vm_format</code>. It returns <code>CL_FORMAT_OK</code>, <code>CL_FORMAT_SYNTAX_ERROR</code> (the source needs a fix, the message is <code>line:col: message</code>), <code>CL_FORMAT_INTERNAL_ERROR</code> (the formatter refused its own output, the source is fine and should be kept) or <code>CL_FORMAT_NO_MEMORY</code>.</p>
 <a href="#cli">^topic</a>
 <h2 id="jit-compiler">JIT compiler. <a href="#jit-compiler">#</a></h2>
 <p>The JIT compiler is not supported. Passing <code>-jit</code> (or <code>CL_JIT</code> through the embedding API) fails with a compile error. Use the default bytecode VM, or the C backend (<code>-tcc</code>, <code>-cc</code>) for native performance.</p>

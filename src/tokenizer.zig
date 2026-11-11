@@ -267,7 +267,7 @@ pub const Tokenizer = struct {
     }
 
     fn isAtEnd(self: *const Tokenizer) bool {
-        return self.src.len == self.nextPos;
+        return self.nextPos >= self.src.len;
     }
 
     fn isNext(self: *const Tokenizer, ch: u8, lookahead: u32) bool {
@@ -283,7 +283,12 @@ pub const Tokenizer = struct {
         return ch;
     }
 
+    /// Returns 0 at the end of the source. No token starts with or continues on a 0 byte, so a branch that looks
+    /// at the next character after an operator (`a.`, `x <`) falls to its default instead of reading out of bounds.
     fn peek(self: *const Tokenizer) u8 {
+        if (self.nextPos >= self.src.len) {
+            return 0;
+        }
         return self.src[self.nextPos];
     }
 
@@ -1066,7 +1071,7 @@ pub const Tokenizer = struct {
     }
 
     fn isOctDigit(ch: u8) bool {
-        return ch >= '0' and ch <= '8';
+        return ch >= '0' and ch <= '7';
     }
 
     fn isBinDigit(ch: u8) bool {
@@ -1128,7 +1133,8 @@ pub const Tokenizer = struct {
                     }
                     ch = peek(t);
                 }
-                if (ch < '0' and ch > '9') {
+                if (ch < '0' or ch > '9') {
+                    // The exponent starts with a digit: `1e_5` and `1e-_5` are not numbers.
                     return t.reportError("Expected number.", &.{});
                 }
 

@@ -90,4 +90,14 @@ t.eq(5 + 90 * (time - minTime) / timeRange, 5)
 -- Left recursion with different operators.
 t.eq(5 + 2 * 3 / 3, 7)
 
+-- Two higher terms joined by a middle operator, after a lower operator.
+-- The second term was parsed with the first term's operator: `2 * 3 + 4 * 5` became `((2 * 3) + 4) * 5`.
+t.eq(26 == 2 * 3 + 4 * 5, true)
+t.eq(1 < 2 * 3 - 4 * 5, false)
+t.eq(100 == 10 * 5 + 5 * 10, true)
+t.eq(true and 1 + 2 * 3 == 7, true)
+t.eq(0 == 2 * 3 - 2 * 3, true)
+t.eq(1 + 2 * 3 * 4 - 5, 20)
+t.eq(30 == 2 * 3 + 4 * 5 + 2 * 2, true)
+
 --cytest: pass

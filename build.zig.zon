@@ -1,6 +1,6 @@
 .{
     .name = .cyber,
-    .version = "0.4.4",
+    .version = "0.4.5",
     .fingerprint = 0xe355852a90df6d01,
     .minimum_zig_version = "0.17.1",
     .dependencies = .{

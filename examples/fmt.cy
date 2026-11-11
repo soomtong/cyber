@@ -9,7 +9,7 @@
 --
 --   * Blocks are detected from the original indentation.
 --   * Binary and unary operators are told apart by the token before them.
---   * `*` and `%` are also type prefixes (`a *T`, `x %T`). They keep their spacing when in doubt.
+--   * Where that is ambiguous (`a *T`, `if (a) -b else b`), the spacing is kept as written.
 --
 -- Like `cyber fmt`, it never joins or splits lines and never touches the inside of a string literal.
 -- The pipeline is: tokenize -> classify operators -> indent lines -> emit -> verify.
@@ -19,7 +19,7 @@ use os
 
 const indent_width = 4
 
-fn main() -> !void:
+fn main():
     check := false
     path := ''
     for os.args()[1..] |arg|:
@@ -31,13 +31,15 @@ fn main() -> !void:
             path = ''
             break
     if path == '':
-        eprint('Usage: cyber fmt.cy [--check] <file.cy>')
+        eprint('Usage: cyber examples/fmt.cy [--check] <file.cy>')
         os.exit(2)
 
-    src := os.read_file_str(path)!
+    src := os.read_file_str(path) !else |err|:
+        eprint('error: can not read `%{path}`: %{err}')
+        os.exit(1)
 
-    -- Refuse to format source that does not parse.
-    -- `cy.parse` reports the syntax error and panics, so there is nothing to handle here.
+    -- Refuse to format source that does not parse. On a syntax error `cy.parse` prints the error and
+    -- panics, which ends the script. The check for `none` only guards against a parser that returns.
     if cy.parse(src).root == none:
         eprint('error: can not parse `%{path}`.')
         os.exit(1)
@@ -56,7 +58,9 @@ fn main() -> !void:
         os.exit(3)
 
     if !check:
-        os.stdout().write_all(out)!
+        os.stdout().write_all(out) !else |err|:
+            eprint('error: can not write to stdout: %{err}')
+            os.exit(1)
     else out != src:
         eprint('%{path} is not formatted.')
         os.exit(1)
@@ -369,11 +373,15 @@ fn is_prefix_keyword(word str) -> bool:
 -- Decides for each operator whether it is binary, unary or part of an op assignment.
 fn (&Formatter) classify():
     -- For each open bracket, whether its closing bracket ends an operand.
-    -- It does not for a type such as `[]int` and for the condition of an `if` expression: `[]*int`, `if (a) -b else b`.
+    -- It does not for a type such as `[]int`: `[]*int`.
     operands := []bool{}
+
+    -- For each open bracket, whether it holds the condition of an `if`: `if (a) -b else b`.
+    conds := []bool{}
 
     -- Whether the previous token ends an operand.
     after_operand := false
+    after_cond := false
     prev_text := ''
 
     for 0..self.tokens.len() |i|:
@@ -385,6 +393,7 @@ fn (&Formatter) classify():
             after_operand = false
 
         operand := false
+        cond := false
         switch t.kind:
             case .word:
                 operand = !is_prefix_keyword(t.text)
@@ -393,17 +402,17 @@ fn (&Formatter) classify():
             case .string:
                 operand = true
             case .open:
-                switch t.text:
-                    case '[': operands += after_operand and t.gap == 0 and !t.line_start
-                    case '(': operands += prev_text != 'if'
-                    else: operands += true
+                operands += t.text != '[' or (after_operand and t.gap == 0 and !t.line_start)
+                conds += t.text == '(' and prev_text == 'if'
             case .close:
                 operand = true
                 if operands.len() > 0:
                     operand = operands.last()
+                    cond = conds.last()
                     operands = operands.size_down(operands.len() - 1)
+                    conds = conds.size_down(conds.len() - 1)
             case .op:
-                self.tokens[i].mark = self.op_mark(i, after_operand)
+                self.tokens[i].mark = self.op_mark(i, after_operand, after_cond)
 
                 -- Postfix operators. `!` is also a type prefix: `res !int`.
                 postfix_bang := t.text == '!' and after_operand and t.gap == 0
@@ -411,6 +420,7 @@ fn (&Formatter) classify():
             else:
                 pass
         after_operand = operand
+        after_cond = cond
         prev_text = t.text
 
     for 0..self.tokens.len() |i|:
@@ -418,7 +428,9 @@ fn (&Formatter) classify():
             self.keep_range_bound(i, -1)
             self.keep_range_bound(i, 1)
 
-fn (&Formatter) op_mark(i int, after_operand bool) -> Mark:
+-- `after_cond` is set when the operator follows the condition of an `if`. It is then binary in an `if`
+-- statement and unary in an `if` expression.
+fn (&Formatter) op_mark(i int, after_operand bool, after_cond bool) -> Mark:
     t := self.tokens[i]
     switch t.text:
         case '==', '!=', '<=', '>=':
@@ -438,10 +450,14 @@ fn (&Formatter) op_mark(i int, after_operand bool) -> Mark:
         if !next.line_start and next.kind != .comment:
             if next.text == '=' and next.gap == 0:
                 return .assign_op
-            if (t.text == '*' or t.text == '%') and !t.line_start and (t.gap > 0) != (next.gap > 0):
-                -- Looks like a type prefix: `a *T`, `x %T`.
+            if (after_cond or is_type_prefix(t.text)) and !t.line_start and (t.gap > 0) != (next.gap > 0):
+                -- Looks like a prefix: `a *T`, `if (a) -b else b`.
                 return .none
     return .binary
+
+-- Operators that also start a type: `a *T`, `a &&T`, `a %T`.
+fn is_type_prefix(op str) -> bool:
+    return op == '*' or op == '&&' or op == '%'
 
 -- The spacing of `0..n-1` is kept. `0..n - 1` would read as if the range bound tighter.
 -- Walks from the range operator to the start (`step` is -1) or the end (`step` is 1) of the bound.
@@ -486,13 +502,13 @@ fn ends_range_bound(t Token) -> bool:
 
 -- Whether a statement continues on the next line when this is the last token of a line.
 fn continues_line(t Token) -> bool:
-    if t.kind == .comma or t.text == 'and' or t.text == 'or':
-        return true
-    if t.kind != .op:
-        return false
     switch t.text:
+        case ',', 'and', 'or', 'not': return true
         case '=', ':=', '=>', '+', '-', '*', '/', '%', '**', '<', '>', '<<', '>>', '&&', '||', '~': return true
         case '==', '!=', '<=', '>=': return true
+
+        -- A block `else` ends with a colon. This one is the `else` of an expression: `a ?else`.
+        case 'else': return true
         else: return false
 
 -- Computes the new indentation of each line.
@@ -543,17 +559,15 @@ fn (&Formatter) indent():
 
             block := Block{width = line.width, new_width = 0, depth = depth, outer_stmt = stmt, outer_base = base}
             if in_block(blocks, depth):
-                if blocks.len() > 0:
-                    b := blocks.last()
-                    block.new_width = b.new_width
-                    if line.width > b.width:
-                        -- Indented deeper than the statement above. This opens a block.
-                        block.new_width += indent_width
-                    else:
-                        blocks = blocks.size_down(blocks.len() - 1)
-                blocks += block
-                new_width = block.new_width
-            else !closes and ended == -1 and self.tokens[prev_last].kind == .colon and line.width > self.lines[prev].width:
+                if blocks.len() == 0:
+                    -- The first top level statement.
+                    blocks += block
+                else line.width > blocks.last().width:
+                    -- Indented deeper than the statement above. This opens a block.
+                    block.new_width = blocks.last().new_width + indent_width
+                    blocks += block
+                new_width = blocks.last().new_width
+            else !closes and ended == -1 and self.opens_block(prev, prev_last, line.width):
                 -- The body of a lambda that is declared inside brackets.
                 block.new_width = self.lines[prev].new_width + indent_width
                 blocks += block
@@ -603,6 +617,10 @@ fn (&Formatter) indent():
         if self.lines[i].is_comment:
             self.lines[i].new_width = self.comment_indent(i)
 
+-- Whether a line with this indentation starts the body of a lambda that the line `prev` declares.
+fn (&Formatter) opens_block(prev int, prev_last int, width int) -> bool:
+    return self.tokens[prev_last].kind == .colon and width > self.lines[prev].width
+
 -- Whether a line at this bracket depth is a statement of a block and not a continuation inside brackets.
 fn in_block(blocks []Block, depth int) -> bool:
     return depth == 0 or (blocks.len() > 0 and blocks.last().depth == depth)
@@ -639,27 +657,35 @@ fn (&Formatter) comment_indent(idx int) -> int:
     return self.lines[near].new_width
 
 -- ---------------------------------------------------------------------------------------------------------
--- Spacing.
+-- Spacing and output.
 -- ---------------------------------------------------------------------------------------------------------
 
 fn (&Formatter) emit() -> str:
-    -- Joining the parts once at the end avoids copying the output for each token.
-    parts := []str{self.prefix}
+    -- The output is built as bytes. Appending to a `str` copies it each time.
+    out := []byte{}
+    out += self.prefix.span()
     if self.prefix.len() > 0 and self.tokens.len() > 0 and !self.prefix.ends_with('\n'):
-        parts += '\n'
+        out += '\n'
 
     for 0..self.tokens.len() |i|:
         t := self.tokens[i]
         if !t.line_start:
-            parts += ' ' ** self.spacing(i)
+            out = append_spaces(out, self.spacing(i))
         else:
             if i > 0:
-                parts += if (t.blank_before) '\n\n' else '\n'
-            parts += ' ' ** self.lines[t.line].new_width
-        parts += t.text
+                out += '\n'
+                if t.blank_before:
+                    out += '\n'
+            out = append_spaces(out, self.lines[t.line].new_width)
+        out += t.text.span()
     if self.tokens.len() > 0:
-        parts += '\n'
-    return parts.join('')
+        out += '\n'
+    return str(out)
+
+fn append_spaces(out []byte, n int) -> []byte:
+    if n == 1:
+        return out + ' '
+    return out + (' ' ** n).span()
 
 -- Number of spaces between the token `i` and the token before it on the same line.
 fn (&Formatter) spacing(i int) -> int:

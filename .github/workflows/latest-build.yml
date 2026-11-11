@@ -296,15 +296,15 @@ jobs:
 
       - name: Zip. (linux/macos)
         if: (env.BUILD_HOST == 'ubuntu-24.04' || env.BUILD_HOST == 'macos-26-intel' || env.BUILD_HOST == 'macos-26') && env.BUILD_TARGET != 'wasm32-wasi' && env.BUILD_CMD == 'cli'
-        # The CLI loads its standard modules from `src/` next to the executable.
+        # The CLI embeds its standard modules, so the bundle is the executable alone.
         run: |
-           tar -C zig-out/bin -czvf ${{ env.BIN_ZIP }} cyber src
+           tar -C zig-out/bin -czvf ${{ env.BIN_ZIP }} cyber
 
       - name: Zip. (windows)
         if: env.BUILD_TARGET == 'x86_64-windows-gnu' && env.BUILD_CMD == 'cli'
         shell: bash
         run: |
-          cd zig-out/bin && 7z a ../../${{env.BIN_ZIP}} cyber.exe src
+          cd zig-out/bin && 7z a ../../${{env.BIN_ZIP}} cyber.exe
 
       - name: Move. (windows lib)
         if: env.BUILD_TARGET == 'x86_64-windows-gnu' && env.BUILD_CMD == 'lib'

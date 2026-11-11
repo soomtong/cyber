@@ -9,7 +9,7 @@ use macos 'os.macos.cy'
 use linux 'os.linux.cy'
 
 #[cond=meta.system() != .windows]
-use lc 'libc.cy'
+use lc 'libc'
 
 #[cond=meta.system() == .windows]
 use windows 'os.windows.cy'

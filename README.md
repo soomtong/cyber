@@ -32,6 +32,6 @@ curl -fsSL https://raw.githubusercontent.com/soomtong/cyber/master/install.sh | 
 ```
   The bundle is unpacked into `/usr/local/lib/cyber` and linked as `/usr/local/bin/cyber`.
   Override the locations with `CYBER_HOME` and `CYBER_BIN`; `sudo` is used only when they are not writable.
-- Install from [Downloads](https://github.com/soomtong/cyber/releases). Keep `cyber` and the bundled `src/` directory together.
+- Install from [Downloads](https://github.com/soomtong/cyber/releases). The `cyber` executable is self-contained (bundles before 0.4.7 also need the `src/` directory next to it).
 - Packages
   - Arch Linux User Repository (AUR): [cyber](https://aur.archlinux.org/packages/cyber-bin), [cyber(alternative)](https://aur.archlinux.org/packages/cyberscript)

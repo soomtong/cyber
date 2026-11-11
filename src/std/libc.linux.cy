@@ -1,4 +1,4 @@
-use lc 'libc.cy'
+use lc 'libc'
 use c
 use meta
 

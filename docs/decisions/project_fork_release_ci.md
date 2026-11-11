@@ -33,6 +33,18 @@
 
 ## 릴리스 번들
 
+- 2026-11-12(0.4.7)부터 CLI는 표준 모듈을 실행 파일에 내장한다. 번들은 `cyber`(Windows는 `cyber.exe`) 하나다. 아래 항목의
+  `src/` 이야기는 0.4.6까지의 번들에 해당한다.
+  - `src/cli.zig`의 `std_mods`가 이름을 소스(`@embedFile` 또는 bind 함수가 돌려주는 소스)와 bind 함수에 잇는다. 이름으로
+    import하는 모듈은 `core` · `meta` · `math` · `cy` · `c` · `io` · `test` · `libc` · `os` · `cli`, 플랫폼 모듈
+    (`os.macos.cy` 등)은 타깃 것만 내장하고 표준 모듈 안에서 상대 경로로만 import된다.
+  - chunk uri는 라이브러리의 기본 로더와 같은 이름(`core`)이다. 스택 트레이스와 컴파일 오류의 위치가
+    `/usr/local/lib/cyber/src/builtins/core.cy:196:5`에서 `core:196:5`로 바뀐다.
+  - 디스크의 소스를 읽는 경로는 남기지 않았다(Node.js의 `--node-builtin-modules-path` 같은 개발용 옵션 없음). 이유: 실행 파일과
+    맞지 않는 `src/`가 옆에 있으면 bind 표와 소스가 어긋나고, builtin 모듈 전용 규칙(intrinsic · `#[consteval]`)이 디스크 파일을
+    고친 사람에게 열린다. `.cy`를 고치면 `zig build cli`가 다시 내장한다.
+  - `install.sh`의 배치(`CYBER_HOME`에 풀고 `CYBER_BIN`에 심링크)는 그대로다. 이전 설치의 `CYBER_HOME/src`는 남아도 읽지 않는다.
+  - `build_config.mod_root`는 테스트 바이너리만 받는다(기대 트레이스의 테스트 스크립트 경로).
 - 릴리스 CLI는 `build_config.mod_root`가 없어서 실행 파일 디렉터리에서 `src/builtins/*.cy`,
   `src/std/*.cy`를 읽는다. 번들에 `src/`를 함께 넣는다(`cli` 스텝이 `zig-out/bin/src`에 설치).
 - `install.sh`는 번들을 `CYBER_HOME`(기본 `/usr/local/lib/cyber`)에 풀고 `CYBER_BIN`(기본
@@ -109,7 +121,7 @@
 sha=$(git rev-parse <태그>); n=$(git rev-list --count 0.3..$sha)
 zig build cli -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false -Dbuild=$n -Dcommit=${sha:0:7}
 zig-out/bin/cyber version            # Cyber 0.4.4 build-N-xxxxxxx
-tar -C zig-out/bin -czvf cyber-macos-arm64.tar.gz cyber src
+tar -C zig-out/bin -czvf cyber-macos-arm64.tar.gz cyber
 zig build lib -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false -Dbuild=$n -Dcommit=${sha:0:7}
 cp zig-out/lib/libcyber.a libcyber-macos-arm64.a
 gh release upload <태그> cyber-macos-arm64.tar.gz libcyber-macos-arm64.a -R soomtong/cyber --clobber

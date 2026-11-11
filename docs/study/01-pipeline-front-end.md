@@ -125,7 +125,7 @@ loadChunk(c)
  └─ reserveChunkSyms(c)         -> 최상위 선언만 훑어 Sym 예약     (compiler.zig:1148)
 ```
 
-CLI에서는 표준 모듈의 `.cy` 소스를 실행 파일에 박힌 사본이 아니라 `mod_root`(빌드 옵션 또는 실행 파일 디렉터리, `cli.zig:66-71`) 아래 `src/builtins/core.cy` 같은 경로에서 매번 읽는다(내장 사본은 임베딩용 `default_loader`가 쓴다). 에러 스택에 `zig-out/bin/src/builtins/core.cy:148:5`가 찍히는 이유다(00 챕터 참고). `build.zig:145-160`이 이 파일들을 `bin/src/` 아래에 설치한다.
+(0.4.6 기준. 0.4.7부터 CLI도 내장 사본을 쓰고 스택에는 `core:148:5`처럼 모듈 이름이 찍힌다.) CLI에서는 표준 모듈의 `.cy` 소스를 실행 파일에 박힌 사본이 아니라 `mod_root`(빌드 옵션 또는 실행 파일 디렉터리, `cli.zig:66-71`) 아래 `src/builtins/core.cy` 같은 경로에서 매번 읽는다(내장 사본은 임베딩용 `default_loader`가 쓴다). 에러 스택에 `zig-out/bin/src/builtins/core.cy:148:5`가 찍히는 이유다(00 챕터 참고). `build.zig:145-160`이 이 파일들을 `bin/src/` 아래에 설치한다.
 
 `reserveChunkSyms`는 루트의 문장을 선언 종류별로 분기한다(`import_stmt`, `type_alias_decl`, `struct_decl`, `enumDecl`, `template`, `const_decl`, `global_decl`, `funcDecl` 등). 선언이 아닌 문장이 imported 모듈에 있으면 여기서 `Top level statement is not allowed from imported module.`(`compiler.zig:1240-1242`)로 거부한다. 메인 청크만 최상위 문장을 가질 수 있다.
 

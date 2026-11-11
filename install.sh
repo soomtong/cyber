@@ -42,9 +42,9 @@ else
   CYBER_BUNDLE="${CYBER_RELEASES}/cyber-linux-x64.tar.gz"
 fi
 
-# The bundle holds the executable and its standard modules (`src/`), which the
-# executable looks up next to itself. Keep them together under CYBER_HOME and
-# link the binary into CYBER_BIN, which should be on PATH.
+# The bundle holds the executable. Its standard modules are embedded since 0.4.7;
+# older bundles also hold `src/`, which the executable looks up next to itself.
+# Unpack under CYBER_HOME and link the binary into CYBER_BIN, which should be on PATH.
 CYBER_HOME="${CYBER_HOME:-/usr/local/lib/cyber}"
 CYBER_BIN="${CYBER_BIN:-/usr/local/bin}"
 

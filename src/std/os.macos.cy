@@ -1,6 +1,6 @@
 use os
 use c
-use lc 'libc.cy'
+use lc 'libc'
 use meta
 
 fn fromStat(cstat Ptr[lc.Stat]) -> os.FileInfo:

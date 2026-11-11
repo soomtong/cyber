@@ -34,6 +34,51 @@ const Config = struct {
     reload: bool = false,
 };
 
+/// A standard module of the CLI. The source is embedded in the executable, so the CLI does not read `src/` from disk.
+const StdMod = struct {
+    /// Source of a module whose bind function does not return it.
+    src: []const u8 = "",
+    bind_fn: C.ModuleBindFn = null,
+};
+
+const StdEntry = struct { []const u8, StdMod };
+
+/// Modules that any chunk can import by name (`use os`). The name is also the chunk uri, the same as in the library's
+/// default loader (`compiler.default_loader`).
+const named_std_mods = [_]StdEntry{
+    .{ "core", .{ .bind_fn = C.mod_bind_core } },
+    .{ "meta", .{ .bind_fn = C.mod_bind_meta } },
+    .{ "math", .{ .bind_fn = C.mod_bind_math } },
+    .{ "cy", .{ .bind_fn = C.mod_bind_cy } },
+    .{ "c", .{ .bind_fn = C.mod_bind_c } },
+    .{ "io", .{ .bind_fn = C.mod_bind_io } },
+    .{ "test", .{ .bind_fn = C.mod_bind_test } },
+    .{ "libc", .{ .src = @embedFile("std/libc.cy") } },
+    .{ "os", .{ .src = os_mod.Src, .bind_fn = &os_mod.bind } },
+    .{ "cli", .{ .src = Src, .bind_fn = &bind } },
+};
+
+/// Platform modules. Only a standard module can import them, by a path relative to its own uri
+/// (`use macos 'os.macos.cy'`). They are imported behind `#[cond=meta.system() == ...]`, so each target embeds its own.
+const platform_std_mods: []const StdEntry = switch (builtin.target.os.tag) {
+    .macos => &.{
+        .{ "os.macos.cy", .{ .src = @embedFile("std/os.macos.cy") } },
+        .{ "libc.macos.cy", .{ .src = @embedFile("std/libc.macos.cy") } },
+    },
+    .linux => &.{
+        .{ "os.linux.cy", .{ .src = @embedFile("std/os.linux.cy") } },
+        .{ "libc.linux.cy", .{ .src = @embedFile("std/libc.linux.cy") } },
+    },
+    .windows => &.{
+        .{ "os.windows.cy", .{ .src = @embedFile("std/os.windows.cy") } },
+        .{ "windows/windows.cy", .{ .src = @embedFile("std/windows/windows.cy") } },
+        .{ "windows/kernel32.cy", .{ .src = @embedFile("std/windows/kernel32.cy") } },
+    },
+    else => &.{},
+};
+
+const std_mods = std.StaticStringMap(StdMod).initComptime(named_std_mods ++ platform_std_mods);
+
 pub const App = struct {
     alloc: std.mem.Allocator,
     config: Config,
@@ -42,65 +87,25 @@ pub const App = struct {
     httpClient: http.HttpClient,
     stdHttpClient: if (!is_wasm) *http.StdHttpClient else void,
 
-    mod_root: []const u8,
-
-    // Short name to abs path.
+    /// Import name to chunk uri, for names that resolve without looking at the file system.
     mod_uris: std.StringHashMapUnmanaged([]const u8) = .empty,
 
-    // Abs path to bind function.
-    mod_bindings: std.StringHashMapUnmanaged(C.ModuleBindFn) = .empty,
-
     pub fn deinit(self: *App) void {
-        var iter = self.mod_bindings.keyIterator();
-        while (iter.next()) |abs_path| {
-            self.alloc.free(abs_path.*);
-        }
-        self.mod_bindings.deinit(self.alloc);
         self.mod_uris.deinit(self.alloc);
-        self.alloc.free(self.mod_root);
     }
 };
 
 pub fn init_cli(vm: *C.VM, alloc: std.mem.Allocator) !void {
-    // Determine module root.
-    var mod_root: []const u8 = undefined;
-    if (build_config.mod_root) |mod_root_| {
-        mod_root = try alloc.dupe(u8, mod_root_);
-    } else {
-        mod_root = try std.process.executableDirPathAlloc(stdx.io(), alloc);
-    }
-
     const app = try alloc.create(App);
     app.* = .{
         .config = .{},
         .alloc = alloc,
         .httpClient = undefined,
         .stdHttpClient = undefined,
-        .mod_root = mod_root,
     };
 
-    // Init builtin module lookup tables.
-    const ModInfo = struct {
-        name: []const u8,
-        uri: []const u8,
-        bind_fn: C.ModuleBindFn,
-    };
-    const mods = [_]ModInfo{
-        .{ .name = "core", .uri = "src/builtins/core.cy", .bind_fn = C.mod_bind_core },
-        .{ .name = "meta", .uri = "src/builtins/meta.cy", .bind_fn = C.mod_bind_meta },
-        .{ .name = "math", .uri = "src/std/math.cy", .bind_fn = C.mod_bind_math },
-        .{ .name = "cy", .uri = "src/builtins/cy.cy", .bind_fn = C.mod_bind_cy },
-        .{ .name = "c", .uri = "src/builtins/c.cy", .bind_fn = C.mod_bind_c },
-        .{ .name = "libc", .uri = "src/std/libc.cy", .bind_fn = null },
-        .{ .name = "os", .uri = "src/std/os.cy", .bind_fn = &os_mod.bind },
-        .{ .name = "io", .uri = "src/std/io.cy", .bind_fn = C.mod_bind_io },
-        .{ .name = "cli", .uri = "src/std/cli.cy", .bind_fn = &bind },
-        .{ .name = "test", .uri = "src/std/test.cy", .bind_fn = C.mod_bind_test },
-    };
-    for (mods) |mod| {
-        const abs_path = try alloc.print("{s}/{s}", .{ app.mod_root, mod.uri });
-        try app.mod_uris.putNoClobber(alloc, mod.name, abs_path);
-        try app.mod_bindings.putNoClobber(alloc, abs_path, mod.bind_fn);
+    for (named_std_mods) |mod| {
+        try app.mod_uris.putNoClobber(alloc, mod[0], mod[0]);
     }
 
     if (!is_wasm) {
@@ -175,10 +180,19 @@ pub fn loader(vm_: ?*C.VM, mod_: ?*C.Sym, spec_: C.Bytes, res: [*c]C.LoaderResul
     const spec = C.from_bytes(spec_);
 
     const app: *App = @ptrCast(@alignCast(C.vm_user_data(vm)));
-    if (app.mod_bindings.get(spec)) |opt_binding| {
-        if (opt_binding) |binding| {
-            _ = binding(vm_, mod_);
+    if (std_mods.get(spec)) |mod| {
+        var src = mod.src;
+        if (mod.bind_fn) |bind_fn| {
+            const bound_src = C.from_bytes(bind_fn(vm_, mod_));
+            if (src.len == 0) {
+                src = bound_src;
+            }
         }
+        res[0] = .{
+            .src = C.to_bytes(src),
+            .manage_src = false,
+        };
+        return true;
     }
 
     if (is_wasm_freestanding) {
@@ -242,6 +256,24 @@ fn resolver(vm_: ?*C.VM, params: C.ResolverParams, res_uri_len: ?*usize) callcon
         if (params.chunkId != NullId) {
             cur_uri = C.from_bytes(params.curUri);
         }
+    }
+
+    if (std_mods.has(cur_uri)) {
+        // A standard module imports a platform module. Both are embedded, so the path is joined to the importer's
+        // uri without looking at the file system.
+        const out = params.buf[0..params.bufLen];
+        const res = if (std.mem.lastIndexOfScalar(u8, cur_uri, '/')) |idx|
+            std.mem.print(out, "{s}/{s}", .{ cur_uri[0..idx], uri }) catch @panic("error")
+        else
+            std.mem.print(out, "{s}", .{uri}) catch @panic("error");
+        if (!std_mods.has(res)) {
+            const msg = app.alloc.print("Standard module `{s}` does not have the module `{s}`.", .{ cur_uri, uri }) catch return false;
+            defer app.alloc.free(msg);
+            C.reportApiError(@ptrCast(vm), C.to_bytes(msg));
+            return false;
+        }
+        res_uri_len.?.* = res.len;
+        return true;
     }
 
     const r_uri = zResolve(vm, app.alloc, params.chunkId, params.buf[0..params.bufLen], cur_uri, uri) catch |e| {

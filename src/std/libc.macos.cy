@@ -1,6 +1,6 @@
 use c
 use os
-use lc 'libc.cy'
+use lc 'libc'
 use meta
 
 -- `_NSGetExecutablePath`

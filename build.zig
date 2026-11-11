@@ -88,11 +88,8 @@ pub fn build(b: *std.Build) !void {
     // TODO: Remove vmc dep from cli.
     const vmc = try create_vmc_mod(b, opts);
 
-    var cli_config = CliConfig.default();
-    if (optimize == .debug or target.os.tag == .wasi) {
-        // Dev build looks at `@root`, release build uses the exe dir as root.
-        cli_config = cli_config.with_mod_root(abs_root_path);
-    }
+    // The CLI embeds its standard modules. Only the tests take `mod_root`, to name the test scripts in expected traces.
+    const cli_config = CliConfig.default();
     const cli_mod = try create_cli_module(b, vmc, lib, cli_config);
 
     const cli_test_config = CliConfig.default().with_mod_root(abs_root_path);
@@ -131,35 +128,6 @@ pub fn build(b: *std.Build) !void {
         // ).step);
 
         step.dependOn(&b.addInstallArtifact(exe, .{}).step);
-        if (optimize != .debug) {
-            // Release builds load the standard modules from `src/` next to the executable.
-            // Platform modules are imported behind `#[cond=meta.system() == ...]`, so each
-            // target only ships its own.
-            const common_mods = [_][]const u8{
-                "src/builtins/core.cy",
-                "src/builtins/cy.cy",
-                "src/builtins/meta.cy",
-                "src/builtins/c.cy",
-                "src/std/math.cy",
-                "src/std/os.cy",
-                "src/std/io.cy",
-                "src/std/cli.cy",
-                "src/std/test.cy",
-                "src/std/libc.cy",
-            };
-            const target_mods: []const []const u8 = switch (target.os.tag) {
-                .macos => &.{ "src/std/os.macos.cy", "src/std/libc.macos.cy" },
-                .linux => &.{ "src/std/os.linux.cy", "src/std/libc.linux.cy" },
-                .windows => &.{ "src/std/os.windows.cy", "src/std/windows/windows.cy", "src/std/windows/kernel32.cy" },
-                else => &.{},
-            };
-            for (common_mods) |mod| {
-                step.dependOn(&b.addInstallFile(b.path(mod), b.fmt("bin/{s}", .{mod})).step);
-            }
-            for (target_mods) |mod| {
-                step.dependOn(&b.addInstallFile(b.path(mod), b.fmt("bin/{s}", .{mod})).step);
-            }
-        }
     }
 
     var standalone_lib_artifact: *std.Build.Step.InstallArtifact = undefined;

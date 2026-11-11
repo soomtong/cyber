@@ -55,10 +55,10 @@ test.eq(123, b2.*)
 ptr := as[Ptr[void]] 0xDEADBEEF
 test.eq(3735928559, as ptr)
 
--- unsafe cast.
+-- Reference to pointer.
 a2 := 123
 a2_ref := ^a2
-a2_ptr := @unsafeCast(Ptr[int], a2_ref)
+a2_ptr := as[Ptr[int]] a2_ref
 test.eq(123, a2_ptr.*)
 
 -- Pointer span of array.

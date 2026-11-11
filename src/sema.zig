@@ -6668,6 +6668,7 @@ pub fn semaExprSkipSym(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
                 const res = (try getResolvedName(c, name, node)) orelse {
                     return reportOldSymbolLit(c, name, node);
                 };
+                try checkIntrinsicUse(c, node);
                 switch (res.type) {
                     .sym => {
                         return sema.symbol2(c, res.data.sym, true, cstr.target_t, node);
@@ -6889,7 +6890,13 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
             return c.reportErrorFmt("Can not infer symbol from `.{}`.", &.{v(name)}, node);
         },
         .at_lit => {
-            return reportOldSymbolLit(c, node.cast(.at_lit).value.slice(), node);
+            const at_name = node.cast(.at_lit).value.slice();
+            if (c.semaProcs.items.len > 0) {
+                if ((try getResolvedName(c, at_name, node)) != null) {
+                    try checkIntrinsicUse(c, node);
+                }
+            }
+            return reportOldSymbolLit(c, at_name, node);
         },
         .void_lit => {
             return c.semaVoid(node);
@@ -8031,6 +8038,7 @@ fn semaFiberExpr(c: *cy.Chunk, node: *ast.Node) !ExprResult {
             .pos = node.pos(),
             .value = .{ .ptr = name.ptr, .len = name.len },
         });
+        c.internal_callee = @ptrCast(callee);
         const new_args = try tree.dupeNodes(&.{child});
         const new_call = try tree.newNode(.callExpr, .{
             .callee = @ptrCast(callee),
@@ -8084,6 +8092,7 @@ fn semaFiberExpr(c: *cy.Chunk, node: *ast.Node) !ExprResult {
         .end = call.end,
         .array_like = true,
     });
+    c.internal_callee = @ptrCast(callee);
     const new_args = try tree.dupeNodes(&.{ call.callee, @ptrCast(args_lit) });
     const new_call = try tree.newNode(.callExpr, .{
         .callee = @ptrCast(callee),
@@ -8185,6 +8194,9 @@ pub fn semaCallExpr(c: *cy.Chunk, node: *ast.Node, opt_target: ?*cy.Type) !ExprR
     } else if (call.callee.type() == .ident or call.callee.type() == .at_lit) {
         const name = call.callee.as_name();
         const varRes = try lookupIdent(c, name, call.callee);
+        if (call.callee.type() == .at_lit and varRes == .static) {
+            try checkIntrinsicUse(c, call.callee);
+        }
         switch (varRes) {
             .local => {
                 const calleeRes = try c.semaExpr(call.callee, .{});
@@ -11195,6 +11207,15 @@ pub fn isBuiltinModuleNode(c: *cy.Chunk, node: *ast.Node) bool {
     const src_id = node.src();
     if (src_id == cy.NullId) return true;
     return c.compiler.chunks.items[src_id].is_builtin;
+}
+
+/// A script can not name an intrinsic: the `@` functions of the builtin modules are the runtime's internals
+/// (reference counts, object layout, VM instructions). `node` is the `@name` node.
+pub fn checkIntrinsicUse(c: *cy.Chunk, node: *ast.Node) !void {
+    if (isBuiltinModuleNode(c, node)) return;
+    if (c.internal_callee == node) return;
+    const name = node.cast(.at_lit).value.slice();
+    return c.reportErrorFmt("`{}` is internal to the builtin modules and can not be used in a script.", &.{v(name)}, node);
 }
 
 /// The `@` functions that a script can declare. The compiler calls them by name.

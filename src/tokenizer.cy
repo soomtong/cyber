@@ -143,18 +143,19 @@ type Token:
 
 fn Token :: @init(token_t TokenType, start_pos i32, end_pos i32) -> Token:
     return {
-        head = (start_pos << 8) || i32(@enumToInt(token_t)),
+        head = (start_pos << 8) || i32(int(token_t)),
         data = end_pos,
     }
 
 fn Token :: indent(start_pos i32, indent i32) -> Token:
     return {
-        head = (start_pos << 8) || i32(@enumToInt(TokenType.indent)),
+        head = (start_pos << 8) || i32(int(TokenType.indent)),
         data = indent,
     }
 
 fn (&Token) tag() -> TokenType:
-    return @intToEnum(TokenType, int(self.head && 0xff))
+    return meta.enum_from_int(TokenType, int(self.head && 0xff)) !else:
+        panic('Invalid token type.')
 
 fn (&Token) pos() -> i32:
     return self.head >> 8

@@ -41,6 +41,14 @@ fn enum_name(enum_value %T) -> str:
 #[bind] fn enum_values(%T type) -> EvalBuffer[T]
 
 --| Raise compile-time error.
+--| Ends the lifetime of a local without running its destructor. For a `sink` method that takes over
+--| the fields of `self`.
+#[bind] fn consume(a Code)
+
+--| Returns the case of the enum `T` that has the integer value `val`, or an error when there is none.
+fn enum_from_int(%T type, val int) -> !T:
+    return @intToEnumResult(T, val)
+
 #[bind] fn error(msg EvalStr) -> never
 
 --| Equivalent to the compile-time expression `#{}`.

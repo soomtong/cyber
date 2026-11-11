@@ -93,6 +93,8 @@ fn test_functions(run: *Runner) void {
     run.case("functions/call_at_ct.cy");
     run.case("functions/consteval_attr_error.cy");
     run.case("functions/unknown_hook_error.cy");
+    run.case("functions/intrinsic_call_error.cy");
+    run.case("meta/script_api.cy");
     run.case("core/symbol_at_lit_error.cy");
     run.case("functions/call_block.cy");
     run.case("functions/call_incompat_param_error.cy");
@@ -212,7 +214,6 @@ fn test_memory(run: *Runner) void {
 }
 
 fn test_types(run: *Runner) void {
-    run.case("types/bitcast.cy");
     run.case("types/cast.cy");
     run.case("types/cast_error.cy");
     // // Failed to cast to abstract type at runtime.
@@ -501,7 +502,6 @@ fn test_control_flow(run: *Runner) void {
     run.case("functions/builtin_func_value_error.cy");
     run.case("functions/func_sym_lift_error.cy");
     run.case("functions/func_sym_addr_error.cy");
-    run.case("functions/func_sym_unsafe_cast_error.cy");
     run.case("syntax/func_parent_no_name_error.cy");
     run.case("syntax/global_parent_no_name_error.cy");
     run.case("types/trait_option_child_error.cy");

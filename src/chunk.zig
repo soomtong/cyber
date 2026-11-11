@@ -46,6 +46,10 @@ pub const Chunk = struct {
     /// Only these declare `@` functions other than the hooks and use the attributes reserved for the compiler.
     is_builtin: bool = false,
 
+    /// A callee that the compiler put into this chunk's AST (`fiber f()` is a call of `@new_fiber`). It names an
+    /// intrinsic that the script could not call itself.
+    internal_callee: ?*ast.Node = null,
+
     /// Whether `src` needs to be loaded from `srcUri`.
     pending_load_src: bool,
     loaded: bool,

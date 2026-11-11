@@ -40,6 +40,7 @@ const types = [_]struct{[]const u8, C.BindType}{
 
 const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"stack_trace",     zErrFunc(stack_trace)},
+    .{"consume",         zErrBuiltinFunc(cy.core.consume, null)},
     .{"get_closure_data", zErrFunc(get_closure_data)},
     .{"access",          zErrBuiltinFunc(access, null)},
     .{"access_result_payload", zErrBuiltinFunc(access_result_payload, null)},

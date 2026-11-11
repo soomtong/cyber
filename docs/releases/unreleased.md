@@ -66,7 +66,7 @@
     `suspend_statement`를 더했다.
   - 구현 기록은 `docs/decisions/project_coroutines.md`의 "Fiber 구현 (2026-11-11)" 절.
 
-- `#` · `@` 표기의 경계를 정리했다. 세 가지 모두 호환되지 않는 변경이다.
+- `#` · `@` 표기의 경계를 정리했다. 네 가지 모두 호환되지 않는 변경이다.
   - symbol 리터럴은 `symbol.usd`로 쓴다(`error.Name`과 같은 꼴). `@usd`는
     ``CompileError: Undeclared `@usd`. A symbol literal is written `symbol.usd`.``이다. 출력도 `symbol.usd`로 바뀌었다
     (`print(symbol.usd)`, `str(symbol.usd)`. 이전에는 `@usd`). `symbol`이라는 이름의 변수는 타입을 가리므로 그대로 쓸 수 있다.
@@ -77,7 +77,12 @@
     ``CompileError: The `#[consteval]` attribute is reserved for the builtin modules.``
   - builtin 모듈은 `core` · `meta` · `cy` · `c` · `math` · `io` · `test`다. 각 모듈의 bind 함수가 표시하므로 호스트가 소스를
     다른 곳에서 읽어도 같다. `os` · `cli` · `libc`는 스크립트와 같은 규칙을 받는다.
-  - intrinsic 호출(`@memcpy` · `@bitCast` 등)의 제한은 아직 넣지 않았다(결정 대기).
+  - 스크립트는 builtin 모듈의 `@` 함수(intrinsic: `@memcpy` · `@bitCast` · `@retain` 등)를 호출하거나 값으로 쓸 수 없다.
+    ``CompileError: `@bitCast` is internal to the builtin modules and can not be used in a script.``
+    런타임 내부(참조 카운트 · 객체 레이아웃 · VM 명령)를 드러내는 함수들이라서다. hook을 메서드로 부르는 것(`a.@deinit()`)은 그대로 된다.
+  - 스크립트에 필요한 기능은 표준 모듈의 일반 이름으로 제공한다. 이번에 더한 것:
+    `c.memcpy(dst Ptr[byte], src Ptr[byte], len int)`, `meta.consume(local)`(`sink` 메서드에서 `self`를 `@deinit` 없이 끝냄),
+    `meta.enum_from_int(T, val int) -> !T`. enum → 정수는 `int(x)`, `^T` → `Ptr[T]`는 `as[Ptr[T]] r`로 이미 된다.
   - 근거는 `docs/decisions/project_sigils.md`.
 
 ## 임베딩 API

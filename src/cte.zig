@@ -707,6 +707,9 @@ fn evalCallExpr(c: *cy.Chunk, call: *ast.CallExpr) !Expr {
     } else if (call.callee.type() == .ident or call.callee.type() == .at_lit) {
 
         const name = call.callee.as_name();
+        if (call.callee.type() == .at_lit) {
+            try sema.checkIntrinsicUse(c, call.callee);
+        }
 
         const callee = try sema.lookupStaticIdent(c, name, node) orelse {
             return c.reportErrorFmt("Could not find the symbol `{}`.", &.{v(name)}, node);

@@ -17,6 +17,10 @@ fn from_strz(ptr Ptr[byte]) -> str
 #[bind]
 #fn include(spec EvalStr) -> void
 
+--| Copies `len` bytes from `src` to `dst`. The two regions must not overlap.
+fn memcpy(dst Ptr[byte], src Ptr[byte], len int):
+    @memcpy(dst, src, len)
+
 --| Returns an allocated null terminated C string.
 #[bind]
 fn to_strz(s str) -> Ptr[byte]

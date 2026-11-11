@@ -1501,7 +1501,11 @@ Any other `@` name is a compile error, so a misspelled hook is not declared as a
 fn (&Foo) @dinit():    --> CompileError: Unknown hook `@dinit`. A function name can start with `@` only when it is a hook that the compiler calls, such as `@init` or `@deinit`.
     pass
 ```
-The builtin modules also declare `@` functions that are part of the runtime. They are not hooks.
+The builtin modules also declare `@` functions that are part of the runtime (`@memcpy`, `@retain`, ...). They are not hooks and a script can not use them:
+```cy
+x := @bitCast(float, 1)    --> CompileError: `@bitCast` is internal to the builtin modules and can not be used in a script.
+```
+The standard modules provide what a script needs from them under plain names, such as `c.memcpy`, `meta.consume` and `meta.enum_from_int`.
 
 The `@get` method allows overriding field accesses for undeclared fields:
 ```cy
@@ -2452,15 +2456,17 @@ type Foo:  -- Copyable struct.
 
 A custom type can also be copyable if it declares a `@copy` method:
 ```cy
+use c
+
 type MyArray:
     ptr Ptr[byte]
     len int
 
 -- Performs deep copy.
 fn (&MyArray) @copy() -> Self:
-    new_ptr := alloc(byte, self.len)
-    @memcpy(new_ptr, self.ptr, self.len)
-    return {ptr=new_ptr}
+    new_buf := alloc(byte, self.len)
+    c.memcpy(new_buf.ptr, self.ptr, self.len)
+    return {ptr=new_buf.ptr, len=self.len}
 ```
 
 A type that implements the `NoCopy` trait prevents implicit copying:
@@ -2763,7 +2769,7 @@ fn (sink Array[]) as_buffer() -> Buffer[T]:
     buf := self.buf
     length := self.length
     cap := self.cap()
-    @consume(self)
+    meta.consume(self)    -- `self` ends here without its `@deinit`.
     return {
         base   = buf,
         length = length,

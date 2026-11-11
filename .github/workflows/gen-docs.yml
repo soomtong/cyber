@@ -35,6 +35,32 @@ jobs:
           cmake ..
           make
 
+      # Dependencies of build.zig.zon are fetched into zig-pkg. Restoring them before the first `zig build` keeps a
+      # build from failing when the host of a dependency (codeberg.org) is down.
+      # build.zig.zon also holds the version, so a release commit changes the key. `restore-keys` then restores the
+      # newest older cache: a package directory is named by its content hash, so an older cache is still correct
+      # and only a changed dependency is fetched.
+      - name: Cache Zig packages.
+        uses: actions/cache@v4
+        with:
+          path: zig-pkg
+          key: zig-pkg-${{ runner.os }}-${{ hashFiles('build.zig.zon') }}
+          restore-keys: |
+            zig-pkg-${{ runner.os }}-
+
+      # No network access when the cache was restored. Otherwise the fetch is retried, the host can be slow.
+      - name: Fetch Zig packages.
+        shell: bash
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if zig build --fetch; then
+              exit 0
+            fi
+            echo "zig build --fetch failed (attempt $attempt)."
+            sleep $((attempt * 20))
+          done
+          exit 1
+
       - name: Setup script.
         uses: actions/github-script@v7
         with:
@@ -70,7 +96,6 @@ jobs:
           path: |-
             ~/.cache/zig
             .zig-cache
-            zig-pkg
           key:
             build-1
           restore-keys:

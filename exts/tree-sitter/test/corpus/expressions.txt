@@ -248,3 +248,40 @@ e := c'a'
       (identifier)
       (string
         (string_content)))))
+
+============================================================
+Numbers
+============================================================
+
+a := 100_000
+b := 0xff_ff
+c := 0b1111_0000
+d := 1_000u
+e := 1_000.000_5
+f := 1.fmt()
+
+------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (number))
+  (variable_declaration
+    (identifier)
+    (number))
+  (variable_declaration
+    (identifier)
+    (number))
+  (variable_declaration
+    (identifier)
+    (number))
+  (variable_declaration
+    (identifier)
+    (number))
+  (variable_declaration
+    (identifier)
+    (call_expression
+      (member_expression
+        (number)
+        (identifier))
+      (arguments))))

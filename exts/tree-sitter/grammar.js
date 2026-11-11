@@ -454,7 +454,9 @@ module.exports = grammar({
     try_statement: ($) =>
       seq('try', ':', field('body', $._suite), $.catch_clause),
 
-    catch_clause: ($) => seq('else', optional(field('error', $.identifier)), ':', field('body', $._suite)),
+    // `else:` or `else |err|:`
+    catch_clause: ($) =>
+      seq('else', optional(seq('|', field('error', $.identifier), '|')), ':', field('body', $._suite)),
 
     begin_statement: ($) => seq('begin', ':', field('body', $._suite)),
 
@@ -777,13 +779,14 @@ module.exports = grammar({
     number: (_) =>
       token(
         choice(
-          /0x[0-9A-Za-z]+/,
-          /0o[0-8]+/,
-          /0b[01]+/,
-          /\d+u/,
-          /\d+\.\d+(e-?\d+)?/,
-          /\d+e-?\d+/,
-          /\d+/,
+          // `_` may separate digits: `100_000`, `0xff_ff`.
+          /0x[0-9A-Za-z]+(_[0-9A-Za-z]+)*/,
+          /0o[0-8]+(_[0-8]+)*/,
+          /0b[01]+(_[01]+)*/,
+          /\d+(_\d+)*u/,
+          /\d+(_\d+)*\.\d+(_\d+)*(e-?\d+(_\d+)*)?/,
+          /\d+(_\d+)*e-?\d+(_\d+)*/,
+          /\d+(_\d+)*/,
         ),
       ),
 

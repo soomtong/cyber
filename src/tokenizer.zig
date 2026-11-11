@@ -1039,8 +1039,38 @@ pub const Tokenizer = struct {
             if (ch >= '0' and ch <= '9') {
                 advance(t);
                 continue;
+            } else if (ch == '_' and isDigitSeparator(t, 0, isDecDigit)) {
+                advance(t);
+                continue;
             } else break;
         }
+    }
+
+    /// Whether the `_` at the current position separates two digits, as in `100_000`.
+    /// `first` is the position of the first digit, after a prefix such as `0x`.
+    fn isDigitSeparator(t: *Tokenizer, first: u32, comptime isDigit: fn (u8) bool) bool {
+        if (t.nextPos == first) {
+            // `0x_ff`
+            return false;
+        }
+        const next = peekAhead(t, 1) orelse return false;
+        return isDigit(next);
+    }
+
+    fn isDecDigit(ch: u8) bool {
+        return ch >= '0' and ch <= '9';
+    }
+
+    fn isHexDigit(ch: u8) bool {
+        return (ch >= '0' and ch <= '9') or (ch >= 'A' and ch <= 'Z') or (ch >= 'a' and ch <= 'z');
+    }
+
+    fn isOctDigit(ch: u8) bool {
+        return ch >= '0' and ch <= '8';
+    }
+
+    fn isBinDigit(ch: u8) bool {
+        return ch == '0' or ch == '1';
     }
 
     /// Assumes first digit is consumed.
@@ -1051,7 +1081,7 @@ pub const Tokenizer = struct {
         }
 
         var ch = peek(t);
-        if ((ch >= '0' and ch <= '9') or ch == '.' or ch == 'e' or ch == 'u') {
+        if ((ch >= '0' and ch <= '9') or ch == '.' or ch == 'e' or ch == 'u' or ch == '_') {
             consumeDigits(t);
             if (isAtEnd(t)) {
                 try t.pushToken(.dec, start);
@@ -1124,7 +1154,7 @@ pub const Tokenizer = struct {
                         break;
                     }
                     ch = peek(t);
-                    if ((ch >= '0' and ch <= '9') or (ch >= 'A' and ch <= 'Z') or (ch >= 'a' and ch <= 'z')) {
+                    if (isHexDigit(ch) or (ch == '_' and isDigitSeparator(t, start + 2, isHexDigit))) {
                         advance(t);
                         continue;
                     } else break;
@@ -1139,7 +1169,7 @@ pub const Tokenizer = struct {
                         break;
                     }
                     ch = peek(t);
-                    if (ch >= '0' and ch <= '8') {
+                    if (isOctDigit(ch) or (ch == '_' and isDigitSeparator(t, start + 2, isOctDigit))) {
                         advance(t);
                         continue;
                     } else break;
@@ -1154,7 +1184,7 @@ pub const Tokenizer = struct {
                         break;
                     }
                     ch = peek(t);
-                    if (ch == '0' or ch == '1') {
+                    if (isBinDigit(ch) or (ch == '_' and isDigitSeparator(t, start + 2, isBinDigit))) {
                         advance(t);
                         continue;
                     } else break;

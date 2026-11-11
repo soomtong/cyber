@@ -20,6 +20,11 @@ if meta.is_vm_target():
 test.eq(1.0, float(true))
 test.eq(0.0, float(false))
 
+-- `_` between digits is ignored.
+test.eq(1_000.5, 1000.5)
+test.eq(1.000_5, 1.0005)
+test.eq(1_0e1_0, 10e10)
+
 -- Infinity.
 test.eq(math.inf, 1.0 / 0)
 

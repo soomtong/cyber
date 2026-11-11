@@ -30,3 +30,13 @@ GitHub 라이선스 표시는 없다.
 
 - 매개변수 목록의 단독 식별자는 이름으로 읽는다(`fn(int) -> bool`의 `int`).
 - 호출 인자는 쉼표로만 구분한다(컴파일러는 줄바꿈도 허용).
+
+## 2026-11-11 갱신 (0.4.6)
+
+- 대조 방법을 바꿨다. `cyber fmt --check`(컴파일러 파서)가 받아들이는 파일만 골라 `tree-sitter parse -q`에 넣는다. 오류 기대
+  테스트와 옛 문법 파일이 자동으로 빠진다.
+- 차이는 둘이었다. `try: … else |err|:`의 캡처(문법은 `else err:`였다. `project_try_block.md`에서 `|err|`로 정해졌다)와 이번에
+  생긴 숫자 구분자 `100_000`. `catch_clause`와 `number`를 고치고 코퍼스에 `Numbers`를 더했다(16건 통과).
+- 결과: 컴파일러가 파싱하는 `.cy` 417개(`src` · `examples` · `docs` · `exts`) 모두 오류 노드 없음. tree-sitter CLI 0.27.2.
+- 쿼리 네 개(`highlights` · `indents` · `locals` · `tags`)는 `tree-sitter query`로 로드되는 것만 확인했다. 에디터에서의 실제
+  하이라이트는 확인하지 않았다.

@@ -199,7 +199,8 @@ Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator 
   프롤로그를 `semaGeneratorPrologue`로 뽑아 함수 · 메서드가 같이 쓴다.
 - 템플릿 제너레이터 `generator fn rep[T Any](x T, n int) -> T:`의 호출은 `Unsupported call from symbol: func_template`.
   이 오류는 제너레이터와 무관하다. `[T]` 템플릿은 일반 함수도 인자로 추론하지 않는다(`rep[int](1, 3)`으로 확장하거나
-  `%T`를 쓴다). 실제 결함은 그 다음에 있었다: 인스턴스가 `resolveUserFuncVariant`로 해석돼 제너레이터 설정을
+  `%T`를 쓴다). 사용자 결정(2026-11-11): `[T]`는 명시적 확장 전용, 추론은 `%T`라는 구분을 유지하고
+  `[T]`에 추론을 넣지 않는다. 실제 결함은 그 다음에 있었다: 인스턴스가 `resolveUserFuncVariant`로 해석돼 제너레이터 설정을
   건너뛰었고 `rep[int](1, 3)` · `%T` 형태가 ``Can not find the symbol `iterator` for `int`.``였다. 같은 날 수정:
   시그니처 변환을 `resolveGeneratorSig`로 뽑아 인스턴스에도 적용한다. 테스트 `concurrency/generator_method.cy`.
 - 함수 본문 안의 `generator fn`은 일반 `fn`과 같이 `` `fn` declarations are not allowed here. ``

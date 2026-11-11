@@ -75,6 +75,11 @@
   에셋 14개, `macos-26` arm64 job도 정상 배정) → `gh release edit 0.4.4 --notes-file --latest` → `install.sh 0.4.4`를 `CYBER_HOME` · `CYBER_BIN`
   override로 임시 경로에 설치해 `cyber version` 확인. `/usr/local`의 설치본은 sudo가 필요해 사용자가 직접 올린다. 성능 표는 성능 변경이 없어
   넣지 않았다.
+- 0.4.7은 2026-11-12에 `a5ad6c23`(버전 올림 + `docs/releases/0.4.7.md`, 바로 앞 `919667f7`이 표준 모듈 내장)으로 찍었다. master push →
+  Latest Build run 43043548521은 `macos-26` arm64 lib job이 러너 미배정으로 취소(나머지 11 job 성공) → 코드 문제가 아니므로 annotated
+  태그 push → 릴리스 run 43047352546 12 job 성공(`build-802-a5ad6c2`, 에셋 14개) → `gh release edit 0.4.7 --notes-file --latest` →
+  `install.sh 0.4.7`을 `CYBER_HOME` · `CYBER_BIN` override로 임시 경로에 설치. 번들 내용이 `cyber` 하나인 것(macOS arm64 · Linux x64 ·
+  Windows zip)과 `src/` 없이 `use os` · `use math` · `use test` 스크립트와 REPL이 도는 것을 확인했다. `/usr/local` 설치본은 사용자가 올린다.
 - 번들의 `src/`는 타깃별로 다르다. `build.zig`의 `cli` 스텝이 공통 10개에 macOS(`os.macos.cy`,
   `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
   더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.

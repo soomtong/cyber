@@ -3363,6 +3363,36 @@ generator fn watch(p ^int) -> int:    -- OK
     yield p.*
 ```
 
+A method can be a generator. The receiver is kept by the generator like any other parameter, so it must be a `^T` pointer and not a borrow:
+```cy
+type Bag:
+    n int
+
+generator fn (^Bag) items() -> int:
+    for 0..self.n |i|:
+        yield i
+
+b := ^Bag{n=3}
+for b.items() |v|:
+    print(v)
+```
+
+A generator can be a function template. As with any function template, `[T]` parameters are expanded explicitly and `%T` parameters are inferred from the arguments:
+```cy
+generator fn rep[T Any](x T, n int) -> T:
+    for 0..n |i|:
+        yield x
+
+generator fn rep2(x %T, n int) -> T:
+    for 0..n |i|:
+        yield x
+
+for rep[int](1, 3) |v|:
+    print(v)
+for rep2('a', 3) |s|:
+    print(s)
+```
+
 `generator` is not a reserved word. It is a modifier only when `fn` follows it, so it can still be used as a name. A hidden generator is written `-generator fn`, and attributes go before the modifier (`#[inline] generator fn`). `yield` outside a `generator fn` is a compile error.
 
 The `#[generator]` attribute of earlier versions was removed. It is a parse error that names the replacement: ``The `#[generator]` attribute was replaced by `generator fn`.``

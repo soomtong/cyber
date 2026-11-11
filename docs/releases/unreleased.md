@@ -6,6 +6,14 @@
 
 ## 버그 수정
 
+- 메서드 제너레이터(`generator fn (^Bag) items() -> int:`)를 호출하면 Segmentation fault로 끝나던 문제를 고쳤다.
+  메서드 본문에는 프레임을 저장하고 제너레이터를 돌려주는 단계가 빠져 있어 본문이 일반 호출처럼 바로 실행됐다.
+- 템플릿 제너레이터가 제너레이터로 만들어지지 않던 문제를 고쳤다. `generator fn rep[T Any](x T, n int) -> T:`를
+  `rep[int](1, 3)`으로 확장하거나 `generator fn rep(x %T, n int) -> T:`를 `rep(1, 3)`으로 부르면
+  ``Can not find the symbol `iterator` for `int`.``였다. borrow 매개변수 검사도 인스턴스에 적용된다.
+  `[T]` 템플릿은 일반 함수와 같이 인자로 타입을 추론하지 않으므로 `rep(1, 3)`은 여전히
+  ``Unsupported call from symbol: `func_template` ``이다.
+
 ## 언어와 표준 라이브러리
 
 - 제너레이터 선언이 `#[generator]` 속성에서 `generator fn` 선언으로 바뀌었다. 호환되지 않는 변경이다.

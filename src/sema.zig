@@ -3215,27 +3215,7 @@ pub fn ensure_resolved_func(c: *cy.Chunk, func: *cy.Func, resolve_new_types: boo
         }
 
         if (has_generator) {
-            // The generator outlives the call that created it: its frame is snapshotted to the heap and resumed
-            // later. A borrow parameter would keep a stack address past the caller's frame (use-after-return),
-            // and the snapshot does not go through `semaLift` where `^borrow` is rejected.
-            var rt_param_idx: usize = 0;
-            for (decl.params.slice()) |param| {
-                if (param.template_param) continue;
-                const param_t = sig.params()[rt_param_idx].get_type();
-                rt_param_idx += 1;
-                if (param_t.info.borrow_only) {
-                    const name = try c.sema.allocTypeName(param_t);
-                    defer c.alloc.free(name);
-                    return c.reportErrorFmt("A `generator fn` can not take the borrow type `{}` as a parameter. The generator outlives the call, so pass an owned value or a `^T` pointer instead.", &.{v(name)}, @ptrCast(param));
-                }
-            }
-            func.info.generator = true;
-            // Modify func signature return type.
-            const decl_sig = try c.sema.ensureFuncSig(sig.params(), sig.ret);
-            const funcptr_t = try getFuncPtrType(c, decl_sig);
-            const gen_t = try getGeneratorType(c, funcptr_t);
-            const ret_t = try getRefType(c, gen_t);
-            sig = try c.sema.ensureFuncSig(sig.params(), ret_t);
+            sig = try resolveGeneratorSig(c, func, sig);
         }
 
         if (func.type == .trait) {
@@ -3307,13 +3287,44 @@ pub fn resolveHostBindFunc(c: *cy.Chunk, func: *cy.Func, host_attr: *ast.Attribu
     };
 }
 
+/// Marks `func` as a generator and returns its signature with the return type `^Generator[fn(params) -> T]`.
+/// Template instances resolve through `resolveUserFuncVariant`, so this is shared with `ensure_resolved_func`.
+fn resolveGeneratorSig(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig) !*cy.FuncSig {
+    const decl = func.decl.?.cast(.funcDecl);
+    // The generator outlives the call that created it: its frame is snapshotted to the heap and resumed
+    // later. A borrow parameter would keep a stack address past the caller's frame (use-after-return),
+    // and the snapshot does not go through `semaLift` where `^borrow` is rejected.
+    var rt_param_idx: usize = 0;
+    for (decl.params.slice()) |param| {
+        if (param.template_param) continue;
+        const param_t = sig.params()[rt_param_idx].get_type();
+        rt_param_idx += 1;
+        if (param_t.info.borrow_only) {
+            const name = try c.sema.allocTypeName(param_t);
+            defer c.alloc.free(name);
+            return c.reportErrorFmt("A `generator fn` can not take the borrow type `{}` as a parameter. The generator outlives the call, so pass an owned value or a `^T` pointer instead.", &.{v(name)}, @ptrCast(param));
+        }
+    }
+    func.info.generator = true;
+    // Modify func signature return type.
+    const decl_sig = try c.sema.ensureFuncSig(sig.params(), sig.ret);
+    const funcptr_t = try getFuncPtrType(c, decl_sig);
+    const gen_t = try getGeneratorType(c, funcptr_t);
+    const ret_t = try getRefType(c, gen_t);
+    return c.sema.ensureFuncSig(sig.params(), ret_t);
+}
+
 pub fn resolveUserFuncVariant(c: *cy.Chunk, func: *cy.Func, resolve_new_types: bool, node: ?*ast.Node) !void {
     try pushFuncResolveContext(c, func, node);
     defer popResolveContext(c);
 
     var generic: GenericFuncResult = undefined;
-    const sig = try resolveFuncSig(c, func, resolve_new_types, &generic, true);
+    var sig = try resolveFuncSig(c, func, resolve_new_types, &generic, true);
     std.debug.assert(!generic.generic);
+
+    if (func.decl.?.cast(.funcDecl).generator) {
+        sig = try resolveGeneratorSig(c, func, sig);
+    }
 
     if (!func.info.const_eval_only) {
         for (sig.params()) |param| {
@@ -3350,9 +3361,58 @@ pub fn semaMethodBody2(c: *cy.Chunk, func: *cy.Func) !void {
 
     const parent_t = func.sig.params()[0].get_type();
     try pushMethodParamVars(c, parent_t, func);
+    if (func.info.generator) {
+        try semaGeneratorPrologue(c, func);
+    }
     try semaStmts(c, func.decl.?.cast(.funcDecl).stmts.slice());
     try procPrologue(c);
     try popFuncBlock(c);
+}
+
+/// Emitted after the parameters are declared. The call that creates the generator runs up to `ret_gen`, which
+/// snapshots the frame and returns the generator. Methods need it as well as functions.
+fn semaGeneratorPrologue(c: *cy.Chunk, func: *cy.Func) !void {
+    const node = func.decl.?.cast(.funcDecl);
+    const proc = c.proc();
+
+    // Retain params with reference type, since the regular call convention will optimize it out.
+    // Other params are already managed.
+    for (c.varStack.items[proc.varStart..]) |param| {
+        if (param.decl_t.isRefPointer()) {
+            var copy = try semaLocal(c, param.stack_idx, @ptrCast(node));
+            copy = try semaOwn(c, copy, @ptrCast(node));
+            _ = try c.ir.pushStmt(.set_local, @ptrCast(node), .{
+                .id = @intCast(param.inner.local.id),
+                .right = copy.ir,
+            });
+        }
+    }
+
+    const gen_t = proc.func.?.sig.ret.cast(.pointer).child_t;
+    const funcptr_t = gen_t.instanceOf(c.sema.generator_tmpl).?.params[0].asPtr(*cy.Type);
+    const val_t = funcptr_t.cast(.func_ptr).sig.ret;
+    const opt_t = try getOptionType(c, val_t);
+
+    try c.ir.pushStmtBlock(c.alloc);
+    {
+        const b = c.procBlock();
+        try semaDestructBlock2(c, b);
+        if (c.ir.stmtBlockStack.items[c.ir.stmtBlockStack.items.len-1].first != null) {
+            _ = try c.ir.pushStmt(.yield, @ptrCast(node), .{
+                .deinit_head = null,
+                .ret_opt_t = opt_t,
+                .end = true,
+            });
+        }
+    }
+    const block = c.ir.popStmtBlock();
+
+    // Returns the generator.
+    _ = try c.ir.pushStmt(.ret_gen, @ptrCast(node), .{
+        .gen_t = func.sig.ret,
+        .next_t = opt_t,
+        .deinit_head = block.first,
+    });
 }
 
 pub fn semaFuncBody(c: *cy.Chunk, func: *cy.Func) !void {
@@ -3369,46 +3429,7 @@ pub fn semaFuncBody2(c: *cy.Chunk, func: *cy.Func) !void {
     _ = try pushFuncProc(c, func);
     try appendFuncParamVars(c, node.params.slice(), @ptrCast(func.sig.params()));
     if (func.info.generator) {
-        const proc = c.proc();
-
-        // Retain params with reference type, since the regular call convention will optimize it out.
-        // Other params are already managed.
-        for (c.varStack.items[proc.varStart..]) |param| {
-            if (param.decl_t.isRefPointer()) {
-                var copy = try semaLocal(c, param.stack_idx, @ptrCast(node));
-                copy = try semaOwn(c, copy, @ptrCast(node));
-                _ = try c.ir.pushStmt(.set_local, @ptrCast(node), .{
-                    .id = @intCast(param.inner.local.id),
-                    .right = copy.ir,
-                });
-            }
-        }
-
-        const gen_t = proc.func.?.sig.ret.cast(.pointer).child_t;
-        const funcptr_t = gen_t.instanceOf(c.sema.generator_tmpl).?.params[0].asPtr(*cy.Type);
-        const val_t = funcptr_t.cast(.func_ptr).sig.ret;
-        const opt_t = try getOptionType(c, val_t);
-
-        try c.ir.pushStmtBlock(c.alloc);
-        {
-            const b = c.procBlock();
-            try semaDestructBlock2(c, b);
-            if (c.ir.stmtBlockStack.items[c.ir.stmtBlockStack.items.len-1].first != null) {
-                _ = try c.ir.pushStmt(.yield, @ptrCast(node), .{
-                    .deinit_head = null,
-                    .ret_opt_t = opt_t,
-                    .end = true,
-                });
-            }
-        }
-        const block = c.ir.popStmtBlock();
-
-        // Returns the generator.
-        _ = try c.ir.pushStmt(.ret_gen, @ptrCast(node), .{
-            .gen_t = func.sig.ret,
-            .next_t = opt_t,
-            .deinit_head = block.first,
-        });
+        try semaGeneratorPrologue(c, func);
     }
     try semaStmts(c, node.stmts.slice());
     try procPrologue(c);

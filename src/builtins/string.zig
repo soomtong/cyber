@@ -332,7 +332,7 @@ pub fn index_rune(t: *cy.Thread) !Ret {
     const str = obj.slice();
     const needle = t.param(i64);
 
-    if (needle > 0) {
+    if (needle > 0 and needle <= 0x10FFFF) {
         const code: u21 = @intCast(needle);
         const needleIsAscii = code < 128;
         if (obj.ascii()) {
@@ -607,8 +607,13 @@ pub fn repeat(t: *cy.Thread) !Ret {
         return t.ret_panic("InvalidArgument");
     }
 
+    // The copy loop below counts in `u32`.
+    const len64 = std.math.mul(u64, @intCast(n), str.len) catch return t.ret_panic("InvalidArgument");
+    if (n > std.math.maxInt(u32) or len64 > std.math.maxInt(u32)) {
+        return t.ret_panic("InvalidArgument");
+    }
     const un: u32 = @intCast(n);
-    const len = un * str.len;
+    const len: usize = @intCast(len64);
     if (un > 1 and len > 0) {
         var new: cy.heap.Str = undefined;
         var buf: []u8 = undefined;

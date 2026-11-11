@@ -1028,6 +1028,11 @@ for arr |it|:
 arr = arr.remove(1)
 ```
 
+An index or a length that is out of range panics. This holds for `Array`, `Slice`, spans and `Buffer`:
+`remove` and `insert` need a valid index, the start and the end of a slice expression can not be negative,
+and a negative or too large length (`[]int(n, 0)`, `size_up`) panics with `Invalid allocation length`.
+`str.repeat` panics with `InvalidArgument` when the result would be longer than 4 GiB.
+
 ## Maps.
 A `Map` type is a dynamic data structure that stores key value pairs in a lookup table governed by hashing functions (key hash and equality functions).
 `Map` provides default hashing functions while `HashMap` requires custom hash functions.

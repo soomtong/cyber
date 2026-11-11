@@ -27,7 +27,12 @@ fn alloc(%T type, n int) -> PtrSpan[T]:
             ptr = none,
             length = 0,
         }
-    ptr := alloc_(type.size(T) * n)
+    if n < 0:
+        panic('Invalid allocation length: %{n}')
+    size := type.size(T)
+    if size != 0 and n > 0x7fffffffffffffff / size:
+        panic('Invalid allocation length: %{n}')
+    ptr := alloc_(size * n)
     return (as[Ptr[T]] ptr)[0..n]
 
 #[bind]
@@ -1002,7 +1007,7 @@ fn Buffer[] :: @init_sequence(init [&]T) -> Self:
     }
 
 fn Buffer[] :: @init(nelems int) -> Self:
-    base := alloc(T, nelems * type.size(T)).ptr
+    base := alloc(T, nelems).ptr
     return {
         base = base,
         length = 0,
@@ -1010,7 +1015,7 @@ fn Buffer[] :: @init(nelems int) -> Self:
     }
 
 fn Buffer[] :: @init(n int, value T) -> Self:
-    base := alloc(T, n * type.size(T)).ptr
+    base := alloc(T, n).ptr
     base[0..n].init(value)
     return {
         base = base,
@@ -1059,7 +1064,7 @@ fn (scope &Buffer[]) @slice() -> scope [&]T:
     }
 
 fn (scope &Buffer[]) @slice(start int) -> scope [&]T:
-    if start > self.length:
+    if start.ugt(self.length):
         panic_oob(start)
     return {
         base   = @scope_ptr_to_borrow('self', self.base + start),
@@ -1067,9 +1072,9 @@ fn (scope &Buffer[]) @slice(start int) -> scope [&]T:
     }
 
 fn (scope &Buffer[]) @slice(start int, end int) -> scope [&]T:
-    if start > self.length:
+    if start.ugt(self.length):
         panic_oob(start)
-    if end > self.length:
+    if end.ugt(self.length):
         panic_oob(end)
     if end < start:
         panic('InvalidArgument')
@@ -1114,7 +1119,7 @@ fn (&&Buffer[]) size_down(new_len int):
 
     #if type.managed(T):
         for new_len..self.length |i|:
-            @destruct(T, self.buf + i)
+            @destruct(T, self.base + i)
     self.length = new_len
 
 --| A dynamically sized data structure that contains a sequence of elements.
@@ -1162,7 +1167,10 @@ fn Slice[] :: @init_sequence(init [&]T) -> Self:
 --| `clone_on_resize` is never a sub-slice, so its count is `(as[Ptr[int]] ptr)[-1]` (no call, hot path).
 --| Only managed element types read the count, so the resize ops skip it for the others.
 fn new_slice_buffer(%T type, cap int) -> ^RawBuffer[byte]:
-    nbytes := 8 + type.size(T) * cap
+    size := type.size(T)
+    if cap < 0 or (size != 0 and cap > (0x7fffffffffffffff - 16) / size):
+        panic('Invalid allocation length: %{cap}')
+    nbytes := 8 + size * cap
     ptr := @new_object_undef(type.id(RawBuffer[byte]), 8 + nbytes)
     buf := as[^RawBuffer[byte]] ptr
     buf.length = nbytes
@@ -1243,7 +1251,7 @@ fn (&Slice[]) @slice() -> []T:
         }
 
 fn (&Slice[]) @slice(start int) -> []T:
-    if start > self._len:
+    if start.ugt(self._len):
         panic_oob(start)
 
     if self.header >> 63 != 0:
@@ -1264,9 +1272,9 @@ fn (&Slice[]) @slice(start int) -> []T:
         }
 
 fn (&Slice[]) @slice(start int, end int) -> []T:
-    if start > self._len:
+    if start.ugt(self._len):
         panic_oob(start)
-    if end > self._len:
+    if end.ugt(self._len):
         panic_oob(end)
     if end < start:
         panic('InvalidArgument')
@@ -1464,6 +1472,8 @@ fn (scope &Slice[]) next_borrow(idx &int) -> scope ?&T:
 
 --| Removes an element at index `idx`.
 fn (&Slice[]) remove(idx int) -> Self:
+    if (as[r64] idx) >= (as[r64] self._len):
+        panic_oob(idx)
     cur := self.clone_on_resize(0)
     @destruct(T, cur.ptr + idx)
     -- Move rest to the left.
@@ -1494,7 +1504,7 @@ fn (&Slice[]) size_down(new_len int) -> Self:
 --| Increases the size of the `Slice` to `new_len` elements. If the new size is bigger, `init` values
 --| are appended to the `Slice`.
 fn (&Slice[]) size_up(new_len int, init T) -> Self:
-    if new_len.ult(self._len):
+    if new_len < self._len:
         panic('Invalid argument.')
     if new_len == self._len:
         return
@@ -1566,9 +1576,9 @@ fn (scope Span[]) @slice(start int) -> scope [&]T:
     return self[start..self.length]
 
 fn (scope Span[]) @slice(start int, end int) -> scope [&]T:
-    if start > self.length:
+    if start.ugt(self.length):
         panic_oob(start)
-    if end > self.length:
+    if end.ugt(self.length):
         panic_oob(end)
     if end < start:
         panic('InvalidArgument')
@@ -1584,7 +1594,7 @@ fn (scope Span[]) span() -> scope [&]T:
     return self
 
 fn (scope Span[]) vec(idx int, %size int) -> scope &[size]T:
-    if idx + size > self.length:
+    if idx.ugt(self.length) or size > self.length - idx:
         panic('OutOfBounds')
     ptr := (as[Ptr[T]] self.base) + idx
     return @scope_ptr_to_borrow('self', as[Ptr[[size]T]] ptr)
@@ -1875,7 +1885,7 @@ fn (scope &Array[]) @slice() -> scope [&]T:
     }
 
 fn (scope &Array[]) @slice(start int) -> scope [&]T:
-    if start > self.length:
+    if start.ugt(self.length):
         panic_oob(start)
     return {
         base   = as (self.buf + start),
@@ -1883,9 +1893,9 @@ fn (scope &Array[]) @slice(start int) -> scope [&]T:
     }
 
 fn (scope &Array[]) @slice(start int, end int) -> scope [&]T:
-    if start > self.length:
+    if start.ugt(self.length):
         panic_oob(start)
-    if end > self.length:
+    if end.ugt(self.length):
         panic_oob(end)
     if end < start:
         panic('InvalidArgument')
@@ -2087,6 +2097,8 @@ fn (scope &Array[]) next_borrow(idx &int) -> scope ?&T:
 
 --| Removes an element at index `idx`.
 fn (&&Array[]) remove(idx int):
+    if (as[r64] idx) >= (as[r64] self.length):
+        panic_oob(idx)
     @destruct(T, self.buf + idx)
     -- Move rest to the left.
     size := type.size(T) * (self.length-idx-1)
@@ -2110,7 +2122,7 @@ fn (&&Array[]) size_down(new_len int):
 --| are appended to the array.
 #[cond=type.is_copyable(T)]
 fn (&&Array[]) size_up(new_len int, init T):
-    if new_len.ult(self.length):
+    if new_len < self.length:
         panic('Invalid argument.')
     if new_len == self.length:
         return
@@ -2140,6 +2152,9 @@ fn (&Array[]) sort(less &OpaqueFunc[LessFn[T]]):
 -- #[bind] fn Array.trim(self, mode symbol, delims []T) -> []T
 
 -fn compute_new_cap(cur int, min int) -> int:
+    if min > (1 << 60):
+        -- Growing by half would overflow. The allocation reports the invalid length.
+        return min
     new := cur
     while:
         new += new / 2 + 8

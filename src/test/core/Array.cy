@@ -215,4 +215,18 @@ t.eq(sl_str.len(), 4)
 t.eq(sl_str[3], 'y')
 t.eq(sl_strs[1], 'y')
 
+-- remove() at the last index and slices that end at the length.
+rm_arr := Array[int]{1, 2, 3}
+rm_arr.remove(2)
+rm_arr.remove(0)
+t.eq(rm_arr.len(), 1)
+t.eq(rm_arr[0], 2)
+t.eq(rm_arr[1..].len(), 0)
+t.eq(rm_arr[1..1].len(), 0)
+rm_arr.size_up(3, 9)
+t.eq(rm_arr[2], 9)
+rm_span := rm_arr[..]
+t.eq(rm_span[3..].len(), 0)
+t.eq(rm_span.vec(1, 2)[1], 9)
+
 --cytest: pass

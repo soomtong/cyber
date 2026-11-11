@@ -86,4 +86,11 @@ t.eq(true, str.is_ascii_digit('3'))
 t.eq(false, str.is_ascii_digit('a'))
 t.eq(false, str.is_ascii_digit('A'))
 
+-- index_rune() with a value that is not a code point. Aborted the host for a value above 21 bits.
+t.eq(true, 'abc'.index_rune(1 << 62) == none)
+t.eq(true, 'abc'.index_rune(0x110000) == none)
+t.eq(true, 'abc'.index_rune(-1) == none)
+t.eq(1, 'abc'.index_rune(98).?)
+t.eq(6, 'ab'.repeat(3).len())
+
 --cytest: pass

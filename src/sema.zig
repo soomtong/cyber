@@ -580,6 +580,11 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
                 const iterator = try semaLocal(c, iterator_v.id, node);
                 const iterator_borrow = try semaBorrow(c, iterator, node);
 
+                if (stmt.count) |count| {
+                    if (count.type() != .ident) {
+                        return c.reportError("Expected a variable name for the index.", count);
+                    }
+                }
                 const counter_init = try c.semaConst(0, c.sema.i64_t, node);
                 const counterv = try declareHiddenLocal(c, "_counter", c.sema.i64_t, counter_init, node);
 

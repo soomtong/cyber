@@ -41,6 +41,23 @@
 - `#[cond=false]`로 빠진 선언이 그 이름의 유일한 선언일 때 그 이름을 쓰면 컴파일러가 죽던 것을 고쳤다(F-91).
   `#[cond=false] fn foo()` 뒤 `foo()`, 메서드 `a.foo()`는 Segmentation fault(종료 코드 134)였다. 빠진 선언이 함수 없는
   빈 심볼을 남겼다. 이제 ``Undeclared variable `foo`.`` · ``Can not find the symbol `foo` in `A`.``다.
+- `for a |&i, e|:`처럼 인덱스 자리에 이름 아닌 식을 쓰면 컴파일러가 죽던 것을 고쳤다(F-92). Segmentation fault(종료 코드
+  134)였고 이제 `CompileError: Expected a variable name for the index.`다. 빌림 순회(`|i, &e|`)를 넣으면서 `&`가 캡처
+  자리에서 파싱되기 시작해 닿게 된 경로다.
+- 컨테이너에 범위를 벗어난 인덱스 · 길이를 주면 호스트가 죽거나 메모리가 조용히 깨지던 것을 고쳤다(F-93). 이제 모두
+  `panic`이다.
+  - `Array.remove(i)` · `Slice.remove(i)`: 범위 검사가 없었다. `i >= len`은 Segmentation fault, 음수는 버퍼 앞쪽을 덮어썼다.
+    이제 `Out of bounds index`.
+  - 음수 슬라이스 시작: `Array` · `Slice` · span · `Buffer`의 `a[-1..]`가 길이 `len + 1`인 버퍼 밖 구간을 돌려줬다.
+    `Span.vec(-1, n)`도 같았다. 이제 `Out of bounds index` · `OutOfBounds`.
+  - 음수 길이: `Array.size_up(-1, v)` · `Slice.size_up(-1, v)` · `[]int(-1, 0)`이 길이 `-1`인 값을 만들었고
+    `Array[int](-1, 0)`은 호스트가 abort했다. 이제 `Invalid argument.` · `Invalid allocation length: -1`.
+  - 너무 큰 길이: `Array[int](1 << 62, 0)` · `[]int(1 << 62, 0)` · `ensure_cap` · `size_up`은 바이트 수 계산이 넘쳐
+    Segmentation fault이거나 abort였다. 이제 `Invalid allocation length` 또는 `OutOfMemory`.
+  - `'ab'.repeat(1 << 62)` · `'ab' ** (1 << 62)`와 `s.index_rune(1 << 62)`는 정수 변환에서 abort했다. `repeat`은 결과가
+    4 GiB를 넘으면 `InvalidArgument`, `index_rune`은 코드 포인트가 아닌 값에 `none`이다.
+  - `Buffer[T](n)` · `Buffer[T](n, v)`가 원소 크기를 한 번 더 곱해 필요한 것보다 크게 할당하던 것과, 관리 원소의
+    `Buffer.size_down`이 없는 필드 이름 때문에 컴파일되지 않던 것도 고쳤다.
 
 ## 언어와 표준 라이브러리
 

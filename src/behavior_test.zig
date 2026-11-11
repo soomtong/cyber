@@ -408,6 +408,19 @@ fn test_core(run: *Runner) void {
     run.case("core/set_index_unsupported_error.cy");
     run.case("core/Slice.cy");
     run.case("core/Slice_oob_panic.cy");
+    run.case("core/Array_remove_oob_panic.cy");
+    run.case("core/Array_size_up_neg_panic.cy");
+    run.case("core/Array_init_neg_len_panic.cy");
+    run.case("core/Array_init_overflow_len_panic.cy");
+    run.case("core/Array_slice_neg_panic.cy");
+    run.case("core/Slice_remove_oob_panic.cy");
+    run.case("core/Slice_size_up_neg_panic.cy");
+    run.case("core/Slice_init_neg_len_panic.cy");
+    run.case("core/Slice_slice_neg_panic.cy");
+    run.case("core/Span_slice_neg_panic.cy");
+    run.case("core/Buffer.cy");
+    run.case("core/Buffer_slice_neg_panic.cy");
+    run.case("core/str_repeat_overflow_panic.cy");
     run.case("core/Slice_neg_oob_panic.cy");
     run.case("core/str_new_line_error.cy");
     run.case("core/str_interpolation.cy");
@@ -464,6 +477,7 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/for_iter.cy");
     run.case("control_flow/for_iter_unsupported_error.cy");
     run.case("control_flow/for_iter_borrow_unsupported_error.cy");
+    run.case("control_flow/for_iter_index_borrow_error.cy");
     run.case("control_flow/for_iter_borrow_mutate_error.cy");
     run.case("control_flow/for_range.cy");
     run.case("control_flow/if_expr.cy");

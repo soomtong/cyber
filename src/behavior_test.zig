@@ -63,6 +63,9 @@ fn test_syntax(run: *Runner) void {
     run.case("syntax/compact_block_error.cy");
     run.case("syntax/func_missing_param_type_error.cy");
     run.case("syntax/func_param_name_error.cy");
+    run.case("syntax/float_exponent_separator_error.cy");
+    run.case("syntax/oct_digit_separator_error.cy");
+    run.case("syntax/dot_lit_space_error.cy");
     run.case("syntax/func_param_name_second_error.cy");
     run.case("syntax/lambda_param_name_error.cy");
     run.case("syntax/func_param_group.cy");

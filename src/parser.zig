@@ -3245,7 +3245,7 @@ pub const Parser = struct {
                 if (right2_op_prec > op_prec) {
                     const op2_start = self.next_pos;
                     self.advance();
-                    const rightExpr = try self.parseRightExpr(rightOp);
+                    const rightExpr = try self.parseRightExpr(rightOp2);
                     const newBinExpr = try self.ast.newNode(.binExpr, .{
                         .left = left,
                         .right = rightExpr,
@@ -3534,6 +3534,11 @@ pub const Parser = struct {
             .dot => {
                 self.advance();
                 if (try self.parseOptName()) |name| {
+                    if (name.pos() != self.tokenPos(start) + 1) {
+                        // The literal's text runs from the `.` to the end of the name, and the name is that text
+                        // without the `.`. With whitespace in between no case could ever match.
+                        return self.reportErrorAtSrc("Expected the name right after `.`.", &.{}, self.tokenPos(start));
+                    }
                     return @ptrCast(try self.ast.newLitNode(.dot_lit, self.tokenPos(start), name.end()));
                 } else {
                     return try self.newTokenNode(.dot, start);

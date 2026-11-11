@@ -4280,6 +4280,13 @@ pub fn sema_func_sym(c: *cy.Chunk, func: *cy.Func, prefer_ct_sym: bool, opt_targ
     if (prefer_ct_sym) {
         return ExprResult.initCustom(undefined, .func, ptr_t, .{ .func = func });
     }
+    switch (func.type) {
+        .generic, .host_const_eval, .host_builtin, .reserved, .trait, .vm_extern_variant => {
+            // These have no runtime function to point to.
+            return c.reportErrorFmt("The function `{}` can not be used as a value.", &.{v(func.name())}, node);
+        },
+        else => {},
+    }
     func.info.escaped = true;
     var loc = try c.ir.newExpr(.func_ptr, ptr_t, node, .{ .func = func });
     var res = ExprResult.initCustom(loc, .func, ptr_t, .{ .func = func });
@@ -6177,6 +6184,13 @@ pub fn sema_bitcast_nocheck(c: *cy.Chunk, expr: ExprResult, target_t: *cy.Type, 
 }
 
 pub fn semaBitcast(c: *cy.Chunk, expr: ExprResult, target_t: *cy.Type, node: *ast.Node) !ExprResult {
+    for ([_]*cy.Type{ target_t, expr.type }) |type_| {
+        if (!type_.has_size()) {
+            const name = try c.sema.allocTypeName(type_);
+            defer c.alloc.free(name);
+            return c.reportErrorFmt("The type `{}` has no size.", &.{v(name)}, node);
+        }
+    }
     if (target_t.size() != expr.type.size()) {
         return c.reportErrorFmt("Expected source type size `{}` to match the target type size `{}`.", &.{v(expr.type.size()), v(target_t.size())}, node);
     }
@@ -8144,7 +8158,9 @@ pub fn semaStringTarget(c: *cy.Chunk, lit: []const u8, opt_target: ?*cy.Type, no
         }
 
         var target_bits: ?u32 = null;
-        if (base_t.kind() == .int) {
+        if (base_t.id() == bt.Type) {
+            // `type` is a host type with an integer layout. A code point is not a type.
+        } else if (base_t.kind() == .int) {
             target_bits = base_t.cast(.int).bits;
         } else if (base_t.kind() == .raw) {
             target_bits = base_t.cast(.raw).bits;
@@ -8330,6 +8346,9 @@ pub fn semaRefOrType(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
     if (child.resType == .sym) {
         return c.reportError("Compile-time type cannot be used here. Consider expanding with `#{expr}` or using it in a compile-time context.", node);
     }
+    if (child.resType == .func) {
+        return c.reportError("A function symbol can not be lifted. Assign it to a variable first.", ref.child);
+    }
     return semaLift(c, child, node);
 }
 
@@ -8438,6 +8457,9 @@ pub fn semaPtrOrType(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
     var child = try c.semaExprSkipSym(ptr.child, .{});
     if (child.resType == .sym) {
         return c.reportErrorFmt("Unsupported.", &.{}, ptr.child);
+    }
+    if (child.resType == .func) {
+        return c.reportError("Can not take the address of a function symbol. Assign it to a variable first.", ptr.child);
     }
     // if (!child.addressable) {
     //     return c.reportErrorFmt("Cannot take the address of a temporary value.", &.{}, node.child);

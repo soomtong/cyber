@@ -775,8 +775,12 @@ pub fn type_name(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
 }
 
 pub fn type_size(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
-    _ = c;
     const type_ = ctx.args[0].asPtr(*cy.Type);
+    if (!type_.has_size()) {
+        const name = try c.sema.allocTypeName(type_);
+        defer c.alloc.free(name);
+        return c.reportErrorFmt("The type `{}` has no size.", &.{cy.fmt.v(name)}, ctx.node);
+    }
     const val = cy.Value.initInt(@intCast(type_.size()));
     return cy.TypeValue.init(ctx.func.sig.ret, val);
 }
@@ -913,11 +917,11 @@ fn type_info2(c: *cy.Chunk, type_: *cy.Type) !cy.Value {
                 },
                 .generic_trait => {
                     const name = type_.name();
-                    const trait_info_t = (try c.vm.findType("meta.GenTraitInfo")).?;
+                    const trait_info_t = (try c.vm.findType("meta.TraitInfo")).?;
                     const trait_info = try c.heap.newInstance(trait_info_t, &.{
                         field_init("name", try c.heap.init_eval_str(name)),
                     });
-                    return c.heap.newChoice(info_t, "gen_trait", trait_info);
+                    return c.heap.newChoice(info_t, "trait", trait_info);
                 },
                 .partial_vector => {
                     const vector_t = type_.cast(.partial_vector);
@@ -1113,6 +1117,12 @@ pub fn type_field(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
 
 pub fn type_info(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     const type_ = ctx.args[0].asPtr(*cy.Type);
+    if (type_.kind() == .generic_trait) {
+        // TODO: `TypeInfo.trait` is not created yet. `type_info2` would abort on the lookup of the case.
+        const name = try c.sema.allocTypeName(type_);
+        defer c.alloc.free(name);
+        return c.reportErrorFmt("`type.info` does not support the trait `{}`.", &.{cy.fmt.v(name)}, ctx.node);
+    }
     const val = try type_info2(c, type_);
     return cy.TypeValue.init(ctx.func.sig.ret, val);
 }

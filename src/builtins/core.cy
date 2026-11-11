@@ -4542,6 +4542,7 @@ type SystemKind enum:
 --| A generator is a stackless coroutine that can `yield` values back to the dispatcher.
 --| For an isolated execution context, consider using threads.
 type Generator[FnPtr Any]:
+    with NoCopy
     frame_ptr Ptr[int]
     frame_len i32
     resume_pc Ptr[byte]

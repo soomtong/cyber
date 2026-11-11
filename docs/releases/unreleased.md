@@ -58,6 +58,24 @@
     4 GiB를 넘으면 `InvalidArgument`, `index_rune`은 코드 포인트가 아닌 값에 `none`이다.
   - `Buffer[T](n)` · `Buffer[T](n, v)`가 원소 크기를 한 번 더 곱해 필요한 것보다 크게 할당하던 것과, 관리 원소의
     `Buffer.size_down`이 없는 필드 이름 때문에 컴파일되지 않던 것도 고쳤다.
+- 타입 · 함수 심볼을 잘못된 자리에 쓰면 컴파일러가 죽던 것을 고쳤다(F-94). 모두 종료 코드 134였고 이제 위치가 붙은 오류다.
+  - 함수 시그니처 밖의 `%x`: `type A = %x` · `Array[%x]{}` · `#if %x:` 등. 이제
+    ``CompileError: `%x` can only be declared in the signature of a function.``
+  - `type` 자리의 한 글자 문자열: `type.size('s')` · `type.name('s')`. 코드 포인트 정수가 타입 포인터로 쓰였다. 이제
+    ``Expected argument `type`, found `EvalStr```.
+  - 런타임 함수가 없는 함수를 값으로: `y := spawn` · `y := print` · `y := type.size`(템플릿 · 컴파일 시간 함수). 이제
+    ``The function `spawn` can not be used as a value.``
+  - 함수 심볼에 `^` · `*`: `x := ^f` · `x := *f`는 Segmentation fault였다. 이제 `A function symbol can not be lifted.` ·
+    `Can not take the address of a function symbol.`
+  - 부모 타입만 있고 이름이 없는 선언: `fn foo[]():` · `global A[] int = 1` · `const A[] = 1`. 이제
+    ``ParseError: Expected `::` and a name after the parent type.``
+  - trait 선언을 값 타입으로: `type.size(Shape)` · `[]Shape{}` · `?Shape` · `Map[str, Shape]{}` · `Map[Shape, int]{}`,
+    trait 타입의 필드, `@unsafeCast(Shape, 1)` · `@unsafeCast(f, 1)`. 이제 ``The type `Shape` has no size.`` 또는
+    ``Expected a value type for the parameter. `Shape` is a trait.`` 동적 디스패치는 전과 같이 `^Dyn[Shape]`를 쓴다.
+  - `type.info(Shape)`(trait): 이제 ``CompileError: `type.info` does not support the trait `Shape`.``
+- 제너레이터 값을 복사하면 종료 때 호스트가 죽던 것을 고쳤다(F-94). `x := gen().*`가 프레임 버퍼를 두 번 해제했다.
+  `Generator`는 이제 `NoCopy`라서 ``Cannot copy `Generator[fn() -> int]`, type implements `NoCopy`.``다. `^Generator` 참조를
+  넘기고 저장하는 코드는 그대로다.
 
 ## 언어와 표준 라이브러리
 

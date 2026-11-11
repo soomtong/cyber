@@ -406,6 +406,16 @@ pub const Type = extern struct {
         }
     }
 
+    /// Whether `size` knows this kind. A trait declaration or a function symbol is not a value type.
+    pub fn has_size(self: *Type) bool {
+        return switch (self.kind()) {
+            .c_union, .struct_t, .result, .option, .choice, .vector, .partial_vector, .raw, .int, .float,
+            .eval_ref, .pointer, .borrow, .ex_borrow, .borrow_trait, .ref_trait, .bool, .enum_t, .never,
+            .void, .func_ptr, .func, .generic => true,
+            else => false,
+        };
+    }
+
     /// Returns the size in bytes.
     pub fn size(self: *Type) usize {
         switch (self.kind()) {

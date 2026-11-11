@@ -732,6 +732,11 @@ pub fn reifyStructType(c: *cy.Chunk, struct_t: *cy.types.Struct, user_fields: []
             has_managed_child = true;
         }
 
+        if (!field_t.has_size()) {
+            const name = try c.sema.allocTypeName(field_t);
+            defer c.alloc.free(name);
+            return c.reportErrorFmt("The type `{}` has no size. It can not be the type of a field.", &.{cy.fmt.v(name)}, node);
+        }
         const member_alignment = field_t.alignment();
         if (member_alignment > alignment) {
             alignment = member_alignment;
@@ -901,6 +906,11 @@ pub fn resolveStructFields(c: *cy.Chunk, struct_t: *cy.types.Struct, decl: *ast.
             has_borrow_child = true;
         }
 
+        if (!field_t.has_size()) {
+            const name = try c.sema.allocTypeName(field_t);
+            defer c.alloc.free(name);
+            return c.reportErrorFmt("The type `{}` has no size. It can not be the type of a field.", &.{cy.fmt.v(name)}, @ptrCast(decl));
+        }
         const member_alignment = field_t.alignment();
         if (member_alignment > alignment) {
             alignment = member_alignment;
@@ -1171,6 +1181,11 @@ pub fn resolveOptionType(c: *cy.Chunk, option_t: *cy.types.Option, decl: *ast.No
 
         // Payload field.
         try ensure_resolved_type(c, option_t.child_t, decl);
+        if (!option_t.child_t.has_size()) {
+            const name = try c.sema.allocTypeName(option_t.child_t);
+            defer c.alloc.free(name);
+            return c.reportErrorFmt("The type `{}` has no size. It can not be the child of an option.", &.{cy.fmt.v(name)}, decl);
+        }
         size += option_t.child_t.size();
 
         if (option_t.child_t.alignment() > alignment) {
@@ -1293,9 +1308,22 @@ pub fn resolveAnyParamType(c: *cy.Chunk, param_idx: usize, resolve_new_type: boo
             };
         } else {
             // Lookup anonymous parameter.
-            var buf: [2]u8 = undefined;
+            var buf: [20]u8 = undefined;
             const anonymous_name = try std.mem.print(&buf, "{}", .{param_idx});
-            return sema.getResolveContext(c).data.func.instance.?.getParam(anonymous_name).?.value.asPtr(*cy.Type);
+            const ctx = sema.getResolveContext(c);
+            const param = b: {
+                if (ctx.type == .func) {
+                    if (ctx.data.func.instance) |instance| {
+                        if (instance.getParam(anonymous_name)) |param| break :b param;
+                    }
+                }
+                // The function was not declared as a template: a type argument of its parent made this parameter
+                // a trait (`Map[SomeTrait, int]`).
+                const name = try c.sema.allocTypeName(res);
+                defer c.alloc.free(name);
+                return c.reportErrorFmt("Expected a value type for the parameter. `{}` is a trait.", &.{cy.fmt.v(name)}, node);
+            };
+            return param.value.asPtr(*cy.Type);
         }
     }
     return res;

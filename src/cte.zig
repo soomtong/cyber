@@ -1677,6 +1677,9 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
             const name = node.cast(.infer_param).name.as_name();
 
             const ctx = sema.getResolveContext(c);
+            if (ctx.type != .func) {
+                return c.reportErrorFmt("`%{}` can only be declared in the signature of a function.", &.{v(name)}, node);
+            }
             if (ctx.data.func.instance != null) {
                 // Resolving variant func.
                 const res = try sema.lookupStaticIdent(c, name, node) orelse {
@@ -2514,7 +2517,10 @@ fn evalStringLiteral(c: *cy.Chunk, str: []const u8, opt_target: ?*cy.Type, node:
             }
         }
 
-        if (target_t.kind() == .int) {
+        // `type` is a host type with an integer layout. A code point is not a type.
+        if (target_t.id() == bt.Type) {
+            // Falls through to `EvalStr`.
+        } else if (target_t.kind() == .int) {
             if (try sema.semaTryStringLitCodepoint(c, str, target_t.cast(.int).bits, node)) |val| {
                 return Expr.initValue(.{
                     .type = target_t,

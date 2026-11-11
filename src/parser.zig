@@ -1676,6 +1676,8 @@ pub const Parser = struct {
             name = (try self.parseOptName()) orelse {
                 return self.reportError("Expected function name.", &.{});
             };
+        } else if (name.type() == .generic_expand) {
+            return self.reportErrorAtSrc("Expected `::` and a name after the parent type.", &.{}, name.pos());
         }
 
         var opt_template: ?*ast.TemplateDecl = null;
@@ -4258,6 +4260,8 @@ pub const Parser = struct {
             name = (try self.parseOptName()) orelse {
                 return self.reportError("Expected constant name.", &.{});
             };
+        } else if (name.type() == .generic_expand) {
+            return self.reportErrorAtSrc("Expected `::` and a name after the parent type.", &.{}, name.pos());
         }
         const type_ = try self.parseOptTypeSpec();
 
@@ -4380,6 +4384,8 @@ pub const Parser = struct {
             name = (try self.parseOptName()) orelse {
                 return self.reportError("Expected global name.", &.{});
             };
+        } else if (name.type() == .generic_expand) {
+            return self.reportErrorAtSrc("Expected `::` and a name after the parent type.", &.{}, name.pos());
         }
 
         const var_t = (try self.parseOptTypeSpec()) orelse {

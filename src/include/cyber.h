@@ -490,12 +490,23 @@ CLBytes cl_vm_error_summary(CLVM* vm);
 /// The text has no terminal escape codes unless `cl_vm_set_error_color` turned them on.
 CLBytes cl_vm_compile_error_summary(CLVM* vm);
 
+typedef enum {
+    /// `out` is the formatted source. It ends with a new line unless it is empty.
+    CL_FORMAT_OK = 0,
+    /// The source does not parse. `out` is `line:col: message` (1-based). The author of the source can fix it.
+    CL_FORMAT_SYNTAX_ERROR,
+    /// The formatter refused its own output: the result did not parse back to the same syntax tree.
+    /// The source is not at fault and should be kept as it is. `out` describes the failure.
+    CL_FORMAT_INTERNAL_ERROR,
+    /// No memory for the result. `out` is the null string.
+    CL_FORMAT_NO_MEMORY,
+} CLFormatResult;
+
 /// Formats Cyber source the way `cyber fmt` does. Only the parser runs, nothing is compiled or evaluated,
 /// and the state of the VM does not change. The VM provides the allocator.
-/// Returns true and sets `out` to the formatted source, which ends with a new line unless it is empty.
-/// Returns false if the source has a syntax error and sets `out` to `line:col: message` (1-based).
-/// `out` is the null string if there is no memory for it. Otherwise it must be freed with `cl_vm_freeb`.
-bool cl_vm_format(CLVM* vm, CLBytes src, CLBytes* out);
+/// `out` is set for every result. Unless it is the null string it must be freed with `cl_vm_freeb`.
+/// The message of an error is the null string if there is no memory for it.
+CLFormatResult cl_vm_format(CLVM* vm, CLBytes src, CLBytes* out);
 
 /// Whether a compile error summary colors the marker under the reported range with ANSI escape codes.
 /// Off by default. Survives `cl_vm_reset`.

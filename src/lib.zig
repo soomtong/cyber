@@ -399,19 +399,31 @@ export fn cl_vm_compile_error_summary(vm: *cy.VM) C.Bytes {
     return C.to_bytes(str);
 }
 
-export fn cl_vm_format(vm: *cy.VM, src: C.Bytes, out: *C.Bytes) bool {
+export fn cl_vm_format(vm: *cy.VM, src: C.Bytes, out: *C.Bytes) C.FormatResult {
     var diag: cy.format.Diagnostic = .{};
     defer diag.deinit(vm.alloc);
     const text = cy.format.format(vm.alloc, C.from_bytes(src), &diag) catch |err| {
         out.* = C.NullStr;
-        if (err != error.OutOfMemory) {
-            const msg = std.fmt.allocPrint(vm.alloc, "{}:{}: {s}", .{ diag.line + 1, diag.col + 1, diag.msg }) catch return false;
-            out.* = C.to_bytes(msg);
+        switch (err) {
+            error.OutOfMemory => return C.FormatNoMemory,
+            error.ParseError => {
+                const msg = std.fmt.allocPrint(vm.alloc, "{}:{}: {s}", .{ diag.line + 1, diag.col + 1, diag.msg }) catch return C.FormatSyntaxError;
+                out.* = C.to_bytes(msg);
+                return C.FormatSyntaxError;
+            },
+            error.VerifyError => {
+                // Not every verification failure has a position in the source.
+                const msg = (if (diag.pos > 0)
+                    std.fmt.allocPrint(vm.alloc, "{}:{}: {s}", .{ diag.line + 1, diag.col + 1, diag.msg })
+                else
+                    vm.alloc.dupe(u8, diag.msg)) catch return C.FormatInternalError;
+                out.* = C.to_bytes(msg);
+                return C.FormatInternalError;
+            },
         }
-        return false;
     };
     out.* = C.to_bytes(text);
-    return true;
+    return C.FormatOk;
 }
 
 export fn cl_vm_set_error_color(vm: *cy.VM, enabled: bool) void {

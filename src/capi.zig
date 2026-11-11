@@ -261,6 +261,11 @@ pub fn vm_compile_error_summary(vm: *VM) []const u8 {
 }
 
 pub const CompileError = c.CLCompileError;
+pub const FormatResult = c.CLFormatResult;
+pub const FormatOk: FormatResult = c.CL_FORMAT_OK;
+pub const FormatSyntaxError: FormatResult = c.CL_FORMAT_SYNTAX_ERROR;
+pub const FormatInternalError: FormatResult = c.CL_FORMAT_INTERNAL_ERROR;
+pub const FormatNoMemory: FormatResult = c.CL_FORMAT_NO_MEMORY;
 pub const ReportKind = c.CLReportKind;
 pub const ReportTokenError: ReportKind = c.CL_REPORT_TOKEN_ERROR;
 pub const ReportParseError: ReportKind = c.CL_REPORT_PARSE_ERROR;

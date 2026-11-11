@@ -113,20 +113,12 @@ fn formatPath(state: *State, path: []const u8) !void {
     const io = stdx.io();
     const cwd = std.Io.Dir.cwd();
     const stat = cwd.statFile(io, path, .{}) catch |err| {
-        std.debug.print("{s}: error: {s}\n", .{ path, @errorName(err) });
-        state.num_failed += 1;
+        reportIoError(state, path, err);
         return;
     };
     if (stat.kind != .directory) {
-        return formatFile(state, path, stat.permissions);
+        return formatFile(state, path);
     }
-
-    var dir = cwd.openDir(io, path, .{ .iterate = true }) catch |err| {
-        std.debug.print("{s}: error: {s}\n", .{ path, @errorName(err) });
-        state.num_failed += 1;
-        return;
-    };
-    defer dir.close(io);
 
     // Collect first so that rewriting does not disturb the directory iteration.
     var files: std.ArrayList([]const u8) = .empty;
@@ -136,36 +128,85 @@ fn formatPath(state: *State, path: []const u8) !void {
         }
         files.deinit(state.alloc);
     }
-    var walker = try dir.walk(state.alloc);
-    defer walker.deinit();
-    while (try walker.next(io)) |entry| {
-        if (entry.kind != .file or !std.mem.endsWith(u8, entry.basename, ".cy")) {
-            continue;
-        }
-        try files.append(state.alloc, try std.fs.path.join(state.alloc, &.{ path, entry.path }));
-    }
+    try collectFiles(state, path, &files);
     std.mem.sort([]const u8, files.items, {}, lessThan);
 
     for (files.items) |file| {
-        const file_stat = cwd.statFile(io, file, .{}) catch |err| {
-            std.debug.print("{s}: error: {s}\n", .{ file, @errorName(err) });
-            state.num_failed += 1;
-            continue;
-        };
-        try formatFile(state, file, file_stat.permissions);
+        try formatFile(state, file);
     }
+}
+
+/// Directories that a search does not enter. A path that is named on the command line is always searched.
+fn skipDir(name: []const u8) bool {
+    if (name.len > 0 and name[0] == '.') {
+        // `.git`, `.zig-cache`, editor and tool state.
+        return true;
+    }
+    return std.mem.eql(u8, name, "zig-out") or std.mem.eql(u8, name, "node_modules");
+}
+
+/// Appends the `.cy` files below `dir_path`. An unreadable directory is reported and skipped,
+/// the rest of the tree is still searched. Symbolic links are not followed.
+fn collectFiles(state: *State, dir_path: []const u8, files: *std.ArrayList([]const u8)) !void {
+    const io = stdx.io();
+    var dir = std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch |err| {
+        reportIoError(state, dir_path, err);
+        return;
+    };
+    defer dir.close(io);
+
+    var subdirs: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (subdirs.items) |subdir| {
+            state.alloc.free(subdir);
+        }
+        subdirs.deinit(state.alloc);
+    }
+
+    var iter = dir.iterate();
+    while (true) {
+        const entry = (iter.next(io) catch |err| {
+            reportIoError(state, dir_path, err);
+            break;
+        }) orelse break;
+        switch (entry.kind) {
+            .file => {
+                if (std.mem.endsWith(u8, entry.name, ".cy")) {
+                    const file = try std.fs.path.join(state.alloc, &.{ dir_path, entry.name });
+                    errdefer state.alloc.free(file);
+                    try files.append(state.alloc, file);
+                }
+            },
+            .directory => {
+                if (!skipDir(entry.name)) {
+                    const subdir = try std.fs.path.join(state.alloc, &.{ dir_path, entry.name });
+                    errdefer state.alloc.free(subdir);
+                    try subdirs.append(state.alloc, subdir);
+                }
+            },
+            else => {},
+        }
+    }
+    // Recurse after the iteration so that only one directory handle is open per level at a time.
+    for (subdirs.items) |subdir| {
+        try collectFiles(state, subdir, files);
+    }
+}
+
+fn reportIoError(state: *State, path: []const u8, err: anyerror) void {
+    std.debug.print("{s}: error: {s}\n", .{ path, @errorName(err) });
+    state.num_failed += 1;
 }
 
 fn lessThan(_: void, a: []const u8, b: []const u8) bool {
     return std.mem.lessThan(u8, a, b);
 }
 
-fn formatFile(state: *State, path: []const u8, permissions: std.Io.File.Permissions) !void {
+fn formatFile(state: *State, path: []const u8) !void {
     const io = stdx.io();
     const cwd = std.Io.Dir.cwd();
     const src = cwd.readFileAlloc(io, path, state.alloc, .limited(max_source_size)) catch |err| {
-        std.debug.print("{s}: error: {s}\n", .{ path, @errorName(err) });
-        state.num_failed += 1;
+        reportIoError(state, path, err);
         return;
     };
     defer state.alloc.free(src);
@@ -174,13 +215,16 @@ fn formatFile(state: *State, path: []const u8, permissions: std.Io.File.Permissi
     defer state.alloc.free(out);
 
     const changed = !std.mem.eql(u8, out, src);
-    if (changed) {
-        state.num_changed += 1;
-    }
     switch (state.mode) {
-        .stdout => try std.Io.File.stdout().writeStreamingAll(io, out),
+        .stdout => {
+            if (changed) {
+                state.num_changed += 1;
+            }
+            try std.Io.File.stdout().writeStreamingAll(io, out);
+        },
         .check => {
             if (changed) {
+                state.num_changed += 1;
                 try printLine(state.alloc, path);
             }
         },
@@ -188,16 +232,14 @@ fn formatFile(state: *State, path: []const u8, permissions: std.Io.File.Permissi
             if (!changed) {
                 return;
             }
-            // Write a sibling temp file and rename it over the original. Keeps the permission bits,
-            // scripts with a shebang line are often executable.
-            var atomic = cwd.createFileAtomic(io, path, .{ .permissions = permissions, .replace = true }) catch |err| {
-                std.debug.print("{s}: error: {s}\n", .{ path, @errorName(err) });
-                state.num_failed += 1;
+            // Write through the existing file instead of renaming a new file over it. The file keeps its
+            // identity: a symbolic link still points at its target (the target is rewritten), hard links
+            // stay linked, the permission bits stay, and a read-only file is refused.
+            cwd.writeFile(io, .{ .sub_path = path, .data = out }) catch |err| {
+                reportIoError(state, path, err);
                 return;
             };
-            defer atomic.deinit(io);
-            try atomic.file.writeStreamingAll(io, out);
-            try atomic.replace(io);
+            state.num_changed += 1;
             try printLine(state.alloc, path);
         },
     }
@@ -221,7 +263,12 @@ fn formatSource(state: *State, name: []const u8, src: []const u8) !?[]u8 {
             return null;
         },
         error.VerifyError => {
-            std.debug.print("{s}:{}:{}: internal error, file left unchanged: {s}\n", .{ name, diag.line + 1, diag.col + 1, diag.msg });
+            if (diag.pos > 0) {
+                std.debug.print("{s}:{}:{}: internal error, file left unchanged: {s}\n", .{ name, diag.line + 1, diag.col + 1, diag.msg });
+            } else {
+                // Not every verification failure has a position in the source.
+                std.debug.print("{s}: internal error, file left unchanged: {s}\n", .{ name, diag.msg });
+            }
             state.num_failed += 1;
             return null;
         },

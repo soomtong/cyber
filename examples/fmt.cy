@@ -206,7 +206,11 @@ fn (&Formatter) tokenize():
         token := Token{kind = kind, text = src[start..end]}
         if self.tokens.len() == 0 or newlines > 0:
             token.line_start = true
-            token.blank_before = self.tokens.len() > 0 and newlines > 1
+            if self.tokens.len() > 0:
+                token.blank_before = newlines > 1
+            else:
+                -- The shebang line of the prefix ends with its own line break, so one more is a blank line.
+                token.blank_before = self.prefix.ends_with('\n') and newlines > 0
             self.lines += Line{
                 head = self.tokens.len(),
                 width = indent_of(src, start),
@@ -675,6 +679,9 @@ fn (&Formatter) emit() -> str:
                 out += '\n'
                 if t.blank_before:
                     out += '\n'
+            else t.blank_before:
+                -- A blank line after the shebang line.
+                out += '\n'
             out = append_spaces(out, self.lines[t.line].new_width)
         out += t.text.span()
     if self.tokens.len() > 0:

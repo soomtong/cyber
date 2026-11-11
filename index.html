@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.6-dev 793-6b946b0</div>
+    <div class="sub-title">v0.4.7-dev 802-a5ad6c2</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1304,14 +1304,14 @@ const lib = switch meta.system():
 <h2 id="reserved-identifiers">Reserved identifiers. <a href="#reserved-identifiers">#</a></h2>
 <a href="#syntax">^topic</a>
 <h3 id="keywords">Keywords. <a href="#keywords">#</a></h3>
-<p>There are <code>23</code> general keywords. This list categorizes them:</p>
+<p>There are <code>25</code> general keywords. This list categorizes them:</p>
 <ul>
 <li><a href="#control-flow" title="">Control flow</a>: <a href="#if-statement" title=""><code>if</code></a> <a href="#if-statement" title=""><code>else</code></a> <a href="#switch-matching" title=""><code>switch</code></a> <a href="#switch-matching" title=""><code>case</code></a> <a href="#conditional-while" title=""><code>while</code></a> <a href="#for-range" title=""><code>for</code></a> <a href="#break-statement" title=""><code>break</code></a> <a href="#continue-statement" title=""><code>continue</code></a> <code>pass</code> <a href="#or-expression" title=""><code>or</code></a> <a href="#and-expression" title=""><code>and</code></a></li>
 <li><a href="#operators" title="">Operators</a>: <code>not</code></li>
 <li><a href="#variables" title="">Variables</a>: <a href="#local-variables" title=""><code>var</code></a> <a href="#global-variables" title=""><code>global</code></a></li>
 <li><a href="#functions" title="">Functions</a>: <code>fn</code> <code>return</code></li>
 <li><a href="#value-ownership" title="">Ownership</a>: <a href="#moving" title=""><code>move</code></a></li>
-<li><a href="#concurrency" title="">Concurrency</a>: <a href="#generators" title=""><code>yield</code></a></li>
+<li><a href="#concurrency" title="">Concurrency</a>: <a href="#generators" title=""><code>yield</code></a> <a href="#fibers" title=""><code>fiber</code></a> <a href="#fibers" title=""><code>suspend</code></a>. <code>generator</code> is a modifier in front of <code>fn</code> and is not reserved.</li>
 <li><a href="#custom-types" title="">Types</a>: <code>type</code> <code>with</code></li>
 <li><a href="#error-handling" title="">Error handling</a>: <a href="#unwrap-block" title=""><code>try</code></a></li>
 <li><a href="#modules" title="">Modules</a>: <code>use</code></li>
@@ -1713,12 +1713,16 @@ print(x.fmt(.hex))  --> 7b
 <p><code>Str</code> is a mutable string type. <em>Planned Feature</em></p>
 <a href="#basic-types">^topic</a>
 <h2 id="symbols">Symbols. <a href="#symbols">#</a></h2>
-<p>Symbol literals begin with <code>@</code>, followed by an identifier.
+<p>A symbol literal is written <code>symbol.</code> followed by an identifier, like an error value is written <code>error.Name</code>.
 Each symbol has a global unique ID.</p>
-<pre><code class="language-cy">currency := @usd
-print(currency == @usd)   --> true
-print(int(currency))      --> <unique ID>
+<pre><code class="language-cy">currency := symbol.usd
+print(currency == symbol.usd)   --> true
+print(currency)                 --> symbol.usd
+print(currency.name())          --> usd
+print(int(currency))            --> <unique ID>
 </code></pre>
+<p>A symbol does not need a declaration. The same name is the same value everywhere in the program.</p>
+<p>Earlier versions wrote a symbol literal as <code>@usd</code>. That is a compile error that names the replacement: <code>Undeclared `@usd`. A symbol literal is written `symbol.usd`.</code></p>
 <a href="#basic-types">^topic</a>
 <h2 id="references">References. <a href="#references">#</a></h2>
 <p>A reference type is denoted as <code>^T</code> where <code>T</code> is the type of the value that the reference points to.
@@ -2238,6 +2242,15 @@ print(a[1])
 </code></pre>
 <a href="#custom-types">^topic</a>
 <h3 id="special-methods">Special methods. <a href="#special-methods">#</a></h3>
+<p>A function name that starts with <code>@</code> is a hook: a function that the compiler calls by name. A script can declare these hooks:</p>
+<table><thead><tr><th>Hook</th><th>Called for</th></tr></thead><tbody><tr><td><a href="#@init" title=""><code>@init</code></a></td><td><code>T(...)</code></td></tr><tr><td><a href="#@init_sequence" title=""><code>@init_sequence</code></a></td><td><code>T{a, b}</code></td></tr><tr><td><a href="#@init_record" title=""><code>@init_record</code></a></td><td><code>T{k=v}</code></td></tr><tr><td><code>@deinit</code></td><td>The value is <a href="#deinitializers" title="">deinitialized</a>.</td></tr><tr><td><code>@copy</code></td><td>The value is copied.</td></tr><tr><td><code>@clone</code></td><td><code>clone</code></td></tr><tr><td><code>@index</code>, <code>@set_index</code>, <code>@index_addr</code>, <code>@slice</code></td><td>The index and slice <a href="#operator-methods" title="">operators</a>.</td></tr><tr><td><code>@get</code>, <code>@set</code></td><td>Access to a field that is not declared.</td></tr><tr><td><code>@send</code></td><td>The value is sent to another thread.</td></tr></tbody></table><p>Any other <code>@</code> name is a compile error, so a misspelled hook is not declared as a plain method:</p>
+<pre><code class="language-cy">fn (&Foo) @dinit():    --> CompileError: Unknown hook `@dinit`. A function name can start with `@` only when it is a hook that the compiler calls, such as `@init` or `@deinit`.
+    pass
+</code></pre>
+<p>The builtin modules also declare <code>@</code> functions that are part of the runtime (<code>@memcpy</code>, <code>@retain</code>, ...). They are not hooks and a script can not use them:</p>
+<pre><code class="language-cy">x := @bitCast(float, 1)    --> CompileError: `@bitCast` is internal to the builtin modules and can not be used in a script.
+</code></pre>
+<p>The standard modules provide what a script needs from them under plain names, such as <code>c.memcpy</code>, <code>meta.consume</code> and <code>meta.enum_from_int</code>.</p>
 <p>The <code>@get</code> method allows overriding field accesses for undeclared fields:</p>
 <pre><code class="language-cy">type Foo
 
@@ -3083,15 +3096,17 @@ type Foo:  -- Copyable struct.
     b str
 </code></pre>
 <p>A custom type can also be copyable if it declares a <code>@copy</code> method:</p>
-<pre><code class="language-cy">type MyArray:
+<pre><code class="language-cy">use c
+
+type MyArray:
     ptr Ptr[byte]
     len int
 
 -- Performs deep copy.
 fn (&MyArray) @copy() -> Self:
-    new_ptr := alloc(byte, self.len)
-    @memcpy(new_ptr, self.ptr, self.len)
-    return {ptr=new_ptr}
+    new_buf := alloc(byte, self.len)
+    c.memcpy(new_buf.ptr, self.ptr, self.len)
+    return {ptr=new_buf.ptr, len=self.len}
 </code></pre>
 <p>A type that implements the <code>NoCopy</code> trait prevents implicit copying:</p>
 <pre><code class="language-cy">type Foo:
@@ -3351,7 +3366,7 @@ fn (scope &FooArray) iterator() -> scope FooIterator:
     buf := self.buf
     length := self.length
     cap := self.cap()
-    @consume(self)
+    meta.consume(self)    -- `self` ends here without its `@deinit`.
     return {
         base   = buf,
         length = length,
@@ -3672,38 +3687,91 @@ The <code>Future</code> contains the asynchronous result of the new thread.</p>
 </ul>
 <a href="#concurrency">^topic</a>
 <h3 id="fibers">Fibers. <a href="#fibers">#</a></h3>
-<p>A fiber is a cooperative execution context that belongs to a parent thread.
-It has its own stack but shares the thread's heap: <em>TODO</em></p>
-<pre><code class="language-cy">f := Fiber(|_|):
-    print('in a fiber')
+<p>A fiber is a cooperative execution context that belongs to a thread. It has its own stack and shares the thread's heap.
+A fiber waits and gives up control. It carries no value: use a <a href="#generators" title="">generator</a> to produce values.</p>
+<p><code>fiber</code> in front of a call creates a <code>Fiber</code>. The arguments are evaluated at once and the function is called at the first <code>resume</code>:</p>
+<pre><code class="language-cy">fn two_steps(name str):
+    print('%{name}: first')
+    suspend
+    print('%{name}: last')
 
-f.resume()
---> in a fiber
+f := fiber two_steps('a')
+print(f.status())      --> FiberStatus.suspended
+
+_ = f.resume()         --> a: first
+_ = f.resume()         --> a: last
+print(f.status())      --> FiberStatus.done
 </code></pre>
-<p>When a fiber panics, all other fibers in the same thread are terminated.</p>
-<p>Fibers are cooperative using a resume and yield mechanism:</p>
-<pre><code class="language-cy">fn two_steps():
-    print('first')
-    Fiber.yield()
-    print('last')
-
-f := Fiber(two_steps, {})
-f.resume()
---> first
-
-f.resume()
---> last
+<p><code>suspend</code> gives control back to the <code>resume</code> call that is running the fiber. It takes no value and it can be used at any call depth, in a function of any signature:</p>
+<pre><code class="language-cy">fn crunch(data ^ArrayStore[int]) -> int:
+    sum := 0
+    for data |x|:
+        sum += x
+        if sum % 4096 == 0:
+            suspend
+    return sum
 </code></pre>
-<p>When a fiber is destructed, it will panic if it's still in progress:</p>
+<p>Outside of a fiber, <code>suspend</code> does nothing.</p>
+<p><code>resume</code> returns <code>.suspended</code> when the fiber suspended and <code>.done</code> when its function returned. Resuming a fiber that is done returns <code>.done</code> again. <code>status</code> returns <code>.suspended</code>, <code>.running</code> or <code>.done</code>. A fiber that resumed another fiber is <code>.running</code> until the other one gives control back.</p>
+<p>Fibers interleave on the same heap. Share state with a <code>^T</code> reference:</p>
+<pre><code class="language-cy">fn worker(name str, log ^ArrayStore[str]):
+    for 0..2 |i|:
+        log << '%{name} %{i}'
+        suspend
+
+log := ^ArrayStore[str]{}
+a := fiber worker('a', log)
+b := fiber worker('b', log)
+while a.status() != .done or b.status() != .done:
+    _ = a.resume()
+    _ = b.resume()
+--> log: a 0, b 0, a 1, b 1
+</code></pre>
+<p><code>fiber:</code> takes a body instead of a call. The body is a closure, so it captures variables that are declared with a reference type:</p>
+<pre><code class="language-cy">log := ^ArrayStore[str]{}
+t := fiber:
+    log << 'step 1'
+    suspend
+    log << 'step 2'
+
+_ = t.resume()         -- log: step 1
+_ = t.resume()         -- log: step 1, step 2
+</code></pre>
+<p>The rules of a fiber entry are checked at the <code>fiber</code> expression:</p>
+<pre><code class="language-cy">generator fn countdown(n int) -> int:
+    yield n
+f := fiber countdown(3)    --> CompileError: A generator cannot be a fiber entry.
+
+fn one() -> int:
+    return 1
+f := fiber one()           --> CompileError: A fiber entry function must return `void`.
+
+fn bump(n &int):
+    n.* += 1
+n := 1
+f := fiber bump(&n)        --> CompileError: Cannot borrow a stack value across fibers. The parameter type is `&int`. Use `^T`.
+
+suspend 1                  --> ParseError: `suspend` takes no value. Use `yield` in a generator.
+</code></pre>
+<p>The arguments are copied into the call at the first <code>resume</code>, so a parameter of a fiber entry can not have a <code>NoCopy</code> type.</p>
+<p>A generator can be consumed inside a fiber, and <code>suspend</code> in a generator body suspends the fiber that consumes the generator. The generator stays <code>.running</code> until that fiber is resumed.</p>
+<p>When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the <code>resume</code> call of each fiber down to the main block.</p>
+<p>A fiber can not resume itself or a fiber that is waiting for it:</p>
+<pre><code class="language-cy">--> panic: Fiber is already running.
+</code></pre>
+<p>When a fiber is destructed, it will panic if it's still in progress. This includes a fiber that was never resumed, since only the fiber can release its arguments:</p>
 <pre><code class="language-cy">fn forever():
-    while:
-        Fiber.yield()
+    while true:
+        suspend
 
-f := Fiber(forever, {})
-f.resume()
+fn start():
+    f := fiber forever()
+    _ = f.resume()
 
+start()
 --> panic: Fiber is still in progress.
 </code></pre>
+<p>Each fiber starts with a stack of 512 bytes that grows on demand like the thread's stack. Fibers are not available when compiling AOT.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="growable-stacks">Growable stacks. <a href="#growable-stacks">#</a></h3>
 <p>When running on Cyber's VM, threads can grow their stack on demand.
@@ -3804,9 +3872,8 @@ print(v)
 <a href="#concurrency">^topic</a>
 <h2 id="generators">Generators. <a href="#generators">#</a></h2>
 <p>Generators are stackless coroutines that are intended to yield values incrementally.
-A function annotated with <code>#[generator]</code> returns a <code>Generator[Fn]</code> when invoked:</p>
-<pre><code class="language-">#[generator]
-fn iterate() -> int:
+A function declared with <code>generator fn</code> returns a <code>Generator[Fn]</code> when invoked. The return type in the signature is the type of the yielded values:</p>
+<pre><code class="language-">generator fn iterate() -> int:
     yield 123
     yield 456
 
@@ -3816,14 +3883,40 @@ print(gen)
 </code></pre>
 <p><code>yield</code> pauses the current generator and returns a value back to the call site of <code>Generator.next</code>.</p>
 <p>A generator outlives the call that created it, so its parameters (including a method's receiver) can not be borrow types such as <code>&T</code>, <code>[&]T</code>, <code>?&T</code> or a struct that holds a borrow. Pass a value or a <code>^T</code> pointer instead:</p>
-<pre><code class="language-cy">#[generator]
-fn watch(p &int) -> int:    --> CompileError: A `#[generator]` function can not take the borrow type `&int` as a parameter.
+<pre><code class="language-cy">generator fn watch(p &int) -> int:    --> CompileError: A `generator fn` can not take the borrow type `&int` as a parameter.
     yield p.*
 
-#[generator]
-fn watch(p ^int) -> int:    -- OK
+generator fn watch(p ^int) -> int:    -- OK
     yield p.*
 </code></pre>
+<p>A method can be a generator. The receiver is kept by the generator like any other parameter, so it must be a <code>^T</code> pointer and not a borrow:</p>
+<pre><code class="language-cy">type Bag:
+    n int
+
+generator fn (^Bag) items() -> int:
+    for 0..self.n |i|:
+        yield i
+
+b := ^Bag{n=3}
+for b.items() |v|:
+    print(v)
+</code></pre>
+<p>A generator can be a function template. As with any function template, <code>[T]</code> parameters are expanded explicitly and <code>%T</code> parameters are inferred from the arguments:</p>
+<pre><code class="language-cy">generator fn rep[T Any](x T, n int) -> T:
+    for 0..n |i|:
+        yield x
+
+generator fn rep2(x %T, n int) -> T:
+    for 0..n |i|:
+        yield x
+
+for rep[int](1, 3) |v|:
+    print(v)
+for rep2('a', 3) |s|:
+    print(s)
+</code></pre>
+<p><code>generator</code> is not a reserved word. It is a modifier only when <code>fn</code> follows it, so it can still be used as a name. A hidden generator is written <code>-generator fn</code>, and attributes go before the modifier (<code>#[inline] generator fn</code>). <code>yield</code> outside a <code>generator fn</code> is a compile error.</p>
+<p>The <code>#[generator]</code> attribute of earlier versions was removed. It is a parse error that names the replacement: <code>The `#[generator]` attribute was replaced by `generator fn`.</code></p>
 <p>A generator begins and resumes execution with <code>next</code> which returns the next yielded value as an optional:</p>
 <pre><code class="language-cy">while gen.next() |res|:
     print(res)
@@ -3839,7 +3932,7 @@ fn watch(p ^int) -> int:    -- OK
 <p>The current state of a generator can be obtained with <code>Generator.status</code>:</p>
 <pre><code class="language-cy">gen := iterate()
 print(gen.status())
---> GeneratorStatus.paused
+--> GeneratorStatus.suspended
 
 while gen.next() |res|:
     pass
@@ -4055,13 +4148,14 @@ m := IntMap[str, my_hash]{}
 <a href="#metaprogramming">^topic</a>
 <h2 id="attributes">Attributes. <a href="#attributes">#</a></h2>
 <p>An attribute annotates the declaration that follows it. It is written as <code>#[name]</code> or <code>#[name='value']</code>, on the line before the declaration or on the same line:</p>
-<pre><code class="language-cy">#[generator]
-fn count() -> int:
-    yield 1
+<pre><code class="language-cy">#[inline]
+fn add(a int, b int) -> int:
+    return a + b
 
 #[extern] global errno Ptr[int]
 </code></pre>
-<table><thead><tr><th>Attribute</th><th>Applies to</th><th>Purpose</th></tr></thead><tbody><tr><td><code>#[generator]</code></td><td>function</td><td>The function is a <a href="#generators" title="">generator</a>.</td></tr><tr><td><code>#[inline]</code></td><td>function</td><td>Calls are inlined in bytecode with a larger size limit.</td></tr><tr><td><code>#[bind]</code></td><td>function, type, global</td><td>The declaration is provided by the host or by a compiler hook. See <a href="#bind-hooks" title=""><code>#[bind]</code> hooks</a>.</td></tr><tr><td><code>#[extern]</code></td><td>function, global</td><td>The declaration is a C symbol. <code>#[extern='name']</code> gives the symbol name. See <a href="#ffi" title="">FFI</a>.</td></tr><tr><td><code>#[unsafe]</code></td><td>function</td><td>The function is exempt from checks on borrow containers. Used by the builtin modules.</td></tr><tr><td><code>#[consteval]</code></td><td>function</td><td>The function is only evaluated at compile-time. Used by the builtin modules.</td></tr><tr><td><code>#[reserve]</code></td><td>function</td><td>Reserves the name for a declaration that the compiler provides. Used by the builtin modules.</td></tr><tr><td><code>#[cond=expr]</code></td><td>function, global, <code>use</code></td><td>The declaration exists only when the compile-time condition is <code>true</code>.</td></tr><tr><td><code>#[call]</code></td><td></td><td>Reserved.</td></tr></tbody></table><p>An unknown attribute name is a parse error: <code>Unknown attribute.</code></p>
+<table><thead><tr><th>Attribute</th><th>Applies to</th><th>Purpose</th></tr></thead><tbody><tr><td><code>#[inline]</code></td><td>function</td><td>Calls are inlined in bytecode with a larger size limit.</td></tr><tr><td><code>#[bind]</code></td><td>function, type, global</td><td>The declaration is provided by the host or by a compiler hook. See <a href="#bind-hooks" title=""><code>#[bind]</code> hooks</a>.</td></tr><tr><td><code>#[extern]</code></td><td>function, global</td><td>The declaration is a C symbol. <code>#[extern='name']</code> gives the symbol name. See <a href="#ffi" title="">FFI</a>.</td></tr><tr><td><code>#[unsafe]</code></td><td>function</td><td>The function is exempt from checks on borrow containers. Reserved for the builtin modules.</td></tr><tr><td><code>#[consteval]</code></td><td>function</td><td>The function is only evaluated at compile-time. Reserved for the builtin modules.</td></tr><tr><td><code>#[reserve]</code></td><td>function</td><td>Reserves the name for a declaration that the compiler provides. Reserved for the builtin modules.</td></tr><tr><td><code>#[cond=expr]</code></td><td>function, global, <code>use</code></td><td>The declaration exists only when the compile-time condition is <code>true</code>.</td></tr><tr><td><code>#[call]</code></td><td></td><td>Reserved.</td></tr></tbody></table><p>An unknown attribute name is a parse error: <code>Unknown attribute.</code></p>
+<p>An attribute that is reserved for the builtin modules is a compile error in a script: <code>The `#[consteval]` attribute is reserved for the builtin modules.</code></p>
 <p>A declaration that <code>#[cond]</code> skips is not declared. Using its name is a compile error unless another declaration of that name exists:</p>
 <pre><code class="language-cy">#[cond=meta.system() == .windows]
 fn sep() -> str:
@@ -4743,12 +4837,12 @@ CompileError: Cannot persist local `sp` of borrow type `[&]int` across evals. De
     | 
 hello!
 </code></pre>
-<p>An attribute line such as <code>#[generator]</code> is held until the declaration it annotates is complete. A one line declaration after an attribute is submitted with an empty input:</p>
-<pre><code class="language-bash">> #[generator]
-| fn gen() -> int:
-    | yield 1
+<p>An attribute line such as <code>#[inline]</code> is held until the declaration it annotates is complete. A one line declaration after an attribute is submitted with an empty input:</p>
+<pre><code class="language-bash">> #[inline]
+| fn one() -> int:
+    | return 1
     | 
-> gen().next().?
+> one()
 `int` 1
 </code></pre>
 <p>Top level declarations such as imports, types, and functions can be referenced in subsequent evals:</p>

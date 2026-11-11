@@ -812,7 +812,7 @@ fn (&Object) toString() -> str:
         case type.id(error):
             return 'error.' + (as[^error] self.inner).*.sym().name()
         case type.id(symbol):
-            return '@' + (as[^symbol] self.inner).*.name()
+            return 'symbol.' + (as[^symbol] self.inner).*.name()
         case type.id(str):
             return (as[^str] self.inner).*
         else:
@@ -902,14 +902,14 @@ fn (&Ex[]) ex_borrow() -> RtExBorrow[T]:
 fn (&Ex[]) borrow() -> RtBorrow[T]:
     #if meta.has_decl(T, '$acquire_ex_borrow'):
         switch self.inner.@acquire_borrow():
-            case @ex_borrowed:
+            case symbol.ex_borrowed:
                 panic('Cannot acquire borrow.')
-            case @borrowed:
+            case symbol.borrowed:
                 return {
                     ptr = &self.inner,
                     acquired = false,
                 }
-            case @acquired:
+            case symbol.acquired:
                 return {
                     ptr = &self.inner,
                     acquired = true,
@@ -1034,11 +1034,11 @@ fn (&Buffer[]) @release_ex_borrow():
 
 fn (&Buffer[]) @acquire_borrow() -> AcquireBorrowKind:
     if (self.header && (1 << 63)) != 0:
-        return @ex_borrowed
+        return symbol.ex_borrowed
     if (self.header && (1 << 62)) == 0:
         self.header ||= 1 << 62
-        return @acquired
-    return @borrowed
+        return symbol.acquired
+    return symbol.borrowed
 
 fn (&Buffer[]) @release_borrow():
     self.header &&= ~(3 << 62)
@@ -1847,11 +1847,11 @@ fn (&Array[]) @release_ex_borrow():
 
 fn (&Array[]) @acquire_borrow() -> AcquireBorrowKind:
     if (self.header && (1 << 63)) != 0:
-        return @ex_borrowed
+        return symbol.ex_borrowed
     if (self.header && (1 << 62)) == 0:
         self.header ||= 1 << 62
-        return @acquired
-    return @borrowed
+        return symbol.acquired
+    return symbol.borrowed
 
 fn (&Array[]) @release_borrow():
     self.header &&= ~(3 << 62)
@@ -3513,7 +3513,7 @@ fn str :: @init(x %T) -> str:
     #else T == error:
         return 'error.' + x.sym().name()
     #else T == symbol:
-        return '@' + x.name()
+        return 'symbol.' + x.name()
     #else type.implements(T, AsSpan[byte]):
         return str(x[..])
     #else:

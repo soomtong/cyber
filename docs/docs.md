@@ -790,13 +790,18 @@ paragraph := {
 `Str` is a mutable string type. *Planned Feature*
 
 ## Symbols.
-Symbol literals begin with `@`, followed by an identifier.
+A symbol literal is written `symbol.` followed by an identifier, like an error value is written `error.Name`.
 Each symbol has a global unique ID.
 ```cy
-currency := @usd
-print(currency == @usd)   --> true
-print(int(currency))      --> <unique ID>
+currency := symbol.usd
+print(currency == symbol.usd)   --> true
+print(currency)                 --> symbol.usd
+print(currency.name())          --> usd
+print(int(currency))            --> <unique ID>
 ```
+A symbol does not need a declaration. The same name is the same value everywhere in the program.
+
+Earlier versions wrote a symbol literal as `@usd`. That is a compile error that names the replacement: ``Undeclared `@usd`. A symbol literal is written `symbol.usd`.``
 
 ## References.
 A reference type is denoted as `^T` where `T` is the type of the value that the reference points to. 
@@ -1476,6 +1481,27 @@ print(a[1])
 ```
 
 ### Special methods.
+
+A function name that starts with `@` is a hook: a function that the compiler calls by name. A script can declare these hooks:
+
+| Hook | Called for |
+| -- | -- |
+| [`@init`](#@init) | `T(...)` |
+| [`@init_sequence`](#@init_sequence) | `T{a, b}` |
+| [`@init_record`](#@init_record) | `T{k=v}` |
+| `@deinit` | The value is [deinitialized](#deinitializers). |
+| `@copy` | The value is copied. |
+| `@clone` | `clone` |
+| `@index`, `@set_index`, `@index_addr`, `@slice` | The index and slice [operators](#operator-methods). |
+| `@get`, `@set` | Access to a field that is not declared. |
+| `@send` | The value is sent to another thread. |
+
+Any other `@` name is a compile error, so a misspelled hook is not declared as a plain method:
+```cy
+fn (&Foo) @dinit():    --> CompileError: Unknown hook `@dinit`. A function name can start with `@` only when it is a hook that the compiler calls, such as `@init` or `@deinit`.
+    pass
+```
+The builtin modules also declare `@` functions that are part of the runtime. They are not hooks.
 
 The `@get` method allows overriding field accesses for undeclared fields:
 ```cy
@@ -3607,13 +3633,15 @@ fn add(a int, b int) -> int:
 | `#[inline]` | function | Calls are inlined in bytecode with a larger size limit. |
 | `#[bind]` | function, type, global | The declaration is provided by the host or by a compiler hook. See [`#[bind]` hooks](#bind-hooks). |
 | `#[extern]` | function, global | The declaration is a C symbol. `#[extern='name']` gives the symbol name. See [FFI](#ffi). |
-| `#[unsafe]` | function | The function is exempt from checks on borrow containers. Used by the builtin modules. |
-| `#[consteval]` | function | The function is only evaluated at compile-time. Used by the builtin modules. |
-| `#[reserve]` | function | Reserves the name for a declaration that the compiler provides. Used by the builtin modules. |
+| `#[unsafe]` | function | The function is exempt from checks on borrow containers. Reserved for the builtin modules. |
+| `#[consteval]` | function | The function is only evaluated at compile-time. Reserved for the builtin modules. |
+| `#[reserve]` | function | Reserves the name for a declaration that the compiler provides. Reserved for the builtin modules. |
 | `#[cond=expr]` | function, global, `use` | The declaration exists only when the compile-time condition is `true`. |
 | `#[call]` | | Reserved. |
 
 An unknown attribute name is a parse error: `Unknown attribute.`
+
+An attribute that is reserved for the builtin modules is a compile error in a script: ``The `#[consteval]` attribute is reserved for the builtin modules.``
 
 A declaration that `#[cond]` skips is not declared. Using its name is a compile error unless another declaration of that name exists:
 ```cy

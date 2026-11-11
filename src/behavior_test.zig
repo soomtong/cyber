@@ -91,7 +91,9 @@ fn test_functions(run: *Runner) void {
     run.case("functions/assign_capture_local_error.cy");
     run.case("functions/assign_error.cy");
     run.case("functions/call_at_ct.cy");
-    run.case("functions/call_at_ct_error.cy");
+    run.case("functions/consteval_attr_error.cy");
+    run.case("functions/unknown_hook_error.cy");
+    run.case("core/symbol_at_lit_error.cy");
     run.case("functions/call_block.cy");
     run.case("functions/call_incompat_param_error.cy");
     run.case("functions/call_closure.cy");

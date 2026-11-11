@@ -66,6 +66,20 @@
     `suspend_statement`를 더했다.
   - 구현 기록은 `docs/decisions/project_coroutines.md`의 "Fiber 구현 (2026-11-11)" 절.
 
+- `#` · `@` 표기의 경계를 정리했다. 세 가지 모두 호환되지 않는 변경이다.
+  - symbol 리터럴은 `symbol.usd`로 쓴다(`error.Name`과 같은 꼴). `@usd`는
+    ``CompileError: Undeclared `@usd`. A symbol literal is written `symbol.usd`.``이다. 출력도 `symbol.usd`로 바뀌었다
+    (`print(symbol.usd)`, `str(symbol.usd)`. 이전에는 `@usd`). `symbol`이라는 이름의 변수는 타입을 가리므로 그대로 쓸 수 있다.
+  - `@`로 시작하는 함수 이름은 hook만 선언할 수 있다: `@init` · `@init_sequence` · `@init_record` · `@deinit` · `@copy` ·
+    `@clone` · `@index` · `@set_index` · `@index_addr` · `@slice` · `@get` · `@set` · `@send`. 그 밖의 이름은
+    ``CompileError: Unknown hook `@whatever`. ...``이다. 이전에는 일반 메서드로 선언되어 오타 난 hook이 조용히 무시됐다.
+  - `#[unsafe]` · `#[consteval]` · `#[reserve]`는 builtin 모듈 전용이다. 스크립트에서 쓰면
+    ``CompileError: The `#[consteval]` attribute is reserved for the builtin modules.``
+  - builtin 모듈은 `core` · `meta` · `cy` · `c` · `math` · `io` · `test`다. 각 모듈의 bind 함수가 표시하므로 호스트가 소스를
+    다른 곳에서 읽어도 같다. `os` · `cli` · `libc`는 스크립트와 같은 규칙을 받는다.
+  - intrinsic 호출(`@memcpy` · `@bitCast` 등)의 제한은 아직 넣지 않았다(결정 대기).
+  - 근거는 `docs/decisions/project_sigils.md`.
+
 ## 임베딩 API
 
 ## 변경

@@ -126,7 +126,7 @@ t.eq(2, Object(^true).type())
 t.eq(13, Object(^1.23).type())
 t.eq(6, Object(^123).type())
 t.eq(23, Object(^'abc').type())
-t.eq(15, Object(^@sym).type())
+t.eq(15, Object(^symbol.sym).type())
 t.eq(14, Object(^error.oops).type())
 
 --cytest: pass

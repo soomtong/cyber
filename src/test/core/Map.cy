@@ -224,11 +224,11 @@ m_bool[false] = 2
 t.eq(1, m_bool[true])
 t.eq(2, m_bool[false])
 m_sym := Map[symbol, int]{}
-m_sym[@red] = 1
-m_sym[@blue] = 2
-t.eq(1, m_sym[@red])
-t.eq(2, m_sym[@blue])
-t.eq(false, m_sym.contains(@green))
+m_sym[symbol.red] = 1
+m_sym[symbol.blue] = 2
+t.eq(1, m_sym[symbol.red])
+t.eq(2, m_sym[symbol.blue])
+t.eq(false, m_sym.contains(symbol.green))
 m_err := Map[error, int]{}
 m_err[error.NotFound] = 1
 t.eq(1, m_err[error.NotFound])

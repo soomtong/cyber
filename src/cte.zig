@@ -1605,12 +1605,8 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
             }
         },
         .at_lit => {
-            const at_lit = node.cast(.at_lit);
-            const name = at_lit.as_at_infer_name();
-            return Expr.initValue(.{
-                .type = c.sema.symbol_t,
-                .value = try c.sema.initSymbol(name),
-            });
+            const at_name = node.cast(.at_lit).value.slice();
+            return c.reportErrorFmt("Undeclared `{}`. A symbol literal is written `symbol.{}`.", &.{v(at_name), v(at_name[1..])}, node);
         },
         .hexLit => {
             const literal = node.cast(.hexLit).asHex();
@@ -1930,6 +1926,13 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
                     return c.reportError("TODO", access_expr.left);
                 },
                 .sym => {
+                    if (parent.data.sym.getStaticType() == c.sema.symbol_t) {
+                        // `symbol.name` is a symbol literal.
+                        return Expr.initValue(.{
+                            .type = c.sema.symbol_t,
+                            .value = try c.sema.initSymbol(name),
+                        });
+                    }
                     const sym = try c.getResolvedSymOrFail(parent.data.sym, name, access_expr.right);
                     try c.checkResolvedSymIsDistinct(sym, access_expr.right);
                     if (sym.type == .const_) {

@@ -8,7 +8,7 @@ type S:
     a int
 
 fn (sink S) foo() -> int:
-    return @a
+    return symbol.a
 
 --cytest: error
 --CompileError: `s` is no longer alive in this scope.

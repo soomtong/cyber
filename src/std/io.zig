@@ -12,6 +12,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
 };
 
 pub fn bind(_: *C.VM, mod: *C.Sym) callconv(.c) C.Bytes {
+    cy.core.markBuiltinModule(mod);
     for (funcs) |e| {
         C.mod_add_func(mod, e.@"0", e.@"1");
     }

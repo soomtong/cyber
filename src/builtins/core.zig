@@ -233,7 +233,15 @@ comptime {
     @export(&bind, .{ .name = "cl_mod_bind_core", .linkage = .strong });
 }
 
+/// Marks the chunk of a module as builtin (`Chunk.is_builtin`). Called by the bind function of each builtin module,
+/// so it holds for the default loader and for a host that loads the source from somewhere else.
+pub fn markBuiltinModule(mod: *C.Sym) void {
+    const sym: *cy.Sym = @ptrCast(@alignCast(mod));
+    sym.cast(.chunk).chunk.is_builtin = true;
+}
+
 pub fn bind(_: *C.VM, mod: *C.Sym) callconv(.c) C.Bytes {
+    markBuiltinModule(mod);
     for (funcs) |e| {
         C.mod_add_func(mod, e.@"0", e.@"1");
     }

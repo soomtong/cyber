@@ -101,13 +101,13 @@ t.eq(true, foo_slice(arr))
 --| symbol
 --|
 fn fooSymbol(a symbol) -> bool:
-    return a == @sometag
+    return a == symbol.sometag
 
 -- Literal.
-t.eq(fooSymbol(@sometag), true)
+t.eq(fooSymbol(symbol.sometag), true)
 
 -- From var.
-tag := @sometag
+tag := symbol.sometag
 t.eq(fooSymbol(tag), true)
 
 --cytest: pass

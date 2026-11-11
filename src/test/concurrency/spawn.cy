@@ -16,7 +16,7 @@ test.eq(f32(2.5), spawn(echo_f32, {f32(2.5)}).await())
 test.eq(byte(200), spawn(echo_byte, {byte(200)}).await())
 test.eq(r64(0xffffffffffffffff), spawn(echo_r64, {~r64(0)}).await())
 test.eq(i8(-5), spawn(echo_i8, {i8(-5)}).await())
-test.eq(@red, spawn(echo_symbol, {@red}).await())
+test.eq(symbol.red, spawn(echo_symbol, {symbol.red}).await())
 test.eq(error.NotFound, spawn(echo_error, {error.NotFound}).await())
 test.eq(Color.green, spawn(echo_enum, {Color.green}).await())
 

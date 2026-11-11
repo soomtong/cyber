@@ -67,7 +67,7 @@ t.eq(str(123.456), '123.456')
 t.eq(str(123.00000123), '123.00000123')
 t.eq(str(int(123)), '123')
 t.eq(str(error.foo), 'error.foo')
-t.eq(str(@foo), '@foo')
+t.eq(str(symbol.foo), 'symbol.foo')
 
 -- initRune(int)
 if meta.is_vm_target():

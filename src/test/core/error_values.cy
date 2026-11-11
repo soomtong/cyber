@@ -6,10 +6,10 @@ t.eq(error.FileNotFound, err)
 
 -- error.value()
 err = error.Oops
-t.eq(@Oops, err.sym())
+t.eq(symbol.Oops, err.sym())
 
 -- error.<call>()
-err = error(@Oops)
-t.eq(@Oops, err.sym())
+err = error(symbol.Oops)
+t.eq(symbol.Oops, err.sym())
 
 --cytest: pass

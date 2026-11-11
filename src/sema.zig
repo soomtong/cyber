@@ -3126,7 +3126,22 @@ pub fn ensure_resolved_func(c: *cy.Chunk, func: *cy.Func, resolve_new_types: boo
     var bind_attr: ?*ast.Attribute = null;
     var extern_attr: ?*ast.Attribute = null;
     const has_generator = decl.generator;
+    const builtin_mod = isBuiltinModuleNode(c, @ptrCast(decl));
+    if (!builtin_mod) {
+        const func_name = func.name();
+        if (func_name.len > 0 and func_name[0] == '@' and !hook_names.has(func_name)) {
+            return c.reportErrorFmt("Unknown hook `{}`. A function name can start with `@` only when it is a hook that the compiler calls, such as `@init` or `@deinit`.", &.{v(func_name)}, decl.name);
+        }
+    }
     for (decl.attrs.slice()) |attr| {
+        if (!builtin_mod) {
+            switch (attr.type) {
+                .unsafe, .consteval, .reserve => {
+                    return c.reportErrorFmt("The `#[{}]` attribute is reserved for the builtin modules.", &.{v(@tagName(attr.type))}, @ptrCast(attr));
+                },
+                else => {},
+            }
+        }
         switch (attr.type) {
             .bind => {
                 bind_attr = attr;
@@ -6651,7 +6666,7 @@ pub fn semaExprSkipSym(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
             const name = node.cast(.at_lit).value.slice();
             if (c.semaProcs.items.len > 0) {
                 const res = (try getResolvedName(c, name, node)) orelse {
-                    return sema_at_symbol(c, name, node);
+                    return reportOldSymbolLit(c, name, node);
                 };
                 switch (res.type) {
                     .sym => {
@@ -6665,7 +6680,7 @@ pub fn semaExprSkipSym(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
                     },
                 }
             }
-            return sema_at_symbol(c, name, node);
+            return reportOldSymbolLit(c, name, node);
         },
         .ident => {
             return semaIdent(c, cstr, true, node);
@@ -6874,8 +6889,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
             return c.reportErrorFmt("Can not infer symbol from `.{}`.", &.{v(name)}, node);
         },
         .at_lit => {
-            const name = node.cast(.at_lit).as_at_infer_name();
-            return sema_at_symbol(c, name, node);
+            return reportOldSymbolLit(c, node.cast(.at_lit).value.slice(), node);
         },
         .void_lit => {
             return c.semaVoid(node);
@@ -9265,6 +9279,10 @@ pub fn semaAccessExpr2(c: *cy.Chunk, left_n: *ast.Node, right_name: []const u8, 
     const rec = try c.semaExprSkipSym(left_n, .{});
     if (rec.resType == .sym) {
         const sym = rec.data.sym;
+        if (sym.getStaticType() == c.sema.symbol_t) {
+            // `symbol.name` is a symbol literal, like `error.Name`.
+            return sema_at_symbol(c, right_name, right_n);
+        }
         const rightSym = try c.getResolvedSymOrFail(sym, right_name, right_n);
         return sema.symbol2(c, rightSym, prefer_ct_sym, target_t, right_n);
     } else {
@@ -11165,6 +11183,29 @@ pub fn semaIntToFloat(c: *cy.Chunk, target_t: *cy.Type, int: ExprResult, node: *
     });
     return sema.ExprResult.init2(expr);
 }
+
+/// `@name` that names no declaration. It used to be a symbol literal.
+fn reportOldSymbolLit(c: *cy.Chunk, at_name: []const u8, node: *ast.Node) anyerror {
+    return c.reportErrorFmt("Undeclared `{}`. A symbol literal is written `symbol.{}`.", &.{v(at_name), v(at_name[1..])}, node);
+}
+
+/// Whether the chunk that holds `node` is one of the builtin modules (`core`, `meta`, ...). Only they declare
+/// `@` functions other than the hooks and use the attributes that are reserved for the compiler.
+pub fn isBuiltinModuleNode(c: *cy.Chunk, node: *ast.Node) bool {
+    const src_id = node.src();
+    if (src_id == cy.NullId) return true;
+    return c.compiler.chunks.items[src_id].is_builtin;
+}
+
+/// The `@` functions that a script can declare. The compiler calls them by name.
+/// `@size` is not one of them: it gives the allocation size that `@freeObject` is called with.
+const hook_names = std.StaticStringMap(void).initComptime(.{
+    .{"@init"}, .{"@init_sequence"}, .{"@init_record"},
+    .{"@deinit"}, .{"@copy"}, .{"@clone"},
+    .{"@index"}, .{"@set_index"}, .{"@index_addr"}, .{"@slice"},
+    .{"@get"}, .{"@set"},
+    .{"@send"},
+});
 
 fn sema_at_symbol(c: *cy.Chunk, name: []const u8, node: *ast.Node) !ExprResult {
     const id = try c.sema.ensureSymbol(name);

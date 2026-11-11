@@ -42,6 +42,10 @@ pub const Chunk = struct {
     src: []const u8,
     manage_src: bool,
 
+    /// A builtin module (`core`, `meta`, `cy`, `c`, `math`, `io`, `test`). Set by the module's bind function.
+    /// Only these declare `@` functions other than the hooks and use the attributes reserved for the compiler.
+    is_builtin: bool = false,
+
     /// Whether `src` needs to be loaded from `srcUri`.
     pending_load_src: bool,
     loaded: bool,

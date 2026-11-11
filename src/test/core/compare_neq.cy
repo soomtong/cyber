@@ -13,8 +13,8 @@ o2 := o
 test.eq(false, o != o2)
 
 -- Compare symbols.
-test.eq(true, @abc != @xyz) 
-test.eq(false, @abc != @abc)
+test.eq(true, symbol.abc != symbol.xyz) 
+test.eq(false, symbol.abc != symbol.abc)
 
 -- Compare errors.
 test.eq(true, error.SomeError != error.OtherError)

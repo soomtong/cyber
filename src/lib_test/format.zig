@@ -238,6 +238,46 @@ test "fmt: blank lines, line ends and the end of the file." {
 test "fmt: shebang line and byte order mark." {
     try eqFormat("#!/usr/bin/env cyber\na := 1\n", "#!/usr/bin/env cyber\r\na:=1\n");
     try eqFormat("\xEF\xBB\xBFa := 1\n", "\xEF\xBB\xBFa:=1\n");
+    // Blank lines after the shebang line become one, like anywhere else.
+    try eqFormat("#!/usr/bin/env cyber\n\nuse os\n", "#!/usr/bin/env cyber\n\nuse os\n");
+    try eqFormat("#!/usr/bin/env cyber\n\nuse os\n", "#!/usr/bin/env cyber  \n\n\n\nuse os\n");
+    try eqFormat("#!/usr/bin/env cyber\n\n-- note\nuse os\n", "#!/usr/bin/env cyber\n\n-- note\nuse os\n");
+    // Blank lines after a byte order mark alone are leading blank lines.
+    try eqFormat("\xEF\xBB\xBFa := 1\n", "\xEF\xBB\xBF\n\na:=1\n");
+}
+
+/// Expects a syntax error, not a crash and not an internal error.
+fn expectParseError(src: []const u8) !void {
+    const alloc = std.testing.allocator;
+    var diag: format.Diagnostic = .{};
+    defer diag.deinit(alloc);
+    try std.testing.expectError(error.ParseError, format.format(alloc, src, &diag));
+    try zt.eq(format.ErrorKind.parse, diag.kind);
+}
+
+test "fmt: source that ends in the middle of a token." {
+    C.setSilent(true);
+    defer C.setSilent(false);
+    // The tokenizer looked at the character after these without checking for the end of the source.
+    for ([_][]const u8{ "x := a.", "x := 1 <", "x >", "a -", "a &", "a |", "a *", "a _", "1.", "1_", "a:" }) |src| {
+        try expectParseError(src);
+    }
+}
+
+test "fmt: malformed number and dot literals are syntax errors." {
+    C.setSilent(true);
+    defer C.setSilent(false);
+    try expectParseError("a := 1e_5\n");
+    try expectParseError("a := 1e-_5\n");
+    try expectParseError("a := 0o7_8\n");
+    // The text of a dot literal includes the whitespace, so squeezing it would change the syntax tree.
+    try expectParseError("var x E = .  a\n");
+    try eqFormat("var x E = .a\n", "var x E   =   .a\n");
+}
+
+test "fmt: operator precedence is kept." {
+    // `2 * 3 + 4 * 5` after a lower operator: the verification compares the trees of both sides.
+    try eqFormat("x := 26 == 2 * 3 + 4 * 5\n", "x := 26==2*3+4*5\n");
 }
 
 test "fmt: string contents are never touched." {
@@ -278,13 +318,13 @@ test "cl_vm_format()" {
     defer C.vm_deinit(vm);
 
     var out: C.Bytes = undefined;
-    try zt.eq(true, C.c.cl_vm_format(vm, C.to_bytes("a:=1"), &out));
+    try zt.eq(C.FormatOk, C.c.cl_vm_format(vm, C.to_bytes("a:=1"), &out));
     try std.testing.expectEqualStrings("a := 1\n", C.from_bytes(out));
     C.vm_freeb(vm, C.from_bytes(out));
 
     C.setSilent(true);
     defer C.setSilent(false);
-    try zt.eq(false, C.c.cl_vm_format(vm, C.to_bytes("a := (1"), &out));
+    try zt.eq(C.FormatSyntaxError, C.c.cl_vm_format(vm, C.to_bytes("a := (1"), &out));
     try std.testing.expect(std.mem.startsWith(u8, C.from_bytes(out), "1:"));
     C.vm_freeb(vm, C.from_bytes(out));
 }

@@ -4457,7 +4457,11 @@ for nouns |n|:
 
 A file with a syntax error is reported as `path:line:col: error: message` and left alone. Before anything is written, the result is parsed again and compared with the original syntax tree and comments. If they differ the file is left alone and an internal error is reported.
 
-Hosts that embed `libcyber` call the same formatter with `cl_vm_format`.
+A directory search skips directories whose name starts with `.` (such as `.git` and `.zig-cache`), `zig-out` and `node_modules`, and it does not follow symbolic links. A path that is named on the command line is always formatted. A file or directory that can not be read or written is reported as `path: error: Name`, the other files are still formatted, and the exit code is 1.
+
+A file is rewritten in place, it is not replaced by a new file. A symbolic link stays a link and its target is rewritten, hard links stay linked, the permission bits are kept, and a read-only file is reported as an error.
+
+Hosts that embed `libcyber` call the same formatter with `cl_vm_format`. It returns `CL_FORMAT_OK`, `CL_FORMAT_SYNTAX_ERROR` (the source needs a fix, the message is `line:col: message`), `CL_FORMAT_INTERNAL_ERROR` (the formatter refused its own output, the source is fine and should be kept) or `CL_FORMAT_NO_MEMORY`.
 
 ## JIT compiler.
 The JIT compiler is not supported. Passing `-jit` (or `CL_JIT` through the embedding API) fails with a compile error. Use the default bytecode VM, or the C backend (`-tcc`, `-cc`) for native performance.

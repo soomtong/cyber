@@ -240,6 +240,65 @@ const FieldKind = enum {
     other,
 };
 
+/// Whether a value of `T` can reach a node. Used on fields of kind `other`, which the generic walks skip.
+fn holdsNodes(comptime T: type, comptime depth: u32) bool {
+    if (@typeInfo(T) == .pointer and isNodeData(@typeInfo(T).pointer.child)) {
+        return true;
+    }
+    if (depth == 0) {
+        return false;
+    }
+    switch (@typeInfo(T)) {
+        .optional => |info| return holdsNodes(info.child, depth - 1),
+        .pointer => |info| return holdsNodes(info.child, depth - 1),
+        .array => |info| return holdsNodes(info.child, depth - 1),
+        .@"struct" => |info| {
+            inline for (info.field_types) |FieldT| {
+                if (holdsNodes(FieldT, depth - 1)) {
+                    return true;
+                }
+            }
+            return false;
+        },
+        .@"union" => |info| {
+            inline for (info.field_types) |FieldT| {
+                if (holdsNodes(FieldT, depth - 1)) {
+                    return true;
+                }
+            }
+            return false;
+        },
+        else => return false,
+    }
+}
+
+/// Fields of kind `other` that hold nodes and are handled by hand in `Formatter.walk` and `Comparer.eqNode`
+/// behind a generic loop that still sees them. Empty: `case_stmt` returns before its generic loop.
+const manual_fields = [_][]const u8{};
+
+comptime {
+    // The check below relies on this: the unions of a `case` are seen as holding nodes.
+    std.debug.assert(holdsNodes(@FieldType(ast.CaseStmt, "body_data"), 4));
+    std.debug.assert(holdsNodes(@FieldType(ast.CaseStmt, "data"), 4));
+    std.debug.assert(!holdsNodes(u32, 4));
+}
+
+/// Fails the build when a node gets a field that holds child nodes in a shape the generic walks do not know.
+/// Such a field would be skipped silently: its subtree would not be compared by the verification and its
+/// statements would not be indented. Teach `fieldKind` the shape, or handle the field by hand and list it.
+fn checkOtherField(comptime NodeT: type, comptime field_name: []const u8, comptime FieldT: type) void {
+    if (!holdsNodes(FieldT, 4)) {
+        return;
+    }
+    const key = @typeName(NodeT) ++ "." ++ field_name;
+    for (manual_fields) |manual| {
+        if (std.mem.eql(u8, manual, key)) {
+            return;
+        }
+    }
+    @compileError("format.zig: the field `" ++ key ++ "` holds nodes but is not walked. See `checkOtherField`.");
+}
+
 fn isNodePtr(comptime T: type) bool {
     const info = @typeInfo(T);
     return info == .pointer and info.pointer.size == .one and @typeInfo(info.pointer.child) == .@"struct" and
@@ -482,7 +541,11 @@ const Formatter = struct {
             const num_new_lines = std.mem.count(u8, between, "\n");
             if (i == 0 or num_new_lines > 0) {
                 atom.line_start = true;
-                atom.blank_before = i > 0 and num_new_lines > 1;
+                // The shebang line of the prefix ends with its own line break, so one more is a blank line.
+                atom.blank_before = if (i > 0)
+                    num_new_lines > 1
+                else
+                    std.mem.endsWith(u8, self.src[0..self.prefix_end], "\n") and num_new_lines > 0;
                 var width: u32 = 0;
                 var j = atom.pos;
                 while (j > 0) {
@@ -666,6 +729,7 @@ const Formatter = struct {
                 },
                 .bytes, .scalar => {},
                 .other => {
+                    comptime checkOtherField(@TypeOf(data.*), field_name, FieldT);
                     // Closing positions such as the `)` of a call.
                     if (FieldT == u32 and comptime nameIs(field_name, &.{ "end", "sig_end", "op_end" })) {
                         if (value > 0 and value != cy.NullId and value <= self.src.len) {
@@ -901,6 +965,18 @@ const Formatter = struct {
         for (atoms, 0..) |atom, i| {
             if (atom.line_start) {
                 const line = self.lines.items[atom.line];
+                if (i == 0) {
+                    if (atom.blank_before) {
+                        // A blank line after the shebang line.
+                        try self.out.append(self.alloc, '\n');
+                    } else if (self.prefix_end == 0 and atom.pos > 0 and
+                        std.mem.startsWith(u8, self.src[atom.pos..], "#!"))
+                    {
+                        // `#!` below leading blank lines is not a shebang line. Keep one line break so that
+                        // dropping the blank lines does not turn it into one.
+                        try self.out.append(self.alloc, '\n');
+                    }
+                }
                 if (i > 0) {
                     try self.out.append(self.alloc, '\n');
                     if (atom.blank_before) {
@@ -1154,7 +1230,7 @@ const Comparer = struct {
                         return false;
                     }
                 },
-                .other => {},
+                .other => comptime checkOtherField(@TypeOf(a.*), field_name, FieldT),
             }
         }
         return true;

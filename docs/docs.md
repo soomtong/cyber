@@ -4316,6 +4316,7 @@ typedef struct MyNode {
 * [Run program.](#run-program)
 * [Help.](#help)
 * [REPL.](#repl)
+* [Format source.](#format-source)
 * [JIT compiler.](#jit-compiler)
 * [C backend.](#c-backend)
 
@@ -4406,6 +4407,49 @@ Records, slices, maps and optionals are shown with their contents. Nesting stops
 > ?int(none)
 `?int` none
 ```
+
+## Format source.
+`cyber fmt` rewrites source files in one fixed style and prints the paths that changed. There are no options for the style.
+```bash
+cyber fmt main.cy            # Rewrite one file.
+cyber fmt src examples       # Rewrite every `.cy` file under the directories.
+cyber fmt --check src        # Write nothing. Print the paths that would change and exit with 1 if there are any.
+cyber fmt --stdout main.cy   # Print the result instead of writing the file.
+cat main.cy | cyber fmt      # Read stdin, write stdout.
+```
+
+The formatter changes whitespace only. It never joins or splits lines, and it never moves or rewrites a token or a comment:
+```cy
+-- Before.
+use   math
+nouns:=[]str{'World','mundo'}   -- Trailing comment.
+
+
+for nouns |n|:
+  print( 'Hello, %{n}!' )
+  total+=n.len()*2
+
+-- After.
+use math
+nouns := []str{'World', 'mundo'}   -- Trailing comment.
+
+for nouns |n|:
+    print('Hello, %{n}!')
+    total += n.len() * 2
+```
+
+* Blocks are indented by 4 spaces. Tabs and other widths are converted.
+* A line inside open brackets is indented 4 spaces from the line that opened the bracket. A line that starts with the closing bracket lines up with it. Other continuation lines, such as the right side of an operator, keep their indentation relative to the statement.
+* Binary operators, `:=`, `->`, `=>` and assignments have one space on each side. Unary operators have none after them. An operator inside a range bound is kept as written: `a[i..i+n]`.
+* `=` inside brackets is kept as written: `Vec2{x=1}`, `Vec2{x = 1}` and `#[extern='puts']` all stay.
+* There is no space inside brackets, none before `,` and `:`, and one after them.
+* Any other run of spaces becomes one space, so columns that were aligned by hand are not kept. The gap before a trailing comment is kept.
+* Trailing whitespace is removed, several blank lines become one, and the file ends with one new line.
+* The contents of strings, including multi-line strings and the expressions in a string template, are not touched.
+
+A file with a syntax error is reported as `path:line:col: error: message` and left alone. Before anything is written, the result is parsed again and compared with the original syntax tree and comments. If they differ the file is left alone and an internal error is reported.
+
+Hosts that embed `libcyber` call the same formatter with `cl_vm_format`.
 
 ## JIT compiler.
 The JIT compiler is not supported. Passing `-jit` (or `CL_JIT` through the embedding API) fails with a compile error. Use the default bytecode VM, or the C backend (`-tcc`, `-cc`) for native performance.

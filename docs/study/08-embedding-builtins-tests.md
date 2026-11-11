@@ -384,7 +384,7 @@ CLI 는 libcyber 위에 얹은 호스트 프로그램 하나다. 구조를 `src/
   └─ repl()                                       (main.zig:182)  "use cli\n\ncli.repl()" 를 uri `main` 으로 eval
 ```
 
-- `cyber fmt` 는 도움말에 있지만 `std.debug.panic("TODO: Embed src/tools/fmt.cy")`(main.zig:121)로 끝난다. 실험: `cyber fmt hello.cy` -> `panic: TODO: Embed src/tools/fmt.cy`, 종료 코드 134.
+- `cyber fmt` 는 도움말에 있지만 `std.debug.panic("TODO: Embed src/tools/fmt.cy")`(main.zig:121)로 끝난다. 실험: `cyber fmt hello.cy` -> `panic: TODO: Embed src/tools/fmt.cy`, 종료 코드 134. (2026-11-11 갱신: `cyber fmt`는 `src/format.zig`로 구현됐다. `docs/decisions/project_fmt.md`)
 - `init_cli`(cli.zig:64)는 `mod_root` 를 정한다. Debug 빌드는 빌드 시점의 저장소 절대 경로(`build_config.mod_root`), 릴리스는 실행 파일 디렉터리다(build.zig:89-93).
   그래서 릴리스 CLI 는 `<exe 디렉터리>/src/builtins/*.cy` 와 `src/std/*.cy` 가 없으면 core 를 못 읽는다. 번들에 `src/` 를 넣는 이유다(build.zig:132-157, docs/decisions/project_fork_release_ci.md).
   이 저장소의 zig-out/bin/src/ 아래에 builtins/(c, core, cy, meta)와 std/(cli, io, libc, libc.macos, math, os, os.macos, test)가 설치돼 있다.
@@ -1086,7 +1086,7 @@ fork 유지보수 관점의 시사점. (a) 호스트 API 를 고칠 때는 `cybe
 | print 콜백 | cyber.h:252 `CLPrintFn(CLThread* t, CLBytes)` | `t` 자리에 VM 포인터가 들어옴(실험, 7.3 의 3). 2026-11-10 수정 |
 | 테스트 발견 방식 | (브리프의 가정) "setup.zig 가 src/test 를 발견" | 발견 로직 없음. behavior_test.zig 의 수작업 목록이며 `cytest:` 해석은 `case2`(behavior_test.zig:606) |
 | bindings.zig 의 역할 | (가정) 호스트 함수 등록 | 등록은 core.zig 의 `funcs`/`types` 표. bindings.zig 는 symbol 열거형 + 훅 + 죽은 `ModuleBuilder` |
-| `cyber fmt` | `cyber help` 에 "Reformat the source code" | main.zig:121 `std.debug.panic("TODO: Embed src/tools/fmt.cy")`, 종료 코드 134 |
+| `cyber fmt` | `cyber help` 에 "Reformat the source code" | main.zig:121 `std.debug.panic("TODO: Embed src/tools/fmt.cy")`, 종료 코드 134 (2026-11-11 갱신: `cyber fmt`는 `src/format.zig`로 구현됐다. `docs/decisions/project_fmt.md`) |
 | 안전 모드 | docs/docs.md:32, 203, 2176, 2522 "Sandbox mode / safe mode" | 소스에 플래그 없음. `rg -i 'safe.?mode\|sandbox'` 는 src/ct_inline.zig:146 주석 한 줄만 찾는다 |
 | 빌드 스텝 이름 | docs/build.md `zig build test-trace` | 실제 `trace-test`(build.zig:270) |
 | 에러 요약의 색 | (문서 없음) | debug.zig:345-350 이 `ESC[31m ... ESC[0m` 를 무조건 넣는다. 같은 줄에 `TODO: Should not emit escape codes` 주석. 하네스는 이를 지우고 비교한다(setup.zig:185-187) |

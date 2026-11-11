@@ -288,7 +288,7 @@ docs/decisions/project_embedding_agent_loop.md).
 ```
 
 `bind` 가 소스 문자열(`@embedFile`)을 돌려주고 `cl_default_loader` 가 이를 그대로 컴파일러에 넘기므로(compiler.zig:1459-1470) 라이브러리 모드의 core 는 디스크 파일이 필요 없다.
-CLI 는 다르다. CLI loader 는 같은 `bind` 를 불러 호스트 표만 등록하고 돌려준 소스는 버린 채 `mod_root/src/builtins/core.cy` 를 디스크에서 읽는다(cli.zig:173-215, 5.5절). 2026-11-12(0.4.7)부터는 CLI 도 내장 소스를 쓴다: `cli.zig` 의 `std_mods` 표가 이름(`core`, `os`, `os.macos.cy` ...)을 소스와 bind 함수에 잇고, chunk uri 도 그 이름이다. 아래 5.5절과 `mod_root` 설명은 0.4.6 기준이다.
+CLI 는 다르다. CLI loader 는 같은 `bind` 를 불러 호스트 표만 등록하고 돌려준 소스는 버린 채 `mod_root/src/builtins/core.cy` 를 디스크에서 읽는다(cli.zig:173-215, 5.5절). 2026-11-11(0.4.7)부터는 CLI 도 내장 소스를 쓴다: `cli.zig` 의 `std_mods` 표가 이름(`core`, `os`, `os.macos.cy` ...)을 소스와 bind 함수에 잇고, chunk uri 도 그 이름이다. 아래 5.5절과 `mod_root` 설명은 0.4.6 기준이다.
 
 호스트 함수 래퍼 네 종류(core.zig:284-398)가 `CLBindFunc.kind` 에 대응한다.
 

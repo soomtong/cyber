@@ -30,7 +30,7 @@
 - `zig build lib`는 FFI를 끄고(`standalone_opts.ffi = false`) 정적 라이브러리를 만든다. `build.zig:165`.
 - 내장 모듈은 소스를 `@embedFile`로 포함하므로 디스크의 `src/`가 필요 없다. 라이브러리의 기본 로더
   (`cl_default_loader`, `src/compiler.zig`의 `mods`)가 제공하는 모듈은 `core` · `meta` · `math` · `cy` · `c` · `io` · `test`다.
-- `os` · `libc` · `cli`는 CLI 전용이다(`src/cli.zig`의 `named_std_mods`. 2026-11-12부터 CLI도 내장 소스를 쓴다). 라이브러리에서 `use os`는 "Failed to load module: os"
+- `os` · `libc` · `cli`는 CLI 전용이다(`src/cli.zig`의 `named_std_mods`. 2026-11-11부터 CLI도 내장 소스를 쓴다). 라이브러리에서 `use os`는 "Failed to load module: os"
   컴파일 에러가 된다. 파일 · 프로세스 · 환경변수 접근은 호스트가 도구 함수로 열어 주는 것만 가능하다.
 - `c` 모듈은 FFI를 꺼도 남는다. `c.to_strz` · `c.from_strz`와 `Ptr[byte]`로 raw 포인터를 다룰 수 있고, extern
   호출만 panic으로 막힌다. 스크립트를 신뢰하지 않는다면 로더에서 `c`를 거르는 것을 고려한다. `use c` 없이도 `as[Ptr[int]] 8`로

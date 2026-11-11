@@ -33,7 +33,7 @@
 
 ## 릴리스 번들
 
-- 2026-11-12(0.4.7)부터 CLI는 표준 모듈을 실행 파일에 내장한다. 번들은 `cyber`(Windows는 `cyber.exe`) 하나다. 아래 항목의
+- 2026-11-11(0.4.7)부터 CLI는 표준 모듈을 실행 파일에 내장한다. 번들은 `cyber`(Windows는 `cyber.exe`) 하나다. 아래 항목의
   `src/` 이야기는 0.4.6까지의 번들에 해당한다.
   - `src/cli.zig`의 `std_mods`가 이름을 소스(`@embedFile` 또는 bind 함수가 돌려주는 소스)와 bind 함수에 잇는다. 이름으로
     import하는 모듈은 `core` · `meta` · `math` · `cy` · `c` · `io` · `test` · `libc` · `os` · `cli`, 플랫폼 모듈

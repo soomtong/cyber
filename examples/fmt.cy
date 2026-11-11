@@ -271,14 +271,14 @@ fn scan_word(src str, start int) -> int:
     if !is_digit(src[start]) or is_at(src, start, '0x'):
         return pos
 
-    -- A number can have a fraction and a negative exponent: `1.5`, `2e-3`.
+    -- A number can have a fraction and a negative exponent: `1.5`, `2e-3`, `1_000.5`.
     if pos + 1 < src.len() and src[pos] == '.' and is_digit(src[pos + 1]):
         pos += 2
         while pos < src.len() and is_word_char(src[pos]):
             pos += 1
     if pos + 1 < src.len() and src[pos - 1] == 'e' and src[pos] == '-' and is_digit(src[pos + 1]):
         pos += 2
-        while pos < src.len() and is_digit(src[pos]):
+        while pos < src.len() and is_word_char(src[pos]):
             pos += 1
     return pos
 
@@ -663,9 +663,8 @@ fn (&Formatter) comment_indent(idx int) -> int:
 fn (&Formatter) emit() -> str:
     -- The output is built as bytes. Appending to a `str` copies it each time.
     out := []byte{}
+    -- Byte order mark and shebang line, copied as they are.
     out += self.prefix.span()
-    if self.prefix.len() > 0 and self.tokens.len() > 0 and !self.prefix.ends_with('\n'):
-        out += '\n'
 
     for 0..self.tokens.len() |i|:
         t := self.tokens[i]

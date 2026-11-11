@@ -399,6 +399,21 @@ export fn cl_vm_compile_error_summary(vm: *cy.VM) C.Bytes {
     return C.to_bytes(str);
 }
 
+export fn cl_vm_format(vm: *cy.VM, src: C.Bytes, out: *C.Bytes) bool {
+    var diag: cy.format.Diagnostic = .{};
+    defer diag.deinit(vm.alloc);
+    const text = cy.format.format(vm.alloc, C.from_bytes(src), &diag) catch |err| {
+        out.* = C.NullStr;
+        if (err != error.OutOfMemory) {
+            const msg = std.fmt.allocPrint(vm.alloc, "{}:{}: {s}", .{ diag.line + 1, diag.col + 1, diag.msg }) catch return false;
+            out.* = C.to_bytes(msg);
+        }
+        return false;
+    };
+    out.* = C.to_bytes(text);
+    return true;
+}
+
 export fn cl_vm_set_error_color(vm: *cy.VM, enabled: bool) void {
     vm.compiler.report_color = enabled;
 }
@@ -720,4 +735,5 @@ test {
     _ = @import("lib_test/compile.zig");
     _ = @import("lib_test/runtime.zig");
     _ = @import("lib_test/alloc_fail.zig");
+    _ = @import("lib_test/format.zig");
 }

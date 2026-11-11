@@ -3243,13 +3243,14 @@ pub const Parser = struct {
                 };
                 const right2_op_prec = getBinOpPrecedence(rightOp2);
                 if (right2_op_prec > op_prec) {
+                    const op2_start = self.next_pos;
                     self.advance();
                     const rightExpr = try self.parseRightExpr(rightOp);
                     const newBinExpr = try self.ast.newNode(.binExpr, .{
                         .left = left,
                         .right = rightExpr,
                         .op = rightOp2,
-                        .op_pos = self.tokenPos(start),
+                        .op_pos = self.tokenPos(op2_start),
                     });
                     left = @ptrCast(newBinExpr);
                     continue;

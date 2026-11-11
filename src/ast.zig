@@ -905,7 +905,7 @@ pub const Token = struct {
     pos: u32,
 };
 
-fn NodeData(comptime node_t: NodeType) type {
+pub fn NodeData(comptime node_t: NodeType) type {
     return switch (node_t) {
         .null           => Node,
         .accessExpr     => AccessExpr,

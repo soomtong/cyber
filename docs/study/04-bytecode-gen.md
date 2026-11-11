@@ -1401,7 +1401,7 @@ print(via_union(rec, &x))
 | 문서의 말 | 코드의 사실 |
 |---|---|
 | 브리프: `ptr_layouts` 는 패닉 시 정리용 | 스택 재할당 때 포인터 패치용이다(2.9절). 패닉 때는 프레임 기록만 하고 지역 변수를 해제하지 않는다(`project_bc_inline.md`) |
-| 브리프: `cyber fmt file.cy` 는 포매터 | `src/main.zig` 에서 `std.debug.panic("TODO: Embed src/tools/fmt.cy")`. 실행하면 그 패닉이 난다 |
+| 브리프: `cyber fmt file.cy` 는 포매터 | `src/main.zig` 에서 `std.debug.panic("TODO: Embed src/tools/fmt.cy")`. 실행하면 그 패닉이 난다 (2026-11-11 갱신: `cyber fmt`는 `src/format.zig`로 구현됐다. `docs/decisions/project_fmt.md`) |
 | 브리프: `-Dvm=zig` 옵션 | `thread.zig:472` 에서 `error.Unsupported` 를 돌려준다. C VM 만 동작한다 |
 | `project_array_index_calls.md`: opcode 수 검사 131 | 이후 `copy_str` 로 132 (`bytecode.zig:1238`) |
 | `cyber help` 의 "`cyber compile` options:" | 항목이 비어 있다 |

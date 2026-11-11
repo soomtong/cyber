@@ -9,6 +9,7 @@ const log = std.log.scoped(.main);
 const cli = @import("cli.zig");
 const os_mod = @import("std/os.zig");
 const fmt = @import("fmt.zig");
+const format_cli = @import("format_cli.zig");
 const is_wasi = builtin.target.os.tag == .wasi;
 
 test {
@@ -86,7 +87,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
                 if (std.mem.eql(u8, arg, "compile")) {
                     cmd = .compile;
                 } else if (std.mem.eql(u8, arg, "fmt")) {
+                    // The rest of the arguments belong to the formatter.
                     cmd = .fmt;
+                    i += 1;
+                    break;
                 } else if (std.mem.eql(u8, arg, "version")) {
                     cmd = .version;
                 } else if (std.mem.eql(u8, arg, "help")) {
@@ -118,7 +122,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
             try compilePath(alloc, path);
         },
         .fmt => {
-            std.debug.panic("TODO: Embed src/tools/fmt.cy", .{});
+            const code = try format_cli.main(alloc, args[@min(i, args.len)..]);
+            if (code != 0) {
+                exit(code);
+            }
         },
         .help => {
             help();
@@ -349,7 +356,7 @@ fn help() void {
         \\  cyber                   Run the REPL.
         \\  cyber [source]          Compile and run.
         \\  cyber compile [source]  Compile and dump the code.
-        \\  cyber fmt [source]      Reformat the source code.
+        \\  cyber fmt [path...]     Reformat source files in place. See `cyber fmt --help`.
         \\  cyber help              Print usage.
         \\  cyber version           Print version number.
         \\

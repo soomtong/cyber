@@ -55,6 +55,8 @@ pub const bindings = @import("builtins/bindings.zig");
 
 pub const hash = @import("hash.zig");
 pub const fmt = @import("fmt.zig");
+/// Source formatter behind `cyber fmt`. `fmt` above is string interpolation for the Zig side.
+pub const format = @import("format.zig");
 
 pub const value = @import("value.zig");
 pub const Value = value.Value;

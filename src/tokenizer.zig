@@ -472,8 +472,8 @@ pub const Tokenizer = struct {
             },
             '!' => {
                 if (isNext(t, '=', 0)) {
-                    try t.pushToken(.bang_equal, start);
                     advance(t);
+                    try t.pushToken(.bang_equal, start);
                 } else {
                     try t.pushToken(.bang, start);
                 }
@@ -500,14 +500,14 @@ pub const Tokenizer = struct {
             '<' => {
                 const ch2 = peek(t);
                 if (ch2 == '=') {
+                    advance(t);
                     try t.pushToken(.left_angle_equal, start);
-                    advance(t);
                 } else if (ch2 == '<') {
+                    advance(t);
                     try t.pushToken(.double_left_angle, start);
-                    advance(t);
                 } else if (ch2 == '>') {
-                    try t.pushToken(.left_right_angle, start);
                     advance(t);
+                    try t.pushToken(.left_right_angle, start);
                 } else {
                     try t.pushToken(.left_angle, start);
                 }
@@ -515,11 +515,11 @@ pub const Tokenizer = struct {
             '>' => {
                 const ch2 = peek(t);
                 if (ch2 == '=') {
+                    advance(t);
                     try t.pushToken(.right_angle_equal, start);
-                    advance(t);
                 } else if (ch2 == '>') {
-                    try t.pushToken(.double_right_angle, start);
                     advance(t);
+                    try t.pushToken(.double_right_angle, start);
                 } else {
                     try t.pushToken(.right_angle, start);
                 }

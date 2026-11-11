@@ -436,7 +436,7 @@ outCol.* = pos - lineStart;      // 바이트 단위 열
 
 ### 3.7 `cyber fmt`와 에디터 지원
 
-`cyber fmt`는 구현이 없다. `main.zig:120-121`이 `TODO: Embed src/tools/fmt.cy`로 패닉하고 그 파일은 저장소에 없다. `git log -S'fmt.cy' -- src/main.zig`는 이 문자열이 `b751ca6c`(2025-11-21 "some updates")에서 들어왔음을 보이고, `git log --all -- src/tools/fmt.cy`는 비어 있다. 즉 포매터는 계획만 있었고 적이 없다. `src/fmt.zig`는 포매터가 아니라 Zig 쪽 문자열 보간 도우미다(파일 첫머리 주석 "This provides a simple string interpolation without comptime").
+`cyber fmt`는 구현이 없다. `main.zig:120-121`이 `TODO: Embed src/tools/fmt.cy`로 패닉하고 그 파일은 저장소에 없다. `git log -S'fmt.cy' -- src/main.zig`는 이 문자열이 `b751ca6c`(2025-11-21 "some updates")에서 들어왔음을 보이고, `git log --all -- src/tools/fmt.cy`는 비어 있다. 즉 포매터는 계획만 있었고 적이 없다. `src/fmt.zig`는 포매터가 아니라 Zig 쪽 문자열 보간 도우미다(파일 첫머리 주석 "This provides a simple string interpolation without comptime"). (2026-11-11 갱신: `cyber fmt`는 `src/format.zig`로 구현됐다. `docs/decisions/project_fmt.md`)
 
 포매터를 만든다면 재료는 이미 있다. AST(노드 `pos`/`end`), 주석(`Tokenizer.parseComments` -> `ast.comments`), 그리고 Cyber에서 접근하는 `cy.parse`다. 부족한 것은 빈 줄과 원본 공백 정보인데 AST는 이를 보존하지 않는다(토큰의 `new_line`만 남는다). "형식을 보존하는 재출력"을 어떻게 할지가 설계 포인트다.
 
@@ -770,7 +770,7 @@ print(x)
 | 항목 | 문서 | 코드 |
 |---|---|---|
 | 일반 키워드 수 | `docs.md:263`은 `23`개라 하지만 아래 분류 목록의 항목은 22개 | 토크나이저는 39개: 목록 22 + `as` `begin` `const` `fnsym` + 문맥 키워드 8(`struct` `cstruct` `enum` `cunion` `trait` `scope` `sink` `void`) + 리터럴 5(`true` `false` `error` `none` `undef`) |
-| `cyber fmt` | `main.zig`의 도움말이 "Reformat the source code."라고 소개 | 호출하면 패닉 (`main.zig:120-121`) |
+| `cyber fmt` | `main.zig`의 도움말이 "Reformat the source code."라고 소개 | 호출하면 패닉 (`main.zig:120-121`) (2026-11-11 갱신: `cyber fmt`는 `src/format.zig`로 구현됐다. `docs/decisions/project_fmt.md`) |
 | `cyber compile` 옵션 | 도움말에 "`cyber compile` options:" 제목만 있고 내용이 비어 있음(`main.zig:351`) | 0.3의 `-pc`는 사라졌고 대체 옵션은 없다 |
 | 사라진 키워드(`history/cyber_0_3_to_0_4_overview.md`) | `c992b94e` 대 HEAD | `0.3` 태그 대 HEAD로는 `catch` `coinit` `coresume` `coyield` `func` `import` `my` `object` `throw`(3.2절). 기준 커밋이 달라 서로 모순은 아니다 |
 

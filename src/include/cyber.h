@@ -490,6 +490,13 @@ CLBytes cl_vm_error_summary(CLVM* vm);
 /// The text has no terminal escape codes unless `cl_vm_set_error_color` turned them on.
 CLBytes cl_vm_compile_error_summary(CLVM* vm);
 
+/// Formats Cyber source the way `cyber fmt` does. Only the parser runs, nothing is compiled or evaluated,
+/// and the state of the VM does not change. The VM provides the allocator.
+/// Returns true and sets `out` to the formatted source, which ends with a new line unless it is empty.
+/// Returns false if the source has a syntax error and sets `out` to `line:col: message` (1-based).
+/// `out` is the null string if there is no memory for it. Otherwise it must be freed with `cl_vm_freeb`.
+bool cl_vm_format(CLVM* vm, CLBytes src, CLBytes* out);
+
 /// Whether a compile error summary colors the marker under the reported range with ANSI escape codes.
 /// Off by default. Survives `cl_vm_reset`.
 void cl_vm_set_error_color(CLVM* vm, bool enabled);

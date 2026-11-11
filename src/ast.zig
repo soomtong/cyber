@@ -130,6 +130,8 @@ pub const NodeType = enum(u8) {
     while_unwrap_stmt,
     with,
     yield_stmt,
+    fiber_expr,
+    suspend_stmt,
 };
 
 pub fn ConstSlice(T: type) type {
@@ -677,6 +679,13 @@ pub const FuncParam = extern struct {
     pos: u32,
 };
 
+/// `fiber f(args)` or `fiber:` with a body. `child` is the call expression or the body as a `lambda_multi`.
+pub const FiberExpr = struct {
+    child: *Node align(8),
+    src: u32,
+    pos: u32,
+};
+
 pub const YieldStmt = struct {
     child: ?*Node align(8),
     src: u32,
@@ -1028,6 +1037,8 @@ pub fn NodeData(comptime node_t: NodeType) type {
         .while_unwrap_stmt => WhileUnwrapStmt,
         .with           => With,
         .yield_stmt     => YieldStmt,
+        .fiber_expr     => FiberExpr,
+        .suspend_stmt   => Token,
     };
 }
 
@@ -1232,6 +1243,8 @@ pub const Node = struct {
             .while_unwrap_stmt => self.cast(.while_unwrap_stmt).opt.src(),
             .with           => self.cast(.with).src,
             .yield_stmt     => self.cast(.yield_stmt).src,
+            .fiber_expr     => self.cast(.fiber_expr).src,
+            .suspend_stmt   => self.cast(.suspend_stmt).src,
         };
     }
 
@@ -1357,6 +1370,8 @@ pub const Node = struct {
             .while_unwrap_stmt => self.cast(.while_unwrap_stmt).pos,
             .with           => self.cast(.with).pos,
             .yield_stmt     => self.cast(.yield_stmt).pos,
+            .fiber_expr     => self.cast(.fiber_expr).pos,
+            .suspend_stmt   => self.cast(.suspend_stmt).pos,
         };
     }
 
@@ -1704,6 +1719,8 @@ pub const Node = struct {
                     return yield.pos + 5;
                 }
             },
+            .fiber_expr     => self.cast(.fiber_expr).child.end(),
+            .suspend_stmt   => self.cast(.suspend_stmt).pos + 7,
         };
     }
 };
@@ -1776,7 +1793,7 @@ pub const UnaryOp = enum(u8) {
 };
 
 test "ast internals." {
-    try t.eq(120, std.enums.values(NodeType).len);
+    try t.eq(122, std.enums.values(NodeType).len);
     try t.eq(1, @sizeOf(NodeHeader));
 }
 

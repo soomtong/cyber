@@ -89,6 +89,7 @@ module.exports = grammar({
         $.use_statement,
         $.return_statement,
         $.yield_statement,
+        $.suspend_statement,
         $.break_statement,
         $.continue_statement,
         $.pass_statement,
@@ -131,6 +132,7 @@ module.exports = grammar({
         $.continue_statement,
         $.pass_statement,
         $.yield_statement,
+        $.suspend_statement,
         alias($._inline_expression_statement, $.expression_statement),
         alias($._inline_assignment, $.assignment),
       ),
@@ -218,6 +220,9 @@ module.exports = grammar({
     return_statement: ($) => prec.right(seq('return', optional($._rhs))),
 
     yield_statement: ($) => prec.right(seq('yield', optional($._expression))),
+
+    // Gives control back to the `resume` of the running fiber. It takes no value.
+    suspend_statement: (_) => 'suspend',
 
     break_statement: (_) => 'break',
 
@@ -479,6 +484,7 @@ module.exports = grammar({
         $.unwrap_or_block,
         $.lambda,
         $.infer_lambda,
+        $.fiber_expression,
         alias($._borrow_lambda, $.borrow_expression),
         $.if_expression,
       ),
@@ -760,6 +766,13 @@ module.exports = grammar({
           optional(field('return_type', $.return_type)),
           choice(seq('=>', field('body', $._expression)), seq(':', field('body', $._expression_suite))),
         ),
+      ),
+
+    // `fiber work(a, b)`, `fiber:` block
+    fiber_expression: ($) =>
+      prec.right(
+        PREC.lambda,
+        seq('fiber', choice(field('call', $.call_expression), seq(':', field('body', $._expression_suite)))),
       ),
 
     function_type: ($) =>

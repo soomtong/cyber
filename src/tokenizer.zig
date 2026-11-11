@@ -44,6 +44,8 @@ const keywords = std.StaticStringMap(TokenType).initComptime(.{
     .{ "while", .while_k },
     .{ "with", .with_k },
     .{ "yield", .yield_k },
+    .{ "fiber", .fiber_k },
+    .{ "suspend", .suspend_k },
 });
 
 pub const TokenType = enum(u8) {
@@ -159,6 +161,8 @@ pub const TokenType = enum(u8) {
     while_k,
     with_k,
     yield_k,
+    fiber_k,
+    suspend_k,
 };
 
 pub const Token = extern struct {
@@ -1249,6 +1253,6 @@ test "tokenizer internals." {
     try tt.eq(@alignOf(Token), 4);
     try tt.eq(@sizeOf(TokenizeState), 5);
 
-    try tt.eq(110, std.enums.values(TokenType).len);
-    try tt.eq(39, keywords.kvs.len);
+    try tt.eq(112, std.enums.values(TokenType).len);
+    try tt.eq(41, keywords.kvs.len);
 }

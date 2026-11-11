@@ -38,6 +38,9 @@ pub fn ret_generator(heap: *cy.Heap, type_id: cy.TypeId, ret_size: u16, frame: [
 /// Length of a new stack in values (4 KiB).
 const InitStackLen = 511;
 
+/// Length of a new fiber stack in values (512 B). It grows like the thread's stack.
+const InitFiberStackLen = 64;
+
 /// Panic. Unwinds to record the stack trace. Then releases all memory tied to the thread.
 pub fn panic(t: *Thread, err: cy.Value) !void {
     _ = err;
@@ -70,6 +73,9 @@ pub fn panic(t: *Thread, err: cy.Value) !void {
         t.compact_trace.clearAndFree(t.alloc);
     };
 
+    // The trace is recorded. Back to the root stack before the fibers go away with the heap.
+    t.exitFibers();
+
     _ = try freeHeapPages(t);
     // Nothing is left on the heap. Give back the pages it grew to, so that a heap that ran into the memory
     // limit starts the next eval empty.
@@ -77,14 +83,44 @@ pub fn panic(t: *Thread, err: cy.Value) !void {
 }
 
 fn recordPanicTrace(t: *Thread, cx: PcFpOff) !void {
-    _ = try t.unwindStack(t.c.stack(), cx);
-
-    // Build detailed stack trace from compact trace.
-    const frames = try cy.debug.allocStackTraceCapped(t.c.vm, t.c.stack(), t.compact_trace.items);
+    const frames = try allocContextTrace(t, cx);
     t.stack_trace.deinit(t.alloc);
     t.stack_trace.frames = frames;
     // One entry per unwound frame. Deep recursion leaves a list that is not needed again.
     t.compact_trace.clearAndFree(t.alloc);
+}
+
+/// Builds the stack trace from `cx`. A running fiber has its own stack, so the walk goes on at the `resume`
+/// site of each resumer until it reaches the thread's root context.
+fn allocContextTrace(t: *Thread, cx: PcFpOff) ![]c.StackFrame {
+    var frames: std.ArrayList(c.StackFrame) = .empty;
+    errdefer {
+        for (frames.items) |*f| cy.debug.deinit_frame(f, t.alloc);
+        frames.deinit(t.alloc);
+    }
+    var tstack = t.c.stack();
+    var cur = cx;
+    var opt_fiber = t.c.cur_fiber;
+    while (true) {
+        _ = try t.unwindStack(tstack, cur);
+        const part = try cy.debug.allocStackTraceCapped(t.c.vm, tstack, t.compact_trace.items);
+        defer t.alloc.free(part);
+        errdefer for (part) |*f| cy.debug.deinit_frame(f, t.alloc);
+        try frames.appendSlice(t.alloc, part);
+
+        const fiber = opt_fiber orelse break;
+        const prev_stack: [*]Value = @ptrCast(@alignCast(fiber.prev_stack_ptr));
+        const prev_fp: [*]Value = @ptrCast(@alignCast(fiber.prev_fp));
+        const prev_pc: [*]cy.Inst = @ptrCast(fiber.prev_pc);
+        tstack = prev_stack[0..fiber.prev_stack_len];
+        cur = .{
+            // The `FIBER_RESUME` inst.
+            .pc = prev_pc - 3,
+            .fp = getStackOffset(prev_stack, prev_fp),
+        };
+        opt_fiber = fiber.prev_fiber;
+    }
+    return frames.toOwnedSlice(t.alloc);
 }
 
 pub fn patch_frame_ptrs(t: *cy.Thread, fp: usize, layout: []bool, new_stack: [*]cy.Value) void {
@@ -131,6 +167,10 @@ pub fn freeHeapPages(t: *cy.Thread) !FreeHeapResult {
     const res = FreeHeapResult{
         .num_freed = 0,
     };
+
+    // The `Fiber` values go away with the heap without their `@deinit`.
+    t.exitFibers();
+    t.freeAllFibers();
 
     logger.tracev("Free heap pages.", .{});
     for (t.heap.heapPages.items, 0..) |page, j| {
@@ -229,6 +269,10 @@ pub const ThreadC = extern struct {
     interrupt: *u8,
     interrupt_flag: u8,
 
+    cur_fiber: ?*vmc.Fiber,
+    fibers: ?*vmc.Fiber,
+    host_depth: u32,
+
     pub fn stack(self: *ThreadC) []Value {
         return self.stack_ptr[0..self.stack_len];
     }
@@ -270,6 +314,9 @@ pub const Thread = struct {
                 .fuel_limit = 0,
                 .interrupt = undefined,
                 .interrupt_flag = 0,
+                .cur_fiber = null,
+                .fibers = null,
+                .host_depth = 0,
             },
 
             .unwinding = false,
@@ -307,9 +354,96 @@ pub const Thread = struct {
             }
         }
 
+        self.exitFibers();
+        self.freeAllFibers();
+
         if (!reset) {
             self.alloc.free(self.c.stack());
             self.c.stack_len = 0;
+        }
+    }
+
+    /// Creates a suspended fiber whose first `resume` enters `entry` (a bytecode function that returns `void`).
+    /// `args` are copied to the entry frame, which is the root frame of the fiber's own stack: it sits at
+    /// offset 0, so the frame walkers (`getFrame`) treat it like the main frame and stop there.
+    pub fn newFiber(self: *Thread, entry: [*]cy.Inst, first_arg: Value, args: []const Value) !*vmc.Fiber {
+        const len = @max(InitFiberStackLen, CallArgStart + 1 + args.len + 8);
+        if (cy.MemAccount.of(self.alloc)) |acct| {
+            if (!acct.fits(len * @sizeOf(Value) + @sizeOf(vmc.Fiber))) return error.OutOfMemory;
+        }
+        const fiber = try self.alloc.create(vmc.Fiber);
+        errdefer self.alloc.destroy(fiber);
+        const fstack = try self.alloc.alloc(Value, len);
+        if (builtin.is_test or cy.Trace) {
+            @memset(fstack, Value.initPtr(&DummyPoolObject.data));
+        }
+        fstack[0] = buildCallInfo(true, 0, 0);
+        fstack[1] = Value{ .retPcPtr = @ptrCast(&vmc.fiber_end_code) };
+        fstack[2] = Value{ .retFramePtr = fstack.ptr };
+        fstack[CallArgStart] = first_arg;
+        @memcpy(fstack[CallArgStart + 1..CallArgStart + 1 + args.len], args);
+        fiber.* = .{
+            .stack_ptr = @ptrCast(fstack.ptr),
+            .stack_len = fstack.len,
+            .pc = @ptrCast(entry),
+            .fp = @ptrCast(fstack.ptr),
+            .prev_stack_ptr = null,
+            .prev_stack_len = 0,
+            .prev_fp = null,
+            .prev_pc = null,
+            .prev_fiber = null,
+            .list_prev = null,
+            .list_next = self.c.fibers,
+            .host_depth = 0,
+            .prev_dst = 0,
+            .state = vmc.FIBER_SUSPENDED,
+        };
+        if (self.c.fibers) |head| {
+            head.list_prev = fiber;
+        }
+        self.c.fibers = fiber;
+        return fiber;
+    }
+
+    /// Frees a fiber that is not running.
+    pub fn freeFiber(self: *Thread, fiber: *vmc.Fiber) void {
+        if (fiber.list_prev) |prev| {
+            prev.*.list_next = fiber.list_next;
+        } else {
+            self.c.fibers = fiber.list_next;
+        }
+        if (fiber.list_next) |next| {
+            next.*.list_prev = fiber.list_prev;
+        }
+        const fstack: [*]Value = @ptrCast(@alignCast(fiber.stack_ptr));
+        self.alloc.free(fstack[0..fiber.stack_len]);
+        self.alloc.destroy(fiber);
+    }
+
+    /// Leaves every running fiber and puts the thread back on its root stack. For a panic or an interrupt
+    /// that ends the eval while a fiber runs. The fibers are left as `done`: their frames are abandoned.
+    pub fn exitFibers(self: *Thread) void {
+        var cur = self.c.cur_fiber;
+        while (cur) |fiber| {
+            fiber.stack_ptr = @ptrCast(self.c.stack_ptr);
+            fiber.stack_len = self.c.stack_len;
+            fiber.state = vmc.FIBER_DONE;
+            self.c.stack_ptr = @ptrCast(@alignCast(fiber.prev_stack_ptr));
+            self.c.stack_len = fiber.prev_stack_len;
+            self.c.stack_end = self.c.stack_ptr + self.c.stack_len;
+            self.c.fp = @ptrCast(@alignCast(fiber.prev_fp));
+            self.c.pc = @ptrCast(fiber.prev_pc);
+            cur = fiber.prev_fiber;
+        }
+        self.c.cur_fiber = null;
+    }
+
+    /// Frees every fiber of the thread. The `Fiber` values that own them are gone without their `@deinit`
+    /// (heap sweep after a panic, teardown).
+    pub fn freeAllFibers(self: *Thread) void {
+        std.debug.assert(self.c.cur_fiber == null);
+        while (self.c.fibers) |fiber| {
+            self.freeFiber(fiber);
         }
     }
 
@@ -392,6 +526,10 @@ pub const Thread = struct {
             self.c.pc = ptr;
             self.c.fp = ret_ + ret_size;
 
+            // A panic inside can leave the fibers (`exitFibers`), so the depth is restored, not decremented.
+            const host_depth = self.c.host_depth;
+            self.c.host_depth = host_depth + 1;
+            defer self.c.host_depth = host_depth;
             try exec_auto(self, true);
 
             // Restore context upon success.
@@ -1186,8 +1324,7 @@ pub const Thread = struct {
 
         const cx = self.getTraceFiberContext();
 
-        _ = try self.unwindStack(self.c.stack(), cx);
-        const frames = try cy.debug.allocStackTrace(self.c.vm, self.c.stack(), self.compact_trace.items);
+        const frames = try allocContextTrace(self, cx);
         var trace = cy.StackTrace{ .frames = frames };
         defer trace.deinit(self.alloc);
         try cy.debug.writeStackFrames(self.c.vm, w, frames);

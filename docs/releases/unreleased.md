@@ -28,6 +28,43 @@
   - tree-sitter 문법에 `generator_fn` 노드를 더했다(`generator fn`이 한 토큰). 속성 형태는 더 이상 제너레이터로 읽지 않는다.
   - 근거와 `generator f()` 대신 `generator fn f()`를 고른 이유는 `docs/decisions/project_coroutines.md`의
     "선언 모양 변경과 구현 (2026-11-11)" 절.
+- `GeneratorStatus.paused`가 `GeneratorStatus.suspended`로 바뀌었다. 호환되지 않는 변경이다. `suspend` → `.suspended` → `resume()`이
+  한 어휘가 된다.
+- Fiber를 구현했다. 키워드 `fiber` · `suspend`가 새로 예약어가 된다(이 이름의 변수 · 함수는 더 쓸 수 없다).
+  ```cy
+  fn worker(name str, log ^ArrayStore[str]):
+      for 0..2 |i|:
+          log << '%{name} %{i}'
+          suspend
+
+  log := ^ArrayStore[str]{}
+  a := fiber worker('a', log)     -- 인자는 지금 평가, 호출은 첫 resume에서
+  b := fiber worker('b', log)
+  while a.status() != .done or b.status() != .done:
+      _ = a.resume()
+      _ = b.resume()
+  -- log: a 0, b 0, a 1, b 1
+
+  t := fiber:                     -- 본문을 받는 형태. 클로저라 `^T` 변수만 캡처한다
+      log << 'step'
+      suspend
+  ```
+  - `Fiber`는 자기 스택을 가진 stackful 코루틴이다(512 B에서 시작해 스레드 스택처럼 성장). 같은 스레드의 힙을 공유한다.
+  - `suspend`는 값을 싣지 않는 문장이고 호출 깊이 어디서든 쓴다. fiber 밖에서는 아무 일도 하지 않는다.
+  - `f.resume() -> FiberStatus`는 `.suspended` 또는 `.done`, 끝난 fiber의 `resume()`은 `.done`. `f.status()`는
+    `.suspended` · `.running` · `.done`.
+  - 컴파일 오류: `A generator cannot be a fiber entry.`, ``A fiber entry function must return `void`.``,
+    ``Cannot borrow a stack value across fibers. The parameter type is `&int`. Use `^T`.``,
+    파스 오류: `` `suspend` takes no value. Use `yield` in a generator. ``, ``Expected a function call after `fiber`.``
+  - panic: `Fiber is already running.`(자기 자신 또는 자기를 기다리는 fiber를 resume), `Fiber is still in progress.`
+    (끝나지 않은 fiber의 소멸. 한 번도 resume하지 않은 fiber도 포함)
+  - fiber 안의 panic은 스레드 panic이다. 스택 트레이스는 각 fiber의 `resume` 지점을 거쳐 main까지 이어진다.
+  - 제약: 인자는 첫 `resume`에서 호출로 복사되므로 `NoCopy` 타입 매개변수는 안 된다. 진입점은 함수 이름이어야 한다
+    (메서드 호출 `fiber obj.work()` 미지원). `Future.await()`는 fiber 안에서도 지금처럼 spin한다(양보하지 않음).
+    AOT(C 백엔드)는 미지원.
+  - `cy` 모듈의 `Node`에 `fiber_expr` · `suspend_stmt`가 생겼다. tree-sitter 문법에 `fiber_expression` ·
+    `suspend_statement`를 더했다.
+  - 구현 기록은 `docs/decisions/project_coroutines.md`의 "Fiber 구현 (2026-11-11)" 절.
 
 ## 임베딩 API
 

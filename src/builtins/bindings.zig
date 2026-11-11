@@ -69,7 +69,7 @@ pub const Symbol = enum {
     ParseError,
 
     running,
-    paused,
+    suspended,
     done,
 
     float,

@@ -624,6 +624,8 @@ pub const VM = struct {
     
         self.main_thread.c.pc = @ptrCast(&buf.ops.items[buf.main_pc]);
 
+        self.main_thread.exitFibers();
+        self.main_thread.c.host_depth = 0;
         try self.main_thread.stackEnsureTotalCapacity(buf.mainStackSize);
         self.main_thread.c.fp = @ptrCast(self.main_thread.c.stack_ptr);
     }

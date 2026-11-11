@@ -285,3 +285,33 @@ f := 1.fmt()
         (number)
         (identifier))
       (arguments))))
+
+============================================================
+Fibers
+============================================================
+
+a := fiber worker(1, log)
+t := fiber:
+    step()
+    suspend
+
+------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (fiber_expression
+      (call_expression
+        (identifier)
+        (arguments
+          (number)
+          (identifier)))))
+  (variable_declaration
+    (identifier)
+    (fiber_expression
+      (block
+        (expression_statement
+          (call_expression
+            (identifier)
+            (arguments)))
+        (suspend_statement)))))

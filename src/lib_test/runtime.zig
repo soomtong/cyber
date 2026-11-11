@@ -168,6 +168,121 @@ test "Panics inside generators unwind through the generator frame." {
     try zt.eq(C.Success, C.vm_eval(vm, "x := 1", &res));
 }
 
+test "Fibers free their stacks and frames." {
+    // Leak-checking allocator: each fiber has its own stack, which grows while the fiber runs, and managed
+    // arguments and locals stay in its frames between resumes.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "t",
+        \\use test
+        \\
+        \\fn deep(n int) -> int:
+        \\  if n == 0:
+        \\    suspend
+        \\    return 0
+        \\  return 1 + deep(n - 1)
+        \\
+        \\fn work(name str, out ^ArrayStore[str]):
+        \\  local := name + '-padding-padding-padding-padding'
+        \\  out << '%{local}-%{deep(2000)}'
+        \\  suspend
+        \\  out << local
+        \\
+        \\out := ^ArrayStore[str]{}
+        \\a := fiber work('a', out)
+        \\b := fiber work('b', out)
+        \\while a.status() != .done or b.status() != .done:
+        \\  _ = a.resume()
+        \\  _ = b.resume()
+        \\test.eq(out.len(), 4)
+        \\c := ^0
+        \\t := fiber:
+        \\  c.* += 1
+        \\  suspend
+        \\  c.* += 1
+        \\while t.resume() == .suspended:
+        \\  pass
+        \\test.eq(c.*, 2)
+    , C.defaultEvalConfig(), &res));
+}
+
+test "Panics inside fibers leave the fiber stacks and report the resumer's frames." {
+    // Leak-checking allocator: the panic happens on a grown fiber stack inside a nested fiber. The thread
+    // goes back to its root stack, and the fibers (one suspended, two running) are freed with the heap.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm,
+        \\fn deep(n int) -> int:
+        \\  if n == 0:
+        \\    panic('boom in fiber')
+        \\  return 1 + deep(n - 1)
+        \\
+        \\fn idle():
+        \\  suspend
+        \\
+        \\fn inner(s str):
+        \\  suspend
+        \\  print(deep(3000))
+        \\
+        \\fn outer(s str):
+        \\  g := fiber inner(s + '-padding-padding-padding-padding')
+        \\  _ = g.resume()
+        \\  _ = g.resume()
+        \\
+        \\fn drive():
+        \\  i := fiber idle()
+        \\  _ = i.resume()
+        \\  f := fiber outer('s')
+        \\  _ = f.resume()
+        \\
+        \\drive()
+    , &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try expectInOrder(report, &.{"panic: boom in fiber", " deep:", " inner:", " Fiber.resume:", " outer:", " Fiber.resume:", " drive:", " main:"});
+    }
+
+    // The VM runs again on its root stack.
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\fn step(c ^int):
+        \\  c.* += 1
+        \\  suspend
+        \\  c.* += 1
+        \\c := ^0
+        \\f := fiber step(c)
+        \\while f.resume() == .suspended:
+        \\  pass
+        \\if c.* != 2:
+        \\  panic('unexpected')
+    , &res));
+}
+
+test "single_run frees fibers that are still in progress at deinit." {
+    // Leak-checking allocator: the main block's `Fiber.@deinit` is skipped, so the sweep frees the stacks.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+
+    var config = C.defaultEvalConfig();
+    config.single_run = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "t",
+        \\fn forever(s str):
+        \\  while true:
+        \\    suspend
+        \\
+        \\a := fiber forever('never-started-padding-padding-padding')
+        \\b := fiber forever('started-padding-padding-padding-padding')
+        \\_ = b.resume()
+    , config, &res));
+}
+
 test "stack_trace() lists the frames from the caller to main." {
     const vm = C.vm_initx(zt.alloc);
     defer C.vm_deinit(vm);

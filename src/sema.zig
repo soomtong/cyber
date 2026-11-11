@@ -804,6 +804,11 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
         .tryStmt => {
             try sema_try_stmt(c, node.cast(.tryStmt));
         },
+        .suspend_stmt => {
+            // Gives control back to the `resume` call of the running fiber. The frames stay on the fiber's
+            // stack, so nothing is copied or destructed here.
+            _ = try c.ir.pushStmt(.suspend_, node, .{});
+        },
         .yield_stmt => {
             const yield = node.cast(.yield_stmt);
             const proc_func = c.proc().func;
@@ -7926,6 +7931,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                 .reqTypeCstr = cstr.reqTypeCstr,
             });
         },
+        .fiber_expr => {
+            return semaFiberExpr(c, node);
+        },
         .move_expr => {
             const child = node.cast(.move_expr).expr;
             var res = try semaExpr(c, child, .{});
@@ -7994,6 +8002,83 @@ fn get_embedded_sym(c: *cy.Chunk, rec_t: *cy.types.Struct, name: []const u8, nod
         }
     }
     return null;
+}
+
+/// `fiber f(a, b)` is the call `@new_fiber(f, {a, b})` of the core module: the arguments are evaluated now
+/// and `f` is called at the first `resume`.
+fn semaFiberExpr(c: *cy.Chunk, node: *ast.Node) !ExprResult {
+    const child = node.cast(.fiber_expr).child;
+    if (child.type() == .lambda_multi) {
+        // `fiber:` is `@new_fiber_block(fn(): body)`. The body is a closure, so it captures `^T` variables only.
+        const tree = &c.parser.ast;
+        const name = "@new_fiber_block";
+        const callee = try tree.newNode(.at_lit, .{
+            .src = node.src(),
+            .pos = node.pos(),
+            .value = .{ .ptr = name.ptr, .len = name.len },
+        });
+        const new_args = try tree.dupeNodes(&.{child});
+        const new_call = try tree.newNode(.callExpr, .{
+            .callee = @ptrCast(callee),
+            .args = .{ .ptr = new_args.ptr, .len = new_args.len },
+            .hasNamedArg = false,
+            .end = child.end(),
+        });
+        c.updateAstView(tree.view());
+        return semaExpr(c, @ptrCast(new_call), .{});
+    }
+    const call = child.cast(.callExpr);
+
+    // Report the role and lifetime rules at the `fiber` expression instead of inside `@new_fiber`.
+    if (call.callee.type() == .ident) {
+        const callee_res = try c.semaExpr(call.callee, .{});
+        const opt_sig: ?*cy.FuncSig = switch (callee_res.type.kind()) {
+            .func_ptr => callee_res.type.cast(.func_ptr).sig,
+            .func_sym => callee_res.type.cast(.func_sym).sig,
+            else => null,
+        };
+        if (opt_sig) |sig| {
+            if (sig.ret.kind() == .pointer and sig.ret.cast(.pointer).child_t.isInstanceOf(c.sema.generator_tmpl)) {
+                return c.reportError("A generator cannot be a fiber entry.", node);
+            }
+            if (sig.ret.id() != bt.Void) {
+                return c.reportError("A fiber entry function must return `void`.", node);
+            }
+            for (sig.params()) |param| {
+                const param_t = param.get_type();
+                if (param_t.info.borrow_only) {
+                    // The fiber's stack moves when it grows, and the resumer's frame can be gone at the next resume.
+                    const type_name = try c.sema.allocTypeName(param_t);
+                    defer c.alloc.free(type_name);
+                    return c.reportErrorFmt("Cannot borrow a stack value across fibers. The parameter type is `{}`. Use `^T`.", &.{v(type_name)}, node);
+                }
+            }
+        }
+    }
+
+    const tree = &c.parser.ast;
+    const name = "@new_fiber";
+    const callee = try tree.newNode(.at_lit, .{
+        .src = node.src(),
+        .pos = node.pos(),
+        .value = .{ .ptr = name.ptr, .len = name.len },
+    });
+    const args_lit = try tree.newNode(.init_lit, .{
+        .args = call.args,
+        .src = node.src(),
+        .pos = call.callee.end(),
+        .end = call.end,
+        .array_like = true,
+    });
+    const new_args = try tree.dupeNodes(&.{ call.callee, @ptrCast(args_lit) });
+    const new_call = try tree.newNode(.callExpr, .{
+        .callee = @ptrCast(callee),
+        .args = .{ .ptr = new_args.ptr, .len = new_args.len },
+        .hasNamedArg = false,
+        .end = call.end,
+    });
+    c.updateAstView(tree.view());
+    return semaExpr(c, @ptrCast(new_call), .{});
 }
 
 pub fn semaCallExpr(c: *cy.Chunk, node: *ast.Node, opt_target: ?*cy.Type) !ExprResult {

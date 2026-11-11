@@ -4585,9 +4585,61 @@ fn @gen_next(gen Generator[%FnPtr]) -> ?(type.fn_ret(FnPtr))
 #[bind] fn (&Generator[]) status() -> GeneratorStatus
 
 type GeneratorStatus enum:
-    case paused
+    case suspended
     case running
     case done
+
+--| A fiber is a stackful coroutine: a function call that runs on its own stack and can be suspended at any
+--| call depth with `suspend`. It is created with `fiber f(args)` and advanced with `resume`.
+--| A fiber carries no value. Use a generator to produce values.
+type Fiber:
+    with NoCopy
+    state Ptr[void]
+
+fn (&Fiber) @deinit():
+    @fiber_deinit(self.state)
+
+--| Runs the fiber until it suspends or its function returns.
+--| Returns `.suspended` or `.done`. Resuming a fiber that is done returns `.done`.
+fn (&Fiber) resume() -> FiberStatus:
+    return @bitCast(FiberStatus, @fiber_resume(self.state))
+
+fn (&Fiber) status() -> FiberStatus:
+    return @fiber_status(self.state)
+
+type FiberStatus enum:
+    case suspended
+    case running
+    case done
+
+#[bind] fn @fiber_deinit(state Ptr[void])
+
+#[bind] fn @fiber_status(state Ptr[void]) -> FiberStatus
+
+#[bind] fn @fiber_resume(state Ptr[void]) -> int
+
+--| `fiber func(args)` is this call. The arguments are evaluated now, the call happens at the first `resume`.
+fn @new_fiber(func funcptr_t[%Sig], args FnTuple[Sig]) -> Fiber:
+    #if Sig.ret() != void:
+        meta.error('A fiber entry function must return `void`.')
+    args_size := type.size(FnTuple[Sig])
+    return Fiber{state=@start_fiber(@fiber_entry[Sig], func, args_size, move args)}
+
+#[bind]
+fn @start_fiber(entry funcptr_t[%EntrySig], func funcptr_t[%Sig], args_size int, args FnTuple[Sig]) -> Ptr[void]
+
+fn @fiber_entry[const Sig FuncSig](func funcptr_t[Sig], args FnTuple[Sig]):
+    @call(func, &args)
+
+-type FiberBlockFn = fn()
+
+--| `fiber:` with a body is this call. The body is a closure.
+fn @new_fiber_block(body Func[FiberBlockFn]) -> Fiber:
+    return @new_fiber(fiber_block_entry, {body})
+
+-- A plain name: `@name` without a call is a symbol literal.
+-fn fiber_block_entry(body Func[FiberBlockFn]):
+    body()
 
 --| Returns the smallest of two values.
 fn min(a %T, b T) -> T:

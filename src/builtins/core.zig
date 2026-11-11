@@ -221,6 +221,12 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"Generator[].status", cFunc(Generator_status)},
     .{"@gen_next",   zErrBuiltinFunc(gen_next, null)},
     .{"@gen_end",    zErrBuiltinFunc(gen_end, null)},
+
+    // Fiber
+    .{"@start_fiber",   zErrFunc(start_fiber)},
+    .{"@fiber_deinit",  zErrFunc(fiber_deinit)},
+    .{"@fiber_status",  cFunc(fiber_status)},
+    .{"@fiber_resume",  zErrBuiltinFunc(fiber_resume, null)},
 };
 
 comptime {
@@ -1980,6 +1986,46 @@ pub fn gen_end(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !vo
     out.* = sema.ExprResult.init2(end);
 }
 
+/// Creates a fiber that enters `entry(func, args)` on its first `resume`.
+pub fn start_fiber(t: *cy.Thread) !C.Ret {
+    const ret = t.ret(*vmc.Fiber);
+    const entry_func = t.param(cy.Value);
+    const func = t.param(cy.Value);
+    const args_size: usize = @intCast(t.param(i64));
+    const func_args = t.param_sized(args_size);
+    const entry: [*]cy.Inst = @ptrFromInt(@as(usize, @truncate(entry_func.val)));
+    ret.* = try t.newFiber(entry, func, func_args);
+    return C.RetOk;
+}
+
+pub fn fiber_deinit(t: *cy.Thread) !C.Ret {
+    _ = t.ret(void);
+    const fiber = t.param(*vmc.Fiber);
+    if (fiber.state != vmc.FIBER_DONE) {
+        // Its frames hold values that only the fiber itself can release.
+        return t.ret_panic("Fiber is still in progress.");
+    }
+    t.freeFiber(fiber);
+    return C.RetOk;
+}
+
+fn fiber_status(t: *cy.Thread) callconv(.c) C.Ret {
+    const ret = t.ret(i64);
+    const fiber = t.param(*vmc.Fiber);
+    ret.* = fiber.state;
+    return C.RetOk;
+}
+
+pub fn fiber_resume(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !void {
+    const fiber = try c.semaExpr(ctx.args[0], .{});
+    // The fiber runs any function, like an indirect call.
+    try cy.global_init.recordIndirectCall(c);
+    const expr = try c.ir.newExpr(.fiber_resume, c.sema.i64_t, ctx.node, .{
+        .expr = fiber.ir,
+    });
+    out.* = sema.ExprResult.init2(expr);
+}
+
 pub fn Generator_deinit(t: *cy.Thread) !C.Ret {
     _ = t.ret(void);
     const gen = t.param(*vmc.Generator);
@@ -1992,7 +2038,7 @@ pub fn Generator_deinit(t: *cy.Thread) !C.Ret {
 }
 
 const GeneratorStatus = enum {
-    paused,
+    suspended,
     running,
     done,
 };
@@ -2019,7 +2065,7 @@ fn getGeneratorStatus(t: *cy.Thread, gen: *vmc.Generator) GeneratorStatus {
     if (gen.running) {
         return .running;
     }
-    return .paused;
+    return .suspended;
 }
 
 pub fn ptr_init(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !void {

@@ -49,6 +49,7 @@ pub const StmtCode = enum(u8) {
     yield,
     await_,
     breakpoint,
+    suspend_,
     ret,
     ret_expr,
     ret_gen,
@@ -171,6 +172,7 @@ pub const ExprCode = enum(u8) {
 
     gen_next,
     gen_end,
+    fiber_resume,
 
     unwrap_addr,
     unwrap_nz,
@@ -711,6 +713,7 @@ pub fn StmtImpl(comptime code: StmtCode) type {
         .yield => Yield,
         .await_ => Await,
         .breakpoint => SimpleStmt,
+        .suspend_ => SimpleStmt,
         .ret_expr => ReturnExpr,
         .ret_gen => ReturnGen,
         .ret => Return,
@@ -787,6 +790,7 @@ pub fn ExprImpl(comptime code: ExprCode) type {
         .trunc => Trunc,
         .gen_next => GenNext,
         .gen_end => GenEnd,
+        .fiber_resume => UnOp2,
         else => SimpleExpr,
     };
     if (@typeInfo(res).@"struct".layout != .@"extern") {

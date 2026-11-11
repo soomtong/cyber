@@ -66,7 +66,7 @@ generator fn foo7() -> int:
     test.eq(static_gen.status(), .running)
 type Fn7 = fn() -> int
 global static_gen ^Generator[Fn7] = foo7()
-test.eq(static_gen.status(), .paused)
+test.eq(static_gen.status(), .suspended)
 _ = static_gen.next()
 test.eq(static_gen.status(), .done)
 

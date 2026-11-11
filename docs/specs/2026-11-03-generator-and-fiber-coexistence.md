@@ -1,6 +1,6 @@
 # Generator와 Fiber를 함께 두는 설계 검토
 
-2026-11-03 작성, 2026-11-07 결정, 2026-11-11 제너레이터 선언을 `generator fn`으로 바꿔 구현. 상태: 결정(제너레이터 선언만 구현, fiber · `suspend` · enum 개명은 미구현). 결정 항목은 `docs/decisions/project_coroutines.md`의
+2026-11-03 작성, 2026-11-07 결정, 2026-11-11 제너레이터 선언을 `generator fn`으로 바꿔 구현. 상태: 단계 1.5 · 2 구현(2026-11-11: `generator fn`, `.suspended`, `fiber` · `suspend` · `Fiber`). 단계 1 · 3 · 4는 미구현. 구현 기록과 스펙에서 달라진 점은 `docs/decisions/project_coroutines.md`의 "Fiber 구현 (2026-11-11)" 절. 결정 항목은 `docs/decisions/project_coroutines.md`의
 "설계 결정 (2026-11-07)" 절에 있다. 이 문서의 코드는 그 결정을 반영한 제안 문법이다.
 앞선 판단 틀은 `docs/history/concurrency_model_fit.md`, 사실 근거는 `docs/study/07-coroutines-concurrency.md`이다.
 
@@ -170,7 +170,7 @@ Future를 "대기의 공통 인터페이스"로 정하면 두 모델과 Thread�
 
 ---
 
-## 5. 예제 코드 (결정된 문법, 미구현)
+## 5. 예제 코드 (결정된 문법. 5.1 · 5.3은 구현됨, `await`가 양보하는 5.2 · 5.4는 미구현)
 
 ### 5.1 요구사항: 값을 조금씩 내는 쪽은 generator만 쓴다
 
@@ -242,8 +242,8 @@ fn worker(name str, log ^Array[str]):
 a := fiber worker('a', log)             -- 인자는 지금 평가, 본문은 첫 resume에서 시작
 b := fiber worker('b', log)
 while a.status() != .done or b.status() != .done:
-    a.resume()
-    b.resume()
+    _ = a.resume()                      -- 반환값(FiberStatus)은 버릴 수 없다
+    _ = b.resume()
 -- log: a 0, b 0, a 1, b 1, a 2, b 2
 
 -- 블록 형태. 한 번 쓰고 버리는 단계 작업에 쓴다. ^T만 캡처할 수 있다.
@@ -251,8 +251,8 @@ t := fiber:
     print('step 1')
     suspend
     print('step 2')
-t.resume()                              --> step 1
-t.resume()                              --> step 2
+_ = t.resume()                          --> step 1
+_ = t.resume()                          --> step 2
 ~~~
 
 ### 5.4 요구사항: Future가 Thread · Fiber · 호스트를 잇는 공통 대기 수단이다
@@ -354,8 +354,8 @@ f.resume()
 | --- | --- | --- | --- |
 | 0 | generator 지역 보존 수정(`RET_Y`에서 프레임 저장, 2026-11-04 완료), `.gen` 트레이스 결함 3개 수정(2026-11-04 완료) | 지금 있는 stackless가 믿을 만해짐 | 없음 |
 | 1 | 루트 맥락 중단 · 재개(`CL_AWAIT`, `cl_vm_resume`, 호스트 Future C API) | 에이전트 루프의 색 없는 도구 대기 | 0 권장 |
-| 1.5 | 문법 정리: `generator fn`으로 `#[generator]` 대체(2026-11-11 완료), `.paused` → `.suspended`(남음). 런타임 변경 없음 | 선언 머리에 역할이 보인다. fiber 문법과 어휘를 맞춘다 | 없음 |
-| 2 | `fiber f(args)` · `fiber:` · `suspend` 키워드, `Fiber` 타입: 스택 교체, 성장, 트레이스의 fiber 경계, 빌림 sema 규칙 | 같은 힙에서 여러 실행 맥락 | 1, 1.5 |
+| 1.5 | 문법 정리: `generator fn`으로 `#[generator]` 대체, `.paused` → `.suspended`(둘 다 2026-11-11 완료). 런타임 변경 없음 | 선언 머리에 역할이 보인다. fiber 문법과 어휘를 맞춘다 | 없음 |
+| 2 | `fiber f(args)` · `fiber:` · `suspend` 키워드, `Fiber` 타입: 스택 교체, 성장, 트레이스의 fiber 경계, 빌림 sema 규칙(2026-11-11 완료. 단계 1 없이 구현) | 같은 힙에서 여러 실행 맥락 | 1, 1.5 |
 | 3 | fiber 안의 `Future.await()`를 yield로, 비-main 스레드 await를 같은 경로로 | `@panic("TODO")` 제거, 스레드마다 협력 스케줄링 | 2 |
 | 4 | (선택) 취소(소멸 시 정리), `spawn f(args)` 호출식 꼴, `Future.wait_any` | 구조적 동시성, 생성 표기 통일, spin 없는 스케줄러 | 2 |
 
@@ -371,7 +371,7 @@ f.resume()
 - 원리적인 통합은 effect handler(OCaml 5, Koka, Unison)다. generator · async · fiber가 모두 effect 하나로 표현된다.
   Cyber에 이것을 넣는 일은 타입 시스템 수준의 결정이라 이 문서의 범위 밖이다. 다만 3.2의 "fiber는 값을 싣지 않는다" 규칙은
   나중에 effect를 도입할 때 막히지 않는 방향이다.
-- 이 저장소의 현재 상태: generator는 구현됐고 지역 보존 버그는 2026-11-04에 고쳤다. Fiber는 문서에만 있다.
+- 이 저장소의 현재 상태: generator는 구현됐고 지역 보존 버그는 2026-11-04에 고쳤다. Fiber는 2026-11-11에 구현했다.
   `CL_AWAIT` 경로는 ABI까지 이어져 있지만 만드는 곳이 없다. C AOT 백엔드는 둘 다 지원하지 않는다.
 
 ## 8. 결론

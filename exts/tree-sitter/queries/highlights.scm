@@ -163,6 +163,11 @@
   "yield"
 ] @keyword.return
 
+[
+  "fiber"
+  (suspend_statement)
+] @keyword.coroutine
+
 (break_statement) @keyword.repeat
 
 (continue_statement) @keyword.repeat

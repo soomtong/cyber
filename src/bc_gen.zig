@@ -415,6 +415,7 @@ fn genStmt(c: *Chunk, stmt: *ir.Stmt) anyerror!void {
         .block              => try gen_block(c, stmt.cast(.block), node),
         .break_             => try gen_break(c, stmt.cast(.break_), node),
         .breakpoint         => try gen_breakpoint(c, node),
+        .suspend_           => try c.pushFCode(.suspend_op, &.{}, node),
         .continue_          => try gen_continue(c, stmt.cast(.continue_), node),
         .declare_local      => try gen_declare_local(c, stmt.cast(.declare_local), node),
         .discard            => try gen_discard(c, stmt.cast(.discard), node),
@@ -548,6 +549,7 @@ fn genExpr(c: *Chunk, expr: *ir.Expr, cstr: Cstr) anyerror!GenValue {
         .func               => genFuncUnion(c, expr.cast(.func), cstr, node),
         .gen_end            => gen_gen_end(c, expr.cast(.gen_end), cstr, node),
         .gen_next           => gen_gen_next(c, expr.cast(.gen_next), cstr, node),
+        .fiber_resume       => gen_fiber_resume(c, expr.cast(.fiber_resume), cstr, node),
         .global             => gen_global(c, expr.cast(.global), cstr, node),
         .i2f                => gen_i2f(c, expr.cast(.i2f), cstr, node),
         .idiv               => gen_width_binop(c, expr.cast(.idiv), .idiv, true, cstr, node),
@@ -739,6 +741,16 @@ fn gen_gen_next(c: *Chunk, expr: *ir.GenNext, cstr: Cstr, node: *ast.Node) !GenV
     try push_site_ptr_layout(c, pc);
     try pop_temp_value(c, gen, node);
     return endCall(c, inst, expr.base.type, node);
+}
+
+/// `dst = resume(fiber)`. The fiber runs on its own stack, so this frame is not under a callee frame and
+/// needs no pointer layout: its stack can not grow until the fiber gives control back.
+fn gen_fiber_resume(c: *Chunk, expr: *ir.UnOp2, cstr: Cstr, node: *ast.Node) !GenValue {
+    const dst = try bc.selectReg(c, expr.base.type, cstr, node);
+    const fiber = try genExpr(c, expr.expr, Cstr.localOrTemp());
+    try c.pushFCode(.fiber_resume, &.{dst.reg, fiber.reg}, node);
+    try pop_temp_value(c, fiber, node);
+    return dst;
 }
 
 fn gen_gen_end(c: *Chunk, expr: *ir.GenEnd, cstr: Cstr, node: *ast.Node) !GenValue {

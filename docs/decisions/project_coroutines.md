@@ -13,7 +13,7 @@
 - 지금 동작하는 코루틴은 `#[generator]` 함수뿐이다. 호출하면 `Generator[Fn]`이 돌아오고 `next()`가
   `?(type.fn_ret(Fn))`, `status()`가 `paused` · `running` · `done`을 준다. 스택리스라 프레임 하나만 저장한다
   (`src/builtins/core.cy`의 `type Generator`). 테스트는 `src/test/concurrency/generator.cy`.
-- 스택형 `Fiber` 타입은 `docs/docs.md`의 "Fibers." 절에 설계만 있다(`Fiber(fn, args)` · `f.resume()` · `Fiber.yield()`).
+- 스택형 `Fiber` 타입은 `docs/docs.md`의 "Fibers." 절에 설계만 있다(`Fiber(fn, args)` · `f.resume()` · `Fiber.yield()`). (2026-11-11에 구현했다. 아래 "Fiber 구현" 절)
   본문에 TODO 표시가 있고 소스 어디에도 `type Fiber` 선언이 없다. `src/fiber.zig`는 옛 VM용 코드이며 현재 어디서도
   import하지 않는다.
 - 2026-11-02, `examples/fiber.cy`를 제너레이터로 다시 썼다. 옛 fiber API는 deprecated로 보고, 예제는 `#[generator]`
@@ -136,7 +136,7 @@ REPL에서는 속성 줄이 `:`로 끝나지 않아 블록으로 묶이지 않�
 
 `docs/specs/2026-11-03-generator-and-fiber-coexistence.md`를 검토해 다음을 결정했다. 스펙 문서 5절의 코드가 결정된 문법이다.
 2번의 제너레이터 선언은 2026-11-11에 모양을 `generator fn f(...)`로 바꿔 구현했다(아래 "선언 모양 변경과 구현" 절).
-`fiber` · `suspend`와 3번의 enum 개명은 아직 구현이 없다.
+`fiber` · `suspend`와 3번의 enum 개명도 같은 날 구현했다("Fiber 구현" 절).
 
 1. 공존 방식은 역할 분리 병존이다. generator는 값을 내고, fiber는 기다린다. 둘 다 언어 내장 타입(`Generator`, `Fiber`)이다.
 2. 새 키워드 세 개: `generator` · `fiber` · `suspend`. upstream이 0.3의 `coinit` · `coresume` · `coyield`를 지운 자리에
@@ -198,4 +198,58 @@ Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator 
 - 템플릿 제너레이터 `generator fn rep[T Any](x T, n int) -> T:`의 호출은 `Unsupported call from symbol: func_template`.
 - 함수 본문 안의 `generator fn`은 일반 `fn`과 같이 `` `fn` declarations are not allowed here. ``
 
-남은 것: `.paused` → `.suspended` 개명(단계 1.5의 나머지), `fiber` · `suspend`(단계 2).
+남은 것: `.paused` → `.suspended` 개명(단계 1.5의 나머지), `fiber` · `suspend`(단계 2). 둘 다 같은 날 아래 절에서 했다.
+
+## Fiber 구현 (2026-11-11)
+
+단계 1.5의 나머지(`GeneratorStatus.paused` → `.suspended`)와 단계 2(`fiber f(args)` · `fiber:` · `suspend` · `Fiber`)를 구현했다.
+단계 1(루트 맥락의 `CL_AWAIT` 탈출과 호스트 Future C API)은 건너뛰었다. fiber의 스택 교체는 그 코드에 기대지 않는다.
+
+모델.
+
+- fiber마다 자기 스택을 둔다(`vmc.Fiber`, `thread.newFiber`). `resume`은 `Thread`의 `stack_ptr` · `stack_len` · `stack_end`와
+  `pc` · `fp`를 fiber 것으로 바꾸고, `suspend`와 진입 함수의 반환은 resume한 쪽으로 되돌린다. 복사가 없고 힙 할당도 없다.
+- 전환은 호스트 함수가 아니라 VM 명령이다(`FIBER_RESUME dst, fiber` · `SUSPEND` · `FIBER_END`). C 스택이 끼지 않아
+  호출 깊이 어디서든 멈출 수 있다.
+- 진입 프레임은 fiber 스택의 오프셋 0에 둔다. `getFrame`이 오프셋 0을 `.init`(main 프레임)으로 보기 때문에 스택 성장
+  (`growStackPrecise`의 포인터 패치) · `recordCurFrames` · `unwindStack`이 고치지 않고도 fiber 스택 안에서 멈춘다.
+- 진입 프레임의 반환 주소는 정적 명령 하나(`fiber_end_code`, `FIBER_END`)다. 진입 함수가 `RET_0`로 돌아오면 그 명령이
+  fiber를 `done`으로 두고 resume한 쪽으로 넘어간다.
+- resume한 쪽 프레임에는 포인터 레이아웃이 필요 없다. fiber가 도는 동안 그 스택은 자라지 않는다.
+- `fiber f(a, b)`는 sema에서 core의 `@new_fiber(f, {a, b})` 호출로 바꾼다(`spawn`과 같은 꼴: `FnTuple[Sig]`,
+  `@fiber_entry[Sig]`가 `@call(func, &args)`). `fiber:`는 본문을 `lambda_multi`로 파싱해 `@new_fiber_block(클로저)`로 바꾼다.
+  AST에는 `fiber_expr` · `suspend_stmt` 노드가 그대로 남는다(`cyber fmt`는 토큰 기반이라 영향 없음).
+- `Fiber`는 `NoCopy` 구조체이고 필드는 호스트가 만든 상태의 포인터 하나다. 상태와 스택은 `Thread.alloc`으로 잡고
+  스레드의 fiber 목록(`ThreadC.fibers`)에 건다. panic · `single_run` 스윕은 `@deinit`을 부르지 않으므로
+  `freeHeapPages`가 목록을 따라 해제한다.
+- panic. 트레이스는 `allocContextTrace`가 fiber 스택을 다 걷고 `Fiber.prev_*`로 resume 지점의 스택으로 넘어가 이어 붙인다.
+  그 뒤 `exitFibers`가 스레드를 루트 스택으로 돌려놓는다. `prepEval`도 같은 일을 한다.
+- `Thread.host_depth`는 `callFunc2`가 바이트코드를 도는 동안 1 늘어난다. resume 때의 값과 다른 깊이의 `suspend`는
+  `Cannot suspend across a host call.` panic이다. 지금은 스크립트에서 닿는 경로가 없다(호스트가 VM으로 되부르는 곳은
+  spawn 스레드 진입과 AOT뿐이고, C API에는 스크립트 함수 호출이 없다). 그런 API가 생길 때를 위한 가드다.
+
+검사.
+
+- sema(`semaFiberExpr`): 진입점이 식별자일 때 시그니처를 먼저 보고 generator · 비-void 반환 · 빌림 매개변수를 `fiber` 식의
+  위치에서 보고한다. 그 밖의 꼴은 `@new_fiber` 안의 `meta.error`가 잡는다(위치가 core.cy가 된다).
+- 파서: `suspend` 뒤에 값이 오면 오류, `fiber` 뒤가 호출이 아니면 오류, 이름 있는 인자 오류.
+
+스펙과 달라진 점 · 제약.
+
+1. `a.resume()`만 쓰면 컴파일 오류다. 반환값을 버릴 수 없는 언어 규칙 때문에 `_ = a.resume()`으로 쓴다. 스펙 5절 예제를 고쳤다.
+2. 인자는 첫 resume에서 `@call`이 복사해 넘긴다(`spawn`의 `@thread_entry`와 같다). `NoCopy` 매개변수는 컴파일 오류이고,
+   `@deinit`이 있는 복사 가능한 구조체는 사본과 원본이 각각 deinit된다.
+3. 끝나지 않은 fiber의 소멸은 panic인데, 한 번도 resume하지 않은 fiber도 여기에 든다. 인자를 해제할 수 있는 것이 진입
+   프레임뿐이라서다. 시작 전 소멸을 허용하려면 `Sig`를 아는 해제 함수를 `Fiber`에 같이 두어야 한다.
+4. 진입점은 함수 이름이다. `fiber obj.work()`는 수신자를 묶지 못한다.
+5. `fiber:` 본문은 기존 클로저 규칙을 그대로 따른다(`^T` 또는 `&T`로 선언한 변수만 캡처). `&T` 캡처를 fiber에서 막는
+   규칙은 넣지 않았다.
+6. `Future.await()`는 fiber 안에서도 spin한다. 단계 3(await를 양보로)은 하지 않았다.
+7. 루트 맥락의 `suspend`는 no-op이다. 임베딩의 `CL_YIELD`는 없다.
+8. AOT(`cgen.zig`)는 미지원.
+
+테스트: behavior `concurrency/fiber.cy`(성장 · 중첩 · 제너레이터 소비 · 블록 형태 포함)와 오류 6개 · panic 3개,
+lib 테스트 3개(누수 검사 할당자: 정상 종료, 중첩 fiber 안 panic 뒤 재사용, `single_run`에서 진행 중인 fiber).
+tree-sitter `fiber_expression` · `suspend_statement`.
+
+남은 것: 위 3 · 4 · 6, 단계 1(`CL_AWAIT`), 단계 3 · 4.

@@ -1567,6 +1567,16 @@ pub const Parser = struct {
         }
     }
 
+    /// Whether the expression ends with a statement block (a lambda with a body, `fiber:`). Nothing can follow
+    /// it on the same statement.
+    fn endsWithBlock(node: *ast.Node) bool {
+        return switch (node.type()) {
+            .lambda_multi => true,
+            .fiber_expr => node.cast(.fiber_expr).child.type() == .lambda_multi,
+            else => false,
+        };
+    }
+
     const FuncDeclConfig = struct {
         attrs: []*ast.Attribute,
         with: ?*ast.With = null,
@@ -2789,6 +2799,14 @@ pub const Parser = struct {
                 self.advance();
                 return self.newTokenNode(.breakStmt, start);
             },
+            .suspend_k => {
+                self.advance();
+                switch (self.peek().tag()) {
+                    .new_line, .null, .right_paren, .right_bracket, .right_brace, .comma => {},
+                    else => return self.reportError("`suspend` takes no value. Use `yield` in a generator.", &.{}),
+                }
+                return self.newTokenNode(.suspend_stmt, start);
+            },
             .yield_k => {
                 self.advance();
                 const child = try self.parseExpr(.{});
@@ -3197,7 +3215,7 @@ pub const Parser = struct {
                 if (token.tag() != .comma and token.tag() != .new_line) {
                     break;
                 }
-                if (arg.type() == .lambda_multi) {
+                if (endsWithBlock(arg)) {
                     break;
                 }
                 self.advance();
@@ -3242,7 +3260,7 @@ pub const Parser = struct {
         const right = (try self.parseTermExpr(.{})) orelse {
             return self.reportError("Expected right operand.", &.{});
         };
-        if (right.type() == .lambda_multi) {
+        if (endsWithBlock(right)) {
             return right;
         }
         return self.parseRightExpr2(left_op, right);
@@ -3951,7 +3969,7 @@ pub const Parser = struct {
         }
         const start = self.next_pos;
         const left = (try self.parseTermExpr(.{ .first_expr = config.first_expr })) orelse return null;
-        if (left.type() == .lambda_multi) {
+        if (endsWithBlock(left)) {
             return left;
         }
         return try self.parseExprWithLeft(start, left, .{ .parse_infer_lambda = config.parse_infer_lambda });
@@ -3986,6 +4004,47 @@ pub const Parser = struct {
                 return self.ast.newNodeErase(.as_expr, .{
                     .target = target,
                     .expr = expr,
+                    .pos = self.tokenPos(start),
+                });
+            },
+            .fiber_k => {
+                self.advance();
+                if (self.peek().tag() == .colon) {
+                    // `fiber:` with a body. The body is a lambda with no parameters.
+                    const sig_end = self.next_pos;
+                    self.advance();
+
+                    try self.pushBlock();
+                    const stmts = try self.parseSingleOrIndentedBodyStmts();
+                    _ = self.popBlock();
+
+                    const lambda = try self.ast.newNodeErase(.lambda_multi, .{
+                        .params = &.{},
+                        .sig_t = .func,
+                        .stmts = stmts,
+                        .src = self.ast.src_id,
+                        .pos = self.tokenPos(start),
+                        .ret = null,
+                        .sig_end = self.tokenPos(sig_end) + 1,
+                    });
+                    return self.ast.newNodeErase(.fiber_expr, .{
+                        .child = lambda,
+                        .src = self.ast.src_id,
+                        .pos = self.tokenPos(start),
+                    });
+                }
+                const child = (try self.parseTermExpr(.{})) orelse {
+                    return self.reportError("Expected a function call after `fiber`.", &.{});
+                };
+                if (child.type() != .callExpr) {
+                    return self.reportErrorAt("Expected a function call after `fiber`.", &.{}, start);
+                }
+                if (child.cast(.callExpr).hasNamedArg) {
+                    return self.reportErrorAt("A `fiber` call can not have named arguments.", &.{}, start);
+                }
+                return self.ast.newNodeErase(.fiber_expr, .{
+                    .child = child,
+                    .src = self.ast.src_id,
                     .pos = self.tokenPos(start),
                 });
             },

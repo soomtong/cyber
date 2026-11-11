@@ -164,6 +164,8 @@ type Node enum:
     case while_unwrap_stmt   void
     case with                With
     case yield_stmt          void
+    case fiber_expr          void
+    case suspend_stmt        void
 
 fn (&Node) decl_name() -> str:
     return switch self.*:

@@ -320,6 +320,23 @@ static Value buildGenCallInfo(bool cont, u8 call_inst_off, u8 stack_size) {
     return ((u8)cont) | (call_inst_off << 1) | (stack_size << 8) | (3 << 16);
 }
 
+Inst fiber_end_code[1] = { CodeFIBER_END };
+
+// Leaves the running fiber `f` with `status` and continues in the context that resumed it.
+#define FIBER_SWITCH_OUT(f, status) \
+    do { \
+        f->stack_ptr = t->c.stack_ptr; \
+        f->stack_len = t->c.stack_len; \
+        f->state = status; \
+        t->c.stack_ptr = f->prev_stack_ptr; \
+        t->c.stack_len = f->prev_stack_len; \
+        t->c.stack_end = f->prev_stack_ptr + f->prev_stack_len; \
+        t->c.cur_fiber = f->prev_fiber; \
+        stack = f->prev_fp; \
+        pc = f->prev_pc; \
+        stack[f->prev_dst] = status; \
+    } while (false)
+
 #define RETURN(code) \
     do { \
         t->c.pc = pc; \
@@ -537,6 +554,9 @@ ResultCode execBytecode(ZThread* t) {
         JENTRY(RET_Y),
         JENTRY(GEN_NEXT),
         JENTRY(GEN_END),
+        JENTRY(FIBER_RESUME),
+        JENTRY(SUSPEND),
+        JENTRY(FIBER_END),
         JENTRY(AWAIT),
         JENTRY(RetainNZ),
         JENTRY(Retain),
@@ -1468,6 +1488,58 @@ beginSwitch:
 
         // Coroutine expects `fp` to be in the right place even though the `end` path will never return anything.
         stack = stack + ret;
+        NEXT();
+    }
+    CASE(FIBER_RESUME): {
+        CHECKPOINT();
+        Fiber* f = (Fiber*)stack[pc[2]];
+        if (f->state == FIBER_DONE) {
+            stack[pc[1]] = FIBER_DONE;
+            pc += 3;
+            NEXT();
+        }
+        if (f->state == FIBER_RUNNING) {
+            panicStaticMsg(t, "Fiber is already running.");
+            RETURN(RES_PANIC);
+        }
+        f->prev_stack_ptr = t->c.stack_ptr;
+        f->prev_stack_len = t->c.stack_len;
+        f->prev_fp = stack;
+        f->prev_pc = pc + 3;
+        f->prev_dst = pc[1];
+        f->prev_fiber = t->c.cur_fiber;
+        f->host_depth = t->c.host_depth;
+        f->state = FIBER_RUNNING;
+        t->c.cur_fiber = f;
+        t->c.stack_ptr = f->stack_ptr;
+        t->c.stack_len = f->stack_len;
+        t->c.stack_end = f->stack_ptr + f->stack_len;
+        pc = f->pc;
+        stack = f->fp;
+        NEXT();
+    }
+    CASE(SUSPEND): {
+        Fiber* f = t->c.cur_fiber;
+        if (f == NULL) {
+            // The root context has no resumer to give control to.
+            pc += 1;
+            NEXT();
+        }
+        if (f->host_depth != t->c.host_depth) {
+            // A host function called back into the VM. Its C frame can not be suspended.
+            panicStaticMsg(t, "Cannot suspend across a host call.");
+            RETURN(RES_PANIC);
+        }
+        f->pc = pc + 1;
+        f->fp = stack;
+        FIBER_SWITCH_OUT(f, FIBER_SUSPENDED);
+        NEXT();
+    }
+    CASE(FIBER_END): {
+        // The entry function returned to `fiber_end_code`.
+        Fiber* f = t->c.cur_fiber;
+        f->pc = NULL;
+        FIBER_SWITCH_OUT(f, FIBER_DONE);
         NEXT();
     }
     CASE(AWAIT): {

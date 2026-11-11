@@ -260,6 +260,9 @@ typedef enum {
     CodeRET_Y,
     CodeGEN_NEXT,
     CodeGEN_END,
+    CodeFIBER_RESUME,
+    CodeSUSPEND,
+    CodeFIBER_END,
     CodeAWAIT,
     CodeRetainNZ,
     CodeRetain,
@@ -501,6 +504,43 @@ typedef struct Generator {
     bool running;
     bool done;
 } Generator;
+
+enum {
+    FIBER_SUSPENDED = 0,
+    FIBER_RUNNING = 1,
+    FIBER_DONE = 2,
+};
+
+// A stackful coroutine. Allocated by `thread.newFiber` and owned by a `Fiber` value in the script.
+// The values match `FiberStatus` in `core.cy`.
+typedef struct Fiber {
+    // The fiber's own stack. While the fiber runs, the `Thread` holds the live values (the stack can grow)
+    // and these are stale until the fiber is switched out.
+    Value* stack_ptr;
+    size_t stack_len;
+
+    // Where the next `resume` continues. `fp` points into the fiber's stack.
+    Inst* pc;
+    Value* fp;
+
+    // The resumer's context while the fiber runs. The resumer's stack can not grow in the meantime.
+    Value* prev_stack_ptr;
+    size_t prev_stack_len;
+    Value* prev_fp;
+    Inst* prev_pc;
+    // The fiber that resumed this one. NULL when resumed from the thread's root context.
+    struct Fiber* prev_fiber;
+
+    // Every fiber of a thread is linked from `Thread.fibers` so that a panic can free their stacks.
+    struct Fiber* list_prev;
+    struct Fiber* list_next;
+
+    // `Thread.host_depth` at the resume. A `suspend` at a different depth has a host frame in between.
+    u32 host_depth;
+    // Register of the resumer that receives the status.
+    u16 prev_dst;
+    u8 state;
+} Fiber;
 
 // Unused members are declared for debugging.
 typedef union HeapObject {
@@ -809,6 +849,13 @@ typedef struct Thread {
     // and waits for the spawned threads. Cleared at the start of each eval.
     u8* interrupt;
     u8 interrupt_flag;
+
+    // The fiber that is running. NULL in the root context.
+    Fiber* cur_fiber;
+    // Head of the list of this thread's fibers.
+    Fiber* fibers;
+    // Number of host calls that are running bytecode on top of this context (`Thread.callFunc2`).
+    u32 host_depth;
 } Thread;
 
 typedef struct ZThread {
@@ -897,6 +944,9 @@ void zFreePoolObject(ZThread* t, HeapObject* obj);
 void zFreeBigObject(ZThread* t, HeapObject* obj, size_t size);
 ResultCode z_ret_generator(ZThread* t, TypeId type_id, u16 ret_size, Value* fp, size_t frame_len, Inst* resume_pc, Inst* deinit_pc);
 ResultCode zAwait(ZThread* t, Value value);
+
+// The return address of a fiber's entry frame. One `FIBER_END` inst.
+extern Inst fiber_end_code[1];
 PcFpResult zCallPtr(ZThread* t, Inst* pc, Value* stack, uint16_t base);
 PcFpResult zCallUnion(ZThread* t, Inst* pc, Value* stack, uint16_t base);
 HeapObjectResult zAllocPoolObject(ZThread* t, TypeId id);

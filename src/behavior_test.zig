@@ -367,6 +367,16 @@ if (!aot) {
     run.case("concurrency/yield_outside_generator_error.cy");
     run.case("concurrency/generator_borrow_param_error.cy");
     run.case("concurrency/generator_borrow_option_param_error.cy");
+    run.case("concurrency/fiber.cy");
+    run.case("concurrency/fiber_generator_entry_error.cy");
+    run.case("concurrency/fiber_entry_ret_error.cy");
+    run.case("concurrency/fiber_borrow_param_error.cy");
+    run.case("concurrency/suspend_value_error.cy");
+    run.case("concurrency/fiber_no_call_error.cy");
+    run.case("concurrency/fiber_block_capture_error.cy");
+    run.case("concurrency/fiber_in_progress_panic.cy");
+    run.case("concurrency/fiber_running_panic.cy");
+    run.case("concurrency/fiber_panic.cy");
     if (!is_wasm) {
         run.case("concurrency/spawn.cy");
     }

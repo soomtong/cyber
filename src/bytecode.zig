@@ -620,6 +620,11 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
             const local = pc[1].val;
             try w.print("await(%{})", .{local});
         },
+        .fiber_resume => {
+            const dst = pc[1].val;
+            const fiber = pc[2].val;
+            try w.print("%{} = resume(%{})", .{dst, fiber});
+        },
         .addr => {
             const dst = pc[1].val;
             const reg = pc[2].val;
@@ -873,6 +878,8 @@ pub fn getInstLenAt(pc: [*]const Inst) u8 {
         .end,
         .ret_0,
         .ret,
+        .suspend_op,
+        .fiber_end,
         .trap_debug,
         .trap => {
             return 1;
@@ -891,6 +898,7 @@ pub fn getInstLenAt(pc: [*]const Inst) u8 {
         .jump => {
             return 2;
         },
+        .fiber_resume,
         .copy_str,
         .const_16s,
         .const_16 => {
@@ -1158,6 +1166,9 @@ pub const OpCode = enum(u8) {
     ret_y = vmc.CodeRET_Y,
     gen_next = vmc.CodeGEN_NEXT,
     gen_end = vmc.CodeGEN_END,
+    fiber_resume = vmc.CodeFIBER_RESUME,
+    suspend_op = vmc.CodeSUSPEND,
+    fiber_end = vmc.CodeFIBER_END,
     retain_nz = vmc.CodeRetainNZ,
     retain = vmc.CodeRetain,
     captured = vmc.CodeCaptured,
@@ -1210,7 +1221,7 @@ pub const OpCode = enum(u8) {
 };
 
 test "bytecode internals." {
-    try t.eq(133, std.enums.values(OpCode).len);
+    try t.eq(136, std.enums.values(OpCode).len);
     try t.eq(@sizeOf(Inst), 2);
     try t.eq(@sizeOf(DebugSym), 16);
 }

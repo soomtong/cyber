@@ -204,7 +204,7 @@ $ rg -n 'Fiber' src/types.zig
 - `docs/docs.md:2787` 의 "Fibers." 절(`Fiber(fn, args)`, `f.resume()`, `Fiber.yield()`)은 본문에 `*TODO*` 가 붙은 설계 문서이고 소스 어디에도 `type Fiber` 가 없다.
 - `src/heap.zig:876~884` 의 `AsyncTaskType` 주석("Invoke callback on a new fiber", "Resumes a fiber")도 옛 모델의 흔적이다.
 
-정리하면 현재 빌드에 fiber 는 없다. 코루틴은 `generator fn` 하나뿐이다.
+정리하면 이 절을 쓴 시점의 빌드에 fiber 는 없었고 코루틴은 제너레이터 하나뿐이었다. (2026-11-11 보충: `Fiber`를 구현했다. `fiber f(args)` · `fiber:` · `suspend`, `docs/decisions/project_coroutines.md`의 "Fiber 구현" 절)
 
 ### 2.3 0.4 의 generator: 프레임 하나를 힙에 복제해 두는 stackless 코루틴
 
@@ -365,7 +365,7 @@ type Generator[FnPtr Any]:
 | `resume_pc` | 다음 `next()` 가 이어서 실행할 명령어 |
 | `deinit_pc` | 버려질 때 실행할 해제 블록 시작(없으면 NULL) |
 | `prev_fp` | 지금 `next()` 를 부른 소비자의 fp (재개 중에만 유효) |
-| `running`, `done` | 상태. `status()` 는 이 둘로 `paused` / `running` / `done` 을 계산한다(`core.zig:2058~2067`) |
+| `running`, `done` | 상태. `status()` 는 이 둘로 `suspended` / `running` / `done` 을 계산한다(`core.zig:2058~2067`) |
 
 크기는 48바이트다(`Generator.@size()` 는 `core.zig:2052`, 트레이스 빌드의 free 로그 `free type=115(Generator) ... 48` 로 확인).
 `next()` 와 `end()` 는 Cyber 로 감싼 얇은 함수이고(`core.cy:4339~4351`), 실제 일은 `@gen_next` / `@gen_end` 라는 컴파일 타임 빌트인이 `gen_next` / `gen_end` IR 노드를 만들어 한다(`core.zig:1999~2024`).
@@ -857,7 +857,7 @@ print(r.await())
 | `generator fn` | 함수를 호출하면 본문을 실행하지 않고 `^Generator[Fn]` 을 돌려주게 하는 선언 수식어(2026-11-11 전에는 `#[generator]` 속성) | `function*` 의 `*` (표기 위치는 반대: 반환 타입이 바뀜) |
 | `yield v` | 값을 `next()` 호출자에게 돌려주고 멈춘다. 호출자가 다시 `next()` 하면 다음 줄부터 이어 간다 | `yield v` (단 값을 되받는 `yield` 표현식은 없다) |
 | `g.next()` | `?T` 를 돌려준다. 끝나면 `none` | `g.next()` 의 `{value, done}` 대신 Option |
-| `g.status()` | `paused` / `running` / `done` | 대응 없음 |
+| `g.status()` | `suspended` / `running` / `done` | 대응 없음 |
 | 스냅샷(snapshot) | `RET_GEN` 이 힙에 복제한 매개변수 레지스터 배열(`frame_ptr`/`frame_len`) | V8 의 generator 객체에 저장되는 레지스터 파일(일반 지식)과 같은 역할을 해야 하는 자리 |
 | 소비자(consumer) | `next()` 를 부르는 쪽. 제너레이터의 프레임은 소비자 스택 위에 펼쳐진다 | `for...of` 루프 |
 | 해제 블록(deinit block) | 각 yield 뒤에 붙는, 제너레이터가 중간에 버려질 때 실행할 destruct 코드 | `finally` 와 `return()` 에 해당 |
@@ -938,7 +938,7 @@ print(gen.status())
 ```text
 $ cyber g0.cy
 ^Generator[fn() -> int]
-GeneratorStatus.paused
+GeneratorStatus.suspended
 123
 456
 GeneratorStatus.done
@@ -1533,7 +1533,7 @@ CodeAct 루프의 이상적인 모양은 이렇다. 스크립트가 `r := tool('
 
 ### 7.4 미완 지점 (upstream 이 비운 자리, `docs/decisions/project_coroutines.md` 와 일치)
 
-- 스택형 `Fiber`: 문서만 있다. 에이전트 루프에 중단/재개가 필요해지면 길 2 또는 길 3 을 이 fork 가 설계해야 한다.
+- 스택형 `Fiber`: 문서만 있다. 에이전트 루프에 중단/재개가 필요해지면 길 2 또는 길 3 을 이 fork 가 설계해야 한다. (2026-11-11 보충: `Fiber`를 구현했다. `fiber f(args)` · `fiber:` · `suspend`, `docs/decisions/project_coroutines.md`의 "Fiber 구현" 절) 길 2(`CL_AWAIT`)는 여전히 없다.
 - generator reset, 값을 되받는 yield, 위임(`yield*`): 없다.
 - continuation 큐, `cl_run_ready_tasks`: 주석 처리. 비-main await 는 2026-11-08 부터 블록한다(2.6).
 - 패닉한 자식 스레드 상태 조회, Channels, Shared memory, OS threads: TBD.

@@ -279,14 +279,14 @@ const lib = switch meta.system():
 ## Reserved identifiers.
 
 ### Keywords.
-There are `23` general keywords. This list categorizes them:
+There are `25` general keywords. This list categorizes them:
 
 - [Control flow](#control-flow): [`if`](#if-statement) [`else`](#if-statement) [`switch`](#switch-matching) [`case`](#switch-matching) [`while`](#conditional-while) [`for`](#for-range) [`break`](#break-statement) [`continue`](#continue-statement) `pass` [`or`](#or-expression) [`and`](#and-expression)
 - [Operators](#operators): `not`
 - [Variables](#variables): [`var`](#local-variables) [`global`](#global-variables)
 - [Functions](#functions): `fn` `return`
 - [Ownership](#value-ownership): [`move`](#moving)
-- [Concurrency](#concurrency): [`yield`](#generators). `generator` is a modifier in front of `fn` and is not reserved.
+- [Concurrency](#concurrency): [`yield`](#generators) [`fiber`](#fibers) [`suspend`](#fibers). `generator` is a modifier in front of `fn` and is not reserved.
 - [Types](#custom-types): `type` `with`
 - [Error handling](#error-handling): [`try`](#unwrap-block)
 - [Modules](#modules): `use`
@@ -3089,43 +3089,109 @@ Types that don't implement `Sendable` include:
 * Function unions. (Closures are not `Sendable`)
 
 ### Fibers.
-A fiber is a cooperative execution context that belongs to a parent thread.
-It has its own stack but shares the thread's heap: *TODO*
+A fiber is a cooperative execution context that belongs to a thread. It has its own stack and shares the thread's heap.
+A fiber waits and gives up control. It carries no value: use a [generator](#generators) to produce values.
+
+`fiber` in front of a call creates a `Fiber`. The arguments are evaluated at once and the function is called at the first `resume`:
 ```cy
-f := Fiber(|_|):
-    print('in a fiber')
+fn two_steps(name str):
+    print('%{name}: first')
+    suspend
+    print('%{name}: last')
 
-f.resume()
---> in a fiber
-```
-When a fiber panics, all other fibers in the same thread are terminated.
+f := fiber two_steps('a')
+print(f.status())      --> FiberStatus.suspended
 
-Fibers are cooperative using a resume and yield mechanism:
-```cy
-fn two_steps():
-    print('first')
-    Fiber.yield()
-    print('last')
-
-f := Fiber(two_steps, {})
-f.resume()
---> first
-
-f.resume()
---> last
+_ = f.resume()         --> a: first
+_ = f.resume()         --> a: last
+print(f.status())      --> FiberStatus.done
 ```
 
-When a fiber is destructed, it will panic if it's still in progress:
+`suspend` gives control back to the `resume` call that is running the fiber. It takes no value and it can be used at any call depth, in a function of any signature:
+```cy
+fn crunch(data ^ArrayStore[int]) -> int:
+    sum := 0
+    for data |x|:
+        sum += x
+        if sum % 4096 == 0:
+            suspend
+    return sum
+```
+Outside of a fiber, `suspend` does nothing.
+
+`resume` returns `.suspended` when the fiber suspended and `.done` when its function returned. Resuming a fiber that is done returns `.done` again. `status` returns `.suspended`, `.running` or `.done`. A fiber that resumed another fiber is `.running` until the other one gives control back.
+
+Fibers interleave on the same heap. Share state with a `^T` reference:
+```cy
+fn worker(name str, log ^ArrayStore[str]):
+    for 0..2 |i|:
+        log << '%{name} %{i}'
+        suspend
+
+log := ^ArrayStore[str]{}
+a := fiber worker('a', log)
+b := fiber worker('b', log)
+while a.status() != .done or b.status() != .done:
+    _ = a.resume()
+    _ = b.resume()
+--> log: a 0, b 0, a 1, b 1
+```
+
+`fiber:` takes a body instead of a call. The body is a closure, so it captures variables that are declared with a reference type:
+```cy
+log := ^ArrayStore[str]{}
+t := fiber:
+    log << 'step 1'
+    suspend
+    log << 'step 2'
+
+_ = t.resume()         -- log: step 1
+_ = t.resume()         -- log: step 1, step 2
+```
+
+The rules of a fiber entry are checked at the `fiber` expression:
+```cy
+generator fn countdown(n int) -> int:
+    yield n
+f := fiber countdown(3)    --> CompileError: A generator cannot be a fiber entry.
+
+fn one() -> int:
+    return 1
+f := fiber one()           --> CompileError: A fiber entry function must return `void`.
+
+fn bump(n &int):
+    n.* += 1
+n := 1
+f := fiber bump(&n)        --> CompileError: Cannot borrow a stack value across fibers. The parameter type is `&int`. Use `^T`.
+
+suspend 1                  --> ParseError: `suspend` takes no value. Use `yield` in a generator.
+```
+The arguments are copied into the call at the first `resume`, so a parameter of a fiber entry can not have a `NoCopy` type.
+
+A generator can be consumed inside a fiber, and `suspend` in a generator body suspends the fiber that consumes the generator. The generator stays `.running` until that fiber is resumed.
+
+When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the `resume` call of each fiber down to the main block.
+
+A fiber can not resume itself or a fiber that is waiting for it:
+```cy
+--> panic: Fiber is already running.
+```
+
+When a fiber is destructed, it will panic if it's still in progress. This includes a fiber that was never resumed, since only the fiber can release its arguments:
 ```cy
 fn forever():
-    while:
-        Fiber.yield()
+    while true:
+        suspend
 
-f := Fiber(forever, {})
-f.resume()
+fn start():
+    f := fiber forever()
+    _ = f.resume()
 
+start()
 --> panic: Fiber is still in progress.
 ```
+
+Each fiber starts with a stack of 512 bytes that grows on demand like the thread's stack. Fibers are not available when compiling AOT.
 
 ### Growable stacks.
 When running on Cyber's VM, threads can grow their stack on demand.
@@ -3289,7 +3355,7 @@ The current state of a generator can be obtained with `Generator.status`:
 ```cy
 gen := iterate()
 print(gen.status())
---> GeneratorStatus.paused
+--> GeneratorStatus.suspended
 
 while gen.next() |res|:
     pass

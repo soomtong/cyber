@@ -402,6 +402,7 @@ pub const Thread = struct {
             .await_single = null,
             .await_ptr = null,
             .await_len = 0,
+            .await_owned = false,
             .await_fibers = false,
         };
         if (self.c.fibers) |head| {
@@ -420,6 +421,12 @@ pub const Thread = struct {
         }
         if (fiber.list_next) |next| {
             next.*.list_prev = fiber.list_prev;
+        }
+        if (fiber.await_owned) {
+            // The list of a `Future.wait_any` that is not resumed anymore. The references are not given back:
+            // a fiber is freed in this state after a panic or with the thread, when its heap is gone.
+            const list: [*]*cy.heap.FutureValue = @ptrCast(@alignCast(fiber.await_ptr));
+            self.alloc.free(list[0..fiber.await_len]);
         }
         const fstack: [*]Value = @ptrCast(@alignCast(fiber.stack_ptr));
         self.alloc.free(fstack[0..fiber.stack_len]);

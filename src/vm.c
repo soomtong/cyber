@@ -1526,7 +1526,9 @@ beginSwitch:
         f->host_depth = t->c.host_depth;
         f->state = FIBER_RUNNING;
         f->started = true;
-        f->await_len = 0;
+        if (!f->await_owned) {
+            f->await_len = 0;
+        }
         f->await_fibers = false;
         t->c.cur_fiber = f;
         t->c.stack_ptr = f->stack_ptr;

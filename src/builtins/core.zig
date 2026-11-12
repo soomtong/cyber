@@ -1547,29 +1547,45 @@ pub fn await_any(t: *cy.Thread) anyerror!C.Ret {
     if (len == 0) {
         return t.ret_panic("No futures to wait for.");
     }
-    const futures = base.?[0..len];
+    var futures = base.?[0..len];
+    if (t.c.cur_fiber) |fiber| {
+        if (fiber.await_owned) {
+            // The call runs again after the fiber was suspended in it. The list it was called with was only
+            // borrowed and can be gone by now. The fiber's copy has the same futures in the same order.
+            futures = fiberFutures(fiber);
+        }
+    }
     while (true) {
         var has_shared = false;
         for (futures, 0..) |future, i| {
-            if (future.shared_state) |shared_state| {
-                has_shared = true;
-                // 2: done. 3 and 4: the thread failed or was stopped, which the `await` of that future reports.
-                if (@atomicLoad(u8, &shared_state.state, .acquire) >= 2) {
-                    ret.* = @intCast(i);
-                    return C.RetOk;
+            // 2: done. 3 and 4: the thread failed or was stopped, which the `await` of that future reports.
+            if (cy.vm.futureDone(future)) {
+                if (t.c.cur_fiber) |fiber| {
+                    if (fiber.await_owned) fiberClearAwait(t, fiber);
                 }
-            } else if (future.completed) {
                 ret.* = @intCast(i);
                 return C.RetOk;
             }
+            if (future.shared_state != null) has_shared = true;
         }
         if (t.c.cur_fiber) |fiber| {
             // A fiber gives control back instead of waiting. The call runs again at the next `resume`.
             if (fiber.host_depth != t.c.host_depth) {
                 return t.ret_panic("Cannot await across a host call.");
             }
-            fiber.await_ptr = @ptrCast(@constCast(futures.ptr));
-            fiber.await_len = futures.len;
+            if (fiber.await_owned) {
+                return vmc.RET_FIBER_AWAIT;
+            }
+            // The fiber keeps its own copy with a reference to each future. The caller's list is only borrowed:
+            // another context can change or free it while this fiber is suspended, and `Fiber.wait_ready` and
+            // `Fiber.waiting` read the futures from outside of the fiber.
+            const owned = try t.alloc.dupe(*cy.heap.FutureValue, futures);
+            for (owned) |future| {
+                t.heap.retain(Value.initPtr(future));
+            }
+            fiber.await_ptr = @ptrCast(owned.ptr);
+            fiber.await_len = owned.len;
+            fiber.await_owned = true;
             return vmc.RET_FIBER_AWAIT;
         }
         if (!has_shared) {
@@ -2082,6 +2098,18 @@ fn fiber_status(t: *cy.Thread) callconv(.c) C.Ret {
     const fiber = t.param(*vmc.Fiber);
     ret.* = fiber.state;
     return C.RetOk;
+}
+
+/// Gives back the list that a fiber owns while it is suspended in `Future.wait_any`.
+fn fiberClearAwait(t: *cy.Thread, fiber: *vmc.Fiber) void {
+    const list: [*]*cy.heap.FutureValue = @ptrCast(@alignCast(fiber.await_ptr));
+    for (list[0..fiber.await_len]) |future| {
+        t.heap.release(Value.initPtr(future));
+    }
+    t.alloc.free(list[0..fiber.await_len]);
+    fiber.await_ptr = null;
+    fiber.await_len = 0;
+    fiber.await_owned = false;
 }
 
 fn fiberFutures(fiber: *const vmc.Fiber) []const *cy.heap.FutureValue {

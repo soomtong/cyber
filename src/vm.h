@@ -553,11 +553,16 @@ typedef struct Fiber {
     bool cancelled;
 
     // What the fiber waits for while it is suspended at an `await`. Cleared by `resume`: the inst that
-    // suspended the fiber runs again and sets it again when the wait is not over.
-    // `await_len` futures at `await_ptr` (`FutureValue*`). For a single future `await_ptr` is `&await_single`.
+    // suspended the fiber runs again and sets it again when the wait is not over. An owned list stays until
+    // the `Future.wait_any` call that made it returns.
+    // `await_len` futures at `await_ptr` (`FutureValue*`). For a single future `await_ptr` is `&await_single`
+    // and the fiber's register keeps the future alive. For `Future.wait_any` the list is a copy that the fiber
+    // owns, with a reference to each future (`await_owned`): the caller's list can change while the fiber is
+    // suspended.
     void* await_single;
     void** await_ptr;
     size_t await_len;
+    bool await_owned;
     // Suspended in `Fiber.wait_ready`: it waits for the futures of the thread's other fibers.
     bool await_fibers;
 } Fiber;

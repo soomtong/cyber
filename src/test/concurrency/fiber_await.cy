@@ -49,6 +49,24 @@ test.eq(f4.waiting(), false)
 test.eq(f4.resume(), .done)
 test.eq(out3.*, 105)
 
+-- The list of a `Future.wait_any` can go away while the fiber is suspended in the call.
+fn any_boxed(box ^[]Future[int], out ^int):
+    out.* = Future.wait_any(box.span())
+re := FutureResolver.new(int)
+rf := FutureResolver.new(int)
+box := ^[]Future[int]{re.future(), rf.future()}
+out6 := ^-1
+f7 := fiber any_boxed(box, out6)
+test.eq(f7.resume(), .suspended)
+box.* = []Future[int]{}
+test.eq(f7.waiting(), true)
+test.eq(f7.resume(), .suspended)
+rf.complete(1)
+test.eq(f7.waiting(), false)
+test.eq(Fiber.wait_ready(), true)
+test.eq(f7.resume(), .done)
+test.eq(out6.*, 1)
+
 -- The await of a nested fiber goes back to the fiber that resumed it.
 fn inner(fut Future[int], out ^int):
     out.* = fut.await()

@@ -382,7 +382,10 @@ spawn 스레드. 예제 `examples/libcyber/host_await.c`(`lib-standalone-test`�
   resume한 쪽에 `.suspended`를 돌려준다. `Fiber.pc`는 그 `AWAIT` 명령 자신이라 다음 resume이 같은 명령을 다시 실행한다.
   아직 미완료면 다시 멈춘다. 그래서 "대기 중인 fiber의 resume은 본문에 들어가지 않는다"에 따로 코드가 없다. 힙 할당도 없다.
 - `Future.wait_any`(builtin `@await_any`)는 fiber 안에서 `RET_FIBER_AWAIT`(3)를 돌려주고 `CALL_HOST`가 fiber를 멈춘다.
-  resume 때 같은 호출이 다시 실행된다. 기다리는 목록은 `Fiber.await_ptr` · `await_len`.
+  resume 때 같은 호출이 다시 실행된다. 기다리는 목록은 `Fiber.await_ptr` · `await_len`이고, fiber가 소유한 사본이다
+  (`await_owned`, Future마다 참조 하나). 호출이 받은 `[&]Future`는 빌린 것이라 fiber가 멈춘 동안 다른 맥락이 목록을
+  바꾸거나 해제할 수 있고, `wait_ready` · `waiting`은 fiber 밖에서 그 Future들을 읽는다. 다시 실행된 호출도 인자가
+  아니라 사본을 본다. 사본은 호출이 값을 돌려줄 때 반납한다(커밋 뒤 자동 보안 리뷰가 지적해 고쳤다).
 - `FIBER_RESUME`이 대기 기록을 지운다. 멈춘 명령이 다시 실행되며 필요하면 다시 적는다.
 - fiber 안의 await는 대기 큐의 스레드 작업을 직접 실행하지 않는다(루트의 await는 한다). 처음에는 멈추기 전에 하나
   실행하게 했는데, 그 작업이 fiber 안에서 끝까지 돌아 다른 fiber가 시작도 못 했다(Release 빌드의 테스트가 순서로 잡았다).

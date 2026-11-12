@@ -284,6 +284,10 @@ tars-agent(이 언어를 code-act 주 언어로 내장할 에이전트)의 요�
 3. Future 완료는 eval을 돌리는 스레드에서만 한다(요청 12번). 완료는 힙 값을 쓰는 일이고 힙은 스레드 소유다. 원자 연산을 넣지
    않았다.
 4. 완료하지 않고 `cl_vm_resume`을 부르면 다시 `CL_AWAIT`다.
+   `cl_vm_resume`은 멈춘 동안 들어온 interrupt 요청을 지운다(새 eval의 시작과 같은 규칙, 사용자 결정 2026-11-12). 처음에는
+   남겨 두었는데, 그러면 승인 대기 중에 발동한 벽시계 타이머가 resume 직후 스크립트를 끊고(요청서의 첫 번째 문제가 그대로),
+   호스트가 `CL_AWAIT`를 받고 타이머를 멈추기 전의 틈도 막을 수 없다. 플래그를 내리는 API도 없다. 멈춘 eval을 끊는 수단은
+   `cl_vm_abandon`이다. 연료는 다시 채우지 않는다(스크립트가 한 일의 양이다).
 5. 스크립트가 만든 미완료 Future(`FutureResolver`)도 같은 경로로 `CL_AWAIT`가 된다. 호스트 Future와 구조가 같아 구분하지 않는다.
    호스트는 모르는 Future면 버린다. CLI(`main.zig` `reportAbandonedAwait`)와 `cy.eval`(자식 VM)은 버리고 panic으로 보고한다.
 6. 켜는 옵션은 두지 않았다. `CL_AWAIT`를 모르는 호스트는 이전의 panic 대신 `CL_AWAIT`를 받는다.
@@ -314,7 +318,7 @@ void cl_vm_abandon(CLVM* vm);
 - `vm.zig` `zAwait`: 미완료 로컬 Future에서 `Compiler.await_future`에 기록하고 `RES_AWAIT`. `vm.c`의 `AWAIT`는 pc를 그 명령으로
   되돌려 저장한다.
 - `VM.eval`의 뒤처리를 `finishExec`(성공) · `failExec`(실패)로 떼어 `resumeEval`과 공유한다. `failExec`는 `error.Await`면 아무것도
-  버리지 않는다. `resumeEval`은 `prepEval` · `resetStop`을 부르지 않는다(둘 다 fiber · 연료 · interrupt를 초기화한다).
+  버리지 않는다. `resumeEval`은 `prepEval` · `resetStop`을 부르지 않는다(fiber와 연료를 초기화한다). interrupt 플래그만 직접 지운다.
 - `abandonEval`: `ret_panic` 뒤 `handleInterrupt`로 되감고 `failExec(error.Interrupted)`. fiber 안이면 `exitFibers` 경로를 탄다.
   `VM.deinit`(reset 포함)이 멈춘 eval을 먼저 버리고 panic 메시지를 지운다(안 지우면 다음 `prepEval`이 이중 해제한다).
 - 상태는 `Compiler.await_future` 하나다. `VM` 구조체는 `vm.h` padding 때문에 늘리지 못한다.

@@ -533,12 +533,14 @@ pub const VM = struct {
     }
 
     /// Continues the eval that is suspended at an `await`. The result follows the rules of `eval`.
-    /// The fuel and an interrupt request are not reset: they carry over from before the suspension.
+    /// An interrupt request from the time of the suspension is cleared, as at the start of an eval: that time is
+    /// the host's, and the host drops a suspended eval with `abandonEval`. The fuel is not refilled.
     pub fn resumeEval(self: *VM) anyerror!C.EvalResult {
         if (!self.isSuspended()) {
             return error.NotSuspended;
         }
         self.compiler.await_future = null;
+        @atomicStore(u8, self.main_thread.c.interrupt, 0, .release);
         cy.Thread.exec_auto(self.main_thread, true) catch |err| {
             self.failExec(err);
             return err;

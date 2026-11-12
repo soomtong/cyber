@@ -492,7 +492,9 @@ CLFuture* cl_vm_pending_future(CLVM* vm);
 
 // Continues the suspended eval. The result code and `res` follow the rules of `cl_vm_evalx`, including another
 // `CL_AWAIT`, which is also the result when the pending future was not completed.
-// The fuel is not refilled and an interrupt request is not cleared: both carry over from before the suspension.
+// An interrupt request that arrived while the eval was suspended is cleared, as at the start of an eval: only a
+// request after this call stops the eval. Use `cl_vm_abandon` to stop a suspended eval.
+// The fuel is not refilled: it counts the checkpoints of the whole eval.
 // Returns `CL_ERROR_UNKNOWN` when no eval is suspended.
 CLResultCode cl_vm_resume(CLVM* vm, CLEvalResult* res);
 

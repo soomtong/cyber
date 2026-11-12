@@ -4482,7 +4482,7 @@ fn write(path str, text str) -> !void:
 ```
 
 * `cl_future_complete` copies the value and the future owns it afterwards, as a return slot does. For a `Future[!U]` the value is the `U`. `cl_future_complete_error` completes a `Future[!U]` with an error.
-* `cl_vm_resume` follows the rules of `cl_vm_evalx`. It returns `CL_AWAIT` again at the next `await`, and also when the pending future was not completed. The fuel is not refilled and an interrupt request is not cleared by a resume.
+* `cl_vm_resume` follows the rules of `cl_vm_evalx`. It returns `CL_AWAIT` again at the next `await`, and also when the pending future was not completed. A resume clears an interrupt request that arrived while the eval was suspended, as the start of an eval does, so a wall clock timer does not count the time the host waited. The fuel is not refilled.
 * While an eval is suspended, `cl_vm_eval*`, `cl_vm_validate` and `cl_vm_compile*` return `CL_ERROR_SUSPENDED`. `cl_vm_reset` and `cl_vm_deinit` abandon the suspended eval first.
 * `cl_vm_abandon` drops the suspended eval with the outcome of an interrupt: the main locals are gone, the declarations stay. The panic summary names the abandoned `await`.
 * A future that the script never awaits, or that is still pending when the eval ends, is freed like any other object.

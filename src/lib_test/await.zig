@@ -75,6 +75,13 @@ const Host = struct {
         return C.RetOk;
     }
 
+    /// Asks the running eval to stop, from inside the eval.
+    fn stop(t: *C.Thread) callconv(.c) C.Ret {
+        _ = C.thread_ret(t, void);
+        C.vm_interrupt(C.thread_vm(t));
+        return C.RetOk;
+    }
+
     fn loader(vm: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
         const name = C.from_bytes(uri);
         if (std.mem.eql(u8, name, "host")) {
@@ -83,12 +90,14 @@ const Host = struct {
             C.mod_add_func(mod, "ask_str", C.BIND_FUNC(&ask_str));
             C.mod_add_func(mod, "ask_void", C.BIND_FUNC(&ask_void));
             C.mod_add_func(mod, "ask_done", C.BIND_FUNC(&ask_done));
+            C.mod_add_func(mod, "stop", C.BIND_FUNC(&stop));
             res[0].src = C.to_bytes(
                 \\#[bind] fn ask(n int) -> Future[int]
                 \\#[bind] fn ask_res(n int) -> Future[!int]
                 \\#[bind] fn ask_str() -> Future[str]
                 \\#[bind] fn ask_void() -> Future[!void]
                 \\#[bind] fn ask_done(n int) -> Future[int]
+                \\#[bind] fn stop()
             );
             return true;
         } else {
@@ -430,9 +439,28 @@ test "The limits of an eval carry over a suspension." {
     }
     C.vm_set_fuel(vm, 0);
 
-    // An interrupt that arrives while the eval is suspended stops it after the resume.
-    try zt.eq(C.Await, C.vm_eval(vm, loop_after, &res));
+    // An interrupt request that arrives while the eval is suspended is dropped by the resume, like one that
+    // arrives before an eval starts. The time of the suspension is the host's.
+    try zt.eq(C.Await, C.vm_eval(vm,
+        \\use host
+        \\use test
+        \\n := host.ask(1).await()
+        \\for 0..1000 |i|:
+        \\    n += 1
+        \\test.eq(n, 1001)
+    , &res));
     C.vm_interrupt(vm);
+    try zt.eq(true, completeInt(vm, C.vm_pending_future(vm), 1));
+    try zt.eq(C.Success, C.vm_resume(vm, &res));
+
+    // A request after the resume stops the eval.
+    try zt.eq(C.Await, C.vm_eval(vm,
+        \\use host
+        \\n := host.ask(1).await()
+        \\host.stop()
+        \\while true:
+        \\    n += 1
+    , &res));
     try zt.eq(true, completeInt(vm, C.vm_pending_future(vm), 1));
     try zt.eq(C.ErrorInterrupt, C.vm_resume(vm, &res));
     {

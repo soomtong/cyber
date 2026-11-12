@@ -37,7 +37,8 @@
 
 - 호스트가 VM 밖에서 기다릴 수 있다(코루틴 로드맵 단계 1, `CL_AWAIT`). main 스레드의 `Future.await()`가 아직 완료되지 않았고
   `spawn`이 만든 것도 아닌 Future를 만나면 eval이 `CL_AWAIT`로 돌아온다. 스택 · 지역 변수 · 남은 연료는 그대로이고, 호스트가
-  Future를 완료시킨 뒤 `cl_vm_resume`으로 멈춘 `await`에서 이어 실행한다. 호출 깊이에 제약이 없고 generator 본문과 fiber
+  Future를 완료시킨 뒤 `cl_vm_resume`으로 멈춘 `await`에서 이어 실행한다. resume은 멈춘 동안 들어온 interrupt 요청을 지우고
+  (벽시계 타이머가 호스트의 대기 시간을 세지 않는다) 연료는 다시 채우지 않는다. 호출 깊이에 제약이 없고 generator 본문과 fiber
   안에서도 같다. 새 함수: `cl_future_new`(호스트 함수가 돌려줄 미완료 `Future[T]`), `cl_future_complete`(값으로 완료,
   `Future[!U]`면 `U`를 넘김), `cl_future_complete_error`, `cl_vm_pending_future`, `cl_vm_resume`, `cl_vm_abandon`(멈춘 eval을
   interrupt처럼 버림). 새 결과 코드 `CL_ERROR_SUSPENDED`: 멈춘 동안의 `cl_vm_eval*` · `cl_vm_validate` · `cl_vm_compile*`.

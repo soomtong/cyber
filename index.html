@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.8-dev 825-5cc32d9</div>
+    <div class="sub-title">v0.4.8-dev 826-5f050c5</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -3814,6 +3814,22 @@ while a.status() != .done or b.status() != .done:
 </code></pre>
 <p>Both computations are started before either result is taken. A loop that resumes fibers needs <code>Fiber.wait_ready()</code>: without it the loop spins while the fibers wait, and it does not end when nothing else completes the futures. That is the case on a machine without spare worker threads, where the waiting root context runs the spawned tasks itself, and for futures that only the host can complete. For those, <code>Fiber.wait_ready()</code> suspends the program and the host sees the futures of all fibers (see <a href="#suspending-an-eval" title="">Suspending an eval</a>). Called inside a fiber, <code>Fiber.wait_ready()</code> suspends that fiber until a future of another fiber is done.</p>
 <p>In the root context, outside of any fiber, <code>await</code> waits as before.</p>
+<p>A <code>Scope</code> runs a group of fibers and does that loop itself. <code>start</code> adds a fiber: the arguments are evaluated at once and the fiber starts in <code>join</code>. <code>join</code> runs the fibers until all of them are done. A fiber that stops at <code>suspend</code> gives the others a turn, and when every fiber waits for a future the scope waits like <code>Fiber.wait_ready()</code>:</p>
+<pre><code class="language-cy">fn fetch(name str, n int, log ^ArrayStore[str]) -> !void:
+    res := spawn(compute, {n}).await()
+    if res < 0:
+        return error.Negative
+    log << '%{name}: %{res}'
+
+fn fetch_all(log ^ArrayStore[str]) -> !void:
+    s := Scope.new()
+    s.start(fetch, {'a', 2000000, log})
+    s.start(fetch, {'b', 10, log})
+    s.join()!
+    -- Both fibers are done here.
+</code></pre>
+<p>The fibers of a scope do not outlive it. A block that is left before <code>join</code> (with <code>return</code>, or with an error from <code>!</code>) joins the fibers first, when the scope is destructed.</p>
+<p>The entry function of a scope's fiber returns <code>void</code> or <code>!void</code>. <code>join</code> returns the first error that a fiber returned. After an error, the fibers that were not started yet are dropped with their arguments released. The fibers that are already in progress run to their end. An error that is left when the scope is destructed without a <code>join</code> panics, like an error that <code>main</code> returns. A scope can be used inside a fiber of another scope, and it can start more fibers after a <code>join</code>.</p>
 <p>When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the <code>resume</code> call of each fiber down to the main block.</p>
 <p>A fiber can not resume itself or a fiber that is waiting for it:</p>
 <pre><code class="language-cy">--> panic: Fiber is already running.

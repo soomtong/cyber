@@ -8285,6 +8285,21 @@ fn semaFiberExpr(c: *cy.Chunk, node: *ast.Node) !ExprResult {
         }
     }
 
+    if (call.callee.type() == .accessExpr) {
+        // `fiber obj.work()` has no place for the receiver. Name the method through its type instead.
+        const access = call.callee.cast(.accessExpr);
+        if (access.left.type() == .ident) {
+            const left = try c.semaExprSkipSym(access.left, .{});
+            if (left.resType != .sym) {
+                if (try c.accessResolvedSym(left.type, access.right.as_name(), access.right)) |sym| {
+                    if (sym.type == .func) {
+                        return c.reportErrorFmt("A fiber entry cannot be a method call on a value. Pass the receiver as the first argument: `fiber T.{}(obj)`.", &.{v(sym.name())}, node);
+                    }
+                }
+            }
+        }
+    }
+
     const tree = &c.parser.ast;
     const name = "@new_fiber";
     const callee = try tree.newNode(.at_lit, .{

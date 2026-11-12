@@ -3207,6 +3207,23 @@ suspend 1                  --> ParseError: `suspend` takes no value. Use `yield`
 ```
 The arguments are copied into the call at the first `resume`, so a parameter of a fiber entry can not have a `NoCopy` type.
 
+A method is a fiber entry through its type, with the receiver as the first argument. A method call on a value is not an entry:
+```cy
+type Job:
+    n int
+
+fn (^Job) work(by int):
+    self.n += by
+    suspend
+    self.n += by
+
+job := ^Job{n=0}
+f := fiber Job.work(job, 2)
+_ = f.resume()
+print(job.n)               --> 2
+g := fiber job.work(2)     --> CompileError: A fiber entry cannot be a method call on a value. Pass the receiver as the first argument: `fiber T.work(obj)`.
+```
+
 A generator can be consumed inside a fiber, and `suspend` in a generator body suspends the fiber that consumes the generator. The generator stays `.running` until that fiber is resumed.
 
 When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the `resume` call of each fiber down to the main block.
@@ -3216,7 +3233,9 @@ A fiber can not resume itself or a fiber that is waiting for it:
 --> panic: Fiber is already running.
 ```
 
-When a fiber is destructed, it will panic if it's still in progress. This includes a fiber that was never resumed, since only the fiber can release its arguments:
+A fiber that was never resumed can be destructed. Its function is not called and its arguments are released.
+
+When a fiber that was resumed is destructed, it will panic if it's still in progress, since only the fiber can release the values in its frames:
 ```cy
 fn forever():
     while true:

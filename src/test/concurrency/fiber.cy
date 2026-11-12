@@ -240,4 +240,43 @@ f15 := fiber: counter.* += 1
 test.eq(f15.resume(), .done)
 test.eq(counter.*, 1)
 
+-- A fiber that was never resumed can be destructed. Its arguments are released without the call.
+type Res:
+    id int
+global res_dropped int = 0
+global res_called int = 0
+fn (&Res) @deinit():
+    res_dropped += 1
+fn hold(r Res, s str):
+    res_called += 1
+    suspend
+fn never_started():
+    f := fiber hold(Res{id=1}, 'abc' + 'def')
+    test.eq(f.status(), .suspended)
+never_started()
+test.eq(res_dropped, 1)
+test.eq(res_called, 0)
+fn never_started_block():
+    r := ^Res{id=2}
+    f := fiber:
+        res_called += r.id
+    test.eq(f.status(), .suspended)
+never_started_block()
+test.eq(res_dropped, 2)
+test.eq(res_called, 0)
+
+-- A method is a fiber entry through its type. The receiver is the first argument.
+type Job:
+    n int
+fn (^Job) work(by int):
+    self.n += by
+    suspend
+    self.n += by
+job := ^Job{n=0}
+f16 := fiber Job.work(job, 2)
+test.eq(f16.resume(), .suspended)
+test.eq(job.n, 2)
+test.eq(f16.resume(), .done)
+test.eq(job.n, 4)
+
 --cytest: pass

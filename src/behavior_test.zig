@@ -384,6 +384,7 @@ if (!aot) {
     run.case("concurrency/fiber_entry_ret_error.cy");
     run.case("concurrency/fiber_borrow_param_error.cy");
     run.case("concurrency/suspend_value_error.cy");
+    run.case("concurrency/fiber_method_entry_error.cy");
     run.case("concurrency/fiber_no_call_error.cy");
     run.case("concurrency/fiber_block_capture_error.cy");
     run.case("concurrency/fiber_in_progress_panic.cy");

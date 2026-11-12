@@ -227,6 +227,8 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"@start_fiber",   zErrFunc(start_fiber)},
     .{"@fiber_deinit",  zErrFunc(fiber_deinit)},
     .{"@fiber_status",  cFunc(fiber_status)},
+    .{"@fiber_cancel",  cFunc(fiber_cancel)},
+    .{"@fiber_cancelled", cFunc(fiber_cancelled)},
     .{"@fiber_resume",  zErrBuiltinFunc(fiber_resume, null)},
 };
 
@@ -2068,6 +2070,26 @@ fn fiber_status(t: *cy.Thread) callconv(.c) C.Ret {
     const ret = t.ret(i64);
     const fiber = t.param(*vmc.Fiber);
     ret.* = fiber.state;
+    return C.RetOk;
+}
+
+/// Marks a fiber that was never resumed as cancelled. Returns whether it did.
+fn fiber_cancel(t: *cy.Thread) callconv(.c) C.Ret {
+    const ret = t.ret(bool);
+    const fiber = t.param(*vmc.Fiber);
+    if (fiber.started) {
+        ret.* = false;
+        return C.RetOk;
+    }
+    fiber.cancelled = true;
+    ret.* = true;
+    return C.RetOk;
+}
+
+/// Whether the running fiber was cancelled before its first `resume`.
+fn fiber_cancelled(t: *cy.Thread) callconv(.c) C.Ret {
+    const ret = t.ret(bool);
+    ret.* = if (t.c.cur_fiber) |fiber| fiber.cancelled else false;
     return C.RetOk;
 }
 

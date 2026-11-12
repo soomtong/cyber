@@ -542,6 +542,11 @@ typedef struct Fiber {
     // Register of the resumer that receives the status.
     u16 prev_dst;
     u8 state;
+    // Set by the first `resume`.
+    bool started;
+    // Set when the `Fiber` value is destructed before the first `resume`. The entry function sees it and
+    // returns without the call, which releases the arguments.
+    bool cancelled;
 } Fiber;
 
 // Unused members are declared for debugging.

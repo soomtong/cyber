@@ -205,6 +205,15 @@ test "Fibers free their stacks and frames." {
         \\while t.resume() == .suspended:
         \\  pass
         \\test.eq(c.*, 2)
+        \\-- Never resumed: the arguments and the captured variable are released without the call.
+        \\fn unstarted(out ^ArrayStore[str]):
+        \\  u := fiber work('u' + '-heap-string-heap-string-heap-string', out)
+        \\  v := fiber:
+        \\    out << 'v'
+        \\  test.eq(u.status(), .suspended)
+        \\  test.eq(v.status(), .suspended)
+        \\unstarted(out)
+        \\test.eq(out.len(), 4)
     , C.defaultEvalConfig(), &res));
 }
 

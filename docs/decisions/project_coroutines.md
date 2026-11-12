@@ -246,9 +246,14 @@ Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator 
 1. `a.resume()`만 쓰면 컴파일 오류다. 반환값을 버릴 수 없는 언어 규칙 때문에 `_ = a.resume()`으로 쓴다. 스펙 5절 예제를 고쳤다.
 2. 인자는 첫 resume에서 `@call`이 복사해 넘긴다(`spawn`의 `@thread_entry`와 같다). `NoCopy` 매개변수는 컴파일 오류이고,
    `@deinit`이 있는 복사 가능한 구조체는 사본과 원본이 각각 deinit된다.
-3. 끝나지 않은 fiber의 소멸은 panic인데, 한 번도 resume하지 않은 fiber도 여기에 든다. 인자를 해제할 수 있는 것이 진입
-   프레임뿐이라서다. 시작 전 소멸을 허용하려면 `Sig`를 아는 해제 함수를 `Fiber`에 같이 두어야 한다.
-4. 진입점은 함수 이름이다. `fiber obj.work()`는 수신자를 묶지 못한다.
+3. 끝나지 않은 fiber의 소멸은 panic이다. 한 번도 resume하지 않은 fiber는 2026-11-12부터 소멸할 수 있다.
+   `Fiber.@deinit`이 `@fiber_cancel`로 `vmc.Fiber.cancelled`를 켜고 한 번 resume하면 `@fiber_entry`가
+   `@fiber_cancelled()`를 보고 호출 없이 반환한다. 인자는 진입 프레임의 매개변수라 그 반환에서 해제된다.
+   `Sig`를 아는 해제 함수를 `Fiber`에 따로 둘 필요가 없다. 대가는 fiber 시작마다 호스트 함수 호출 한 번이다.
+   인자의 `@deinit`이 `suspend`하면 fiber가 끝나지 않아 `Fiber is still in progress.` panic이 된다.
+4. 진입점은 함수 이름이다. `fiber obj.work()`는 수신자를 묶지 못한다. 메서드는 `fiber Job.work(job, 2)`로 쓴다
+   (원래 되던 형태다). 값에 대한 메서드 호출 꼴은 2026-11-12부터 이 표기를 알려 주는 컴파일 오류다(수신자가
+   식별자일 때만 본다. 그 밖의 수신자 식은 이전의 필드 오류 그대로). `obj.work()` 꼴을 받아들일지는 정하지 않았다.
 5. `fiber:` 본문은 기존 클로저 규칙을 그대로 따른다(`^T` 또는 `&T`로 선언한 변수만 캡처). `&T` 캡처를 fiber에서 막는
    규칙은 넣지 않았다.
 6. `Future.await()`는 fiber 안에서도 spin한다(spawn의 Future). 단계 3(await를 양보로)은 하지 않았다. 호스트 Future는 2026-11-12부터 eval을 탈출한다.
@@ -259,7 +264,7 @@ Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator 
 lib 테스트 3개(누수 검사 할당자: 정상 종료, 중첩 fiber 안 panic 뒤 재사용, `single_run`에서 진행 중인 fiber).
 tree-sitter `fiber_expression` · `suspend_statement`.
 
-남은 것: 위 3 · 4 · 6, 단계 3 · 4. 단계 1(`CL_AWAIT`)은 2026-11-12에 구현했다(아래 절).
+남은 것: 위 6, 4의 `obj.work()` 꼴, 단계 3 · 4. 단계 1(`CL_AWAIT`)은 2026-11-12에 구현했다(아래 절).
 
 ## 단계 1 구현 (2026-11-12)
 

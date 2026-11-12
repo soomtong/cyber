@@ -1515,6 +1515,7 @@ beginSwitch:
         f->prev_fiber = t->c.cur_fiber;
         f->host_depth = t->c.host_depth;
         f->state = FIBER_RUNNING;
+        f->started = true;
         t->c.cur_fiber = f;
         t->c.stack_ptr = f->stack_ptr;
         t->c.stack_len = f->stack_len;

@@ -4637,6 +4637,9 @@ type Fiber:
     state Ptr[void]
 
 fn (&Fiber) @deinit():
+    if @fiber_cancel(self.state):
+        -- Never resumed. The entry frame owns the arguments: it runs once to release them, without the call.
+        _ = @fiber_resume(self.state)
     @fiber_deinit(self.state)
 
 --| Runs the fiber until it suspends or its function returns.
@@ -4656,6 +4659,10 @@ type FiberStatus enum:
 
 #[bind] fn @fiber_status(state Ptr[void]) -> FiberStatus
 
+#[bind] fn @fiber_cancel(state Ptr[void]) -> bool
+
+#[bind] fn @fiber_cancelled() -> bool
+
 #[bind] fn @fiber_resume(state Ptr[void]) -> int
 
 --| `fiber func(args)` is this call. The arguments are evaluated now, the call happens at the first `resume`.
@@ -4669,6 +4676,8 @@ fn @new_fiber(func funcptr_t[%Sig], args FnTuple[Sig]) -> Fiber:
 fn @start_fiber(entry funcptr_t[%EntrySig], func funcptr_t[%Sig], args_size int, args FnTuple[Sig]) -> Ptr[void]
 
 fn @fiber_entry[const Sig FuncSig](func funcptr_t[Sig], args FnTuple[Sig]):
+    if @fiber_cancelled():
+        return
     @call(func, &args)
 
 -type FiberBlockFn = fn()

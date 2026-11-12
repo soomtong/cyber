@@ -613,11 +613,13 @@ pub fn matchFuncSym2(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const 
         else => {
             sema.markHotCall(c, res.func);
             try cy.global_init.recordCall(c, res.func);
+            try sema.semaCancelHoist(c);
             const expr = try c.ir.newExpr(.call, res.func.sig.ret, node, .{ 
                 .func = res.func,
                 .numArgs = @as(u8, @intCast(res.data.rt.nargs)),
                 .args = res.data.rt.args,
             });
+            try sema.semaCancelPad(c, @intFromPtr(expr), node);
             var expr_res = sema.ExprResult.initOwned(expr);
             expr_res.data.value.parent_local = res.data.rt.ret_parent_scope_local;
             return expr_res;

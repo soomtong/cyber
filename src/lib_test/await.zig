@@ -314,6 +314,45 @@ test "Fibers that await host futures run interleaved, and the host sees all of t
     try zt.eq(null, C.vm_pending_future(vm));
 }
 
+test "A scope cancels the fibers that wait for host futures when another fiber fails." {
+    // Leak-checking allocator: the cancelled fibers release their frames, the futures they waited for and the
+    // list of a `Future.wait_any`. The host never completes anything and the eval never leaves the VM.
+    const vm = Host.init();
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use host
+        \\use test
+        \\fn ask(n int, log ^ArrayStore[str]) -> !void:
+        \\    held := 'held' + '-padding-padding-padding-padding-%{n}'
+        \\    v := host.ask(n).await()
+        \\    log << '%{held} %{v}'
+        \\fn ask_any(log ^ArrayStore[str]):
+        \\    futs := []Future[int]{host.ask(10), host.ask(20)}
+        \\    k := Future.wait_any(futs.span())
+        \\    log << 'any %{k}'
+        \\fn fail() -> !void:
+        \\    suspend
+        \\    return error.Stop
+        \\fn run(log ^ArrayStore[str]) -> !void:
+        \\    s := Scope.new()
+        \\    s.start(ask, {1, log})
+        \\    s.start(ask_any, {log})
+        \\    s.start(fail, {})
+        \\    s.start(ask, {2, log})
+        \\    s.join()!
+        \\log := ^ArrayStore[str]{}
+        \\res := run(log)
+        \\test.eq(res.unwrap_error(), error.Stop)
+        \\test.eq(log.len(), 0)
+        \\test.eq(Fiber.wait_ready(), false)
+    , &res));
+    // The last fiber was started before the failure and asked too.
+    try zt.eq(4, Host.num_asked);
+    try zt.eq(null, C.vm_pending_future(vm));
+}
+
 test "A host future completes with a value or an error." {
     const vm = Host.init();
     defer C.vm_deinit(vm);

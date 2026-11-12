@@ -34,11 +34,17 @@
 
 ## 언어와 표준 라이브러리
 
+- `Fiber.cancel() -> bool`: 끝나지 않은 fiber를 나머지 코드를 실행하지 않고 끝낸다. fiber가 들어가 있는 호출이 안쪽부터
+  차례로 바로 반환하고, 각 호출이 가진 값은 `return` 때처럼 해제된다(`@deinit` 호출 포함). 실행 중인 fiber와 제너레이터
+  본문 안에서 멈춘 fiber는 취소되지 않고 `false`를 돌려준다. 식 중간의 임시 값은 연산자의 피연산자 · 호출 인자 ·
+  리터럴 원소일 때 해제되고, 그 밖의 자리에서는 해제되지 않고 남는다.
+- 호환성: 진행 중인 fiber의 소멸이 `panic: Fiber is still in progress.` 대신 취소가 됐다. 그 fiber의 프레임이 가진
+  fiber도 연쇄로 취소된다. 취소할 수 없는 fiber(제너레이터 본문 안에서 멈춘 것)의 소멸은 여전히 panic이다.
+
 - `Scope`: fiber 묶음을 돌리는 타입. `Scope.new()`, `start(func, {args})`, `join() -> !void`, `active()`.
   `join`은 모든 fiber가 끝날 때까지 차례로 resume하고, 전부 Future를 기다리면 `Fiber.wait_ready()`처럼 기다린다.
-  진입 함수는 `void` 또는 `!void`를 돌려주고 `join`은 첫 오류를 돌려준다. 오류 뒤에는 시작하지 않은 fiber만 버리고
-  진행 중인 fiber는 끝까지 돈다(취소는 다음 작업). `join` 없이 블록을 나가면 소멸 때 먼저 합류한다. 그때 남은
-  오류는 panic이다.
+  진입 함수는 `void` 또는 `!void`를 돌려주고 `join`은 첫 오류를 돌려준다. 오류 뒤에는 나머지 fiber를 취소한다
+  (`Fiber.cancel`). `join` 없이 블록을 나가면 소멸 때 먼저 합류한다. 그때 남은 오류는 panic이다.
 
 - fiber 안의 `Future.await()`와 `Future.wait_any`가 미완료 Future에서 기다리지 않고 그 fiber를 멈춘다
   (`resume`은 `.suspended`를 돌려준다). 다른 fiber가 그동안 돈다. 대기 중인 fiber의 `resume`은 본문에 들어가지

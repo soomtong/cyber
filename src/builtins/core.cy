@@ -4637,10 +4637,25 @@ type Fiber:
     state Ptr[void]
 
 fn (&Fiber) @deinit():
+    -- A fiber that is in progress is cancelled. One that can not be cancelled panics below.
+    _ = self.cancel()
+    @fiber_deinit(self.state)
+
+--| Ends a fiber that is not done without running the rest of its function. Every call that the fiber is in
+--| returns at once, from the innermost one out, and the values that the calls own are destructed as at a
+--| `return`. A fiber that was never resumed is ended without the call and its arguments are released.
+--| Returns whether the fiber is done afterwards. A fiber that is running is not cancelled, and neither is
+--| one that is suspended inside the body of a generator.
+fn (&Fiber) cancel() -> bool:
     if @fiber_cancel(self.state):
         -- Never resumed. The entry frame owns the arguments: it runs once to release them, without the call.
         _ = @fiber_resume(self.state)
-    @fiber_deinit(self.state)
+        return true
+    if !@fiber_unwind(self.state):
+        return @fiber_status(self.state) == .done
+    if @bitCast(FiberStatus, @fiber_resume(self.state)) != .done:
+        panic('A fiber was suspended while it was cancelled.')
+    return true
 
 --| Runs the fiber until it suspends or its function returns.
 --| Returns `.suspended` or `.done`. Resuming a fiber that is done returns `.done`.
@@ -4676,6 +4691,8 @@ fn Fiber :: wait_ready() -> bool:
             return res == 1
 
 #[bind] fn @fiber_waiting(state Ptr[void]) -> bool
+
+#[bind] fn @fiber_unwind(state Ptr[void]) -> bool
 
 #[bind] fn @fibers_wait() -> int
 
@@ -4714,8 +4731,7 @@ fn @new_fiber_block(body Func[FiberBlockFn]) -> Fiber:
 --| them are done. A scope that is destructed joins its fibers first, so a fiber of a scope never runs after
 --| the block that holds the scope.
 --| The entry function of a fiber returns `void` or `!void`. `join` returns the first error that a fiber
---| returned. After an error, the fibers that were not started yet are dropped, and the ones that are in
---| progress still run to their end.
+--| returned. After an error the other fibers are cancelled (`Fiber.cancel`): they do not run on.
 type Scope:
     with NoCopy
     fibers Array[Fiber]
@@ -4773,9 +4789,8 @@ fn (&Scope) join() -> !void:
         for self.fibers |&child|:
             if child.status() == .done:
                 continue
-            if failed and @fiber_cancel(child.state):
-                -- Not started. Its entry returns at once and releases the arguments.
-                _ = child.resume()
+            if failed and child.cancel():
+                -- The others end where they are. One that can not be cancelled runs on.
                 continue
             if child.waiting():
                 left += 1

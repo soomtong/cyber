@@ -3290,7 +3290,7 @@ fn fetch_all(log ^ArrayStore[str]) -> !void:
 ```
 The fibers of a scope do not outlive it. A block that is left before `join` (with `return`, or with an error from `!`) joins the fibers first, when the scope is destructed.
 
-The entry function of a scope's fiber returns `void` or `!void`. `join` returns the first error that a fiber returned. After an error, the fibers that were not started yet are dropped with their arguments released. The fibers that are already in progress run to their end. An error that is left when the scope is destructed without a `join` panics, like an error that `main` returns. A scope can be used inside a fiber of another scope, and it can start more fibers after a `join`.
+The entry function of a scope's fiber returns `void` or `!void`. `join` returns the first error that a fiber returned. After an error the other fibers are cancelled: a fiber in progress ends where it is suspended with its values destructed, and a fiber that was not started is dropped with its arguments released. A fiber that can not be cancelled runs to its end. An error that is left when the scope is destructed without a `join` panics, like an error that `main` returns. A scope can be used inside a fiber of another scope, and it can start more fibers after a `join`.
 
 When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the `resume` call of each fiber down to the main block.
 
@@ -3299,21 +3299,50 @@ A fiber can not resume itself or a fiber that is waiting for it:
 --> panic: Fiber is already running.
 ```
 
-A fiber that was never resumed can be destructed. Its function is not called and its arguments are released.
-
-When a fiber that was resumed is destructed, it will panic if it's still in progress, since only the fiber can release the values in its frames:
+`cancel` ends a fiber that is not done without running the rest of its function. Every call that the fiber is in returns at once, from the innermost one out, and the values that the calls own are destructed as at a `return`. No code of the fiber runs after the point where it was suspended, except the `@deinit` of those values:
 ```cy
-fn forever():
-    while true:
-        suspend
+type Conn:
+    id int
+
+fn (&Conn) @deinit():
+    print('closed %{self.id}')
+
+fn query(conn &Conn) -> int:
+    suspend                -- Waiting for the reply.
+    return 1
+
+fn session(id int):
+    conn := Conn{id = id}
+    print('rows: %{query(&conn)}')
+
+f := fiber session(7)
+_ = f.resume()
+print(f.cancel())          --> closed 7
+                           --> true
+print(f.status())          --> FiberStatus.done
+```
+`cancel` returns whether the fiber is done afterwards. A fiber that was never resumed is ended without the call and its arguments are released. A fiber that is running is not cancelled, and neither is one that is suspended inside the body of a generator: `cancel` returns `false` and the fiber stays as it is.
+
+A fiber that is destructed while it is in progress is cancelled first, and so is every fiber that its frames hold. A fiber that can not be cancelled panics when it is destructed:
+```cy
+generator fn numbers() -> int:
+    yield 1
+    suspend
+    yield 2
+
+fn consume():
+    for numbers() |n|:
+        pass
 
 fn start():
-    f := fiber forever()
+    f := fiber consume()
     _ = f.resume()
 
 start()
 --> panic: Fiber is still in progress.
 ```
+
+A value in the middle of an expression is destructed too when it is an operand of an operator, an argument, or an element of a literal (`use(Res{}, wait())`, `'a' + wait()`). In other positions such a value is not released when the fiber is cancelled inside a later part of the same expression.
 
 Each fiber starts with a stack of 512 bytes that grows on demand like the thread's stack. Fibers are not available when compiling AOT.
 

@@ -234,6 +234,10 @@ pub const Proc = struct {
     /// `varStack[varStart]` is the start of params.
     numParams: u8,
 
+    /// The last cancel pad of this proc and the hash of the locals it destructs (`semaCancelPad`).
+    cancel_pad: ?*ir.Stmt = null,
+    cancel_pad_sig: u64 = 0,
+
     /// Captured vars. 
     captures: std.ArrayList(CaptureInfo),
 
@@ -807,7 +811,8 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
         .suspend_stmt => {
             // Gives control back to the `resume` call of the running fiber. The frames stay on the fiber's
             // stack, so nothing is copied or destructed here.
-            _ = try c.ir.pushStmt(.suspend_, node, .{});
+            const stmt = try c.ir.pushStmt(.suspend_, node, .{});
+            try semaCancelPad(c, @intFromPtr(stmt), node);
         },
         .yield_stmt => {
             const yield = node.cast(.yield_stmt);
@@ -6728,6 +6733,7 @@ pub fn semaCallFuncSymRec2(c: *cy.Chunk, sym: *cy.sym.FuncSym, args: []const Arg
             .nargs = @intCast(res.data.rt.nargs),
             .args = res.data.rt.args,
         });
+        try semaCancelPad(c, @intFromPtr(loc), node);
         return ExprResult.initOwned(loc);
     } else {
         return sema_func.matchFuncSym2(c, sym, args, &.{}, false, node);
@@ -6747,6 +6753,7 @@ pub fn semaCallFuncSymRec(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, re
             .nargs = @intCast(res.data.rt.nargs),
             .args = res.data.rt.args,
         });
+        try semaCancelPad(c, @intFromPtr(loc), node);
         return ExprResult.initOwned(loc);
     } else {
         return sema_func.matchFuncSym2(c, sym, &.{rec_arg}, args, req_value, node);
@@ -6764,10 +6771,83 @@ pub fn markHotCall(c: *cy.Chunk, func: *cy.Func) void {
 pub fn sema_call_ir(c: *cy.Chunk, func: *cy.Func, args: []const *ir.Expr, node: *ast.Node) !ExprResult {
     markHotCall(c, func);
     try cy.global_init.recordCall(c, func);
+    try semaCancelHoist(c);
     const expr = try c.ir.newExpr(.call, func.sig.ret, node, .{ 
         .func = func, .numArgs = @intCast(args.len), .args = args.ptr,
     });
+    try semaCancelPad(c, @intFromPtr(expr), node);
     return sema.ExprResult.initOwned(expr);
+}
+
+/// Whether the code that is analyzed can run in a frame of a fiber that is cancelled.
+/// The main block is never on a fiber's stack. A generator body has its own drop path (the deinit block of
+/// each `yield`), and a fiber with a generator frame on its stack is not cancelled.
+fn cancelPadApplies(c: *cy.Chunk) bool {
+    if (c.cancel_pad_building) return false;
+    const func = c.proc().func orelse return false;
+    return !func.info.generator;
+}
+
+/// Before a call is added to an expression: the operands of the expression that are done and own a managed
+/// value are moved to locals (`seqFlush`), so that the pad of the call destructs them. Without this,
+/// `'a' + f()` would leak the string when the fiber is cancelled inside `f`.
+pub fn semaCancelHoist(c: *cy.Chunk) !void {
+    if (c.ir.seq_pending == 0 or !cancelPadApplies(c)) return;
+    const depth = c.ir.stmtBlockStack.items.len;
+    for (c.seq_pending.items) |e| {
+        if (e.var_id != cy.NullId or e.depth != depth or e.proc_depth != c.semaProcs.items.len) continue;
+        if (e.owned and e.orig.type.isManaged()) {
+            return seqFlush(c);
+        }
+    }
+}
+
+/// Attaches a cancel pad to the IR node at `key` (a call expr, a `suspend_` or an `await_` stmt): the
+/// statements that a `return` at this point would run to destruct the proc's locals, and a return without a
+/// value. bc_gen emits the pad after the function body and records the site in `ByteCodeBuffer.cancel_table`.
+/// `Fiber.cancel` sends every frame of a suspended fiber to the pad of the site it is at, so the frames
+/// release what they own from the top down and the fiber ends. Nothing runs on the normal path.
+/// Consecutive sites with the same live locals share a pad.
+pub fn semaCancelPad(c: *cy.Chunk, key: usize, node: *ast.Node) !void {
+    if (!cancelPadApplies(c)) return;
+    const proc = c.proc();
+
+    var hasher = std.hash.Wyhash.init(0);
+    const b = c.procBlock();
+    for (c.varStack.items[b.varStart..], b.varStart..) |*local, i| {
+        if (local.type != .local) continue;
+        std.hash.autoHash(&hasher, i);
+        std.hash.autoHash(&hasher, @intFromPtr(local.decl_t));
+        std.hash.autoHash(&hasher, local.inner.local.id);
+    }
+    // Zero is "no pad yet".
+    const sig = hasher.final() | 1;
+    if (proc.cancel_pad) |pad| {
+        if (proc.cancel_pad_sig == sig) {
+            try c.cancel_pads.put(c.alloc, key, pad);
+            return;
+        }
+    }
+
+    c.cancel_pad_building = true;
+    defer c.cancel_pad_building = false;
+    // The pad is not part of the expression that is analyzed. Its statements must not flush the operands that
+    // are still pending there (`ir.Buffer.pushStmt` would).
+    const saved_flushing = c.seq_flushing;
+    c.seq_flushing = true;
+    defer c.seq_flushing = saved_flushing;
+    try c.ir.pushStmtBlock(c.alloc);
+    {
+        errdefer _ = c.ir.popStmtBlock();
+        try semaDestructBlock2(c, b);
+        _ = try c.ir.pushStmt(.ret, node, .{ .return_value = false });
+    }
+    const block = c.ir.popStmtBlock();
+    // `proc` can be stale: analyzing a destructor can add procs.
+    const cur = c.proc();
+    cur.cancel_pad = block.first;
+    cur.cancel_pad_sig = sig;
+    try c.cancel_pads.put(c.alloc, key, block.first.?);
 }
 
 pub fn semaCallFuncResult(c: *cy.Chunk, res: sema_func.FuncResult, node: *ast.Node) !ExprResult {
@@ -6795,11 +6875,13 @@ pub fn semaCallPtr(c: *cy.Chunk, func: ExprResult, sig: *FuncSig, args: []*ast.N
         func.type.cast(.func_ptr).extern_is_called = true;
     }
     try cy.global_init.recordIndirectCall(c);
+    try semaCancelHoist(c);
     const loc = try c.ir.newExpr(.call_ptr, sig.ret, node, .{
         .callee = func.ir,
         .nargs = @intCast(ir_args.len),
         .args = ir_args.ptr,
     });
+    try semaCancelPad(c, @intFromPtr(loc), node);
     return ExprResult.initOwned(loc);
 }
 
@@ -6812,11 +6894,13 @@ pub fn semaCallUnion(c: *cy.Chunk, func: ExprResult, func_n: *ast.Node, sig: *Fu
         return sema_func.reportCallFuncMismatch(c, &.{}, args, "", sig, match_err, node);
     };
     try cy.global_init.recordIndirectCall(c);
+    try semaCancelHoist(c);
     const loc = try c.ir.newExpr(.call_union, sig.ret, node, .{
         .callee = managed.ir,
         .nargs = @intCast(ir_args.len),
         .args = ir_args.ptr,
     });
+    try semaCancelPad(c, @intFromPtr(loc), node);
     return ExprResult.initOwned(loc);
 }
 

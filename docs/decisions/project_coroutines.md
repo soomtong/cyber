@@ -427,9 +427,35 @@ panic 대신 취소. 목표는 0.5.
 1. `Scope` 타입과 합류(2026-11-12 구현). `core.cy`의 `Scope` · `ScopeState`, `@scope_entry[Sig]`, `@start_scope_fiber`
    (`@start_fiber`와 같은 호스트 함수. 상태 참조가 복사되는 인자의 첫 칸이다).
 2. 자식의 `!void` 반환과 오류 전파(같이 구현). `@scope_entry`가 `try`로 받아 `ScopeState.err`에 첫 오류를 둔다.
-3. 취소. 아래 "취소의 구현 방법".
+3. 취소(2026-11-12 구현). 아래 "취소 구현".
 4. `scope` 블록 문법, 범위 안 빌림 허용.
 
+취소 구현(2026-11-12).
+
+- sema `semaCancelPad`가 호출(`.call` · `.call_ptr` · `.call_union` · `.call_trait`, `@call`) · `suspend_` · `await_` IR 노드마다
+  정리 블록(cancel pad)을 붙인다: `semaDestructBlock2(procBlock)` + `.ret`. `return`과 같은 해제 루틴이라 사용자 `@deinit`이
+  불린다. 노드 주소 → 블록 맵은 `Chunk.cancel_pads`. 살아 있는 지역의 해시가 같은 연속 지점은 블록을 공유한다
+  (`Proc.cancel_pad_sig`). 메인 블록과 제너레이터 proc에는 만들지 않는다. 패드 안의 소멸자 호출에는 패드를 붙이지 않는다.
+- 식 중간의 값: 호출 IR을 만들기 직전 `semaCancelHoist`가 소유한 관리 값이 대기 중(`seq_pending`)이면 `seqFlush`로 지역에
+  올린다. 호출 자신의 인자는 그 전에 `seqPop`으로 소유가 넘어가 있어 패드에 들지 않는다(피호출자의 패드가 매개변수를 해제).
+  `seq_pending`이 덮지 않는 식 모양(인덱스 식, 캐스트 인자 등)의 임시 값은 취소 때 누수된다(이중 해제는 아니다).
+- bc_gen: 지점에서 `push_cancel_site`가 `bc_local_map` 사본 · `reg_end` · 인라인 사슬(지점의 패드 + 바깥 인라인 호출들의 패드)을
+  적어 두고, 함수 본문 뒤 `gen_cancel_pads`가 그 상태로 패드를 생성한다(인라인 금지, 포인터 레이아웃 기록 없음). 패드의
+  `.ret`는 사슬의 마지막에서만 실제 반환이 된다. 표는 `ByteCodeBuffer.cancel_table`(지점 pc → 패드 pc). 정상 실행 경로에는
+  명령이 늘지 않는다. ReleaseFast에서 `fib(32)`와 문자열 연결 30만 회의 시간이 변경 전과 같았다(0.08초).
+- 지점 pc: 호출은 호출 명령의 pc(`FrameInfo.prev_context`가 돌려주는 값), `SUSPEND`는 다음 명령(`Fiber.pc`), `AWAIT`와
+  `CALL_HOST`(`@await_any` · `@fibers_wait`)는 명령 자신.
+- 런타임: `Thread.unwindFiber`가 멈춘 fiber의 프레임을 위에서부터 걸어 전부 패드가 있는지 확인한 뒤, `Fiber.pc`와 각 프레임의
+  반환 주소(`base[1]`)를 패드로 바꾼다. 패드가 없는 프레임(제너레이터 본문, 패드 안에서 부른 소멸자)이 있으면 아무것도 바꾸지
+  않고 false. `Fiber.cancel()`(core.cy)이 그 뒤 한 번 resume하면 패드들이 차례로 돌아 `FIBER_END`에 닿는다. 그 resume이
+  `.done`이 아니면(소멸자가 suspend) panic.
+- `Fiber.@deinit`은 `cancel()`을 먼저 부른다. 취소 못 한 fiber는 이전처럼 `Fiber is still in progress.` panic.
+- `Scope.run`은 오류 뒤 남은 자식을 `cancel()`한다. 취소 못 한 자식은 끝까지 돌린다.
+
+남은 것: 4번(`scope` 블록 문법, 범위 안 빌림), 제너레이터 본문 프레임의 취소, `seq_pending` 밖의 임시 값, 블록을 오류로
+나갈 때 합류 대신 취소할지(지금 `Scope.@deinit`은 합류한다. 블록 문법에서 sema가 출구 종류를 구분할 수 있다).
+
+(구현 전의 조사 기록) 
 지금의 한계: 오류 뒤에 시작하지 않은 fiber만 버린다(`@fiber_cancel`). 진행 중인 fiber는 끝까지 돈다. 3이 들어가면
 정책 A가 완성된다. `Scope.@deinit`은 합류한 뒤 남은 오류를 `panic_unwrap_error`로 올린다.
 

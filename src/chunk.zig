@@ -114,6 +114,18 @@ pub const Chunk = struct {
     seq_pending: std.ArrayList(cy.sema.SeqEntry) = .empty,
     seq_flushing: bool = false,
 
+    /// Cancel pads by the address of the IR node they belong to: a call expr, a `suspend_` stmt or an
+    /// `await_` stmt. A pad is a statement list that destructs the locals that are alive at the node and
+    /// returns. A fiber that is cancelled while one of its frames is at the node continues there.
+    /// See `sema.semaCancelPad` and `bc_gen.push_cancel_site`.
+    cancel_pads: std.AutoHashMapUnmanaged(usize, *cy.ir.Stmt) = .empty,
+    /// A pad is being analyzed. Its own calls (destructors) get no pad.
+    cancel_pad_building: bool = false,
+    /// bc_gen: the sites of the function that is generated, and the state while their pads are generated.
+    cancel_sites: std.ArrayList(bc.CancelSite) = .empty,
+    cancel_replay: bool = false,
+    cancel_replay_last: bool = false,
+
     /// Main sema block id.
     mainSemaProcId: sema.ProcId,
 
@@ -303,6 +315,9 @@ pub const Chunk = struct {
         self.blockJumpStack.deinit(self.alloc);
         self.varShadowStack.deinit(self.alloc);
         self.seq_pending.deinit(self.alloc);
+        self.cancel_pads.deinit(self.alloc);
+        for (self.cancel_sites.items) |site| self.alloc.free(site.local_map);
+        self.cancel_sites.deinit(self.alloc);
         self.varStack.deinit(self.alloc);
 
         self.typeStack.deinit(self.alloc);

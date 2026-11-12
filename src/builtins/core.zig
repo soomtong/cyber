@@ -231,6 +231,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"@fiber_cancel",  cFunc(fiber_cancel)},
     .{"@fiber_cancelled", cFunc(fiber_cancelled)},
     .{"@fiber_waiting", cFunc(fiber_waiting)},
+    .{"@fiber_unwind",  cFunc(fiber_unwind)},
     .{"@fibers_wait",   zErrFunc(fibers_wait)},
     .{"@fiber_resume",  zErrBuiltinFunc(fiber_resume, null)},
 };
@@ -1495,6 +1496,8 @@ pub fn call(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !void 
         .nargs = @intCast(ir_args.len),
         .args = ir_args.ptr,
     });
+    // The entry frame of a fiber is at this call while the fiber's function runs.
+    try sema.semaCancelPad(c, @intFromPtr(expr), ctx.node);
     out.* = sema.ExprResult.initOwned(expr);
 }
 
@@ -1533,7 +1536,8 @@ pub fn start_thread(t: *cy.Thread) !C.Ret {
 
 pub fn await_(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !void {
     const fut = try c.semaExpr(ctx.args[0], .{});
-    _ = try c.ir.pushStmt(.await_, ctx.node, .{ .expr = fut.ir });
+    const stmt = try c.ir.pushStmt(.await_, ctx.node, .{ .expr = fut.ir });
+    try sema.semaCancelPad(c, @intFromPtr(stmt), ctx.node);
     out.* = try c.semaVoid(ctx.node);
 }
 
@@ -2184,6 +2188,20 @@ pub fn fibers_wait(t: *cy.Thread) anyerror!C.Ret {
         }
         std.atomic.spinLoopHint();
     }
+}
+
+/// `Fiber.cancel` for a fiber that was started: see `Thread.unwindFiber`.
+fn fiber_unwind(t: *cy.Thread) callconv(.c) C.Ret {
+    const ret = t.ret(bool);
+    const fiber = t.param(*vmc.Fiber);
+    ret.* = t.unwindFiber(fiber);
+    if (ret.*) {
+        // The wait is over. The list of a `Future.wait_any` is given back: the call does not run again.
+        if (fiber.await_owned) fiberClearAwait(t, fiber);
+        fiber.await_len = 0;
+        fiber.await_fibers = false;
+    }
+    return C.RetOk;
 }
 
 /// Whether the fiber is suspended at an `await` that can not go on yet.

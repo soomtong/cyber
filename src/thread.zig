@@ -139,6 +139,21 @@ pub fn patch_frame_ptrs(t: *cy.Thread, fp: usize, layout: []bool, new_stack: [*]
     }
 }
 
+/// The cancel pad of the site at `pc` (`bytecode.PcCancelPad`), or null when the site has none.
+pub fn get_cancel_pad(vm: *cy.VM, pc: [*]cy.Inst) ?[*]cy.Inst {
+    const table_idx = cy.debug.indexOfTableEntry(vm.debug_tables, pc) orelse return null;
+    const entry = vm.debug_tables[table_idx];
+    const table = entry.chunk.buf.cancel_table.items;
+    const pc_off = pc - entry.ptr;
+    const S = struct {
+        fn cmp(cx: usize, o: cy.bytecode.PcCancelPad) std.math.Order {
+            return std.math.order(cx, o.pc);
+        }
+    };
+    const idx = std.sort.binarySearch(cy.bytecode.PcCancelPad, table, pc_off, S.cmp) orelse return null;
+    return entry.ptr + table[idx].pad;
+}
+
 pub fn get_ptr_layout(vm: *cy.VM, pc: [*]cy.Inst) ?[]bool {
     const table_idx = cy.debug.indexOfTableEntry(vm.debug_tables, pc) orelse return null;
     const entry = vm.debug_tables[table_idx];
@@ -413,6 +428,48 @@ pub const Thread = struct {
         }
         self.c.fibers = fiber;
         return fiber;
+    }
+
+    /// Prepares a suspended fiber to end without running the rest of its code: every frame is sent to the
+    /// cancel pad of the site it is at, which destructs the frame's locals and returns. The next `resume`
+    /// then runs the pads from the top frame down to the entry frame and the fiber is done.
+    /// Returns false, changing nothing, when the fiber can not be unwound this way: it is not suspended, or a
+    /// frame has no pad (a generator body that the fiber consumes, a site in a destructor that a pad called).
+    pub fn unwindFiber(self: *Thread, fiber: *vmc.Fiber) bool {
+        if (fiber.state != vmc.FIBER_SUSPENDED or !fiber.started) return false;
+        const fstack_ptr: [*]Value = @ptrCast(@alignCast(fiber.stack_ptr));
+        const fstack = fstack_ptr[0..fiber.stack_len];
+        const top_pc: [*]cy.Inst = @ptrCast(fiber.pc orelse return false);
+        const top_fp = getStackOffset(fstack_ptr, @ptrCast(@alignCast(fiber.fp)));
+
+        // First pass: every frame needs a pad.
+        var pc = top_pc;
+        var fp = top_fp;
+        while (true) {
+            _ = get_cancel_pad(self.c.vm, pc) orelse return false;
+            if (fp == 0) break;
+            const frame = getFrame(self, fstack, fp, pc);
+            if (frame.frame_type() != .vm) return false;
+            const prev = frame.prev_context();
+            pc = prev.pc orelse return false;
+            fp = getStackOffset(fstack_ptr, prev.fp);
+        }
+
+        // Second pass: the top frame continues at its pad, and each frame returns to the pad of its caller.
+        pc = top_pc;
+        fp = top_fp;
+        fiber.pc = @ptrCast(get_cancel_pad(self.c.vm, pc).?);
+        while (fp != 0) {
+            const frame = getFrame(self, fstack, fp, pc);
+            const prev = frame.prev_context();
+            const base = frame.base.?;
+            base[1] = Value{ .retPcPtr = @ptrCast(get_cancel_pad(self.c.vm, prev.pc.?).?) };
+            // The return address is no call site anymore.
+            base[0].call_info.call_inst_off = 0;
+            pc = prev.pc.?;
+            fp = getStackOffset(fstack_ptr, prev.fp);
+        }
+        return true;
     }
 
     /// Frees a fiber that is not running.

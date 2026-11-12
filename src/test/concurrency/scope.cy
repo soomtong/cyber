@@ -28,7 +28,8 @@ fn run_steps() -> !void:
     test.eq(log[5], 'c0')
 run_steps()!
 
--- `join` returns the first error. A fiber in progress runs to its end, one that was not started is dropped.
+-- `join` returns the first error. The other fibers are cancelled: one in progress ends where it is with its
+-- locals destructed, one that was not started is dropped.
 type Res:
     id int
 global dropped int = 0
@@ -41,10 +42,11 @@ fn fail_later(log ^ArrayStore[str]) -> !void:
     return error.Failed
 
 fn slow(log ^ArrayStore[str]) -> !void:
+    held := Res{id = 2}
     log << 'slow start'
     suspend
     suspend
-    log << 'slow end'
+    log << 'slow end %{held.id}'
 
 fn never(r Res, log ^ArrayStore[str]):
     log << 'never'
@@ -58,12 +60,13 @@ fn run_failing(log ^ArrayStore[str]) -> !void:
 
 fn check_failing():
     log := ^ArrayStore[str]{}
+    dropped = 0
     res := run_failing(log)
     test.eq(res.unwrap_error(), error.Failed)
-    test.eq(log.len(), 3)
+    test.eq(log.len(), 2)
     test.eq(log[0], 'fail start')
     test.eq(log[1], 'slow start')
-    test.eq(log[2], 'slow end')
+    test.eq(dropped, 1)
 check_failing()
 
 fn second_fails() -> !void:

@@ -52,6 +52,8 @@ pub const ByteCodeBuffer = struct {
 
     /// Maps pc to a bitset with active pointer locals.
     ptr_table: std.ArrayList(PcPtrLayout),
+    /// Ordered by `pc`. Where a frame at a call, a `suspend` or an `await` goes on when its fiber is cancelled.
+    cancel_table: std.ArrayList(PcCancelPad),
 
     ptr_layouts: std.ArrayList([]bool),
     ptr_layout_map: std.HashMapUnmanaged([]const bool, usize, PtrLayoutContext, 80),
@@ -80,6 +82,7 @@ pub const ByteCodeBuffer = struct {
             .func_table = .empty,
             .const_string_map = .empty,
             .ptr_table = .empty,
+            .cancel_table = .empty,
             .ptr_layouts = .empty,
             .ptr_layout_map = .empty,
             .ptr_layout_builder = .empty,
@@ -103,6 +106,7 @@ pub const ByteCodeBuffer = struct {
         self.debugTable.deinit(self.alloc);
         self.func_table.deinit(self.alloc);
         self.ptr_table.deinit(self.alloc);
+        self.cancel_table.deinit(self.alloc);
         for (self.ptr_layouts.items) |layout| {
             self.alloc.free(layout);
         }
@@ -857,6 +861,12 @@ pub const InlineSite = struct {
     caller_frame: u32,
     /// Enclosing site index, or `NullId`.
     parent: u32,
+};
+
+pub const PcCancelPad = extern struct {
+    pc: u32,
+    /// The pc of the pad: it destructs the frame's locals and returns.
+    pad: u32,
 };
 
 pub const PcPtrLayout = extern struct {

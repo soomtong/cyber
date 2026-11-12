@@ -415,7 +415,11 @@ fn genStmt(c: *Chunk, stmt: *ir.Stmt) anyerror!void {
         .block              => try gen_block(c, stmt.cast(.block), node),
         .break_             => try gen_break(c, stmt.cast(.break_), node),
         .breakpoint         => try gen_breakpoint(c, node),
-        .suspend_           => try c.pushFCode(.suspend_op, &.{}, node),
+        .suspend_           => {
+            try c.pushFCode(.suspend_op, &.{}, node);
+            // `Fiber.pc` is the inst after `SUSPEND`.
+            try push_cancel_site(c, @intFromPtr(stmt), c.buf.ops.items.len);
+        },
         .continue_          => try gen_continue(c, stmt.cast(.continue_), node),
         .declare_local      => try gen_declare_local(c, stmt.cast(.declare_local), node),
         .discard            => try gen_discard(c, stmt.cast(.discard), node),
@@ -694,6 +698,7 @@ pub fn genFuncBlock(c: *Chunk, stmt: *ir.FuncBlock, node: *ast.Node) !void {
     try c.pushFCode(.chk_stk, &.{ 0, 0 }, node);
 
     try genStmts(c, stmt.bodyHead);
+    try gen_cancel_pads(c);
 
     c.buf.ops.items[chk_stk_pc + 1].val = c.cur_proc.ret_size;
 
@@ -721,7 +726,10 @@ fn gen_breakpoint(c: *Chunk, node: *ast.Node) !void {
 
 fn gen_await(c: *Chunk, stmt: *ir.Await, node: *ast.Node) !void {
     const childv = try genExpr(c, stmt.expr, Cstr.localOrTemp());
+    // `Fiber.pc` is the `AWAIT` inst itself: it runs again at a resume.
+    const pc = c.buf.ops.items.len;
     try c.pushFCode(.await_op, &.{childv.reg}, node);
+    try push_cancel_site(c, @intFromPtr(stmt), pc);
     try pop_temp_value(c, childv, node);
 }
 
@@ -1598,6 +1606,7 @@ fn gen_call_trait(c: *Chunk, expr: *ir.CallTrait, cstr: Cstr, node: *ast.Node) !
     const pc = c.buf.ops.items.len;
     try c.pushFCode(.call_trait, &.{inst.base, @intCast(expr.vtable_idx) }, node);
     try push_site_ptr_layout(c, pc);
+    try push_cancel_site(c, @intFromPtr(expr), pc);
 
     return endCall(c, inst, ret_t, node);
 }
@@ -1704,6 +1713,7 @@ fn gen_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenValue {
         _ = try genExpr(c, arg, Cstr.toTemp(temp));
     }
 
+    const call_pc = c.buf.ops.items.len;
     if (expr.func.type == .extern_) {
         // const rt_id = (try ensureExternFunc(c.compiler, expr.func)).vm_id;
         try pushCall(c, inst.base, expr.func, node);
@@ -1711,6 +1721,7 @@ fn gen_call(c: *Chunk, expr: *ir.Call, cstr: Cstr, node: *ast.Node) !GenValue {
         // const rt_id = try ensureFunc(c.compiler, expr.func);
         try pushCall(c, inst.base, expr.func, node);
     }
+    try push_cancel_site(c, @intFromPtr(expr), call_pc);
 
     return endCall(c, inst, ret_t, node);
 }
@@ -1744,6 +1755,27 @@ pub const InlineCtx = struct {
     body_head: ?*ir.Stmt,
     /// `jump` insts that go to the end of the inlined body.
     end_jumps: std.ArrayList(u32),
+    /// The inlined call expr (the key of its cancel pad) and `Chunk.inline_local_base` outside of the body.
+    call_key: usize,
+    outer_local_base: usize,
+};
+
+/// A site that a frame can be at while its fiber is suspended, with what it takes to generate the site's
+/// cancel pad after the function body (`gen_cancel_pads`).
+pub const CancelSite = struct {
+    /// Key in `ByteCodeBuffer.cancel_table`: the pc that the frame is found with.
+    pc: u32,
+    reg_end: Reg,
+    /// Copy of `Chunk.bc_local_map` at the site.
+    local_map: []LocalSlot,
+    /// The pad of the site, then the pad of each inlined call that the site is inside of, innermost first.
+    parts: [inline_max_depth + 1]Part,
+    num_parts: u8,
+
+    pub const Part = struct {
+        head: *ir.Stmt,
+        local_base: usize,
+    };
 };
 
 const inline_max_nodes = 40;
@@ -2099,6 +2131,8 @@ fn gen_inline_call(c: *Chunk, expr: *ir.Call, cost: u32, cstr: Cstr, node: *ast.
         .ret_is_temp = cstr.type != .localReg or cstr.data.slot.fresh,
         .body_head = block.bodyHead,
         .end_jumps = .empty,
+        .call_key = @intFromPtr(expr),
+        .outer_local_base = saved_local_base,
     };
     defer ctx.end_jumps.deinit(c.alloc);
     if (parent) |p| {
@@ -2178,6 +2212,7 @@ fn gen_call_union(c: *Chunk, expr: *ir.CallUnion, cstr: Cstr, node: *ast.Node) !
     const pc = c.buf.ops.items.len;
     try c.pushFCode(.call_union, &.{inst.base}, node);
     try push_site_ptr_layout(c, pc);
+    try push_cancel_site(c, @intFromPtr(expr), pc);
 
     try pop_regs(c, arg_start, node);
     return endCall(c, inst, ret_t, node);
@@ -2206,6 +2241,7 @@ fn gen_call_ptr(c: *Chunk, expr: *ir.CallPtr, cstr: Cstr, node: *ast.Node) !GenV
     const pc = c.buf.ops.items.len;
     try c.pushFCode(.call_ptr, &.{inst.base}, node);
     try push_site_ptr_layout(c, pc);
+    try push_cancel_site(c, @intFromPtr(expr), pc);
 
     return endCall(c, inst, ret_t, node);
 }
@@ -2869,6 +2905,13 @@ fn gen_set_local(c: *Chunk, stmt: *ir.SetLocal, node: *ast.Node) !void {
 }
 
 fn gen_ret(c: *Chunk, stmt: *ir.Return, node: *ast.Node) !void {
+    if (c.cancel_replay) {
+        // The end of a cancel pad. The pad of an inlined call's site goes on with the pad of the call.
+        if (c.cancel_replay_last) {
+            try push_ret(c, c.cur_proc.ret_size, node);
+        }
+        return;
+    }
     if (c.inline_ctx) |ctx| {
         try inline_ret_jump(c, ctx, &stmt.base, node);
         return;
@@ -3627,6 +3670,95 @@ fn pushCall(c: *cy.Chunk, base: Reg, func: *cy.Func, node: *ast.Node) !void {
     }
 
     try push_site_ptr_layout(c, start);
+}
+
+/// Records a site with a cancel pad (`sema.semaCancelPad`): a call, a `suspend` or an `await`. `key` is the
+/// address of the IR node and `pc` is what a frame at this site is found with: the pc of a call inst for a
+/// frame under a callee frame, and the pc that `Fiber.pc` holds for the frame that suspended the fiber.
+/// A site inside inlined code runs the pads of the inlined calls around it as well: the frame is the caller's.
+fn push_cancel_site(c: *cy.Chunk, key: usize, pc: usize) !void {
+    if (c.cancel_replay) return;
+    if (c.cur_proc.type == .main) return;
+    const pad = c.cancel_pads.get(key) orelse return;
+    var site = CancelSite{
+        .pc = @intCast(pc),
+        .reg_end = c.cur_proc.reg_end,
+        .local_map = &.{},
+        .parts = undefined,
+        .num_parts = 1,
+    };
+    site.parts[0] = .{ .head = pad, .local_base = c.inline_local_base };
+    var opt_ctx = c.inline_ctx;
+    while (opt_ctx) |ctx| : (opt_ctx = ctx.parent) {
+        // The inlined call has no pad when its own proc needs none. Then this site has none either.
+        const outer = c.cancel_pads.get(ctx.call_key) orelse return;
+        site.parts[site.num_parts] = .{ .head = outer, .local_base = ctx.outer_local_base };
+        site.num_parts += 1;
+    }
+    site.local_map = try c.alloc.dupe(LocalSlot, c.bc_local_map.items);
+    errdefer c.alloc.free(site.local_map);
+    try c.cancel_sites.append(c.alloc, site);
+}
+
+fn cancel_sites_share_pad(a: *const CancelSite, b: *const CancelSite) bool {
+    if (a.num_parts != b.num_parts or a.reg_end != b.reg_end) return false;
+    for (a.parts[0..a.num_parts], b.parts[0..b.num_parts]) |pa, pb| {
+        if (pa.head != pb.head or pa.local_base != pb.local_base) return false;
+    }
+    return std.mem.eql(u8, std.mem.sliceAsBytes(a.local_map), std.mem.sliceAsBytes(b.local_map));
+}
+
+/// Emits the cancel pads of the function that was generated, after its body, and adds its sites to
+/// `ByteCodeBuffer.cancel_table`. A pad is generated with the locals and the register end of its site.
+fn gen_cancel_pads(c: *cy.Chunk) !void {
+    defer {
+        for (c.cancel_sites.items) |site| c.alloc.free(site.local_map);
+        c.cancel_sites.clearRetainingCapacity();
+    }
+    if (c.cancel_sites.items.len == 0) return;
+
+    const saved_map = try c.alloc.dupe(LocalSlot, c.bc_local_map.items);
+    defer c.alloc.free(saved_map);
+    const saved_reg_end = c.cur_proc.reg_end;
+    const saved_local_base = c.inline_local_base;
+    const saved_num_ptr_locals = c.cur_proc.num_ptr_locals;
+    defer {
+        c.bc_local_map.items.len = 0;
+        c.bc_local_map.appendSliceAssumeCapacity(saved_map);
+        c.cur_proc.reg_end = saved_reg_end;
+        c.inline_local_base = saved_local_base;
+        c.cur_proc.num_ptr_locals = saved_num_ptr_locals;
+        c.cancel_replay = false;
+        c.cold_depth -= 1;
+    }
+    // The destructor calls of a pad stay calls.
+    c.cold_depth += 1;
+    c.cancel_replay = true;
+    // A pad only destructs and returns: its frame's stack pointers are not read again, so its call sites
+    // record no pointer layout.
+    c.cur_proc.num_ptr_locals = 0;
+
+    var prev: ?*const CancelSite = null;
+    var prev_pad: u32 = 0;
+    for (c.cancel_sites.items) |*site| {
+        var pad_pc = prev_pad;
+        const shared = if (prev) |p| cancel_sites_share_pad(p, site) else false;
+        if (!shared) {
+            pad_pc = @intCast(c.buf.ops.items.len);
+            c.bc_local_map.items.len = 0;
+            try c.bc_local_map.appendSlice(c.alloc, site.local_map);
+            c.cur_proc.reg_end = site.reg_end;
+            try c.buf.ptr_layout_builder.resize(c.alloc, @max(c.buf.ptr_layout_builder.items.len, site.reg_end));
+            for (site.parts[0..site.num_parts], 0..) |part, i| {
+                c.inline_local_base = part.local_base;
+                c.cancel_replay_last = i + 1 == site.num_parts;
+                try genStmts(c, part.head);
+            }
+        }
+        try c.buf.cancel_table.append(c.alloc, .{ .pc = site.pc, .pad = pad_pc });
+        prev = site;
+        prev_pad = pad_pc;
+    }
 }
 
 /// Records the current proc's live pointer locals at a site that can be suspended under a callee frame

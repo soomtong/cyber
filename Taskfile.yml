@@ -82,6 +82,12 @@ tasks:
       - task: build
         vars: { OPT: ReleaseSafe, TARGET: '{{.TARGET}}', CLI_ARGS: '{{.CLI_ARGS}}' }
 
+  build:lsp:
+    desc: 'Build the language server into zig-out/bin/cyber-lsp. OPT=ReleaseSafe for everyday use.'
+    cmds:
+      - task: zig:build
+        vars: { STEP: lsp, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
   build:all:
     desc: 'Build the CLI, the library and every test binary without running them.'
     cmds:
@@ -158,6 +164,12 @@ tasks:
     cmds:
       - task: zig:build
         vars: { STEP: cli-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+
+  test:lsp:
+    desc: 'Run the language server tests.'
+    cmds:
+      - task: zig:build
+        vars: { STEP: lsp-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', CLI_ARGS: '{{.CLI_ARGS}}' }
 
   test:trace:
     desc: 'Run the trace tests (a separate lib build with -Dtrace).'

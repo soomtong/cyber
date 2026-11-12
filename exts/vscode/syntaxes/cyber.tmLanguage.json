@@ -16,7 +16,7 @@
 		"keywords": {
 			"patterns": [{
 				"name": "keyword.control.cyber",
-				"match": "\\b(import|if|then|else|and|or|not|try|catch|for|while|break|return|as|var|func|object|my|coinit|coresume|coyield|pass|type|continue)\\b"
+				"match": "\\b(use|fn|if|else|and|or|not|try|catch|for|while|break|continue|return|as|type|struct|enum|trait|const|global|switch|case|pass|move|await|yield|generator|fiber|suspend|scope|import|var|func)\\b"
 			}]
 		},
 		"strings": {

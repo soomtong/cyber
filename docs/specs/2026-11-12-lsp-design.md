@@ -1,6 +1,6 @@
 # LSP 서버 설계와 단계 계획
 
-2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 구현(2026-11-12, 아래 "P0 구현" 절). P1 이후는 미구현.
+2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 · P1 구현(2026-11-12, 아래 "P0 구현" · "P1 구현" 절). P2 이후는 미구현.
 앞선 결정은 `docs/decisions/project_fmt.md`의 "내장 도구의 기준"(LSP는 CLI에 넣지 않고 라이브러리 위의 별도 프로그램),
 사실 근거는 `docs/study/01-pipeline-front-end.md` 6절과 `docs/decisions/project_compile_error_report.md`이다.
 
@@ -102,8 +102,71 @@ LSP의 `Diagnostic`은 `range`(시작 · 끝), `message`, `relatedInformation`(�
 
 확인: lib 테스트 `Compile reports give the range and the notes of a compile error.`
 
-## 6. P1에서 먼저 확인할 것
+## 6. P1 구현 (2026-11-12)
 
-- 컴파일 시간: `cl_vm_validate` 한 번이 core 로드를 포함해 얼마인지 잰다. 수십 ms를 넘으면 P4의 VM 재사용을 당긴다.
-- 검사 중 부작용: validate가 `use` 대상의 extern 바인딩(dlopen)과 컴파일 타임 코드를 어디까지 실행하는지 확인하고
-  서버에서는 막는다.
+`zig build lsp`가 `zig-out/bin/cyber-lsp`를 만든다. 테스트는 `zig build lsp-test`(`zig build test`에 포함).
+
+구조. 2절 1번에서 달라진 점: 서버는 `cy` 모듈을 통째로 import하지 않는다. CLI와 같은 꼴이다.
+
+- 진입점은 `src/lsp_main.zig`, 나머지는 `src/lsp/`. Zig 모듈은 루트 파일의 디렉터리 밖을 import하지 못하고 서버는
+  `cli.zig`(표준 모듈 `os` · `io` 등의 resolver · loader)를 써야 하므로 루트 파일을 `src/`에 둔다.
+- 컴파일은 `libcyber`의 C API로 한다(`cl_vm_compile` + P0의 `cl_vm_compile_report*`). 개요는 `cyber fmt`처럼 서버 쪽에서
+  `cy.Parser`만 돌려 AST를 읽는다. VM과 컴파일러의 상태는 라이브러리 쪽에만 있다.
+- P3에서 `Sym`을 읽어야 할 때는 해석 기록을 C API로 내는 쪽을 먼저 본다(서버가 컴파일러 내부 구조체를 직접 읽지 않게).
+
+| 파일 | 내용 |
+| --- | --- |
+| `src/lsp_main.zig` | 인자, 메시지 루프, 종료 코드(`shutdown` 뒤 `exit`면 0, 아니면 1) |
+| `src/lsp/transport.zig` | `Content-Length` 프레이밍, stdin 읽기와 대기 |
+| `src/lsp/server.zig` | 요청 처리, 문서 저장, 진단, VM 콜백, uri ↔ 경로 |
+| `src/lsp/position.zig` | 바이트 오프셋 ↔ 줄 · 문자(UTF-8 · UTF-16) |
+| `src/lsp/symbols.zig` | 개요(파서), 접기(들여쓰기) |
+| `src/lsp/test.zig` | 서버에 메시지를 하나씩 넣는 세션 테스트 |
+
+동작:
+
+- 수명 주기: `initialize` · `initialized` · `shutdown` · `exit`. `initialize` 전의 요청은 `-32002`, 모르는 요청은 `-32601`,
+  `shutdown` 뒤의 요청은 `-32600`. 알림은 조용히 넘긴다.
+- 동기화: full sync(`change: 1`). `didOpen` · `didChange` · `didSave` · `didClose`.
+- 진단: 문서를 `cl_vm_compile(vm, 경로, 본문, skip_codegen)`으로 컴파일한다. 전체 프로그램으로 보고 VM을 먼저 리셋하므로
+  검사 사이에 남는 상태가 없다. 실행하지 않고 코드도 생성하지 않는다. 리포트가 `Diagnostic`이 되고 딸린 위치는
+  `relatedInformation`이다(클라이언트가 받는다고 했을 때만). 템플릿 확장 호출 지점은 `Template expanded here.`.
+- 디바운스: 변경은 표시만 하고, 클라이언트가 150ms 동안 조용하면 표시된 문서를 검사한다. 스레드 없이 stdin을 `poll`로 기다린다
+  (Windows는 `poll`이 없어 메시지마다 바로 검사한다). 버전 비교는 필요 없다: 검사는 메시지 사이에서만 돌고 항상 마지막 본문을 본다.
+- 모듈: 열린 문서는 loader가 편집기의 본문으로 준다. 열린 문서는 resolver가 자기 자신으로 해석하므로 저장한 적 없는 문서도
+  검사된다. 그 밖은 CLI와 같다. 문서 하나가 바뀌면 열린 문서 모두를 다시 검사한다(누가 누구를 쓰는지 추적하지 않는다).
+- 다른 파일의 오류: 문서가 쓰는 모듈에 오류가 있으면 그 모듈의 uri로 진단을 내고, 문서에는 0:0에 `` In `경로`: 메시지 ``를
+  관련 정보와 함께 낸다. 그 모듈이 열려 있으면 모듈의 진단은 모듈 자신의 검사에서만 낸다(두 검사가 같은 문서의 진단을 서로 덮지 않게).
+- 포맷: `cl_vm_format` 결과로 문서 전체를 바꾸는 편집 하나. 이미 포맷된 문서는 빈 목록, 구문 오류면 `null`.
+- 개요: 타입(필드 · case · 트레이트 함수를 자식으로), 함수, 메서드(`Vec2.len`), 상수, 전역, main 블록의 `:=` 지역.
+  파싱되지 않는 문서는 빈 목록.
+- 접기: 들여쓰기만 본다. 파싱되지 않아도 동작하고 `scope |s|:` 같은 새 블록 문장에도 그대로 맞는다.
+- stdout은 프로토콜 전용이다. VM의 print · eprint · log 콜백은 버리고 `clSilent`를 켠다.
+
+확인한 것(5절 뒤에 남겨 둔 질문):
+
+- 컴파일 시간: ReleaseFast에서 검사 한 번(VM 리셋 + core 로드 + sema)이 약 5ms, Debug 빌드는 약 85ms다. P4의 VM 재사용은
+  서두를 이유가 없다.
+- 검사 중 부작용: 컴파일 타임 평가는 루프(`while`)를 지원하지 않고 재귀는 `Maximum resolve depth reached.`로 끝난다.
+  `os.write_file` 같은 호스트 함수는 컴파일 타임에 불리지 않았다(인자 타입에서 컴파일 오류). `#[extern]` 선언은 `skip_codegen`
+  이라 라이브러리를 열지 않는다. `use 'https://…'`는 CLI처럼 네트워크에서 읽는다.
+- 서버를 끝내는 입력이 있다: `#print('x')`가 컴파일러 panic이다(F-112). 클라이언트가 서버를 다시 띄우지만 그 문서가 열려 있는 한
+  다시 죽는다. 컴파일러의 panic을 컴파일 오류로 바꾸는 쪽이 먼저다(2절 5번의 워커 스레드로는 panic을 못 막는다. 막으려면 자식 프로세스다).
+
+에디터:
+
+- `exts/vscode`: `extension.js`가 `vscode-languageclient`로 서버를 띄운다. 설정 `cyber.lsp.enabled` · `cyber.lsp.path`.
+  이 환경에서는 VS Code로 실행해 보지 못했다(`node --check`만). TextMate 문법은 키워드 목록만 지금 문법으로 바꿨다.
+- `exts/tree-sitter`의 `scope |s|:` 블록 문장은 아직 없다(`tree-sitter` CLI로 코퍼스를 돌려야 해서 따로 한다).
+
+하지 않은 것:
+
+- 증분 동기화(`change: 2`), 범위 포맷, 워크스페이스 폴더.
+- Windows에서의 실행 확인. 경로 구분자 변환은 넣었지만 돌려 보지 않았다.
+- 릴리스 번들 · `install.sh`에 `cyber-lsp` 넣기.
+
+## 7. P2로 가기 전에
+
+- F-112를 고친다. 서버가 한 줄로 죽는 입력을 남겨 둔 채 오류 복구를 올리지 않는다.
+- 오류 복구의 순서: 파서의 블록 단위 동기화(파싱 오류 여러 개) → sema의 함수 단위 계속 진행. `cl_vm_compile_report_count`가
+  1을 넘기 시작하고 서버는 고칠 것이 없다.

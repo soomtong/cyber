@@ -307,7 +307,10 @@ fn zResolve(vm: *C.VM, alloc: std.mem.Allocator, chunkId: u32, buf: []u8, cur_ur
                 return w.buffered();
             }
         }
-        return spec;
+        // The caller reads the result from `buf` and only takes its length from here.
+        if (spec.len > buf.len) return error.NameTooLong;
+        @memcpy(buf[0..spec.len], spec);
+        return buf[0..spec.len];
     }
 
     var pathBuf: [4096]u8 = undefined;

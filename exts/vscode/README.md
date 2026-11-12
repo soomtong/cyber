@@ -1,69 +1,53 @@
-# cyber README
+# Cyber for VS Code
 
-Cyber Language Support
+Syntax highlighting for `.cy` files and a client for the Cyber language server `cyber-lsp`.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+With the language server running:
 
-For example if there is an image subfolder under your extension project workspace:
+* Compile errors as diagnostics while typing. The document is compiled as a program, it is not run.
+  Related places (`First declared at:`, the call that expanded a template) are attached to the error.
+* Format Document, the same result as `cyber fmt`.
+* Outline (types with their fields, functions, methods, constants, globals) and folding by indentation.
 
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
-
-## Manual Install
-Run `vsce package` in this directory. It will generate a .vsix package.
-Open vscode, under plugins, click Install from VSIX and locate the package.
+The compiler stops at its first error, so a document shows one error at a time.
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+Build the server from the repository root and put it in `PATH`, or point `cyber.lsp.path` at it:
+
+```bash
+zig build lsp -Doptimize=ReleaseSafe
+```
+
+The executable is `zig-out/bin/cyber-lsp`. It has to be the same version as the `cyber` that runs the scripts.
+
+## Manual Install
+
+```bash
+npm install
+```
+
+```bash
+npx vsce package
+```
+
+Open VS Code, under Extensions click "Install from VSIX..." and pick the generated package.
 
 ## Extension Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+* `cyber.lsp.enabled`: Start the language server. Default `true`.
+* `cyber.lsp.path`: Path of the `cyber-lsp` executable. Empty looks up `cyber-lsp` in `PATH`.
 
-For example:
+The command "Cyber: Restart Language Server" starts the server again, for example after rebuilding it.
 
-This extension contributes the following settings:
+## Other editors
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+`cyber-lsp` speaks the Language Server Protocol over stdin and stdout, so any client can start it.
+Neovim (0.11 or later):
 
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+```lua
+vim.lsp.config('cyber', { cmd = { 'cyber-lsp' }, filetypes = { 'cyber' } })
+vim.lsp.enable('cyber')
+```

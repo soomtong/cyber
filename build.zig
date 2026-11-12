@@ -130,6 +130,38 @@ pub fn build(b: *std.Build) !void {
         step.dependOn(&b.addInstallArtifact(exe, .{}).step);
     }
 
+    // The language server: a program of its own on top of the library, like the CLI.
+    const lsp_mod = try create_lsp_module(b, vmc, lib, cli_config);
+    {
+        const step = b.step("lsp", "Build the language server.");
+
+        const exe = b.addExecutable(.{
+            .name = "cyber-lsp",
+            .root_module = lsp_mod,
+        });
+        exe.root_module.strip = strip;
+        // A document can use a module that binds a dynamic library, like a script run by the CLI.
+        if (target.os.tag == .linux) {
+            exe.root_module.addRPath(.{ .cwd_relative = "$ORIGIN" });
+        } else if (target.os.tag == .macos) {
+            exe.root_module.addRPath(.{ .cwd_relative = "@loader_path" });
+        }
+        exe.rdynamic = true;
+
+        step.dependOn(&b.addInstallArtifact(exe, .{}).step);
+    }
+    const lsp_test_cmd = b.step("lsp-test", "Run language server tests.");
+    {
+        const lsp_test = b.addTest(.{
+            .name = "lsp_test",
+            .root_module = try create_lsp_module(b, vmc, lib, cli_test_config),
+            .filters = &.{testFilter orelse ""},
+        });
+        var run = b.addRunArtifact(lsp_test);
+        run.has_side_effects = no_cache;
+        lsp_test_cmd.dependOn(&run.step);
+    }
+
     var standalone_lib_artifact: *std.Build.Step.InstallArtifact = undefined;
     {
         const step = b.step("lib", "Build as a library.");
@@ -210,6 +242,7 @@ pub fn build(b: *std.Build) !void {
         main_step.dependOn(lib_test_cmd);
         main_step.dependOn(lib_standalone_test_cmd);
         main_step.dependOn(cli_test_cmd);
+        main_step.dependOn(lsp_test_cmd);
         main_step.dependOn(trace_test_cmd);
         main_step.dependOn(behavior_test_cmd);
     }
@@ -395,6 +428,8 @@ fn create_cli_config(b: *std.Build, opts: CliConfig) !*std.Build.Module {
     options.addOption(?[]const u8, "mod_root", opts.mod_root);
     options.addOption(bool, "trace", opts.trace);
     options.addOption(Allocator, "malloc", opts.malloc);
+    // The tests of the compiler sources that a CLI program imports (`debug.zig` through the parser) read this.
+    options.addOption(bool, "is32Bit", is32Bit(rtarget.result));
     return options.createModule();
 }
 
@@ -613,6 +648,17 @@ pub fn buildCVM(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
 fn create_cli_module(b: *std.Build, vmc: *std.Build.Module, lib: *std.Build.Step.Compile, config: CliConfig) !*std.Build.Module {
     const mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
+        .target = rtarget,
+        .optimize = optimize,
+    });
+    try link_cli_deps(b, mod, vmc, config);
+    mod.linkLibrary(lib);
+    return mod;
+}
+
+fn create_lsp_module(b: *std.Build, vmc: *std.Build.Module, lib: *std.Build.Step.Compile, config: CliConfig) !*std.Build.Module {
+    const mod = b.createModule(.{
+        .root_source_file = b.path("src/lsp_main.zig"),
         .target = rtarget,
         .optimize = optimize,
     });

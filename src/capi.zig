@@ -252,6 +252,14 @@ pub fn vm_eval_path(vm: *VM, uri: []const u8, config: EvalConfig, out: *EvalResu
     return c.cl_vm_eval_path(vm, to_bytes(uri), config, out);
 }
 
+pub const Future = c.CLFuture;
+pub const vm_resume = c.cl_vm_resume;
+pub const vm_abandon = c.cl_vm_abandon;
+pub const vm_pending_future = c.cl_vm_pending_future;
+pub const future_new = c.cl_future_new;
+pub const future_complete = c.cl_future_complete;
+pub const future_complete_error = c.cl_future_complete_error;
+
 pub fn vm_error_summary(vm: *VM) []const u8 {
     return from_bytes(c.cl_vm_error_summary(vm));
 }
@@ -421,6 +429,7 @@ pub const ErrorCompile = c.CL_ERROR_COMPILE;
 pub const ErrorPanic = c.CL_ERROR_PANIC;
 pub const ErrorUnknown = c.CL_ERROR_UNKNOWN;
 pub const ErrorInterrupt = c.CL_ERROR_INTERRUPT;
+pub const ErrorSuspended = c.CL_ERROR_SUSPENDED;
 
 pub fn vm_find_type(vm: *VM, spec: []const u8) ?*Type {
     return c.cl_find_type(vm, to_bytes(spec));

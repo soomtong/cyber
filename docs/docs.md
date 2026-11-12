@@ -3288,6 +3288,8 @@ print(work.await())
 
 If the spawned thread panicked, `await` panics with `Spawned thread panicked: <message>`. If the spawned thread was interrupted or ran out of fuel, the waiting thread is interrupted too.
 
+A future that no spawned thread completes (one from a host function, or from `FutureResolver` before `complete`) can only be completed from outside the running program. Awaiting it on the main thread suspends the whole program and returns to the host, which completes the future and resumes the program at the `await` (see [Suspending an eval](#suspending-an-eval)). This works at any call depth, in a generator body and inside a fiber. The `cyber` command completes no futures, so there the program ends with `panic: Abandoned while awaiting a future.` A spawned thread can not wait for such a future, and neither can a function that a host function called: both panic.
+
 When `await` resumes, the expression evaluates to the completed value of the `Future`:
 ```cy
 use aio
@@ -4229,6 +4231,7 @@ Note that an `extern` global requires a pointer type.
 * [Module loader.](#module-loader)
 * [Function binding.](#function-binding)
   * [VM functions.](#vm-functions)
+  * [Suspending an eval.](#suspending-an-eval)
 * [Global binding.](#global-binding)
 * [Type binding.](#type-binding)
 </td><td valign="top">
@@ -4437,6 +4440,55 @@ CLRet add(CLThread* t) {
     return CL_RET_OK;
 }
 ```
+
+### Suspending an eval.
+A host function that can not answer at once (it needs the user's approval, or a slow tool) returns a pending `Future` instead of blocking inside the call. When the script awaits it, the eval returns `CL_AWAIT`. The script is suspended with its stack, its locals and its remaining fuel intact. The host completes the future and calls `cl_vm_resume`:
+```c
+// #[bind] fn write_async(path str, text str) -> Future[!void]
+CLRet write_async(CLThread* t) {
+    CLValue* ret = cl_thread_ret(t, sizeof(CLValue));
+    CLstr path = cl_thread_str(t);
+    CLstr text = cl_thread_str(t);
+    CLFuture* f = cl_future_new(t, cl_find_type(cl_thread_vm(t), CL_BYTES("Future[!void]")));
+    // ... remember the request for `f` ...
+    *ret = (CLValue)(uintptr_t)f;
+    cl_str_deinit(t, &path);
+    cl_str_deinit(t, &text);
+    return CL_RET_OK;
+}
+
+CLResultCode code = cl_vm_evalx(vm, uri, src, config, &res);
+while (code == CL_AWAIT) {
+    CLFuture* f = cl_vm_pending_future(vm);
+    if (cancelled) {
+        cl_vm_abandon(vm);                 // Like an interrupt. The VM takes the next eval.
+        break;
+    }
+    if (approved) {
+        cl_future_complete(vm, f, NULL);   // `!void` has no value to pass.
+    } else {
+        cl_future_complete_error(vm, f, cl_error(vm, CL_BYTES("Denied")));
+    }
+    code = cl_vm_resume(vm, &res);
+}
+```
+
+A wrapper in the module source keeps the script API synchronous:
+```cy
+#[bind] fn write_async(path str, text str) -> Future[!void]
+
+fn write(path str, text str) -> !void:
+    return write_async(path, text).await()
+```
+
+* `cl_future_complete` copies the value and the future owns it afterwards, as a return slot does. For a `Future[!U]` the value is the `U`. `cl_future_complete_error` completes a `Future[!U]` with an error.
+* `cl_vm_resume` follows the rules of `cl_vm_evalx`. It returns `CL_AWAIT` again at the next `await`, and also when the pending future was not completed. The fuel is not refilled and an interrupt request is not cleared by a resume.
+* While an eval is suspended, `cl_vm_eval*`, `cl_vm_validate` and `cl_vm_compile*` return `CL_ERROR_SUSPENDED`. `cl_vm_reset` and `cl_vm_deinit` abandon the suspended eval first.
+* `cl_vm_abandon` drops the suspended eval with the outcome of an interrupt: the main locals are gone, the declarations stay. The panic summary names the abandoned `await`.
+* A future that the script never awaits, or that is still pending when the eval ends, is freed like any other object.
+* All of these functions are called from the thread that runs the evals of the VM. A future is not completed from another thread.
+
+The full program is `examples/libcyber/host_await.c`.
 
 ## Global binding.
 A global binding describes how to load a `#[bind]` global:

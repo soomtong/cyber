@@ -254,4 +254,21 @@ test.eq('abc', joined)
 -- coresume f
 -- test.eq(list[0], 123)
 
+-- A temporary of the yield expression is released after the resume, or when the generator is dropped there.
+type YieldTemp:
+    s str
+fn yield_temp(i int) -> YieldTemp:
+    return YieldTemp{s='n' + str(i)}
+fn (&YieldTemp) get() -> str:
+    return self.s
+generator fn yield_temps(n int) -> str:
+    for 0..n |i|:
+        yield yield_temp(i).get()
+yield_out := ''
+for yield_temps(3) |v|:
+    yield_out += v
+test.eq(yield_out, 'n0n1n2')
+yield_gen := yield_temps(3)
+test.eq(yield_gen.next().?, 'n0')
+
 --cytest: pass

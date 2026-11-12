@@ -233,6 +233,7 @@ fn repl(alloc: std.mem.Allocator) !void {
     if (res != c.Success) {
         const thread = c.vm_main_thread(vm);
         switch (res) {
+            c.Await => reportAbandonedAwait(vm),
             c.ErrorPanic => {
                 if (!c.silent()) {
                     const report = c.thread_panic_summary(thread);
@@ -275,6 +276,17 @@ fn repl(alloc: std.mem.Allocator) !void {
     }
 }
 
+/// The program awaits a future that nothing completes: the CLI is not a host that completes futures.
+/// The eval is dropped and reported like a panic at the `await`.
+fn reportAbandonedAwait(vm: *c.VM) void {
+    c.vm_abandon(vm);
+    if (!c.silent()) {
+        const report = c.thread_panic_summary(c.vm_main_thread(vm));
+        defer c.vm_freeb(vm, report);
+        std.debug.print("{s}", .{report});
+    }
+}
+
 fn evalPath(alloc: std.mem.Allocator, path: []const u8) !void {
     c.setVerbose(verbose);
 
@@ -298,6 +310,7 @@ fn evalPath(alloc: std.mem.Allocator, path: []const u8) !void {
     const res = c.vm_eval_path(vm, path, config, &eval_res);
     if (res != c.Success) {
         switch (res) {
+            c.Await => reportAbandonedAwait(vm),
             c.ErrorPanic => {
                 if (!c.silent()) {
                     const thread = c.vm_main_thread(vm);

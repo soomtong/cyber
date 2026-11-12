@@ -251,7 +251,7 @@ Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator 
 4. 진입점은 함수 이름이다. `fiber obj.work()`는 수신자를 묶지 못한다.
 5. `fiber:` 본문은 기존 클로저 규칙을 그대로 따른다(`^T` 또는 `&T`로 선언한 변수만 캡처). `&T` 캡처를 fiber에서 막는
    규칙은 넣지 않았다.
-6. `Future.await()`는 fiber 안에서도 spin한다. 단계 3(await를 양보로)은 하지 않았다.
+6. `Future.await()`는 fiber 안에서도 spin한다(spawn의 Future). 단계 3(await를 양보로)은 하지 않았다. 호스트 Future는 2026-11-12부터 eval을 탈출한다.
 7. 루트 맥락의 `suspend`는 no-op이다. 임베딩의 `CL_YIELD`는 없다.
 8. AOT(`cgen.zig`)는 미지원.
 
@@ -259,4 +259,73 @@ Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator 
 lib 테스트 3개(누수 검사 할당자: 정상 종료, 중첩 fiber 안 panic 뒤 재사용, `single_run`에서 진행 중인 fiber).
 tree-sitter `fiber_expression` · `suspend_statement`.
 
-남은 것: 위 3 · 4 · 6, 단계 1(`CL_AWAIT`), 단계 3 · 4.
+남은 것: 위 3 · 4 · 6, 단계 3 · 4. 단계 1(`CL_AWAIT`)은 2026-11-12에 구현했다(아래 절).
+
+## 단계 1 구현 (2026-11-12)
+
+tars-agent(이 언어를 code-act 주 언어로 내장할 에이전트)의 요청으로 구현했다. 능력 함수가 사용자 승인을 호스트 함수 안에서
+동기적으로 기다리면 벽시계 상한이 고민하는 시간까지 세고, 취소해도 VM을 끊을 수 없다(F-42). 호스트 함수가 미완료 Future를
+바로 돌려주고 VM 밖에서 기다리게 하는 것이 해법이다.
+
+동작.
+
+- main 스레드의 `Future.await()`가 미완료이고 `shared_state`가 없는 Future(호스트 Future, 완료 전의 `FutureResolver`)를 만나면
+  eval이 `CL_AWAIT`로 돌아온다. 스택 · 지역 변수 · `persist_main` 상태 · 연료 · 현재 fiber가 그대로 남는다.
+- `cl_vm_resume`이 같은 `AWAIT` 명령을 다시 실행한다. 완료됐으면 이어 가고, 아니면 다시 `CL_AWAIT`다. 그래서 "완료하지 않고
+  resume"에 따로 코드가 없다.
+- 호출 깊이에 제약이 없다. generator의 `next`와 fiber 전환이 모두 같은 루프 안의 VM 명령이고 실행 상태가 전부 `ThreadC`에 있어
+  루프를 나갔다 들어와도 된다.
+
+결정(사용자 동의 2026-11-12).
+
+1. fiber 안의 await도 eval을 탈출한다(요청 8번). 재개는 그 fiber 안에서 이어진다. 단계 3(다른 fiber에 양보)은 아니다.
+2. spawn한 스레드 안에서는 panic이다(요청 9번). `Cannot wait in a spawned thread for a future that the host or another context
+   completes.` 이전의 `Local future will never complete.` 자리다.
+3. Future 완료는 eval을 돌리는 스레드에서만 한다(요청 12번). 완료는 힙 값을 쓰는 일이고 힙은 스레드 소유다. 원자 연산을 넣지
+   않았다.
+4. 완료하지 않고 `cl_vm_resume`을 부르면 다시 `CL_AWAIT`다.
+5. 스크립트가 만든 미완료 Future(`FutureResolver`)도 같은 경로로 `CL_AWAIT`가 된다. 호스트 Future와 구조가 같아 구분하지 않는다.
+   호스트는 모르는 Future면 버린다. CLI(`main.zig` `reportAbandonedAwait`)와 `cy.eval`(자식 VM)은 버리고 panic으로 보고한다.
+6. 켜는 옵션은 두지 않았다. `CL_AWAIT`를 모르는 호스트는 이전의 panic 대신 `CL_AWAIT`를 받는다.
+7. 호스트 함수가 스크립트를 다시 부른 안쪽(`host_depth != 0`)은 C 프레임이 끼어 있어 `Cannot await across a host call.` panic이다.
+
+C API(`cyber.h`의 "Suspended evals and host futures" 절).
+
+~~~c
+CLFuture* cl_future_new(CLThread* t, CLType* future_t);
+bool cl_future_complete(CLVM* vm, CLFuture* future, const void* value);
+bool cl_future_complete_error(CLVM* vm, CLFuture* future, int64_t err);
+CLFuture* cl_vm_pending_future(CLVM* vm);
+CLResultCode cl_vm_resume(CLVM* vm, CLEvalResult* res);
+void cl_vm_abandon(CLVM* vm);
+// 새 결과 코드: CL_ERROR_SUSPENDED
+~~~
+
+- `CLFuture`는 `FutureValue[T]` 힙 객체다. `Future[T]`는 그 포인터 하나짜리 구조체라 반환 슬롯(`CLValue`, 모든 타깃에서 8바이트)에
+  포인터 값을 쓴다. 32비트 타깃(wasm32)에서 포인터 크기로 쓰면 위쪽 4바이트가 채워지지 않는다.
+- `cl_future_new`의 `future_t`는 `cl_find_type(vm, "Future[!void]")`로 얻는다. 이미 확장된 인스턴스만 찾으므로 스크립트(호스트
+  함수의 선언)가 그 타입을 이름 지은 뒤여야 한다. 타입 포인터는 `cl_vm_reset` 뒤에 무효다.
+- 값은 복사되고 Future가 소유한다(반환 슬롯과 같은 규칙). `Future[!U]`는 `U`를 받아 `Result`로 감싼다. 크기 없는 타입은
+  `value`를 읽지 않는다.
+- 호스트가 포인터를 비교 이상으로 쓰려면 `cl_thread_retain`으로 잡는다.
+
+구현.
+
+- `vm.zig` `zAwait`: 미완료 로컬 Future에서 `Compiler.await_future`에 기록하고 `RES_AWAIT`. `vm.c`의 `AWAIT`는 pc를 그 명령으로
+  되돌려 저장한다.
+- `VM.eval`의 뒤처리를 `finishExec`(성공) · `failExec`(실패)로 떼어 `resumeEval`과 공유한다. `failExec`는 `error.Await`면 아무것도
+  버리지 않는다. `resumeEval`은 `prepEval` · `resetStop`을 부르지 않는다(둘 다 fiber · 연료 · interrupt를 초기화한다).
+- `abandonEval`: `ret_panic` 뒤 `handleInterrupt`로 되감고 `failExec(error.Interrupted)`. fiber 안이면 `exitFibers` 경로를 탄다.
+  `VM.deinit`(reset 포함)이 멈춘 eval을 먼저 버리고 panic 메시지를 지운다(안 지우면 다음 `prepEval`이 이중 해제한다).
+- 상태는 `Compiler.await_future` 하나다. `VM` 구조체는 `vm.h` padding 때문에 늘리지 못한다.
+- `lib.zig` `futureSlot`: 객체의 타입에서 `data ?T`의 레이아웃을 읽는다(`zero_union`이면 태그 없음, 아니면 태그 8바이트 뒤).
+
+조사 중 찾은 것: `yield` 식의 임시 값 누수(F-97, 수정), 임시 수신자의 평가 순서(F-98, 미수정).
+
+테스트: lib `src/lib_test/await.zig` 10개(누수 검사 할당자). 기본 · 연속 await, 깊은 호출 · generator 본문 · fiber, 값 · 오류
+완료와 `!else`, 완료된 Future의 빠른 경로, await하지 않은 · 미완료 Future, `persist_main` 지역 이월과 결과, 버리기 뒤 재사용 ·
+멈춘 동안의 거부 · fiber 안에서 버리기 · reset · deinit, resume 뒤 연료 · interrupt · 메모리 상한 · panic, 스크립트 Future와
+spawn 스레드. 예제 `examples/libcyber/host_await.c`(`lib-standalone-test`에 등록).
+
+남은 것: 단계 3(fiber 안 await를 양보로) · 단계 4(취소, `wait_any`), `CL_YIELD`, AOT. `await` 여럿을 동시에 기다리는 수단이 없어
+호스트는 한 번에 Future 하나만 본다. 호스트 함수가 부른 스크립트 안의 await는 panic이다.

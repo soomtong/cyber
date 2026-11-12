@@ -169,7 +169,12 @@ pub fn UserVM_eval(t: *cy.Thread) !C.Ret {
 
     var res: C.EvalResult = undefined;
     const zvm: *C.VM = @ptrCast(uvm.vm);
-    const code = C.vm_evalx(zvm, uri, src, config_c, &res);
+    var code = C.vm_evalx(zvm, uri, src, config_c, &res);
+    if (code == C.Await) {
+        // The script API has no resume. The awaited future can not complete, so the eval ends like a panic.
+        C.vm_abandon(zvm);
+        code = C.ErrorPanic;
+    }
 
     if (code == C.Success) {
         ret.* = .{

@@ -11,6 +11,8 @@ extern "C" {
 typedef struct CLVM CLVM;
 typedef struct CLThread CLThread;
 typedef struct CLHeap CLHeap;
+// A `FutureValue[T]` object, the shared state behind a `Future[T]` value.
+typedef struct CLFuture CLFuture;
 
 typedef uint64_t CLValue;
 typedef uint8_t CLRet;
@@ -45,6 +47,8 @@ enum {
     CL_ERROR_UNKNOWN,
     // `cl_vm_interrupt` or the fuel limit (`cl_vm_set_fuel`) stopped the eval.
     CL_ERROR_INTERRUPT,
+    // An eval of this VM is suspended at an `await` (`CL_AWAIT`). Resume or abandon it first.
+    CL_ERROR_SUSPENDED,
 };
 
 enum {
@@ -429,6 +433,73 @@ CLResultCode cl_vm_eval(CLVM* vm, CLBytes src, CLEvalResult* res);
 
 // Accepts a `uri` and EvalConfig.
 CLResultCode cl_vm_evalx(CLVM* vm, CLBytes uri, CLBytes src, CLEvalConfig config, CLEvalResult* res);
+
+// -----------------------------------
+// [ Suspended evals and host futures ]
+// -----------------------------------
+//
+// `Future[T].await()` on the main thread returns from the eval with `CL_AWAIT` when the future is not completed
+// and no spawned thread completes it. The eval is suspended: its stack, its locals and the fuel that is left
+// stay as they are. The host completes the future and calls `cl_vm_resume`, as often as the eval awaits:
+//
+//     CLResultCode r = cl_vm_evalx(vm, uri, src, config, &res);
+//     while (r == CL_AWAIT) {
+//         CLFuture* f = cl_vm_pending_future(vm);
+//         int64_t n = 123;
+//         cl_future_complete(vm, f, &n);
+//         r = cl_vm_resume(vm, &res);
+//     }
+//
+// The await can be at any call depth, in the body of a generator and inside a fiber. It can not be inside a
+// function that a host function called (`panic: Cannot await across a host call.`) or in a spawned thread.
+// While an eval is suspended, `cl_vm_eval*`, `cl_vm_validate` and `cl_vm_compile*` return `CL_ERROR_SUSPENDED`.
+// `cl_vm_reset` and `cl_vm_deinit` abandon the suspended eval first.
+// All of these functions are called from the thread that runs the evals of the VM. A future is not completed
+// from another thread.
+
+// Creates a pending future for a host function to return. `future_t` is a `Future[T]` type, from
+// `cl_find_type(vm, CL_BYTES("Future[int]"))` once a script has named that type (the declaration of the host
+// function does). Call it from a host function on the main thread, and write the result to the return slot:
+//
+//     CLValue* ret = cl_thread_ret(t, sizeof(CLValue));
+//     CLFuture* f = cl_future_new(t, future_t);
+//     *ret = (CLValue)(uintptr_t)f;
+//
+// The return slot is a `CLValue` (8 bytes on every target) and owns the reference. To keep the pointer past the
+// host function for anything but a comparison, retain it with `cl_thread_retain(t, (CLValue)(uintptr_t)f)` and
+// release it later.
+// Returns `NULL` if `future_t` is not a `Future[T]` type or the allocator fails.
+// A future that the script drops without awaiting it, or that is still pending when the eval ends, is freed
+// like any other object.
+CLFuture* cl_future_new(CLThread* t, CLType* future_t);
+
+// Completes a pending future with a value. `value` points to a `T`, which is copied (`sizeof` the type as host
+// functions return it: 8 bytes for an `int`, a `CLstr` for a `str`, a `CLSlice` for a `[]T`). The future takes
+// ownership of the value, as a return slot does: do not release it afterwards.
+// For a `Future[!U]`, `value` points to the `U`. `value` is not read when the type has no size (`void`).
+// Returns false and takes nothing if the future is already completed or was created by `spawn`.
+bool cl_future_complete(CLVM* vm, CLFuture* future, const void* value);
+
+// Completes a pending `Future[!U]` with an error value from `cl_error`.
+// Returns false if the future is already completed, was created by `spawn`, or is not a `Future[!U]`.
+bool cl_future_complete_error(CLVM* vm, CLFuture* future, int64_t err);
+
+// The future that the suspended eval waits for, or `NULL` when no eval is suspended. The pointer is borrowed:
+// it is valid until `cl_vm_resume` or `cl_vm_abandon`.
+// A script can also wait for a future of its own that it never completes (`FutureResolver`). The host does not
+// know such a future and abandons the eval.
+CLFuture* cl_vm_pending_future(CLVM* vm);
+
+// Continues the suspended eval. The result code and `res` follow the rules of `cl_vm_evalx`, including another
+// `CL_AWAIT`, which is also the result when the pending future was not completed.
+// The fuel is not refilled and an interrupt request is not cleared: both carry over from before the suspension.
+// Returns `CL_ERROR_UNKNOWN` when no eval is suspended.
+CLResultCode cl_vm_resume(CLVM* vm, CLEvalResult* res);
+
+// Drops the suspended eval. The outcome is that of `cl_vm_interrupt`: the main locals are gone (also the
+// persisted ones of `persist_main`), the declarations stay, and the VM takes the next eval.
+// `cl_thread_panic_summary` names the abandoned `await`. Does nothing when no eval is suspended.
+void cl_vm_abandon(CLVM* vm);
 
 // Asks the running eval to stop at its next checkpoint (a loop back edge or a call).
 // Safe to call from another thread. The eval returns `CL_ERROR_INTERRUPT` after unwinding like a panic,

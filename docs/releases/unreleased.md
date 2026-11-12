@@ -6,6 +6,9 @@
 
 ## 버그 수정
 
+- `yield` 식의 임시 값이 해제되지 않았다. `yield make().get()`이나 `yield tool(x).await()`처럼 식 안에서 만든 객체가
+  반복마다 하나씩 샜다. 이제 재개된 뒤에 해제하고, 그 `yield`에서 멈춘 채 generator가 버려지면 정리 블록이 해제한다(F-97).
+
 - `cy.parse`가 구문 오류에서 panic했다. 스크립트가 잡을 수 없어 스택 트레이스와 함께 끝났다. 이제 오류를 기록하고
   `root`가 `none`인 `ParseResult`를 돌려준다. 토큰 오류(끝나지 않은 문자열 등)도 위치와 함께 기록한다(F-96).
 
@@ -31,6 +34,23 @@
   슬라이스 인덱스에서만 쓴다. `r := ..3` · `for ..3 |i|` · `case ..5`는 컴파일 오류다. 부분 벡터 타입 `[..4]T`는 그대로다.
 
 ## 임베딩 API
+
+- 호스트가 VM 밖에서 기다릴 수 있다(코루틴 로드맵 단계 1, `CL_AWAIT`). main 스레드의 `Future.await()`가 아직 완료되지 않았고
+  `spawn`이 만든 것도 아닌 Future를 만나면 eval이 `CL_AWAIT`로 돌아온다. 스택 · 지역 변수 · 남은 연료는 그대로이고, 호스트가
+  Future를 완료시킨 뒤 `cl_vm_resume`으로 멈춘 `await`에서 이어 실행한다. 호출 깊이에 제약이 없고 generator 본문과 fiber
+  안에서도 같다. 새 함수: `cl_future_new`(호스트 함수가 돌려줄 미완료 `Future[T]`), `cl_future_complete`(값으로 완료,
+  `Future[!U]`면 `U`를 넘김), `cl_future_complete_error`, `cl_vm_pending_future`, `cl_vm_resume`, `cl_vm_abandon`(멈춘 eval을
+  interrupt처럼 버림). 새 결과 코드 `CL_ERROR_SUSPENDED`: 멈춘 동안의 `cl_vm_eval*` · `cl_vm_validate` · `cl_vm_compile*`.
+  `cl_vm_reset` · `cl_vm_deinit`은 멈춘 eval을 먼저 버린다. 완료는 eval을 돌리는 스레드에서만 한다.
+  예제 `examples/libcyber/host_await.c`, 결정 문서 `docs/decisions/project_coroutines.md`의 "단계 1 구현" 절.
+- 같은 변경으로 바뀐 동작: 같은 스레드의 미완료 Future(`FutureResolver`)를 await하면 `panic: Local future will never complete.`
+  대신 `CL_AWAIT`가 된다. `cyber` CLI와 `cy.eval`은 Future를 완료시킬 수 없으므로 그 eval을 버리고
+  `panic: Abandoned while awaiting a future.`로 끝난다. spawn한 스레드 안에서는 `Cannot wait in a spawned thread for a future
+  that the host or another context completes.`, 호스트 함수가 부른 함수 안에서는 `Cannot await across a host call.` panic이다.
+- `clResultName`이 `CL_AWAIT` · `CL_ERROR_SUSPENDED`에서 abort하지 않고 이름을 돌려준다.
+- wasm32에서 `CLValue`를 값으로 주고받는 함수 일곱 개의 ABI가 헤더와 달랐다(`cl_thread_retain` · `cl_thread_release` ·
+  `cl_object_string` · `cl_array_empty` · `cl_map_empty` · `cl_new_func_union` · `cl_lift`). 헤더는 `uint64_t`인데 export는
+  유니언이었다. 64비트 정수로 맞췄다. 64비트 타깃의 동작은 같다(F-99).
 
 ## 변경
 

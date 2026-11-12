@@ -203,6 +203,14 @@ pub const VM = struct {
             return;
         }
 
+        // A suspended eval still owns its stack values. Unwind it like an interrupt first.
+        if (self.isSuspended()) {
+            self.abandonEval();
+            // Nobody reads the panic of the abandoned eval, and the thread deinit below frees its message.
+            self.main_thread.free_panic();
+            self.main_thread.c.panic_type = vmc.PANIC_NONE;
+        }
+
         // A future that was never awaited can leave a spawned thread running or queued. Stop it before
         // the main heap it writes to is freed, and before the worker threads are joined.
         self.stopSpawnedThreads();
@@ -368,6 +376,9 @@ pub const VM = struct {
     /// first (`use math`) is complete; the next eval that runs initializes it (`emit_program_init_func`).
     pub fn validate(self: *VM, srcUri: []const u8, src: ?[]const u8, config: C.ValidateConfig) !void {
         _ = config;
+        if (self.isSuspended()) {
+            return error.Suspended;
+        }
         if (self.compiler.first_compile_failed or self.compiler.alloc_failed) {
             // Same as `eval`: start over instead of compiling on top of the half-built first compile (F-04).
             try self.resetVM();
@@ -386,6 +397,9 @@ pub const VM = struct {
     /// Compiles `src` as a whole program and resets the VM first. See `validate` to check source against the
     /// current session.
     pub fn compile(self: *VM, srcUri: []const u8, src: ?[]const u8, config: C.CompileConfig) !cy.CompileResult {
+        if (self.isSuspended()) {
+            return error.Suspended;
+        }
         try self.resetVM();
         self.config = C.defaultEvalConfig();
         self.config.single_run = config.single_run;
@@ -471,8 +485,87 @@ pub const VM = struct {
         self.env_local_saves_map.clearRetainingCapacity();
     }
 
+    /// The tail of an eval whose program ran to its end: carries the main locals over and returns the result.
+    fn finishExec(self: *VM, val: *Value) !C.EvalResult {
+        self.markChunksInited();
+        if (self.config.persist_main) {
+            self.copyMainLocalSaves() catch |err| {
+                // The program ran, but its main locals cannot be carried over. The next eval starts over.
+                self.compiler.alloc_failed = true;
+                return err;
+            };
+        }
+        if (self.compiler.main_res) |*main_res| {
+            // Copied now, before another eval reuses the stack. The VM owns the copy until the next eval.
+            const stack = self.main_thread.c.stack();
+            main_res.value = self.alloc.dupe(cy.Value, stack[main_res.stack_off..main_res.stack_off + main_res.reg_size]) catch |err| {
+                self.compiler.main_res = null;
+                return err;
+            };
+            return .{
+                .res = @ptrCast(main_res.value.ptr),
+                .res_t = main_res.val_t.id(),
+            };
+        }
+        return .{
+            .res = @ptrCast(val),
+            .res_t = if (self.compiler.main_func) |main_func| main_func.sig.ret.id() else bt.Void,
+        };
+    }
+
+    /// The tail of an eval whose program stopped with `err`.
+    fn failExec(self: *VM, err: anyerror) void {
+        if (err == error.Await) {
+            // Suspended at an `await`. The stack, the main locals and the bytecode are kept for `resumeEval`.
+            return;
+        }
+        self.compiler.await_future = null;
+        self.markChunksInited();
+        if (self.config.persist_main) self.dropMainLocalSaves();
+        self.dropMainResult(false);
+        // The main thread unwound and freed its heap. Its stack goes back to the initial size as well.
+        if (err == error.Panic or err == error.Interrupted) self.main_thread.resetStack();
+    }
+
+    /// Whether an eval is suspended at an `await` (`CL_AWAIT`).
+    pub fn isSuspended(self: *const VM) bool {
+        return self.compiler.await_future != null;
+    }
+
+    /// Continues the eval that is suspended at an `await`. The result follows the rules of `eval`.
+    /// The fuel and an interrupt request are not reset: they carry over from before the suspension.
+    pub fn resumeEval(self: *VM) anyerror!C.EvalResult {
+        if (!self.isSuspended()) {
+            return error.NotSuspended;
+        }
+        self.compiler.await_future = null;
+        cy.Thread.exec_auto(self.main_thread, true) catch |err| {
+            self.failExec(err);
+            return err;
+        };
+        // NOTE: Same slot as `exec_bytecode`.
+        return self.finishExec(&self.main_thread.c.stack_ptr[1]);
+    }
+
+    /// Drops the eval that is suspended at an `await`. The outcome is that of an interrupt: the main frame
+    /// unwinds, the main locals are gone, the declarations stay and the VM takes the next eval.
+    /// The panic summary of the main thread names the `await` that was abandoned.
+    pub fn abandonEval(self: *VM) void {
+        if (!self.isSuspended()) {
+            return;
+        }
+        const t = self.main_thread;
+        _ = t.ret_panic("Abandoned while awaiting a future.");
+        t.handleInterrupt() catch {};
+        self.failExec(error.Interrupted);
+    }
+
     pub fn eval(self: *VM, src_uri: []const u8, src: ?[]const u8, config: C.EvalConfig) !C.EvalResult {
         var tt = cy.debug.timer();
+
+        if (self.isSuspended()) {
+            return error.Suspended;
+        }
 
         if (self.compiler.first_compile_failed or self.compiler.alloc_failed) {
             // Start over instead of compiling on top of the half-built first compile (F-04). Nothing from a failed
@@ -516,37 +609,10 @@ pub const VM = struct {
             defer tt.endPrintVerbose("eval");
 
             const val = self.exec_bytecode(res.vm) catch |err| {
-                self.markChunksInited();
-                if (config.persist_main) self.dropMainLocalSaves();
-                self.dropMainResult(false);
-                // The main thread unwound and freed its heap. Its stack goes back to the initial size as well.
-                if (err == error.Panic or err == error.Interrupted) self.main_thread.resetStack();
+                self.failExec(err);
                 return err;
             };
-            self.markChunksInited();
-            if (config.persist_main) {
-                self.copyMainLocalSaves() catch |err| {
-                    // The program ran, but its main locals cannot be carried over. The next eval starts over.
-                    self.compiler.alloc_failed = true;
-                    return err;
-                };
-            }
-            if (self.compiler.main_res) |*main_res| {
-                // Copied now, before another eval reuses the stack. The VM owns the copy until the next eval.
-                const stack = self.main_thread.c.stack();
-                main_res.value = self.alloc.dupe(cy.Value, stack[main_res.stack_off..main_res.stack_off + main_res.reg_size]) catch |err| {
-                    self.compiler.main_res = null;
-                    return err;
-                };
-                return .{
-                    .res = @ptrCast(main_res.value.ptr),
-                    .res_t = main_res.val_t.id(),
-                };
-            }
-            return .{
-                .res = @ptrCast(val),
-                .res_t = if (self.compiler.main_func) |main_func| main_func.sig.ret.id() else bt.Void,
-            };
+            return self.finishExec(val);
         } else {
             defer res.aot.deinit(self.alloc);
             if (cy.isFreestanding or cy.isWasm or !cy.hasCLI) {
@@ -1037,8 +1103,20 @@ fn zAwait(t: *cy.Thread, fut_value_bits: u64) callconv(.c) vmc.ResultCode {
         }
     } else {
         if (!future.completed) {
-            _ = t.ret_panic("Local future will never complete.");
-            return vmc.RES_PANIC;
+            // Nothing in this thread can complete the future while it waits. Only the host can, so the eval
+            // leaves the VM with `CL_AWAIT` and `cl_vm_resume` runs this `AWAIT` inst again.
+            const vm = t.c.vm;
+            if (t != vm.main_thread) {
+                _ = t.ret_panic("Cannot wait in a spawned thread for a future that the host or another context completes.");
+                return vmc.RES_PANIC;
+            }
+            if (t.c.host_depth != 0) {
+                // A host function called back into the VM. Its C frame can not be suspended.
+                _ = t.ret_panic("Cannot await across a host call.");
+                return vmc.RES_PANIC;
+            }
+            vm.compiler.await_future = future;
+            return vmc.RES_AWAIT;
         }
         // Continue if completed Future.
         return vmc.RES_SUCCESS;

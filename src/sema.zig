@@ -854,7 +854,9 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
                     .ret_opt_t = opt_t,
                     .end = false,
                 });
-                try popLocals2(c, var_start, false, node);
+                // Temporaries of the yield expression are alive while the generator is suspended here (the
+                // deinit block above destructs them when the generator is dropped). After the resume they end.
+                try popLocals2(c, var_start, true, node);
             } else {
                 return c.reportErrorFmt("TODO", &.{}, node);
             }

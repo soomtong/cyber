@@ -1549,6 +1549,8 @@ beginSwitch:
         t->c.fp = stack;
         ResultCode code = zAwait(t, future);
         if (code == RES_AWAIT) {
+            // The eval is suspended. A resume runs this inst again and finds the future completed.
+            pc -= 2;
             RETURN(RES_AWAIT);
         }
         if (UNLIKELY(code != RES_SUCCESS)) {

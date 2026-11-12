@@ -263,6 +263,7 @@ fn evalResultCode(err: anytype) C.ResultCode {
         error.Panic => C.ErrorPanic,
         error.Interrupted => C.ErrorInterrupt,
         error.Await => C.Await,
+        error.Suspended => C.ErrorSuspended,
         else => b: {
             log.tracev("{}", .{err});
             break :b C.ErrorUnknown;
@@ -274,6 +275,7 @@ fn evalResultCode(err: anytype) C.ResultCode {
 fn compileResultCode(err: anytype) C.ResultCode {
     return switch (err) {
         error.CompileError => C.ErrorCompile,
+        error.Suspended => C.ErrorSuspended,
         else => C.ErrorUnknown,
     };
 }
@@ -291,6 +293,95 @@ export fn cl_vm_evalx(vm: *cy.VM, uri: C.Bytes, src: C.Bytes, config: C.EvalConf
     };
     vm.last_res = res;
     return res;
+}
+
+export fn cl_vm_resume(vm: *cy.VM, out: *C.EvalResult) C.ResultCode {
+    var res = C.Success;
+    out.* = vm.resumeEval() catch |err| b: {
+        res = evalResultCode(err);
+        break :b undefined;
+    };
+    vm.last_res = res;
+    return res;
+}
+
+export fn cl_vm_abandon(vm: *cy.VM) void {
+    if (!vm.isSuspended()) return;
+    vm.abandonEval();
+    vm.last_res = C.ErrorInterrupt;
+}
+
+export fn cl_vm_pending_future(vm: *cy.VM) ?*cy.heap.FutureValue {
+    return vm.compiler.await_future;
+}
+
+export fn cl_future_new(t: *cy.Thread, future_t: *cy.Type) ?*cy.heap.FutureValue {
+    if (!future_t.isInstanceOf(t.c.vm.sema.future_tmpl)) return null;
+    // `Future[T]` is a struct with the single field `inner ^FutureValue[T]`.
+    const value_t = future_t.cast(.struct_t).fields()[0].type.cast(.pointer).child_t;
+    const size = value_t.size();
+    const obj = t.heap.new_object_undef(value_t.id(), size) catch return null;
+    // Zeroed: not completed, no shared state, and `data` is `none`.
+    @memset(@as([*]u8, @ptrCast(obj))[0..size], 0);
+    const future: *cy.heap.FutureValue = @ptrCast(@alignCast(obj));
+    future.cont_head = cy.NullId;
+    future.cont_tail = cy.NullId;
+    return future;
+}
+
+/// Where the `T` of a pending host future is written, or null if the future can not be completed by the host.
+const FutureSlot = struct {
+    type: *cy.Type,
+    ptr: [*]u8,
+    /// The tag of `data ?T`, or null when `none` is the zero value of `T`.
+    some_tag: ?*u64,
+};
+
+fn futureSlot(vm: *cy.VM, future: *cy.heap.FutureValue) ?FutureSlot {
+    if (future.completed or future.shared_state != null) return null;
+    const obj: *cy.HeapObject = @ptrCast(@alignCast(future));
+    const value_t = vm.sema.getType(obj.getTypeId());
+    if (value_t.kind() != .struct_t) return null;
+    // `FutureValue[T]`: cont_head, cont_tail, shared_state, completed, data ?T.
+    const fields = value_t.cast(.struct_t).fields();
+    if (fields.len != 5 or fields[4].type.kind() != .option) return null;
+    const option_t = fields[4].type.cast(.option);
+    const data: [*]u8 = @ptrCast(&future.data);
+    if (option_t.zero_union) {
+        return .{ .type = option_t.child_t, .ptr = data, .some_tag = null };
+    }
+    return .{ .type = option_t.child_t, .ptr = data + 8, .some_tag = @ptrCast(@alignCast(data)) };
+}
+
+export fn cl_future_complete(vm: *cy.VM, future: *cy.heap.FutureValue, value: ?*const anyopaque) bool {
+    const slot = futureSlot(vm, future) orelse return false;
+    var dst = slot.ptr;
+    var val_t = slot.type;
+    if (val_t.kind() == .result) {
+        // `Future[!U]` takes the `U`. The result's tag 1 is the value case.
+        @as(*u64, @ptrCast(@alignCast(dst))).* = 1;
+        dst += 8;
+        val_t = val_t.cast(.result).child_t;
+    }
+    const size = val_t.size();
+    if (size > 0) {
+        const src: [*]const u8 = @ptrCast(value orelse return false);
+        @memcpy(dst[0..size], src[0..size]);
+    }
+    if (slot.some_tag) |tag| tag.* = 1;
+    future.completed = true;
+    return true;
+}
+
+export fn cl_future_complete_error(vm: *cy.VM, future: *cy.heap.FutureValue, err: i64) bool {
+    const slot = futureSlot(vm, future) orelse return false;
+    if (slot.type.kind() != .result) return false;
+    // The result's tag 0 is the error case.
+    @as(*u64, @ptrCast(@alignCast(slot.ptr))).* = 0;
+    @as(*i64, @ptrCast(@alignCast(slot.ptr + 8))).* = err;
+    if (slot.some_tag) |tag| tag.* = 1;
+    future.completed = true;
+    return true;
 }
 
 export fn cl_vm_interrupt(vm: *cy.VM) void {
@@ -373,6 +464,8 @@ export fn clResultName(code: C.ResultCode) C.Bytes {
         C.ErrorPanic => return C.to_bytes("PanicError"),
         C.ErrorInterrupt => return C.to_bytes("InterruptError"),
         C.ErrorUnknown => return C.to_bytes("UnknownError"),
+        C.Await => return C.to_bytes("Await"),
+        C.ErrorSuspended => return C.to_bytes("SuspendedError"),
         else => fatal(),
     }
 }
@@ -586,12 +679,14 @@ export fn cl_mod_on_load(mod: *C.Sym, on_load: C.ModuleOnLoadFn) void {
     c.chunk.on_load = on_load;
 }
 
-export fn cl_thread_release(t: *cy.Thread, val: Value) void {
-    t.heap.release(val);
+// `CLValue` is a `uint64_t` in the header. An `extern union` passed by value has another ABI on wasm32, so the
+// exports take and return the 64-bit pattern.
+export fn cl_thread_release(t: *cy.Thread, val: u64) void {
+    t.heap.release(.{ .val = val });
 }
 
-export fn cl_thread_retain(t: *cy.Thread, val: Value) void {
-    t.heap.retain(val);
+export fn cl_thread_retain(t: *cy.Thread, val: u64) void {
+    t.heap.retain(.{ .val = val });
 }
 
 export fn cl_vm_user_data(vm: *cy.VM) ?*anyopaque {
@@ -622,16 +717,16 @@ export fn cl_str_bytes(s: cy.heap.Str) C.Bytes {
     return C.to_bytes(s.slice());
 }
 
-export fn cl_array_empty(t: *cy.Thread, array_t: *cy.Type) Value {
-    return t.heap.newEmptyArray(array_t.id()) catch fatal();
+export fn cl_array_empty(t: *cy.Thread, array_t: *cy.Type) u64 {
+    return (t.heap.newEmptyArray(array_t.id()) catch fatal()).val;
 }
 
-export fn cl_map_empty(t: *cy.Thread, map_t: *cy.Type) Value {
-    return t.heap.allocMapZero(map_t.id()) catch fatal();
+export fn cl_map_empty(t: *cy.Thread, map_t: *cy.Type) u64 {
+    return (t.heap.allocMapZero(map_t.id()) catch fatal()).val;
 }
 
-export fn cl_new_func_union(t: *cy.Thread, union_t: *cy.Type, func: C.HostFn) Value {
-    return t.heap.allocHostFuncUnion(union_t.id(), @ptrCast(func)) catch fatal();
+export fn cl_new_func_union(t: *cy.Thread, union_t: *cy.Type, func: C.HostFn) u64 {
+    return (t.heap.allocHostFuncUnion(union_t.id(), @ptrCast(func)) catch fatal()).val;
 }
 
 export fn cl_vm_ensure_func_sig(vm: *cy.VM, params: [*]const *cy.Type, nparams: usize, ret_t: *cy.Type) *cy.FuncSig {
@@ -658,12 +753,12 @@ export fn cl_mod_get_data(mod_: *C.Sym) ?*anyopaque {
     return chunk.user_data;
 }
 
-export fn cl_lift(t: *cy.Thread, type_: *cy.Type, value: *anyopaque) Value {
+export fn cl_lift(t: *cy.Thread, type_: *cy.Type, value: *anyopaque) u64 {
     const res = t.heap.new_object_undef(type_.id(), type_.size()) catch @panic("error");
     const dst: [*]u8 = @ptrCast(res);
     const src: [*]u8 = @ptrCast(value);
     @memcpy(dst[0..type_.size()], src[0..type_.size()]);
-    return Value.initPtr(res);
+    return Value.initPtr(res).val;
 }
 
 export fn cl_error(vm: *cy.VM, name: C.Bytes) u64 {
@@ -674,8 +769,8 @@ export fn cl_symbol(vm: *cy.VM, name: C.Bytes) u64 {
     return vm.sema.ensureSymbol(C.from_bytes(name)) catch @panic("error");
 }
 
-export fn cl_object_string(t: *cy.Thread, val: Value) C.Bytes {
-    const str = t.heap.get_or_buf_print_object(&cy.tempBuf, val) catch cy.fatal();
+export fn cl_object_string(t: *cy.Thread, val: u64) C.Bytes {
+    const str = t.heap.get_or_buf_print_object(&cy.tempBuf, .{ .val = val }) catch cy.fatal();
     return C.to_bytes(str);
 }
 
@@ -748,4 +843,5 @@ test {
     _ = @import("lib_test/runtime.zig");
     _ = @import("lib_test/alloc_fail.zig");
     _ = @import("lib_test/format.zig");
+    _ = @import("lib_test/await.zig");
 }

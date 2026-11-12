@@ -51,6 +51,10 @@ pub const Compiler = struct {
     /// Kept here rather than in `VM`, whose field layout `vm.h` mirrors with measured padding.
     main_res: ?cy.vm.MainResult = null,
 
+    /// The future that a suspended eval waits for (`CL_AWAIT`), or null when no eval is suspended.
+    /// The main stack and the bytecode stay as they are until `VM.resumeEval` or `VM.abandonEval`.
+    await_future: ?*cy.heap.FutureValue = null,
+
     reports: std.ArrayList(Report),
 
     /// Whether a compile error summary marks the reported source range with ANSI escape codes

@@ -777,7 +777,7 @@ fn zAwait(t: *cy.Thread, fut_value_bits: u64) callconv(.c) vmc.ResultCode {
 
 세 갈래다.
 
-1. 로컬 future(`shared_state == null`, `Future.complete(v)` 나 `FutureResolver`): 완료됐으면 즉시 성공, 아니면 `panic: Local future will never complete.`(`vm.zig:1029~1033`, 실습 5 의 fu2). 같은 스레드에서 아무도 완료시킬 수 없기 때문이다.
+1. 로컬 future(`shared_state == null`, `Future.complete(v)` 나 `FutureResolver`): 완료됐으면 즉시 성공, 아니면 `panic: Local future will never complete.`(`vm.zig:1029~1033`, 실습 5 의 fu2). 같은 스레드에서 아무도 완료시킬 수 없기 때문이다. (2026-11-12부터는 panic 대신 eval이 `CL_AWAIT`로 호스트에 돌아간다. CLI는 그 eval을 버리고 `panic: Abandoned while awaiting a future.`로 끝난다. `project_coroutines.md`의 "단계 1 구현" 절.)
 2. 공유 future 를 main 스레드가 await: 위 spin 루프. 이 루프는 스크립트 안의 역방향 점프나 CALL 이 아니라 호스트 코드 안이라 `CHECKPOINT()` 를 지나지 않는다. 그래서 `interrupt` 플래그를 루프 안에서 직접 읽는다(`project_vm_interrupt.md` 의 spawn 절).
 3. 공유 future 를 비-main 스레드가 await: 수정 전에는 `@panic("TODO")`. 이것은 Zig 의 `@panic` 이라 해당 스크립트 오류가 아니라 호스트 프로세스 abort 였다. 실습 5 의 t7.cy(스레드 안에서 `spawn(...).await()`)가 `exit=134` 로 확인했다.
 

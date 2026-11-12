@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.8-dev 826-5f050c5</div>
+    <div class="sub-title">v0.4.8-dev 827-9045308</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -3829,24 +3829,51 @@ fn fetch_all(log ^ArrayStore[str]) -> !void:
     -- Both fibers are done here.
 </code></pre>
 <p>The fibers of a scope do not outlive it. A block that is left before <code>join</code> (with <code>return</code>, or with an error from <code>!</code>) joins the fibers first, when the scope is destructed.</p>
-<p>The entry function of a scope's fiber returns <code>void</code> or <code>!void</code>. <code>join</code> returns the first error that a fiber returned. After an error, the fibers that were not started yet are dropped with their arguments released. The fibers that are already in progress run to their end. An error that is left when the scope is destructed without a <code>join</code> panics, like an error that <code>main</code> returns. A scope can be used inside a fiber of another scope, and it can start more fibers after a <code>join</code>.</p>
+<p>The entry function of a scope's fiber returns <code>void</code> or <code>!void</code>. <code>join</code> returns the first error that a fiber returned. After an error the other fibers are cancelled: a fiber in progress ends where it is suspended with its values destructed, and a fiber that was not started is dropped with its arguments released. A fiber that can not be cancelled runs to its end. An error that is left when the scope is destructed without a <code>join</code> panics, like an error that <code>main</code> returns. A scope can be used inside a fiber of another scope, and it can start more fibers after a <code>join</code>.</p>
 <p>When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the <code>resume</code> call of each fiber down to the main block.</p>
 <p>A fiber can not resume itself or a fiber that is waiting for it:</p>
 <pre><code class="language-cy">--> panic: Fiber is already running.
 </code></pre>
-<p>A fiber that was never resumed can be destructed. Its function is not called and its arguments are released.</p>
-<p>When a fiber that was resumed is destructed, it will panic if it's still in progress, since only the fiber can release the values in its frames:</p>
-<pre><code class="language-cy">fn forever():
-    while true:
-        suspend
+<p><code>cancel</code> ends a fiber that is not done without running the rest of its function. Every call that the fiber is in returns at once, from the innermost one out, and the values that the calls own are destructed as at a <code>return</code>. No code of the fiber runs after the point where it was suspended, except the <code>@deinit</code> of those values:</p>
+<pre><code class="language-cy">type Conn:
+    id int
+
+fn (&Conn) @deinit():
+    print('closed %{self.id}')
+
+fn query(conn &Conn) -> int:
+    suspend                -- Waiting for the reply.
+    return 1
+
+fn session(id int):
+    conn := Conn{id = id}
+    print('rows: %{query(&conn)}')
+
+f := fiber session(7)
+_ = f.resume()
+print(f.cancel())          --> closed 7
+                           --> true
+print(f.status())          --> FiberStatus.done
+</code></pre>
+<p><code>cancel</code> returns whether the fiber is done afterwards. A fiber that was never resumed is ended without the call and its arguments are released. A fiber that is running is not cancelled, and neither is one that is suspended inside the body of a generator: <code>cancel</code> returns <code>false</code> and the fiber stays as it is.</p>
+<p>A fiber that is destructed while it is in progress is cancelled first, and so is every fiber that its frames hold. A fiber that can not be cancelled panics when it is destructed:</p>
+<pre><code class="language-cy">generator fn numbers() -> int:
+    yield 1
+    suspend
+    yield 2
+
+fn consume():
+    for numbers() |n|:
+        pass
 
 fn start():
-    f := fiber forever()
+    f := fiber consume()
     _ = f.resume()
 
 start()
 --> panic: Fiber is still in progress.
 </code></pre>
+<p>A value in the middle of an expression is destructed too when it is an operand of an operator, an argument, or an element of a literal (<code>use(Res{}, wait())</code>, <code>'a' + wait()</code>). In other positions such a value is not released when the fiber is cancelled inside a later part of the same expression.</p>
 <p>Each fiber starts with a stack of 512 bytes that grows on demand like the thread's stack. Fibers are not available when compiling AOT.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="growable-stacks">Growable stacks. <a href="#growable-stacks">#</a></h3>

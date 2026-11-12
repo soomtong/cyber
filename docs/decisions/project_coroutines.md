@@ -237,7 +237,7 @@ Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator 
 
 검사.
 
-- sema(`semaFiberExpr`): 진입점이 식별자일 때 시그니처를 먼저 보고 generator · 비-void 반환 · 빌림 매개변수를 `fiber` 식의
+- sema(`semaFiberExpr`): 진입점이 식별자이거나 경로(`T.method` · `mod.func`, 2026-11-12부터)일 때 시그니처를 먼저 보고 generator · 비-void 반환 · 빌림 매개변수를 `fiber` 식의
   위치에서 보고한다. 그 밖의 꼴은 `@new_fiber` 안의 `meta.error`가 잡는다(위치가 core.cy가 된다).
 - 파서: `suspend` 뒤에 값이 오면 오류, `fiber` 뒤가 호출이 아니면 오류, 이름 있는 인자 오류.
 

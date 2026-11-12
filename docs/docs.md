@@ -3223,6 +3223,7 @@ _ = f.resume()
 print(job.n)               --> 2
 g := fiber job.work(2)     --> CompileError: A fiber entry cannot be a method call on a value. Pass the receiver as the first argument: `fiber T.work(obj)`.
 ```
+The receiver follows the rules of a parameter, so a method with a `&T` receiver can not be a fiber entry.
 
 A generator can be consumed inside a fiber, and `suspend` in a generator body suspends the fiber that consumes the generator. The generator stays `.running` until that fiber is resumed.
 

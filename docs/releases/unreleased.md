@@ -6,6 +6,10 @@
 
 ## 버그 수정
 
+- `fiber Job.peek(&job)`처럼 타입 경로로 댄 진입점은 빌림 매개변수 검사를 건너뛰었다. `&T` 수신자 메서드가
+  fiber에 스택 빌림을 넘길 수 있었다. 이제 이름 하나로 댄 진입점과 같이
+  `Cannot borrow a stack value across fibers.` 컴파일 오류다. generator · 비-void 반환 검사도 같이 적용된다.
+
 ## 언어와 표준 라이브러리
 
 - 한 번도 `resume`하지 않은 fiber를 소멸할 수 있다. 진입 함수는 불리지 않고 인자만 해제된다. 이전에는

@@ -8258,8 +8258,24 @@ fn semaFiberExpr(c: *cy.Chunk, node: *ast.Node) !ExprResult {
     }
     const call = child.cast(.callExpr);
 
+    if (call.callee.type() == .accessExpr) {
+        // `fiber obj.work()` has no place for the receiver. Name the method through its type instead.
+        const access = call.callee.cast(.accessExpr);
+        if (access.left.type() == .ident) {
+            const left = try c.semaExprSkipSym(access.left, .{});
+            if (left.resType != .sym) {
+                if (try c.accessResolvedSym(left.type, access.right.as_name(), access.right)) |sym| {
+                    if (sym.type == .func) {
+                        return c.reportErrorFmt("A fiber entry cannot be a method call on a value. Pass the receiver as the first argument: `fiber T.{}(obj)`.", &.{v(sym.name())}, node);
+                    }
+                }
+            }
+        }
+    }
+
     // Report the role and lifetime rules at the `fiber` expression instead of inside `@new_fiber`.
-    if (call.callee.type() == .ident) {
+    // A path (`T.method`, `mod.func`) is checked too: a `&T` receiver is a borrow like any parameter.
+    if (call.callee.type() == .ident or call.callee.type() == .accessExpr) {
         const callee_res = try c.semaExpr(call.callee, .{});
         const opt_sig: ?*cy.FuncSig = switch (callee_res.type.kind()) {
             .func_ptr => callee_res.type.cast(.func_ptr).sig,
@@ -8280,21 +8296,6 @@ fn semaFiberExpr(c: *cy.Chunk, node: *ast.Node) !ExprResult {
                     const type_name = try c.sema.allocTypeName(param_t);
                     defer c.alloc.free(type_name);
                     return c.reportErrorFmt("Cannot borrow a stack value across fibers. The parameter type is `{}`. Use `^T`.", &.{v(type_name)}, node);
-                }
-            }
-        }
-    }
-
-    if (call.callee.type() == .accessExpr) {
-        // `fiber obj.work()` has no place for the receiver. Name the method through its type instead.
-        const access = call.callee.cast(.accessExpr);
-        if (access.left.type() == .ident) {
-            const left = try c.semaExprSkipSym(access.left, .{});
-            if (left.resType != .sym) {
-                if (try c.accessResolvedSym(left.type, access.right.as_name(), access.right)) |sym| {
-                    if (sym.type == .func) {
-                        return c.reportErrorFmt("A fiber entry cannot be a method call on a value. Pass the receiver as the first argument: `fiber T.{}(obj)`.", &.{v(sym.name())}, node);
-                    }
                 }
             }
         }

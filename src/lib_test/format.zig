@@ -44,18 +44,24 @@ test "fmt: spacing between tokens." {
     );
 }
 
-test "fmt: `=` inside brackets is kept as written." {
+test "fmt: `=` of a literal field has a space on each side, `=` of an attribute is kept as written." {
     try eqFormat(
-        \\a := Vec2{x=1, y = 2}
+        \\a := Vec2{x = 1, y = 2}
+        \\b := foo({x = a.x * 2, inner = Vec2{x = 1, y = 2}}, [2]int{1, 2})
         \\foo(1, name: 2)
         \\#[extern='puts']
         \\fn puts(s Ptr[byte]) -> int
+        \\#[cond = type.is_copyable(T)]
+        \\fn copy(a T) -> T
         \\
     ,
-        \\a := Vec2{x=1,y = 2}
+        \\a := Vec2{x=1,y  =  2}
+        \\b := foo({x=a.x*2, inner= Vec2{x =1, y=2}}, [2]int{1, 2})
         \\foo(1,name:2)
         \\#[extern='puts']
         \\fn puts(s Ptr[byte])->int
+        \\#[cond = type.is_copyable( T )]
+        \\fn copy(a T) -> T
         \\
     );
 }

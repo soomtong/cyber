@@ -4691,7 +4691,7 @@ for nouns |n|:
 * Blocks are indented by 4 spaces. Tabs and other widths are converted.
 * A line inside open brackets is indented 4 spaces from the line that opened the bracket. A line that starts with the closing bracket lines up with it. Other continuation lines, such as the right side of an operator, keep their indentation relative to the statement.
 * Binary operators, `:=`, `->`, `=>` and assignments have one space on each side. Unary operators have none after them. An operator inside a range bound is kept as written: `a[i..i+n]`.
-* `=` inside brackets is kept as written: `Vec2{x=1}`, `Vec2{x = 1}` and `#[extern='puts']` all stay.
+* `=` of a literal field has one space on each side like an assignment: `Vec2{x=1}` becomes `Vec2{x = 1}`. `=` inside an attribute is kept as written: `#[extern='puts']` stays.
 * There is no space inside brackets, none before `,` and `:`, and one after them.
 * Any other run of spaces becomes one space, so columns that were aligned by hand are not kept. The gap before a trailing comment is kept.
 * Trailing whitespace is removed, several blank lines become one, and the file ends with one new line.

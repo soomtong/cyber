@@ -402,6 +402,8 @@ const Atom = struct {
     mark: Mark = .none,
     /// Inside brackets that were opened by the statement this atom belongs to.
     in_brackets: bool = false,
+    /// Inside the brackets of an attribute (`#[...]`). `=` is kept as written there.
+    in_attr: bool = false,
 };
 
 const Mark = enum(u8) {
@@ -814,6 +816,8 @@ const Formatter = struct {
         line: u32,
         /// First line of the statement that the bracket belongs to.
         stmt: u32,
+        /// `#[`, or a bracket inside one.
+        attr: bool,
     };
 
     fn resolveIndents(self: *Formatter) !void {
@@ -878,14 +882,16 @@ const Formatter = struct {
 
             // Track the brackets on this line.
             const end = if (i + 1 < lines.len) lines[i + 1].head else atoms.len;
-            for (atoms[line.head..end]) |*atom| {
+            for (atoms[line.head..end], line.head..) |*atom, atom_i| {
                 if (atom.is_comment) {
                     continue;
                 }
                 const num_open = open.items.len;
                 atom.in_brackets = num_open > 0 and open.items[num_open - 1].stmt == stmt;
+                atom.in_attr = atom.in_brackets and open.items[num_open - 1].attr;
                 if (isOpen(atom.tag)) {
-                    try open.append(self.alloc, .{ .line = @intCast(i), .stmt = stmt });
+                    const after_pound = atom_i > line.head and atoms[atom_i - 1].tag == .pound and atom.gap == 0;
+                    try open.append(self.alloc, .{ .line = @intCast(i), .stmt = stmt, .attr = after_pound or atom.in_attr });
                 } else if (isClose(atom.tag) and atom.in_brackets) {
                     _ = open.pop();
                 }
@@ -1036,9 +1042,10 @@ const Formatter = struct {
             want = 0;
         } else if (isSpacedOp(a.tag) or isSpacedOp(b.tag)) {
             want = 1;
-        } else if (a.tag == .equal and !a.in_brackets) {
+        } else if (a.tag == .equal and !a.in_attr) {
+            // A field of a literal like an assignment. Only an attribute keeps its `=` as written.
             want = 1;
-        } else if (b.tag == .equal and !b.in_brackets) {
+        } else if (b.tag == .equal and !b.in_attr) {
             want = 1;
         }
 

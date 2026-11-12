@@ -110,6 +110,9 @@ type Token:
     -- Inside brackets that were opened by the statement this token belongs to.
     in_brackets bool = false
 
+    -- Inside the brackets of an attribute (`#[...]`). `=` is kept as written there.
+    in_attr bool = false
+
 type Line:
     -- Index of the first token.
     head int
@@ -522,6 +525,9 @@ fn (&Formatter) indent():
     -- The line of each open bracket.
     open := []int{}
 
+    -- Whether each open bracket is `#[` or is inside one.
+    open_attr := []bool{}
+
     -- The line that starts the current statement and the number of open brackets in front of it.
     stmt := 0
     base := 0
@@ -602,11 +608,17 @@ fn (&Formatter) indent():
             t := self.tokens[j]
             if t.kind == .comment:
                 continue
-            self.tokens[j].in_brackets = open.len() > base
+            in_brackets := open.len() > base
+            in_attr := in_brackets and open_attr.last()
+            self.tokens[j].in_brackets = in_brackets
+            self.tokens[j].in_attr = in_attr
             if t.kind == .open:
+                after_pound := j > line.head and self.tokens[j - 1].text == '#' and t.gap == 0
                 open += i
+                open_attr += after_pound or in_attr
             else t.kind == .close and open.len() > 0:
                 open = open.size_down(open.len() - 1)
+                open_attr = open_attr.size_down(open_attr.len() - 1)
 
                 -- The bracket also ends the blocks inside it.
                 while blocks.len() > 0 and blocks.last().depth > open.len():
@@ -728,7 +740,8 @@ fn (&Formatter) spacing(i int) -> int:
         want = 0
     else is_spaced_op(a) or is_spaced_op(b):
         want = 1
-    else (a.text == '=' and !a.in_brackets) or (b.text == '=' and !b.in_brackets):
+    else (a.text == '=' and !a.in_attr) or (b.text == '=' and !b.in_attr):
+        -- A field of a literal like an assignment. Only an attribute keeps its `=` as written.
         want = 1
 
     if want == 0 and keep == 1 and !can_join(a, b):

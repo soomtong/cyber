@@ -1,6 +1,6 @@
 # LSP 서버 설계와 단계 계획
 
-2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 · P1 구현(2026-11-12, 아래 "P0 구현" · "P1 구현" 절). P2 이후는 미구현.
+2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 · P1 · P2의 sema 복구 구현(2026-11-12, 아래 "P0 구현" · "P1 구현" · "P2 구현" 절). 파서 복구와 P3 이후는 미구현.
 앞선 결정은 `docs/decisions/project_fmt.md`의 "내장 도구의 기준"(LSP는 CLI에 넣지 않고 라이브러리 위의 별도 프로그램),
 사실 근거는 `docs/study/01-pipeline-front-end.md` 6절과 `docs/decisions/project_compile_error_report.md`이다.
 
@@ -167,8 +167,49 @@ LSP의 `Diagnostic`은 `range`(시작 · 끝), `message`, `relatedInformation`(�
 - Windows에서의 실행 확인. 경로 구분자 변환은 넣었지만 돌려 보지 않았다.
 - 릴리스 번들 · `install.sh`에 `cyber-lsp` 넣기.
 
-## 7. P2로 가기 전에
+## 7. P2 구현: sema 복구 (2026-11-12)
 
-- F-112는 고쳤다(2026-11-12).
-- 오류 복구의 순서: 파서의 블록 단위 동기화(파싱 오류 여러 개) → sema의 함수 단위 계속 진행. `cl_vm_compile_report_count`가
-  1을 넘기 시작하고 서버는 고칠 것이 없다.
+`cl_vm_set_error_recovery(vm, true)`를 켜면 컴파일러가 오류 뒤에도 안전한 곳에서 계속한다. 기본은 꺼짐이고 `cyber` CLI의
+동작은 그대로다. `cyber-lsp`는 켠다.
+
+규칙: 본문 하나에 오류 하나.
+
+- 본문은 main 블록, 함수, 메서드, 함수 템플릿의 인스턴스(인스턴스마다 따로)다. 람다는 자기를 둘러싼 본문에 속한다.
+- 본문은 첫 오류에서 버리고 다음 본문으로 간다. 본문 안에서 문장 단위로 잇지 않는다. 실패한 `x := …` 뒤의 `x`가
+  `Undeclared variable`로 줄줄이 따라 나오는 일을 만들지 않기 위해서다. 함수는 main의 지역을 못 보므로 본문 사이에는 그런 연쇄가 없다.
+- 구문 오류와 선언의 오류(타입, 시그니처, 전역 초기화)는 지금처럼 컴파일을 끝낸다. 본문 밖에서는 반쯤 해석된 심볼을 되돌릴 방법이 없다.
+- 결과 코드는 그대로 `CL_ERROR_COMPILE`이고 아무것도 실행하지 않는다. 본문 sema가 끝난 뒤 리포트가 하나라도 있으면 거기서
+  끝낸다(트레이트 구현 검사, 코드 생성으로 가지 않는다). 리포트 순서는 main 블록, 그다음 청크의 함수 순서. 상한은 100개.
+
+구현:
+
+- `sema.StackMark`: sema가 본문 하나를 보는 동안 청크에 쌓는 것들의 깊이(proc · block · 지역 · resolve context · 값/타입 스택 ·
+  IR 블록 등 스무 개 남짓)를 기록하고 `restore`로 되돌린다. proc과 resolve context는 자기 `deinit`을 거쳐 내린다.
+  템플릿은 선언한 청크에서 해석되므로 본문 하나를 보기 전에 모든 청크의 mark를 뜬다(`compiler.RecoverMarks`).
+- `compiler.semaChunkFuncsRecover`: 함수 루프에서 실패한 본문을 `recoverBody`로 되돌리고 `emitted`로 표시해 다시 보지 않는다.
+  `OutOfMemory`와 할당 실패는 복구하지 않는다.
+- 실패한 템플릿 인스턴스: 인스턴스는 순환 참조 때문에 해석 전에 캐시에 들어간다. 해석이 실패하면 반쯤 만들어진 심볼이
+  캐시에 남고, 다음 본문이 같은 인스턴스를 물으면 그것을 받았다(`Foo[int]`를 두 함수가 쓰면 둘째가 `error.OutOfMemory`).
+  `Instance.failed`를 세우고, 다시 물으면 그 본문을 새 리포트 없이 버린다(오류는 실패한 자리에 이미 있다).
+  시그니처가 해석되지 않은 함수 템플릿 인스턴스는 본문 검사에서 건너뛴다(`func.isResolved()`).
+- IR은 되돌리지 않는다. 오류가 있는 컴파일은 코드를 만들지 않고, 버린 본문의 IR은 청크 arena의 것이다.
+
+확인:
+
+- lib 테스트 `With error recovery every body reports its first error.` · `With error recovery a template that failed to expand is reported once.`,
+  서버 테스트 `Every body with an error gets a diagnostic.`
+- 저장소의 `.cy` 469개(`src/test` · `examples` · `docs` · `src/tools`, 오류 기대 테스트 215개 포함)를 Debug 서버에 넣어 죽거나
+  멈추는 것이 없음을 봤다. 처음에는 하나가 죽었다(`types/trait_func_type_arg_error.cy`, 위의 해석 안 된 인스턴스).
+- 통과하는 스크립트에 오류를 여러 줄 심은 변형 202개(없는 변수 · 없는 필드 · 잘못된 호출)도 같다. 128개가 진단을 둘 이상 냈다.
+- 메모리: 오류가 있는 문서를 300번 검사해 RSS가 약 250kB 늘었다. 오류가 없는 문서도 같은 만큼 는다. 복구가 아니라 검사(컴파일 ·
+  리셋)마다 약 0.9kB가 새는 것이다(F-114, 미해결).
+
+남은 위험: 복구는 "본문 sema가 실패해도 전역 상태(심볼 · 타입 · 템플릿 캐시)는 쓸 수 있다"는 가정에 선다. 깨지는 곳을 둘 찾아
+고쳤고 더 있을 수 있다. 깨지면 서버 프로세스가 죽고 클라이언트가 다시 띄운다. CLI는 복구를 켜지 않으므로 영향이 없다.
+
+## 8. 다음
+
+- 파서 복구(P2의 나머지): 들여쓰기 기준 블록 동기화로 구문 오류를 여러 개 낸다. 구문 오류가 있으면 sema는 돌지 않는다.
+  편집 중에는 구문 오류가 대개 커서 자리 하나라 sema 복구보다 얻는 것이 작다.
+- P3: 해석 기록(hover · definition). 6절에 적은 대로 C API로 내는 쪽을 먼저 본다.
+- F-114: 검사마다 새는 메모리.

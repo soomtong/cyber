@@ -11,7 +11,7 @@ With the language server running:
 * Format Document, the same result as `cyber fmt`.
 * Outline (types with their fields, functions, methods, constants, globals) and folding by indentation.
 
-The compiler stops at its first error, so a document shows one error at a time.
+The main block and each function show their first error. A syntax error is shown alone until it is fixed.
 
 ## Requirements
 

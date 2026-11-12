@@ -296,6 +296,48 @@ test "A document that the compiler used to abort on is a diagnostic." {
     try t.expectEqual(@as(usize, 0), items(out[0], &.{ "params", "diagnostics" }).len);
 }
 
+test "Every body with an error gets a diagnostic." {
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+
+    try s.open(main_uri, 1,
+        \\fn a() -> int:
+        \\    return nope1
+        \\
+        \\fn b() -> int:
+        \\    return nope2
+        \\
+        \\print(a() + nope3)
+        \\
+    );
+    var out = try s.flush();
+    try t.expectEqual(@as(usize, 1), out.len);
+    const diags = items(out[0], &.{ "params", "diagnostics" });
+    try t.expectEqual(@as(usize, 3), diags.len);
+    try t.expectEqualStrings("Undeclared variable `nope3`.", str(diags[0], &.{"message"}));
+    try expectRange(get(diags[0], &.{"range"}).?, 6, 12, 6, 17);
+    try t.expectEqualStrings("Undeclared variable `nope1`.", str(diags[1], &.{"message"}));
+    try expectRange(get(diags[1], &.{"range"}).?, 1, 11, 1, 16);
+    try t.expectEqualStrings("Undeclared variable `nope2`.", str(diags[2], &.{"message"}));
+    try expectRange(get(diags[2], &.{"range"}).?, 4, 11, 4, 16);
+
+    // Fixing one of them leaves the others.
+    try s.change(main_uri, 2,
+        \\fn a() -> int:
+        \\    return 1
+        \\
+        \\fn b() -> int:
+        \\    return nope2
+        \\
+        \\print(a())
+        \\
+    );
+    out = try s.flush();
+    try t.expectEqual(@as(usize, 1), items(out[0], &.{ "params", "diagnostics" }).len);
+}
+
 test "Positions are bytes for a client that offers utf-8." {
     var s: Session = undefined;
     try s.init();

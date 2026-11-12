@@ -5311,6 +5311,113 @@ pub fn popProc2(self: *cy.Chunk, destruct_locals: bool) !cy.ir.StmtBlock {
     return stmtBlock;
 }
 
+/// The depth of everything that sema stacks up in a chunk while it checks one body. With error recovery
+/// (`Compiler.recover`) a body that fails is abandoned where the error was reported: `restore` drops what
+/// it left behind and the compiler goes on with the next body.
+/// Nothing is generated from a compile that reported an error, so the IR of the abandoned body is only dropped
+/// from the list of blocks. Its memory belongs to the arena of the chunk.
+pub const StackMark = struct {
+    procs: usize,
+    blocks: usize,
+    vars: usize,
+    var_shadows: usize,
+    active_fields: usize,
+    types: usize,
+    values: usize,
+    exprs: usize,
+    func_params: usize,
+    func_template_params: usize,
+    list_data: usize,
+    block_jumps: usize,
+    seq_entries: usize,
+    scope_start_borrows: usize,
+    scope_blocks: usize,
+    scope_borrows: usize,
+    resolve_contexts: usize,
+    ir_stmt_blocks: usize,
+    ir_func_blocks: usize,
+    ir_seq_pending: usize,
+    cur_cont_expr: ?*ast.LambdaContExpr,
+    scope_start_call: ?*ast.Node,
+    scope_start_lit: ?*ast.Node,
+    resolving_ct_stmts: bool,
+
+    pub fn take(c: *cy.Chunk) StackMark {
+        return .{
+            .procs = c.semaProcs.items.len,
+            .blocks = c.semaBlocks.items.len,
+            .vars = c.varStack.items.len,
+            .var_shadows = c.varShadowStack.items.len,
+            .active_fields = c.active_field_stack.items.len,
+            .types = c.typeStack.items.len,
+            .values = c.valueStack.items.len,
+            .exprs = c.expr_stack.items.len,
+            .func_params = c.func_param_stack.items.len,
+            .func_template_params = c.func_template_param_stack.items.len,
+            .list_data = c.listDataStack.items.len,
+            .block_jumps = c.blockJumpStack.items.len,
+            .seq_entries = c.seq_pending.items.len,
+            .scope_start_borrows = c.scope_start_borrows.items.len,
+            .scope_blocks = c.scope_blocks.items.len,
+            .scope_borrows = c.scope_borrows.items.len,
+            .resolve_contexts = c.resolve_stack.items.len,
+            .ir_stmt_blocks = c.ir.stmtBlockStack.items.len,
+            .ir_func_blocks = c.ir.func_blocks.items.len,
+            .ir_seq_pending = c.ir.seq_pending,
+            .cur_cont_expr = c.cur_cont_expr,
+            .scope_start_call = c.scope_start_call,
+            .scope_start_lit = c.scope_start_lit,
+            .resolving_ct_stmts = c.resolving_ct_stmts,
+        };
+    }
+
+    /// A stack that is not deeper than the mark is left alone. Nothing here can fail.
+    pub fn restore(self: StackMark, c: *cy.Chunk) void {
+        while (c.resolve_stack.items.len > self.resolve_contexts) {
+            popResolveContext(c);
+        }
+        while (c.semaProcs.items.len > self.procs) {
+            c.semaProcs.items[c.semaProcs.items.len - 1].deinit(c.alloc);
+            c.semaProcs.items.len -= 1;
+        }
+        if (c.semaProcs.items.len > 0) {
+            c.cur_sema_proc = &c.semaProcs.items[c.semaProcs.items.len - 1];
+        }
+        truncate(&c.semaBlocks, self.blocks);
+        truncate(&c.varStack, self.vars);
+        truncate(&c.varShadowStack, self.var_shadows);
+        truncate(&c.active_field_stack, self.active_fields);
+        truncate(&c.typeStack, self.types);
+        truncate(&c.valueStack, self.values);
+        truncate(&c.expr_stack, self.exprs);
+        truncate(&c.func_param_stack, self.func_params);
+        truncate(&c.func_template_param_stack, self.func_template_params);
+        truncate(&c.listDataStack, self.list_data);
+        truncate(&c.blockJumpStack, self.block_jumps);
+        truncate(&c.seq_pending, self.seq_entries);
+        truncate(&c.scope_start_borrows, self.scope_start_borrows);
+        truncate(&c.scope_blocks, self.scope_blocks);
+        truncate(&c.scope_borrows, self.scope_borrows);
+        truncate(&c.ir.stmtBlockStack, self.ir_stmt_blocks);
+        truncate(&c.ir.func_blocks, self.ir_func_blocks);
+        c.ir.seq_pending = @min(c.ir.seq_pending, self.ir_seq_pending);
+        c.seq_flushing = false;
+        c.cur_cont_expr = self.cur_cont_expr;
+        c.scope_start_call = self.scope_start_call;
+        c.scope_start_lit = self.scope_start_lit;
+        c.resolving_ct_stmts = self.resolving_ct_stmts;
+        // A cancel pad is built inside one body and never across two.
+        c.cancel_pad_building = false;
+        c.cancel_pad_var_end = null;
+        c.cancel_replay = false;
+        c.cancel_replay_last = false;
+    }
+
+    fn truncate(list: anytype, len: usize) void {
+        if (list.items.len > len) list.items.len = len;
+    }
+};
+
 pub fn pushLambdaProc(c: *cy.Chunk, func: *cy.Func) !ProcId {
     return pushFuncProc(c, func);
 }

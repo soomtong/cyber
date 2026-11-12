@@ -544,6 +544,10 @@ export fn cl_vm_set_error_color(vm: *cy.VM, enabled: bool) void {
     vm.compiler.report_color = enabled;
 }
 
+export fn cl_vm_set_error_recovery(vm: *cy.VM, enabled: bool) void {
+    vm.compiler.recover = enabled;
+}
+
 export fn cl_vm_compile_error(vm: *cy.VM, out: *C.CompileError) bool {
     out.* = std.mem.zeroes(C.CompileError);
     // `last_res` rather than the report list alone: the list is only cleared when the next compile starts.

@@ -18,12 +18,18 @@
 
 ## 임베딩 API
 
+- `cl_vm_set_error_recovery(vm, true)`를 켜면 컴파일러가 오류 뒤에도 계속해 여러 오류를 낸다(기본은 꺼짐, `cl_vm_reset`을 넘어 유지).
+  본문(main 블록 · 함수 · 메서드 · 함수 템플릿 인스턴스) 하나가 첫 오류에서 버려지고 나머지 본문은 검사된다. 본문당 오류는 하나다.
+  구문 오류와 선언(타입 · 시그니처 · 전역)의 오류는 지금처럼 컴파일을 끝낸다. 결과는 그대로 `CL_ERROR_COMPILE`이고 아무것도
+  실행하지 않는다. 요약 문자열과 `cl_vm_compile_error`는 첫 오류를, `cl_vm_compile_report_count` · `cl_vm_compile_report`는 전부를 준다.
+  실패한 템플릿 인스턴스를 다른 본문이 다시 쓰면 그 본문은 새 오류 없이 건너뛴다. 설계는 `docs/specs/2026-11-12-lsp-design.md` 7절.
+
 - `cl_vm_compile_report_count(vm)` · `cl_vm_compile_report(vm, idx, &rep)` · `cl_vm_compile_report_note(vm, idx, note_idx, &rep)`가
   컴파일 오류의 전체 범위와 딸린 위치를 `CLReport`로 준다. `cl_vm_compile_error`는 시작 위치와 첫 줄 안의 길이만 줬고
   `First declared at:` · 템플릿 확장 호출 지점은 요약 문자열에만 있었다. `CLReport`는 `line` · `col` ~ `end_line` · `end_col`
   (0부터, 열은 바이트, 끝은 범위 밖)과 같은 범위의 바이트 오프셋 `pos` · `end_pos`를 가진다. 여러 줄에 걸친 노드는 끝 줄까지 간다.
   토큰 · 파싱 오류는 그 자리의 코드포인트 하나(줄 끝 · 소스 끝이면 빈 범위)다. 딸린 위치의 `kind`는 `CL_REPORT_NOTE`이고
-  템플릿 확장 호출 지점은 `msg`가 비어 있다. 컴파일러가 첫 오류에서 멈추므로 개수는 아직 0 또는 1이다.
+  템플릿 확장 호출 지점은 `msg`가 비어 있다. 오류 복구를 켜지 않으면 개수는 0 또는 1이다.
   `cl_vm_compile_error` · `CLCompileError`는 그대로다. LSP 서버 계획의 P0다(`docs/specs/2026-11-12-lsp-design.md`).
 
 ## 변경
@@ -32,7 +38,7 @@
   Language Server Protocol을 말한다. 문서를 실행 없이 프로그램으로 컴파일해 컴파일 오류를 진단으로 내고(`First declared at:` ·
   템플릿 확장 호출 지점은 관련 정보), `cyber fmt`와 같은 결과의 문서 포맷, 개요(타입 · 필드 · 함수 · 메서드 · 상수 · 전역),
   들여쓰기 기준 접기를 준다. 편집기에 열린 모듈은 디스크가 아니라 편집기의 내용으로 읽는다. 위치는 클라이언트가 `utf-8`을
-  받으면 바이트, 아니면 UTF-16이다. 컴파일러가 첫 오류에서 멈추므로 진단은 문서당 하나다. 검사 한 번은 ReleaseFast에서 약 5ms다.
+  받으면 바이트, 아니면 UTF-16이다. 오류 복구를 켜서 본문(main 블록 · 함수 · 메서드)마다 첫 오류를 진단으로 낸다. 검사 한 번은 ReleaseFast에서 약 5ms다.
   설계와 단계는 `docs/specs/2026-11-12-lsp-design.md`(P1). 릴리스 번들에는 아직 넣지 않는다.
 - `exts/vscode`가 `cyber-lsp`의 클라이언트가 됐다(`vscode-languageclient`, 설정 `cyber.lsp.enabled` · `cyber.lsp.path`, 명령
   `Cyber: Restart Language Server`). TextMate 문법의 키워드를 지금 문법으로 바꿨다(`fn` · `use` · `fiber` · `suspend` · `scope` 등).

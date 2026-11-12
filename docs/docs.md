@@ -4545,7 +4545,8 @@ for (size_t i = 0; i < count; i += 1) {
     }
 }
 ```
-A range can end on a later line than it starts. A token or parse error reports a position: its range is the code point there, or empty at the end of a line. The count is 0 or 1 while the compiler stops at its first error.
+A range can end on a later line than it starts. A token or parse error reports a position: its range is the code point there, or empty at the end of a line. 
+By default the compiler stops at its first error and the count is 0 or 1. `cl_vm_set_error_recovery(vm, true)` lets it go on: the main block, each function and each method is abandoned at its first error and the others are still checked, so every body reports at most one error. A syntax error or an error in a declaration (a type, a signature, a global) still ends the compile. The result is `CL_ERROR_COMPILE` either way and nothing is run. The summary and `cl_vm_compile_error` describe the first error.
 
 ### Checking a script without running it.
 `cl_vm_validate` compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (`persist_main`) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (`use math`) is initialized by the next eval that runs.

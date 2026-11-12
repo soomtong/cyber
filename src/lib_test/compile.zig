@@ -832,6 +832,158 @@ test "A compile-time call with a string argument does not end the host." {
     try zt.eqStr("Could not find the symbol `nope`.", C.from_bytes(err.msg));
 }
 
+test "With error recovery every body reports its first error." {
+    // docs/specs/2026-11-12-lsp-design.md, P2.
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    var rep: C.Report = undefined;
+    var err: C.CompileError = undefined;
+
+    const src =
+        \\fn a() -> int:
+        \\    return nope1
+        \\
+        \\fn b() -> int:
+        \\    x := 1
+        \\    if x == 1:
+        \\        return nope2
+        \\    return nope2b
+        \\
+        \\type T:
+        \\    v int
+        \\
+        \\fn (&T) m() -> int:
+        \\    f := fn(y int) -> int:
+        \\        return y + self.zz
+        \\    return f(1)
+        \\
+        \\fn ok() -> int:
+        \\    return 1
+        \\
+        \\print(a() + nope3)
+        \\print(nope4)
+    ;
+
+    // Off by default: the compile ends at the first error, which is in the main block.
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("Undeclared variable `nope3`.", C.from_bytes(rep.msg));
+
+    // On: the main block and each function report their first error. A body is given up at that error,
+    // so `nope4` and `nope2b` are not reported. The setting is kept across a reset.
+    C.vm_set_error_recovery(vm, true);
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
+    try zt.eq(@as(usize, 4), C.vm_compile_report_count(vm));
+    const expected = [_]struct { line: u32, msg: []const u8 }{
+        .{ .line = 20, .msg = "Undeclared variable `nope3`." },
+        .{ .line = 1, .msg = "Undeclared variable `nope1`." },
+        .{ .line = 6, .msg = "Undeclared variable `nope2`." },
+        .{ .line = 14, .msg = "Field `zz` does not exist in `T`." },
+    };
+    for (expected, 0..) |exp, i| {
+        try zt.expect(C.vm_compile_report(vm, i, &rep));
+        try zt.eq(C.ReportCompileError, rep.kind);
+        try zt.eq(exp.line, rep.line);
+        try zt.eqStr(exp.msg, C.from_bytes(rep.msg));
+    }
+    try zt.expect(!C.vm_compile_report(vm, 4, &rep));
+    // The summary and `cl_vm_compile_error` describe the first one.
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eqStr("Undeclared variable `nope3`.", C.from_bytes(err.msg));
+
+    // Nothing ran, and the next compile starts clean.
+    try zt.eq(C.Success, C.vm_eval(vm, "fn main() -> int:\n    return 7", &res));
+    try zt.eq(@as(i64, 7), @as(*i64, @ptrCast(@alignCast(res.res))).*);
+    try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
+
+    // `cl_vm_validate` recovers the same way.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "fn a() -> int:\n    return nope1\nfn b() -> int:\n    return nope2"));
+    try zt.eq(@as(usize, 2), C.vm_compile_report_count(vm));
+
+    // A syntax error and an error in a declaration still end the compile.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "fn a() -> int:\n    return nope1\nfn b( -> int:\n    return nope2", &res));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(C.ReportParseError, rep.kind);
+
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "fn a(x Nope) -> int:\n    return 1\nfn b() -> int:\n    return nope2", &res));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+}
+
+test "With error recovery a template that failed to expand is reported once." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_error_recovery(vm, true);
+
+    var res: C.EvalResult = undefined;
+    var rep: C.Report = undefined;
+
+    // `Foo[int]` fails in `a`. `b` asks for the same instance: it is given up without a second report, and
+    // without using the instance that was left half resolved. `c` expands another instance, which has its own error.
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\type Foo[T Any]:
+        \\    a T.nope
+        \\
+        \\fn a():
+        \\    f := Foo[int]{a = 1}
+        \\
+        \\fn b():
+        \\    g := Foo[int]{a = 2}
+        \\
+        \\fn c():
+        \\    h := Foo[str]{a = 2}
+    , &res));
+    try zt.eq(@as(usize, 2), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("Can not find the symbol `nope` in `int`.", C.from_bytes(rep.msg));
+    try zt.expect(C.vm_compile_report_note(vm, 0, 0, &rep));
+    try zt.eq(@as(u32, 4), rep.line);
+    try zt.expect(C.vm_compile_report(vm, 1, &rep));
+    try zt.eqStr("Can not find the symbol `nope` in `str`.", C.from_bytes(rep.msg));
+    try zt.expect(C.vm_compile_report_note(vm, 1, 0, &rep));
+    try zt.eq(@as(u32, 10), rep.line);
+
+    // The body of a function template is a body of its own, per instance.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\fn id[T Any](x T) -> T:
+        \\    return x.nope
+        \\
+        \\fn a() -> int:
+        \\    return id[int](1)
+        \\
+        \\fn b() -> float:
+        \\    return id[float](1.0) + nope2
+    , &res));
+    try zt.eq(@as(usize, 3), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("Undeclared variable `nope2`.", C.from_bytes(rep.msg));
+    try zt.expect(C.vm_compile_report(vm, 1, &rep));
+    try zt.eqStr("Field `nope` does not exist in `int`.", C.from_bytes(rep.msg));
+    try zt.expect(C.vm_compile_report(vm, 2, &rep));
+    try zt.eqStr("Field `nope` does not exist in `float`.", C.from_bytes(rep.msg));
+
+    // An instance whose signature does not resolve has no body to check (this aborted the compiler).
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\type Shape trait:
+        \\    fn area() -> float
+        \\fn hash[K Any](key K) -> int:
+        \\    return 1
+        \\x := hash[Shape]
+    , &res));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("Expected a value type for the parameter. `Shape` is a trait.", C.from_bytes(rep.msg));
+}
+
 test "Error summaries are empty when there is no error." {
     // `cl_vm_compile_error_summary` and `cl_thread_panic_summary` used to end the host process when asked
     // without an error, and a script could ask through `cy.VM` (F-52).

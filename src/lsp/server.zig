@@ -104,6 +104,8 @@ pub const Server = struct {
         c.vm_set_printer(vm, dropPrint);
         c.vm_set_eprinter(vm, dropPrint);
         c.vm_set_logger(vm, dropLog);
+        // One diagnostic per body that has an error, not one per document.
+        c.vm_set_error_recovery(vm, true);
         c.vm_set_resolver(vm, resolver);
         c.vm_set_loader(vm, loader);
         active = self;

@@ -677,8 +677,16 @@ typedef struct CLReport {
     uint32_t end_pos;
 } CLReport;
 
+/// Whether the compiler goes on after a compile error to report more than one. Off by default.
+/// With it a body (the main block, a function, a method) that has an error is abandoned at its first error and
+/// the other bodies are still checked, so there is at most one error per body. A syntax error or an error in a
+/// declaration (a type, a signature, a global) still ends the compile at once.
+/// The result is `CL_ERROR_COMPILE` as before and nothing is run. `cl_vm_compile_error` and the summary describe
+/// the first error, `cl_vm_compile_report` gives all of them. The setting is kept across `cl_vm_reset`.
+void cl_vm_set_error_recovery(CLVM* vm, bool enabled);
+
 /// The number of compile errors of the last `cl_vm_eval`, `cl_vm_compile` or `cl_vm_validate`.
-/// 0 if the last result was not `CL_ERROR_COMPILE`. The compiler stops at its first error, so this is at most 1 today.
+/// 0 if the last result was not `CL_ERROR_COMPILE`. At most 1 unless `cl_vm_set_error_recovery` is on.
 size_t cl_vm_compile_report_count(CLVM* vm);
 
 /// Writes compile error `idx` to `out` and returns true. Returns false and zeroes `out` if there is no such error.

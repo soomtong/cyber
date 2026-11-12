@@ -66,6 +66,12 @@ pub const Compiler = struct {
     /// Whether a compile error summary marks the reported source range with ANSI escape codes
     /// (`cl_vm_set_error_color`). Off by default: a host that logs or parses the summary gets plain text.
     report_color: bool = false,
+
+    /// Go on after a compile error where that is safe, to report more than one (`cl_vm_set_error_recovery`).
+    /// A body (the main block, a function, a method) that fails is abandoned at its first error and the
+    /// next body is checked. Errors outside of a body (syntax, declarations) still end the compile.
+    /// The compile fails as before, with every report in `reports`. Kept across `cl_vm_reset` like `report_color`.
+    recover: bool = false,
     
     /// Sema model resulting from the sema pass.
     sema: sema.Sema,
@@ -508,7 +514,17 @@ pub const Compiler = struct {
 
         // Generate main first to expand any templates.
         log.tracev("emit program.", .{});
-        self.program_ir = try sema.sema_program(mainChunk, self.main_func);
+        if (self.recover) {
+            var marks = try RecoverMarks.take(self);
+            defer marks.deinit(self);
+            if (sema.sema_program(mainChunk, self.main_func)) |program_ir| {
+                self.program_ir = program_ir;
+            } else |err| {
+                try recoverBody(self, mainChunk, &marks, err);
+            }
+        } else {
+            self.program_ir = try sema.sema_program(mainChunk, self.main_func);
+        }
 
         // Perform sema on all chunks.
         log.tracev("Perform sema.", .{});
@@ -523,6 +539,11 @@ pub const Compiler = struct {
                 }
                 return err;
             };
+        }
+
+        // With recovery the bodies that failed were skipped. What follows needs all of them.
+        if (self.reports.items.len > 0) {
+            return error.CompileError;
         }
 
         // Pass through type syms.
@@ -712,7 +733,50 @@ fn performChunkSema(c: *cy.Chunk) !void {
     try semaChunkFuncs(c);
 }
 
+/// Reports after which recovery stops. A compile that is this wrong gains nothing from more of them.
+const max_recover_reports = 100;
+
+/// The stacks of every chunk before a body is checked. The body belongs to one chunk, but a template that it
+/// expands is resolved in the chunk that declares it.
+const RecoverMarks = struct {
+    marks: []sema.StackMark,
+
+    fn take(self: *Compiler) !RecoverMarks {
+        const marks = try self.alloc.alloc(sema.StackMark, self.chunks.items.len);
+        for (self.chunks.items, 0..) |chunk, i| {
+            marks[i] = sema.StackMark.take(chunk);
+        }
+        return .{ .marks = marks };
+    }
+
+    fn deinit(self: *RecoverMarks, compiler: *Compiler) void {
+        compiler.alloc.free(self.marks);
+    }
+};
+
+/// A body failed with `err`. Makes sure the error is reported, drops what the body left on the stacks and
+/// returns, so that the caller goes on with the next body. Returns the error if the compile has to end.
+fn recoverBody(self: *Compiler, c: *cy.Chunk, marks: *const RecoverMarks, err: anyerror) !void {
+    // Without memory there is nothing to go on with.
+    if (err == error.OutOfMemory or self.alloc_failed) {
+        return err;
+    }
+    if (err != error.CompileError) {
+        // Wrap all other errors as a CompileError.
+        _ = try c.addReportFmt("error.{}", &.{v(err)}, c.curNode);
+    }
+    if (self.reports.items.len == 0 or self.reports.items.len >= max_recover_reports) {
+        return error.CompileError;
+    }
+    for (marks.marks, 0..) |mark, i| {
+        mark.restore(self.chunks.items[i]);
+    }
+}
+
 fn semaChunkFuncs(c: *cy.Chunk) !void {
+    if (c.compiler.recover) {
+        return semaChunkFuncsRecover(c);
+    }
     // Iterate funcs with explicit index since lambdas could be appended.
     var i: u32 = 0;
     while (i < c.funcs.items.len) : (i += 1) {
@@ -746,6 +810,38 @@ fn semaChunkFuncs(c: *cy.Chunk) !void {
             },
             else => {},
         }
+    }
+}
+
+/// `semaChunkFuncs` with error recovery: a function that fails is skipped and the next one is checked.
+fn semaChunkFuncsRecover(c: *cy.Chunk) !void {
+    const self = c.compiler;
+    var i: u32 = 0;
+    while (i < c.funcs.items.len) : (i += 1) {
+        const func = c.funcs.items[i];
+        const has_body = switch (func.type) {
+            .userFunc => !func.info.const_eval_only,
+            .extern_ => func.data.extern_.has_impl,
+            else => false,
+        };
+        if (!has_body or func.info.emitted) {
+            continue;
+        }
+        // An instance of a function template whose signature failed to resolve. The error is reported already.
+        if (!func.isResolved()) {
+            continue;
+        }
+        var marks = try RecoverMarks.take(self);
+        defer marks.deinit(self);
+        const res = if (func.type == .userFunc and func.isMethod())
+            sema.semaMethodBody(c, func)
+        else
+            sema.semaFuncBody(c, func);
+        res catch |err| {
+            try recoverBody(self, c, &marks, err);
+            // The body is not checked again when something else refers to the function.
+            func.info.emitted = true;
+        };
     }
 }
 

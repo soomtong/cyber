@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.7-dev 803-3d47a89</div>
+    <div class="sub-title">v0.4.7-dev 812-de98510</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1511,6 +1511,7 @@ ratio := 1_000.000_5
 a = 18446744073709551615u    -- -1
 var b r64 = 18446744073709551615
 </code></pre>
+<p>When the target is a <code>float</code> or <code>f32</code>, a hexadecimal, octal or binary literal converts by its unsigned 64-bit value: <code>var f float = 0x10</code> is <code>16.0</code> and <code>var g float = 0xFFFFFFFFFFFFFFFF</code> is <code>18446744073709551615.0</code>. Without a float target the literal is an <code>int</code> first, so <code>float(0xFFFFFFFFFFFFFFFF)</code> is <code>-1.0</code>.</p>
 <p>String literals evaluate as their UTF-8 codepoint if the target integer type is big enough:</p>
 <pre><code class="language-cy">-- Success.
 var a int = '🐶'
@@ -1624,6 +1625,7 @@ print(a.seek(2))    --> 0x62 ('b')
 <pre><code class="language-cy">a := 'abcxyz'
 b := a[0..3]
 print(a[0..3])  --> abc
+print(a[..3])   --> abc
 print(a[1..])   --> bcxyz
 </code></pre>
 <a href="#basic-types">^topic</a>
@@ -1868,7 +1870,10 @@ Slices grow or shrink when inserting or removing elements.</p>
 print(arr[0..0])    --> {}
 print(arr[0..3])    --> {1, 2, 3}
 print(arr[3..])     --> {4, 5}
+print(arr[..3])     --> {1, 2, 3}
+print(arr[..])      --> {1, 2, 3, 4, 5}
 </code></pre>
+<p>The start, the end, or both can be omitted. A missing start is <code>0</code> and a missing end is the length. A range without a start or an end is only a slice index. Anywhere else (<code>r := ..3</code>, <code>for ..3 |i|</code>, <code>case ..5</code>) it is a compile error.</p>
 <p>A sub-slice will clone the underlying buffer upon any resize operation such as <code>append</code>, <code>insert</code>, <code>remove</code>, etc.
 Once cloned, the slice will no longer point to the same elements as the original slice:</p>
 <pre><code class="language-cy">arr := []int{1, 2, 3}
@@ -3817,6 +3822,7 @@ print(work.await())
 <p><code>Future.await()</code> asynchronously waits for a <code>Future</code> to complete.</p>
 <p><code>await</code> blocks the current thread until the <code>Future</code> completes. It can be called from the main thread and from spawned threads. While a thread waits, it runs other spawned threads that are still queued, so waiting on nested <code>spawn</code> calls does not deadlock the worker pool.</p>
 <p>If the spawned thread panicked, <code>await</code> panics with <code>Spawned thread panicked: <message></code>. If the spawned thread was interrupted or ran out of fuel, the waiting thread is interrupted too.</p>
+<p>A future that no spawned thread completes (one from a host function, or from <code>FutureResolver</code> before <code>complete</code>) can only be completed from outside the running program. Awaiting it on the main thread suspends the whole program and returns to the host, which completes the future and resumes the program at the <code>await</code> (see <a href="#suspending-an-eval" title="">Suspending an eval</a>). This works at any call depth, in a generator body and inside a fiber. The <code>cyber</code> command completes no futures, so there the program ends with <code>panic: Abandoned while awaiting a future.</code> A spawned thread can not wait for such a future, and neither can a function that a host function called: both panic.</p>
 <p>When <code>await</code> resumes, the expression evaluates to the completed value of the <code>Future</code>:</p>
 <pre><code class="language-cy">use aio
 
@@ -3824,6 +3830,12 @@ work := aio.read_file_defer('foo.txt')
 print(work.await())
 --> "foo.txt contents"
 </code></pre>
+<p><code>Future.wait_any</code> waits for the first of several futures and returns its index in the list. When several are done it returns the first of them in the list. The future at that index does not wait when it is awaited:</p>
+<pre><code class="language-cy">futs := []Future[str]{tool_async('a'), tool_async('b'), tool_async('c')}
+i := Future.wait_any(futs.span())
+print(futs[i].await())
+</code></pre>
+<p>Futures of spawned threads are waited for inside the VM. When none of the futures belongs to a spawned thread, the program is suspended until the host completes one of them (see <a href="#suspending-an-eval" title="">Suspending an eval</a>). An empty list panics.</p>
 <p><code>await</code> can be used in any function which makes asynchronous functions <strong>colorless</strong>. They do not need a special function modifier. This means that asynchronous work can be wrapped in a synchronous API.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="future-chains">Future chains. <a href="#future-chains">#</a></h3>
@@ -4214,6 +4226,15 @@ print('not ok')
 <pre><code class="language-cy">fn main():
     print('program start')
 </code></pre>
+<p>The main function can return a result type. <code>expr!</code> in its body then returns the error from <code>main</code>. An error that <code>main</code> returns panics, like <code>expr!</code> at the top level, and the <code>cyber</code> command ends with exit code 1. The same holds for a <code>main</code> that returns <code>error</code>:</p>
+<pre><code class="language-cy">use os
+
+fn main() -> !void:
+    src := os.read_file_str('missing.txt')!
+    print(src)
+
+--> panic: Unwrapped error `error.FileNotFound`.
+</code></pre>
 <a href="#modules">^topic</a>
 <h2 id="builtin-modules">Builtin modules. <a href="#builtin-modules">#</a></h2>
 <p>Builtin and std modules come with Cyber. See the <a href="api.html" title="">API docs</a>.</p>
@@ -4582,6 +4603,7 @@ fn CreateWindow(title Ptr[c_char], w c_int, h c_int, flags WindowFlags) -> Ptr[W
 <li><a href="#module-loader" title="">Module loader.</a></li>
 <li><a href="#function-binding" title="">Function binding.</a><ul>
 <li><a href="#vm-functions" title="">VM functions.</a></li>
+<li><a href="#suspending-an-eval" title="">Suspending an eval.</a></li>
 </ul>
 </li>
 <li><a href="#global-binding" title="">Global binding.</a></li>
@@ -4765,6 +4787,53 @@ cl_mod_add_func(mod, CL_BYTES("add"), CL_BIND_FUNC(add));
     return CL_RET_OK;
 }
 </code></pre>
+<a href="#libcyber">^topic</a>
+<h3 id="suspending-an-eval">Suspending an eval. <a href="#suspending-an-eval">#</a></h3>
+<p>A host function that can not answer at once (it needs the user's approval, or a slow tool) returns a pending <code>Future</code> instead of blocking inside the call. When the script awaits it, the eval returns <code>CL_AWAIT</code>. The script is suspended with its stack, its locals and its remaining fuel intact. The host completes the future and calls <code>cl_vm_resume</code>:</p>
+<pre><code class="language-c">// #[bind] fn write_async(path str, text str) -> Future[!void]
+CLRet write_async(CLThread* t) {
+    CLValue* ret = cl_thread_ret(t, sizeof(CLValue));
+    CLstr path = cl_thread_str(t);
+    CLstr text = cl_thread_str(t);
+    CLFuture* f = cl_future_new(t, cl_find_type(cl_thread_vm(t), CL_BYTES("Future[!void]")));
+    // ... remember the request for `f` ...
+    *ret = (CLValue)(uintptr_t)f;
+    cl_str_deinit(t, &path);
+    cl_str_deinit(t, &text);
+    return CL_RET_OK;
+}
+
+CLResultCode code = cl_vm_evalx(vm, uri, src, config, &res);
+while (code == CL_AWAIT) {
+    CLFuture* f = cl_vm_pending_future(vm);
+    if (cancelled) {
+        cl_vm_abandon(vm);                 // Like an interrupt. The VM takes the next eval.
+        break;
+    }
+    if (approved) {
+        cl_future_complete(vm, f, NULL);   // `!void` has no value to pass.
+    } else {
+        cl_future_complete_error(vm, f, cl_error(vm, CL_BYTES("Denied")));
+    }
+    code = cl_vm_resume(vm, &res);
+}
+</code></pre>
+<p>A wrapper in the module source keeps the script API synchronous:</p>
+<pre><code class="language-cy">#[bind] fn write_async(path str, text str) -> Future[!void]
+
+fn write(path str, text str) -> !void:
+    return write_async(path, text).await()
+</code></pre>
+<ul>
+<li><code>cl_future_complete</code> copies the value and the future owns it afterwards, as a return slot does. For a <code>Future[!U]</code> the value is the <code>U</code>. <code>cl_future_complete_error</code> completes a <code>Future[!U]</code> with an error.</li>
+<li><code>cl_vm_resume</code> follows the rules of <code>cl_vm_evalx</code>. It returns <code>CL_AWAIT</code> again at the next <code>await</code>, and also when the pending future was not completed. A resume clears an interrupt request that arrived while the eval was suspended, as the start of an eval does, so a wall clock timer does not count the time the host waited. The fuel is not refilled.</li>
+<li>While an eval is suspended, <code>cl_vm_eval*</code>, <code>cl_vm_validate</code> and <code>cl_vm_compile*</code> return <code>CL_ERROR_SUSPENDED</code>. <code>cl_vm_reset</code> and <code>cl_vm_deinit</code> abandon the suspended eval first.</li>
+<li><code>cl_vm_abandon</code> drops the suspended eval with the outcome of an interrupt: the main locals are gone, the declarations stay. The panic summary names the abandoned <code>await</code>.</li>
+<li>A script can start several requests before it waits. <code>cl_vm_pending_futures</code> returns the futures the suspended eval waits for: one for <code>await</code>, the whole list for <code>Future.wait_any</code>. The host completes any of them, in any order and more than one if it likes, before the resume.</li>
+<li>A future that the script never awaits, or that is still pending when the eval ends, is freed like any other object.</li>
+<li>All of these functions are called from the thread that runs the evals of the VM. A future is not completed from another thread.</li>
+</ul>
+<p>The full program is <code>examples/libcyber/host_await.c</code>.</p>
 <a href="#libcyber">^topic</a>
 <h2 id="global-binding">Global binding. <a href="#global-binding">#</a></h2>
 <p>A global binding describes how to load a <code>#[bind]</code> global:</p>

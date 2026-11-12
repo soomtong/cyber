@@ -213,6 +213,10 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
 
     var arg_idx: u32 = 0;
 
+    // An argument is evaluated before a statement that a later argument adds (`sema.seqFlush`).
+    const seq_start = c.seq_pending.items.len;
+    defer sema.seqPop(c, seq_start);
+
     const params = template.sig.params();
     for (0..nargs) |i| {
         var arg: Argument = undefined;
@@ -224,6 +228,10 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
         const final_arg = try matchTemplateArg(c, params[i], arg, template, &template_ctx, i, false);
         if (final_arg.resolve_t == .rt) {
             args[arg_idx] = final_arg.res.rt.ir;
+            const arg_res = final_arg.res.rt;
+            if (arg_res.resType == .value and !arg_res.addressable) {
+                try sema.seqPush(c, &args[arg_idx], arg_res.owned, arg.node);
+            }
             arg_idx += 1;
         } else if (final_arg.resolve_t == .template) {
             const name = template.func_params[i].name_type.as_name();
@@ -527,6 +535,10 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
 
     var arg_idx: u32 = 0;
 
+    // An argument is evaluated before a statement that a later argument adds (`sema.seqFlush`).
+    const seq_start = c.seq_pending.items.len;
+    defer sema.seqPop(c, seq_start);
+
     for (0..nargs) |i| {
         var arg: Argument = undefined;
         if (i < pre_args.len) {
@@ -560,6 +572,9 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         arg_ex[arg_idx] = arg_res.type.kind() == .ex_borrow;
         arg_nodes[arg_idx] = arg.node;
         args[arg_idx] = arg_res.ir;
+        if (arg_res.resType == .value and !arg_res.addressable) {
+            try sema.seqPush(c, &args[arg_idx], arg_res.owned, arg.node);
+        }
         arg_idx += 1;
     }
 

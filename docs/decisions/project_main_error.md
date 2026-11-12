@@ -27,6 +27,7 @@ CLI에서만 결과를 검사하는 방법은 쓰지 않았다. 최상위 문과
 
 ## 남은 것
 
-- `fn main() -> error`는 그대로 둔다(2026-11-12 검토). `error`를 돌려주는 함수는 항상 오류 값을 돌려주므로 성공과 실패를
-  가르는 반환 타입이 아니다. 그 값은 `-> int`처럼 eval의 결과 값으로 호스트에 간다.
+- `fn main() -> error`도 같은 panic이다(사용자 지시 2026-11-12). 처음 검토에서는 "항상 오류 값을 돌려주는 타입이라 결과 값으로
+  둔다"고 적었는데, main이 돌려준 오류는 처리되지 않은 오류라는 규칙 하나로 맞췄다. 이 시그니처의 main은 항상 panic으로 끝난다.
+  테스트 `functions/main_func_error_ret_panic.cy`.
 - `fn main() -> str`처럼 힙 값을 돌려주면 Debug · Trace CLI가 `unreleased refcount: 1`을 찍는다(`_main_res`는 deinit을 건너뛴다).

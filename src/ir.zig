@@ -812,6 +812,10 @@ pub const Buffer = struct {
     /// Main and func blocks.
     func_blocks: std.ArrayList(*Stmt),
 
+    /// Number of pending operands in `Chunk.seq_pending`. A statement that is added while operands are pending
+    /// runs before the expression they belong to, so they are evaluated first (`sema.seqFlush`).
+    seq_pending: usize = 0,
+
     pub fn init(self: *Buffer, alloc: std.mem.Allocator) void {
         self.* = .{
             .arena = .{ .child_allocator = alloc, .state = .{} },
@@ -835,6 +839,7 @@ pub const Buffer = struct {
     }
 
     pub fn pushStmtBlock(self: *Buffer, alloc: std.mem.Allocator) !void {
+        if (self.seq_pending > 0) try cy.sema.seqFlush(@fieldParentPtr("ir", self));
         try self.stmtBlockStack.append(alloc, .{
             .first = null,
             .last = null,
@@ -842,6 +847,7 @@ pub const Buffer = struct {
     }
 
     pub fn pushStmtBlock2(self: *Buffer, alloc: std.mem.Allocator, block: StmtBlock) !void {
+        if (self.seq_pending > 0) try cy.sema.seqFlush(@fieldParentPtr("ir", self));
         try self.stmtBlockStack.append(alloc, block);
     }
 
@@ -882,6 +888,7 @@ pub const Buffer = struct {
     }
 
     pub fn pushStmt(self: *Buffer, comptime code: StmtCode, node: *ast.Node, data: StmtImpl(code)) !*Stmt {
+        if (self.seq_pending > 0) try cy.sema.seqFlush(@fieldParentPtr("ir", self));
         const stmt = try self.newStmt(code, node, data);
         self.appendStmt(stmt);
         return stmt;

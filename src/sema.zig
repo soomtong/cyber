@@ -3710,6 +3710,9 @@ pub fn declareHiddenLocal(c: *cy.Chunk, name: []const u8, decl_t: *cy.Type, init
 }
 
 fn reserveLocalName(c: *cy.Chunk, name: []const u8, declType: *cy.Type, hidden: bool, hasInit: bool, node: *ast.Node) anyerror!LocalId {
+    // Pending operands get their locals first. Later than this, a flush would declare a local in the middle of
+    // this declaration, and its statement would come before this one with a later IR id.
+    if (c.ir.seq_pending > 0) try seqFlush(c);
     if (!hidden) {
         const proc = c.proc();
         if (proc.var_cache_entries.get(name)) |varInfo| {
@@ -4574,6 +4577,8 @@ pub fn semaStringTemplate(c: *cy.Chunk, template: *ast.StringTemplate) !ExprResu
 
     // exprs as [&]str
     const exprs_loc = try c.ir.allocArray(*ir.Expr, nexprs);
+    const seq_tmpl_start = c.seq_pending.items.len;
+    errdefer seqPop(c, seq_tmpl_start);
     for (0..nexprs) |i| {
         const expr = template.parts[1 + i*2].cast(.stringt_expr);
         const res = try c.semaExpr(expr.child, .{});
@@ -4582,7 +4587,9 @@ pub fn semaStringTemplate(c: *cy.Chunk, template: *ast.StringTemplate) !ExprResu
         const expr_arg = Argument.initPreResolved(expr.child, res);
         const expr_str = try c.semaCallFunc2(to_print_string_func, &.{expr_arg}, &.{}, expr.child);
         exprs_loc[i] = expr_str.ir;
+        try seqPush(c, &exprs_loc[i], expr_str.owned, expr.child);
     }
+    seqPop(c, seq_tmpl_start);
     const expr_vec_t = try getVectorType(c, c.sema.str_t, @intCast(nexprs));
     const exprs_init = try semaVector(c, expr_vec_t, exprs_loc, @ptrCast(template));
     const exprs_local = try declareHiddenLocal(c, "_exprs_vec", expr_vec_t, exprs_init, @ptrCast(template));
@@ -5110,6 +5117,13 @@ pub fn sema_program(c: *cy.Chunk, opt_main_func: ?*cy.Func) !*ir.Stmt {
                 .cond_expr = cond.ir,
                 .body_head = block.first,
             });
+        } else if (call_main.type.id() == bt.Error) {
+            // `fn main() -> error` has no value case. What it returns is an error that nothing handles.
+            const node: *ast.Node = @ptrCast(main_func.decl.?);
+            const err = try semaLocal(c, main_res.id, node);
+            const arg = Argument.initPreResolved(node, err);
+            const panic_call = try c.semaCallFunc2(c.sema.panic_unwrap_error_fn, &.{arg}, &.{}, node);
+            _ = try declareHiddenLocal(c, "_res", c.sema.void_t, panic_call, node);
         }
 
         // Skip deinit of main result.
@@ -5154,6 +5168,9 @@ pub fn sema_program(c: *cy.Chunk, opt_main_func: ?*cy.Func) !*ir.Stmt {
 }
 
 pub fn pushProc(self: *cy.Chunk, func: ?*cy.Func) !ProcId {
+    // The locals of pending operands belong to the proc that the operands are in. A lambda argument starts
+    // another proc before its statement block is pushed.
+    if (self.ir.seq_pending > 0) try seqFlush(self);
     if (cy.Trace) {
         if (func) |func_| {
             const path = try cy.sym.newFuncName(self.sema, self.alloc, func_, .{});
@@ -6342,6 +6359,115 @@ pub fn sema_copy(c: *cy.Chunk, expr: ExprResult, node: *ast.Node) anyerror!ExprR
     return c.semaCallFunc2(copy_fn, &.{arg}, &.{}, node);
 }
 
+/// An operand whose IR is built but that the enclosing expression has not consumed yet.
+///
+/// Analysis can add statements in the middle of an expression: a temporary for a method receiver, an `await`,
+/// the branch of an `!` unwrap, the block of an `and`. Such a statement runs before the statement that holds
+/// the expression. Without care it would run before the operands that were analyzed earlier, so
+/// `say(1) + mk(2).get()` would call `mk(2)` first. `seqFlush` evaluates the pending operands into locals right
+/// before such a statement is added, which keeps the order left to right.
+pub const SeqEntry = struct {
+    /// Where the consumer reads the operand's IR from. Rewritten to a read of the local.
+    slot: **ir.Expr,
+    orig: *ir.Expr,
+    /// The consumer takes ownership of the value.
+    owned: bool,
+    node: *ast.Node,
+    /// `ir.stmtBlockStack` length at registration. The local is declared in that block only.
+    depth: usize,
+    /// `Chunk.semaProcs` length at registration.
+    proc_depth: usize,
+    var_id: u32 = cy.NullId,
+    decl: ?*ir.Stmt = null,
+};
+
+/// An operand that nothing can affect and that has no effect itself does not have to be evaluated early.
+fn seqOrderFree(expr: *ir.Expr) bool {
+    return switch (expr.code) {
+        .local, .captured, .const8, .const16, .const32, .const64, .truev, .falsev, .voidv, .undef,
+        .func, .func_ptr, .string, .init_zero, .address_of => true,
+        else => false,
+    };
+}
+
+/// Registers the IR slot of an operand that is done. The caller pops with `seqPop` once the operands after it
+/// are analyzed, on every path (`defer`).
+pub fn seqPush(c: *cy.Chunk, slot: **ir.Expr, owned: bool, node: *ast.Node) !void {
+    const expr = slot.*;
+    if (seqOrderFree(expr)) return;
+    const type_ = expr.type;
+    // A borrow stays tied to its owner. It is not held in another local.
+    if (type_.kind() == .borrow or type_.kind() == .ex_borrow or type_.info.borrow_only) return;
+    if (type_.kind() == .void or type_.kind() == .never) return;
+    try c.seq_pending.append(c.alloc, .{
+        .slot = slot,
+        .orig = expr,
+        .owned = owned,
+        .node = node,
+        .depth = c.ir.stmtBlockStack.items.len,
+        .proc_depth = c.semaProcs.items.len,
+    });
+    c.ir.seq_pending = c.seq_pending.items.len;
+}
+
+/// Registers an operand result. A place (a local, a field) is not registered: its consumer can take its address.
+pub fn seqPushRes(c: *cy.Chunk, res: *ExprResult, node: *ast.Node) !void {
+    if (res.resType != .value or res.addressable) return;
+    try seqPush(c, &res.ir, res.owned, node);
+}
+
+/// An overload candidate that does not match discards the locals and statements of its attempt
+/// (`sema_func.matchRtOverload`). A local that was declared for a pending operand goes with them.
+fn seqValidate(c: *cy.Chunk, e: *SeqEntry) void {
+    if (e.var_id == cy.NullId) return;
+    if (e.var_id < c.varStack.items.len) {
+        const local = &c.varStack.items[e.var_id];
+        if (@as(?*ir.Stmt, @ptrCast(local.inner.local.declIrStart)) == e.decl) return;
+    }
+    e.slot.* = e.orig;
+    e.var_id = cy.NullId;
+    e.decl = null;
+}
+
+/// Called before a statement or a statement block is added while operands are pending (`ir.Buffer.seq_pending`).
+pub fn seqFlush(c: *cy.Chunk) anyerror!void {
+    if (c.seq_flushing) return;
+    c.seq_flushing = true;
+    defer c.seq_flushing = false;
+
+    const depth = c.ir.stmtBlockStack.items.len;
+    var i: usize = 0;
+    while (i < c.seq_pending.items.len) : (i += 1) {
+        seqValidate(c, &c.seq_pending.items[i]);
+        var e = c.seq_pending.items[i];
+        if (e.var_id != cy.NullId or e.depth != depth or e.proc_depth != c.semaProcs.items.len) continue;
+
+        const temp = try declareHiddenLocal(c, "_seq", e.orig.type, ExprResult.init2(e.orig), e.node);
+        const local = &c.varStack.items[temp.id];
+        e.decl = @ptrCast(local.inner.local.declIrStart);
+        if (!(e.owned and e.orig.type.isManaged())) {
+            // Nothing to destruct. An owned value stays alive until `seqPop`, so that a return in between
+            // (the error branch of a later `!`) destructs it.
+            local.type = .dead;
+        }
+        e.slot.* = try c.ir.newExpr(.local, e.orig.type, e.node, .{ .id = local.inner.local.id });
+        e.var_id = @intCast(temp.id);
+        c.seq_pending.items[i] = e;
+    }
+}
+
+/// Ends the registrations since `start`. The consumer now owns the values held for it.
+pub fn seqPop(c: *cy.Chunk, start: usize) void {
+    for (c.seq_pending.items[start..]) |*e| {
+        seqValidate(c, e);
+        if (e.var_id != cy.NullId) {
+            c.varStack.items[e.var_id].type = .dead;
+        }
+    }
+    c.seq_pending.items.len = start;
+    c.ir.seq_pending = start;
+}
+
 pub fn semaEnsureAddressable(c: *cy.Chunk, expr: ExprResult, node: *ast.Node) !ExprResult {
     if (!expr.addressable) {
         const tempv = try declareHiddenLocal(c, "_temp", expr.type, expr, node);
@@ -6411,10 +6537,16 @@ pub fn semaTupleInit(c: *cy.Chunk, type_: *cy.Type, fields: []const cy.types.Fie
     }
 
     const args = try c.ir.allocArray(*ir.Expr, fields.len);
-    for (fields, 0..) |field, i| {
-        var arg = try c.semaExprCstr(lit.args.ptr[i], field.type);
-        arg = try semaOwn(c, arg, lit.args.ptr[i]);
-        args[i] = arg.ir;
+    {
+        // An element is evaluated before a statement that a later element adds (`seqFlush`).
+        const seq_start = c.seq_pending.items.len;
+        defer seqPop(c, seq_start);
+        for (fields, 0..) |field, i| {
+            var arg = try c.semaExprCstr(lit.args.ptr[i], field.type);
+            arg = try semaOwn(c, arg, lit.args.ptr[i]);
+            args[i] = arg.ir;
+            try seqPush(c, &args[i], true, lit.args.ptr[i]);
+        }
     }
 
     const init = try c.ir.newExpr(.init, type_, @ptrCast(lit), .{
@@ -6430,10 +6562,15 @@ pub fn semaInitPartialVector(c: *cy.Chunk, vector_t: *cy.types.PartialVector, in
     }
     const args = try c.ir.allocArray(*ir.Expr, nargs + 1);
     args[0] = (try semaConst(c, nargs, c.sema.i64_t, @ptrCast(init_n))).ir;
-    for (init_n.args.slice(), 0..) |arg_n, i| {
-        var arg = try c.semaExprTarget(arg_n, vector_t.elem_t);
-        arg = try semaOwn(c, arg, arg_n);
-        args[i+1] = arg.ir;
+    {
+        const seq_start = c.seq_pending.items.len;
+        defer seqPop(c, seq_start);
+        for (init_n.args.slice(), 0..) |arg_n, i| {
+            var arg = try c.semaExprTarget(arg_n, vector_t.elem_t);
+            arg = try semaOwn(c, arg, arg_n);
+            args[i+1] = arg.ir;
+            try seqPush(c, &args[i+1], true, arg_n);
+        }
     }
     return semaPartialVector(c, &vector_t.base, args, @ptrCast(init_n));
 }
@@ -6441,10 +6578,15 @@ pub fn semaInitPartialVector(c: *cy.Chunk, vector_t: *cy.types.PartialVector, in
 pub fn semaInitVector(c: *cy.Chunk, vector_t: *cy.types.Vector, init_n: *ast.InitLit) !ExprResult {
     const nargs = init_n.args.len;
     const args = try c.ir.allocArray(*ir.Expr, nargs);
-    for (init_n.args.slice(), 0..) |arg_n, i| {
-        var arg = try c.semaExprTarget(arg_n, vector_t.elem_t);
-        arg = try semaOwn(c, arg, arg_n);
-        args[i] = arg.ir;
+    {
+        const seq_start = c.seq_pending.items.len;
+        defer seqPop(c, seq_start);
+        for (init_n.args.slice(), 0..) |arg_n, i| {
+            var arg = try c.semaExprTarget(arg_n, vector_t.elem_t);
+            arg = try semaOwn(c, arg, arg_n);
+            args[i] = arg.ir;
+            try seqPush(c, &args[i], true, arg_n);
+        }
     }
 
     const loc = try c.ir.newExpr(.init, @ptrCast(vector_t), @ptrCast(init_n), .{
@@ -6495,6 +6637,10 @@ pub fn semaInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, initializer: *as
 
     const ir_args = try c.ir.allocArray(*ir.Expr, struct_t.fields_len);
 
+    // A field value is evaluated before a statement that the value of a later field adds (`seqFlush`).
+    // The order is the order of the fields in the type.
+    const seq_start = c.seq_pending.items.len;
+    errdefer seqPop(c, seq_start);
     for (0..fieldNodes.len) |i| {
         const item = c.listDataStack.items[fieldsDataStart+i];
         const fieldT = struct_t.fields_ptr[i].type;
@@ -6511,8 +6657,10 @@ pub fn semaInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, initializer: *as
             var arg = try c.semaExprCstr(item.node.?, fieldT);
             arg = try semaOwn(c, arg, item.node.?);
             ir_args[i] = arg.ir;
+            try seqPush(c, &ir_args[i], true, item.node.?);
         }
     }
+    seqPop(c, seq_start);
 
     const loc = try c.ir.newExpr(.init, @ptrCast(struct_t), node, .{
         .nargs = @as(u8, @intCast(struct_t.fields_len)),
@@ -9110,12 +9258,12 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: Cstr, left_n: *ast.Node, op: cy.BinaryExp
         .greater_equal,
         .less,
         .less_equal => {
-            const left = try c.semaExpr(left_n, .{});
+            var left = try c.semaExpr(left_n, .{});
             switch (left.type.kind()) {
                 .int,
                 .raw,
                 .float => {
-                    const right = try c.semaExprCstr(right_n, left.type);
+                    const right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = true, .fit_target = true });
                     return sema_bin_expr3(c, left, left_n, right, right_n, op, node);
                 },
                 else => {},
@@ -9150,7 +9298,7 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: Cstr, left_n: *ast.Node, op: cy.BinaryExp
             }
             var left = try c.semaExprHint(left_n, expr.target_t);
             if (left.type.kind() == .int or left.type.kind() == .raw) {
-                var right = try c.semaExprTarget(right_n, left.type);
+                var right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = false, .fit_target = true });
                 if (left.type.id() != right.type.id()) {
                     // Target biggest int width.
                     var left_bits: u32 = undefined;
@@ -9183,7 +9331,7 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: Cstr, left_n: *ast.Node, op: cy.BinaryExp
                 }
                 return fold_const_int(c, try sema_bin_expr2(c, left, left_n, right, right_n, op, node));
             } else if (left.type.kind() == .float) {
-                const right = try c.semaExprTarget(right_n, left.type);
+                const right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = false, .fit_target = true });
                 return fold_const_int(c, try sema_bin_expr2(c, left, left_n, right, right_n, op, node));
             }
 
@@ -9193,8 +9341,8 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: Cstr, left_n: *ast.Node, op: cy.BinaryExp
             return c.semaCallFuncSymRec(func_sym, left_n, left, &.{ right_n }, false, node);
         },
         .bang_equal => {
-            const left = try c.semaExpr(left_n, .{});
-            const right = try c.semaExprCstr(right_n, left.type);
+            var left = try c.semaExpr(left_n, .{});
+            const right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = true, .fit_target = true });
             const res = try semaCompare(c, left_n, left, right_n, right, node);
             const not = try c.ir.newExpr(.unary_op, c.sema.bool_t, node, .{
                 .childT = c.sema.bool_t, .op = .lnot, .expr = res.ir,
@@ -9202,12 +9350,21 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: Cstr, left_n: *ast.Node, op: cy.BinaryExp
             return ExprResult.init2(not);
         },
         .equal_equal => {
-            const left = try c.semaExpr(left_n, .{});
-            const right = try c.semaExprCstr(right_n, left.type);
+            var left = try c.semaExpr(left_n, .{});
+            const right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = true, .fit_target = true });
             return semaCompare(c, left_n, left, right_n, right, node);
         },
         else => return c.reportErrorFmt("Unsupported binary op: {}", &.{v(op)}, node),
     }
+}
+
+/// Analyzes the right operand of a binary expression. `left` is evaluated before a statement that the right
+/// operand adds (`seqFlush`).
+fn semaRightOperand(c: *cy.Chunk, left: *ExprResult, left_n: *ast.Node, right_n: *ast.Node, cstr: Cstr) !ExprResult {
+    const seq_start = c.seq_pending.items.len;
+    defer seqPop(c, seq_start);
+    try seqPushRes(c, left, left_n);
+    return c.semaExpr(right_n, cstr);
 }
 
 /// Assumes first arg contains the the args count.
@@ -9244,6 +9401,8 @@ fn semaInitLitTarget(c: *cy.Chunk, init_lit: *ast.InitLit, target_t: *cy.Type, r
                 c.varStack.items[vec_var].type = .dead;
 
                 const args = try c.ir.allocArray(*ir.Expr, init_lit.args.len);
+                // The elements are not registered as pending operands (`seqFlush`): `_vec` is reserved above and
+                // declared below, and a local that is declared in between would break the order of the IR locals.
                 for (init_lit.args.slice(), 0..) |arg, i| {
                     const res = try c.semaExprTarget(arg, elem_t);
                     args[i] = res.ir;
@@ -9573,10 +9732,16 @@ fn semaInitSequence(c: *cy.Chunk, init_seq: *cy.Sym, lit: *ast.InitLit) !ExprRes
     } else {
         const nargs = lit.args.len;
         const args = try c.ir.allocArray(*ir.Expr, nargs);
-        for (lit.args.slice(), 0..) |arg, i| {
-            var res = try c.semaExprCstr(arg, elem_t);
-            res = try semaOwn(c, res, arg);
-            args[i] = res.ir;
+        {
+            // An element is evaluated before a statement that a later element adds (`seqFlush`).
+            const seq_start = c.seq_pending.items.len;
+            defer seqPop(c, seq_start);
+            for (lit.args.slice(), 0..) |arg, i| {
+                var res = try c.semaExprCstr(arg, elem_t);
+                res = try semaOwn(c, res, arg);
+                args[i] = res.ir;
+                try seqPush(c, &args[i], true, arg);
+            }
         }
         return sema_call_init_span(c, func_sym, span_t, borrow_t, elem_t, args, node);
     }
@@ -9633,6 +9798,8 @@ fn semaInitRecord(c: *cy.Chunk, init_pairs: *cy.Sym, init_n: *ast.InitLit) !Expr
         return c.semaCallFuncSym1(func_sym, node, init_span, node);
     } else {
         const pairs = try c.ir.allocArray(*ir.Expr, init_n.args.len);
+        const seq_start = c.seq_pending.items.len;
+        errdefer seqPop(c, seq_start);
         for (init_n.args.slice(), 0..) |arg, i| {
             if (arg.type() != .keyValue) {
                 return c.reportError("Expected key value pair.", arg);
@@ -9650,7 +9817,9 @@ fn semaInitRecord(c: *cy.Chunk, init_pairs: *cy.Sym, init_n: *ast.InitLit) !Expr
             val = try semaOwn(c, val, kv.value);
             const pair = try semaInitPair(c, pair_t, key, val, arg);
             pairs[i] = pair.ir;
+            try seqPush(c, &pairs[i], true, arg);
         }
+        seqPop(c, seq_start);
         return sema_call_init_span(c, func_sym, span_t, borrow_t, pair_t, pairs, node);
     }
 }

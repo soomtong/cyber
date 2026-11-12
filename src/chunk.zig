@@ -109,6 +109,11 @@ pub const Chunk = struct {
     varStack: std.ArrayList(sema.Local),
     varShadowStack: std.ArrayList(cy.sema.VarShadow),
 
+    /// Operands of the expression being analyzed that are done but not consumed yet, in evaluation order.
+    /// See `sema.seqFlush`.
+    seq_pending: std.ArrayList(cy.sema.SeqEntry) = .empty,
+    seq_flushing: bool = false,
+
     /// Main sema block id.
     mainSemaProcId: sema.ProcId,
 
@@ -297,6 +302,7 @@ pub const Chunk = struct {
 
         self.blockJumpStack.deinit(self.alloc);
         self.varShadowStack.deinit(self.alloc);
+        self.seq_pending.deinit(self.alloc);
         self.varStack.deinit(self.alloc);
 
         self.typeStack.deinit(self.alloc);

@@ -3238,6 +3238,41 @@ The receiver follows the rules of a parameter, so a method with a `&T` receiver 
 
 A generator can be consumed inside a fiber, and `suspend` in a generator body suspends the fiber that consumes the generator. The generator stays `.running` until that fiber is resumed.
 
+`Future.await()` inside a fiber does not block. When the future is not done, the fiber is suspended and `resume` returns `.suspended`, so the other fibers can run. `Future.wait_any` inside a fiber behaves the same way. A fiber that waits is not entered by `resume`: it returns `.suspended` at once until the future is done. `waiting` tells such a fiber apart from one that stopped at `suspend`:
+```cy
+fn waiter(fut Future[int], out ^int):
+    out.* = fut.await()
+
+r := FutureResolver.new(int)
+out := ^0
+w := fiber waiter(r.future(), out)
+print(w.resume())     --> FiberStatus.suspended
+print(w.waiting())    --> true
+r.complete(7)
+print(w.waiting())    --> false
+print(w.resume())     --> FiberStatus.done
+print(out.*)          --> 7
+```
+
+A loop that resumes fibers calls `Fiber.wait_ready()` when every fiber waits. It blocks the root context until a future that a suspended fiber awaits is done and returns `true`. It returns `false` at once when no fiber awaits a future:
+```cy
+fn fetch(name str, n int, log ^ArrayStore[str]):
+    res := spawn(compute, {n}).await()
+    log << '%{name}: %{res}'
+
+log := ^ArrayStore[str]{}
+a := fiber fetch('a', 2000000, log)
+b := fiber fetch('b', 10, log)
+while a.status() != .done or b.status() != .done:
+    _ = a.resume()
+    _ = b.resume()
+    if a.waiting() and b.waiting():
+        _ = Fiber.wait_ready()
+```
+Both computations are started before either result is taken. A loop that resumes fibers needs `Fiber.wait_ready()`: without it the loop spins while the fibers wait, and it does not end when nothing else completes the futures. That is the case on a machine without spare worker threads, where the waiting root context runs the spawned tasks itself, and for futures that only the host can complete. For those, `Fiber.wait_ready()` suspends the program and the host sees the futures of all fibers (see [Suspending an eval](#suspending-an-eval)). Called inside a fiber, `Fiber.wait_ready()` suspends that fiber until a future of another fiber is done.
+
+In the root context, outside of any fiber, `await` waits as before.
+
 When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the `resume` call of each fiber down to the main block.
 
 A fiber can not resume itself or a fiber that is waiting for it:
@@ -3319,7 +3354,7 @@ print(work.await())
 
 If the spawned thread panicked, `await` panics with `Spawned thread panicked: <message>`. If the spawned thread was interrupted or ran out of fuel, the waiting thread is interrupted too.
 
-A future that no spawned thread completes (one from a host function, or from `FutureResolver` before `complete`) can only be completed from outside the running program. Awaiting it on the main thread suspends the whole program and returns to the host, which completes the future and resumes the program at the `await` (see [Suspending an eval](#suspending-an-eval)). This works at any call depth, in a generator body and inside a fiber. The `cyber` command completes no futures, so there the program ends with `panic: Abandoned while awaiting a future.` A spawned thread can not wait for such a future, and neither can a function that a host function called: both panic.
+A future that no spawned thread completes (one from a host function, or from `FutureResolver` before `complete`) can only be completed from outside the running program. Awaiting it on the main thread suspends the whole program and returns to the host, which completes the future and resumes the program at the `await` (see [Suspending an eval](#suspending-an-eval)). This works at any call depth and in a generator body. Inside a fiber the `await` suspends the fiber instead (see [Fibers](#fibers)). The `cyber` command completes no futures, so there the program ends with `panic: Abandoned while awaiting a future.` A spawned thread can not wait for such a future, and neither can a function that a host function called: both panic.
 
 When `await` resumes, the expression evaluates to the completed value of the `Future`:
 ```cy

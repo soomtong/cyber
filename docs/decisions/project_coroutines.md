@@ -256,7 +256,7 @@ Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator 
    식별자일 때만 본다. 그 밖의 수신자 식은 이전의 필드 오류 그대로). `obj.work()` 꼴을 받아들일지는 정하지 않았다.
 5. `fiber:` 본문은 기존 클로저 규칙을 그대로 따른다(`^T` 또는 `&T`로 선언한 변수만 캡처). `&T` 캡처를 fiber에서 막는
    규칙은 넣지 않았다.
-6. `Future.await()`는 fiber 안에서도 spin한다(spawn의 Future). 단계 3(await를 양보로)은 하지 않았다. 호스트 Future는 2026-11-12부터 eval을 탈출한다.
+6. `Future.await()`는 fiber 안에서도 spin했다(spawn의 Future). 2026-11-12 단계 3부터 fiber를 멈춘다(아래 "단계 3 구현" 절).
 7. 루트 맥락의 `suspend`는 no-op이다. 임베딩의 `CL_YIELD`는 없다.
 8. AOT(`cgen.zig`)는 미지원.
 
@@ -264,7 +264,7 @@ Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator 
 lib 테스트 3개(누수 검사 할당자: 정상 종료, 중첩 fiber 안 panic 뒤 재사용, `single_run`에서 진행 중인 fiber).
 tree-sitter `fiber_expression` · `suspend_statement`.
 
-남은 것: 위 6, 4의 `obj.work()` 꼴, 단계 3 · 4. 단계 1(`CL_AWAIT`)은 2026-11-12에 구현했다(아래 절).
+남은 것: 단계 4(취소, 구조적 동시성). 4의 `obj.work()` 꼴은 넣지 않기로 했다(2026-11-12 사용자 결정). 단계 1(`CL_AWAIT`)은 2026-11-12에 구현했다(아래 절).
 
 ## 단계 1 구현 (2026-11-12)
 
@@ -370,3 +370,46 @@ spawn 스레드. 예제 `examples/libcyber/host_await.c`(`lib-standalone-test`�
 
 `await` 하나씩으로도 동시 실행은 된다: 요청을 먼저 다 보낸 뒤 순서대로 await하면 호스트는 자기가 만든 Future를 전부 알고 있어
 한꺼번에 처리할 수 있다. `wait_any`가 더하는 것은 "먼저 끝난 것부터"다.
+
+## 단계 3 구현 (2026-11-12)
+
+사용자 지시("이번 시즌에 fiber 관련 동시성 동작을 모두 완성해 0.5를 낸다")로 구현했다. 스펙 4절의 정의 그대로다:
+`await()`는 "완료될 때까지 현재 실행 맥락을 멈춘다"이고 fiber 안에서는 그 fiber를 멈춘다.
+
+동작.
+
+- `AWAIT` 명령이 fiber 안에서 미완료 Future를 만나면 `Fiber.await_single`에 Future를 적고 `FIBER_SWITCH_OUT`으로
+  resume한 쪽에 `.suspended`를 돌려준다. `Fiber.pc`는 그 `AWAIT` 명령 자신이라 다음 resume이 같은 명령을 다시 실행한다.
+  아직 미완료면 다시 멈춘다. 그래서 "대기 중인 fiber의 resume은 본문에 들어가지 않는다"에 따로 코드가 없다. 힙 할당도 없다.
+- `Future.wait_any`(builtin `@await_any`)는 fiber 안에서 `RET_FIBER_AWAIT`(3)를 돌려주고 `CALL_HOST`가 fiber를 멈춘다.
+  resume 때 같은 호출이 다시 실행된다. 기다리는 목록은 `Fiber.await_ptr` · `await_len`.
+- `FIBER_RESUME`이 대기 기록을 지운다. 멈춘 명령이 다시 실행되며 필요하면 다시 적는다.
+- fiber 안의 await는 대기 큐의 스레드 작업을 직접 실행하지 않는다(루트의 await는 한다). 처음에는 멈추기 전에 하나
+  실행하게 했는데, 그 작업이 fiber 안에서 끝까지 돌아 다른 fiber가 시작도 못 했다(Release 빌드의 테스트가 순서로 잡았다).
+  큐의 작업은 `wait_ready`가 루트에서 실행한다. 그래서 워커가 없는 풀(cpu 1개)에서는 `wait_ready`를 부르지 않는
+  루프가 끝나지 않는다.
+- `Fiber.wait_ready()`(builtin `@fibers_wait`): 스레드의 fiber 목록에서 `SUSPENDED`이고 대기 기록이 있는 것을 훑는다.
+  하나라도 끝났으면 `true`, 기다리는 fiber가 없으면 `false`. 아니면 기다린다: spawn의 Future가 섞여 있으면 VM 안에서,
+  호스트 Future뿐이면 `Compiler.await_buf`에 전부 모아 `CL_AWAIT`(`cl_vm_pending_futures`가 그 목록을 돌려준다).
+  fiber 안에서 부르면 `Fiber.await_fibers`를 켜고 그 fiber를 멈춘다(중첩 스케줄러용).
+- `Fiber.waiting()`: 대기 기록이 있고 아직 끝난 Future가 없는지.
+
+결정.
+
+1. 런타임 스케줄러를 두지 않았다. 누가 다음에 도는지는 스크립트의 resume 루프가 정한다. 다음 단계의 범위 객체
+   (구조적 동시성)가 자식들을 돌리는 자리이고, 전역 큐는 그와 겹친다. 런타임이 주는 것은 "모두가 대기 중일 때 쉬는 법"
+   (`wait_ready`) 하나다.
+2. `resume`의 반환값은 `.suspended` · `.done` 그대로다. 네 번째 상태(`.waiting`)를 넣지 않고 `waiting()`으로 묻는다.
+   `FiberStatus`가 `GeneratorStatus`와 같은 모양으로 남는다.
+3. 0.4.8의 "fiber 안 await도 eval을 탈출한다"(tars-agent 요청 8번)를 바꿨다. fiber를 쓰면서 호스트 Future를 기다리는
+   스크립트는 루트에서 `Fiber.wait_ready()`를 불러야 한다. 부르지 않는 루프는 호스트에 돌아가지 않고 상한까지 돈다.
+   tars-agent에 알릴 것.
+4. 루트 맥락의 await는 그대로다(spawn Future는 spin, 호스트 Future는 `CL_AWAIT`). spawn한 스레드의 루트가 호스트
+   Future를 기다리면 여전히 panic이다. 그 스레드 안의 fiber는 멈출 수 있지만 `wait_ready`가 같은 panic을 낸다.
+
+테스트: behavior `concurrency/fiber_await.cy`(spawn Future 교차 실행, `FutureResolver`, `wait_any`, 중첩 fiber,
+generator 본문), lib `Fibers that await host futures run interleaved, and the host sees all of their futures.`와
+기존 fiber · abandon 테스트 갱신.
+
+남은 것: 취소(멈춘 fiber의 스택 풀기) · 범위 문법 · 오류 전파(구조적 동시성), `CL_YIELD`, AOT.
+

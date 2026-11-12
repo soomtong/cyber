@@ -978,6 +978,14 @@ beginSwitch:
                 // are still in their registers.
                 RETURN(RES_AWAIT);
             }
+            if (res == RET_FIBER_AWAIT) {
+                // A builtin suspended the running fiber. It recorded what the fiber waits for.
+                Fiber* f = t->c.cur_fiber;
+                f->pc = pc;
+                f->fp = stack;
+                FIBER_SWITCH_OUT(f, FIBER_SUSPENDED);
+                NEXT();
+            }
             RETURN(RES_PANIC);
         }
         pc += CALL_INST_LEN;
@@ -1518,6 +1526,8 @@ beginSwitch:
         f->host_depth = t->c.host_depth;
         f->state = FIBER_RUNNING;
         f->started = true;
+        f->await_len = 0;
+        f->await_fibers = false;
         t->c.cur_fiber = f;
         t->c.stack_ptr = f->stack_ptr;
         t->c.stack_len = f->stack_len;
@@ -1552,6 +1562,21 @@ beginSwitch:
     }
     CASE(AWAIT): {
         Value future = stack[pc[1]];
+        Fiber* f = t->c.cur_fiber;
+        if (f != NULL && !zFiberAwaitReady(t, future)) {
+            // A fiber gives control back instead of waiting. A resume runs this inst again.
+            if (f->host_depth != t->c.host_depth) {
+                panicStaticMsg(t, "Cannot await across a host call.");
+                RETURN(RES_PANIC);
+            }
+            f->await_single = (void*)future;
+            f->await_ptr = &f->await_single;
+            f->await_len = 1;
+            f->pc = pc;
+            f->fp = stack;
+            FIBER_SWITCH_OUT(f, FIBER_SUSPENDED);
+            NEXT();
+        }
         pc += 2;
         t->c.pc = pc;
         t->c.fp = stack;

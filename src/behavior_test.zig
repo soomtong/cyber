@@ -384,6 +384,7 @@ if (!aot) {
     run.case("concurrency/fiber_entry_ret_error.cy");
     run.case("concurrency/fiber_borrow_param_error.cy");
     run.case("concurrency/suspend_value_error.cy");
+    run.case("concurrency/fiber_await.cy");
     run.case("concurrency/fiber_method_entry_error.cy");
     run.case("concurrency/fiber_borrow_receiver_error.cy");
     run.case("concurrency/fiber_no_call_error.cy");
@@ -394,6 +395,7 @@ if (!aot) {
     run.case("concurrency/future_wait_any.cy");
     run.case("concurrency/future_wait_any_empty_panic.cy");
     if (!is_wasm) {
+        run.case("concurrency/fiber_await_spawn.cy");
         run.case("concurrency/spawn.cy");
     }
 }

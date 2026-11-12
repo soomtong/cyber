@@ -4659,6 +4659,26 @@ type FiberStatus enum:
 
 #[bind] fn @fiber_status(state Ptr[void]) -> FiberStatus
 
+--| Whether the fiber is suspended at an `await` or a `Future.wait_any` whose future is not done.
+--| A `resume` of such a fiber returns `.suspended` at once.
+fn (&Fiber) waiting() -> bool:
+    return @fiber_waiting(self.state)
+
+--| Waits until a future that a suspended fiber of this thread awaits is done, and returns `true`.
+--| Returns `false` at once when no fiber awaits a future. A scheduler loop calls it when a round of
+--| `resume` calls made no progress. Futures of spawned threads are waited for like `await` does. When only
+--| the host can complete the futures, the eval is suspended and all of them are pending
+--| (see `cl_vm_pending_futures`). Inside a fiber, that fiber is suspended until one of the futures is done.
+fn Fiber :: wait_ready() -> bool:
+    while:
+        res := @fibers_wait()
+        if res >= 0:
+            return res == 1
+
+#[bind] fn @fiber_waiting(state Ptr[void]) -> bool
+
+#[bind] fn @fibers_wait() -> int
+
 #[bind] fn @fiber_cancel(state Ptr[void]) -> bool
 
 #[bind] fn @fiber_cancelled() -> bool

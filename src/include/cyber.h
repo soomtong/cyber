@@ -453,8 +453,11 @@ CLResultCode cl_vm_evalx(CLVM* vm, CLBytes uri, CLBytes src, CLEvalConfig config
 //         r = cl_vm_resume(vm, &res);
 //     }
 //
-// The await can be at any call depth, in the body of a generator and inside a fiber. It can not be inside a
-// function that a host function called (`panic: Cannot await across a host call.`) or in a spawned thread.
+// The await can be at any call depth and in the body of a generator. It can not be inside a function that a
+// host function called (`panic: Cannot await across a host call.`) or in a spawned thread.
+// An await inside a fiber does not suspend the eval: it suspends the fiber, and the script goes on in the
+// context that resumed it. The eval is suspended when the root context waits: with an `await` of its own,
+// with `Future.wait_any`, or with `Fiber.wait_ready()`, which waits for the futures of all suspended fibers.
 // While an eval is suspended, `cl_vm_eval*`, `cl_vm_validate` and `cl_vm_compile*` return `CL_ERROR_SUSPENDED`.
 // `cl_vm_reset` and `cl_vm_deinit` abandon the suspended eval first.
 // All of these functions are called from the thread that runs the evals of the VM. A future is not completed
@@ -507,7 +510,8 @@ bool cl_future_complete_error(CLVM* vm, CLFuture* future, int64_t err);
 CLFuture* cl_vm_pending_future(CLVM* vm);
 
 // The futures that the suspended eval waits for: one for `await`, the whole list for `Future.wait_any`, in the
-// order of the list. Writes at most `cap` of them to `out` (which can be `NULL`) and returns how many there are,
+// order of the list. For `Fiber.wait_ready` they are the futures that the suspended fibers await, in no
+// particular order: identify them by their tags. Writes at most `cap` of them to `out` (which can be `NULL`) and returns how many there are,
 // 0 when no eval is suspended. Completing any one of them lets `cl_vm_resume` continue. More than one can be
 // completed before the resume. The pointers are borrowed like the one of `cl_vm_pending_future`, which returns
 // the first of this list.

@@ -1108,6 +1108,22 @@ pub fn canSuspendEval(t: *cy.Thread) bool {
     return true;
 }
 
+/// Whether a future no longer waits: it is completed, or its spawned thread ended (the `await` reports how).
+pub fn futureDone(future: *const cy.heap.FutureValue) bool {
+    if (future.shared_state) |shared_state| {
+        return @atomicLoad(u8, &shared_state.state, .acquire) >= 2;
+    }
+    return future.completed;
+}
+
+/// An `await` inside a fiber: whether it can go on. The fiber is suspended otherwise.
+/// It does not run queued thread tasks like the blocking wait does: the task would run to its end inside this
+/// fiber while the other fibers stand still. `Fiber.wait_ready` runs them when every fiber waits.
+fn zFiberAwaitReady(_: *cy.Thread, fut_value_bits: u64) callconv(.c) bool {
+    const fut_value_ptr: Value = .{ .val = fut_value_bits };
+    return futureDone(fut_value_ptr.asPtr(*cy.heap.FutureValue));
+}
+
 fn zAwait(t: *cy.Thread, fut_value_bits: u64) callconv(.c) vmc.ResultCode {
     const fut_value_ptr: Value = .{ .val = fut_value_bits };
     const future = fut_value_ptr.asPtr(*cy.heap.FutureValue);
@@ -1327,6 +1343,7 @@ comptime {
     }
 
     @export(&zAwait, .{ .name = "zAwait", .linkage = .strong });
+    @export(&zFiberAwaitReady, .{ .name = "zFiberAwaitReady", .linkage = .strong });
     @export(&z_panic_unexpected_choice, .{ .name = "z_panic_unexpected_choice", .linkage = .strong });
     @export(&zAllocBigObject, .{ .name = "zAllocBigObject", .linkage = .strong });
     @export(&zAllocPoolObject, .{ .name = "zAllocPoolObject", .linkage = .strong });

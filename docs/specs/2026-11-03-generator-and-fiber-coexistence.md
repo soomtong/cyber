@@ -1,6 +1,6 @@
 # Generator와 Fiber를 함께 두는 설계 검토
 
-2026-11-03 작성, 2026-11-07 결정, 2026-11-11 제너레이터 선언을 `generator fn`으로 바꿔 구현. 상태: 단계 1.5 · 2 구현(2026-11-11: `generator fn`, `.suspended`, `fiber` · `suspend` · `Fiber`). 단계 1(`CL_AWAIT`, `cl_vm_resume`, 호스트 Future C API)은 2026-11-12 구현(`docs/decisions/project_coroutines.md`의 "단계 1 구현" 절). 단계 3 · 4는 미구현. 구현 기록과 스펙에서 달라진 점은 `docs/decisions/project_coroutines.md`의 "Fiber 구현 (2026-11-11)" 절. 결정 항목은 `docs/decisions/project_coroutines.md`의
+2026-11-03 작성, 2026-11-07 결정, 2026-11-11 제너레이터 선언을 `generator fn`으로 바꿔 구현. 상태: 단계 1.5 · 2 구현(2026-11-11: `generator fn`, `.suspended`, `fiber` · `suspend` · `Fiber`). 단계 1(`CL_AWAIT`, `cl_vm_resume`, 호스트 Future C API)은 2026-11-12 구현(`docs/decisions/project_coroutines.md`의 "단계 1 구현" 절). 단계 3(fiber 안 await의 양보, `Fiber.wait_ready`)은 2026-11-12 구현(같은 문서의 "단계 3 구현" 절). 단계 4의 취소는 미구현. 구현 기록과 스펙에서 달라진 점은 `docs/decisions/project_coroutines.md`의 "Fiber 구현 (2026-11-11)" 절. 결정 항목은 `docs/decisions/project_coroutines.md`의
 "설계 결정 (2026-11-07)" 절에 있다. 이 문서의 코드는 그 결정을 반영한 제안 문법이다.
 앞선 판단 틀은 `docs/history/concurrency_model_fit.md`, 사실 근거는 `docs/study/07-coroutines-concurrency.md`이다.
 

@@ -58,6 +58,8 @@ pub const Compiler = struct {
     /// The futures of a suspended `Future.wait_any`. Empty when the eval waits for one future.
     /// Points into the list that the script passed, which stays in place while the eval is suspended.
     await_any: []const *cy.heap.FutureValue = &.{},
+    /// Storage of `await_any` when the list is collected from the fibers (`Fiber.wait_ready`).
+    await_buf: std.ArrayListUnmanaged(*cy.heap.FutureValue) = .empty,
 
     reports: std.ArrayList(Report),
 
@@ -190,6 +192,8 @@ pub const Compiler = struct {
     }
 
     pub fn deinit(self: *Compiler, comptime reset: bool) void {
+        self.await_buf.clearAndFree(self.alloc);
+        self.await_any = &.{};
         self.vm.log_tracev("Deinit compiler reset={}", .{reset});
         self.clearReports();
         if (!reset) {

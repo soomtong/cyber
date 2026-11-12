@@ -28,6 +28,14 @@
 
 ## 언어와 표준 라이브러리
 
+- fiber 안의 `Future.await()`와 `Future.wait_any`가 미완료 Future에서 기다리지 않고 그 fiber를 멈춘다
+  (`resume`은 `.suspended`를 돌려준다). 다른 fiber가 그동안 돈다. 대기 중인 fiber의 `resume`은 본문에 들어가지
+  않고 바로 `.suspended`다. 루트 맥락(fiber 밖)의 `await`는 그대로다.
+- `Fiber.waiting()`: fiber가 미완료 Future에서 멈춰 있는지. `suspend`로 멈춘 fiber와 구분한다.
+- `Fiber.wait_ready()`: 멈춘 fiber가 기다리는 Future 중 하나가 끝날 때까지 루트를 재우고 `true`를 돌려준다.
+  기다리는 fiber가 없으면 바로 `false`. spawn의 Future는 VM 안에서 기다리고, 호스트만 완료할 수 있으면 eval이
+  `CL_AWAIT`로 나간다. fiber 안에서 부르면 그 fiber가 멈춘다.
+
 - `type.info(Trait)`가 `TypeInfo.trait`(`TraitInfo{name}`)를 돌려준다. 이전에는
   ``type.info does not support the trait`` 컴파일 오류로 막아 두었다.
 
@@ -37,6 +45,13 @@
   메서드를 진입점으로 쓰려면 타입으로 이름을 대고 수신자를 첫 인자로 넘긴다: `fiber Job.work(job, 2)`.
 
 ## 임베딩 API
+
+- 호환성: fiber 안에서 호스트 Future를 await해도 eval이 더는 `CL_AWAIT`로 나가지 않는다(0.4.8에서는 나갔다).
+  fiber만 멈추고 스크립트는 resume한 쪽에서 계속된다. eval이 나가는 것은 루트 맥락이 기다릴 때다: 루트의
+  `await` · `Future.wait_any` · `Fiber.wait_ready()`. fiber를 resume하는 루프는 `Fiber.wait_ready()`를 불러야
+  호스트가 Future를 완료할 기회를 얻는다. 부르지 않으면 연료 · 시간 상한까지 돈다.
+- `cl_vm_pending_futures`는 `Fiber.wait_ready()`로 멈춘 eval에서 멈춘 fiber들이 기다리는 Future 전부를 돌려준다
+  (순서 없음, 태그로 식별). 그중 하나를 완료하고 resume하면 된다.
 
 - `cl_vm_release_result(vm)`: 마지막 eval이 `CLEvalResult`로 돌려준 값을 바로 해제한다. 그 뒤에는 `res->res`를
   읽을 수 없다. `cl_thread_rc`로 누수를 세는 호스트는 먼저 이것을 부른다. `CLEvalResult`의 값은 VM 소유이고

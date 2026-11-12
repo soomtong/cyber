@@ -357,6 +357,8 @@ typedef uint64_t Value;
 typedef uint8_t Ret;
 // A builtin host function suspends the eval. The VM runs the call again on a resume. Not part of the C API.
 #define RET_AWAIT 2
+// A builtin host function suspends the running fiber. The VM runs the call again when the fiber is resumed.
+#define RET_FIBER_AWAIT 3
 
 typedef union ValueUnion {
     double d;
@@ -549,6 +551,15 @@ typedef struct Fiber {
     // Set when the `Fiber` value is destructed before the first `resume`. The entry function sees it and
     // returns without the call, which releases the arguments.
     bool cancelled;
+
+    // What the fiber waits for while it is suspended at an `await`. Cleared by `resume`: the inst that
+    // suspended the fiber runs again and sets it again when the wait is not over.
+    // `await_len` futures at `await_ptr` (`FutureValue*`). For a single future `await_ptr` is `&await_single`.
+    void* await_single;
+    void** await_ptr;
+    size_t await_len;
+    // Suspended in `Fiber.wait_ready`: it waits for the futures of the thread's other fibers.
+    bool await_fibers;
 } Fiber;
 
 // Unused members are declared for debugging.
@@ -953,6 +964,7 @@ void zFreePoolObject(ZThread* t, HeapObject* obj);
 void zFreeBigObject(ZThread* t, HeapObject* obj, size_t size);
 ResultCode z_ret_generator(ZThread* t, TypeId type_id, u16 ret_size, Value* fp, size_t frame_len, Inst* resume_pc, Inst* deinit_pc);
 ResultCode zAwait(ZThread* t, Value value);
+bool zFiberAwaitReady(ZThread* t, Value value);
 
 // The return address of a fiber's entry frame. One `FIBER_END` inst.
 extern Inst fiber_end_code[1];

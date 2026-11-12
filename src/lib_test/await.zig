@@ -181,7 +181,7 @@ fn runCompleting(vm: *C.VM, config: C.EvalConfig, src: []const u8, res: *C.EvalR
     return code;
 }
 
-test "An await suspends at any call depth, in a generator body and in a fiber." {
+test "An await suspends at any call depth and in a generator body. In a fiber it suspends the fiber." {
     const vm = Host.init();
     defer C.vm_deinit(vm);
 
@@ -216,7 +216,8 @@ test "An await suspends at any call depth, in a generator body and in a fiber." 
     , &res));
     try zt.eq(3, Host.num_asked);
 
-    // Inside a fiber the eval leaves the VM as well. The resume continues in the fiber.
+    // Inside a fiber the await gives control back to the resumer. The eval leaves the VM when the root
+    // context waits for the fibers, and the resume continues in the root.
     Host.reset();
     try zt.eq(C.Success, runCompleting(vm, C.defaultEvalConfig(),
         \\use host
@@ -228,11 +229,89 @@ test "An await suspends at any call depth, in a generator body and in a fiber." 
         \\log := ^ArrayStore[int]{}
         \\f := fiber work(log, 1)
         \\test.eq(f.resume(), .suspended)
+        \\test.eq(f.waiting(), true)
+        \\test.eq(log.len(), 0)
+        \\-- Not done yet: the fiber is not entered.
+        \\test.eq(f.resume(), .suspended)
+        \\test.eq(Fiber.wait_ready(), true)
+        \\test.eq(f.waiting(), false)
+        \\-- Runs to the plain `suspend`.
+        \\test.eq(f.resume(), .suspended)
+        \\test.eq(f.waiting(), false)
         \\test.eq(log.len(), 1)
+        \\test.eq(Fiber.wait_ready(), false)
+        \\test.eq(f.resume(), .suspended)
+        \\test.eq(Fiber.wait_ready(), true)
         \\test.eq(f.resume(), .done)
         \\test.eq(log[0] + log[1], 30)
     , &res));
     try zt.eq(2, Host.num_asked);
+}
+
+test "Fibers that await host futures run interleaved, and the host sees all of their futures." {
+    const vm = Host.init();
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Await, C.vm_eval(vm,
+        \\use host
+        \\use test
+        \\fn work(name str, n int, log ^ArrayStore[str]):
+        \\    a := host.ask(n).await()
+        \\    log << '%{name}1=%{a}'
+        \\    b := host.ask(n + 1).await()
+        \\    log << '%{name}2=%{b}'
+        \\fn pair(log ^ArrayStore[str]):
+        \\    futs := []Future[int]{host.ask(100), host.ask(200)}
+        \\    k := Future.wait_any(futs.span())
+        \\    log << 'pair%{k}=%{futs[k].await()}'
+        \\log := ^ArrayStore[str]{}
+        \\x := fiber work('x', 1, log)
+        \\y := fiber work('y', 5, log)
+        \\z := fiber pair(log)
+        \\while x.status() != .done or y.status() != .done or z.status() != .done:
+        \\    _ = x.resume()
+        \\    _ = y.resume()
+        \\    _ = z.resume()
+        \\    _ = Fiber.wait_ready()
+        \\test.eq(log.len(), 5)
+        \\test.eq(log[0], 'y1=50')
+        \\test.eq(log[1], 'pair1=2000')
+        \\test.eq(log[2], 'x1=10')
+        \\test.eq(log[3], 'x2=20')
+        \\test.eq(log[4], 'y2=60')
+        \\test.eq(Fiber.wait_ready(), false)
+    , &res));
+    // x asked 1, y asked 5, z asked 100 and 200. All four are pending at once.
+    try zt.eq(4, Host.num_asked);
+    var pending: [8]?*C.Future = @splat(null);
+    try zt.eq(4, C.vm_pending_futures(vm, &pending, pending.len));
+    for (Host.asked[0..4]) |asked| {
+        try zt.eq(true, std.mem.indexOfScalar(?*C.Future, pending[0..4], asked) != null);
+    }
+    // A resume without a completion waits again.
+    try zt.eq(C.Await, C.vm_resume(vm, &res));
+    try zt.eq(4, C.vm_pending_futures(vm, null, 0));
+
+    // y's first answer comes first: y goes on to its second question while x still waits.
+    try zt.eq(true, completeInt(vm, Host.asked[1], 50));
+    try zt.eq(C.Await, C.vm_resume(vm, &res));
+    try zt.eq(5, Host.num_asked);
+    try zt.eq(4, C.vm_pending_futures(vm, null, 0));
+
+    // The second future of the `wait_any` in z.
+    try zt.eq(true, completeInt(vm, Host.asked[3], 2000));
+    try zt.eq(C.Await, C.vm_resume(vm, &res));
+    try zt.eq(2, C.vm_pending_futures(vm, null, 0));
+
+    try zt.eq(true, completeInt(vm, Host.asked[0], 10));
+    try zt.eq(C.Await, C.vm_resume(vm, &res));
+    try zt.eq(6, Host.num_asked);
+    try zt.eq(true, completeInt(vm, Host.asked[5], 20));
+    try zt.eq(C.Await, C.vm_resume(vm, &res));
+    try zt.eq(true, completeInt(vm, Host.asked[4], 60));
+    try zt.eq(C.Success, C.vm_resume(vm, &res));
+    try zt.eq(null, C.vm_pending_future(vm));
 }
 
 test "A host future completes with a value or an error." {
@@ -409,6 +488,7 @@ test "cl_vm_abandon drops a suspended eval, and the VM takes the next eval." {
         \\    _ = ask(7)
         \\f := fiber work('a' + 'b')
         \\_ = f.resume()
+        \\_ = Fiber.wait_ready()
     , config, &res));
     C.vm_abandon(vm);
     try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = m", config, &res));

@@ -399,6 +399,10 @@ pub const Thread = struct {
             .state = vmc.FIBER_SUSPENDED,
             .started = false,
             .cancelled = false,
+            .await_single = null,
+            .await_ptr = null,
+            .await_len = 0,
+            .await_fibers = false,
         };
         if (self.c.fibers) |head| {
             head.list_prev = fiber;

@@ -229,4 +229,11 @@ rm_span := rm_arr[..]
 t.eq(rm_span[3..].len(), 0)
 t.eq(rm_span.vec(1, 2)[1], 9)
 
+-- join()
+t.eq([]int{}.join(','), '')
+t.eq([]int{1}.join(','), '1')
+t.eq(Array[int]{1, 2, 3}.join(','), '1,2,3')
+t.eq(Array[int]{1, 2, 3}.join('🦊'), '1🦊2🦊3')
+t.eq([]str{'한글', 'x'}.join(' · '), '한글 · x')
+
 --cytest: pass

@@ -5081,6 +5081,25 @@ pub fn sema_program(c: *cy.Chunk, opt_main_func: ?*cy.Func) !*ir.Stmt {
         const call_main = try sema_call_ir(c, main_func, &.{}, c.ast.null_node);
         const main_res = try declareHiddenLocal(c, "_main_res", call_main.type, call_main, c.ast.null_node);
 
+        // An error that `main` returns is not handled by anything. It panics, like `expr!` at the top level.
+        if (call_main.type.kind() == .result) {
+            const node: *ast.Node = @ptrCast(main_func.decl.?);
+            const res = try semaLocal(c, main_res.id, node);
+            const cond = try c.semaIsError(res, node);
+            _ = try pushBlock(c, node);
+            {
+                const err = try semaUnwrapResultErrorNoCheck(c, res, node);
+                const arg = Argument.initPreResolved(node, err);
+                const panic_call = try c.semaCallFunc2(c.sema.panic_unwrap_error_fn, &.{arg}, &.{}, node);
+                _ = try declareHiddenLocal(c, "_res", c.sema.void_t, panic_call, node);
+            }
+            const block = try popBlock2(c, false);
+            _ = try c.ir.pushStmt(.if_block, node, .{
+                .cond_expr = cond.ir,
+                .body_head = block.first,
+            });
+        }
+
         // Skip deinit of main result.
         c.varStack.items[main_res.id].type = .dead;
 

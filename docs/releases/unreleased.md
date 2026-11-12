@@ -6,6 +6,14 @@
 
 ## 버그 수정
 
+- `fn main() -> !T`가 돌려준 오류가 버려졌다. `os.read_file_str('nofile')!`로 끝나도 아무것도 출력하지 않고 종료 코드 0이었다.
+  이제 최상위의 `expr!`처럼 ``panic: Unwrapped error `error.FileNotFound`.``로 끝나고 `cyber`의 종료 코드는 1이다.
+  임베딩 호스트는 이 경우 `!T` 값 대신 `CL_ERROR_PANIC`을 받는다(F-96).
+- `str.trimLeft` · `trimRight` · `trim`에 구분자를 여럿 주면 구분자마다 한 번씩만 훑었다.
+  `'abc  \r'.trimRight({' ', '\r', '\t'})`가 `'abc  '`였다. 이제 어느 구분자도 남지 않을 때까지 깎는다.
+  빈 구분자(`'abc'.trim('')`)는 끝나지 않는 루프였고 이제 아무것도 깎지 않는다(F-96).
+- `[]T.join` · `Array[T].join`이 길이에 대해 제곱 시간이었다(10만 개에 6초). 바이트로 모아 한 번에 `str`을 만든다(F-96).
+
 - 16진 · 8진 · 2진 리터럴이 `float` · `f32` 자리에 오면 자릿수를 10진 소수로 읽었다. `var f float = 0x10`이 16이 아니라 10,
   `0b101`이 101, `0o17`이 17이었고, 10진 숫자가 아닌 글자가 있으면(`float((0x7fffffffffffffff))`) 위치 없는
   `CompileError: Error: InvalidCharacter`였다. 이제 리터럴의 값(부호 없는 64비트)을 float으로 바꾼다(F-95).

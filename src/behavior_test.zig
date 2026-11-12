@@ -146,6 +146,8 @@ fn test_functions(run: *Runner) void {
     run.case("functions/lambda_incompat_arg_error.cy");
     run.case("functions/main_func_overload_error.cy");
     run.case("functions/main_func_panic.cy");
+    run.case("functions/main_func_error_panic.cy");
+    run.case("functions/main_func_result.cy");
     run.case("functions/main_func_sig_error.cy");
     run.case("functions/main_func_top_stmt_error.cy");
     run.case("functions/@init.cy");

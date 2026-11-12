@@ -116,6 +116,13 @@ t.eq(s.starts_with('bc🦊'), false)
 t.eq(s.trimLeft('a'), 'bc🦊xyz🐶')
 t.eq(s.trimRight('🐶'), 'abc🦊xyz')
 t.eq(s.trim({'a', '🐶'}), 'bc🦊xyz')
+-- Several delimiters are trimmed in any order, until none is left at that end.
+t.eq('abc  \r'.trimRight({' ', '\r', '\t'}), 'abc')
+t.eq(' \t abc'.trimLeft({'\t', ' '}), 'abc')
+t.eq('x cabcx c'.trim({'x', 'c', ' '}), 'ab')
+-- An empty delimiter trims nothing.
+t.eq('abc'.trim(''), 'abc')
+t.eq('abc'.trimLeft({'', 'a'}), 'bc')
 
 -- upper()
 t.eq(s.upper(), 'ABC🦊XYZ🐶')

@@ -3750,6 +3750,17 @@ fn main():
     print('program start')
 ```
 
+The main function can return a result type. `expr!` in its body then returns the error from `main`. An error that `main` returns panics, like `expr!` at the top level, and the `cyber` command ends with exit code 1:
+```cy
+use os
+
+fn main() -> !void:
+    src := os.read_file_str('missing.txt')!
+    print(src)
+
+--> panic: Unwrapped error `error.FileNotFound`.
+```
+
 ## Builtin modules.
 Builtin and std modules come with Cyber. See the [API docs](api.html).
 

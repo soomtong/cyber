@@ -1432,10 +1432,14 @@ fn (&Slice[]) iterator() -> int:
 fn (&Slice[]) join(sep str) -> str:
     if self._len == 0:
         return ''
-    res := str(self.ptr[0])
-    for 1..self._len |i|:
-        res += sep + str(self.ptr[i])
-    return res
+    -- The result is built as bytes. Appending to a `str` copies it each time.
+    out := []byte{}
+    for 0..self._len |i|:
+        if i > 0:
+            out += sep.span()
+        elem := str(self.ptr[i])
+        out += elem.span()
+    return str(out)
 
 fn (&Slice[]) last() -> T:
     return self[self._len-1]
@@ -2055,10 +2059,14 @@ fn (&Array[]) iterator() -> int:
 fn (&Array[]) join(sep str) -> str:
     if self.length == 0:
         return ''
-    res := str(self.buf[0])
-    for 1..self.length |i|:
-        res += sep + str(self.buf[i])
-    return res
+    -- The result is built as bytes. Appending to a `str` copies it each time.
+    out := []byte{}
+    for 0..self.length |i|:
+        if i > 0:
+            out += sep.span()
+        elem := str(self.buf[i])
+        out += elem.span()
+    return str(out)
 
 #[cond=type.is_copyable(T)]
 fn (&Array[]) last() -> T:
@@ -4053,6 +4061,8 @@ fn (&str) starts_with(prefix str) -> bool:
 
 fn (&str) trimLeft(delim str) -> str:
     res := self.*
+    if delim.len() == 0:
+        return res
     while res.len() >= delim.len():
         i := delim.len()
         if res[0..i] != delim:
@@ -4060,14 +4070,21 @@ fn (&str) trimLeft(delim str) -> str:
         res = res[i..]
     return res
 
+--| Trims until none of `delims` is at that end, in any order.
 fn (&str) trimLeft(delims AsSpan[str]) -> str:
     res := self.*
-    for delims |delim|:
-        res = res.trimLeft(delim)
+    while:
+        before := res.len()
+        for delims |delim|:
+            res = res.trimLeft(delim)
+        if res.len() == before:
+            break
     return res
 
 fn (&str) trimRight(delim str) -> str:
     res := self.*
+    if delim.len() == 0:
+        return res
     while res.len() >= delim.len():
         i := res.len() - delim.len()
         if res[i..] != delim:
@@ -4075,10 +4092,15 @@ fn (&str) trimRight(delim str) -> str:
         res = res[0..i]
     return res
 
+--| Trims until none of `delims` is at that end, in any order.
 fn (&str) trimRight(delims AsSpan[str]) -> str:
     res := self.*
-    for delims |delim|:
-        res = res.trimRight(delim)
+    while:
+        before := res.len()
+        for delims |delim|:
+            res = res.trimRight(delim)
+        if res.len() == before:
+            break
     return res
 
 --| Returns the string with both ends trimmed.

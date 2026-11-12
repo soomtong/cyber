@@ -202,4 +202,11 @@ idx_strs := []str{'a', 'bb', 'ccc'}
 t.eq(2, idx_strs.index('ccc').?)
 t.eq(true, idx_strs.index('d') == none)
 
+-- join()
+t.eq([]int{}.join(','), '')
+t.eq([]int{1}.join(','), '1')
+t.eq([]int{1, 2, 3}.join(','), '1,2,3')
+t.eq([]int{1, 2, 3}.join('🦊'), '1🦊2🦊3')
+t.eq([]str{'한글', 'x'}.join(' · '), '한글 · x')
+
 --cytest: pass

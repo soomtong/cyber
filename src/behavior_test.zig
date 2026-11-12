@@ -54,6 +54,7 @@ pub fn isAot(backend: c.Backend) bool {
 
 fn test_syntax(run: *Runner) void {
     run.case("syntax/adjacent_stmt_error.cy");
+    run.case("syntax/range_no_end_error.cy");
     run.case("syntax/block_no_child_error.cy");
     run.case("syntax/change_to_spaces_error.cy");
     run.case("syntax/change_to_tabs_error.cy");

@@ -7735,8 +7735,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
         },
         .range => {
             const range = node.cast(.range);
+            // `a..` and `..` are only slice bounds. `a[..-1]` parses as `(..) - 1` and arrives here.
             const end = range.end orelse {
-                return error.Unexpected;
+                return c.reportError("Expected range end. A range without an end is only allowed as a slice index.", node);
             };
 
             var b: InitBuilder = .{ .c = c };
@@ -11128,12 +11129,15 @@ fn semaInferSignedLit(c: *cy.Chunk, literal: []const u8, target_t: *cy.Type, bas
 
 fn semaInferUnsignedLit(c: *cy.Chunk, literal: []const u8, target_t: *cy.Type, base: u8, node: *ast.Node) !?ExprResult {
     switch (target_t.id()) {
+        // The digits are in `base`. They are not a decimal float literal.
         bt.F32 => {
-            const val = try std.fmt.parseFloat(f32, literal);
+            const int = try semaParseInt(c, u64, literal, base, node);
+            const val: f32 = @floatFromInt(int);
             return try c.semaConst32(@bitCast(val), target_t, node);
         },
         bt.F64 => {
-            const val = try std.fmt.parseFloat(f64, literal);
+            const int = try semaParseInt(c, u64, literal, base, node);
+            const val: f64 = @floatFromInt(int);
             return try c.semaConst(@bitCast(val), target_t, node);
         },
         bt.R8,

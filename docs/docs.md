@@ -520,6 +520,8 @@ a = 18446744073709551615u    -- -1
 var b r64 = 18446744073709551615
 ```
 
+When the target is a `float` or `f32`, a hexadecimal, octal or binary literal converts by its unsigned 64-bit value: `var f float = 0x10` is `16.0` and `var g float = 0xFFFFFFFFFFFFFFFF` is `18446744073709551615.0`. Without a float target the literal is an `int` first, so `float(0xFFFFFFFFFFFFFFFF)` is `-1.0`.
+
 String literals evaluate as their UTF-8 codepoint if the target integer type is big enough:
 ```cy
 -- Success.
@@ -991,7 +993,10 @@ arr := []int{1, 2, 3, 4, 5}
 print(arr[0..0])    --> {}
 print(arr[0..3])    --> {1, 2, 3}
 print(arr[3..])     --> {4, 5}
+print(arr[..])      --> {1, 2, 3, 4, 5}
 ```
+
+The end can be omitted (`arr[3..]`), or both bounds (`arr[..]`). The start alone can not be omitted: write `arr[0..n]`, not `arr[..n]`. A range without an end is only a slice index. Anywhere else it is a compile error.
 
 A sub-slice will clone the underlying buffer upon any resize operation such as `append`, `insert`, `remove`, etc.
 Once cloned, the slice will no longer point to the same elements as the original slice:

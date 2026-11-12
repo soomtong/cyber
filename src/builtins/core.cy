@@ -4358,6 +4358,9 @@ type FutureValue[T Any]:
     shared_state Ptr[byte]
     completed bool
 
+    -- Set by the host for a future it creates (`cl_future_new`). 0 for every other future.
+    tag       int
+
     data      ?T
 
 -- type AsyncTask[T Any]:
@@ -4402,6 +4405,7 @@ fn Future :: complete(val %T) -> Future[T]:
             cont_tail = NullId,
             completed = true,
             shared_state = none,
+            tag = 0,
             data = val,
         }
     }
@@ -4413,6 +4417,7 @@ fn Future :: @init(%T type) -> Future[T]:
             cont_tail = NullId,
             shared_state = none,
             completed = false,
+            tag = 0,
             data = none,
         }
     }

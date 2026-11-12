@@ -327,7 +327,11 @@ export fn cl_vm_pending_futures(vm: *cy.VM, out: ?[*]?*cy.heap.FutureValue, cap:
     return list.len;
 }
 
-export fn cl_future_new(t: *cy.Thread, future_t: *cy.Type) ?*cy.heap.FutureValue {
+export fn cl_future_tag(future: *cy.heap.FutureValue) u64 {
+    return future.tag;
+}
+
+export fn cl_future_new(t: *cy.Thread, future_t: *cy.Type, tag: u64) ?*cy.heap.FutureValue {
     if (!future_t.isInstanceOf(t.c.vm.sema.future_tmpl)) return null;
     // `Future[T]` is a struct with the single field `inner ^FutureValue[T]`.
     const value_t = future_t.cast(.struct_t).fields()[0].type.cast(.pointer).child_t;
@@ -338,6 +342,7 @@ export fn cl_future_new(t: *cy.Thread, future_t: *cy.Type) ?*cy.heap.FutureValue
     const future: *cy.heap.FutureValue = @ptrCast(@alignCast(obj));
     future.cont_head = cy.NullId;
     future.cont_tail = cy.NullId;
+    future.tag = tag;
     return future;
 }
 
@@ -354,10 +359,10 @@ fn futureSlot(vm: *cy.VM, future: *cy.heap.FutureValue) ?FutureSlot {
     const obj: *cy.HeapObject = @ptrCast(@alignCast(future));
     const value_t = vm.sema.getType(obj.getTypeId());
     if (value_t.kind() != .struct_t) return null;
-    // `FutureValue[T]`: cont_head, cont_tail, shared_state, completed, data ?T.
+    // `FutureValue[T]`: cont_head, cont_tail, shared_state, completed, tag, data ?T.
     const fields = value_t.cast(.struct_t).fields();
-    if (fields.len != 5 or fields[4].type.kind() != .option) return null;
-    const option_t = fields[4].type.cast(.option);
+    if (fields.len != 6 or fields[5].type.kind() != .option) return null;
+    const option_t = fields[5].type.cast(.option);
     const data: [*]u8 = @ptrCast(&future.data);
     if (option_t.zero_union) {
         return .{ .type = option_t.child_t, .ptr = data, .some_tag = null };

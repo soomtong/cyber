@@ -445,7 +445,7 @@ CLResultCode cl_vm_evalx(CLVM* vm, CLBytes uri, CLBytes src, CLEvalConfig config
 //     CLResultCode r = cl_vm_evalx(vm, uri, src, config, &res);
 //     while (r == CL_AWAIT) {
 //         CLFuture* f = cl_vm_pending_future(vm);
-//         int64_t n = 123;
+//         int64_t n = answer(cl_future_tag(f));
 //         cl_future_complete(vm, f, &n);
 //         r = cl_vm_resume(vm, &res);
 //     }
@@ -462,25 +462,29 @@ CLResultCode cl_vm_evalx(CLVM* vm, CLBytes uri, CLBytes src, CLEvalConfig config
 // function does). Call it from a host function on the main thread, and write the result to the return slot:
 //
 //     CLValue* ret = cl_thread_ret(t, sizeof(CLValue));
-//     CLFuture* f = cl_future_new(t, future_t);
+//     CLFuture* f = cl_future_new(t, future_t, request_id);
 //     *ret = (CLValue)(uintptr_t)f;
 //
 // The return slot is a `CLValue` (8 bytes on every target) and owns the reference.
-//
-// A host that keeps the pointer (to find the request of a pending future, or to complete the future later)
-// retains it: `cl_thread_retain(t, (CLValue)(uintptr_t)f)`. Without that, a pending future that the script drops
-// is freed and the next `cl_future_new` can return the same address, so two requests of the host would have one
-// pointer. A retained future keeps its address to itself, and it can be completed after the script dropped it.
-// The host gives the reference back with `cl_thread_release`:
-// - after it completed the future, or
-// - when the eval ends with `CL_SUCCESS`.
-// When the eval ends with `CL_ERROR_PANIC` or `CL_ERROR_INTERRUPT`, or is dropped with `cl_vm_abandon`, the
-// heap of the eval is freed together with every future in it, retained or not. The host then forgets its
-// pointers and does not release them. The same holds after `cl_vm_reset`.
 // Returns `NULL` if `future_t` is not a `Future[T]` type or the allocator fails.
-// A future that the script drops without awaiting it, or that is still pending when the eval ends, is freed
-// like any other object.
-CLFuture* cl_future_new(CLThread* t, CLType* future_t);
+//
+// `tag` is the host's own number for the request behind the future, read back with `cl_future_tag`. Use it to
+// find the request of the future that a suspended eval waits for. Do not compare future pointers for that:
+// a pending future that the script drops is freed like any other object, and the next `cl_future_new` can
+// return the same address. Futures that the host did not create have the tag 0, so give no request that tag.
+//
+// The host does not have to keep the pointer: `cl_vm_pending_future` and `cl_vm_pending_futures` hand out the
+// futures to complete, and those are alive. Only a host that completes a future the eval is not waiting for at
+// that moment keeps its pointer, and then it retains it: `cl_thread_retain(t, (CLValue)(uintptr_t)f)`.
+// It gives the reference back with `cl_thread_release` after it completed the future, or when the eval ends
+// with `CL_SUCCESS`. When the eval ends with `CL_ERROR_PANIC` or `CL_ERROR_INTERRUPT`, or is dropped with
+// `cl_vm_abandon` or `cl_vm_reset`, the heap of the eval is freed together with every future in it, retained
+// or not: the host then forgets its pointers and does not release them.
+CLFuture* cl_future_new(CLThread* t, CLType* future_t, uint64_t tag);
+
+// The tag that `cl_future_new` gave the future. 0 for a future that the host did not create (one of a spawned
+// thread, or of the script's own `FutureResolver`).
+uint64_t cl_future_tag(CLFuture* future);
 
 // Completes a pending future with a value. `value` points to a `T`, which is copied (`sizeof` the type as host
 // functions return it: 8 bytes for an `int`, a `CLstr` for a `str`, a `CLSlice` for a `[]T`). The future takes
@@ -494,8 +498,7 @@ bool cl_future_complete(CLVM* vm, CLFuture* future, const void* value);
 bool cl_future_complete_error(CLVM* vm, CLFuture* future, int64_t err);
 
 // The future that the suspended eval waits for, or `NULL` when no eval is suspended. The pointer is borrowed:
-// it is valid until `cl_vm_resume` or `cl_vm_abandon`. Compare it only with pointers that the host retained
-// (see `cl_future_new`).
+// it is valid until `cl_vm_resume` or `cl_vm_abandon`. `cl_future_tag` tells which request it belongs to.
 // A script can also wait for a future of its own that it never completes (`FutureResolver`). The host does not
 // know such a future and abandons the eval.
 CLFuture* cl_vm_pending_future(CLVM* vm);

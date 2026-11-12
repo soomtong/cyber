@@ -931,6 +931,8 @@ pub const FutureValue = extern struct {
     cont_tail: u64,
     shared_state: ?*cy.sync.FutureSyncState,
     completed: bool,
+    /// The host's tag (`cl_future_new`), 0 for a future that the host did not create.
+    tag: u64,
     data: u64,
 };
 

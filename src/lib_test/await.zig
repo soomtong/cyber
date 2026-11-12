@@ -34,7 +34,7 @@ const Host = struct {
         const future_t = C.vm_find_type(C.thread_vm(t), spec) orelse {
             return C.thread_ret_panic(t, "No future type.");
         };
-        const f = C.future_new(t, future_t) orelse {
+        const f = C.future_new(t, future_t, num_asked + 1) orelse {
             return C.thread_ret_panic(t, "No future.");
         };
         asked[num_asked] = f;
@@ -58,7 +58,7 @@ const Host = struct {
         const future_t = C.vm_find_type(C.thread_vm(t), spec) orelse {
             return C.thread_ret_panic(t, "No future type.");
         };
-        const f = C.future_new(t, future_t) orelse {
+        const f = C.future_new(t, future_t, num_asked + 1) orelse {
             return C.thread_ret_panic(t, "No future.");
         };
         asked[num_asked] = f;
@@ -80,7 +80,7 @@ const Host = struct {
         const ret = C.thread_ret(t, u64);
         const n = C.thread_int(t);
         const vm = C.thread_vm(t);
-        const f = C.future_new(t, C.vm_find_type(vm, "Future[int]").?).?;
+        const f = C.future_new(t, C.vm_find_type(vm, "Future[int]").?, 1000).?;
         const v: i64 = n * 2;
         if (!C.future_complete(vm, f, &v)) return C.thread_ret_panic(t, "Not completed.");
         ret.* = @intFromPtr(f);
@@ -171,15 +171,11 @@ test "An await of a host future suspends the eval, and cl_vm_resume continues it
 fn runCompleting(vm: *C.VM, config: C.EvalConfig, src: []const u8, res: *C.EvalResult) C.ResultCode {
     var code = C.vm_evalx(vm, "main", src, config, res);
     while (code == C.Await) {
-        const f = C.vm_pending_future(vm);
-        var found = false;
-        for (Host.asked[0..Host.num_asked], 0..) |asked, i| {
-            if (asked == f) {
-                found = completeInt(vm, f, Host.args[i] * 10);
-                break;
-            }
-        }
-        if (!found) return C.ErrorUnknown;
+        const f = C.vm_pending_future(vm).?;
+        // The tag is the number of the request, starting at 1. No pointers are compared.
+        const tag: usize = @intCast(C.future_tag(f));
+        if (tag == 0 or tag > Host.num_asked) return C.ErrorUnknown;
+        if (!completeInt(vm, f, Host.args[tag - 1] * 10)) return C.ErrorUnknown;
         code = C.vm_resume(vm, res);
     }
     return code;
@@ -696,4 +692,45 @@ test "A host that keeps the pointers of its futures retains them." {
     try zt.eq(C.ErrorPanic, C.vm_resume(vm, &res));
     Host.reset();
     try zt.eq(C.Success, C.vm_eval(vm, "_ = 1 + 2", &res));
+}
+
+test "cl_future_tag identifies the request of a pending future." {
+    const vm = Host.init();
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var res: C.EvalResult = undefined;
+    // Futures that the script drops are freed and their addresses are used again. The tags stay apart.
+    try zt.eq(C.Await, C.vm_eval(vm,
+        \\use host
+        \\use test
+        \\for 0..4 |i|:
+        \\    _ = host.ask(i)
+        \\test.eq(host.ask(9).await(), 90)
+        \\futs := []Future[int]{host.ask(5), host.ask(6)}
+        \\test.eq(Future.wait_any(futs.span()), 1)
+        \\test.eq(futs[1].await(), 60)
+    , &res));
+    try zt.eq(5, Host.num_asked);
+    const f = C.vm_pending_future(vm).?;
+    try zt.eq(5, C.future_tag(f));
+    try zt.eq(9, Host.args[@as(usize, @intCast(C.future_tag(f))) - 1]);
+    try zt.eq(true, completeInt(vm, f, 90));
+
+    try zt.eq(C.Await, C.vm_resume(vm, &res));
+    var pending: [2]?*C.Future = .{ null, null };
+    try zt.eq(2, C.vm_pending_futures(vm, &pending, pending.len));
+    try zt.eq(6, C.future_tag(pending[0]));
+    try zt.eq(7, C.future_tag(pending[1]));
+    try zt.eq(true, completeInt(vm, pending[1], 60));
+    try zt.eq(C.Success, C.vm_resume(vm, &res));
+
+    // A future of the script has the tag 0.
+    try zt.eq(C.Await, C.vm_eval(vm,
+        \\r := FutureResolver.new(int)
+        \\_ = r.future().await()
+    , &res));
+    try zt.eq(0, C.future_tag(C.vm_pending_future(vm)));
+    C.vm_abandon(vm);
 }

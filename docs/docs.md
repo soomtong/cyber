@@ -4457,8 +4457,8 @@ CLRet write_async(CLThread* t) {
     CLValue* ret = cl_thread_ret(t, sizeof(CLValue));
     CLstr path = cl_thread_str(t);
     CLstr text = cl_thread_str(t);
-    CLFuture* f = cl_future_new(t, cl_find_type(cl_thread_vm(t), CL_BYTES("Future[!void]")));
-    // ... remember the request for `f` ...
+    // ... remember the request as number `id` ...
+    CLFuture* f = cl_future_new(t, cl_find_type(cl_thread_vm(t), CL_BYTES("Future[!void]")), id);
     *ret = (CLValue)(uintptr_t)f;
     cl_str_deinit(t, &path);
     cl_str_deinit(t, &text);
@@ -4468,6 +4468,7 @@ CLRet write_async(CLThread* t) {
 CLResultCode code = cl_vm_evalx(vm, uri, src, config, &res);
 while (code == CL_AWAIT) {
     CLFuture* f = cl_vm_pending_future(vm);
+    uint64_t id = cl_future_tag(f);        // The request this future belongs to.
     if (cancelled) {
         cl_vm_abandon(vm);                 // Like an interrupt. The VM takes the next eval.
         break;
@@ -4494,7 +4495,8 @@ fn write(path str, text str) -> !void:
 * While an eval is suspended, `cl_vm_eval*`, `cl_vm_validate` and `cl_vm_compile*` return `CL_ERROR_SUSPENDED`. `cl_vm_reset` and `cl_vm_deinit` abandon the suspended eval first.
 * `cl_vm_abandon` drops the suspended eval with the outcome of an interrupt: the main locals are gone, the declarations stay. The panic summary names the abandoned `await`.
 * A script can start several requests before it waits. `cl_vm_pending_futures` returns the futures the suspended eval waits for: one for `await`, the whole list for `Future.wait_any`. The host completes any of them, in any order and more than one if it likes, before the resume.
-* A future that the script never awaits, or that is still pending when the eval ends, is freed like any other object. Its address can be given to the next future. A host that keeps the pointers of its futures therefore retains each one with `cl_thread_retain` when it creates it, and releases it after it completed the future or when the eval ends with `CL_SUCCESS`. After a panic, an interrupt or `cl_vm_abandon` the heap of the eval is already freed with the futures in it: the host forgets its pointers without releasing them.
+* The tag given to `cl_future_new` is the host's number for the request, read back with `cl_future_tag`. Futures that the host did not create have the tag 0. Find the request of a pending future by its tag and not by its pointer: a future that the script never awaits, or that is still pending when the eval ends, is freed like any other object, and its address can be given to the next future.
+* The host does not have to keep future pointers. A host that completes a future the eval is not waiting for at that moment keeps its pointer and retains it with `cl_thread_retain`. It releases it after it completed the future or when the eval ends with `CL_SUCCESS`. After a panic, an interrupt or `cl_vm_abandon` the heap of the eval is already freed with the futures in it: the host forgets its pointers without releasing them.
 * All of these functions are called from the thread that runs the evals of the VM. A future is not completed from another thread.
 
 The full program is `examples/libcyber/host_await.c`.

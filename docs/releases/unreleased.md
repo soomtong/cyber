@@ -48,13 +48,15 @@
   `spawn`이 만든 것도 아닌 Future를 만나면 eval이 `CL_AWAIT`로 돌아온다. 스택 · 지역 변수 · 남은 연료는 그대로이고, 호스트가
   Future를 완료시킨 뒤 `cl_vm_resume`으로 멈춘 `await`에서 이어 실행한다. resume은 멈춘 동안 들어온 interrupt 요청을 지우고
   (벽시계 타이머가 호스트의 대기 시간을 세지 않는다) 연료는 다시 채우지 않는다. 호출 깊이에 제약이 없고 generator 본문과 fiber
-  안에서도 같다. 새 함수: `cl_future_new`(호스트 함수가 돌려줄 미완료 `Future[T]`), `cl_future_complete`(값으로 완료,
+  안에서도 같다. 새 함수: `cl_future_new`(호스트 함수가 돌려줄 미완료 `Future[T]`), `cl_future_tag`, `cl_future_complete`(값으로 완료,
   `Future[!U]`면 `U`를 넘김), `cl_future_complete_error`, `cl_vm_pending_future`, `cl_vm_resume`, `cl_vm_abandon`(멈춘 eval을
   interrupt처럼 버림), `cl_vm_pending_futures`(`Future.wait_any`가 기다리는 목록 전체. 호스트는 그중 아무것이나 완료시킨다).
   새 결과 코드 `CL_ERROR_SUSPENDED`: 멈춘 동안의 `cl_vm_eval*` · `cl_vm_validate` · `cl_vm_compile*`.
   `cl_vm_reset` · `cl_vm_deinit`은 멈춘 eval을 먼저 버린다. 완료는 eval을 돌리는 스레드에서만 한다.
-  호스트가 Future 포인터를 보관하려면 만들 때 `cl_thread_retain`으로 잡는다(버려진 Future의 주소가 다음 Future에 다시 쓰인다).
-  완료시킨 뒤나 eval이 `CL_SUCCESS`로 끝났을 때 놓고, panic · interrupt · abandon 뒤에는 힙이 이미 해제됐으므로 놓지 않는다.
+  `cl_future_new(t, future_t, tag)`의 `tag`는 호스트의 요청 번호이고 `cl_future_tag`로 읽는다. 멈춘 eval이 기다리는 Future가 어느
+  요청인지는 포인터가 아니라 태그로 찾는다(버려진 Future의 주소가 다음 Future에 다시 쓰인다). 호스트가 만들지 않은 Future의
+  태그는 0이다. 호스트가 포인터를 보관하는 경우(지금 기다리지 않는 Future를 완료시킬 때)에만 `cl_thread_retain`으로 잡고,
+  완료시킨 뒤나 eval이 `CL_SUCCESS`로 끝났을 때 놓는다. panic · interrupt · abandon 뒤에는 힙이 이미 해제됐으므로 놓지 않는다.
   예제 `examples/libcyber/host_await.c`, 결정 문서 `docs/decisions/project_coroutines.md`의 "단계 1 구현" 절.
 - 같은 변경으로 바뀐 동작: 같은 스레드의 미완료 Future(`FutureResolver`)를 await하면 `panic: Local future will never complete.`
   대신 `CL_AWAIT`가 된다. `cyber` CLI와 `cy.eval`은 Future를 완료시킬 수 없으므로 그 eval을 버리고

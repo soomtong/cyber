@@ -258,6 +258,7 @@ pub const vm_abandon = c.cl_vm_abandon;
 pub const vm_pending_future = c.cl_vm_pending_future;
 pub const vm_pending_futures = c.cl_vm_pending_futures;
 pub const future_new = c.cl_future_new;
+pub const future_tag = c.cl_future_tag;
 pub const future_complete = c.cl_future_complete;
 pub const future_complete_error = c.cl_future_complete_error;
 

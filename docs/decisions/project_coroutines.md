@@ -296,7 +296,9 @@ tars-agent(이 언어를 code-act 주 언어로 내장할 에이전트)의 요�
 C API(`cyber.h`의 "Suspended evals and host futures" 절).
 
 ~~~c
-CLFuture* cl_future_new(CLThread* t, CLType* future_t);
+CLFuture* cl_future_new(CLThread* t, CLType* future_t, uint64_t tag);
+uint64_t cl_future_tag(CLFuture* future);
+size_t cl_vm_pending_futures(CLVM* vm, CLFuture** out, size_t cap);
 bool cl_future_complete(CLVM* vm, CLFuture* future, const void* value);
 bool cl_future_complete_error(CLVM* vm, CLFuture* future, int64_t err);
 CLFuture* cl_vm_pending_future(CLVM* vm);
@@ -317,7 +319,13 @@ void cl_vm_abandon(CLVM* vm);
   찾는 호스트의 표에 같은 포인터가 여럿 남는다. 잡아 둔 Future는 주소를 혼자 쓰고, 스크립트가 버린 뒤에도 완료시킬 수 있다.
   놓는 때: 완료시킨 뒤, 또는 eval이 `CL_SUCCESS`로 끝났을 때. panic · interrupt · `cl_vm_abandon` · `cl_vm_reset` 뒤에는 그
   eval의 힙이 통째로 해제됐으므로(`freeHeapPages`는 참조 계수를 보지 않는다) 놓지 않고 잊는다. 놓으면 해제된 메모리를 건드린다.
-  lib 테스트 `A host that keeps the pointers of its futures retains them.`, 예제 `host_await.c`가 이 규칙을 따른다.
+  lib 테스트 `A host that keeps the pointers of its futures retains them.`
+- 태그(사용자 결정 2026-11-12, 0.4.8 전에 넣음): `cl_future_new(t, future_t, tag)` · `cl_future_tag(f)`. 위 규칙이 세 갈래라
+  호스트가 틀리기 쉬워서, 포인터를 보관할 필요 자체를 없앴다. 호스트는 요청 번호를 태그로 주고, `cl_vm_pending_future(s)`가 준
+  Future의 태그로 요청을 찾는다. 그 Future들은 멈춘 eval이 쥐고 있어 살아 있다. `FutureValue`에 `tag int` 필드를 더했다(40 → 48
+  바이트, `core.cy`와 `heap.zig`의 미러). 호스트가 만들지 않은 Future는 0이다. retain 규칙은 지금 기다리지 않는 Future를
+  완료시키려고 포인터를 보관하는 호스트에만 남는다. 예제 `host_await.c`는 태그만 쓰고 포인터를 보관하지 않는다.
+  lib 테스트 `cl_future_tag identifies the request of a pending future.`
 
 구현.
 

@@ -14,12 +14,11 @@
 // Compile this program with any C compiler:
 // clang -o host_await host_await.c -I ../../src/include ../../zig-out/lib/libcyber.a
 
-// One request per future. The host looks the request up by the future the script awaits.
-// The host retains each future it keeps a pointer to. A pending future that the script drops would otherwise be
-// freed, the next future could get its address, and two requests would have the same pointer.
+// One request per future. The tag of a future is the number of its request, starting at 1 (the tag 0 is a
+// future that this host did not create). The host keeps no future pointers: the VM hands out the future to
+// complete, and `cl_future_tag` tells which request it is.
 #define MAX_REQUESTS 8
 typedef struct Request {
-    CLFuture* future;   // Retained until the request is answered or the eval ends.
     char path[64];
 } Request;
 static Request requests[MAX_REQUESTS];
@@ -37,15 +36,16 @@ CLRet write_async(CLThread* t) {
     CLRet res = CL_RET_OK;
     // The type exists because the declaration of this function names it.
     CLType* future_t = cl_find_type(cl_thread_vm(t), CL_BYTES("Future[!void]"));
-    CLFuture* f = future_t != NULL ? cl_future_new(t, future_t) : NULL;
-    if (f == NULL || num_requests == MAX_REQUESTS) {
+    CLFuture* f = NULL;
+    if (future_t != NULL && num_requests < MAX_REQUESTS) {
+        f = cl_future_new(t, future_t, (uint64_t)num_requests + 1);
+    }
+    if (f == NULL) {
         res = cl_thread_ret_panic(t, CL_BYTES("Too many requests."));
     } else {
         Request* req = &requests[num_requests++];
-        req->future = f;
         snprintf(req->path, sizeof req->path, "%.*s", (int)path.len, path.ptr);
-        // The return slot owns one reference. `requests` holds its own.
-        cl_thread_retain(t, (CLValue)(uintptr_t)f);
+        // The return slot owns the future.
         *ret = (CLValue)(uintptr_t)f;
     }
     cl_str_deinit(t, &path_s);
@@ -83,24 +83,16 @@ static bool approve(const char* path) {
 // With `cancel_at` >= 0, the host abandons the eval at that request instead (the user pressed Esc).
 CLResultCode run(CLVM* vm, char* src, int cancel_at) {
     num_requests = 0;
-    CLThread* t = cl_vm_main_thread(vm);
     CLEvalResult res;
     CLResultCode code = cl_vm_eval(vm, CL_BYTES(src), &res);
     int answered = 0;
     while (code == CL_AWAIT) {
         CLFuture* f = cl_vm_pending_future(vm);
-        Request* req = NULL;
-        for (int i = 0; i < num_requests; i += 1) {
-            if (requests[i].future == f) {
-                req = &requests[i];
-                break;
-            }
-        }
+        uint64_t tag = cl_future_tag(f);
+        Request* req = tag >= 1 && tag <= (uint64_t)num_requests ? &requests[tag - 1] : NULL;
         if (req == NULL || answered == cancel_at) {
             // Not a future of this host, or the user cancelled. The eval ends like an interrupted one.
-            // Its heap is freed with the futures in it, so the requests are forgotten without a release.
             cl_vm_abandon(vm);
-            num_requests = 0;
             return CL_ERROR_INTERRUPT;
         }
         answered += 1;
@@ -113,21 +105,8 @@ CLResultCode run(CLVM* vm, char* src, int cancel_at) {
             printf("denied: %s\n", req->path);
             cl_future_complete_error(vm, f, cl_error(vm, CL_BYTES("Denied")));
         }
-        // The request is answered. Give the reference back.
-        cl_thread_release(t, (CLValue)(uintptr_t)f);
-        req->future = NULL;
         code = cl_vm_resume(vm, &res);
     }
-    if (code == CL_SUCCESS) {
-        // Requests that the script never awaited. The eval ended normally, so their futures are still alive.
-        for (int i = 0; i < num_requests; i += 1) {
-            if (requests[i].future != NULL) {
-                cl_thread_release(t, (CLValue)(uintptr_t)requests[i].future);
-            }
-        }
-    }
-    // After a panic or an interrupt the heap of the eval is freed. Nothing is released then.
-    num_requests = 0;
     if (code != CL_SUCCESS) {
         CLBytes summary = cl_vm_error_summary(vm);
         printf("%.*s\n", (int)summary.len, summary.ptr);
@@ -167,8 +146,8 @@ int main() {
     failed |= num_written != 3;
     failed |= run(vm, "print('still alive')\n", -1) != CL_SUCCESS;
 
-    // A request that the script starts and drops, followed by one that it awaits. Without the retain in
-    // `write_async` both futures could have the same address.
+    // A request that the script starts and drops, followed by one that it awaits. The dropped future is freed
+    // and the second future can get its address. The tags tell the two requests apart.
     failed |= run(vm,
         "use fs\n"
         "_ = fs.write_async('/tmp/dropped.txt', 'data')\n"

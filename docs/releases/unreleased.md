@@ -53,6 +53,8 @@
   interrupt처럼 버림), `cl_vm_pending_futures`(`Future.wait_any`가 기다리는 목록 전체. 호스트는 그중 아무것이나 완료시킨다).
   새 결과 코드 `CL_ERROR_SUSPENDED`: 멈춘 동안의 `cl_vm_eval*` · `cl_vm_validate` · `cl_vm_compile*`.
   `cl_vm_reset` · `cl_vm_deinit`은 멈춘 eval을 먼저 버린다. 완료는 eval을 돌리는 스레드에서만 한다.
+  호스트가 Future 포인터를 보관하려면 만들 때 `cl_thread_retain`으로 잡는다(버려진 Future의 주소가 다음 Future에 다시 쓰인다).
+  완료시킨 뒤나 eval이 `CL_SUCCESS`로 끝났을 때 놓고, panic · interrupt · abandon 뒤에는 힙이 이미 해제됐으므로 놓지 않는다.
   예제 `examples/libcyber/host_await.c`, 결정 문서 `docs/decisions/project_coroutines.md`의 "단계 1 구현" 절.
 - 같은 변경으로 바뀐 동작: 같은 스레드의 미완료 Future(`FutureResolver`)를 await하면 `panic: Local future will never complete.`
   대신 `CL_AWAIT`가 된다. `cyber` CLI와 `cy.eval`은 Future를 완료시킬 수 없으므로 그 eval을 버리고

@@ -311,7 +311,13 @@ void cl_vm_abandon(CLVM* vm);
   함수의 선언)가 그 타입을 이름 지은 뒤여야 한다. 타입 포인터는 `cl_vm_reset` 뒤에 무효다.
 - 값은 복사되고 Future가 소유한다(반환 슬롯과 같은 규칙). `Future[!U]`는 `U`를 받아 `Result`로 감싼다. 크기 없는 타입은
   `value`를 읽지 않는다.
-- 호스트가 포인터를 비교 이상으로 쓰려면 `cl_thread_retain`으로 잡는다.
+- 호스트가 포인터를 보관하면 만들 때 `cl_thread_retain`으로 잡는다(규칙, tars-agent 피드백 2026-11-12). 처음에는 "비교만 하면
+  잡지 않아도 된다"고 적었는데 틀렸다. 스크립트가 await하지 않고 버린 미완료 Future는 바로 해제되고 그 주소가 다음
+  `cl_future_new`에 다시 쓰인다. 재현: `for 0..8 |i|: _ = host.ask(i)`에서 Future 8개가 전부 같은 주소였다. 포인터로 요청을
+  찾는 호스트의 표에 같은 포인터가 여럿 남는다. 잡아 둔 Future는 주소를 혼자 쓰고, 스크립트가 버린 뒤에도 완료시킬 수 있다.
+  놓는 때: 완료시킨 뒤, 또는 eval이 `CL_SUCCESS`로 끝났을 때. panic · interrupt · `cl_vm_abandon` · `cl_vm_reset` 뒤에는 그
+  eval의 힙이 통째로 해제됐으므로(`freeHeapPages`는 참조 계수를 보지 않는다) 놓지 않고 잊는다. 놓으면 해제된 메모리를 건드린다.
+  lib 테스트 `A host that keeps the pointers of its futures retains them.`, 예제 `host_await.c`가 이 규칙을 따른다.
 
 구현.
 

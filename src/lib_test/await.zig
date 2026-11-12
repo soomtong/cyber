@@ -10,6 +10,17 @@ const Host = struct {
     var asked: [16]?*C.Future = @splat(null);
     var args: [16]i64 = @splat(0);
     var num_asked: usize = 0;
+    /// The host keeps a reference to each future it creates (see the test on retained futures).
+    var retain: bool = false;
+
+    /// Gives back the references of an eval that ended normally, and forgets the futures.
+    fn releaseAll(t: *C.Thread) void {
+        for (asked[0..num_asked]) |f| {
+            const value: u64 = @intFromPtr(f.?);
+            C.thread_release(t, value);
+        }
+        reset();
+    }
 
     fn reset() void {
         asked = @splat(null);
@@ -53,6 +64,7 @@ const Host = struct {
         asked[num_asked] = f;
         args[num_asked] = n;
         num_asked += 1;
+        if (retain) C.thread_retain(t, @as(u64, @intFromPtr(f)));
         ret.* = @intFromPtr(f);
         return C.RetOk;
     }
@@ -628,4 +640,60 @@ test "Future.wait_any suspends the eval until the host completes one of the futu
         \\test.eq(Future.wait_any(futs.span()), 1)
         \\test.eq(futs[1].await(), 42)
     , &res));
+}
+
+test "A host that keeps the pointers of its futures retains them." {
+    // A pending future that the script drops is freed, and the next future can get its address. A host that
+    // looks a request up by the pointer would then find two requests for one pointer.
+    const vm = Host.init();
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+    const t = C.vm_main_thread(vm);
+    Host.retain = true;
+    defer Host.retain = false;
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Await, C.vm_eval(vm,
+        \\use host
+        \\use test
+        \\for 0..4 |i|:
+        \\    _ = host.ask(i)
+        \\test.eq(host.ask(9).await(), 90)
+    , &res));
+    try zt.eq(5, Host.num_asked);
+    // The retained futures are alive, so every request has its own pointer.
+    for (1..Host.num_asked) |i| {
+        for (0..i) |j| {
+            try zt.expect(Host.asked[i] != Host.asked[j]);
+        }
+    }
+    try zt.eq(Host.asked[4], C.vm_pending_future(vm));
+    // A future that the script dropped can still be completed. Nobody reads the value.
+    try zt.eq(true, completeInt(vm, Host.asked[0], 1));
+    try zt.eq(true, completeInt(vm, Host.asked[4], 90));
+    try zt.eq(C.Success, C.vm_resume(vm, &res));
+    // The eval ended normally: the host gives its references back.
+    Host.releaseAll(t);
+
+    // After a panic, an interrupt or `cl_vm_abandon` the heap of the eval is freed, with the futures in it.
+    // The host forgets its pointers. It does not release them.
+    try zt.eq(C.Await, C.vm_eval(vm,
+        \\use host
+        \\_ = host.ask(1)
+        \\_ = host.ask(2).await()
+    , &res));
+    try zt.eq(2, Host.num_asked);
+    C.vm_abandon(vm);
+    Host.reset();
+    try zt.eq(C.Await, C.vm_eval(vm,
+        \\use host
+        \\_ = host.ask(1)
+        \\n := host.ask(2).await()
+        \\panic('after %{n}')
+    , &res));
+    try zt.eq(true, completeInt(vm, C.vm_pending_future(vm), 2));
+    try zt.eq(C.ErrorPanic, C.vm_resume(vm, &res));
+    Host.reset();
+    try zt.eq(C.Success, C.vm_eval(vm, "_ = 1 + 2", &res));
 }

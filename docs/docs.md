@@ -4494,7 +4494,7 @@ fn write(path str, text str) -> !void:
 * While an eval is suspended, `cl_vm_eval*`, `cl_vm_validate` and `cl_vm_compile*` return `CL_ERROR_SUSPENDED`. `cl_vm_reset` and `cl_vm_deinit` abandon the suspended eval first.
 * `cl_vm_abandon` drops the suspended eval with the outcome of an interrupt: the main locals are gone, the declarations stay. The panic summary names the abandoned `await`.
 * A script can start several requests before it waits. `cl_vm_pending_futures` returns the futures the suspended eval waits for: one for `await`, the whole list for `Future.wait_any`. The host completes any of them, in any order and more than one if it likes, before the resume.
-* A future that the script never awaits, or that is still pending when the eval ends, is freed like any other object.
+* A future that the script never awaits, or that is still pending when the eval ends, is freed like any other object. Its address can be given to the next future. A host that keeps the pointers of its futures therefore retains each one with `cl_thread_retain` when it creates it, and releases it after it completed the future or when the eval ends with `CL_SUCCESS`. After a panic, an interrupt or `cl_vm_abandon` the heap of the eval is already freed with the futures in it: the host forgets its pointers without releasing them.
 * All of these functions are called from the thread that runs the evals of the VM. A future is not completed from another thread.
 
 The full program is `examples/libcyber/host_await.c`.

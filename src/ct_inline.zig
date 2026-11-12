@@ -279,11 +279,12 @@ pub fn evalStmts(c: *cy.Chunk, stmts: []const *ast.Node) anyerror!void {
 }
 
 pub fn switchCaseInner(c: *cy.Chunk, case_stmt: *ast.CaseStmt, _: ?*anyopaque, _: ?*cy.Type) anyerror!void {
-    try sema.semaStmts(c, case_stmt.body_data.block.slice());
+    // Outside of a function body there is no block to add a runtime statement to. `evalStmts` reports it.
+    try evalStmts(c, case_stmt.body_data.block.slice());
 }
 
 fn forRangeInner(c: *cy.Chunk, for_range: *ast.ForRangeStmt, _: ?*anyopaque) anyerror!void {
-    try sema.semaStmts(c, for_range.stmts);
+    try evalStmts(c, for_range.stmts);
 }
 
 pub fn evalStmt(c: *cy.Chunk, ct_stmt: *ast.ComptimeStmt) !void {

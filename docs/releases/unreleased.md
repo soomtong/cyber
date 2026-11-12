@@ -6,6 +6,15 @@
 
 ## 버그 수정
 
+- `fn main() -> T`가 돌려준 힙 값(`str`, 참조를 가진 struct, `!T` · `?T` 안의 값, 클로저)이 해제되지 않았다.
+  VM을 닫아도 메모리가 남았고 Debug · Trace CLI는 `unreleased refcount: 1`과 객체 덤프를 찍었다. 이제 VM이
+  결과를 소유하고 다음 eval · `cl_vm_reset` · `cl_vm_deinit` · `cl_vm_release_result`에서 해제한다. 사용자
+  `@deinit`은 이 해제에서 불리지 않는다(REPL 결과와 같다).
+- `type.info(T)`가 `TypeInfo`를 쓰는 다른 코드보다 먼저 평가되면 컴파일러가 abort했다(`No such field` ·
+  `Can not find case`). 파일 최상위의 `#info := type.info(int)`가 그랬다. `type.info`가 `TypeInfo`를 먼저 해석한다.
+- 파일 최상위 `#switch`의 case 블록이나 `#for` 본문에 실행문이 있으면 컴파일러가 abort했다(`integer overflow`).
+  이제 `Only compile-time statements are allowed in this context.` 컴파일 오류다(최상위 `#if`와 같다).
+
 - `r64` → `float` · `f32` 변환이 값을 부호 있는 정수로 읽었다. `var r r64 = 0xFFFFFFFFFFFFFFFF` 뒤 `float(r)`이
   `-1.0`이었고 이제 `18446744073709551615.0`이다(VM 명령 `U2F` · `U2F32`). `byte` · `r16` · `r32`는 원래 맞았다.
 - `float` → raw 정수(`r64(x)` · `byte(x)` 등)는 `x`가 `float` 변수이면 `Expected type f32, got float.` 컴파일 오류였다.
@@ -19,12 +28,19 @@
 
 ## 언어와 표준 라이브러리
 
+- `type.info(Trait)`가 `TypeInfo.trait`(`TraitInfo{name}`)를 돌려준다. 이전에는
+  ``type.info does not support the trait`` 컴파일 오류로 막아 두었다.
+
 - 한 번도 `resume`하지 않은 fiber를 소멸할 수 있다. 진입 함수는 불리지 않고 인자만 해제된다. 이전에는
   `panic: Fiber is still in progress.`였다. 한 번이라도 resume한 뒤 끝나지 않은 fiber의 소멸은 여전히 panic이다.
 - `fiber obj.work()`는 ``Type `T` does not have a field named `work`.`` 대신 대체 표기를 알려 주는 오류를 낸다.
   메서드를 진입점으로 쓰려면 타입으로 이름을 대고 수신자를 첫 인자로 넘긴다: `fiber Job.work(job, 2)`.
 
 ## 임베딩 API
+
+- `cl_vm_release_result(vm)`: 마지막 eval이 `CLEvalResult`로 돌려준 값을 바로 해제한다. 그 뒤에는 `res->res`를
+  읽을 수 없다. `cl_thread_rc`로 누수를 세는 호스트는 먼저 이것을 부른다. `CLEvalResult`의 값은 VM 소유이고
+  다음 eval · reset · deinit까지 유효하다는 규칙을 `cyber.h`에 적었다.
 
 ## 변경
 

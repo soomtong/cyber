@@ -523,7 +523,8 @@ fn test_control_flow(run: *Runner) void {
     run.case("types/trait_field_error.cy");
     run.case("concurrency/generator_copy_error.cy");
     run.case("types/trait_func_type_arg_error.cy");
-    run.case("meta/type_info_trait_error.cy");
+    run.case("meta/type_info_trait.cy");
+    run.case("meta/ct_switch_top_level_error.cy");
     run.case("control_flow/for_iter_borrow_mutate_error.cy");
     run.case("control_flow/for_range.cy");
     run.case("control_flow/if_expr.cy");

@@ -3580,6 +3580,13 @@ The `#switch` statement evaluates at compile-time and inserts the child statemen
         print('unsupported')
 ```
 
+At the top level of a file, the case blocks of `#switch` and the body of `#for` can hold declarations and compile-time statements only. A statement that runs is a compile error there:
+```cy
+#switch meta.system():
+    #case .macos:
+        print('macos')    --> CompileError: Only compile-time statements are allowed in this context.
+```
+
 ### `switch #for` inline.
 A regular `switch` statement with a `#for` block can automatically expand all `case` statements:
 ```cy
@@ -3621,6 +3628,21 @@ The `meta` module contains metaprogramming utilities. See the [`meta` docs](api.
 ```cy
 #info := type.info(Foo).!struct
 #meta.log(info.fields.length)
+```
+
+A trait has the case `.trait` with its name:
+```cy
+type Shape trait:
+    fn area() -> float
+
+fn kind(%T type) -> str:
+    #switch type.info(T):
+        #case .trait |trait_t|:
+            return 'trait ' + #{trait_t.name}
+        #else:
+            return 'other'
+
+print(kind(Shape))    --> trait Shape
 ```
 
 Runtime type info is currently limited to a name and ID:

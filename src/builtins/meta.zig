@@ -835,6 +835,9 @@ const field_init = cy.heap.field_init;
 
 fn type_info2(c: *cy.Chunk, type_: *cy.Type) !cy.Value {
     const info_t = (try c.vm.findType("meta.TypeInfo")).?;
+    // The cases and the info structs are declared when `TypeInfo` is resolved. A `type.info` call that is
+    // evaluated before anything else used the type (at the top level of a script) comes here first.
+    try sema_type.ensure_resolved_type(c, info_t, c.ast.null_node);
     switch (type_.id()) {
         bt.Never => {
             return c.heap.newChoice(info_t, "never", cy.Value.Void);
@@ -1119,12 +1122,6 @@ pub fn type_field(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
 
 pub fn type_info(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     const type_ = ctx.args[0].asPtr(*cy.Type);
-    if (type_.kind() == .generic_trait) {
-        // TODO: `TypeInfo.trait` is not created yet. `type_info2` would abort on the lookup of the case.
-        const name = try c.sema.allocTypeName(type_);
-        defer c.alloc.free(name);
-        return c.reportErrorFmt("`type.info` does not support the trait `{}`.", &.{cy.fmt.v(name)}, ctx.node);
-    }
     const val = try type_info2(c, type_);
     return cy.TypeValue.init(ctx.func.sig.ret, val);
 }

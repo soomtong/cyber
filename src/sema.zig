@@ -2106,6 +2106,16 @@ fn semaSliceExpr(c: *cy.Chunk, left: *ast.Node, left_res: ExprResult, range: *as
     const sym = try c.accessResolvedSymOrFail(left_res.type, "@slice", node);
     const func_sym = try requireFuncSym(c, sym, node);
     if (range.start == null) {
+        if (range.end) |end| {
+            // `a[..end]` is `a[0..end]`.
+            const zero = try c.semaConst(0, c.sema.i64_t, @ptrCast(range));
+            const args = [_]sema_func.Argument{
+                sema_func.Argument.initReceiver(left, left_res),
+                sema_func.Argument.initPreResolved(@ptrCast(range), zero),
+                sema_func.Argument.init(end),
+            };
+            return c.semaCallFuncSymRec2(func_sym, &args, node);
+        }
         const args = [_]sema_func.Argument{
             sema_func.Argument.initReceiver(left, left_res),
         };
@@ -6167,6 +6177,9 @@ fn semaCaseCond(c: *cy.Chunk, info: *SwitchInfo, conds_buf: *std.ArrayList(*ir.E
                 return c.reportError("Expected range to match `Int` or `Raw` type.", cond);
             }
             const range = cond.cast(.range);
+            if (range.start == null or range.end == null) {
+                return c.reportError("Expected a range with a start and an end.", cond);
+            }
             const start = try cte.evalCheck(c, range.start.?, c.sema.eval_int_t);
             const end = try cte.evalCheck(c, range.end.?, c.sema.eval_int_t);
 
@@ -7754,16 +7767,19 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
         },
         .range => {
             const range = node.cast(.range);
-            // `a..` and `..` are only slice bounds. `a[..-1]` parses as `(..) - 1` and arrives here.
+            // `a..`, `..b` and `..` are only slice bounds.
             const end = range.end orelse {
                 return c.reportError("Expected range end. A range without an end is only allowed as a slice index.", node);
+            };
+            const start = range.start orelse {
+                return c.reportError("Expected range start. A range without a start is only allowed as a slice index.", node);
             };
 
             var b: InitBuilder = .{ .c = c };
             try b.begin(c.sema.range_t, 2, node);
 
-            const start_res = try c.semaExprCstr(range.start.?, c.sema.i64_t);
-            try b.pushArg(start_res, range.start.?);
+            const start_res = try c.semaExprCstr(start, c.sema.i64_t);
+            try b.pushArg(start_res, start);
 
             const end_res = try c.semaExprCstr(end, c.sema.i64_t);
             try b.pushArg(end_res, end);

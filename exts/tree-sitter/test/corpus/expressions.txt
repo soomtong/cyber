@@ -315,3 +315,21 @@ t := fiber:
             (identifier)
             (arguments)))
         (suspend_statement)))))
+
+============================================================
+Slice without a start
+============================================================
+
+b := a[..n - 1]
+
+------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (index_expression
+      object: (identifier)
+      index: (range_expression
+        end: (binary_expression
+          left: (identifier)
+          right: (number))))))

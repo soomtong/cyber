@@ -55,6 +55,9 @@ pub fn isAot(backend: c.Backend) bool {
 fn test_syntax(run: *Runner) void {
     run.case("syntax/adjacent_stmt_error.cy");
     run.case("syntax/range_no_end_error.cy");
+    run.case("syntax/range_no_start_error.cy");
+    run.case("control_flow/for_range_no_start_error.cy");
+    run.case("control_flow/switch_range_open_error.cy");
     run.case("syntax/block_no_child_error.cy");
     run.case("syntax/change_to_spaces_error.cy");
     run.case("syntax/change_to_tabs_error.cy");
@@ -433,6 +436,7 @@ fn test_core(run: *Runner) void {
     run.case("core/Array_init_neg_len_panic.cy");
     run.case("core/Array_init_overflow_len_panic.cy");
     run.case("core/Array_slice_neg_panic.cy");
+    run.case("core/Slice_open_start_neg_panic.cy");
     run.case("core/Slice_remove_oob_panic.cy");
     run.case("core/Slice_size_up_neg_panic.cy");
     run.case("core/Slice_init_neg_len_panic.cy");

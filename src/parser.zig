@@ -2189,6 +2189,9 @@ pub const Parser = struct {
             if (range.end == null) {
                 return self.reportError("Expected right range expression.", &.{});
             }
+            if (range.start == null) {
+                return self.reportError("Expected left range expression.", &.{});
+            }
 
             token = self.peek();
             var is_body_expr: bool = undefined;
@@ -2343,6 +2346,9 @@ pub const Parser = struct {
             const range = expr.cast(.range);
             if (range.end == null) {
                 return self.reportError("Expected right range expression.", &.{});
+            }
+            if (range.start == null) {
+                return self.reportError("Expected left range expression.", &.{});
             }
 
             token = self.peek();
@@ -4073,11 +4079,15 @@ pub const Parser = struct {
                 return self.parseIfExpr(start);
             },
             .dot2 => {
+                // `..` or `..end`. Only a slice index takes a range without a start.
                 const op_end = self.next_pos;
                 self.advance();
+                const end: ?*ast.Node = if (try self.parseTermExpr(.{})) |right| b: {
+                    break :b try self.parseRightExpr2(.range, right);
+                } else null;
                 return self.ast.newNodeErase(.range, .{
                     .start = null,
-                    .end = null,
+                    .end = end,
                     .inc = true,
                     .end_inclusive = false,
                     .src = self.ast.src_id,

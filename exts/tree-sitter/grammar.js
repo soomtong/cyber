@@ -602,7 +602,7 @@ module.exports = grammar({
       );
     },
 
-    // `a..b`, `a..=b`, `a..>b`, `a..>=b`, `a..`, `..`
+    // `a..b`, `a..=b`, `a..>b`, `a..>=b`, `a..`, `..b`, `..`
     range_expression: ($) =>
       choice(
         prec.left(
@@ -614,6 +614,7 @@ module.exports = grammar({
           ),
         ),
         prec.left(PREC.range, seq(field('start', $._expression), '..')),
+        prec.left(PREC.range, seq('..', field('end', $._expression))),
         prec.left(PREC.range, '..'),
       ),
 

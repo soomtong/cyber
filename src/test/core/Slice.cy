@@ -202,6 +202,21 @@ idx_strs := []str{'a', 'bb', 'ccc'}
 t.eq(2, idx_strs.index('ccc').?)
 t.eq(true, idx_strs.index('d') == none)
 
+-- A slice without a start begins at 0.
+open_n := 3
+open_s := []int{1, 2, 3, 4, 5}
+t.eq(open_s[..open_n].len(), 3)
+t.eq(open_s[..open_n - 1].len(), 2)
+t.eq(open_s[..open_n-1][1], 2)
+t.eq(open_s[..0].len(), 0)
+t.eq(open_s[..open_s.len()].len(), 5)
+t.eq(open_s[..open_n][..2][..1][0], 1)
+t.eq(Array[int]{1, 2, 3}[..2].len(), 2)
+t.eq('abcxyz'[..3], 'abc')
+-- The partial vector type is not a range.
+open_v := [..4]int{1, 2}
+t.eq(open_v.len(), 2)
+
 -- join()
 t.eq([]int{}.join(','), '')
 t.eq([]int{1}.join(','), '1')

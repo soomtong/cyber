@@ -688,6 +688,7 @@ Slicing also operates on byte indexes and returns a view of the string at the gi
 a := 'abcxyz'
 b := a[0..3]
 print(a[0..3])  --> abc
+print(a[..3])   --> abc
 print(a[1..])   --> bcxyz
 ```
 
@@ -993,10 +994,11 @@ arr := []int{1, 2, 3, 4, 5}
 print(arr[0..0])    --> {}
 print(arr[0..3])    --> {1, 2, 3}
 print(arr[3..])     --> {4, 5}
+print(arr[..3])     --> {1, 2, 3}
 print(arr[..])      --> {1, 2, 3, 4, 5}
 ```
 
-The end can be omitted (`arr[3..]`), or both bounds (`arr[..]`). The start alone can not be omitted: write `arr[0..n]`, not `arr[..n]`. A range without an end is only a slice index. Anywhere else it is a compile error.
+The start, the end, or both can be omitted. A missing start is `0` and a missing end is the length. A range without a start or an end is only a slice index. Anywhere else (`r := ..3`, `for ..3 |i|`, `case ..5`) it is a compile error.
 
 A sub-slice will clone the underlying buffer upon any resize operation such as `append`, `insert`, `remove`, etc.
 Once cloned, the slice will no longer point to the same elements as the original slice:

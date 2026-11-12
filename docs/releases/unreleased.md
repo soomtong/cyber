@@ -21,10 +21,14 @@
   `0b101`이 101, `0o17`이 17이었고, 10진 숫자가 아닌 글자가 있으면(`float((0x7fffffffffffffff))`) 위치 없는
   `CompileError: Error: InvalidCharacter`였다. 이제 리터럴의 값(부호 없는 64비트)을 float으로 바꾼다(F-95).
 - 끝이 없는 범위(`..` · `a..`)를 슬라이스 인덱스가 아닌 자리에 쓰면 위치 없는 `CompileError: Error: Unexpected`였다.
-  `a[..-1]`도 `(..) - 1`로 파싱되어 여기에 닿는다. 이제 위치와 함께
-  `Expected range end. A range without an end is only allowed as a slice index.`를 보고한다(F-95).
+  이제 위치와 함께 `Expected range end. A range without an end is only allowed as a slice index.`를 보고한다.
+  `case 1..:`는 컴파일러를 끝냈고 이제 `Expected a range with a start and an end.`다(F-95).
 
 ## 언어와 표준 라이브러리
+
+- 슬라이스의 시작을 생략할 수 있다. `a[..n]`은 `a[0..n]`이다(`Slice` · `Array` · `str` · span 등 `@slice(start, end)`가 있는
+  타입 전부). 이전에는 `Expected closing bracket.`이었고 `a[..-1]`은 `(..) - 1`로 파싱됐다. 시작이나 끝이 없는 범위는
+  슬라이스 인덱스에서만 쓴다. `r := ..3` · `for ..3 |i|` · `case ..5`는 컴파일 오류다. 부분 벡터 타입 `[..4]T`는 그대로다.
 
 ## 임베딩 API
 

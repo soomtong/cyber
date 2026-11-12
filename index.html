@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.8-dev 827-9045308</div>
+    <div class="sub-title">v0.4.8-dev 828-e11a34e</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1311,7 +1311,7 @@ const lib = switch meta.system():
 <li><a href="#variables" title="">Variables</a>: <a href="#local-variables" title=""><code>var</code></a> <a href="#global-variables" title=""><code>global</code></a></li>
 <li><a href="#functions" title="">Functions</a>: <code>fn</code> <code>return</code></li>
 <li><a href="#value-ownership" title="">Ownership</a>: <a href="#moving" title=""><code>move</code></a></li>
-<li><a href="#concurrency" title="">Concurrency</a>: <a href="#generators" title=""><code>yield</code></a> <a href="#fibers" title=""><code>fiber</code></a> <a href="#fibers" title=""><code>suspend</code></a>. <code>generator</code> is a modifier in front of <code>fn</code> and is not reserved.</li>
+<li><a href="#concurrency" title="">Concurrency</a>: <a href="#generators" title=""><code>yield</code></a> <a href="#fibers" title=""><code>fiber</code></a> <a href="#fibers" title=""><code>suspend</code></a>. <code>generator</code> is a modifier in front of <code>fn</code> and is not reserved. <a href="#fibers" title=""><code>scope</code></a> starts a block of fibers (<code>scope |s|:</code>) and is a lifetime modifier in a type.</li>
 <li><a href="#custom-types" title="">Types</a>: <code>type</code> <code>with</code></li>
 <li><a href="#error-handling" title="">Error handling</a>: <a href="#unwrap-block" title=""><code>try</code></a></li>
 <li><a href="#modules" title="">Modules</a>: <code>use</code></li>
@@ -3814,7 +3814,7 @@ while a.status() != .done or b.status() != .done:
 </code></pre>
 <p>Both computations are started before either result is taken. A loop that resumes fibers needs <code>Fiber.wait_ready()</code>: without it the loop spins while the fibers wait, and it does not end when nothing else completes the futures. That is the case on a machine without spare worker threads, where the waiting root context runs the spawned tasks itself, and for futures that only the host can complete. For those, <code>Fiber.wait_ready()</code> suspends the program and the host sees the futures of all fibers (see <a href="#suspending-an-eval" title="">Suspending an eval</a>). Called inside a fiber, <code>Fiber.wait_ready()</code> suspends that fiber until a future of another fiber is done.</p>
 <p>In the root context, outside of any fiber, <code>await</code> waits as before.</p>
-<p>A <code>Scope</code> runs a group of fibers and does that loop itself. <code>start</code> adds a fiber: the arguments are evaluated at once and the fiber starts in <code>join</code>. <code>join</code> runs the fibers until all of them are done. A fiber that stops at <code>suspend</code> gives the others a turn, and when every fiber waits for a future the scope waits like <code>Fiber.wait_ready()</code>:</p>
+<p>A <code>scope</code> block runs a group of fibers and does that loop itself. The name between the bars is a <code>Scope</code> that lives for the block. <code>start</code> adds a fiber: the arguments are evaluated at once, and the fibers run when the body is done. A fiber that stops at <code>suspend</code> gives the others a turn, and when every fiber waits for a future the block waits like <code>Fiber.wait_ready()</code>:</p>
 <pre><code class="language-cy">fn fetch(name str, n int, log ^ArrayStore[str]) -> !void:
     res := spawn(compute, {n}).await()
     if res < 0:
@@ -3822,14 +3822,27 @@ while a.status() != .done or b.status() != .done:
     log << '%{name}: %{res}'
 
 fn fetch_all(log ^ArrayStore[str]) -> !void:
-    s := Scope.new()
-    s.start(fetch, {'a', 2000000, log})
-    s.start(fetch, {'b', 10, log})
-    s.join()!
+    scope |s|:
+        s.start(fetch, {'a', 2000000, log})
+        s.start(fetch, {'b', 10, log})
     -- Both fibers are done here.
+    log << 'done'
 </code></pre>
-<p>The fibers of a scope do not outlive it. A block that is left before <code>join</code> (with <code>return</code>, or with an error from <code>!</code>) joins the fibers first, when the scope is destructed.</p>
-<p>The entry function of a scope's fiber returns <code>void</code> or <code>!void</code>. <code>join</code> returns the first error that a fiber returned. After an error the other fibers are cancelled: a fiber in progress ends where it is suspended with its values destructed, and a fiber that was not started is dropped with its arguments released. A fiber that can not be cancelled runs to its end. An error that is left when the scope is destructed without a <code>join</code> panics, like an error that <code>main</code> returns. A scope can be used inside a fiber of another scope, and it can start more fibers after a <code>join</code>.</p>
+<p>The fibers of a scope do not outlive the block:</p>
+<ul>
+<li>When the body reaches its end, the block waits until every fiber is done.</li>
+<li>The entry function of a fiber returns <code>void</code> or <code>!void</code>. When a fiber returns an error, the other fibers are cancelled (see <code>cancel</code> below) and the error leaves the block like a failing <code>!</code>: the function returns it, or it goes to the <code>else</code> block of an enclosing <code>try</code>, or it panics at the top level.</li>
+<li>When a <code>!</code> in the body fails, the fibers that were started are cancelled and the error goes on the same way.</li>
+<li><code>return</code>, <code>break</code> and <code>continue</code> leave the block after the fibers are done.</li>
+</ul>
+<p>Since an error leaves the block like a failing <code>!</code>, a <code>scope</code> block in a function needs a <code>!T</code> or <code>error</code> return type, or an enclosing <code>try</code> block:</p>
+<pre><code class="language-cy">fn run() -> int:
+    scope |s|:             --> CompileError: A `scope` block needs a function that returns `!T` or `error`, or an enclosing `try` block. An error of its fibers leaves the block like a failing `!`.
+        s.start(work, {})
+    return 1
+</code></pre>
+<p>Blocks can be nested, and a fiber of a scope can have a <code>scope</code> block of its own. A fiber that can not be cancelled runs to its end instead.</p>
+<p>The block is built on the <code>Scope</code> type, which can be used directly when the group does not fit a block. <code>Scope.new()</code> returns an empty scope, <code>join() -> !void</code> runs the fibers and returns the first error after cancelling the others, <code>abort()</code> cancels the fibers, and <code>active()</code> returns how many are not done. A <code>Scope</code> value that is destructed joins its fibers first, and an error that is left then panics.</p>
 <p>When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the <code>resume</code> call of each fiber down to the main block.</p>
 <p>A fiber can not resume itself or a fiber that is waiting for it:</p>
 <pre><code class="language-cy">--> panic: Fiber is already running.

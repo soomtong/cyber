@@ -796,6 +796,42 @@ test "Compile reports give the range and the notes of a compile error." {
     try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
 }
 
+test "A compile-time call with a string argument does not end the host." {
+    // `#print('x')` ended the process with `panic: Unsupported: .eval_ref`, and a generic function evaluated
+    // with a string freed the string twice (F-112). A host that only compiles, like the language server, died too.
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    var err: C.CompileError = undefined;
+
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "#print('hello')\nprint(1)", &res));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eqStr("`type.info` does not support the type `EvalStr`.", C.from_bytes(err.msg));
+
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "#print('hello')"));
+
+    // The callee owns the argument, also when it passes it on and when it fails.
+    C.vm_reset(vm);
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\fn g(x %T) -> int:
+        \\    return 2
+        \\fn f(x %T) -> int:
+        \\    return g(x)
+        \\#a := f('abc')
+    , &res));
+
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\fn f(x %T) -> int:
+        \\    return nope
+        \\#a := f('abc')
+    , &res));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eqStr("Could not find the symbol `nope`.", C.from_bytes(err.msg));
+}
+
 test "Error summaries are empty when there is no error." {
     // `cl_vm_compile_error_summary` and `cl_thread_panic_summary` used to end the host process when asked
     // without an error, and a script could ask through `cy.VM` (F-52).

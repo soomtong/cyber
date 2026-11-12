@@ -271,6 +271,31 @@ test "Compile errors are published as diagnostics." {
     try t.expect(!s.server.hasPending());
 }
 
+test "A document that the compiler used to abort on is a diagnostic." {
+    // F-112: this document ended the server process.
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+
+    try s.open(main_uri, 1, "#print('hello')\nprint(1)\n");
+    var out = try s.flush();
+    const diags = items(out[0], &.{ "params", "diagnostics" });
+    try t.expectEqual(@as(usize, 1), diags.len);
+    // The error is inside `core`, which has no document. The diagnostic is at the call in the document.
+    try t.expectEqualStrings("In `core`: `type.info` does not support the type `EvalStr`.", str(diags[0], &.{"message"}));
+    try expectRange(get(diags[0], &.{"range"}).?, 0, 1, 0, 15);
+    for (items(diags[0], &.{"relatedInformation"})) |info| {
+        try t.expectEqualStrings(main_uri, str(info, &.{ "location", "uri" }));
+    }
+    try t.expectEqual(@as(usize, 1), out.len);
+
+    // The server goes on.
+    try s.change(main_uri, 2, "print(1)\n");
+    out = try s.flush();
+    try t.expectEqual(@as(usize, 0), items(out[0], &.{ "params", "diagnostics" }).len);
+}
+
 test "Positions are bytes for a client that offers utf-8." {
     var s: Session = undefined;
     try s.init();

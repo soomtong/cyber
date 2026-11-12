@@ -138,14 +138,20 @@ pub fn matchGenericFuncCt(c: *cy.Chunk, template: *cy.sym.FuncTemplate,
     try c.typeStack.resize(c.alloc, argt_start + nargs);
 
     var arg_idx: u32 = 0;
+    // The callee owns the arguments once it is called, like in `matchFuncCt`: it binds them as compile-time
+    // params and destructs them when its block ends. Destructing them here as well freed a string argument
+    // twice (`fn f(x %T)` evaluated with `'abc'`, F-112).
+    var called = false;
     defer {
-        for (0..arg_idx) |i| {
-            const arg = c.valueStack.items[arg_start + i];
-            const arg_t = c.typeStack.items[argt_start + i];
+        if (!called) {
+            for (0..arg_idx) |i| {
+                const arg = c.valueStack.items[arg_start + i];
+                const arg_t = c.typeStack.items[argt_start + i];
 
-            // Only reference args are owned by the callsite.
-            if (arg_t.isObjectLike()) {
-                c.heap.destructValue2(arg_t, arg);
+                // Only reference args are owned by the callsite.
+                if (arg_t.isObjectLike()) {
+                    c.heap.destructValue2(arg_t, arg);
+                }
             }
         }
         c.valueStack.items.len = arg_start;
@@ -176,6 +182,7 @@ pub fn matchGenericFuncCt(c: *cy.Chunk, template: *cy.sym.FuncTemplate,
     const gen_func = try genFunc(c, template, &template_ctx, node);
 
     const ct_args = c.valueStack.items[arg_start..arg_start+arg_idx];
+    called = true;
     const res = try cte.evalCall(c, gen_func, ct_args, node);
     return .{
         .func = gen_func,

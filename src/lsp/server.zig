@@ -387,6 +387,8 @@ pub const Server = struct {
                 while (c.vm_compile_report_note(self.vm, i, j, &note)) : (j += 1) {
                     // A note without a place has nothing to point at.
                     if (!note.has_loc) continue;
+                    // Nor has a note inside a standard module, which has no document.
+                    if (!self.hasDocument(doc, note)) continue;
                     const note_msg = c.from_bytes(note.msg);
                     try notes.append(arena, .{
                         .uri = try self.uriOfReport(arena, doc, note),
@@ -397,22 +399,36 @@ pub const Server = struct {
                 }
 
                 const uri = try self.uriOfReport(arena, doc, rep);
-                const group = try groupOf(arena, &groups, uri);
-                try group.diags.append(arena, .{
-                    .range = try self.rangeOfReport(arena, doc, rep),
-                    .msg = msg,
-                    .notes = notes.items,
-                });
-                if (!std.mem.eql(u8, uri, doc.uri)) {
-                    // The error is in a module that the document uses. The document gets a pointer to it.
-                    const at = try arena.alloc(Note, 1);
-                    at[0] = .{ .uri = uri, .range = try self.rangeOfReport(arena, doc, rep), .msg = msg };
-                    try groups.items[0].diags.append(arena, .{
-                        .range = Range.zero,
-                        .msg = try std.fmt.allocPrint(arena, "In `{s}`: {s}", .{ try validText(arena, c.from_bytes(rep.uri)), msg }),
-                        .notes = at,
-                    });
+                const range = try self.rangeOfReport(arena, doc, rep);
+                if (std.mem.eql(u8, uri, doc.uri)) {
+                    try groups.items[0].diags.append(arena, .{ .range = range, .msg = msg, .notes = notes.items });
+                    continue;
                 }
+
+                // The error is in a module that the document uses. A module with a file gets the diagnostic.
+                // A standard module (`core`) is embedded in the server and has no document to show it in.
+                const has_document = self.hasDocument(doc, rep);
+                if (has_document) {
+                    const group = try groupOf(arena, &groups, uri);
+                    try group.diags.append(arena, .{ .range = range, .msg = msg, .notes = notes.items });
+                }
+                // The document gets a diagnostic that points to it: at the place in the document that led there
+                // (the outermost call that expanded a template), or at its start.
+                var at = Range.zero;
+                for (notes.items) |n| {
+                    if (std.mem.eql(u8, n.uri, doc.uri)) at = n.range;
+                }
+                var origin: []const Note = notes.items;
+                if (has_document) {
+                    const one = try arena.alloc(Note, 1);
+                    one[0] = .{ .uri = uri, .range = range, .msg = msg };
+                    origin = one;
+                }
+                try groups.items[0].diags.append(arena, .{
+                    .range = at,
+                    .msg = try std.fmt.allocPrint(arena, "In `{s}`: {s}", .{ try validText(arena, c.from_bytes(rep.uri)), msg }),
+                    .notes = origin,
+                });
             }
         } else if (code != c.Success) {
             try groups.items[0].diags.append(arena, .{
@@ -458,6 +474,15 @@ pub const Server = struct {
         }
         try groups.append(arena, .{ .uri = uri });
         return &groups.items[groups.items.len - 1];
+    }
+
+    /// Whether the source of a report is something a client can open: the checked document, another open
+    /// document or a file. The standard modules are embedded in the server and named `core`, `os`, ...
+    fn hasDocument(self: *Server, doc: *Document, rep: c.Report) bool {
+        const path = c.from_bytes(rep.uri);
+        if (path.len == 0 or std.mem.eql(u8, path, doc.path)) return true;
+        if (self.docByPath(path) != null) return true;
+        return std.Io.Dir.path.isAbsolute(path);
     }
 
     /// The document that a report belongs to. A report without a source belongs to the checked document.

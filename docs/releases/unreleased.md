@@ -6,6 +6,11 @@
 
 ## 버그 수정
 
+- 컴파일 타임 호출에 문자열 인자를 주면 컴파일러가 호스트를 끝냈다(F-112). `#print('hello')`는 `panic: Unsupported: .eval_ref`,
+  `fn f(x %T)`를 `#a := f('abc')`로 평가하면 `Double free`였다(Release 빌드에서는 해제된 메모리를 다시 해제). `type.info`가
+  지원하지 않는 타입은 이제 ``` `type.info` does not support the type `EvalStr`. ``` 컴파일 오류이고, 제네릭 함수의 컴파일 타임
+  인자는 피호출 쪽만 해제한다.
+
 - `use x 'https://…'`가 해석된 주소 대신 초기화되지 않은 버퍼를 읽었다(F-113). 오류 메시지에 쓰레기 바이트가 들어가고 모듈은
   로드되지 않았다. CLI의 resolver가 http(s) 지정자를 결과 버퍼에 쓰지 않고 길이만 돌려줬다. GitHub 저장소 주소는 원래 맞았다.
 

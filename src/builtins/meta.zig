@@ -833,7 +833,7 @@ pub fn type_init(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
 
 const field_init = cy.heap.field_init;
 
-fn type_info2(c: *cy.Chunk, type_: *cy.Type) !cy.Value {
+fn type_info2(c: *cy.Chunk, type_: *cy.Type, node: *ast.Node) !cy.Value {
     const info_t = (try c.vm.findType("meta.TypeInfo")).?;
     // The cases and the info structs are declared when `TypeInfo` is resolved. A `type.info` call that is
     // evaluated before anything else used the type (at the top level of a script) comes here first.
@@ -1085,7 +1085,8 @@ fn type_info2(c: *cy.Chunk, type_: *cy.Type) !cy.Value {
                     return c.heap.newChoice(info_t, "func", func_info);
                 },
                 else => {
-                    std.debug.panic("Unsupported: {}", .{type_.kind()});
+                    // A compile error, not a panic: a script must not end the host (F-112).
+                    return c.reportErrorFmt("`type.info` does not support the type `{}`.", &.{v(type_.name())}, node);
                 }
             }
         },
@@ -1122,7 +1123,7 @@ pub fn type_field(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
 
 pub fn type_info(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     const type_ = ctx.args[0].asPtr(*cy.Type);
-    const val = try type_info2(c, type_);
+    const val = try type_info2(c, type_, ctx.node);
     return cy.TypeValue.init(ctx.func.sig.ret, val);
 }
 

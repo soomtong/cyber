@@ -282,6 +282,11 @@ pub const ReportParseError: ReportKind = c.CL_REPORT_PARSE_ERROR;
 pub const ReportCompileError: ReportKind = c.CL_REPORT_COMPILE_ERROR;
 pub const vm_set_error_color = c.cl_vm_set_error_color;
 pub const vm_compile_error = c.cl_vm_compile_error;
+pub const Report = c.CLReport;
+pub const ReportNote: ReportKind = c.CL_REPORT_NOTE;
+pub const vm_compile_report_count = c.cl_vm_compile_report_count;
+pub const vm_compile_report = c.cl_vm_compile_report;
+pub const vm_compile_report_note = c.cl_vm_compile_report_note;
 
 pub const thread_panic_trace = c.cl_thread_panic_trace;
 

@@ -4526,6 +4526,27 @@ if (cl_vm_compile_error(vm, &err)) {
 ```
 `msg` and `uri` are owned by the VM and stay valid until its next eval, compile, validate or reset. `kind` is `CL_REPORT_TOKEN_ERROR`, `CL_REPORT_PARSE_ERROR` or `CL_REPORT_COMPILE_ERROR`. `cl_vm_compile_error` returns false if the last result was not `CL_ERROR_COMPILE`.
 
+`cl_vm_compile_report` returns the whole reported range and `cl_vm_compile_report_note` the other places that the summary prints with an error, for a host that marks errors in an editor:
+```c
+size_t count = cl_vm_compile_report_count(vm);
+for (size_t i = 0; i < count; i += 1) {
+    CLReport rep;
+    cl_vm_compile_report(vm, i, &rep);
+    // Lines and columns start at 0, columns count bytes, and the end is exclusive.
+    // `pos` and `end_pos` are the same range as byte offsets in the source.
+    if (rep.has_loc) {
+        printf("%u:%u-%u:%u: ", rep.line + 1, rep.col + 1, rep.end_line + 1, rep.end_col + 1);
+    }
+    printf("%.*s\n", (int)rep.msg.len, rep.msg.ptr);
+
+    CLReport note;
+    for (size_t j = 0; cl_vm_compile_report_note(vm, i, j, &note); j += 1) {
+        // `First declared at:` with the first declaration, or the call that expanded a template (empty `msg`).
+    }
+}
+```
+A range can end on a later line than it starts. A token or parse error reports a position: its range is the code point there, or empty at the end of a line. The count is 0 or 1 while the compiler stops at its first error.
+
 ### Checking a script without running it.
 `cl_vm_validate` compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (`persist_main`) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (`use math`) is initialized by the next eval that runs.
 ```c

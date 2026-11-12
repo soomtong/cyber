@@ -617,6 +617,8 @@ typedef enum {
     CL_REPORT_TOKEN_ERROR = 0,
     CL_REPORT_PARSE_ERROR,
     CL_REPORT_COMPILE_ERROR,
+    /// An entry of the chain behind a report, see `cl_vm_compile_report_note`.
+    CL_REPORT_NOTE,
 } CLReportKind;
 
 typedef struct CLCompileError {
@@ -646,6 +648,47 @@ typedef struct CLCompileError {
 /// returns true. Returns false and zeroes `out` if the last result was not `CL_ERROR_COMPILE`.
 /// `msg` and `uri` stay valid until the next eval, compile, validate or reset of the VM.
 bool cl_vm_compile_error(CLVM* vm, CLCompileError* out);
+
+/// A compile error or a note of one, with the reported range. See `cl_vm_compile_report`.
+typedef struct CLReport {
+    CLReportKind kind;
+
+    /// The message without the location. Owned by the VM.
+    /// Empty for a note that only names a place: the call that expanded a template.
+    CLBytes msg;
+
+    /// The source that the range is in. Empty if the report does not belong to a source. Owned by the VM.
+    CLBytes uri;
+
+    /// Whether the fields below are set. A report can belong to a source without a position in it.
+    bool has_loc;
+
+    /// Start of the range. `line` starts at 0, `col` is the byte offset in the line.
+    uint32_t line;
+    uint32_t col;
+
+    /// End of the range, exclusive. A range can end on a later line than it starts.
+    uint32_t end_line;
+    uint32_t end_col;
+
+    /// The same range as byte offsets in the source.
+    /// A token or parse error reports a position: the range is the code point there, or empty at the end of a line.
+    uint32_t pos;
+    uint32_t end_pos;
+} CLReport;
+
+/// The number of compile errors of the last `cl_vm_eval`, `cl_vm_compile` or `cl_vm_validate`.
+/// 0 if the last result was not `CL_ERROR_COMPILE`. The compiler stops at its first error, so this is at most 1 today.
+size_t cl_vm_compile_report_count(CLVM* vm);
+
+/// Writes compile error `idx` to `out` and returns true. Returns false and zeroes `out` if there is no such error.
+/// `msg` and `uri` stay valid until the next eval, compile, validate or reset of the VM.
+bool cl_vm_compile_report(CLVM* vm, size_t idx, CLReport* out);
+
+/// Writes note `note_idx` of compile error `idx` to `out` and returns true. Returns false and zeroes `out` after the
+/// last note. Notes are in the order the summary prints them: context such as `First declared at:` with its place,
+/// then the calls that expanded the template the error is in, innermost first. `kind` is `CL_REPORT_NOTE`.
+bool cl_vm_compile_report_note(CLVM* vm, size_t idx, size_t note_idx, CLReport* out);
 
 // For embedded, Cyber by default uses malloc (it can be configured to use the high-perf mimalloc).
 // If the host uses a different allocator than Cyber, use `cl_vm_alloc` to allocate memory

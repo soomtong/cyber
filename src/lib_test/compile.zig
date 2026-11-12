@@ -660,6 +660,142 @@ test "cl_vm_compile_error returns the location of a compile error." {
     try zt.expect(!C.vm_compile_error(vm, &err));
 }
 
+test "Compile reports give the range and the notes of a compile error." {
+    // `cl_vm_compile_error` gives the start, the length on the first line and the head of the chain only.
+    // A language server needs the whole range and the related places (docs/specs/2026-11-12-lsp-design.md, P0).
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    var rep: C.Report = undefined;
+
+    // Nothing was compiled yet.
+    try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
+    try zt.expect(!C.vm_compile_report(vm, 0, &rep));
+    try zt.expect(!C.vm_compile_report_note(vm, 0, 0, &rep));
+    try zt.eq(@as(usize, 0), rep.msg.len);
+
+    // The range of a node, as lines and columns and as byte offsets. The end is exclusive.
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "a := 1\nprint(nope)", &res));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(C.ReportCompileError, rep.kind);
+    try zt.eqStr("Undeclared variable `nope`.", C.from_bytes(rep.msg));
+    try zt.eqStr("eval", C.from_bytes(rep.uri));
+    try zt.expect(rep.has_loc);
+    try zt.eq(@as(u32, 1), rep.line);
+    try zt.eq(@as(u32, 6), rep.col);
+    try zt.eq(@as(u32, 1), rep.end_line);
+    try zt.eq(@as(u32, 10), rep.end_col);
+    try zt.eq(@as(u32, 13), rep.pos);
+    try zt.eq(@as(u32, 17), rep.end_pos);
+    // There is no other report and this one has no notes.
+    try zt.expect(!C.vm_compile_report(vm, 1, &rep));
+    try zt.expect(!rep.has_loc);
+    try zt.expect(!C.vm_compile_report_note(vm, 0, 0, &rep));
+    try zt.expect(!C.vm_compile_report_note(vm, 1, 0, &rep));
+
+    // Columns count bytes: `한글` is 6 bytes.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "x := '한글' + nope", &res));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(@as(u32, 16), rep.col);
+    try zt.eq(@as(u32, 20), rep.end_col);
+    try zt.eq(@as(u32, 16), rep.pos);
+    try zt.eq(@as(u32, 20), rep.end_pos);
+
+    // A node that continues on later lines ends on its last line. `CLCompileError.len` stops at the first.
+    // A context note carries its message and the place it points to.
+    C.vm_reset(vm);
+    const dup_src = "type A:\n  a int\n\ntype A:\n  b int\n";
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, dup_src, &res));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("`A` has already been declared as a `type`", C.from_bytes(rep.msg));
+    try zt.eq(@as(u32, 3), rep.line);
+    try zt.eq(@as(u32, 0), rep.col);
+    try zt.eq(@as(u32, 4), rep.end_line);
+    try zt.eq(@as(u32, 7), rep.end_col);
+    try zt.eqStr("type A:\n  b int", dup_src[rep.pos..rep.end_pos]);
+    try zt.expect(C.vm_compile_report_note(vm, 0, 0, &rep));
+    try zt.eq(C.ReportNote, rep.kind);
+    try zt.eqStr("First declared at:", C.from_bytes(rep.msg));
+    try zt.eqStr("eval", C.from_bytes(rep.uri));
+    try zt.expect(rep.has_loc);
+    try zt.eq(@as(u32, 0), rep.line);
+    try zt.eq(@as(u32, 0), rep.col);
+    try zt.eq(@as(u32, 1), rep.end_line);
+    try zt.eqStr("type A:\n  a int", dup_src[rep.pos..rep.end_pos]);
+    try zt.expect(!C.vm_compile_report_note(vm, 0, 1, &rep));
+    try zt.eq(@as(usize, 0), rep.msg.len);
+
+    // An error inside a template has the call that expanded it as a note without a message.
+    C.vm_reset(vm);
+    const tmpl_src = "type Foo[T Any]:\n  a T.nope\n\nfn main():\n  f := Foo[int]{a = 1}\n";
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, tmpl_src, &res));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("Can not find the symbol `nope` in `int`.", C.from_bytes(rep.msg));
+    try zt.eq(@as(u32, 1), rep.line);
+    try zt.eqStr("nope", tmpl_src[rep.pos..rep.end_pos]);
+    try zt.expect(C.vm_compile_report_note(vm, 0, 0, &rep));
+    try zt.eq(C.ReportNote, rep.kind);
+    try zt.eq(@as(usize, 0), rep.msg.len);
+    try zt.eq(@as(u32, 4), rep.line);
+    try zt.eq(@as(u32, 7), rep.col);
+    try zt.eqStr("Foo[int]", tmpl_src[rep.pos..rep.end_pos]);
+    try zt.expect(!C.vm_compile_report_note(vm, 0, 1, &rep));
+
+    // A parse error and a token error report a position. The range is the code point there.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "a := 'abc", &res));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(C.ReportTokenError, rep.kind);
+    try zt.eq(@as(u32, 0), rep.line);
+    try zt.eq(@as(u32, 6), rep.col);
+    try zt.eq(@as(u32, 0), rep.end_line);
+    try zt.eq(@as(u32, 7), rep.end_col);
+    try zt.eq(@as(u32, 6), rep.pos);
+    try zt.eq(@as(u32, 7), rep.end_pos);
+
+    // At the end of the source the range is empty.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "a := 1\nb := a +\n", &res));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(C.ReportParseError, rep.kind);
+    try zt.expect(rep.has_loc);
+    try zt.eq(@as(u32, 2), rep.line);
+    try zt.eq(@as(u32, 0), rep.col);
+    try zt.eq(@as(u32, 2), rep.end_line);
+    try zt.eq(@as(u32, 0), rep.end_col);
+    try zt.eq(@as(u32, 16), rep.pos);
+    try zt.eq(@as(u32, 16), rep.end_pos);
+
+    // `cl_vm_validate` records its error the same way.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "print(nope)"));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(@as(u32, 6), rep.pos);
+    try zt.eq(@as(u32, 10), rep.end_pos);
+
+    // An error that does not belong to a source has no location.
+    C.vm_reset(vm);
+    var config = C.defaultEvalConfig();
+    config.backend = C.BackendJIT;
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "a := 1", config, &res));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(@as(usize, 0), rep.uri.len);
+    try zt.expect(!rep.has_loc);
+
+    // The reports are those of the last compile.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "print(nope)", &res));
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm, "panic('boom')", &res));
+    try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
+    try zt.expect(!C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(C.Success, C.vm_eval(vm, "a := 1", &res));
+    try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
+}
+
 test "Error summaries are empty when there is no error." {
     // `cl_vm_compile_error_summary` and `cl_thread_panic_summary` used to end the host process when asked
     // without an error, and a script could ask through `cy.VM` (F-52).

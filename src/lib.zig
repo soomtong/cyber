@@ -568,6 +568,61 @@ export fn cl_vm_compile_error(vm: *cy.VM, out: *C.CompileError) bool {
     return true;
 }
 
+fn toReport(vm: *cy.VM, report: cy.Report, kind: C.ReportKind) C.Report {
+    const loc = cy.debug.reportLoc(vm.compiler, report);
+    return .{
+        .kind = kind,
+        .msg = C.to_bytes(report.msg),
+        .uri = C.to_bytes(loc.uri),
+        .has_loc = loc.has_pos,
+        .line = loc.line,
+        .col = loc.col,
+        .end_line = loc.end_line,
+        .end_col = loc.end_col,
+        .pos = loc.pos,
+        .end_pos = loc.end_pos,
+    };
+}
+
+export fn cl_vm_compile_report_count(vm: *cy.VM) usize {
+    // `last_res` rather than the report list alone: the list is only cleared when the next compile starts.
+    if (vm.last_res != C.ErrorCompile) {
+        return 0;
+    }
+    return vm.compiler.reports.items.len;
+}
+
+export fn cl_vm_compile_report(vm: *cy.VM, idx: usize, out: *C.Report) bool {
+    out.* = std.mem.zeroes(C.Report);
+    if (idx >= cl_vm_compile_report_count(vm)) {
+        return false;
+    }
+    const report = vm.compiler.reports.items[idx];
+    out.* = toReport(vm, report, switch (report.type) {
+        .token_err => C.ReportTokenError,
+        .parse_err => C.ReportParseError,
+        .compile_err, .context => C.ReportCompileError,
+    });
+    return true;
+}
+
+export fn cl_vm_compile_report_note(vm: *cy.VM, idx: usize, note_idx: usize, out: *C.Report) bool {
+    out.* = std.mem.zeroes(C.Report);
+    if (idx >= cl_vm_compile_report_count(vm)) {
+        return false;
+    }
+    var note: ?*cy.Report = vm.compiler.reports.items[idx].next;
+    var i: usize = 0;
+    while (note) |n| : (i += 1) {
+        if (i == note_idx) {
+            out.* = toReport(vm, n.*, C.ReportNote);
+            return true;
+        }
+        note = n.next;
+    }
+    return false;
+}
+
 export fn cl_thread_panic_summary(t: *cy.Thread) C.Bytes {
     if (t.c.panic_type == vmc.PANIC_NONE) {
         return C.NullStr;

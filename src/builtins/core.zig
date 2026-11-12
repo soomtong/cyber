@@ -2141,15 +2141,27 @@ fn fiberFutureReady(fiber: *const vmc.Fiber) bool {
 /// this function again. Inside a fiber, the fiber is suspended instead and waits for the other fibers' futures.
 pub fn fibers_wait(t: *cy.Thread) anyerror!C.Ret {
     const ret = t.ret(i64);
+    if (t.c.cur_fiber) |fiber| {
+        if (fiber.await_yielded) {
+            // The call that suspended the fiber runs again: the resumer saw a future that is done.
+            fiber.await_yielded = false;
+            ret.* = 1;
+            return C.RetOk;
+        }
+    }
     while (true) {
         var num_awaiting: usize = 0;
         var has_shared = false;
         var opt_fiber = t.c.fibers;
+        // In a fiber a future that is done is no reason to return: the fiber that awaits it can be one that
+        // only the resumer of this fiber runs (a sibling of a nested `scope` block). Returning would spin
+        // here forever. So a fiber always gives control back once, and its resumer decides (`Fiber.waiting`).
+        const in_fiber = t.c.cur_fiber != null;
         while (opt_fiber) |fiber| : (opt_fiber = fiber.list_next) {
             if (fiber.state != vmc.FIBER_SUSPENDED) continue;
             for (fiberFutures(fiber)) |future| {
                 num_awaiting += 1;
-                if (cy.vm.futureDone(future)) {
+                if (!in_fiber and cy.vm.futureDone(future)) {
                     ret.* = 1;
                     return C.RetOk;
                 }
@@ -2165,6 +2177,7 @@ pub fn fibers_wait(t: *cy.Thread) anyerror!C.Ret {
                 return t.ret_panic("Cannot await across a host call.");
             }
             fiber.await_fibers = true;
+            fiber.await_yielded = true;
             return vmc.RET_FIBER_AWAIT;
         }
         // The root context waits. It runs queued thread tasks itself like `await` does, which also covers a
@@ -2203,6 +2216,7 @@ fn fiber_unwind(t: *cy.Thread) callconv(.c) C.Ret {
         if (fiber.await_owned) fiberClearAwait(t, fiber);
         fiber.await_len = 0;
         fiber.await_fibers = false;
+        fiber.await_yielded = false;
     }
     return C.RetOk;
 }

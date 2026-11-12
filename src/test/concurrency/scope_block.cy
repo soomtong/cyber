@@ -193,6 +193,34 @@ fn check_first_fails():
     test.eq(dropped, 2)
 check_first_fails()
 
+-- A group that waits gives control back when a future outside of it is done: the fiber that awaits that
+-- future belongs to the outer block.
+fn adds(fut Future[int], out ^int):
+    v := fut.await()
+    out.* += v
+fn add_group(f1 Future[int], f2 Future[int], out ^int) -> !void:
+    scope |s|:
+        s.start(adds, {f1, out})
+        s.start(adds, {f2, out})
+fn completer(r3 FutureResolver[int], r1 FutureResolver[int], r2 FutureResolver[int]):
+    suspend
+    r3.complete(3)
+    suspend
+    suspend
+    r1.complete(1)
+    r2.complete(2)
+fn check_group_yields() -> !void:
+    out := ^0
+    r1 := FutureResolver.new(int)
+    r2 := FutureResolver.new(int)
+    r3 := FutureResolver.new(int)
+    scope |s|:
+        s.start(add_group, {r1.future(), r2.future(), out})
+        s.start(adds, {r3.future(), out})
+        s.start(completer, {r3, r1, r2})
+    test.eq(out.*, 6)
+check_group_yields()!
+
 -- At the top level an error panics, like `!`. Without an error the block is an ordinary statement.
 top_log := ^ArrayStore[str]{}
 scope |s|:

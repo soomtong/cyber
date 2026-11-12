@@ -353,6 +353,57 @@ test "A scope cancels the fibers that wait for host futures when another fiber f
     try zt.eq(null, C.vm_pending_future(vm));
 }
 
+test "A scope block at the root waits for the host futures of nested groups, and an abandon frees them." {
+    // Leak-checking allocator. The fibers borrow values of the functions that hold their blocks.
+    const src =
+        \\use host
+        \\use test
+        \\fn ask(n int, out &int) -> !void:
+        \\    held := 'held' + '-padding-padding-padding-padding-%{n}'
+        \\    v := host.ask(n).await()
+        \\    out.* += v
+        \\fn group(base int, out &int) -> !void:
+        \\    sum := 0
+        \\    scope |s|:
+        \\        s.start(ask, {base, &sum})
+        \\        s.start(ask, {base + 1, &sum})
+        \\    out.* += sum
+        \\fn run() -> !int:
+        \\    total := 0
+        \\    scope |s|:
+        \\        s.start(group, {10, &total})
+        \\        s.start(ask, {30, &total})
+        \\        return total
+        \\test.eq(run()!, 600)
+    ;
+    {
+        const vm = Host.init();
+        defer C.vm_deinit(vm);
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Await, C.vm_eval(vm, src, &res));
+        // The group asked 10 and 11, then the second fiber of the root block asked 30.
+        try zt.eq(3, Host.num_asked);
+        try zt.eq(3, C.vm_pending_futures(vm, null, 0));
+        try zt.eq(true, completeInt(vm, Host.asked[2], 300));
+        try zt.eq(C.Await, C.vm_resume(vm, &res));
+        try zt.eq(2, C.vm_pending_futures(vm, null, 0));
+        try zt.eq(true, completeInt(vm, Host.asked[0], 100));
+        try zt.eq(true, completeInt(vm, Host.asked[1], 200));
+        try zt.eq(C.Success, C.vm_resume(vm, &res));
+        try zt.eq(null, C.vm_pending_future(vm));
+    }
+    {
+        const vm = Host.init();
+        defer C.vm_deinit(vm);
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Await, C.vm_eval(vm, src, &res));
+        try zt.eq(3, C.vm_pending_futures(vm, null, 0));
+        C.vm_abandon(vm);
+        try zt.eq(null, C.vm_pending_future(vm));
+        try zt.eq(C.Success, C.vm_eval(vm, "_ = 1", &res));
+    }
+}
+
 test "A host future completes with a value or an error." {
     const vm = Host.init();
     defer C.vm_deinit(vm);

@@ -565,6 +565,8 @@ typedef struct Fiber {
     bool await_owned;
     // Suspended in `Fiber.wait_ready`: it waits for the futures of the thread's other fibers.
     bool await_fibers;
+    // `Fiber.wait_ready` gave control back from this fiber. The call returns when the fiber is resumed.
+    bool await_yielded;
 } Fiber;
 
 // Unused members are declared for debugging.

@@ -424,6 +424,7 @@ pub const Thread = struct {
             .await_len = 0,
             .await_owned = false,
             .await_fibers = false,
+            .await_yielded = false,
         };
         if (self.c.fibers) |head| {
             head.list_prev = fiber;

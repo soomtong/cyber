@@ -524,12 +524,18 @@ panic 대신 취소. 목표는 0.5.
   임시 값, 깊은 재귀 뒤 취소, 미시작 fiber의 인자 해제, 제너레이터를 가진 프레임, `scope` 블록의 출구 경로와 `spawn`,
   제너레이터 안의 블록, fiber 2만 개). 성능은 ReleaseFast로 쟀다.
 - 찾아 고친 것: F-107(다른 청크에서 인라인된 지점의 패드), F-108(취소되는 fiber의 `Scope`), F-109(`Scope.run`의 제곱 시간),
-  F-110(조기 출구 뒤 fiber 오류의 panic).
+  F-110(조기 출구 뒤 fiber 오류의 panic), F-111(중첩 그룹의 `wait_ready`가 양보하지 않음).
 - F-110의 수정으로 "출구 구분"이 바뀌었다: `return` · `break` · `continue`는 여전히 취소가 아니라 합류지만, 합류는
   `Scope.@deinit`이 아니라 출구 문장 앞의 `s.join()!`이 한다. 오류는 블록의 `try_ctx`를 거쳐 `abort` 뒤 바깥으로 간다.
   `return expr`의 식은 합류 뒤에 분석 · 실행된다. `Scope.@deinit`의 합류는 블록 밖에서 직접 쓴 `Scope`에만 남는다.
 - `Scope.run`은 실패 여부를 라운드 시작이 아니라 fiber마다 본다. 전에는 실패한 fiber 뒤의 형제가 같은 라운드에서 한 번
   더 돌았고, 시작 전이던 형제는 그 한 번에 끝까지 갈 수 있었다(테스트 `scope_block.cy`의 `check_first_fails`).
+- F-111: fiber 안의 `@fibers_wait`는 끝난 Future가 있어도 반환하지 않고 한 번 양보한다. 끝난 Future의 주인이 자기
+  하위 fiber인지 `fibers_wait`는 알 수 없고(스레드의 fiber 목록은 평평하다), 바깥의 것이면 반환해도 진행이 없다.
+  양보한 호출은 resume 때 다시 실행되므로 `Fiber.await_yielded`로 "이미 양보했다"를 기억해 1을 돌려준다. 비용은 자기
+  하위의 Future가 이미 끝나 있던 경우의 왕복 한 번이다.
+- 교훈: `out.* += fut.await()`는 await 전에 `out.*`를 읽는다(F-98의 평가 순서). 여러 fiber가 같은 값에 더하는 테스트는
+  `v := fut.await()` 뒤에 더한다. 탐침 하나가 이것 때문에 틀린 합을 냈다.
 - F-107 수정의 후속: 다른 청크의 패드를 재생성할 때 `nop_label`은 그 청크의 IR 버퍼를 가리키므로 건너뛴다
   (`gen_nop_label`의 `cancel_replay` 조건. Debug 빌드의 `modules/core.cy`가 범위 밖 인덱스로 잡았다).
 - `Scope`의 새 구조: `fibers Array[Ptr[void]]`(끝나지 않은 fiber만, 시작 순서), `ScopeState.running`. `Fiber.cancel`의

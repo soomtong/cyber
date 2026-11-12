@@ -3355,21 +3355,23 @@ print(f.cancel())          --> closed 7
                            --> true
 print(f.status())          --> FiberStatus.done
 ```
-`cancel` returns whether the fiber is done afterwards. A fiber that was never resumed is ended without the call and its arguments are released. A fiber that is running is not cancelled, and neither is one that is suspended inside the body of a generator: `cancel` returns `false` and the fiber stays as it is.
+`cancel` returns whether the fiber is done afterwards. A fiber that was never resumed is ended without the call and its arguments are released. A fiber that is running is not cancelled: `cancel` returns `false` and the fiber stays as it is. The same holds for a fiber that is suspended inside the `@deinit` of a `^T` reference, or inside a `@deinit` that the end of a generator runs.
+
+A fiber that is suspended inside the body of a generator is cancelled like any other: the body's values are destructed, the generator is done, and the function that consumes it returns.
 
 A fiber that is destructed while it is in progress is cancelled first, and so is every fiber that its frames hold. A fiber that can not be cancelled panics when it is destructed:
 ```cy
-generator fn numbers() -> int:
-    yield 1
-    suspend
-    yield 2
+type Res:
+    id int
 
-fn consume():
-    for numbers() |n|:
-        pass
+fn (&Res) @deinit():
+    suspend
+
+fn work():
+    r := ^Res{id = 1}
 
 fn start():
-    f := fiber consume()
+    f := fiber work()
     _ = f.resume()
 
 start()

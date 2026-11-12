@@ -37,6 +37,9 @@
   빌림은 해제된 옛 스택을 가리켰다. 이제 `scope |s|:` 블록의 이름에 대한 `s.start` 밖에서는
   `Cannot borrow a stack value across fibers.` 컴파일 오류다(아래 "범위 안 빌림").
 
+- 블록 끝에서 불린 `@deinit` 안에서 멈춘 fiber를 취소(또는 소멸)하면 그 값과 먼저 해제된 지역의 `@deinit`이 한 번 더
+  불렸다(F-106). 이제 그 지점의 취소는 아직 해제되지 않은 지역만 해제한다.
+
 ## 언어와 표준 라이브러리
 
 - 범위 안 빌림: `scope |s|:` 블록의 `s.start(func, {&x, ...})`가 빌림 인자(`&T` · `&&T`, 빌림을 담은 타입)를 받는다.
@@ -53,11 +56,12 @@
   `try` 블록이 필요하다. `Scope.abort()` 추가(남은 fiber 취소).
 
 - `Fiber.cancel() -> bool`: 끝나지 않은 fiber를 나머지 코드를 실행하지 않고 끝낸다. fiber가 들어가 있는 호출이 안쪽부터
-  차례로 바로 반환하고, 각 호출이 가진 값은 `return` 때처럼 해제된다(`@deinit` 호출 포함). 실행 중인 fiber와 제너레이터
-  본문 안에서 멈춘 fiber는 취소되지 않고 `false`를 돌려준다. 식 중간의 임시 값은 연산자의 피연산자 · 호출 인자 ·
+  차례로 바로 반환하고, 각 호출이 가진 값은 `return` 때처럼 해제된다(`@deinit` 호출 포함). 실행 중인 fiber는
+  취소되지 않고 `false`를 돌려준다(`^T` 참조의 `@deinit` 안, 제너레이터가 끝날 때 도는 `@deinit` 안에서 멈춘 fiber도 같다).
+  제너레이터 본문 안에서 멈춘 fiber는 취소된다: 본문의 값이 해제되고 제너레이터는 끝난 상태가 되며 소비하던 함수가 반환한다. 식 중간의 임시 값은 연산자의 피연산자 · 호출 인자 ·
   리터럴 원소일 때 해제되고, 그 밖의 자리에서는 해제되지 않고 남는다.
 - 호환성: 진행 중인 fiber의 소멸이 `panic: Fiber is still in progress.` 대신 취소가 됐다. 그 fiber의 프레임이 가진
-  fiber도 연쇄로 취소된다. 취소할 수 없는 fiber(제너레이터 본문 안에서 멈춘 것)의 소멸은 여전히 panic이다.
+  fiber도 연쇄로 취소된다. 취소할 수 없는 fiber(`^T` 참조의 `@deinit` 안에서 멈춘 것)의 소멸은 여전히 panic이다.
 
 - `Scope`: fiber 묶음을 돌리는 타입. `Scope.new()`, `start(func, {args})`, `join() -> !void`, `active()`.
   `join`은 모든 fiber가 끝날 때까지 차례로 resume하고, 전부 Future를 기다리면 `Fiber.wait_ready()`처럼 기다린다.

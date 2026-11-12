@@ -751,6 +751,8 @@ fn gen_gen_next(c: *Chunk, expr: *ir.GenNext, cstr: Cstr, node: *ast.Node) !GenV
     const pc = c.buf.ops.items.len;
     try c.pushFCode(.gen_next, &.{inst.ret.reg, inst.base, gen.reg}, node);
     try push_site_ptr_layout(c, pc);
+    // The generator frame returns to this inst's pad when the fiber is cancelled (`Thread.unwindFiber`).
+    try push_cancel_site(c, @intFromPtr(expr), pc);
     try pop_temp_value(c, gen, node);
     return endCall(c, inst, expr.base.type, node);
 }

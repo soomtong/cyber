@@ -446,7 +446,7 @@ panic 대신 취소. 목표는 0.5.
 - 지점 pc: 호출은 호출 명령의 pc(`FrameInfo.prev_context`가 돌려주는 값), `SUSPEND`는 다음 명령(`Fiber.pc`), `AWAIT`와
   `CALL_HOST`(`@await_any` · `@fibers_wait`)는 명령 자신.
 - 런타임: `Thread.unwindFiber`가 멈춘 fiber의 프레임을 위에서부터 걸어 전부 패드가 있는지 확인한 뒤, `Fiber.pc`와 각 프레임의
-  반환 주소(`base[1]`)를 패드로 바꾼다. 패드가 없는 프레임(제너레이터 본문, 패드 안에서 부른 소멸자)이 있으면 아무것도 바꾸지
+  반환 주소(`base[1]`)를 패드로 바꾼다. 패드가 없는 프레임(패드 안에서 부른 소멸자. 제너레이터 본문은 아래 "제너레이터 본문 프레임의 취소"에서 풀림)이 있으면 아무것도 바꾸지
   않고 false. `Fiber.cancel()`(core.cy)이 그 뒤 한 번 resume하면 패드들이 차례로 돌아 `FIBER_END`에 닿는다. 그 resume이
   `.done`이 아니면(소멸자가 suspend) panic.
 - `Fiber.@deinit`은 `cancel()`을 먼저 부른다. 취소 못 한 fiber는 이전처럼 `Fiber is still in progress.` panic.
@@ -464,7 +464,26 @@ panic 대신 취소. 목표는 0.5.
 - 오류가 나갈 길이 필요해서 함수 안의 `scope` 블록은 `!T` · `error` 반환이나 바깥 `try`를 요구한다(전용 컴파일 오류).
   `void` 자식만 쓰는 블록에도 요구한다. 규칙을 하나로 두려고 그렇게 했다.
 
-남은 것: 제너레이터 본문 프레임의 취소, `seq_pending` 밖의 임시 값.
+남은 것: `seq_pending` 밖의 임시 값.
+
+제너레이터 본문 프레임의 취소(2026-11-12).
+
+- `sema.cancelPadApplies`가 제너레이터 proc을 더는 빼지 않는다. 제너레이터 proc의 패드는 `.ret` 대신
+  `.yield{deinit_head=null, end=true}`로 끝난다(`yield`의 정리 블록과 같은 모양). `RET_Y`의 end 경로가 `gen->done`을
+  세우고 `base[1]`의 주소로, `gen->prev_fp`의 프레임으로 돌아간다.
+- 소비자 쪽 지점은 `GEN_NEXT`다. `core.zig`의 `gen_next` builtin이 `semaCancelHoist` · `semaCancelPad`를 부르고
+  `bc_gen.gen_gen_next`가 `push_cancel_site`를 단다. `.gen` 프레임의 `prev_context`는 `base[1] - 4`(`GEN_NEXT` 명령)라
+  표의 키와 맞는다. `GEN_NEXT`는 보통 core의 `Generator.next` 안에 있고 그 함수의 패드는 반환뿐이다. 소비자의 패드가
+  제너레이터 참조를 해제하면 `Generator.@deinit` → `GEN_END`는 `done`을 보고 지나간다.
+- `Thread.unwindFiber`의 첫 패스가 `.gen` 프레임을 받아들인다. 둘째 패스는 그대로다: 반환 주소가 `.vm` 프레임과 같은
+  칸(`base[1]`)에 있다.
+- 남은 취소 불가: (1) `^T` 참조의 해제(`release` 문)가 부른 `@deinit` 안에서 멈춘 fiber. `release`는 호출 IR이 아니라
+  패드가 없다. (2) `GEN_END`가 돌리는 `yield` 정리 블록의 `@deinit` 안에서 멈춘 fiber. `Generator.end`의 `GEN_END`
+  지점에 패드를 달지 않았다. 둘 다 소멸은 `panic: Fiber is still in progress.`
+- 같이 고친 것(F-106): 블록 끝 소멸 순서의 소멸자 호출 지점 패드가 이미 해제된 지역과 해제 중인 지역을 다시 해제했다.
+  `semaDestructBlock3`이 해제 중인 지역 번호(`Chunk.cancel_pad_var_end`, proc 깊이와 함께)를 두고 `semaCancelPad`가
+  그 아래만 넣는다. `g2` 꼴(정상 경로의 `@deinit`이 매번 suspend)은 전에는 `A fiber was suspended while it was
+  cancelled.` panic이었고 이제 취소된다.
 
 범위 안 빌림 구현(2026-11-12).
 

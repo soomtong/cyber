@@ -211,20 +211,85 @@ start_and_leave(log)
 test.eq(dropped, 2)
 test.eq(log.len(), 0)
 
--- A fiber that is suspended in the body of a generator is not cancelled.
+-- A fiber that is suspended in the body of a generator is cancelled: the body's locals are destructed and
+-- the generator is done.
+fn pause(r &Res):
+    suspend
 generator fn numbers() -> int:
+    r := Res{id = 1}
     yield 1
     suspend
     yield 2
+    pause(&r)
+    yield 3
 fn consume(out ^int):
+    r := Res{id = 2}
     for numbers() |n|:
         out.* += n
 total := ^0
+dropped = 0
 f10 := fiber consume(total)
 test.eq(f10.resume(), .suspended)
-test.eq(f10.cancel(), false)
-test.eq(f10.status(), .suspended)
-test.eq(f10.resume(), .done)
+test.eq(f10.cancel(), true)
+test.eq(f10.status(), .done)
+test.eq(total.*, 1)
+test.eq(dropped, 2)
+
+-- Suspended in a call of the generator body.
+dropped = 0
+total.* = 0
+f11 := fiber consume(total)
+test.eq(f11.resume(), .suspended)
+test.eq(f11.resume(), .suspended)
+test.eq(f11.cancel(), true)
 test.eq(total.*, 3)
+test.eq(dropped, 2)
+
+-- A generator that consumes a generator.
+generator fn tens() -> int:
+    r := Res{id = 3}
+    for numbers() |n|:
+        yield n * 10
+fn consume_tens(out ^int):
+    for tens() |n|:
+        out.* += n
+dropped = 0
+total.* = 0
+f12 := fiber consume_tens(total)
+test.eq(f12.resume(), .suspended)
+test.eq(f12.cancel(), true)
+test.eq(total.*, 10)
+test.eq(dropped, 2)
+
+-- Dropped in progress.
+fn start_consume(out ^int):
+    f := fiber consume(out)
+    test.eq(f.resume(), .suspended)
+dropped = 0
+start_consume(total)
+test.eq(dropped, 2)
+
+-- The generator runs to its end outside a fiber.
+total.* = 0
+consume(total)
+test.eq(total.*, 6)
+
+-- A fiber that is suspended in a destructor at the end of a block: the value is not destructed again.
+global slow_drops int = 0
+type Slow:
+    with NoCopy
+    id int
+fn (&Slow) @deinit():
+    slow_drops += 1
+    if slow_drops == 1:
+        suspend
+fn hold_slow():
+    a := Slow{id = 1}
+    b := Slow{id = 2}
+fn start_slow():
+    f := fiber hold_slow()
+    test.eq(f.resume(), .suspended)
+start_slow()
+test.eq(slow_drops, 2)
 
 --cytest: pass

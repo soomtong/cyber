@@ -129,6 +129,11 @@ pub const Chunk = struct {
     cancel_pads: std.AutoHashMapUnmanaged(usize, *cy.ir.Stmt) = .empty,
     /// A pad is being analyzed. Its own calls (destructors) get no pad.
     cancel_pad_building: bool = false,
+    /// While the locals of a block are destructed from the youngest down (`sema.semaDestructBlock2`): the index
+    /// of the local that is destructed now, and the proc depth it belongs to. The locals from here up are
+    /// destructed or being destructed, so the pad of the destructor call only destructs the older ones.
+    cancel_pad_var_end: ?usize = null,
+    cancel_pad_var_proc: usize = 0,
     /// bc_gen: the sites of the function that is generated, and the state while their pads are generated.
     cancel_sites: std.ArrayList(bc.CancelSite) = .empty,
     cancel_replay: bool = false,

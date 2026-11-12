@@ -1,14 +1,15 @@
-generator fn numbers() -> int:
-    yield 1
-    suspend
-    yield 2
+-- A fiber that is suspended in the destructor of a reference can not be cancelled.
+type Res:
+    id int
 
-fn consume():
-    for numbers() |n|:
-        pass
+fn (&Res) @deinit():
+    suspend
+
+fn work():
+    r := ^Res{id = 1}
 
 fn start():
-    f := fiber consume()
+    f := fiber work()
     _ = f.resume()
 
 start()
@@ -17,7 +18,7 @@ start()
 --panic: Fiber is still in progress.
 --
 --[trace]
---@MainPath():14:1 main:
+--@MainPath():15:1 main:
 --start()
 --^
 --

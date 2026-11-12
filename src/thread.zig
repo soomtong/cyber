@@ -436,7 +436,7 @@ pub const Thread = struct {
     /// cancel pad of the site it is at, which destructs the frame's locals and returns. The next `resume`
     /// then runs the pads from the top frame down to the entry frame and the fiber is done.
     /// Returns false, changing nothing, when the fiber can not be unwound this way: it is not suspended, or a
-    /// frame has no pad (a generator body that the fiber consumes, a site in a destructor that a pad called).
+    /// frame has no pad (a site in a destructor that a pad or the deinit block of a generator called).
     pub fn unwindFiber(self: *Thread, fiber: *vmc.Fiber) bool {
         if (fiber.state != vmc.FIBER_SUSPENDED or !fiber.started) return false;
         const fstack_ptr: [*]Value = @ptrCast(@alignCast(fiber.stack_ptr));
@@ -451,7 +451,8 @@ pub const Thread = struct {
             _ = get_cancel_pad(self.c.vm, pc) orelse return false;
             if (fp == 0) break;
             const frame = getFrame(self, fstack, fp, pc);
-            if (frame.frame_type() != .vm) return false;
+            // A generator body (`.gen`) returns through `RET_Y` to the address in the same slot.
+            if (frame.frame_type() != .vm and frame.frame_type() != .gen) return false;
             const prev = frame.prev_context();
             pc = prev.pc orelse return false;
             fp = getStackOffset(fstack_ptr, prev.fp);

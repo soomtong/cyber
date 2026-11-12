@@ -4645,7 +4645,7 @@ fn (&Fiber) @deinit():
 --| returns at once, from the innermost one out, and the values that the calls own are destructed as at a
 --| `return`. A fiber that was never resumed is ended without the call and its arguments are released.
 --| Returns whether the fiber is done afterwards. A fiber that is running is not cancelled, and neither is
---| one that is suspended inside the body of a generator.
+--| one that is suspended inside the `@deinit` of a `^T` reference.
 fn (&Fiber) cancel() -> bool:
     if @fiber_cancel(self.state):
         -- Never resumed. The entry frame owns the arguments: it runs once to release them, without the call.

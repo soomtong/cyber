@@ -2056,9 +2056,12 @@ pub fn gen_next(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !v
     const fn_ptr_t = gen.type.cast(.struct_t).base.sym().instance.?.params[0].asPtr(*cy.Type);
     const ret_t = try sema.getOptionType(c, fn_ptr_t.cast(.func_ptr).sig.ret);
     try cy.global_init.recordIndirectCall(c);
+    // The generator body runs under this frame like a callee. A fiber can be cancelled while it is there.
+    try sema.semaCancelHoist(c);
     const next = try c.ir.newExpr(.gen_next, ret_t, ctx.node, .{
         .gen = addr.ir,
     });
+    try sema.semaCancelPad(c, @intFromPtr(next), ctx.node);
     out.* = sema.ExprResult.initOwned(next);
 }
 

@@ -5563,9 +5563,23 @@ pub fn semaDestructBlock(c: *cy.Chunk) !void {
 }
 
 pub fn semaDestructBlock2(c: *cy.Chunk, b: *Block) !void {
-    var i: usize = c.varStack.items.len;
+    return semaDestructBlock3(c, b, c.varStack.items.len);
+}
+
+/// Destructs the locals of `b` below `var_end`, from the youngest down.
+fn semaDestructBlock3(c: *cy.Chunk, b: *Block, var_end: usize) !void {
+    const saved_end = c.cancel_pad_var_end;
+    const saved_proc = c.cancel_pad_var_proc;
+    defer {
+        c.cancel_pad_var_end = saved_end;
+        c.cancel_pad_var_proc = saved_proc;
+    }
+    var i: usize = var_end;
     while (i > b.varStart) {
         i -= 1;
+        // A fiber that is cancelled inside this destructor must not destruct the local again (F-106).
+        c.cancel_pad_var_end = i;
+        c.cancel_pad_var_proc = c.semaProcs.items.len;
         try semaDestructLocal(c, &c.varStack.items[i], b.node);
     }
 }
@@ -7019,12 +7033,11 @@ pub fn sema_call_ir(c: *cy.Chunk, func: *cy.Func, args: []const *ir.Expr, node: 
 }
 
 /// Whether the code that is analyzed can run in a frame of a fiber that is cancelled.
-/// The main block is never on a fiber's stack. A generator body has its own drop path (the deinit block of
-/// each `yield`), and a fiber with a generator frame on its stack is not cancelled.
+/// The main block is never on a fiber's stack. A generator body can be: its frame runs on the stack of the
+/// fiber that consumes it, and its pad ends the generator (`semaCancelPad`).
 fn cancelPadApplies(c: *cy.Chunk) bool {
     if (c.cancel_pad_building) return false;
-    const func = c.proc().func orelse return false;
-    return !func.info.generator;
+    return c.proc().func != null;
 }
 
 /// Before a call is added to an expression: the operands of the expression that are done and own a managed
@@ -7053,7 +7066,14 @@ pub fn semaCancelPad(c: *cy.Chunk, key: usize, node: *ast.Node) !void {
 
     var hasher = std.hash.Wyhash.init(0);
     const b = c.procBlock();
-    for (c.varStack.items[b.varStart..], b.varStart..) |*local, i| {
+    // The call of a destructor at the end of a block: the locals from the destructed one up are not alive.
+    var var_end = c.varStack.items.len;
+    if (c.cancel_pad_var_end) |end| {
+        if (c.cancel_pad_var_proc == c.semaProcs.items.len and end >= b.varStart and end < var_end) {
+            var_end = end;
+        }
+    }
+    for (c.varStack.items[b.varStart..var_end], b.varStart..) |*local, i| {
         if (local.type != .local) continue;
         std.hash.autoHash(&hasher, i);
         std.hash.autoHash(&hasher, @intFromPtr(local.decl_t));
@@ -7078,8 +7098,21 @@ pub fn semaCancelPad(c: *cy.Chunk, key: usize, node: *ast.Node) !void {
     try c.ir.pushStmtBlock(c.alloc);
     {
         errdefer _ = c.ir.popStmtBlock();
-        try semaDestructBlock2(c, b);
-        _ = try c.ir.pushStmt(.ret, node, .{ .return_value = false });
+        try semaDestructBlock3(c, b, var_end);
+        if (proc.func.?.info.generator) {
+            // The frame of a generator body leaves like the deinit block of a `yield`: `RET_Y` marks the
+            // generator as done and returns to the consumer, whose own pad drops the generator.
+            const gen_t = proc.getReturnType(c.sema).cast(.pointer).child_t;
+            const funcptr_t = gen_t.sym().instance.?.params[0].asPtr(*cy.Type);
+            const opt_t = try getOptionType(c, funcptr_t.cast(.func_ptr).sig.ret);
+            _ = try c.ir.pushStmt(.yield, node, .{
+                .deinit_head = null,
+                .ret_opt_t = opt_t,
+                .end = true,
+            });
+        } else {
+            _ = try c.ir.pushStmt(.ret, node, .{ .return_value = false });
+        }
     }
     const block = c.ir.popStmtBlock();
     // `proc` can be stale: analyzing a destructor can add procs.

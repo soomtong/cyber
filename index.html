@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.8-dev 828-e11a34e</div>
+    <div class="sub-title">v0.4.9-dev 831-8287771</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -3841,6 +3841,25 @@ fn fetch_all(log ^ArrayStore[str]) -> !void:
         s.start(work, {})
     return 1
 </code></pre>
+<p>Because the fibers are done when the block is left, <code>start</code> on the name of the block takes borrows. A fiber can read and write a value of the function that holds the block without a <code>^T</code> reference:</p>
+<pre><code class="language-cy">fn add(out &int, n int):
+    suspend
+    out.* += n
+
+fn sum() -> !int:
+    total := 0
+    scope |s|:
+        s.start(add, {&total, 1})
+        s.start(add, {&total, 2})
+    return total           -- 3
+</code></pre>
+<p>The rules follow from the lifetime of the fibers:</p>
+<ul>
+<li>The borrowed value is declared before the block. A value that is declared in the body is gone before the fibers are done: <code>A fiber of the `scope` block can not borrow `inner`: it is declared inside the block and is gone before the fibers are done. Declare it before the block.</code></li>
+<li>The borrow lasts until the end of the block, like a borrow that a local of the block holds. While a fiber holds <code>&a</code>, the body can not resize <code>a</code>, and an exclusive borrow <code>&&a</code> is given to one fiber only.</li>
+<li>The arguments are written as a literal at the call: <code>s.start(func, {&a, 1})</code>.</li>
+<li>Only the name of a <code>scope</code> block takes borrows. <code>start</code> on any other <code>Scope</code>, including a <code>&Scope</code> that is passed to a function, and <code>fiber f(&a)</code> are compile errors: <code>Cannot borrow a stack value across fibers.</code></li>
+</ul>
 <p>Blocks can be nested, and a fiber of a scope can have a <code>scope</code> block of its own. A fiber that can not be cancelled runs to its end instead.</p>
 <p>The block is built on the <code>Scope</code> type, which can be used directly when the group does not fit a block. <code>Scope.new()</code> returns an empty scope, <code>join() -> !void</code> runs the fibers and returns the first error after cancelling the others, <code>abort()</code> cancels the fibers, and <code>active()</code> returns how many are not done. A <code>Scope</code> value that is destructed joins its fibers first, and an error that is left then panics.</p>
 <p>When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the <code>resume</code> call of each fiber down to the main block.</p>
@@ -3868,19 +3887,20 @@ print(f.cancel())          --> closed 7
                            --> true
 print(f.status())          --> FiberStatus.done
 </code></pre>
-<p><code>cancel</code> returns whether the fiber is done afterwards. A fiber that was never resumed is ended without the call and its arguments are released. A fiber that is running is not cancelled, and neither is one that is suspended inside the body of a generator: <code>cancel</code> returns <code>false</code> and the fiber stays as it is.</p>
+<p><code>cancel</code> returns whether the fiber is done afterwards. A fiber that was never resumed is ended without the call and its arguments are released. A fiber that is running is not cancelled: <code>cancel</code> returns <code>false</code> and the fiber stays as it is. The same holds for a fiber that is suspended inside the <code>@deinit</code> of a <code>^T</code> reference, or inside a <code>@deinit</code> that the end of a generator runs.</p>
+<p>A fiber that is suspended inside the body of a generator is cancelled like any other: the body's values are destructed, the generator is done, and the function that consumes it returns.</p>
 <p>A fiber that is destructed while it is in progress is cancelled first, and so is every fiber that its frames hold. A fiber that can not be cancelled panics when it is destructed:</p>
-<pre><code class="language-cy">generator fn numbers() -> int:
-    yield 1
-    suspend
-    yield 2
+<pre><code class="language-cy">type Res:
+    id int
 
-fn consume():
-    for numbers() |n|:
-        pass
+fn (&Res) @deinit():
+    suspend
+
+fn work():
+    r := ^Res{id = 1}
 
 fn start():
-    f := fiber consume()
+    f := fiber work()
     _ = f.resume()
 
 start()

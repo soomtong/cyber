@@ -148,4 +148,28 @@ fn check_futures() -> !void:
     test.eq(out.*, 21)
 check_futures()!
 
+-- A fiber starts more fibers on the scope that runs it. Fibers that are done are dropped while the others run.
+fn leaf(out ^int):
+    suspend
+    out.* += 1
+fn spawner(s ^Scope, out ^int, n int):
+    for 0..n |i|:
+        s.start(leaf, {out})
+        suspend
+fn long_run(out ^int, n int):
+    for 0..n |i|:
+        suspend
+    out.* += 1
+dyn_total := ^0
+dyn := ^Scope.new()
+dyn.start(spawner, {dyn, dyn_total, 40})
+dyn.start(spawner, {dyn, dyn_total, 40})
+for 0..500 |i|:
+    dyn.start(leaf, {dyn_total})
+dyn.start(long_run, {dyn_total, 2000})
+test.eq(dyn.active(), 503)
+dyn.join()!
+test.eq(dyn_total.*, 581)
+test.eq(dyn.active(), 0)
+
 --cytest: pass

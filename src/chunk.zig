@@ -119,6 +119,9 @@ pub const Chunk = struct {
     scope_start_call: ?*cy.ast.Node = null,
     scope_start_lit: ?*cy.ast.Node = null,
     scope_start_borrows: std.ArrayList(cy.sema.ScopeBorrow) = .empty,
+    /// The `scope` blocks whose body is being analyzed, outermost first. `return`, `break` and `continue`
+    /// join the blocks they leave (`sema.semaScopeExitJoin`).
+    scope_blocks: std.ArrayList(cy.sema.OpenScopeBlock) = .empty,
     /// The borrows that the fibers of the open `scope` blocks hold. They end with their block.
     scope_borrows: std.ArrayList(cy.sema.ScopeBorrow) = .empty,
 
@@ -330,6 +333,7 @@ pub const Chunk = struct {
         self.seq_pending.deinit(self.alloc);
         self.scope_start_borrows.deinit(self.alloc);
         self.scope_borrows.deinit(self.alloc);
+        self.scope_blocks.deinit(self.alloc);
         self.cancel_pads.deinit(self.alloc);
         for (self.cancel_sites.items) |site| self.alloc.free(site.local_map);
         self.cancel_sites.deinit(self.alloc);

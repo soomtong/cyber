@@ -472,6 +472,8 @@ pub const Thread = struct {
             pc = prev.pc.?;
             fp = getStackOffset(fstack_ptr, prev.fp);
         }
+        // A `Scope` that a pad destructs cancels its fibers instead of joining them (`@fiber_cancelled`).
+        fiber.cancelled = true;
         return true;
     }
 

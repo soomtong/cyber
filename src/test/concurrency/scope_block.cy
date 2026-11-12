@@ -125,6 +125,74 @@ fn check_try():
     test.eq(log[0], 'fails')
 check_try()
 
+-- A fiber that is inside a `scope` block of its own is cancelled with its fibers: they wait for futures that
+-- are never completed.
+fn waits(fut Future[int], name str, log ^ArrayStore[str]):
+    held := Res{id = 1}
+    log << ('wait ' + name)
+    _ = fut.await()
+    log << ('got ' + name)
+fn group(f1 Future[int], f2 Future[int], log ^ArrayStore[str]) -> !void:
+    scope |s|:
+        s.start(waits, {f1, 'a', log})
+        s.start(waits, {f2, 'b', log})
+    log << 'group done'
+fn fails_late(log ^ArrayStore[str]) -> !void:
+    suspend
+    suspend
+    return error.Late
+fn group_and_fail(f1 Future[int], f2 Future[int], log ^ArrayStore[str]) -> !void:
+    scope |s|:
+        s.start(group, {f1, f2, log})
+        s.start(fails_late, {log})
+fn check_group_cancel():
+    log := ^ArrayStore[str]{}
+    r1 := FutureResolver.new(int)
+    r2 := FutureResolver.new(int)
+    dropped = 0
+    res := group_and_fail(r1.future(), r2.future(), log)
+    test.eq(res.unwrap_error(), error.Late)
+    test.eq(log.len(), 2)
+    test.eq(log[0], 'wait a')
+    test.eq(log[1], 'wait b')
+    test.eq(dropped, 2)
+check_group_cancel()
+
+-- The same with `Scope.join` called directly, under a plain fiber.
+fn joins(fut Future[int], log ^ArrayStore[str]):
+    s := Scope.new()
+    s.start(waits, {fut, 'c', log})
+    _ = s.join()
+fn check_join_cancel():
+    log := ^ArrayStore[str]{}
+    r := FutureResolver.new(int)
+    dropped = 0
+    f := fiber joins(r.future(), log)
+    test.eq(f.resume(), .suspended)
+    test.eq(f.cancel(), true)
+    test.eq(log.len(), 1)
+    test.eq(dropped, 1)
+check_join_cancel()
+
+-- The fibers that come after the failed one in the same round do not get a turn. One that did not start
+-- never calls its function.
+fn fail_now() -> !void:
+    return error.Now
+fn never(r ^Res, out ^int):
+    out.* += 100
+fn first_fails(out ^int) -> !void:
+    scope |s|:
+        s.start(fail_now, {})
+        s.start(never, {^Res{id = 2}, out})
+        s.start(never, {^Res{id = 3}, out})
+fn check_first_fails():
+    out := ^0
+    dropped = 0
+    test.eq(first_fails(out).unwrap_error(), error.Now)
+    test.eq(out.*, 0)
+    test.eq(dropped, 2)
+check_first_fails()
+
 -- At the top level an error panics, like `!`. Without an error the block is an ordinary statement.
 top_log := ^ArrayStore[str]{}
 scope |s|:

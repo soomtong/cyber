@@ -619,8 +619,9 @@ fn gen_trap(c: *Chunk, node: *ast.Node) !void {
 }
 
 fn gen_nop_label(c: *Chunk, stmt: *ir.NopLabel, node: *ast.Node) !void {
-    if (!emit_nop or c.inline_ctx != null) {
-        // An inlined callee's label lives in another chunk's IR buffer.
+    if (!emit_nop or c.inline_ctx != null or c.cancel_replay) {
+        // An inlined callee's label lives in another chunk's IR buffer. So does the label in the pad of a
+        // site inside it (`find_cancel_pad`).
         return;
     }
     const label = c.ir.buf.items[stmt.label_idx..stmt.label_idx + stmt.label_len];
@@ -3682,10 +3683,23 @@ fn pushCall(c: *cy.Chunk, base: Reg, func: *cy.Func, node: *ast.Node) !void {
 /// address of the IR node and `pc` is what a frame at this site is found with: the pc of a call inst for a
 /// frame under a callee frame, and the pc that `Fiber.pc` holds for the frame that suspended the fiber.
 /// A site inside inlined code runs the pads of the inlined calls around it as well: the frame is the caller's.
+/// The pad of the IR node at `key`. The node belongs to the chunk that is generated, or to the chunk of a
+/// function that is inlined here (a `core` method in a user function): the pad is kept by the chunk that
+/// analyzed the node.
+fn find_cancel_pad(c: *cy.Chunk, key: usize) ?*ir.Stmt {
+    if (c.cancel_pads.get(key)) |pad| return pad;
+    if (c.inline_ctx == null) return null;
+    for (c.compiler.chunks.items) |chunk| {
+        if (chunk == c) continue;
+        if (chunk.cancel_pads.get(key)) |pad| return pad;
+    }
+    return null;
+}
+
 fn push_cancel_site(c: *cy.Chunk, key: usize, pc: usize) !void {
     if (c.cancel_replay) return;
     if (c.cur_proc.type == .main) return;
-    const pad = c.cancel_pads.get(key) orelse return;
+    const pad = find_cancel_pad(c, key) orelse return;
     var site = CancelSite{
         .pc = @intCast(pc),
         .reg_end = c.cur_proc.reg_end,
@@ -3697,7 +3711,7 @@ fn push_cancel_site(c: *cy.Chunk, key: usize, pc: usize) !void {
     var opt_ctx = c.inline_ctx;
     while (opt_ctx) |ctx| : (opt_ctx = ctx.parent) {
         // The inlined call has no pad when its own proc needs none. Then this site has none either.
-        const outer = c.cancel_pads.get(ctx.call_key) orelse return;
+        const outer = find_cancel_pad(c, ctx.call_key) orelse return;
         site.parts[site.num_parts] = .{ .head = outer, .local_base = ctx.outer_local_base };
         site.num_parts += 1;
     }

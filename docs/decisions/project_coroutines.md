@@ -518,6 +518,30 @@ panic 대신 취소. 목표는 0.5.
 - 남은 한계: 인자를 변수에 담은 `FnTuple`로는 빌림을 넘기지 못한다(리터럴만). choice · result payload 안의 스택
   포인터는 여전히 표시되지 않는다(F-104 남은 것).
 
+전체 리뷰(2026-11-12, 0.4.9 태그 전).
+
+- 방법: 기능마다 탐침 스크립트를 Debug와 ReleaseSafe로 돌렸다(취소 지점별, 중첩 fiber, `wait_any`, 클로저 진입, 식 중간의
+  임시 값, 깊은 재귀 뒤 취소, 미시작 fiber의 인자 해제, 제너레이터를 가진 프레임, `scope` 블록의 출구 경로와 `spawn`,
+  제너레이터 안의 블록, fiber 2만 개). 성능은 ReleaseFast로 쟀다.
+- 찾아 고친 것: F-107(다른 청크에서 인라인된 지점의 패드), F-108(취소되는 fiber의 `Scope`), F-109(`Scope.run`의 제곱 시간),
+  F-110(조기 출구 뒤 fiber 오류의 panic).
+- F-110의 수정으로 "출구 구분"이 바뀌었다: `return` · `break` · `continue`는 여전히 취소가 아니라 합류지만, 합류는
+  `Scope.@deinit`이 아니라 출구 문장 앞의 `s.join()!`이 한다. 오류는 블록의 `try_ctx`를 거쳐 `abort` 뒤 바깥으로 간다.
+  `return expr`의 식은 합류 뒤에 분석 · 실행된다. `Scope.@deinit`의 합류는 블록 밖에서 직접 쓴 `Scope`에만 남는다.
+- `Scope.run`은 실패 여부를 라운드 시작이 아니라 fiber마다 본다. 전에는 실패한 fiber 뒤의 형제가 같은 라운드에서 한 번
+  더 돌았고, 시작 전이던 형제는 그 한 번에 끝까지 갈 수 있었다(테스트 `scope_block.cy`의 `check_first_fails`).
+- F-107 수정의 후속: 다른 청크의 패드를 재생성할 때 `nop_label`은 그 청크의 IR 버퍼를 가리키므로 건너뛴다
+  (`gen_nop_label`의 `cancel_replay` 조건. Debug 빌드의 `modules/core.cy`가 범위 밖 인덱스로 잡았다).
+- `Scope`의 새 구조: `fibers Array[Ptr[void]]`(끝나지 않은 fiber만, 시작 순서), `ScopeState.running`. `Fiber.cancel`의
+  본체는 `fiber_cancel(state)`로 빼서 `Scope`가 `Fiber` 값 없이 쓴다. `Array[Fiber]`를 유지하지 않은 이유: `NoCopy` 원소를
+  배열 밖으로 옮기는 연산이 없어 끝난 것만 골라 버릴 수 없다.
+- 고치지 않은 관찰: (1) 루트의 `await`와 `Fiber.wait_ready`는 워커 스레드를 기다릴 때 spin한다(큐에 남은 작업은 직접
+  돌린다. 이번 시즌 이전부터의 설계). 오래 걸리는 작업을 워커가 잡고 있으면 코어 하나를 쓴다. (2) `Fiber.waiting()`은
+  `wait_ready`로 멈춘 fiber에 대해 스레드의 모든 fiber를 훑는다. 중첩 그룹이 많으면 라운드당 그룹 수 × fiber 수다.
+  (3) 양보만 하는 fiber와 Future를 기다리는 fiber가 섞이면 `Scope.run`은 쉬지 않고 돈다(설계대로).
+- 측정(ReleaseFast, M 계열): fiber 100개 × 2만 번 양보 0.12초, fiber 하나짜리 `scope` 블록 20만 번 0.09초,
+  `resume` 200만 번 0.05초.
+
 (구현 전의 조사 기록) 
 지금의 한계: 오류 뒤에 시작하지 않은 fiber만 버린다(`@fiber_cancel`). 진행 중인 fiber는 끝까지 돈다. 3이 들어가면
 정책 A가 완성된다. `Scope.@deinit`은 합류한 뒤 남은 오류를 `panic_unwrap_error`로 올린다.

@@ -497,11 +497,13 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
         },
         .breakStmt => {
             const var_start = c.varStack.items.len;
+            try semaScopeExitJoin(c, c.loopBlock(c.proc().block_start), node);
             try semaBreak(c, node);
             try popLocals2(c, var_start, false, node);
         },
         .continueStmt => {
             const var_start = c.varStack.items.len;
+            try semaScopeExitJoin(c, c.loopBlock(c.proc().block_start), node);
             try semaContinue(c, node);
             try popLocals2(c, var_start, false, node);
         },
@@ -876,6 +878,7 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
             if (proc.func == null) {
                 return c.reportErrorFmt("Return statement is not allowed in the main block.", &.{}, node);
             }
+            try semaScopeExitJoin(c, null, node);
             _ = try semaReturn(c, node);
         },
         .returnExprStmt => {
@@ -885,6 +888,8 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
                 return c.reportErrorFmt("Return statement is not allowed in the main block.", &.{}, node);
             }
             const retType = proc.getReturnType(c.sema);
+            // The fibers are done before the result is evaluated.
+            try semaScopeExitJoin(c, null, node);
             _ = try semaReturnExprStmt(c, child, retType, node);
         },
         else => return c.reportErrorFmt("Unsupported statement: {}", &.{v(node.type())}, node),
@@ -1520,6 +1525,12 @@ fn sema_scope_stmt(c: *cy.Chunk, stmt: *ast.ScopeStmt) !void {
             const prev_ctx = proc.try_ctx;
             proc.try_ctx = .{ .body_block = @intCast(body_block), .err_local = err_local.id };
             {
+                try c.scope_blocks.append(c.alloc, .{
+                    .local = scope_local.id,
+                    .body_block = body_block,
+                    .proc_depth = c.semaProcs.items.len,
+                });
+                defer c.scope_blocks.items.len -= 1;
                 try semaStmts(c, stmt.stmts);
                 body_end_reachable = c.block().endReachable;
                 if (body_end_reachable) {
@@ -1546,31 +1557,68 @@ fn sema_scope_stmt(c: *cy.Chunk, stmt: *ast.ScopeStmt) !void {
 
         if (body_end_reachable) {
             // `s.join()!`
-            const scope_v = try semaLocal(c, scope_local.id, node);
-            const scope_addr = try semaAddressOf(c, scope_v, borrow_t, node);
-            var join_res = try c.semaCallFunc2(c.sema.scope_join_fn, &.{Argument.initPreResolved(node, scope_addr)}, &.{}, node);
-            join_res = try semaEnsureAddressable(c, join_res, node);
-            const res_borrow_t = try getBorrowType(c, join_res.type);
-            const res_addr = try semaAddressOf(c, join_res, res_borrow_t, node);
-            const res_local = try declareHiddenLocal(c, "_res_addr", res_borrow_t, res_addr, node);
-            const res = try semaLocal(c, res_local.id, node);
-            const cond = try c.semaIsError(res, node);
-            _ = try pushBlock(c, node);
-            {
-                const err = try semaUnwrapResultErrorNoCheck(c, res, node);
-                try semaPropagateError(c, err, node);
-            }
-            const err_block = try popBlock2(c, false);
-            _ = try c.ir.pushStmt(.if_block, node, .{
-                .cond_expr = cond.ir,
-                .body_head = err_block.first,
-            });
+            try semaScopeJoinCheck(c, scope_local.id, node);
         }
     }
     const block = try popBlock(c);
     _ = try c.ir.pushStmt(.block, node, .{ .bodyHead = block.first });
     if (!body_end_reachable) {
         c.block().endReachable = false;
+    }
+}
+
+pub const OpenScopeBlock = struct {
+    local: LocalId,
+    /// Index of the body's block in `semaBlocks`.
+    body_block: usize,
+    proc_depth: usize,
+};
+
+/// `s.join()!` for the `Scope` in the local `scope_local`: the fibers run to their end, and an error of a fiber
+/// goes on like at a failing `!`.
+fn semaScopeJoinCheck(c: *cy.Chunk, scope_local: LocalId, node: *ast.Node) !void {
+    const scope_t = c.sema.scope_new_fn.sig.ret;
+    const borrow_t = try getBorrowType(c, scope_t);
+    const scope_v = try semaLocal(c, scope_local, node);
+    const scope_addr = try semaAddressOf(c, scope_v, borrow_t, node);
+    var join_res = try c.semaCallFunc2(c.sema.scope_join_fn, &.{Argument.initPreResolved(node, scope_addr)}, &.{}, node);
+    join_res = try semaEnsureAddressable(c, join_res, node);
+    const res_borrow_t = try getBorrowType(c, join_res.type);
+    const res_addr = try semaAddressOf(c, join_res, res_borrow_t, node);
+    const res_local = try declareHiddenLocal(c, "_res_addr", res_borrow_t, res_addr, node);
+    const res = try semaLocal(c, res_local.id, node);
+    const cond = try c.semaIsError(res, node);
+    _ = try pushBlock(c, node);
+    {
+        const err = try semaUnwrapResultErrorNoCheck(c, res, node);
+        try semaPropagateError(c, err, node);
+    }
+    const err_block = try popBlock2(c, false);
+    _ = try c.ir.pushStmt(.if_block, node, .{
+        .cond_expr = cond.ir,
+        .body_head = err_block.first,
+    });
+}
+
+/// Before a `return` (`loop_block` is null), or a `break` · `continue` of the loop at `loop_block`: the `scope`
+/// blocks that the statement leaves are joined first, innermost first, and an error of a fiber goes on like at
+/// a failing `!` instead of the statement. Without this the join would be left to `Scope.@deinit`, where an
+/// error can only panic.
+fn semaScopeExitJoin(c: *cy.Chunk, loop_block: ?usize, node: *ast.Node) !void {
+    const proc_depth = c.semaProcs.items.len;
+    var i = c.scope_blocks.items.len;
+    while (i > 0) {
+        i -= 1;
+        const open = c.scope_blocks.items[i];
+        if (open.proc_depth != proc_depth) break;
+        if (loop_block) |idx| {
+            // The loop is inside the block: the statement does not leave it.
+            if (open.body_block < idx) break;
+        }
+        _ = try pushBlock(c, node);
+        try semaScopeJoinCheck(c, open.local, node);
+        const block = try popBlock(c);
+        _ = try c.ir.pushStmt(.block, node, .{ .bodyHead = block.first });
     }
 }
 

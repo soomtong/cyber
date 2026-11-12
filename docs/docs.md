@@ -3293,7 +3293,7 @@ The fibers of a scope do not outlive the block:
 * When the body reaches its end, the block waits until every fiber is done.
 * The entry function of a fiber returns `void` or `!void`. When a fiber returns an error, the other fibers are cancelled (see `cancel` below) and the error leaves the block like a failing `!`: the function returns it, or it goes to the `else` block of an enclosing `try`, or it panics at the top level.
 * When a `!` in the body fails, the fibers that were started are cancelled and the error goes on the same way.
-* `return`, `break` and `continue` leave the block after the fibers are done.
+* `return`, `break` and `continue` leave the block after the fibers are done. The result of `return expr` is evaluated after that, so it sees what the fibers did. When a fiber returns an error, the error leaves the block instead of the statement.
 
 Since an error leaves the block like a failing `!`, a `scope` block in a function needs a `!T` or `error` return type, or an enclosing `try` block:
 ```cy

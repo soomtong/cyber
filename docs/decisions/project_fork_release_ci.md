@@ -85,6 +85,11 @@
   태그 push → 릴리스 run 43170310099 성공(`build-815-2dfc061`, 에셋 14개) → `gh release edit 0.4.8 --notes-file --latest` →
   macOS arm64 자산을 임시 경로에 풀어 `Cyber 0.4.8 build-815-2dfc061`과 0.4.8 동작(평가 순서, `a[..2]`, `var f float = 0x10`)을 확인했다.
   개발 빌드 릴리스 `latest`는 워크플로가 `prerelease: true`로 만들므로(`e4d48258`) 따로 표시하지 않는다. `/usr/local` 설치본은 사용자가 올린다.
+- 0.4.9는 2026-11-12에 `03d24f4e`로 찍었다. 버전 올림은 `82877718`이고, 그 뒤 태그 전의 전체 리뷰에서 찾은 결함(F-107 ~ F-111)의
+  수정 둘(`06b0cd7b` · `03d24f4e`)이 들어갔다. 내용은 fiber 안 await의 양보 · `Fiber.cancel` · `Scope` · `scope` 블록 · 범위 안 빌림이다.
+  master push → Latest Build run 43226879565 성공 → annotated 태그 push → 릴리스 run 43231226185 성공(`build-833-03d24f4`, 에셋 14개)
+  → `gh release edit 0.4.9 --notes-file --latest` → macOS arm64 자산을 임시 경로에 풀어 `Cyber 0.4.9 build-833-03d24f4`와
+  `concurrency/scope_block.cy` 통과를 확인했다. tars-agent 안내 초안은 그 저장소의 `docs/requests/cyber-0.4.9-report.md`.
 - 번들의 `src/`는 타깃별로 다르다. `build.zig`의 `cli` 스텝이 공통 10개에 macOS(`os.macos.cy`,
   `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
   더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.

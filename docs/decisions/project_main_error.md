@@ -27,5 +27,6 @@ CLI에서만 결과를 검사하는 방법은 쓰지 않았다. 최상위 문과
 
 ## 남은 것
 
-- `fn main() -> error`가 돌려준 오류는 여전히 버려진다.
+- `fn main() -> error`는 그대로 둔다(2026-11-12 검토). `error`를 돌려주는 함수는 항상 오류 값을 돌려주므로 성공과 실패를
+  가르는 반환 타입이 아니다. 그 값은 `-> int`처럼 eval의 결과 값으로 호스트에 간다.
 - `fn main() -> str`처럼 힙 값을 돌려주면 Debug · Trace CLI가 `unreleased refcount: 1`을 찍는다(`_main_res`는 deinit을 건너뛴다).

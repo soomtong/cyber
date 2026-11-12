@@ -14,6 +14,7 @@
 
 - `fn main() -> !T`가 돌려준 오류가 버려졌다. `os.read_file_str('nofile')!`로 끝나도 아무것도 출력하지 않고 종료 코드 0이었다.
   이제 최상위의 `expr!`처럼 ``panic: Unwrapped error `error.FileNotFound`.``로 끝나고 `cyber`의 종료 코드는 1이다.
+  `fn main() -> error`가 돌려준 오류도 같다.
   임베딩 호스트는 이 경우 `!T` 값 대신 `CL_ERROR_PANIC`을 받는다(F-96).
 - `str.trimLeft` · `trimRight` · `trim`에 구분자를 여럿 주면 구분자마다 한 번씩만 훑었다.
   `'abc  \r'.trimRight({' ', '\r', '\t'})`가 `'abc  '`였다. 이제 어느 구분자도 남지 않을 때까지 깎는다.
@@ -29,6 +30,14 @@
 
 ## 언어와 표준 라이브러리
 
+- `Future.wait_any(futures [&]Future[T]) -> int`: 여러 Future 중 먼저 끝난 것의 인덱스를 돌려준다. 여럿이 끝나 있으면 목록에서
+  앞선 것이다. spawn한 스레드의 Future는 VM 안에서 기다리고, 목록에 그런 Future가 없으면 호스트가 하나를 완료시킬 때까지
+  eval이 멈춘다(`CL_AWAIT`). 빈 목록은 `panic: No futures to wait for.`
+- 피연산자의 평가 순서가 왼쪽에서 오른쪽으로 지켜진다(F-98). 이전에는 식 안에서 임시 값을 만드는 부분(메서드 수신자의 임시,
+  `await`, `!` 등)이 그 문장의 다른 피연산자보다 먼저 실행됐다. `say(1) + mk(2).get()`가 `mk(2)`를 먼저 불렀고,
+  `ask(2).await() + ask(3).await()`는 요청 둘을 먼저 보냈다. 이항 연산, 호출 인자(제네릭 · 오버로드 포함), 배열 · 구조체 초기화,
+  문자열 템플릿에 적용된다. 구조체 초기화의 순서는 타입의 필드 순서다.
+
 - 슬라이스의 시작을 생략할 수 있다. `a[..n]`은 `a[0..n]`이다(`Slice` · `Array` · `str` · span 등 `@slice(start, end)`가 있는
   타입 전부). 이전에는 `Expected closing bracket.`이었고 `a[..-1]`은 `(..) - 1`로 파싱됐다. 시작이나 끝이 없는 범위는
   슬라이스 인덱스에서만 쓴다. `r := ..3` · `for ..3 |i|` · `case ..5`는 컴파일 오류다. 부분 벡터 타입 `[..4]T`는 그대로다.
@@ -41,7 +50,8 @@
   (벽시계 타이머가 호스트의 대기 시간을 세지 않는다) 연료는 다시 채우지 않는다. 호출 깊이에 제약이 없고 generator 본문과 fiber
   안에서도 같다. 새 함수: `cl_future_new`(호스트 함수가 돌려줄 미완료 `Future[T]`), `cl_future_complete`(값으로 완료,
   `Future[!U]`면 `U`를 넘김), `cl_future_complete_error`, `cl_vm_pending_future`, `cl_vm_resume`, `cl_vm_abandon`(멈춘 eval을
-  interrupt처럼 버림). 새 결과 코드 `CL_ERROR_SUSPENDED`: 멈춘 동안의 `cl_vm_eval*` · `cl_vm_validate` · `cl_vm_compile*`.
+  interrupt처럼 버림), `cl_vm_pending_futures`(`Future.wait_any`가 기다리는 목록 전체. 호스트는 그중 아무것이나 완료시킨다).
+  새 결과 코드 `CL_ERROR_SUSPENDED`: 멈춘 동안의 `cl_vm_eval*` · `cl_vm_validate` · `cl_vm_compile*`.
   `cl_vm_reset` · `cl_vm_deinit`은 멈춘 eval을 먼저 버린다. 완료는 eval을 돌리는 스레드에서만 한다.
   예제 `examples/libcyber/host_await.c`, 결정 문서 `docs/decisions/project_coroutines.md`의 "단계 1 구현" 절.
 - 같은 변경으로 바뀐 동작: 같은 스레드의 미완료 Future(`FutureResolver`)를 await하면 `panic: Local future will never complete.`

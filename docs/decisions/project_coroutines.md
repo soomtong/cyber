@@ -331,5 +331,23 @@ void cl_vm_abandon(CLVM* vm);
 멈춘 동안의 거부 · fiber 안에서 버리기 · reset · deinit, resume 뒤 연료 · interrupt · 메모리 상한 · panic, 스크립트 Future와
 spawn 스레드. 예제 `examples/libcyber/host_await.c`(`lib-standalone-test`에 등록).
 
-남은 것: 단계 3(fiber 안 await를 양보로) · 단계 4(취소, `wait_any`), `CL_YIELD`, AOT. `await` 여럿을 동시에 기다리는 수단이 없어
-호스트는 한 번에 Future 하나만 본다. 호스트 함수가 부른 스크립트 안의 await는 panic이다.
+남은 것: 단계 3(fiber 안 await를 양보로) · 단계 4의 취소, `CL_YIELD`, AOT. 호스트 함수가 부른 스크립트 안의 await는 panic이다.
+
+## `Future.wait_any` (2026-11-12)
+
+단계 4의 일부다. 사용자 지시로 단계 1에 이어 구현했다. 도구 여러 개를 먼저 시작해 두고 먼저 끝난 것부터 받는 스크립트를 쓸 수 있다.
+
+- `fn Future :: wait_any(futures [&]Future[%T]) -> int`. 먼저 끝난 Future의 인덱스, 여럿이면 목록에서 앞선 것. 같은 `T`만 섞는다.
+- 목록에 spawn Future가 하나라도 있으면 `await`처럼 VM 안에서 기다린다(큐의 스레드 작업을 돌리며 spin). 호스트 Future만
+  기다리는 탈출은 하지 않는다: 호스트가 완료시키지 않고 resume하면 호스트 쪽 busy loop가 되기 때문이다.
+- 목록이 전부 로컬 Future이고 아무것도 끝나지 않았으면 eval이 `CL_AWAIT`로 나간다. `cl_vm_pending_futures(vm, out, cap)`가 목록
+  전체를 돌려주고 호스트는 그중 아무것이나, 여러 개여도 완료시킨 뒤 resume한다. `cl_vm_pending_future`는 목록의 첫 번째다.
+- 구현: builtin `@await_any(ptr, len)`(`core.zig` `await_any`)가 `RET_AWAIT`(2, `vm.h`)를 돌려주면 `CALL_HOST`가 pc를 그 호출에
+  둔 채 `RES_AWAIT`로 나간다. resume은 같은 호출을 다시 실행한다(인자가 레지스터에 남아 있다). 새 opcode는 없다.
+  목록은 `Compiler.await_any`가 가리킨다(스크립트가 넘긴 span의 메모리, 멈춘 동안 움직이지 않는다).
+- interrupt: spin 중에 요청이 오면 builtin이 -1을 돌려주고 `wait_any`의 루프가 검사점에서 멈춘다.
+- 테스트: lib `Future.wait_any suspends the eval until the host completes one of the futures.`, behavior
+  `concurrency/future_wait_any.cy` · `future_wait_any_empty_panic.cy`, `spawn.cy`의 한 절.
+
+`await` 하나씩으로도 동시 실행은 된다: 요청을 먼저 다 보낸 뒤 순서대로 await하면 호스트는 자기가 만든 Future를 전부 알고 있어
+한꺼번에 처리할 수 있다. `wait_any`가 더하는 것은 "먼저 끝난 것부터"다.

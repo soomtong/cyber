@@ -111,6 +111,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"@memset",        zErrFunc(memset)},
     .{"@memmove",       zErrFunc(memmove)},
     .{"@notifyFutureComplete", zErrFunc(notifyFutureComplete)},
+    .{"@await_any", zErrFunc(await_any)},
     .{"@await_",        zErrBuiltinFunc(await_, null)},
     .{"@trackMainLocal", zErrFunc(trackMainLocal)},
     .{"@mainResult",     zErrFunc(mainResult)},
@@ -1529,6 +1530,52 @@ pub fn await_(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !voi
     const fut = try c.semaExpr(ctx.args[0], .{});
     _ = try c.ir.pushStmt(.await_, ctx.node, .{ .expr = fut.ir });
     out.* = try c.semaVoid(ctx.node);
+}
+
+/// `Future.wait_any`: the index of the first future that is done, or -1 when the wait was interrupted (the caller
+/// loops, and the loop's checkpoint stops the eval).
+/// When no future is done and none belongs to a spawned thread, only the host can complete one: the eval is
+/// suspended (`CL_AWAIT`) and a resume calls this function again with the same arguments.
+pub fn await_any(t: *cy.Thread) anyerror!C.Ret {
+    const ret = t.ret(i64);
+    const base = t.param(?[*]const *cy.heap.FutureValue);
+    const len: usize = @intCast(t.param(i64));
+    if (len == 0) {
+        return t.ret_panic("No futures to wait for.");
+    }
+    const futures = base.?[0..len];
+    while (true) {
+        var has_shared = false;
+        for (futures, 0..) |future, i| {
+            if (future.shared_state) |shared_state| {
+                has_shared = true;
+                // 2: done. 3 and 4: the thread failed or was stopped, which the `await` of that future reports.
+                if (@atomicLoad(u8, &shared_state.state, .acquire) >= 2) {
+                    ret.* = @intCast(i);
+                    return C.RetOk;
+                }
+            } else if (future.completed) {
+                ret.* = @intCast(i);
+                return C.RetOk;
+            }
+        }
+        if (!has_shared) {
+            if (!cy.vm.canSuspendEval(t)) return C.RetInterrupt;
+            const compiler = t.c.vm.compiler;
+            compiler.await_future = futures[0];
+            compiler.await_any = futures;
+            return vmc.RET_AWAIT;
+        }
+        // A spawned thread will complete one of them. Wait like `await` does.
+        if (@atomicLoad(u8, t.c.interrupt, .acquire) != 0) {
+            ret.* = -1;
+            return C.RetOk;
+        }
+        if (t.c.vm.worker_pool.run_queued_task()) {
+            continue;
+        }
+        std.atomic.spinLoopHint();
+    }
 }
 
 pub fn notifyFutureComplete(t: *cy.Thread) anyerror!C.Ret {

@@ -490,6 +490,13 @@ bool cl_future_complete_error(CLVM* vm, CLFuture* future, int64_t err);
 // know such a future and abandons the eval.
 CLFuture* cl_vm_pending_future(CLVM* vm);
 
+// The futures that the suspended eval waits for: one for `await`, the whole list for `Future.wait_any`, in the
+// order of the list. Writes at most `cap` of them to `out` (which can be `NULL`) and returns how many there are,
+// 0 when no eval is suspended. Completing any one of them lets `cl_vm_resume` continue. More than one can be
+// completed before the resume. The pointers are borrowed like the one of `cl_vm_pending_future`, which returns
+// the first of this list.
+size_t cl_vm_pending_futures(CLVM* vm, CLFuture** out, size_t cap);
+
 // Continues the suspended eval. The result code and `res` follow the rules of `cl_vm_evalx`, including another
 // `CL_AWAIT`, which is also the result when the pending future was not completed.
 // An interrupt request that arrived while the eval was suspended is cleared, as at the start of an eval: only a

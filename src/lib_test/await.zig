@@ -528,3 +528,104 @@ test "A future that only the script could complete suspends too, and a spawned t
     }
     try zt.eq(C.Success, C.vm_eval(vm, "_ = 1 + 2", &res));
 }
+
+test "Future.wait_any suspends the eval until the host completes one of the futures." {
+    const vm = Host.init();
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var res: C.EvalResult = undefined;
+    // Three tools are started before any of them is awaited. The host answers in its own order.
+    try zt.eq(C.Await, C.vm_eval(vm,
+        \\use host
+        \\use test
+        \\fn first_done(futs []Future[int]) -> int:
+        \\    return Future.wait_any(futs.span())
+        \\futs := []Future[int]{host.ask(1), host.ask(2), host.ask(3)}
+        \\order := ^ArrayStore[int]{}
+        \\left := futs.len()
+        \\done := []bool{false, false, false}
+        \\while left > 0:
+        \\    pending := []Future[int]{}
+        \\    index := []int{}
+        \\    for 0..futs.len() |i|:
+        \\        if !done[i]:
+        \\            pending = pending.append(futs[i])
+        \\            index = index.append(i)
+        \\    k := first_done(pending)
+        \\    done[index[k]] = true
+        \\    order << pending[k].await()
+        \\    left -= 1
+        \\test.eq(order[0], 20)
+        \\test.eq(order[1], 10)
+        \\test.eq(order[2], 30)
+    , &res));
+    try zt.eq(3, Host.num_asked);
+
+    var pending: [4]?*C.Future = @splat(null);
+    try zt.eq(3, C.vm_pending_futures(vm, &pending, pending.len));
+    try zt.eq(Host.asked[0], pending[0]);
+    try zt.eq(Host.asked[1], pending[1]);
+    try zt.eq(Host.asked[2], pending[2]);
+    // The count is returned without a buffer and with a short one.
+    try zt.eq(3, C.vm_pending_futures(vm, null, 0));
+    var one: [1]?*C.Future = .{null};
+    try zt.eq(3, C.vm_pending_futures(vm, &one, 1));
+    try zt.eq(Host.asked[0], one[0]);
+    try zt.eq(Host.asked[0], C.vm_pending_future(vm));
+
+    // A resume without a completion waits again for the same list.
+    try zt.eq(C.Await, C.vm_resume(vm, &res));
+    try zt.eq(3, C.vm_pending_futures(vm, null, 0));
+
+    // The second tool finishes first.
+    try zt.eq(true, completeInt(vm, Host.asked[1], 20));
+    try zt.eq(C.Await, C.vm_resume(vm, &res));
+    try zt.eq(2, C.vm_pending_futures(vm, &pending, pending.len));
+    try zt.eq(Host.asked[0], pending[0]);
+    try zt.eq(Host.asked[2], pending[1]);
+
+    // Two completions before one resume: the script sees them in list order without another suspension.
+    try zt.eq(true, completeInt(vm, Host.asked[2], 30));
+    try zt.eq(true, completeInt(vm, Host.asked[0], 10));
+    try zt.eq(C.Success, C.vm_resume(vm, &res));
+    try zt.eq(0, C.vm_pending_futures(vm, null, 0));
+
+    // A single await is a list of one.
+    try zt.eq(C.Await, C.vm_eval(vm, "use host\n_ = host.ask(1).await()", &res));
+    try zt.eq(1, C.vm_pending_futures(vm, &pending, pending.len));
+    try zt.eq(C.vm_pending_future(vm), pending[0]);
+
+    // Abandoned in a wait for several futures.
+    C.vm_abandon(vm);
+    try zt.eq(C.Await, C.vm_eval(vm,
+        \\use host
+        \\futs := []Future[int]{host.ask(1), host.ask(2)}
+        \\_ = Future.wait_any(futs.span())
+    , &res));
+    C.vm_abandon(vm);
+    try zt.eq(0, C.vm_pending_futures(vm, null, 0));
+
+    // No futures is a panic, and a completed future does not suspend.
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm, "_ = Future.wait_any([]Future[int]{}.span())", &res));
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use host
+        \\use test
+        \\futs := []Future[int]{host.ask(1), host.ask_done(4)}
+        \\test.eq(Future.wait_any(futs.span()), 1)
+        \\test.eq(futs[1].await(), 8)
+    , &res));
+
+    if (cy.isWasm) return;
+    // With a future of a spawned thread in the list, the wait stays in the VM until that thread is done.
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use host
+        \\use test
+        \\fn work(n int) -> int:
+        \\    return n * 2
+        \\futs := []Future[int]{host.ask(1), spawn(work, {21})}
+        \\test.eq(Future.wait_any(futs.span()), 1)
+        \\test.eq(futs[1].await(), 42)
+    , &res));
+}

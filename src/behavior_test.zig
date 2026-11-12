@@ -389,6 +389,8 @@ if (!aot) {
     run.case("concurrency/fiber_in_progress_panic.cy");
     run.case("concurrency/fiber_running_panic.cy");
     run.case("concurrency/fiber_panic.cy");
+    run.case("concurrency/future_wait_any.cy");
+    run.case("concurrency/future_wait_any_empty_panic.cy");
     if (!is_wasm) {
         run.case("concurrency/spawn.cy");
     }

@@ -3299,6 +3299,14 @@ print(work.await())
 --> "foo.txt contents"
 ```
 
+`Future.wait_any` waits for the first of several futures and returns its index in the list. When several are done it returns the first of them in the list. The future at that index does not wait when it is awaited:
+```cy
+futs := []Future[str]{tool_async('a'), tool_async('b'), tool_async('c')}
+i := Future.wait_any(futs.span())
+print(futs[i].await())
+```
+Futures of spawned threads are waited for inside the VM. When none of the futures belongs to a spawned thread, the program is suspended until the host completes one of them (see [Suspending an eval](#suspending-an-eval)). An empty list panics.
+
 `await` can be used in any function which makes asynchronous functions **colorless**. They do not need a special function modifier. This means that asynchronous work can be wrapped in a synchronous API.
 
 ### Future chains.
@@ -3754,7 +3762,7 @@ fn main():
     print('program start')
 ```
 
-The main function can return a result type. `expr!` in its body then returns the error from `main`. An error that `main` returns panics, like `expr!` at the top level, and the `cyber` command ends with exit code 1:
+The main function can return a result type. `expr!` in its body then returns the error from `main`. An error that `main` returns panics, like `expr!` at the top level, and the `cyber` command ends with exit code 1. The same holds for a `main` that returns `error`:
 ```cy
 use os
 
@@ -4485,6 +4493,7 @@ fn write(path str, text str) -> !void:
 * `cl_vm_resume` follows the rules of `cl_vm_evalx`. It returns `CL_AWAIT` again at the next `await`, and also when the pending future was not completed. A resume clears an interrupt request that arrived while the eval was suspended, as the start of an eval does, so a wall clock timer does not count the time the host waited. The fuel is not refilled.
 * While an eval is suspended, `cl_vm_eval*`, `cl_vm_validate` and `cl_vm_compile*` return `CL_ERROR_SUSPENDED`. `cl_vm_reset` and `cl_vm_deinit` abandon the suspended eval first.
 * `cl_vm_abandon` drops the suspended eval with the outcome of an interrupt: the main locals are gone, the declarations stay. The panic summary names the abandoned `await`.
+* A script can start several requests before it waits. `cl_vm_pending_futures` returns the futures the suspended eval waits for: one for `await`, the whole list for `Future.wait_any`. The host completes any of them, in any order and more than one if it likes, before the resume.
 * A future that the script never awaits, or that is still pending when the eval ends, is freed like any other object.
 * All of these functions are called from the thread that runs the evals of the VM. A future is not completed from another thread.
 

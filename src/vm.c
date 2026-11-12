@@ -971,6 +971,11 @@ beginSwitch:
         HostFn fn = (HostFn)READ_U48(2);
         Ret res = fn(t);
         if (res != 0) {
+            if (res == RET_AWAIT) {
+                // A builtin suspended the eval (`@await_any`). A resume runs this call again: its arguments
+                // are still in their registers.
+                RETURN(RES_AWAIT);
+            }
             RETURN(RES_PANIC);
         }
         pc += CALL_INST_LEN;

@@ -6,6 +6,11 @@ test.eq(123, spawn(entry, {}).await())
 -- Sending primitive.
 test.eq(45, spawn(entry2, {10}).await())
 
+-- `Future.wait_any` returns the index of a thread that is done. Both are awaited afterwards.
+any_futs := []Future[int]{spawn(entry2, {10}), spawn(entry2, {20})}
+any_i := Future.wait_any(any_futs.span())
+test.eq(any_futs[any_i].await() + any_futs[1 - any_i].await(), 235)
+
 -- Sending `str`.
 test.eq('xyz', spawn(entry3, {'abc'}).await())
 

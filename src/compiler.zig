@@ -55,6 +55,10 @@ pub const Compiler = struct {
     /// The main stack and the bytecode stay as they are until `VM.resumeEval` or `VM.abandonEval`.
     await_future: ?*cy.heap.FutureValue = null,
 
+    /// The futures of a suspended `Future.wait_any`. Empty when the eval waits for one future.
+    /// Points into the list that the script passed, which stays in place while the eval is suspended.
+    await_any: []const *cy.heap.FutureValue = &.{},
+
     reports: std.ArrayList(Report),
 
     /// Whether a compile error summary marks the reported source range with ANSI escape codes

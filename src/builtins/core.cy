@@ -4381,6 +4381,19 @@ type FutureValue[T Any]:
 
 const NullId = (1 << 32) - 1
 
+#[bind]
+fn @await_any(futures Ptr[void], len int) -> int
+
+--| Waits until one of `futures` is done and returns its index. When several are done, the first in the list.
+--| The future at that index does not wait when it is awaited.
+--| Futures of spawned threads are waited for like `await` does. When none of the futures belongs to a spawned
+--| thread, the host completes one of them (see `cl_vm_pending_futures`).
+fn Future :: wait_any(futures [&]Future[%T]) -> int:
+    while:
+        idx := @await_any(as[Ptr[void]] futures.base, futures.length)
+        if idx >= 0:
+            return idx
+
 --| Returns a `Future[T]` that has a completed value.
 fn Future :: complete(val %T) -> Future[T]:
     return {

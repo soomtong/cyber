@@ -353,6 +353,8 @@ enum {
 typedef uint16_t Inst;
 typedef uint64_t Value;
 typedef uint8_t Ret;
+// A builtin host function suspends the eval. The VM runs the call again on a resume. Not part of the C API.
+#define RET_AWAIT 2
 
 typedef union ValueUnion {
     double d;

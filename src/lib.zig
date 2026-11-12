@@ -315,6 +315,18 @@ export fn cl_vm_pending_future(vm: *cy.VM) ?*cy.heap.FutureValue {
     return vm.compiler.await_future;
 }
 
+export fn cl_vm_pending_futures(vm: *cy.VM, out: ?[*]?*cy.heap.FutureValue, cap: usize) usize {
+    const compiler = vm.compiler;
+    const single = compiler.await_future orelse return 0;
+    const list: []const *cy.heap.FutureValue = if (compiler.await_any.len > 0) compiler.await_any else &.{single};
+    if (out) |out_| {
+        for (list[0..@min(cap, list.len)], 0..) |future, i| {
+            out_[i] = future;
+        }
+    }
+    return list.len;
+}
+
 export fn cl_future_new(t: *cy.Thread, future_t: *cy.Type) ?*cy.heap.FutureValue {
     if (!future_t.isInstanceOf(t.c.vm.sema.future_tmpl)) return null;
     // `Future[T]` is a struct with the single field `inner ^FutureValue[T]`.

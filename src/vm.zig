@@ -520,6 +520,7 @@ pub const VM = struct {
             return;
         }
         self.compiler.await_future = null;
+        self.compiler.await_any = &.{};
         self.markChunksInited();
         if (self.config.persist_main) self.dropMainLocalSaves();
         self.dropMainResult(false);
@@ -540,6 +541,7 @@ pub const VM = struct {
             return error.NotSuspended;
         }
         self.compiler.await_future = null;
+        self.compiler.await_any = &.{};
         @atomicStore(u8, self.main_thread.c.interrupt, 0, .release);
         cy.Thread.exec_auto(self.main_thread, true) catch |err| {
             self.failExec(err);
@@ -1069,6 +1071,21 @@ fn z_ret_generator(t: *cy.Thread, type_id: cy.TypeId, ret_size: u16, fp: [*]Valu
     return vmc.RES_SUCCESS;
 }
 
+/// Whether the eval can leave the VM at an await of a future that only the host can complete.
+/// Sets the panic otherwise.
+pub fn canSuspendEval(t: *cy.Thread) bool {
+    if (t != t.c.vm.main_thread) {
+        _ = t.ret_panic("Cannot wait in a spawned thread for a future that the host or another context completes.");
+        return false;
+    }
+    if (t.c.host_depth != 0) {
+        // A host function called back into the VM. Its C frame can not be suspended.
+        _ = t.ret_panic("Cannot await across a host call.");
+        return false;
+    }
+    return true;
+}
+
 fn zAwait(t: *cy.Thread, fut_value_bits: u64) callconv(.c) vmc.ResultCode {
     const fut_value_ptr: Value = .{ .val = fut_value_bits };
     const future = fut_value_ptr.asPtr(*cy.heap.FutureValue);
@@ -1107,17 +1124,8 @@ fn zAwait(t: *cy.Thread, fut_value_bits: u64) callconv(.c) vmc.ResultCode {
         if (!future.completed) {
             // Nothing in this thread can complete the future while it waits. Only the host can, so the eval
             // leaves the VM with `CL_AWAIT` and `cl_vm_resume` runs this `AWAIT` inst again.
-            const vm = t.c.vm;
-            if (t != vm.main_thread) {
-                _ = t.ret_panic("Cannot wait in a spawned thread for a future that the host or another context completes.");
-                return vmc.RES_PANIC;
-            }
-            if (t.c.host_depth != 0) {
-                // A host function called back into the VM. Its C frame can not be suspended.
-                _ = t.ret_panic("Cannot await across a host call.");
-                return vmc.RES_PANIC;
-            }
-            vm.compiler.await_future = future;
+            if (!canSuspendEval(t)) return vmc.RES_PANIC;
+            t.c.vm.compiler.await_future = future;
             return vmc.RES_AWAIT;
         }
         // Continue if completed Future.

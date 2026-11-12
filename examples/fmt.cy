@@ -39,7 +39,7 @@ fn main():
         os.exit(1)
 
     -- Refuse to format source that does not parse. On a syntax error `cy.parse` prints the error and
-    -- panics, which ends the script. The check for `none` only guards against a parser that returns.
+    -- returns a result without a root.
     if cy.parse(src).root == none:
         eprint('error: can not parse `%{path}`.')
         os.exit(1)

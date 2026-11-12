@@ -6,6 +6,9 @@
 
 ## 버그 수정
 
+- `cy.parse`가 구문 오류에서 panic했다. 스크립트가 잡을 수 없어 스택 트레이스와 함께 끝났다. 이제 오류를 기록하고
+  `root`가 `none`인 `ParseResult`를 돌려준다. 토큰 오류(끝나지 않은 문자열 등)도 위치와 함께 기록한다(F-96).
+
 - `fn main() -> !T`가 돌려준 오류가 버려졌다. `os.read_file_str('nofile')!`로 끝나도 아무것도 출력하지 않고 종료 코드 0이었다.
   이제 최상위의 `expr!`처럼 ``panic: Unwrapped error `error.FileNotFound`.``로 끝나고 `cyber`의 종료 코드는 1이다.
   임베딩 호스트는 이 경우 `!T` 값 대신 `CL_ERROR_PANIC`을 받는다(F-96).

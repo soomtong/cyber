@@ -1171,7 +1171,7 @@ fn (&ParseResult) stmt_docs(stmt ^Node) -> ?str:
 
     return res
 
---| Parses Cyber source.
+--| Parses Cyber source. On a syntax error the error is logged and `root` is `none`.
 fn parse(src str) -> ParseResult:
     parser := new_parser()
     raw_root := parse_(parser.inner, src)

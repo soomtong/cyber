@@ -252,7 +252,14 @@ pub fn _parser_comments(t: *cy.Thread) anyerror!C.Ret {
     return C.RetOk;
 }
 
-fn parserReportFn(p: *cy.Parser, format: []const u8, args: []const cy.fmt.FmtValue, pos: u32) anyerror {
+/// `Parser.ctx` during `cy.parse`. The tokenizer report function only gets the context.
+const ParseCtx = struct {
+    t: *cy.Thread,
+    parser: *cy.Parser,
+};
+
+fn logParseError(ctx: *ParseCtx, format: []const u8, args: []const cy.fmt.FmtValue, pos: u32) !void {
+    const p = ctx.parser;
     const msg = try cy.fmt.allocFormat(p.alloc, format, args);
     defer p.alloc.free(msg);
 
@@ -262,22 +269,34 @@ fn parserReportFn(p: *cy.Parser, format: []const u8, args: []const cy.fmt.FmtVal
     try wa.writer.print("{s}\n", .{msg});
     try cy.debug.write_user_error_trace2(&wa.writer, p.ast.view(), "<memory>", pos);
 
-    const t: *cy.Thread = @ptrCast(@alignCast(p.ctx));
-    t.c.vm.log(wa.written());
+    ctx.t.c.vm.log(wa.written());
+}
+
+fn parserReportFn(p: *cy.Parser, format: []const u8, args: []const cy.fmt.FmtValue, pos: u32) anyerror {
+    try logParseError(@ptrCast(@alignCast(p.ctx)), format, args, pos);
     return error.ParseError;
 }
 
+fn tokenizerReportFn(ctx: *anyopaque, format: []const u8, args: []const cy.fmt.FmtValue, pos: u32) anyerror!void {
+    try logParseError(@ptrCast(@alignCast(ctx)), format, args, pos);
+    return error.TokenError;
+}
+
 pub fn parse(t: *cy.Thread) anyerror!C.Ret {
-    const ret = t.ret(*anyopaque);
+    const ret = t.ret(?*anyopaque);
     const parser = t.param(*cy.Parser);
     const src = t.param(cy.heap.Str);
     defer t.heap.destructStr(&src);
 
+    var ctx: ParseCtx = .{ .t = t, .parser = parser };
     parser.reportFn = parserReportFn;
-    parser.ctx = t;
+    parser.tokenizerReportFn = tokenizerReportFn;
+    parser.ctx = &ctx;
     const res = try parser.parse(src.slice(), 0, .{ .parseComments = true });
     if (res.has_error) {
-        return error.ParseError;
+        // A syntax error is not a panic. The report is logged and `ParseResult.root` is `none`.
+        ret.* = null;
+        return C.RetOk;
     }
     ret.* = res.ast.root.?;
     return C.RetOk;

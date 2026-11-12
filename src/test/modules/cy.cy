@@ -39,6 +39,10 @@ fn parseStmts(src str) -> []^cy.Node:
     res := cy.parse(src)
     return res.root.?.!root.stmts
 
+-- A syntax error is logged, and the result has no root.
+t.eq(cy.parse('a := (1 +').root == none, true)
+t.eq(cy.parse("s := 'abc").root == none, true)
+
 stmts := parseStmts('global foo int = 123')
 t.eq(cy.Node.Tag.global_decl, meta.choice_tag(stmts[0].*))
 t.eq('foo', stmts[0].!global_decl.name.name())

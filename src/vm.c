@@ -589,6 +589,8 @@ ResultCode execBytecode(ZThread* t) {
         JENTRY(F32_2I),
         JENTRY(I2F),
         JENTRY(I2F32),
+        JENTRY(U2F),
+        JENTRY(U2F32),
         JENTRY(FABS),
         JENTRY(F32ABS),
         JENTRY(FN_VM),
@@ -1771,6 +1773,21 @@ beginSwitch:
     CASE(I2F32): {
         u16 dst = pc[1];
         i64 val = BITCAST(i64, stack[pc[2]]);
+        stack[dst] = BITCAST(u32, (f32)val);
+        pc += 3;
+        NEXT();
+    }
+    CASE(U2F): {
+        // A 64-bit raw value is unsigned.
+        u16 dst = pc[1];
+        u64 val = stack[pc[2]];
+        stack[dst] = BITCAST(u64, (f64)val);
+        pc += 3;
+        NEXT();
+    }
+    CASE(U2F32): {
+        u16 dst = pc[1];
+        u64 val = stack[pc[2]];
         stack[dst] = BITCAST(u32, (f32)val);
         pc += 3;
         NEXT();

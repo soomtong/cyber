@@ -6,6 +6,13 @@
 
 ## 버그 수정
 
+- `r64` → `float` · `f32` 변환이 값을 부호 있는 정수로 읽었다. `var r r64 = 0xFFFFFFFFFFFFFFFF` 뒤 `float(r)`이
+  `-1.0`이었고 이제 `18446744073709551615.0`이다(VM 명령 `U2F` · `U2F32`). `byte` · `r16` · `r32`는 원래 맞았다.
+- `float` → raw 정수(`r64(x)` · `byte(x)` 등)는 `x`가 `float` 변수이면 `Expected type f32, got float.` 컴파일 오류였다.
+  이제 부호 없는 값으로 변환한다. 2^63 이상도 `r64`에 들어가고, 음수 · NaN · 범위 밖은
+  ``panic: Lossy conversion to `r64`.``다. `f32`에서 오는 변환도 같은 규칙을 따른다(이전에는 `r32(4294967295.0)`에
+  해당하는 값이 panic이었다).
+
 - `fiber Job.peek(&job)`처럼 타입 경로로 댄 진입점은 빌림 매개변수 검사를 건너뛰었다. `&T` 수신자 메서드가
   fiber에 스택 빌림을 넘길 수 있었다. 이제 이름 하나로 댄 진입점과 같이
   `Cannot borrow a stack value across fibers.` 컴파일 오류다. generator · 비-void 반환 검사도 같이 적용된다.

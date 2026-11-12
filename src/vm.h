@@ -295,6 +295,8 @@ typedef enum {
     CodeF32_2I,
     CodeI2F,
     CodeI2F32,
+    CodeU2F,
+    CodeU2F32,
     CodeFABS,
     CodeF32ABS,
     CodeFN_VM,

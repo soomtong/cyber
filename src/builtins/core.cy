@@ -407,21 +407,21 @@ fn Raw[] :: @init(x %T) -> Self:
     #if T == bool:
         return if (x) 1 else 0
     #else T == float:
-        res := @floatToInt(f32, x)
-        if res.uge(Self.umax):
-            panic('Lossy conversion to `%{type.name(Self)}`.')
+        -- A raw integer is unsigned. `@floatToInt` gives an `int`, so the upper half of `r64` is converted
+        -- below 2^63 and moved back up.
         #if Bits == 64:
-            return @bitCast(Self, res)
+            if !(x >= 0.0) or x >= 18446744073709551616.0:
+                panic('Lossy conversion to `%{type.name(Self)}`.')
+            if x >= 9223372036854775808.0:
+                upper := @floatToInt(float, x - 9223372036854775808.0)
+                return @bitCast(Self, upper) || (Self(1) << 63)
+            return @bitCast(Self, @floatToInt(float, x))
         #else:
-            return @bitTrunc(Self, res)
+            if !(x >= 0.0) or x >= float(1 << Bits):
+                panic('Lossy conversion to `%{type.name(Self)}`.')
+            return @bitTrunc(Self, @floatToInt(float, x))
     #else T == f32:
-        res := @floatToInt(f32, x)
-        if res.uge(Self.ones):
-            panic('Lossy conversion to `%{type.name(Self)}`.')
-        #if Bits == 64:
-            return @bitCast(Self, res)
-        #else:
-            return @bitTrunc(Self, res)
+        return Self(f32_to_f64(x))
     #else:
         #switch type.info(T):
             #case .int |int_t|:

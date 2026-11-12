@@ -522,6 +522,16 @@ var b r64 = 18446744073709551615
 
 When the target is a `float` or `f32`, a hexadecimal, octal or binary literal converts by its unsigned 64-bit value: `var f float = 0x10` is `16.0` and `var g float = 0xFFFFFFFFFFFFFFFF` is `18446744073709551615.0`. Without a float target the literal is an `int` first, so `float(0xFFFFFFFFFFFFFFFF)` is `-1.0`.
 
+A raw integer converts to a float by its unsigned value at every width, and a float converts to a raw integer the same way. The fraction is dropped. A negative value, a NaN or a value that does not fit the raw type panics:
+```cy
+var mask r64 = 0xFFFFFFFFFFFFFFFF
+print(float(mask))                -- 18446744073709552000
+print(r64(9223372036854775808.0)) -- 0x8000000000000000
+print(byte(255.9))                -- 0xff
+f := -1.0
+print(r64(f))                     --> panic: Lossy conversion to `r64`.
+```
+
 String literals evaluate as their UTF-8 codepoint if the target integer type is big enough:
 ```cy
 -- Success.
@@ -1177,6 +1187,7 @@ Type casting supports all [implicit casts](#implicit-casts) in addition to the f
 | `^T` | `r64` | reinterpret |
 | `T` | `r64 where T is enum` | reinterpret |
 | `Int[X]` | `Raw[W] where X > W` | runtime check, convert |
+| `Float[X]` | `Raw[W]` | runtime check, convert |
 | `f64` | `f32` | convert |
 | `^Dyn[S]` | `^T where T implements S` | runtime check, unwrap |
 

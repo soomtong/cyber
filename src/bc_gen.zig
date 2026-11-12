@@ -1394,11 +1394,11 @@ fn gen_i2f(c: *Chunk, expr: *ir.UnOp2, cstr: Cstr, node: *ast.Node) !GenValue {
         },
         else => {},
     }
-    if (expr.base.type.id() == bt.F64) {
-        try c.pushCode(.i2f, &.{ dst.reg, src.reg}, node);
-    } else {
-        try c.pushCode(.i2f32, &.{ dst.reg, src.reg}, node);
-    }
+    // A raw value is unsigned. Below 64 bits the zero extended value is a positive `i64`.
+    const unsigned = src_t.kind() == .raw and src_t.cast(.raw).bits == 64;
+    const to_f64 = expr.base.type.id() == bt.F64;
+    const op: cy.OpCode = if (unsigned) (if (to_f64) .u2f else .u2f32) else (if (to_f64) .i2f else .i2f32);
+    try c.pushCode(op, &.{ dst.reg, src.reg}, node);
     try pop_temp_value(c, src, node);
     return dst;
 }

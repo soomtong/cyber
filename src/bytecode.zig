@@ -912,6 +912,8 @@ pub fn getInstLenAt(pc: [*]const Inst) u8 {
         .unwrap_nz,
         .i2f,
         .i2f32,
+        .u2f,
+        .u2f32,
         .f2i,
         .f32_2i,
         .fabs,
@@ -1199,6 +1201,8 @@ pub const OpCode = enum(u8) {
     f32_2i = vmc.CodeF32_2I,
     i2f = vmc.CodeI2F,
     i2f32 = vmc.CodeI2F32,
+    u2f = vmc.CodeU2F,
+    u2f32 = vmc.CodeU2F32,
     fabs = vmc.CodeFABS,
     f32abs = vmc.CodeF32ABS,
     fn_vm = vmc.CodeFN_VM,
@@ -1221,7 +1225,7 @@ pub const OpCode = enum(u8) {
 };
 
 test "bytecode internals." {
-    try t.eq(136, std.enums.values(OpCode).len);
+    try t.eq(138, std.enums.values(OpCode).len);
     try t.eq(@sizeOf(Inst), 2);
     try t.eq(@sizeOf(DebugSym), 16);
 }

@@ -225,6 +225,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
 
     // Fiber
     .{"@start_fiber",   zErrFunc(start_fiber)},
+    .{"@start_scope_fiber", zErrFunc(start_fiber)},
     .{"@fiber_deinit",  zErrFunc(fiber_deinit)},
     .{"@fiber_status",  cFunc(fiber_status)},
     .{"@fiber_cancel",  cFunc(fiber_cancel)},

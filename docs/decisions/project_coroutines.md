@@ -416,3 +416,32 @@ generator 본문), lib `Fibers that await host futures run interleaved, and the 
 
 남은 것: 취소(멈춘 fiber의 스택 풀기) · 범위 문법 · 오류 전파(구조적 동시성), `CL_YIELD`, AOT.
 
+## 구조적 동시성 (2026-11-12 시작)
+
+사용자 결정(2026-11-12): 범위는 블록 문법(`scope |s|:`), 실패 정책 기본값은 "하나 실패하면 나머지 취소", 취소는
+강제 풀기(프레임의 값은 해제하되 사용자 코드는 더 실행하지 않음. `await`의 타입은 그대로), 진행 중인 fiber의 소멸은
+panic 대신 취소. 목표는 0.5.
+
+순서.
+
+1. `Scope` 타입과 합류(2026-11-12 구현). `core.cy`의 `Scope` · `ScopeState`, `@scope_entry[Sig]`, `@start_scope_fiber`
+   (`@start_fiber`와 같은 호스트 함수. 상태 참조가 복사되는 인자의 첫 칸이다).
+2. 자식의 `!void` 반환과 오류 전파(같이 구현). `@scope_entry`가 `try`로 받아 `ScopeState.err`에 첫 오류를 둔다.
+3. 취소. 아래 "취소의 구현 방법".
+4. `scope` 블록 문법, 범위 안 빌림 허용.
+
+지금의 한계: 오류 뒤에 시작하지 않은 fiber만 버린다(`@fiber_cancel`). 진행 중인 fiber는 끝까지 돈다. 3이 들어가면
+정책 A가 완성된다. `Scope.@deinit`은 합류한 뒤 남은 오류를 `panic_unwrap_error`로 올린다.
+
+취소의 구현 방법(조사 결과, 미구현).
+
+- 끝나지 않은 제너레이터의 소멸이 같은 문제를 한 프레임에 대해 풀고 있다: sema가 `yield`마다 정리 블록
+  (`semaDestructBlock2(procBlock)` + 끝 표시)을 만들고 `RET_Y`가 `Generator.deinit_pc`에 그 주소를 둔다. `GEN_END`가 거기로 뛴다.
+- fiber는 호출 깊이 어디서든 멈추므로 멈춘 스택의 모든 프레임이 "호출 도중"이다. 호출 지점마다 정리 블록(또는 살아 있는
+  소유 레지스터의 표)이 필요하다. 반환 주소 → 정리 블록 표를 두고, 취소가 각 프레임의 반환 주소를 정리 블록으로 바꿔
+  fiber를 한 번 resume하면 위에서부터 차례로 정리하고 `FIBER_END`에 닿는다. 평소 실행 비용은 없다.
+- 어려운 점: (1) 식 중간의 임시 값(`foo(a(), b())`에서 `b()` 안에서 멈추면 `a()`의 결과). `seq_pending` · `seqFlush`
+  (F-98)를 모든 호출 앞에서 강제해 지역으로 올려야 sema가 살아 있는 값을 전부 안다. (2) bc_gen의 임시 레지스터.
+  (3) fiber 스택 위에서 도는 제너레이터 본문 프레임. (4) panic 경로는 힙을 통째로 버려 프레임별 해제가 없으니 재사용 불가.
+  (5) 호스트 쪽 `destructValueAt`은 사용자 `@deinit`을 부르지 않으므로 표 + 호스트 해제 방식은 정리 의미가 달라진다.
+

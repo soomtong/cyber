@@ -2747,23 +2747,53 @@ fn reserve_reg(c: *Chunk, local_t: *cy.Type) !Reg {
         c.cur_proc.max_regs = c.cur_proc.reg_end;
     }
 
-    if (local_t.is_stack_ptr()) {
-        c.buf.ptr_layout_builder.items[reg] = true;
-        c.cur_proc.num_ptr_locals += 1;
-        // Dump where ptr regs are reserved on the stack.
-        // if (cy.Trace) {
-        //     const buf = try c.alloc.print("ptr reg {}", .{reg});
-        //     defer c.alloc.free(buf);
-        //     try genNopLabel2(c, buf, c.ast.null_node);
-        // }
-    } else {
-        if (reg_size == 1) {
-            c.buf.ptr_layout_builder.items[reg] = false;
-        } else {
-            @memset(c.buf.ptr_layout_builder.items[reg..reg+reg_size], false);
-        }
-    }
+    @memset(c.buf.ptr_layout_builder.items[reg..reg + reg_size], false);
+    c.cur_proc.num_ptr_locals += mark_stack_ptr_regs(c, local_t, reg);
     return reg;
+}
+
+/// Marks the registers of a local of type `type_` at `reg` that can hold a pointer into the stack, and returns
+/// how many there are. Growing the stack can move it, and these registers are patched then (only when the
+/// value is an address inside the stack, so a register that holds another address is left alone).
+/// Besides `&T` and `Ptr[T]` that is an exclusive borrow (`&&T`, the receiver of a mutating method) and every
+/// such pointer inside a struct, an option or a vector: the `base` of a span over an array literal's elements
+/// points into the frame that holds them.
+fn mark_stack_ptr_regs(c: *Chunk, type_: *cy.Type, reg: usize) usize {
+    if (type_.is_stack_ptr() or type_.kind() == .ex_borrow) {
+        c.buf.ptr_layout_builder.items[reg] = true;
+        return 1;
+    }
+    var count: usize = 0;
+    switch (type_.kind()) {
+        .struct_t => {
+            const struct_t = type_.cast(.struct_t);
+            for (struct_t.fields()) |field| {
+                // A pointer field is 8 byte aligned. Smaller fields share a register and hold no pointer.
+                if (field.offset % 8 != 0) continue;
+                count += mark_stack_ptr_regs(c, field.type, reg + field.offset / 8);
+            }
+        },
+        .option => {
+            const option_t = type_.cast(.option);
+            // A zero union is the payload itself. Otherwise the payload follows the tag.
+            const payload_reg = if (option_t.zero_union) reg else reg + 1;
+            count += mark_stack_ptr_regs(c, option_t.child_t, payload_reg);
+        },
+        .vector => {
+            const vector_t = type_.cast(.vector);
+            const elem_size = vector_t.elem_t.size();
+            if (elem_size > 0 and elem_size % 8 == 0) {
+                for (0..vector_t.n) |i| {
+                    const marked = mark_stack_ptr_regs(c, vector_t.elem_t, reg + i * (elem_size / 8));
+                    // The elements have the same layout: no pointer in the first one, none in the others.
+                    if (marked == 0) break;
+                    count += marked;
+                }
+            }
+        },
+        else => {},
+    }
+    return count;
 }
 
 fn gen_global(c: *Chunk, expr: *ir.Global, cstr: Cstr, node: *ast.Node) !GenValue {

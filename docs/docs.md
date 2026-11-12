@@ -3273,6 +3273,25 @@ Both computations are started before either result is taken. A loop that resumes
 
 In the root context, outside of any fiber, `await` waits as before.
 
+A `Scope` runs a group of fibers and does that loop itself. `start` adds a fiber: the arguments are evaluated at once and the fiber starts in `join`. `join` runs the fibers until all of them are done. A fiber that stops at `suspend` gives the others a turn, and when every fiber waits for a future the scope waits like `Fiber.wait_ready()`:
+```cy
+fn fetch(name str, n int, log ^ArrayStore[str]) -> !void:
+    res := spawn(compute, {n}).await()
+    if res < 0:
+        return error.Negative
+    log << '%{name}: %{res}'
+
+fn fetch_all(log ^ArrayStore[str]) -> !void:
+    s := Scope.new()
+    s.start(fetch, {'a', 2000000, log})
+    s.start(fetch, {'b', 10, log})
+    s.join()!
+    -- Both fibers are done here.
+```
+The fibers of a scope do not outlive it. A block that is left before `join` (with `return`, or with an error from `!`) joins the fibers first, when the scope is destructed.
+
+The entry function of a scope's fiber returns `void` or `!void`. `join` returns the first error that a fiber returned. After an error, the fibers that were not started yet are dropped with their arguments released. The fibers that are already in progress run to their end. An error that is left when the scope is destructed without a `join` panics, like an error that `main` returns. A scope can be used inside a fiber of another scope, and it can start more fibers after a `join`.
+
 When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the `resume` call of each fiber down to the main block.
 
 A fiber can not resume itself or a fiber that is waiting for it:

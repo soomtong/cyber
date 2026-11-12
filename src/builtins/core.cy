@@ -4710,6 +4710,100 @@ fn @new_fiber_block(body Func[FiberBlockFn]) -> Fiber:
 -fn fiber_block_entry(body Func[FiberBlockFn]):
     body()
 
+--| A group of fibers that do not outlive it. `start` adds a fiber and `join` runs the fibers until all of
+--| them are done. A scope that is destructed joins its fibers first, so a fiber of a scope never runs after
+--| the block that holds the scope.
+--| The entry function of a fiber returns `void` or `!void`. `join` returns the first error that a fiber
+--| returned. After an error, the fibers that were not started yet are dropped, and the ones that are in
+--| progress still run to their end.
+type Scope:
+    with NoCopy
+    fibers Array[Fiber]
+    state  ^ScopeState
+
+type ScopeState:
+    err    ?error
+    -- Whether `err` was handed out by `join`.
+    taken  bool
+
+--| Returns a scope without fibers.
+fn Scope :: new() -> Scope:
+    return {fibers = Array[Fiber]{}, state = ^ScopeState{err = none, taken = false}}
+
+fn (&Scope) @deinit():
+    -- An early exit of the block (`return`, an error) comes here without a `join`.
+    self.run()
+    if !self.state.taken:
+        if self.state.err |err|:
+            -- Nothing handles the error anymore.
+            panic_unwrap_error(err)
+
+--| Adds a fiber that calls `func(args)`. The arguments are evaluated now. The fiber starts in `join`.
+fn (&Scope) start(func funcptr_t[%Sig], args FnTuple[Sig]):
+    #if Sig.ret() != void and Sig.ret() != !void:
+        meta.error('A fiber of a scope must return `void` or `!void`.')
+    -- The state takes one value slot, which is 8 bytes on every target. A reference is not.
+    args_size := 8 + type.size(FnTuple[Sig])
+    self.fibers << Fiber{state = @start_scope_fiber(@scope_entry[Sig], func, args_size, self.state, move args)}
+
+--| The number of fibers that are not done.
+fn (&Scope) active() -> int:
+    count := 0
+    for self.fibers |&child|:
+        if child.status() != .done:
+            count += 1
+    return count
+
+--| Runs the fibers until all of them are done. A fiber that stops at `suspend` gives the others a turn.
+--| When every fiber waits for a future, the scope waits like `Fiber.wait_ready`.
+--| Returns the first error that a fiber returned. More fibers can be started after a `join`.
+fn (&Scope) join() -> !void:
+    self.run()
+    self.fibers = Array[Fiber]{}
+    if !self.state.taken:
+        if self.state.err |err|:
+            self.state.taken = true
+            return err
+
+-fn (&Scope) run():
+    while:
+        left := 0
+        progress := false
+        failed := self.state.err != none
+        for self.fibers |&child|:
+            if child.status() == .done:
+                continue
+            if failed and @fiber_cancel(child.state):
+                -- Not started. Its entry returns at once and releases the arguments.
+                _ = child.resume()
+                continue
+            if child.waiting():
+                left += 1
+                continue
+            if child.resume() != .done:
+                left += 1
+            progress = true
+        if left == 0:
+            break
+        if !progress:
+            _ = Fiber.wait_ready()
+
+-- The same host function as `@start_fiber`. The state is the first of the copied arguments.
+#[bind]
+fn @start_scope_fiber(entry funcptr_t[%EntrySig], func funcptr_t[%Sig], args_size int, state ^ScopeState, args FnTuple[Sig]) -> Ptr[void]
+
+fn @scope_entry[const Sig FuncSig](func funcptr_t[Sig], state ^ScopeState, args FnTuple[Sig]):
+    if @fiber_cancelled():
+        return
+    #if Sig.ret() == void:
+        @call(func, &args)
+    #else:
+        try:
+            @call(func, &args)!
+        else |err|:
+            if state.err == none:
+                state.err = err
+
 --| Returns the smallest of two values.
 fn min(a %T, b T) -> T:
     if a > b:

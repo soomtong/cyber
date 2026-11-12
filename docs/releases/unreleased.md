@@ -6,6 +6,12 @@
 
 ## 버그 수정
 
+- 스택이 커지며 다른 주소로 옮겨질 때 배타 빌림(`&&T`, `<<` · `append` 같은 변경 메서드의 수신자)이 가리키는
+  주소가 보정되지 않았다. 옮겨진 뒤 메서드가 옛 스택에 쓰고 읽어 Segmentation fault가 났다. fiber는 스택이 512바이트에서
+  시작해 자주 옮겨지므로 "fiber 안에서 다른 fiber를 만든 뒤 지역 배열에 `<<`"로 재현됐다. main 스택에서도 같은 결함이다.
+  struct · 옵션 · 벡터 안에 든 스택 포인터도 같았다: 배열 리터럴 `[]T{a, b}`를 만드는 도중 스택이 옮겨지면 원소를
+  해제된 옛 스택에서 읽었다. 둘 다 고쳤다.
+
 - `fn main() -> T`가 돌려준 힙 값(`str`, 참조를 가진 struct, `!T` · `?T` 안의 값, 클로저)이 해제되지 않았다.
   VM을 닫아도 메모리가 남았고 Debug · Trace CLI는 `unreleased refcount: 1`과 객체 덤프를 찍었다. 이제 VM이
   결과를 소유하고 다음 eval · `cl_vm_reset` · `cl_vm_deinit` · `cl_vm_release_result`에서 해제한다. 사용자
@@ -27,6 +33,12 @@
   `Cannot borrow a stack value across fibers.` 컴파일 오류다. generator · 비-void 반환 검사도 같이 적용된다.
 
 ## 언어와 표준 라이브러리
+
+- `Scope`: fiber 묶음을 돌리는 타입. `Scope.new()`, `start(func, {args})`, `join() -> !void`, `active()`.
+  `join`은 모든 fiber가 끝날 때까지 차례로 resume하고, 전부 Future를 기다리면 `Fiber.wait_ready()`처럼 기다린다.
+  진입 함수는 `void` 또는 `!void`를 돌려주고 `join`은 첫 오류를 돌려준다. 오류 뒤에는 시작하지 않은 fiber만 버리고
+  진행 중인 fiber는 끝까지 돈다(취소는 다음 작업). `join` 없이 블록을 나가면 소멸 때 먼저 합류한다. 그때 남은
+  오류는 panic이다.
 
 - fiber 안의 `Future.await()`와 `Future.wait_any`가 미완료 Future에서 기다리지 않고 그 fiber를 멈춘다
   (`resume`은 `.suspended`를 돌려준다). 다른 fiber가 그동안 돈다. 대기 중인 fiber의 `resume`은 본문에 들어가지

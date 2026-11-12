@@ -279,4 +279,19 @@ test.eq(job.n, 2)
 test.eq(f16.resume(), .done)
 test.eq(job.n, 4)
 
+-- A fiber's stack moves when it grows. An exclusive borrow (`&&T`, the receiver of `<<`) of a local on that
+-- stack is patched like a `&T`. The second fiber keeps the stack from growing in place.
+fn grow_with_borrow(out ^int):
+    other := fiber step(1, ^ArrayStore[str]{})
+    arr := Array[int]{}
+    arr << 1
+    arr << 2
+    out.* = arr.len() + arr[1]
+fn step(n int, log ^ArrayStore[str]):
+    suspend
+grown := ^0
+f17 := fiber grow_with_borrow(grown)
+test.eq(f17.resume(), .done)
+test.eq(grown.*, 4)
+
 --cytest: pass

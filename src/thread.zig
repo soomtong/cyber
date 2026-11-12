@@ -127,9 +127,12 @@ pub fn patch_frame_ptrs(t: *cy.Thread, fp: usize, layout: []bool, new_stack: [*]
     for (layout, 0..) |is_ptr, i| {
         if (!is_ptr) continue;
 
-        const ptr: usize = @intCast(t.c.stack_ptr[fp + i].val);
+        // A marked register can hold something else than an address (the other case of an option, a pointer
+        // field that was not set), so the value is compared as 64 bits before it is taken as an address.
+        const bits: u64 = t.c.stack_ptr[fp + i].val;
         const stack_start = @intFromPtr(t.c.stack_ptr);
-        if (ptr >= stack_start and ptr < stack_start + t.c.stack_len*8) {
+        if (bits >= stack_start and bits < stack_start + t.c.stack_len*8) {
+            const ptr: usize = @intCast(bits);
             const byte_off = ptr - stack_start;
             new_stack[fp + i] = cy.Value.initRaw(@intFromPtr(new_stack) + byte_off);
         }

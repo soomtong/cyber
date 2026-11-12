@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.8-dev 816-2ad3357</div>
+    <div class="sub-title">v0.4.8-dev 821-4c01a73</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1512,6 +1512,14 @@ a = 18446744073709551615u    -- -1
 var b r64 = 18446744073709551615
 </code></pre>
 <p>When the target is a <code>float</code> or <code>f32</code>, a hexadecimal, octal or binary literal converts by its unsigned 64-bit value: <code>var f float = 0x10</code> is <code>16.0</code> and <code>var g float = 0xFFFFFFFFFFFFFFFF</code> is <code>18446744073709551615.0</code>. Without a float target the literal is an <code>int</code> first, so <code>float(0xFFFFFFFFFFFFFFFF)</code> is <code>-1.0</code>.</p>
+<p>A raw integer converts to a float by its unsigned value at every width, and a float converts to a raw integer the same way. The fraction is dropped. A negative value, a NaN or a value that does not fit the raw type panics:</p>
+<pre><code class="language-cy">var mask r64 = 0xFFFFFFFFFFFFFFFF
+print(float(mask))                -- 18446744073709552000
+print(r64(9223372036854775808.0)) -- 0x8000000000000000
+print(byte(255.9))                -- 0xff
+f := -1.0
+print(r64(f))                     --> panic: Lossy conversion to `r64`.
+</code></pre>
 <p>String literals evaluate as their UTF-8 codepoint if the target integer type is big enough:</p>
 <pre><code class="language-cy">-- Success.
 var a int = '🐶'
@@ -1984,7 +1992,7 @@ small = as[i8] i
 <pre><code class="language-cy">small = as i
 </code></pre>
 <p>Type casting supports all <a href="#implicit-casts" title="">implicit casts</a> in addition to the following:</p>
-<table><thead><tr><th>Source</th><th>Target</th><th>Behavior</th></tr></thead><tbody><tr><td><code>Ptr[S]</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>i64</code>, <code>r64</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>Int[W]</code>, <code>Raw[W]</code></td><td><code>Ptr[T] where W < 64</code></td><td>zero extension</td></tr><tr><td><code>Ptr[T]</code></td><td><code>&T</code></td><td>reinterpret</td></tr><tr><td><code>Ptr[T]</code></td><td><code>^T</code></td><td>reinterpret</td></tr><tr><td><code>FuncPtr[Sig2]</code></td><td><code>FuncPtr[Sig] where #[extern] Sig, Sig2</code></td><td>reinterpret</td></tr><tr><td><code>Ptr[T]</code></td><td><code>i64</code></td><td>reinterpret</td></tr><tr><td><code>^T</code></td><td><code>i64</code></td><td>reinterpret</td></tr><tr><td><code>T</code></td><td><code>i64 where T is enum</code></td><td>reinterpret</td></tr><tr><td><code>Int[X]</code></td><td><code>Int[W] where X > W</code></td><td>runtime check, convert</td></tr><tr><td><code>Float[X]</code></td><td><code>Int[W]</code></td><td>runtime check, convert</td></tr><tr><td><code>Ptr[T]</code></td><td><code>r64</code></td><td>reinterpret</td></tr><tr><td><code>^T</code></td><td><code>r64</code></td><td>reinterpret</td></tr><tr><td><code>T</code></td><td><code>r64 where T is enum</code></td><td>reinterpret</td></tr><tr><td><code>Int[X]</code></td><td><code>Raw[W] where X > W</code></td><td>runtime check, convert</td></tr><tr><td><code>f64</code></td><td><code>f32</code></td><td>convert</td></tr><tr><td><code>^Dyn[S]</code></td><td><code>^T where T implements S</code></td><td>runtime check, unwrap</td></tr></tbody></table><a href="#basic-types">^topic</a>
+<table><thead><tr><th>Source</th><th>Target</th><th>Behavior</th></tr></thead><tbody><tr><td><code>Ptr[S]</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>i64</code>, <code>r64</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>Int[W]</code>, <code>Raw[W]</code></td><td><code>Ptr[T] where W < 64</code></td><td>zero extension</td></tr><tr><td><code>Ptr[T]</code></td><td><code>&T</code></td><td>reinterpret</td></tr><tr><td><code>Ptr[T]</code></td><td><code>^T</code></td><td>reinterpret</td></tr><tr><td><code>FuncPtr[Sig2]</code></td><td><code>FuncPtr[Sig] where #[extern] Sig, Sig2</code></td><td>reinterpret</td></tr><tr><td><code>Ptr[T]</code></td><td><code>i64</code></td><td>reinterpret</td></tr><tr><td><code>^T</code></td><td><code>i64</code></td><td>reinterpret</td></tr><tr><td><code>T</code></td><td><code>i64 where T is enum</code></td><td>reinterpret</td></tr><tr><td><code>Int[X]</code></td><td><code>Int[W] where X > W</code></td><td>runtime check, convert</td></tr><tr><td><code>Float[X]</code></td><td><code>Int[W]</code></td><td>runtime check, convert</td></tr><tr><td><code>Ptr[T]</code></td><td><code>r64</code></td><td>reinterpret</td></tr><tr><td><code>^T</code></td><td><code>r64</code></td><td>reinterpret</td></tr><tr><td><code>T</code></td><td><code>r64 where T is enum</code></td><td>reinterpret</td></tr><tr><td><code>Int[X]</code></td><td><code>Raw[W] where X > W</code></td><td>runtime check, convert</td></tr><tr><td><code>Float[X]</code></td><td><code>Raw[W]</code></td><td>runtime check, convert</td></tr><tr><td><code>f64</code></td><td><code>f32</code></td><td>convert</td></tr><tr><td><code>^Dyn[S]</code></td><td><code>^T where T implements S</code></td><td>runtime check, unwrap</td></tr></tbody></table><a href="#basic-types">^topic</a>
 <h1 id="custom-types">Custom types. <a href="#custom-types">#</a></h1>
 <table><tr>
 <td valign="top">
@@ -3759,12 +3767,29 @@ f := fiber bump(&n)        --> CompileError: Cannot borrow a stack value across 
 suspend 1                  --> ParseError: `suspend` takes no value. Use `yield` in a generator.
 </code></pre>
 <p>The arguments are copied into the call at the first <code>resume</code>, so a parameter of a fiber entry can not have a <code>NoCopy</code> type.</p>
+<p>A method is a fiber entry through its type, with the receiver as the first argument. A method call on a value is not an entry:</p>
+<pre><code class="language-cy">type Job:
+    n int
+
+fn (^Job) work(by int):
+    self.n += by
+    suspend
+    self.n += by
+
+job := ^Job{n=0}
+f := fiber Job.work(job, 2)
+_ = f.resume()
+print(job.n)               --> 2
+g := fiber job.work(2)     --> CompileError: A fiber entry cannot be a method call on a value. Pass the receiver as the first argument: `fiber T.work(obj)`.
+</code></pre>
+<p>The receiver follows the rules of a parameter, so a method with a <code>&T</code> receiver can not be a fiber entry.</p>
 <p>A generator can be consumed inside a fiber, and <code>suspend</code> in a generator body suspends the fiber that consumes the generator. The generator stays <code>.running</code> until that fiber is resumed.</p>
 <p>When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the <code>resume</code> call of each fiber down to the main block.</p>
 <p>A fiber can not resume itself or a fiber that is waiting for it:</p>
 <pre><code class="language-cy">--> panic: Fiber is already running.
 </code></pre>
-<p>When a fiber is destructed, it will panic if it's still in progress. This includes a fiber that was never resumed, since only the fiber can release its arguments:</p>
+<p>A fiber that was never resumed can be destructed. Its function is not called and its arguments are released.</p>
+<p>When a fiber that was resumed is destructed, it will panic if it's still in progress, since only the fiber can release the values in its frames:</p>
 <pre><code class="language-cy">fn forever():
     while true:
         suspend
@@ -4969,7 +4994,7 @@ for nouns |n|:
 <li>Blocks are indented by 4 spaces. Tabs and other widths are converted.</li>
 <li>A line inside open brackets is indented 4 spaces from the line that opened the bracket. A line that starts with the closing bracket lines up with it. Other continuation lines, such as the right side of an operator, keep their indentation relative to the statement.</li>
 <li>Binary operators, <code>:=</code>, <code>-></code>, <code>=></code> and assignments have one space on each side. Unary operators have none after them. An operator inside a range bound is kept as written: <code>a[i..i+n]</code>.</li>
-<li><code>=</code> inside brackets is kept as written: <code>Vec2{x=1}</code>, <code>Vec2{x = 1}</code> and <code>#[extern='puts']</code> all stay.</li>
+<li><code>=</code> of a literal field has one space on each side like an assignment: <code>Vec2{x=1}</code> becomes <code>Vec2{x = 1}</code>. <code>=</code> inside an attribute is kept as written: <code>#[extern='puts']</code> stays.</li>
 <li>There is no space inside brackets, none before <code>,</code> and <code>:</code>, and one after them.</li>
 <li>Any other run of spaces becomes one space, so columns that were aligned by hand are not kept. The gap before a trailing comment is kept.</li>
 <li>Trailing whitespace is removed, several blank lines become one, and the file ends with one new line.</li>

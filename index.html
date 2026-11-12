@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.8-dev 830-46a0a4d</div>
+    <div class="sub-title">v0.4.9-dev 833-03d24f4</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -3833,7 +3833,7 @@ fn fetch_all(log ^ArrayStore[str]) -> !void:
 <li>When the body reaches its end, the block waits until every fiber is done.</li>
 <li>The entry function of a fiber returns <code>void</code> or <code>!void</code>. When a fiber returns an error, the other fibers are cancelled (see <code>cancel</code> below) and the error leaves the block like a failing <code>!</code>: the function returns it, or it goes to the <code>else</code> block of an enclosing <code>try</code>, or it panics at the top level.</li>
 <li>When a <code>!</code> in the body fails, the fibers that were started are cancelled and the error goes on the same way.</li>
-<li><code>return</code>, <code>break</code> and <code>continue</code> leave the block after the fibers are done.</li>
+<li><code>return</code>, <code>break</code> and <code>continue</code> leave the block after the fibers are done. The result of <code>return expr</code> is evaluated after that, so it sees what the fibers did. When a fiber returns an error, the error leaves the block instead of the statement.</li>
 </ul>
 <p>Since an error leaves the block like a failing <code>!</code>, a <code>scope</code> block in a function needs a <code>!T</code> or <code>error</code> return type, or an enclosing <code>try</code> block:</p>
 <pre><code class="language-cy">fn run() -> int:

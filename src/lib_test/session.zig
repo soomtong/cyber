@@ -15,6 +15,41 @@ test "Return from main." {
     try zt.eq(123, @as(*i64, @ptrCast(res.res)).*);
 }
 
+test "The VM owns what main returns and releases it." {
+    // Leak-checking allocator. The main block does not release the result of `main`, so a heap value used to
+    // stay allocated after the VM was gone. It is released by the next eval, by `cl_vm_release_result` and
+    // by the deinit.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\fn main() -> str:
+        \\  return 'abc' + '-padding-padding-padding-padding-padding'
+    , &res));
+    try zt.eqStr("abc-padding-padding-padding-padding-padding", C.str_bytes(@as(*C.str, @ptrCast(res.res)).*));
+
+    // Released by the next eval. A result with a value inside, then an error.
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\type Pair:
+        \\  name str
+        \\  count ^int
+        \\fn main() -> !?Pair:
+        \\  return Pair{name = 'pair' + '-padding-padding-padding-padding-padding', count = ^3}
+    , &res));
+    C.vm_release_result(vm);
+    // Nothing left to release.
+    C.vm_release_result(vm);
+
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\type Step = fn() -> int
+        \\fn main() -> Func[Step]:
+        \\  n := ^5
+        \\  return fn() -> int:
+        \\    return n.*
+    , &res));
+}
+
 test "Evals after a failed first compile." {
     // F-04. The first compile used to leave the core chunk loaded while `Compiler.cont` stayed false, so the next
     // compile loaded core again: SIGSEGV after a syntax error, `@program_init has already been declared` after a

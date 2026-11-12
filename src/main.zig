@@ -351,6 +351,8 @@ fn evalPath(alloc: std.mem.Allocator, path: []const u8) !void {
         c.thread_dump_stats(main_thread);
     }
     if (c.TRACE()) {
+        // What `main` returned is still owned by the VM. It is not a leak.
+        c.vm_release_result(vm);
         const grc = c.thread_rc(main_thread);
         if (grc != 0) {
             std.debug.print("unreleased refcount: {}\n", .{grc});

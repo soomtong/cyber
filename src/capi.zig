@@ -319,6 +319,7 @@ pub const thread_signal_host_segfault = c.cl_thread_signal_host_segfault;
 
 pub const thread_dump_stats = c.cl_thread_dump_stats;
 pub const thread_rc = c.cl_thread_rc;
+pub const vm_release_result = c.cl_vm_release_result;
 pub const thread_release = c.cl_thread_release;
 pub const thread_retain = c.cl_thread_retain;
 pub const thread_count_objects = c.cl_thread_count_objects;

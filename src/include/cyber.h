@@ -431,6 +431,9 @@ void cl_vm_reset(CLVM* vm);
 // - In the bookkeeping after the run (the result, the persisted locals): `CL_ERROR_UNKNOWN`, with no summary.
 CLResultCode cl_vm_eval(CLVM* vm, CLBytes src, CLEvalResult* res);
 
+// The VM owns the value in `res`. It is released by the next eval, by `cl_vm_reset`, by `cl_vm_deinit` or by
+// `cl_vm_release_result`, and `res->res` is not valid after that.
+//
 // Accepts a `uri` and EvalConfig.
 CLResultCode cl_vm_evalx(CLVM* vm, CLBytes uri, CLBytes src, CLEvalConfig config, CLEvalResult* res);
 
@@ -719,6 +722,10 @@ CLSlice cl_thread_slice(CLThread* t);
 
 void cl_thread_release(CLThread* t, CLValue val);
 void cl_thread_retain(CLThread* t, CLValue val);
+
+// Releases the value that the last eval returned in its `CLEvalResult`. The result must not be read after this.
+// Does nothing when there is no result. A host that counts references (`cl_thread_rc`) calls it first.
+void cl_vm_release_result(CLVM* vm);
 
 // Get's the current global reference count.
 // NOTE: This will panic if the lib was not built with `Trace`.

@@ -105,6 +105,10 @@ export fn cl_vm_allocator(vm: *cy.VM) C.Allocator {
     return C.toAllocator(vm.alloc);
 }
 
+export fn cl_vm_release_result(vm: *cy.VM) void {
+    vm.dropMainResult(true);
+}
+
 export fn cl_thread_rc(t: *cy.Thread) usize {
     return t.getGlobalRC();
 }

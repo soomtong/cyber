@@ -294,6 +294,7 @@ pub const VMrunner = struct {
         defer {
             const main_thread = c.vm_main_thread(vm);
             if (c.TRACE()) {
+                c.vm_release_result(vm);
                 const grc = c.thread_rc(main_thread);
                 if (grc != 0) {
                     c.thread_dump_live_objects(main_thread);

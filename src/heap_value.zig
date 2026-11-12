@@ -475,6 +475,21 @@ pub fn destructValueAt(self: *cy.Heap, val_t: *cy.Type, ptr: [*]u8) void {
                 .eval_ref => {
                     self.release(valueCast(ptr)[0]);
                 },
+                .result => {
+                    // Tag 0 is the error case, which owns nothing.
+                    const result_t = val_t.cast(.result);
+                    if (valueCast(ptr)[0].asInt() != 0) {
+                        destructValueAt(self, result_t.child_t, ptr + result_t.fields_arr[1].offset);
+                    }
+                },
+                .func => {
+                    // A function union is a reference to a function object or a closure.
+                    self.release(valueCast(ptr)[0]);
+                },
+                .int,
+                .raw,
+                .float,
+                .func_ptr,
                 .borrow,
                 .enum_t => {
                     // Nop.

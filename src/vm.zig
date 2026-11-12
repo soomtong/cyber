@@ -466,7 +466,7 @@ pub const VM = struct {
     }
 
     /// Destructs and frees the previous REPL result. `destruct` is false after a panic freed the heap.
-    fn dropMainResult(self: *VM, destruct: bool) void {
+    pub fn dropMainResult(self: *VM, destruct: bool) void {
         const res = self.compiler.main_res orelse return;
         if (res.value.len > 0) {
             if (destruct and !res.borrowed) self.main_thread.heap.destructValueAt(res.val_t, @ptrCast(res.value.ptr));
@@ -506,6 +506,28 @@ pub const VM = struct {
                 .res = @ptrCast(main_res.value.ptr),
                 .res_t = main_res.val_t.id(),
             };
+        }
+        if (self.compiler.main_func) |main_func| {
+            const ret_t = main_func.sig.ret;
+            const reg_size = ret_t.reg_size();
+            if (reg_size > 0) {
+                // What `main` returned is not released by the main block (`_main_res` is not a live local).
+                // The VM owns it like a REPL result: until the next eval, `cl_vm_release_result` or the deinit.
+                const stack = self.main_thread.c.stack();
+                const stack_off = (@intFromPtr(val) - @intFromPtr(stack.ptr)) / @sizeOf(Value);
+                const copy = try self.alloc.dupe(cy.Value, stack[stack_off..stack_off + reg_size]);
+                self.compiler.main_res = .{
+                    .val_t = ret_t,
+                    .stack_off = stack_off,
+                    .reg_size = reg_size,
+                    .borrowed = false,
+                    .value = copy,
+                };
+                return .{
+                    .res = @ptrCast(copy.ptr),
+                    .res_t = ret_t.id(),
+                };
+            }
         }
         return .{
             .res = @ptrCast(val),

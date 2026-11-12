@@ -3302,6 +3302,26 @@ fn run() -> int:
         s.start(work, {})
     return 1
 ```
+Because the fibers are done when the block is left, `start` on the name of the block takes borrows. A fiber can read and write a value of the function that holds the block without a `^T` reference:
+```cy
+fn add(out &int, n int):
+    suspend
+    out.* += n
+
+fn sum() -> !int:
+    total := 0
+    scope |s|:
+        s.start(add, {&total, 1})
+        s.start(add, {&total, 2})
+    return total           -- 3
+```
+The rules follow from the lifetime of the fibers:
+
+* The borrowed value is declared before the block. A value that is declared in the body is gone before the fibers are done: ``A fiber of the `scope` block can not borrow `inner`: it is declared inside the block and is gone before the fibers are done. Declare it before the block.``
+* The borrow lasts until the end of the block, like a borrow that a local of the block holds. While a fiber holds `&a`, the body can not resize `a`, and an exclusive borrow `&&a` is given to one fiber only.
+* The arguments are written as a literal at the call: `s.start(func, {&a, 1})`.
+* Only the name of a `scope` block takes borrows. `start` on any other `Scope`, including a `&Scope` that is passed to a function, and `fiber f(&a)` are compile errors: `Cannot borrow a stack value across fibers.`
+
 Blocks can be nested, and a fiber of a scope can have a `scope` block of its own. A fiber that can not be cancelled runs to its end instead.
 
 The block is built on the `Scope` type, which can be used directly when the group does not fit a block. `Scope.new()` returns an empty scope, `join() -> !void` runs the fibers and returns the first error after cancelling the others, `abort()` cancels the fibers, and `active()` returns how many are not done. A `Scope` value that is destructed joins its fibers first, and an error that is left then panics.

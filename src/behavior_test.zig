@@ -389,6 +389,10 @@ if (!aot) {
     run.case("concurrency/scope.cy");
     run.case("concurrency/scope_block.cy");
     run.case("concurrency/scope_block_no_result_error.cy");
+    run.case("concurrency/scope_block_borrow.cy");
+    run.case("concurrency/scope_block_borrow_inner_error.cy");
+    run.case("concurrency/scope_block_borrow_exclusive_error.cy");
+    run.case("concurrency/scope_start_borrow_error.cy");
     run.case("concurrency/fiber_method_entry_error.cy");
     run.case("concurrency/fiber_borrow_receiver_error.cy");
     run.case("concurrency/fiber_no_call_error.cy");

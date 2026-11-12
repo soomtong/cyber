@@ -124,6 +124,8 @@ pub const Local = struct {
     parent_local: LocalId,
     /// Whether the borrow held by this local is exclusive (`&&T`).
     ex_borrow: bool = false,
+    /// The name of a `scope |s|:` block. Only `s.start` on this name takes borrows (`semaScopeStart`).
+    scope_block: bool = false,
 
     stack_idx: u32,
 
@@ -1503,6 +1505,10 @@ fn sema_scope_stmt(c: *cy.Chunk, stmt: *ast.ScopeStmt) !void {
     {
         const new_call = try c.semaCallFunc2(c.sema.scope_new_fn, &.{}, &.{}, node);
         const scope_local = try declareLocalInit(c, stmt.name.cast(.ident).name.slice(), scope_t, new_call, stmt.name);
+        c.varStack.items[scope_local.id].scope_block = true;
+        // The fibers are done when this block is left, on every path: the `Scope` is destructed here.
+        const borrows_start = c.scope_borrows.items.len;
+        defer endScopeBorrows(c, borrows_start);
 
         const mid = try pushBlock(c, node);
         {
@@ -1565,6 +1571,92 @@ fn sema_scope_stmt(c: *cy.Chunk, stmt: *ast.ScopeStmt) !void {
     _ = try c.ir.pushStmt(.block, node, .{ .bodyHead = block.first });
     if (!body_end_reachable) {
         c.block().endReachable = false;
+    }
+}
+
+/// A borrow that an argument of `s.start` passes to a fiber of a `scope` block.
+pub const ScopeBorrow = struct {
+    /// The local that owns the borrowed value. Null when no local does (a global).
+    owner: ?LocalId,
+    ex: bool,
+    node: *ast.Node,
+};
+
+fn endScopeBorrows(c: *cy.Chunk, start: usize) void {
+    for (c.scope_borrows.items[start..]) |borrow| {
+        const owner = &c.varStack.items[borrow.owner.?];
+        if (borrow.ex) {
+            owner.active_ex_borrows -= 1;
+        } else {
+            owner.active_borrows -= 1;
+        }
+    }
+    c.scope_borrows.items.len = start;
+}
+
+/// `s.start(func, {args})`. A fiber of a `Scope` runs after the call, so its arguments can not borrow in
+/// general (`checkScopeStartCall`). The fibers of a `scope |s|:` block are done when the block is left, so
+/// there `s.start` takes borrows of values that are declared before the block. A value that is declared in
+/// the block is destructed before the fibers are joined.
+/// The borrow lasts until the end of the block: the owner counts it like a borrow that a local holds.
+fn semaScopeStart(c: *cy.Chunk, rec: *ast.Node, rec_res: ExprResult, call: *ast.CallExpr, node: *ast.Node) !ExprResult {
+    var scope_local: ?LocalId = null;
+    if (rec.type() == .ident and rec_res.resType == .value_local) {
+        if (c.varStack.items[rec_res.data.value_local].scope_block) {
+            scope_local = rec_res.data.value_local;
+        }
+    }
+    const args = call.args.slice();
+    const lit: ?*ast.Node = if (args.len == 2 and args[1].type() == .init_lit) args[1] else null;
+    if (scope_local == null or lit == null) {
+        return c.semaCallFuncSymRec(c.sema.scope_start_sym, rec, rec_res, args, false, node);
+    }
+
+    const prev_call = c.scope_start_call;
+    const prev_lit = c.scope_start_lit;
+    const start = c.scope_start_borrows.items.len;
+    c.scope_start_call = node;
+    c.scope_start_lit = lit;
+    defer {
+        c.scope_start_call = prev_call;
+        c.scope_start_lit = prev_lit;
+        c.scope_start_borrows.items.len = start;
+    }
+    const res = try c.semaCallFuncSymRec(c.sema.scope_start_sym, rec, rec_res, args, false, node);
+
+    for (c.scope_start_borrows.items[start..]) |borrow| {
+        const owner_id = borrow.owner orelse continue;
+        const owner = &c.varStack.items[owner_id];
+        if (owner.lifetime.kind == .temp) {
+            return c.reportError("A fiber can not borrow from a temporary value.", borrow.node);
+        }
+        if (owner_id > scope_local.?) {
+            return c.reportErrorFmt("A fiber of the `scope` block can not borrow `{}`: it is declared inside the block and is gone before the fibers are done. Declare it before the block.", &.{v(owner.name())}, borrow.node);
+        }
+        // The earlier arguments and the earlier `start` calls of the open blocks count.
+        if (borrow.ex) {
+            try checkExclusiveBorrow(c, owner_id, borrow.node);
+            owner.active_ex_borrows += 1;
+        } else {
+            try checkSharedBorrow(c, owner_id, borrow.node);
+            owner.active_borrows += 1;
+        }
+        try c.scope_borrows.append(c.alloc, borrow);
+    }
+    return res;
+}
+
+/// Reports a `Scope.start` whose arguments hold a borrow, unless it is the call that `semaScopeStart` checks.
+pub fn checkScopeStartCall(c: *cy.Chunk, func: *cy.Func, node: *ast.Node) !void {
+    if (c.scope_start_call == node) return;
+    const params = func.sig.params();
+    // A `FnTuple` is not marked as a borrow container (`reifyStructType`), so its fields are looked at.
+    const args_t = params[params.len - 1].get_type();
+    for (args_t.cast(.struct_t).fields()) |field| {
+        if (!field.type.info.borrow_only) continue;
+        const type_name = try c.sema.allocTypeName(field.type);
+        defer c.alloc.free(type_name);
+        return c.reportErrorFmt("Cannot borrow a stack value across fibers. The parameter type is `{}`. Only `s.start(func, {...})` on the name of a `scope |s|:` block takes a borrow. Use `^T`.", &.{v(type_name)}, node);
     }
 }
 
@@ -6685,8 +6777,16 @@ pub fn semaTupleInit(c: *cy.Chunk, type_: *cy.Type, fields: []const cy.types.Fie
         // An element is evaluated before a statement that a later element adds (`seqFlush`).
         const seq_start = c.seq_pending.items.len;
         defer seqPop(c, seq_start);
+        const record_borrows = c.scope_start_lit == @as(*ast.Node, @ptrCast(lit));
         for (fields, 0..) |field, i| {
             var arg = try c.semaExprCstr(lit.args.ptr[i], field.type);
+            if (record_borrows and field.type.info.borrow_only) {
+                try c.scope_start_borrows.append(c.alloc, .{
+                    .owner = borrowOwner(c, arg),
+                    .ex = field.type.kind() == .ex_borrow,
+                    .node = lit.args.ptr[i],
+                });
+            }
             arg = try semaOwn(c, arg, lit.args.ptr[i]);
             args[i] = arg.ir;
             try seqPush(c, &args[i], true, lit.args.ptr[i]);
@@ -8590,6 +8690,9 @@ pub fn semaCallExpr(c: *cy.Chunk, node: *ast.Node, opt_target: ?*cy.Type) !ExprR
             };
 
             if (rightSym.type == .func) {
+                if (rightSym.cast(.func) == c.sema.scope_start_sym) {
+                    return semaScopeStart(c, callee.left, leftRes, call, node);
+                }
                 return c.semaCallFuncSymRec(rightSym.cast(.func), callee.left, leftRes, call.args.slice(), false, node);
             } else if (rightSym.type == .func_template) {
                 // const template = rightSym.cast(.func_template);
@@ -10461,6 +10564,8 @@ pub const Sema = struct {
     scope_new_fn: *cy.Func = undefined,
     scope_abort_fn: *cy.Func = undefined,
     scope_join_fn: *cy.Func = undefined,
+    /// `Scope.start`.
+    scope_start_sym: *cy.sym.FuncSym = undefined,
     to_print_string_fn: *cy.Func = undefined,
     access_fn: *cy.Func = undefined,
     builtin_sig: *FuncSig = undefined,

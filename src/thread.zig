@@ -123,18 +123,20 @@ fn allocContextTrace(t: *Thread, cx: PcFpOff) ![]c.StackFrame {
     return frames.toOwnedSlice(t.alloc);
 }
 
-pub fn patch_frame_ptrs(t: *cy.Thread, fp: usize, layout: []bool, new_stack: [*]cy.Value) void {
+/// Patches the registers of the frame at `fp` in `stack` that `layout` marks and that hold an address inside the
+/// stack that moves (`old_bytes` bytes at `old_start`, now at `new_start`). `stack` is the new copy of the moved
+/// stack, or the stack of a suspended fiber that borrows from it (`Thread.patchFiberPtrs`).
+pub fn patch_frame_ptrs(stack: [*]cy.Value, fp: usize, layout: []bool, old_start: usize, old_bytes: usize, new_start: usize) void {
     for (layout, 0..) |is_ptr, i| {
         if (!is_ptr) continue;
 
         // A marked register can hold something else than an address (the other case of an option, a pointer
         // field that was not set), so the value is compared as 64 bits before it is taken as an address.
-        const bits: u64 = t.c.stack_ptr[fp + i].val;
-        const stack_start = @intFromPtr(t.c.stack_ptr);
-        if (bits >= stack_start and bits < stack_start + t.c.stack_len*8) {
+        const bits: u64 = stack[fp + i].val;
+        if (bits >= old_start and bits < old_start + old_bytes) {
             const ptr: usize = @intCast(bits);
-            const byte_off = ptr - stack_start;
-            new_stack[fp + i] = cy.Value.initRaw(@intFromPtr(new_stack) + byte_off);
+            const byte_off = ptr - old_start;
+            stack[fp + i] = cy.Value.initRaw(new_start + byte_off);
         }
     }
 }
@@ -1182,6 +1184,35 @@ pub const Thread = struct {
         return error.Panic;
     }
 
+    /// A fiber of a `scope` block can hold borrows of the stack that started it (`sema.checkScopeStart`). When
+    /// that stack moves, the fibers that borrow from it are suspended: the stack that runs is the one that
+    /// grows, and a fiber is only resumed through the scope that the borrowed frame holds. So the frames of
+    /// every suspended fiber are walked. The site of each frame has a pointer layout: a call, the `SUSPEND` or
+    /// `AWAIT` that the fiber stopped at, or the entry of a fiber that did not start yet.
+    fn patchFiberPtrs(self: *Thread, old_start: usize, old_bytes: usize, new_start: usize) void {
+        var opt_fiber = self.c.fibers;
+        while (opt_fiber) |fiber| : (opt_fiber = fiber.list_next) {
+            if (fiber.state != vmc.FIBER_SUSPENDED) continue;
+            const fstack_ptr: [*]Value = @ptrCast(@alignCast(fiber.stack_ptr));
+            const fstack = fstack_ptr[0..fiber.stack_len];
+            var pc: ?[*]cy.Inst = @ptrCast(fiber.pc orelse continue);
+            var fp = getStackOffset(fstack_ptr, @ptrCast(@alignCast(fiber.fp)));
+            while (true) {
+                if (pc) |site_pc| {
+                    if (get_ptr_layout(self.c.vm, site_pc)) |layout| {
+                        patch_frame_ptrs(fstack_ptr, fp, layout, old_start, old_bytes, new_start);
+                    }
+                }
+                if (fp == 0) break;
+                const frame = getFrame(self, fstack, fp, pc);
+                if (frame.frame_type() == .init) break;
+                const prev = frame.prev_context();
+                pc = prev.pc;
+                fp = getStackOffset(fstack_ptr, prev.fp);
+            }
+        }
+    }
+
     fn growStackPrecise(self: *Thread, newCap: usize) error{OutOfMemory}!void {
         // The overflow is reported by a `CHK_STK` (function entry) or by `GEN_NEXT` / `GEN_END`
         // (resuming a generator frame). `CHK_STK` has already moved `fp` down to the ret slots and runs
@@ -1211,6 +1242,8 @@ pub const Thread = struct {
             @memcpy(newStack[0..self.c.stack_len], self.c.stack());
 
             // Patch frame ptrs and ptr values.
+            const old_start = @intFromPtr(self.c.stack_ptr);
+            const old_bytes = self.c.stack_len * @sizeOf(Value);
             var pc: ?[*]cy.Inst = self.c.pc;
             var fp = getStackOffset(self.c.stack_ptr, self.c.fp);
             const top_fp_off = fp;
@@ -1219,7 +1252,7 @@ pub const Thread = struct {
             while (true) {
                 if (pc) |site_pc| {
                     if (get_ptr_layout(self.c.vm, site_pc)) |layout| {
-                        patch_frame_ptrs(self, fp, layout, newStack.ptr);
+                        patch_frame_ptrs(newStack.ptr, fp, layout, old_start, old_bytes, @intFromPtr(newStack.ptr));
                     }
                 }
                 // The main frame (`.init`) has no caller to walk to, but its own pointers are patched like any
@@ -1239,6 +1272,8 @@ pub const Thread = struct {
                 fp = prev_fp_off;
                 frame = getFrame(self, self.c.stack(), fp, pc);
             }
+
+            self.patchFiberPtrs(old_start, old_bytes, @intFromPtr(newStack.ptr));
 
             // Free old stack.
             self.alloc.free(self.c.stack());

@@ -611,6 +611,9 @@ pub fn matchFuncSym2(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const 
             return res.data.expr_res;
         },
         else => {
+            if (func_sym == c.sema.scope_start_sym) {
+                try sema.checkScopeStartCall(c, res.func, node);
+            }
             sema.markHotCall(c, res.func);
             try cy.global_init.recordCall(c, res.func);
             try sema.semaCancelHoist(c);

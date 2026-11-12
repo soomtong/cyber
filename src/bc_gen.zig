@@ -418,6 +418,7 @@ fn genStmt(c: *Chunk, stmt: *ir.Stmt) anyerror!void {
         .suspend_           => {
             try c.pushFCode(.suspend_op, &.{}, node);
             // `Fiber.pc` is the inst after `SUSPEND`.
+            try push_site_ptr_layout(c, c.buf.ops.items.len);
             try push_cancel_site(c, @intFromPtr(stmt), c.buf.ops.items.len);
         },
         .continue_          => try gen_continue(c, stmt.cast(.continue_), node),
@@ -696,6 +697,8 @@ pub fn genFuncBlock(c: *Chunk, stmt: *ir.FuncBlock, node: *ast.Node) !void {
     const chk_stk_pc = c.buf.ops.items.len;
     try c.buf.func_table.append(c.alloc, chk_stk_pc);
     try c.pushFCode(.chk_stk, &.{ 0, 0 }, node);
+    // The parameters. A fiber that did not start yet is found at its entry (`Thread.patchFiberPtrs`).
+    try push_site_ptr_layout(c, chk_stk_pc);
 
     try genStmts(c, stmt.bodyHead);
     try gen_cancel_pads(c);
@@ -729,6 +732,7 @@ fn gen_await(c: *Chunk, stmt: *ir.Await, node: *ast.Node) !void {
     // `Fiber.pc` is the `AWAIT` inst itself: it runs again at a resume.
     const pc = c.buf.ops.items.len;
     try c.pushFCode(.await_op, &.{childv.reg}, node);
+    try push_site_ptr_layout(c, pc);
     try push_cancel_site(c, @intFromPtr(stmt), pc);
     try pop_temp_value(c, childv, node);
 }
@@ -3764,9 +3768,17 @@ fn gen_cancel_pads(c: *cy.Chunk) !void {
 /// Records the current proc's live pointer locals at a site that can be suspended under a callee frame
 /// (`call` · `call_host` · `call_ptr` · `call_union` · `call_trait`, `gen_next`, `gen_end`). Growing the stack
 /// patches the frame's stack pointers from this layout (F-10: the indirect calls used to have no entry).
+/// A frame of a suspended fiber is patched too when the stack it borrows from moves, so the sites that a fiber
+/// stops at have one: `suspend` (the inst after it), `await` and the function entry.
 fn push_site_ptr_layout(c: *cy.Chunk, pc: usize) !void {
     if (c.cur_proc.num_ptr_locals > 0) {
         const layout = try get_uniq_ptr_layout(c, c.buf.ptr_layout_builder.items);
+        const table = c.buf.ptr_table.items;
+        if (table.len > 0 and table[table.len - 1].pc == pc) {
+            // The inst after a `suspend` is a site itself. Nothing was generated in between.
+            table[table.len - 1].layout = @intCast(layout);
+            return;
+        }
         try c.buf.ptr_table.append(c.alloc, .{
             .pc = @intCast(pc),
             .layout = @intCast(layout),

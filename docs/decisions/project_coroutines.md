@@ -428,7 +428,7 @@ panic 대신 취소. 목표는 0.5.
    (`@start_fiber`와 같은 호스트 함수. 상태 참조가 복사되는 인자의 첫 칸이다).
 2. 자식의 `!void` 반환과 오류 전파(같이 구현). `@scope_entry`가 `try`로 받아 `ScopeState.err`에 첫 오류를 둔다.
 3. 취소(2026-11-12 구현). 아래 "취소 구현".
-4. `scope` 블록 문법, 범위 안 빌림 허용.
+4. `scope` 블록 문법, 범위 안 빌림 허용(2026-11-12 구현). 아래 "`scope` 블록 구현" · "범위 안 빌림 구현".
 
 취소 구현(2026-11-12).
 
@@ -464,8 +464,40 @@ panic 대신 취소. 목표는 0.5.
 - 오류가 나갈 길이 필요해서 함수 안의 `scope` 블록은 `!T` · `error` 반환이나 바깥 `try`를 요구한다(전용 컴파일 오류).
   `void` 자식만 쓰는 블록에도 요구한다. 규칙을 하나로 두려고 그렇게 했다.
 
-남은 것: 범위 안 빌림 허용(fiber에 `&T` 인자. 자식이 블록보다 오래 살지 않으니 가능하지만 스택 이동 때 다른 fiber의
-스택을 가리키는 포인터 보정이 필요하다), 제너레이터 본문 프레임의 취소, `seq_pending` 밖의 임시 값.
+남은 것: 제너레이터 본문 프레임의 취소, `seq_pending` 밖의 임시 값.
+
+범위 안 빌림 구현(2026-11-12).
+
+- 시작 상태: `Scope.start`는 빌림 인자를 그냥 받고 있었다(F-105). `FnTuple[Sig]`는 `meta.new_struct` →
+  `reifyStructType`으로 만들어져 `borrow_only`가 서지 않는다. 이 표시를 세우는 쪽은 택하지 않았다: `spawn` ·
+  `@new_fiber` · `@call`이 같은 타입을 쓰므로 영향 범위가 넓다. 대신 `Scope.start` 호출 자리에서 필드를 본다.
+- 거부: `sema_func.matchFuncSym2`가 `Scope.start`(`Sema.scope_start_sym`)로 풀린 호출마다 `sema.checkScopeStartCall`을
+  부른다. 인자 튜플에 빌림 필드가 있고 그 호출이 `Chunk.scope_start_call`이 아니면 오류다. 템플릿 인스턴스는 `Sig`마다
+  한 번만 만들어지므로 검사를 `start` 본문(`meta.error`)에 둘 수 없다.
+- 허용: `semaCallExpr`의 메서드 호출 경로가 수신자가 `scope` 블록의 이름(`Local.scope_block`)이고 둘째 인자가 리터럴이면
+  `sema.semaScopeStart`로 간다. `semaTupleInit`이 그 리터럴의 빌림 원소마다 소유 지역(`borrowOwner`)을
+  `Chunk.scope_start_borrows`에 적고, 호출 뒤에 검사한다: 임시 값이면 오류, 소유 지역이 `scope` 지역보다 뒤에
+  선언됐으면 오류(`varStack` 번호 비교), 그 밖에는 `checkSharedBorrow` · `checkExclusiveBorrow`를 거쳐 소유 지역의
+  `active_borrows` · `active_ex_borrows`를 올린다. 올린 것은 `Chunk.scope_borrows`에 두었다가 `sema_scope_stmt`가
+  끝날 때 내린다. 소유 지역이 없는 빌림(전역)은 그대로 통과한다.
+- "블록보다 먼저 선언"으로 정한 이유: 본문 블록의 지역은 본문이 끝날 때 해제되고 합류는 그 뒤다. `return` ·
+  `break`로 나갈 때의 합류는 `Scope.@deinit`인데, `s`보다 먼저 선언된 지역은 어느 출구에서든 `s`보다 늦게 해제된다.
+  본문 안의 지역을 허용하려면 합류를 본문 블록 안으로 옮겨야 하고 조기 출구마다 따로 다뤄야 한다.
+- 스택 이동: `thread.patch_frame_ptrs`가 "어느 스택의 프레임을, 어느 옛 범위에서 어느 새 주소로"를 인자로 받는다.
+  `growStackPrecise`는 자기 프레임을 고친 뒤 `Thread.patchFiberPtrs`로 스레드의 모든 멈춘 fiber(`ThreadC.fibers`의
+  `FIBER_SUSPENDED`)의 프레임을 걸어 옮겨진 범위를 가리키는 표시된 레지스터를 고친다. 실행 중인 사슬(자기를 resume한
+  쪽들)은 걷지 않는다: 빌림을 가진 fiber는 빌린 프레임의 `Scope`를 통해서만 resume되므로, 빌려준 스택이 실행 중일 때
+  빌린 fiber는 멈춰 있다.
+- 레이아웃 지점 추가(`bc_gen.push_site_ptr_layout`): 함수 진입(`CHK_STK`, 매개변수만. 시작 전 fiber의 `Fiber.pc`가
+  여기다), `SUSPEND` 다음 명령(`Fiber.pc`가 가리키는 곳. 바로 뒤가 호출 명령이면 같은 pc라 표의 마지막 항목을 덮는다),
+  `AWAIT`. `CALL_HOST`의 `RET_FIBER_AWAIT`는 호출 지점이라 이미 있었다.
+- 실제로 일어나는 경우: 블록 본문이 도는 동안 자식은 시작 전이거나 끝났다(자식은 합류 안에서만 돈다). 그래서 흔한
+  경우는 "시작 전 fiber + 본문의 깊은 호출"이고 테스트가 이것을 덮는다(보정을 뺀 ReleaseSafe 빌드는
+  `scope_block_borrow.cy`의 첫 절에서 `Expected 12, found 0`). 시작한 뒤 멈춘 자식이 있는 동안 부모 스택이 옮겨지는
+  것은 `Scope.run` 자신의 호출(`cancel` · `Fiber.wait_ready`)에서 스택이 모자랄 때뿐이라 테스트로 재현하지 못했다.
+  `SUSPEND` · `AWAIT` 지점의 레이아웃은 그 경우를 위한 것이고 실행으로 확인한 것은 진입 지점 경로다.
+- 남은 한계: 인자를 변수에 담은 `FnTuple`로는 빌림을 넘기지 못한다(리터럴만). choice · result payload 안의 스택
+  포인터는 여전히 표시되지 않는다(F-104 남은 것).
 
 (구현 전의 조사 기록) 
 지금의 한계: 오류 뒤에 시작하지 않은 fiber만 버린다(`@fiber_cancel`). 진행 중인 fiber는 끝까지 돈다. 3이 들어가면

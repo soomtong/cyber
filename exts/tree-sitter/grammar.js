@@ -106,6 +106,7 @@ module.exports = grammar({
         $.switch_statement,
         $.try_statement,
         $.begin_statement,
+        $.scope_statement,
         $.with_declaration,
         $.decorated_definition,
         $.comptime_statement,
@@ -468,6 +469,10 @@ module.exports = grammar({
       seq('else', optional(seq('|', field('error', $.identifier), '|')), ':', field('body', $._suite)),
 
     begin_statement: ($) => seq('begin', ':', field('body', $._suite)),
+
+    // `scope |s|:` runs a group of fibers that are done when the block is.
+    scope_statement: ($) =>
+      seq('scope', '|', field('name', $.identifier), '|', ':', field('body', $._suite)),
 
     // ---------------------------------------------------------------------
     // Expressions

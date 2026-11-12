@@ -4781,6 +4781,25 @@ fn (&Scope) join() -> !void:
             self.state.taken = true
             return err
 
+--| Cancels the fibers that are not done (`Fiber.cancel`) and drops an error that a fiber returned.
+--| A fiber that can not be cancelled runs to its end first.
+fn (&Scope) abort():
+    for self.fibers |&child|:
+        _ = child.cancel()
+    self.run()
+    self.fibers = Array[Fiber]{}
+    self.state.taken = true
+
+-- `scope |s|:` is lowered to calls of these (`sema.sema_scope_stmt`).
+fn @scope_new() -> Scope:
+    return Scope.new()
+
+fn @scope_abort(s &Scope):
+    s.abort()
+
+fn @scope_join(s &Scope) -> !void:
+    return s.join()
+
 -fn (&Scope) run():
     while:
         left := 0

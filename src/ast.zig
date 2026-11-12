@@ -131,6 +131,7 @@ pub const NodeType = enum(u8) {
     with,
     yield_stmt,
     fiber_expr,
+    scope_stmt,
     suspend_stmt,
 };
 
@@ -424,6 +425,13 @@ const Group = extern struct {
     child: *Node,
     pos: u32,
     end: u32,
+};
+
+/// `scope |name|:` with a body.
+pub const ScopeStmt = struct {
+    name: *Node align(8),
+    stmts: []const *Node,
+    pos: u32,
 };
 
 pub const BeginStmt = struct {
@@ -1038,6 +1046,7 @@ pub fn NodeData(comptime node_t: NodeType) type {
         .with           => With,
         .yield_stmt     => YieldStmt,
         .fiber_expr     => FiberExpr,
+        .scope_stmt     => ScopeStmt,
         .suspend_stmt   => Token,
     };
 }
@@ -1244,6 +1253,7 @@ pub const Node = struct {
             .with           => self.cast(.with).src,
             .yield_stmt     => self.cast(.yield_stmt).src,
             .fiber_expr     => self.cast(.fiber_expr).src,
+            .scope_stmt     => self.cast(.scope_stmt).name.src(),
             .suspend_stmt   => self.cast(.suspend_stmt).src,
         };
     }
@@ -1371,6 +1381,7 @@ pub const Node = struct {
             .with           => self.cast(.with).pos,
             .yield_stmt     => self.cast(.yield_stmt).pos,
             .fiber_expr     => self.cast(.fiber_expr).pos,
+            .scope_stmt     => self.cast(.scope_stmt).pos,
             .suspend_stmt   => self.cast(.suspend_stmt).pos,
         };
     }
@@ -1720,6 +1731,10 @@ pub const Node = struct {
                 }
             },
             .fiber_expr     => self.cast(.fiber_expr).child.end(),
+            .scope_stmt     => {
+                const stmts = self.cast(.scope_stmt).stmts;
+                return stmts[stmts.len-1].end();
+            },
             .suspend_stmt   => self.cast(.suspend_stmt).pos + 7,
         };
     }
@@ -1793,7 +1808,7 @@ pub const UnaryOp = enum(u8) {
 };
 
 test "ast internals." {
-    try t.eq(122, std.enums.values(NodeType).len);
+    try t.eq(123, std.enums.values(NodeType).len);
     try t.eq(1, @sizeOf(NodeHeader));
 }
 

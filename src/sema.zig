@@ -808,6 +808,9 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
         .tryStmt => {
             try sema_try_stmt(c, node.cast(.tryStmt));
         },
+        .scope_stmt => {
+            try sema_scope_stmt(c, node.cast(.scope_stmt));
+        },
         .suspend_stmt => {
             // Gives control back to the `resume` call of the running fiber. The frames stay on the fiber's
             // stack, so nothing is copied or destructed here.
@@ -1425,6 +1428,142 @@ fn semaIfUnwrapStmt(c: *cy.Chunk, stmt: *ast.IfUnwrapStmt) !void {
     const block = try popBlock(c);
     _ = try c.ir.pushStmt(.block, @ptrCast(stmt), .{ .bodyHead = block.first });
     if (!blocks_end_reachable and has_else) {
+        c.block().endReachable = false;
+    }
+}
+
+/// What a failing `!` does with its error: it goes to the `else` block of the enclosing `try`, or the function
+/// returns it, or the main block panics.
+fn semaPropagateError(c: *cy.Chunk, err: ExprResult, node: *ast.Node) !void {
+    const proc = c.proc();
+    if (proc.try_ctx) |try_ctx| {
+        // Inside a `try` block: hand the error to the `else` block instead of leaving the proc.
+        const err_local = &c.varStack.items[try_ctx.err_local];
+        _ = try c.ir.pushStmt(.set_local, node, .{
+            .id = @intCast(err_local.inner.local.id),
+            .right = err.ir,
+        });
+        try semaBreakTo(c, try_ctx.body_block, node);
+    } else if (proc.func != null) {
+        const ret_t = proc.getReturnType(c.sema);
+        if (ret_t.id() == bt.Error) {
+            try semaReturnExpr(c, err, node);
+        } else if (ret_t.kind() == .result) {
+            const ret = try semaInitChoice(c, ret_t, 0, 0, err, node);
+            try semaReturnExpr(c, ret, node);
+        } else {
+            return c.reportErrorFmt("Expected `Result` or `error` return type for enclosing function.", &.{}, node);
+        }
+    } else {
+        // Panic.
+        const arg = Argument.initPreResolved(node, err);
+        const call = try c.semaCallFunc2(c.sema.panic_unwrap_error_fn, &.{arg}, &.{}, node);
+        _ = try declareHiddenLocal(c, "_res", c.sema.void_t, call, node);
+    }
+}
+
+/// `scope |s|:` with a body. `s` is a `Scope` that lives for the body. The fibers that the body starts are
+/// done when the statement is:
+///
+///     outer:
+///         s := Scope.new()
+///         mid:
+///             _try_err
+///             body:
+///                 <body>            -- a failing `!` sets `_try_err` and breaks out of `body`
+///                 break mid
+///             s.abort()             -- the body failed: the fibers are cancelled
+///             <the error goes on like at a `!`>
+///         s.join()!                 -- the body reached its end: wait for the fibers
+///
+/// A `return`, `break` or `continue` that leaves the body destructs `s`, which joins the fibers first.
+fn sema_scope_stmt(c: *cy.Chunk, stmt: *ast.ScopeStmt) !void {
+    const node: *ast.Node = @ptrCast(stmt);
+    if (stmt.name.type() != .ident) {
+        return c.reportError("Expected a name for the scope.", stmt.name);
+    }
+    {
+        // An error of the body or of a fiber leaves the block like a failing `!`. Say so here instead of at
+        // the `!` that the block is lowered to.
+        const proc = c.proc();
+        if (proc.try_ctx == null) {
+            if (proc.func != null) {
+                const ret_t = proc.getReturnType(c.sema);
+                if (ret_t.id() != bt.Error and ret_t.kind() != .result) {
+                    return c.reportError("A `scope` block needs a function that returns `!T` or `error`, or an enclosing `try` block. An error of its fibers leaves the block like a failing `!`.", node);
+                }
+            }
+        }
+    }
+    const scope_t = c.sema.scope_new_fn.sig.ret;
+    const borrow_t = try getBorrowType(c, scope_t);
+
+    var body_end_reachable = false;
+    _ = try pushBlock(c, node);
+    {
+        const new_call = try c.semaCallFunc2(c.sema.scope_new_fn, &.{}, &.{}, node);
+        const scope_local = try declareLocalInit(c, stmt.name.cast(.ident).name.slice(), scope_t, new_call, stmt.name);
+
+        const mid = try pushBlock(c, node);
+        {
+            const err_local = try declareHiddenLocal(c, "_try_err", c.sema.error_t, null, node);
+            c.varStack.items[err_local.id].type = .dead;
+
+            const proc = c.proc();
+            const body_block = try pushBlock(c, node);
+            const prev_ctx = proc.try_ctx;
+            proc.try_ctx = .{ .body_block = @intCast(body_block), .err_local = err_local.id };
+            {
+                try semaStmts(c, stmt.stmts);
+                body_end_reachable = c.block().endReachable;
+                if (body_end_reachable) {
+                    try semaBreakTo(c, mid, node);
+                }
+            }
+            c.proc().try_ctx = prev_ctx;
+            const body = try popBlock2(c, false);
+            _ = try c.ir.pushStmt(.block, node, .{ .bodyHead = body.first });
+
+            // The body failed.
+            const scope_v = try semaLocal(c, scope_local.id, node);
+            const scope_addr = try semaAddressOf(c, scope_v, borrow_t, node);
+            const abort_call = try c.semaCallFunc2(c.sema.scope_abort_fn, &.{Argument.initPreResolved(node, scope_addr)}, &.{}, node);
+            _ = try declareHiddenLocal(c, "_res", c.sema.void_t, abort_call, node);
+            c.varStack.items[err_local.id].type = .local;
+            const err = try semaLocal(c, err_local.id, node);
+            c.varStack.items[err_local.id].type = .dead;
+            try semaPropagateError(c, err, node);
+        }
+        const mid_block = try popBlock2(c, false);
+        _ = try c.ir.pushStmt(.block, node, .{ .bodyHead = mid_block.first });
+        c.block().endReachable = body_end_reachable;
+
+        if (body_end_reachable) {
+            // `s.join()!`
+            const scope_v = try semaLocal(c, scope_local.id, node);
+            const scope_addr = try semaAddressOf(c, scope_v, borrow_t, node);
+            var join_res = try c.semaCallFunc2(c.sema.scope_join_fn, &.{Argument.initPreResolved(node, scope_addr)}, &.{}, node);
+            join_res = try semaEnsureAddressable(c, join_res, node);
+            const res_borrow_t = try getBorrowType(c, join_res.type);
+            const res_addr = try semaAddressOf(c, join_res, res_borrow_t, node);
+            const res_local = try declareHiddenLocal(c, "_res_addr", res_borrow_t, res_addr, node);
+            const res = try semaLocal(c, res_local.id, node);
+            const cond = try c.semaIsError(res, node);
+            _ = try pushBlock(c, node);
+            {
+                const err = try semaUnwrapResultErrorNoCheck(c, res, node);
+                try semaPropagateError(c, err, node);
+            }
+            const err_block = try popBlock2(c, false);
+            _ = try c.ir.pushStmt(.if_block, node, .{
+                .cond_expr = cond.ir,
+                .body_head = err_block.first,
+            });
+        }
+    }
+    const block = try popBlock(c);
+    _ = try c.ir.pushStmt(.block, node, .{ .bodyHead = block.first });
+    if (!body_end_reachable) {
         c.block().endReachable = false;
     }
 }
@@ -7783,35 +7922,8 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
             // Push error branch.
             _ = try pushBlock(c, node);
             {
-                const proc = c.proc();
-                if (proc.try_ctx) |try_ctx| {
-                    // Inside a `try` block: hand the error to the `else` block instead of leaving the proc.
-                    const err = try semaUnwrapResultErrorNoCheck(c, res, node);
-                    const err_local = &c.varStack.items[try_ctx.err_local];
-                    _ = try c.ir.pushStmt(.set_local, node, .{
-                        .id = @intCast(err_local.inner.local.id),
-                        .right = err.ir,
-                    });
-                    try semaBreakTo(c, try_ctx.body_block, node);
-                } else if (proc.func != null) {
-                    const ret_t = proc.getReturnType(c.sema);
-                    if (ret_t.id() == bt.Error) {
-                        const err = try semaUnwrapResultErrorNoCheck(c, res, node);
-                        try semaReturnExpr(c, err, node);
-                    } else if (ret_t.kind() == .result) {
-                        const err = try semaUnwrapResultErrorNoCheck(c, res, node);
-                        const ret = try semaInitChoice(c, ret_t, 0, 0, err, node);
-                        try semaReturnExpr(c, ret, node);
-                    } else {
-                        return c.reportErrorFmt("Expected `Result` or `error` return type for enclosing function.", &.{}, node);
-                    }
-                } else {
-                    // Panic.
-                    const err = try semaUnwrapResultErrorNoCheck(c, res, node); 
-                    const arg = Argument.initPreResolved(node, err);
-                    const call = try c.semaCallFunc2(c.sema.panic_unwrap_error_fn, &.{arg}, &.{}, node);
-                    _ = try declareHiddenLocal(c, "_res", c.sema.void_t, call, node);
-                }
+                const err = try semaUnwrapResultErrorNoCheck(c, res, node);
+                try semaPropagateError(c, err, node);
             }
             const block = try popBlock2(c, false);
             _ = try c.ir.pushStmt(.if_block, node, .{
@@ -10346,6 +10458,9 @@ pub const Sema = struct {
     panic_unwrap_error_fn: *cy.Func = undefined,
     track_main_local_fn: *cy.Func = undefined,
     main_result_fn: *cy.Func = undefined,
+    scope_new_fn: *cy.Func = undefined,
+    scope_abort_fn: *cy.Func = undefined,
+    scope_join_fn: *cy.Func = undefined,
     to_print_string_fn: *cy.Func = undefined,
     access_fn: *cy.Func = undefined,
     builtin_sig: *FuncSig = undefined,

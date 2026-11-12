@@ -452,8 +452,20 @@ panic 대신 취소. 목표는 0.5.
 - `Fiber.@deinit`은 `cancel()`을 먼저 부른다. 취소 못 한 fiber는 이전처럼 `Fiber is still in progress.` panic.
 - `Scope.run`은 오류 뒤 남은 자식을 `cancel()`한다. 취소 못 한 자식은 끝까지 돌린다.
 
-남은 것: 4번(`scope` 블록 문법, 범위 안 빌림), 제너레이터 본문 프레임의 취소, `seq_pending` 밖의 임시 값, 블록을 오류로
-나갈 때 합류 대신 취소할지(지금 `Scope.@deinit`은 합류한다. 블록 문법에서 sema가 출구 종류를 구분할 수 있다).
+`scope` 블록 구현(2026-11-12).
+
+- 파서: 문장 머리의 `scope` 뒤가 `|`이면 `parseScopeBlock`(AST `.scope_stmt{name, stmts}`, 노드 수 123). 그 밖의 자리의
+  `scope`는 타입의 수명 수식어 그대로다. tree-sitter `scope_statement`(코퍼스 19/19), `cy` 모듈 미러에 케이스 추가.
+- sema `sema_scope_stmt`: `try` 블록과 같은 방식으로 본문의 `!`를 가로챈다(`Proc.try_ctx`). 낮춘 모양은 함수 주석에 있다.
+  본문이 실패하면 `@scope_abort(&s)`(남은 fiber 취소) 뒤 오류를 `semaPropagateError`로 내보내고, 끝에 닿으면
+  `@scope_join(&s)`의 결과를 `!`처럼 처리한다. `semaPropagateError`는 `.unwrap_res`의 오류 분기를 뽑아낸 것이다.
+- 출구 구분: 오류 탈출은 취소, `return` · `break` · `continue`는 `Scope.@deinit`의 합류. Kotlin의 `coroutineScope`와 같은
+  선택이다(Trio도 예외만 취소한다).
+- 오류가 나갈 길이 필요해서 함수 안의 `scope` 블록은 `!T` · `error` 반환이나 바깥 `try`를 요구한다(전용 컴파일 오류).
+  `void` 자식만 쓰는 블록에도 요구한다. 규칙을 하나로 두려고 그렇게 했다.
+
+남은 것: 범위 안 빌림 허용(fiber에 `&T` 인자. 자식이 블록보다 오래 살지 않으니 가능하지만 스택 이동 때 다른 fiber의
+스택을 가리키는 포인터 보정이 필요하다), 제너레이터 본문 프레임의 취소, `seq_pending` 밖의 임시 값.
 
 (구현 전의 조사 기록) 
 지금의 한계: 오류 뒤에 시작하지 않은 fiber만 버린다(`@fiber_cancel`). 진행 중인 fiber는 끝까지 돈다. 3이 들어가면

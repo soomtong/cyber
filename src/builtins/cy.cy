@@ -165,6 +165,7 @@ type Node enum:
     case with                With
     case yield_stmt          void
     case fiber_expr          void
+    case scope_stmt          void
     case suspend_stmt        void
 
 fn (&Node) decl_name() -> str:

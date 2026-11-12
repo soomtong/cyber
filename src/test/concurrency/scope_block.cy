@@ -1,0 +1,134 @@
+use test
+
+type Res:
+    id int
+global dropped int = 0
+fn (&Res) @deinit():
+    dropped += 1
+
+fn step(name str, n int, log ^ArrayStore[str]):
+    held := Res{id = n}
+    for 0..n |i|:
+        log << '%{name}%{i}'
+        suspend
+
+fn fails(log ^ArrayStore[str]) -> !void:
+    log << 'fails'
+    suspend
+    return error.Child
+
+fn check(ok bool) -> !int:
+    if !ok:
+        return error.Body
+    return 1
+
+-- The fibers are done when the block is.
+fn all(log ^ArrayStore[str]) -> !void:
+    scope |s|:
+        s.start(step, {'a', 2, log})
+        s.start(step, {'b', 1, log})
+        test.eq(s.active(), 2)
+        test.eq(log.len(), 0)
+    log << 'after'
+
+fn check_all() -> !void:
+    log := ^ArrayStore[str]{}
+    dropped = 0
+    all(log)!
+    test.eq(log.len(), 4)
+    test.eq(log[0], 'a0')
+    test.eq(log[1], 'b0')
+    test.eq(log[2], 'a1')
+    test.eq(log[3], 'after')
+    test.eq(dropped, 2)
+check_all()!
+
+-- An error of a fiber comes out of the block like at a `!`. The other fibers are cancelled.
+fn child_fails(log ^ArrayStore[str]) -> !void:
+    scope |s|:
+        s.start(step, {'a', 5, log})
+        s.start(fails, {log})
+    log << 'not reached'
+
+fn check_child_fails():
+    log := ^ArrayStore[str]{}
+    dropped = 0
+    res := child_fails(log)
+    test.eq(res.unwrap_error(), error.Child)
+    test.eq(log.len(), 3)
+    test.eq(log[0], 'a0')
+    test.eq(log[1], 'fails')
+    test.eq(log[2], 'a1')
+    test.eq(dropped, 1)
+check_child_fails()
+
+-- A failing `!` in the body cancels the fibers that were started. None of them runs.
+fn body_fails(log ^ArrayStore[str], ok bool) -> !int:
+    total := 0
+    scope |s|:
+        s.start(step, {'a', 3, log})
+        total += check(ok)!
+        s.start(step, {'b', 1, log})
+    return total
+
+fn check_body_fails() -> !void:
+    log := ^ArrayStore[str]{}
+    dropped = 0
+    res := body_fails(log, false)
+    test.eq(res.unwrap_error(), error.Body)
+    test.eq(log.len(), 0)
+    -- The fiber was not started: its function never made a `Res`.
+    test.eq(dropped, 0)
+    test.eq(body_fails(log, true)!, 1)
+    test.eq(log.len(), 4)
+check_body_fails()!
+
+-- `return` and `break` leave the block after the fibers are done.
+fn returns(log ^ArrayStore[str]) -> !int:
+    scope |s|:
+        s.start(step, {'r', 2, log})
+        return 7
+fn breaks(log ^ArrayStore[str]) -> !int:
+    rounds := 0
+    while true:
+        rounds += 1
+        scope |s|:
+            s.start(step, {'k', 1, log})
+            if rounds == 2:
+                break
+    return rounds
+
+fn check_exits() -> !void:
+    log := ^ArrayStore[str]{}
+    test.eq(returns(log)!, 7)
+    test.eq(log.len(), 2)
+    test.eq(breaks(log)!, 2)
+    test.eq(log.len(), 4)
+check_exits()!
+
+-- Inside a `try` block the error goes to the `else` block. Blocks can be nested.
+fn in_try(log ^ArrayStore[str]) -> str:
+    try:
+        scope |outer|:
+            outer.start(step, {'o', 1, log})
+            scope |inner|:
+                inner.start(fails, {log})
+            log << 'not reached'
+    else |err|:
+        return 'caught %{err}'
+    return 'none'
+
+fn check_try():
+    log := ^ArrayStore[str]{}
+    test.eq(in_try(log), 'caught error.Child')
+    test.eq(log.len(), 1)
+    test.eq(log[0], 'fails')
+check_try()
+
+-- At the top level an error panics, like `!`. Without an error the block is an ordinary statement.
+top_log := ^ArrayStore[str]{}
+scope |s|:
+    s.start(step, {'t', 1, top_log})
+test.eq(top_log.len(), 1)
+
+--cytest: pass

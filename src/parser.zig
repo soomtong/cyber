@@ -1960,6 +1960,32 @@ pub const Parser = struct {
         });
     }
 
+    fn parseScopeBlock(self: *Parser) !*ast.Node {
+        const start = self.next_pos;
+        // Assumes the first tokens are `scope` and `|`.
+        self.advance();
+        self.advance();
+        if (self.peek().tag() != .ident) {
+            return self.reportError("Expected a name for the scope.", &.{});
+        }
+        const name = try self.newIdentNode(self.next_pos);
+        self.advance();
+        if (self.peek().tag() != .vert_bar) {
+            return self.reportError("Expected vertical bar.", &.{});
+        }
+        self.advance();
+        if (self.peek().tag() != .colon) {
+            return self.reportError("Expected colon.", &.{});
+        }
+        self.advance();
+        const stmts = try self.parseSingleOrIndentedBodyStmts();
+        return self.ast.newNodeErase(.scope_stmt, .{
+            .name = name,
+            .stmts = stmts,
+            .pos = self.tokenPos(start),
+        });
+    }
+
     fn parse_begin_block(self: *Parser) !*ast.Node {
         const start = self.next_pos;
         // Assumes first token is the `begin` keyword.
@@ -2771,6 +2797,12 @@ pub const Parser = struct {
             },
             .begin_k => {
                 return try self.parse_begin_block();
+            },
+            .scope_k => {
+                // `scope |s|:`. In other positions `scope` is a lifetime modifier of a type.
+                if (self.peekAhead(1).tag() == .vert_bar) {
+                    return try self.parseScopeBlock();
+                }
             },
             .try_k => {
                 if (self.peekAhead(1).tag() == .colon) {

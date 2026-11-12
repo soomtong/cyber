@@ -286,7 +286,7 @@ There are `25` general keywords. This list categorizes them:
 - [Variables](#variables): [`var`](#local-variables) [`global`](#global-variables)
 - [Functions](#functions): `fn` `return`
 - [Ownership](#value-ownership): [`move`](#moving)
-- [Concurrency](#concurrency): [`yield`](#generators) [`fiber`](#fibers) [`suspend`](#fibers). `generator` is a modifier in front of `fn` and is not reserved.
+- [Concurrency](#concurrency): [`yield`](#generators) [`fiber`](#fibers) [`suspend`](#fibers). `generator` is a modifier in front of `fn` and is not reserved. [`scope`](#fibers) starts a block of fibers (`scope |s|:`) and is a lifetime modifier in a type.
 - [Types](#custom-types): `type` `with`
 - [Error handling](#error-handling): [`try`](#unwrap-block)
 - [Modules](#modules): `use`
@@ -3273,7 +3273,7 @@ Both computations are started before either result is taken. A loop that resumes
 
 In the root context, outside of any fiber, `await` waits as before.
 
-A `Scope` runs a group of fibers and does that loop itself. `start` adds a fiber: the arguments are evaluated at once and the fiber starts in `join`. `join` runs the fibers until all of them are done. A fiber that stops at `suspend` gives the others a turn, and when every fiber waits for a future the scope waits like `Fiber.wait_ready()`:
+A `scope` block runs a group of fibers and does that loop itself. The name between the bars is a `Scope` that lives for the block. `start` adds a fiber: the arguments are evaluated at once, and the fibers run when the body is done. A fiber that stops at `suspend` gives the others a turn, and when every fiber waits for a future the block waits like `Fiber.wait_ready()`:
 ```cy
 fn fetch(name str, n int, log ^ArrayStore[str]) -> !void:
     res := spawn(compute, {n}).await()
@@ -3282,15 +3282,29 @@ fn fetch(name str, n int, log ^ArrayStore[str]) -> !void:
     log << '%{name}: %{res}'
 
 fn fetch_all(log ^ArrayStore[str]) -> !void:
-    s := Scope.new()
-    s.start(fetch, {'a', 2000000, log})
-    s.start(fetch, {'b', 10, log})
-    s.join()!
+    scope |s|:
+        s.start(fetch, {'a', 2000000, log})
+        s.start(fetch, {'b', 10, log})
     -- Both fibers are done here.
+    log << 'done'
 ```
-The fibers of a scope do not outlive it. A block that is left before `join` (with `return`, or with an error from `!`) joins the fibers first, when the scope is destructed.
+The fibers of a scope do not outlive the block:
 
-The entry function of a scope's fiber returns `void` or `!void`. `join` returns the first error that a fiber returned. After an error the other fibers are cancelled: a fiber in progress ends where it is suspended with its values destructed, and a fiber that was not started is dropped with its arguments released. A fiber that can not be cancelled runs to its end. An error that is left when the scope is destructed without a `join` panics, like an error that `main` returns. A scope can be used inside a fiber of another scope, and it can start more fibers after a `join`.
+* When the body reaches its end, the block waits until every fiber is done.
+* The entry function of a fiber returns `void` or `!void`. When a fiber returns an error, the other fibers are cancelled (see `cancel` below) and the error leaves the block like a failing `!`: the function returns it, or it goes to the `else` block of an enclosing `try`, or it panics at the top level.
+* When a `!` in the body fails, the fibers that were started are cancelled and the error goes on the same way.
+* `return`, `break` and `continue` leave the block after the fibers are done.
+
+Since an error leaves the block like a failing `!`, a `scope` block in a function needs a `!T` or `error` return type, or an enclosing `try` block:
+```cy
+fn run() -> int:
+    scope |s|:             --> CompileError: A `scope` block needs a function that returns `!T` or `error`, or an enclosing `try` block. An error of its fibers leaves the block like a failing `!`.
+        s.start(work, {})
+    return 1
+```
+Blocks can be nested, and a fiber of a scope can have a `scope` block of its own. A fiber that can not be cancelled runs to its end instead.
+
+The block is built on the `Scope` type, which can be used directly when the group does not fit a block. `Scope.new()` returns an empty scope, `join() -> !void` runs the fibers and returns the first error after cancelling the others, `abort()` cancels the fibers, and `active()` returns how many are not done. A `Scope` value that is destructed joins its fibers first, and an error that is left then panics.
 
 When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the `resume` call of each fiber down to the main block.
 

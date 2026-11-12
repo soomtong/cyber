@@ -387,6 +387,8 @@ if (!aot) {
     run.case("concurrency/fiber_await.cy");
     run.case("concurrency/fiber_cancel.cy");
     run.case("concurrency/scope.cy");
+    run.case("concurrency/scope_block.cy");
+    run.case("concurrency/scope_block_no_result_error.cy");
     run.case("concurrency/fiber_method_entry_error.cy");
     run.case("concurrency/fiber_borrow_receiver_error.cy");
     run.case("concurrency/fiber_no_call_error.cy");

@@ -991,6 +991,9 @@ fn loadBuiltinChunk(c: *cy.Chunk) !void {
     c.sema.eval_buffer_tmpl = core.getSym("EvalBuffer").?.cast(.template);
     c.sema.panic_fn = core.getSym("panic").?.cast(.func).first;
     c.sema.panic_unwrap_error_fn = core.getSym("panic_unwrap_error").?.cast(.func).first;
+    c.sema.scope_new_fn = core.getSym("@scope_new").?.cast(.func).first;
+    c.sema.scope_abort_fn = core.getSym("@scope_abort").?.cast(.func).first;
+    c.sema.scope_join_fn = core.getSym("@scope_join").?.cast(.func).first;
     c.sema.track_main_local_fn = core.getSym("@trackMainLocal").?.cast(.func).first;
     c.sema.main_result_fn = core.getSym("@mainResult").?.cast(.func).first;
 

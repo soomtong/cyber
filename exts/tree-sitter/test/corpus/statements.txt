@@ -239,3 +239,26 @@ switch t:
             (identifier)
             (block
               (pass_statement))))))))
+
+=============================================================
+Scope block
+=============================================================
+
+scope |s|:
+    s.start(work, {1})
+
+-------------------------------------------------------------
+
+(source_file
+  (scope_statement
+    (identifier)
+    (block
+      (expression_statement
+        (call_expression
+          (member_expression
+            (identifier)
+            (identifier))
+          (arguments
+            (identifier)
+            (initializer
+              (number))))))))

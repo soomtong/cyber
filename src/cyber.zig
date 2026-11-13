@@ -82,6 +82,7 @@ pub const vmc = @import("vmc");
 pub const BoundedArray = @import("bounded_array.zig").BoundedArray;
 
 pub const debug = @import("debug.zig");
+pub const refs = @import("refs.zig");
 pub const StackTrace = debug.StackTrace;
 
 pub const string = @import("string.zig");

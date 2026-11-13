@@ -1,6 +1,6 @@
 # LSP 서버 설계와 단계 계획
 
-2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 · P1 · P2의 sema 복구 구현(2026-11-12, 아래 "P0 구현" · "P1 구현" · "P2 구현" 절). 파서 복구와 P3 이후는 미구현.
+2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 · P1 · P2의 sema 복구 · P3의 hover와 definition 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P3 구현" 절). 파서 복구, P3의 나머지(references · completion · signatureHelp), P4 이후는 미구현.
 앞선 결정은 `docs/decisions/project_fmt.md`의 "내장 도구의 기준"(LSP는 CLI에 넣지 않고 라이브러리 위의 별도 프로그램),
 사실 근거는 `docs/study/01-pipeline-front-end.md` 6절과 `docs/decisions/project_compile_error_report.md`이다.
 
@@ -207,9 +207,62 @@ LSP의 `Diagnostic`은 `range`(시작 · 끝), `message`, `relatedInformation`(�
 남은 위험: 복구는 "본문 sema가 실패해도 전역 상태(심볼 · 타입 · 템플릿 캐시)는 쓸 수 있다"는 가정에 선다. 깨지는 곳을 둘 찾아
 고쳤고 더 있을 수 있다. 깨지면 서버 프로세스가 죽고 클라이언트가 다시 띄운다. CLI는 복구를 켜지 않으므로 영향이 없다.
 
-## 8. 다음
+## 8. P3 구현: 해석 기록, hover, definition (2026-11-13)
 
+sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨다"를 적어 두고, 호스트는 위치로 묻는다. 6절에 적은 대로 서버는
+컴파일러 구조체를 읽지 않고 C API로만 받는다.
+
+- `cl_vm_set_symbol_info(vm, true)`: 기록을 켠다(기본 꺼짐, `cl_vm_reset`을 넘어 유지). main 소스만 기록한다. 모듈의 것을
+  알고 싶은 호스트는 그 모듈을 main으로 컴파일한다(서버가 문서마다 그렇게 한다).
+- `bool cl_vm_symbol_at(vm, pos, &info)`: 마지막 컴파일의 main 소스에서 바이트 오프셋 `pos`에 있는 것.
+  `CLSymbolInfo{ pos, end_pos, detail, has_def, def_uri, def_pos, def_end_pos }`.
+  - `detail`은 한 줄이다. 선언이 있는 심볼은 선언의 첫 줄(`fn add(a int, b int) -> int`, `type Vec2`, `const limit = 10`,
+    앞의 `#[…]` 속성과 끝의 `:`는 뺀다), 지역 · 매개변수 · 필드는 `이름 타입`, enum · choice case는 `case Color.green`,
+    그 밖의 식은 타입 이름. 시그니처를 다시 조립하지 않고 소스의 줄을 그대로 쓰므로 매개변수 이름이 보인다.
+  - 선언 위치는 지역 · 매개변수 · 필드는 이름, 나머지는 선언 전체다. 표준 모듈의 것은 `def_uri`가 `core` · `math` 같은 이름이다.
+  - 이름 바로 뒤의 위치도 그 이름으로 친다(커서가 단어 끝에 있을 때). 컴파일이 실패해도 오류 전에 해석된 것은 남는다.
+
+기록하는 자리(`src/refs.zig`, sema 쪽 훅은 모두 `Compiler.record_refs`가 켜졌을 때만):
+
+| 자리 | 기록 |
+| --- | --- |
+| `sema.semaExpr` | 식 노드의 범위와 타입 |
+| `sema.lookupIdent` · `lookupStaticIdent` | 식별자 → 지역 또는 심볼. 타입 자리의 이름과 호출되는 함수 이름도 여기를 지난다 |
+| `module.getResolvedSym` · `semaAccessFieldName` | `a.b`의 `b` → 필드 · 메서드 · 모듈 멤버 |
+| `sema.pushLocalVar`와 타입 추론이 끝나는 세 곳 | 지역의 선언 자리와 타입(`x := …`는 초기화 식 뒤에 타입이 정해진다) |
+
+- 노드의 원문이 찾은 이름과 같을 때만 적는다. 리터럴을 대신해 `@init_sequence`를 찾는 것 같은 내부 조회가 그 리터럴의 참조로
+  남지 않게 하기 위해서다.
+- 지역의 선언 위치는 `Local`에 필드를 더하지 않고 이름 슬라이스의 주소에서 얻는다. 선언된 지역의 이름은 소스의 슬라이스이고
+  숨은 지역의 이름은 아니다.
+- 조회는 위치를 품는 가장 작은 범위를 고른다. 같은 범위면 식의 타입보다 심볼 · 지역이 앞서고, 나중에 적힌 것이 앞선다.
+- 필드는 선언 노드를 갖지 않는다. 부모 타입의 `struct_decl`에서 인덱스로 이름 노드를 찾는다.
+
+서버:
+
+- `textDocument/hover`: `detail`을 `cyber` 코드 블록으로 준다. `textDocument/definition`: 선언의 `Location`.
+  표준 모듈 안의 선언은 열 문서가 없어 `null`.
+- VM은 컴파일 하나만 들고 있다. 요청이 온 문서가 마지막에 컴파일한 문서가 아니거나 그 뒤로 무엇이든 바뀌었으면 그 문서를
+  다시 컴파일하고 답한다(`Server.compiled`). 검사 한 번이 수 ms라 캐시를 두지 않는다. 디바운스 전에 온 요청도 새 본문으로 답한다.
+
+확인:
+
+- lib 테스트 `cl_vm_symbol_at describes the names of the main source.`, 서버 테스트
+  `Hover describes a name and go to definition finds its declaration.`
+- 저장소 `.cy` 462개의 모든 줄에서 세 칸마다 hover와 definition을 물었다(Debug 서버, 216,672 요청, hover 응답 50,105 ·
+  정의 12,368). 죽는 것이 없다. 처음에는 둘이 죽었고 원인은 `ast.Node.end()`였다: 함수가 없는 트레이트
+  (`type NoCopy trait`)에서 `funcs.len - 1`이 넘쳤다(F-115, 수정). 이 노드에 컴파일 오류가 나도 같은 자리에서 죽었을 것이다.
+
+하지 않은 것:
+
+- 오버로드 중 실제로 고른 함수. 함수 이름은 심볼(오버로드 묶음)로 기록되고 `detail`은 첫 선언에 `(+N overloads)`를 붙인다.
+- 템플릿 본문 안의 이름은 인스턴스마다 기록되고 마지막 인스턴스의 것이 보인다(`x T`가 `x int`로).
+- 문서 주석. 선언 위의 `--|` 줄을 hover에 싣는 일은 서버가 `def_pos`와 소스로 할 수 있다.
+- capture된 지역, `use`의 경로 문자열, 필드 초기화(`Vec2{x = 1}`의 `x`).
+
+## 9. 다음
+
+- P3의 나머지: `references`(기록을 대상 기준으로 뒤집으면 한 문서 안에서는 바로 된다), `completion` · `signatureHelp`
+  (미완성 식 `a.`을 파서가 노드로 남겨야 한다. 2절의 "감수하는 것" 첫째).
 - 파서 복구(P2의 나머지): 들여쓰기 기준 블록 동기화로 구문 오류를 여러 개 낸다. 구문 오류가 있으면 sema는 돌지 않는다.
-  편집 중에는 구문 오류가 대개 커서 자리 하나라 sema 복구보다 얻는 것이 작다.
-- P3: 해석 기록(hover · definition). 6절에 적은 대로 C API로 내는 쪽을 먼저 본다.
 - F-114: 검사마다 새는 메모리.

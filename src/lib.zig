@@ -544,6 +544,25 @@ export fn cl_vm_set_error_color(vm: *cy.VM, enabled: bool) void {
     vm.compiler.report_color = enabled;
 }
 
+export fn cl_vm_set_symbol_info(vm: *cy.VM, enabled: bool) void {
+    vm.compiler.record_refs = enabled;
+}
+
+export fn cl_vm_symbol_at(vm: *cy.VM, pos: u32, out: *C.SymbolInfo) bool {
+    out.* = std.mem.zeroes(C.SymbolInfo);
+    const info = (cy.refs.find(vm.compiler, pos) catch return false) orelse return false;
+    out.* = .{
+        .pos = info.pos,
+        .end_pos = info.end,
+        .detail = C.to_bytes(info.detail),
+        .has_def = info.def_uri.len > 0,
+        .def_uri = C.to_bytes(info.def_uri),
+        .def_pos = info.def_pos,
+        .def_end_pos = info.def_end,
+    };
+    return true;
+}
+
 export fn cl_vm_set_error_recovery(vm: *cy.VM, enabled: bool) void {
     vm.compiler.recover = enabled;
 }

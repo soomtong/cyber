@@ -84,6 +84,17 @@ const Session = struct {
         try t.expect(self.server.hasPending());
     }
 
+    fn requestAt(self: *Session, method: []const u8, uri: []const u8, line: u32, character: u32) !Value {
+        const body = try std.fmt.allocPrint(self.arena.allocator(),
+            \\{{"jsonrpc":"2.0","id":8,"method":"{s}","params":{{"textDocument":{{"uri":"{s}"}},
+            \\"position":{{"line":{},"character":{}}}}}}}
+        , .{ method, uri, line, character });
+        const out = try self.send(body);
+        try t.expectEqual(@as(usize, 1), out.len);
+        try t.expectEqual(@as(i64, 8), get(out[0], &.{"id"}).?.integer);
+        return out[0];
+    }
+
     fn request(self: *Session, method: []const u8, uri: []const u8) !Value {
         const body = try std.fmt.allocPrint(self.arena.allocator(),
             \\{{"jsonrpc":"2.0","id":7,"method":"{s}","params":{{"textDocument":{{"uri":"{s}"}}}}}}
@@ -152,6 +163,8 @@ test "The server follows the lifecycle of the protocol." {
     try t.expect(get(out[0], &.{ "result", "capabilities", "documentFormattingProvider" }).?.bool);
     try t.expect(get(out[0], &.{ "result", "capabilities", "documentSymbolProvider" }).?.bool);
     try t.expect(get(out[0], &.{ "result", "capabilities", "foldingRangeProvider" }).?.bool);
+    try t.expect(get(out[0], &.{ "result", "capabilities", "hoverProvider" }).?.bool);
+    try t.expect(get(out[0], &.{ "result", "capabilities", "definitionProvider" }).?.bool);
     try t.expectEqualStrings("cyber-lsp", str(out[0], &.{ "result", "serverInfo", "name" }));
 
     out = try s.send(
@@ -161,7 +174,7 @@ test "The server follows the lifecycle of the protocol." {
 
     // A request that the server does not know gets an error, a notification is skipped, a reply is ignored.
     out = try s.send(
-        \\{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{}}
+        \\{"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{}}
     );
     try t.expectEqual(@as(i64, -32601), int(out[0], &.{ "error", "code" }));
     out = try s.send(
@@ -427,6 +440,88 @@ test "The outline and the folding ranges of a document." {
     try t.expectEqual(@as(usize, 0), items(reply, &.{"result"}).len);
     reply = try s.request("textDocument/foldingRange", main_uri);
     try t.expectEqual(@as(usize, 1), items(reply, &.{"result"}).len);
+}
+
+test "Hover describes a name and go to definition finds its declaration." {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "b.cy", .data = "-- 한글\nfn twice(a int) -> int:\n    return a * 2\n" });
+    const dir = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(dir);
+
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+    const arena = s.arena.allocator();
+    const sep = std.Io.Dir.path.sep_str;
+    const a_uri = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "a.cy", .{dir}));
+    const b_uri = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "b.cy", .{dir}));
+
+    try s.open(a_uri, 1,
+        \\use b './b.cy'
+        \\
+        \\fn add(a int, b_ int) -> int:
+        \\    return a + b_
+        \\
+        \\n := add(1, 2)
+        \\print('한글' + str(add(n, 2)))
+        \\print(b.twice(n))
+        \\print(n + nope)
+        \\
+    );
+    // The request comes before the pause in which the document is checked: the server compiles for it.
+    var reply = try s.requestAt("textDocument/hover", a_uri, 5, 0);
+    try t.expectEqualStrings("markdown", str(reply, &.{ "result", "contents", "kind" }));
+    try t.expectEqualStrings("```cyber\nn int\n```", str(reply, &.{ "result", "contents", "value" }));
+    try expectRange(get(reply, &.{ "result", "range" }).?, 5, 0, 5, 1);
+
+    // Columns are UTF-16 code units: the two Korean characters before `add` are two of them.
+    reply = try s.requestAt("textDocument/hover", a_uri, 6, 18);
+    try t.expectEqualStrings("```cyber\nfn add(a int, b_ int) -> int\n```", str(reply, &.{ "result", "contents", "value" }));
+    try expectRange(get(reply, &.{ "result", "range" }).?, 6, 17, 6, 20);
+
+    // A function of this document, a local, and a function of a module on disk.
+    reply = try s.requestAt("textDocument/definition", a_uri, 6, 18);
+    try t.expectEqualStrings(a_uri, str(reply, &.{ "result", "uri" }));
+    try expectRange(get(reply, &.{ "result", "range" }).?, 2, 0, 3, 17);
+
+    reply = try s.requestAt("textDocument/definition", a_uri, 7, 14);
+    try t.expectEqualStrings(a_uri, str(reply, &.{ "result", "uri" }));
+    try expectRange(get(reply, &.{ "result", "range" }).?, 5, 0, 5, 1);
+
+    reply = try s.requestAt("textDocument/hover", a_uri, 7, 9);
+    try t.expectEqualStrings("```cyber\nfn twice(a int) -> int\n```", str(reply, &.{ "result", "contents", "value" }));
+    reply = try s.requestAt("textDocument/definition", a_uri, 7, 9);
+    try t.expectEqualStrings(b_uri, str(reply, &.{ "result", "uri" }));
+    try expectRange(get(reply, &.{ "result", "range" }).?, 1, 0, 2, 16);
+
+    // A function of a standard module is described, but there is no document to go to.
+    reply = try s.requestAt("textDocument/hover", a_uri, 7, 1);
+    try t.expectEqualStrings("```cyber\nfn print(x %T)\n```", str(reply, &.{ "result", "contents", "value" }));
+    reply = try s.requestAt("textDocument/definition", a_uri, 7, 1);
+    try t.expect(get(reply, &.{"result"}).? == .null);
+
+    // Nothing at a keyword, and nothing at the name that does not resolve. The rest of the line still answers.
+    reply = try s.requestAt("textDocument/hover", a_uri, 2, 0);
+    try t.expect(get(reply, &.{"result"}).? == .null);
+    reply = try s.requestAt("textDocument/hover", a_uri, 8, 11);
+    try t.expect(get(reply, &.{"result"}).? == .null);
+    reply = try s.requestAt("textDocument/hover", a_uri, 8, 6);
+    try t.expectEqualStrings("```cyber\nn int\n```", str(reply, &.{ "result", "contents", "value" }));
+
+    // The diagnostics are still published after the pause, and a request after a change sees the new text.
+    var out = try s.flush();
+    try t.expectEqualStrings("Undeclared variable `nope`.", str(items(out[0], &.{ "params", "diagnostics" })[0], &.{"message"}));
+    try s.change(a_uri, 2, "x := 1.5\nprint(x)\n");
+    reply = try s.requestAt("textDocument/hover", a_uri, 1, 6);
+    try t.expectEqualStrings("```cyber\nx float\n```", str(reply, &.{ "result", "contents", "value" }));
+    out = try s.flush();
+    try t.expectEqual(@as(usize, 0), items(out[0], &.{ "params", "diagnostics" }).len);
+
+    // A position is required.
+    const bad = try s.request("textDocument/hover", a_uri);
+    try t.expectEqual(@as(i64, -32602), int(bad, &.{ "error", "code" }));
 }
 
 test "A module is read from the editor when it is open, otherwise from the disk." {

@@ -72,6 +72,13 @@ pub const Compiler = struct {
     /// next body is checked. Errors outside of a body (syntax, declarations) still end the compile.
     /// The compile fails as before, with every report in `reports`. Kept across `cl_vm_reset` like `report_color`.
     recover: bool = false,
+
+    /// Record what the names of the main source refer to (`cl_vm_set_symbol_info`, `refs.zig`).
+    /// Kept across `cl_vm_reset` like `report_color`. The references are those of the last compile.
+    record_refs: bool = false,
+    refs: std.ArrayList(cy.refs.Ref) = .empty,
+    /// The text that the last `refs.find` returned.
+    ref_detail: []const u8 = "",
     
     /// Sema model resulting from the sema pass.
     sema: sema.Sema,
@@ -203,6 +210,7 @@ pub const Compiler = struct {
         self.vm.log_tracev("Deinit compiler reset={}", .{reset});
         self.clearReports();
         if (!reset) {
+            self.refs.deinit(self.alloc);
             self.reports.deinit(self.alloc);
         }
 
@@ -308,6 +316,10 @@ pub const Compiler = struct {
             report.deinit(self.alloc);
         }
         self.reports.clearRetainingCapacity();
+        // The references point into the symbols and sources of the compile that the reports are from.
+        self.refs.clearRetainingCapacity();
+        self.alloc.free(self.ref_detail);
+        self.ref_detail = "";
     }
 
     pub fn newTypes(self: *Compiler) []*cy.Type {

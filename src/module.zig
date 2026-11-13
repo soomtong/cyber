@@ -536,6 +536,14 @@ pub fn check_sym_visible(c: *cy.Chunk, sym: *cy.Sym, node: *ast.Node) !void {
 
 /// Note that resolved refers to a resolved symbol path and not the underlying symbol content.
 pub fn getResolvedSym(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *ast.Node) anyerror!?*cy.Sym {
+    const res = try getResolvedSym2(c, modSym, name, node);
+    if (c.compiler.record_refs) {
+        if (res) |sym| cy.refs.recordSym(c, node, name, sym);
+    }
+    return res;
+}
+
+fn getResolvedSym2(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *ast.Node) anyerror!?*cy.Sym {
     const mod = modSym.getMod() orelse {
         return null;
     };

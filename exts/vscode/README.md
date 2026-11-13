@@ -8,6 +8,8 @@ With the language server running:
 
 * Compile errors as diagnostics while typing. The document is compiled as a program, it is not run.
   Related places (`First declared at:`, the call that expanded a template) are attached to the error.
+* Hover: the declaration line of a function or type, the type of a local, a field or an expression.
+* Go to Definition, within the document and into the modules it uses.
 * Format Document, the same result as `cyber fmt`.
 * Outline (types with their fields, functions, methods, constants, globals) and folding by indentation.
 

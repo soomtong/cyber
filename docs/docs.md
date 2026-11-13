@@ -4548,6 +4548,23 @@ for (size_t i = 0; i < count; i += 1) {
 A range can end on a later line than it starts. A token or parse error reports a position: its range is the code point there, or empty at the end of a line. 
 By default the compiler stops at its first error and the count is 0 or 1. `cl_vm_set_error_recovery(vm, true)` lets it go on: the main block, each function and each method is abandoned at its first error and the others are still checked, so every body reports at most one error. A syntax error or an error in a declaration (a type, a signature, a global) still ends the compile. The result is `CL_ERROR_COMPILE` either way and nothing is run. The summary and `cl_vm_compile_error` describe the first error.
 
+### Asking what a name is.
+For editor tooling, `cl_vm_set_symbol_info(vm, true)` makes the compiler record what the names in the main source refer to. After a compile, `cl_vm_symbol_at` describes what is at a byte offset:
+```c
+cl_vm_set_symbol_info(vm, true);
+cl_vm_validate(vm, src);
+
+CLSymbolInfo info;
+if (cl_vm_symbol_at(vm, pos, &info)) {
+    // `fn add(a int, b int) -> int`, `total int`, or the type of an expression.
+    printf("%.*s\n", (int)info.detail.len, info.detail.ptr);
+    if (info.has_def) {
+        // The declaration is at bytes `def_pos`..`def_end_pos` of the source `def_uri`.
+    }
+}
+```
+`detail` is the first line of the declaration for a function, a type, a constant or a global, `name Type` for a local, a parameter or a field, and the type for any other expression. The compile may have failed: what was resolved before the error is still answered. `detail` and `def_uri` are owned by the VM and stay valid until the next call, eval, compile, validate or reset. The language server `cyber-lsp` uses this for hover and go to definition.
+
 ### Checking a script without running it.
 `cl_vm_validate` compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (`persist_main`) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (`use math`) is initialized by the next eval that runs.
 ```c

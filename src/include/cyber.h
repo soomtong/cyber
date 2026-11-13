@@ -698,6 +698,40 @@ bool cl_vm_compile_report(CLVM* vm, size_t idx, CLReport* out);
 /// then the calls that expanded the template the error is in, innermost first. `kind` is `CL_REPORT_NOTE`.
 bool cl_vm_compile_report_note(CLVM* vm, size_t idx, size_t note_idx, CLReport* out);
 
+/// Whether the compiler records what the names in the main source refer to. Off by default, kept across
+/// `cl_vm_reset`. For editor tooling: see `cl_vm_symbol_at`.
+void cl_vm_set_symbol_info(CLVM* vm, bool enabled);
+
+/// What a name or an expression of the main source is, see `cl_vm_symbol_at`.
+typedef struct CLSymbolInfo {
+    /// The range of the name or expression, as byte offsets in the main source. `end_pos` is exclusive.
+    uint32_t pos;
+    uint32_t end_pos;
+
+    /// One line that describes it: the first line of the declaration (`fn add(a int, b int) -> int`),
+    /// `name Type` for a local or a field, the type for any other expression. Owned by the VM.
+    CLBytes detail;
+
+    /// Whether it has a declaration in a source. A builtin type has none.
+    bool has_def;
+
+    /// The source that declares it, as the compiler names it: the resolved uri of the module.
+    /// A standard module is embedded and has a name like `core`. Owned by the VM.
+    CLBytes def_uri;
+
+    /// The range of the declaration as byte offsets in that source: the name of a local or a field,
+    /// otherwise the whole declaration.
+    uint32_t def_pos;
+    uint32_t def_end_pos;
+} CLSymbolInfo;
+
+/// Describes what is at byte offset `pos` of the main source of the last `cl_vm_compile`, `cl_vm_validate` or
+/// `cl_vm_eval`, which has to have run with `cl_vm_set_symbol_info` on. The compile may have failed: what was
+/// resolved before the error is there. Returns false and zeroes `out` if nothing was recorded at `pos`.
+/// A position right after a name counts as the name. Only the main source is recorded, not the modules it uses.
+/// `detail` and `def_uri` stay valid until the next call of this function, eval, compile, validate or reset.
+bool cl_vm_symbol_at(CLVM* vm, uint32_t pos, CLSymbolInfo* out);
+
 // For embedded, Cyber by default uses malloc (it can be configured to use the high-perf mimalloc).
 // If the host uses a different allocator than Cyber, use `cl_vm_alloc` to allocate memory
 // that is handed over to Cyber so it knows how to free it.

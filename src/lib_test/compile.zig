@@ -984,6 +984,140 @@ test "With error recovery a template that failed to expand is reported once." {
     try zt.eqStr("Expected a value type for the parameter. `Shape` is a trait.", C.from_bytes(rep.msg));
 }
 
+test "cl_vm_symbol_at describes the names of the main source." {
+    // docs/specs/2026-11-12-lsp-design.md, P3.
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    const src =
+        \\use math
+        \\
+        \\type Vec2:
+        \\    x float
+        \\    y float
+        \\
+        \\fn (&Vec2) len() -> float:
+        \\    return math.sqrt(self.x * self.x + self.y * self.y)
+        \\
+        \\type Color enum:
+        \\    case red
+        \\    case green
+        \\
+        \\const limit = 10
+        \\
+        \\fn add(a int, b int) -> int:
+        \\    total := a + b
+        \\    return total + limit
+        \\
+        \\v := Vec2{x = 1.0, y = 2.0}
+        \\n := add(1, 2)
+        \\c := Color.green
+        \\print(v.len() + float(n))
+        \\s := 'abc'
+        \\print(s.len())
+    ;
+    const S = struct {
+        /// Asks at the `nth` occurrence of `needle` and checks the range, the description and the declaration.
+        fn expect(vm_: *C.VM, src_: []const u8, needle: []const u8, nth: usize, detail: []const u8, def: ?[]const u8) !void {
+            var pos: usize = 0;
+            var n: usize = 0;
+            while (true) : (n += 1) {
+                pos = std.mem.findPos(u8, src_, pos, needle).?;
+                if (n == nth) break;
+                pos += 1;
+            }
+            var info: C.SymbolInfo = undefined;
+            try zt.expect(C.vm_symbol_at(vm_, @intCast(pos), &info));
+            // `needle` starts with the name and can go on to tell one occurrence from another.
+            try zt.eq(@as(u32, @intCast(pos)), info.pos);
+            try zt.expect(std.mem.startsWith(u8, needle, src_[info.pos..info.end_pos]));
+            try zt.eqStr(detail, C.from_bytes(info.detail));
+            if (def) |text| {
+                try zt.expect(info.has_def);
+                try zt.eqStr("main", C.from_bytes(info.def_uri));
+                try zt.eqStr(text, src_[info.def_pos..info.def_end_pos]);
+            }
+            // The position right after the name finds it too.
+            var after: C.SymbolInfo = undefined;
+            try zt.expect(C.vm_symbol_at(vm_, info.end_pos, &after));
+            try zt.eq(info.pos, after.pos);
+        }
+    };
+
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+    var info: C.SymbolInfo = undefined;
+
+    // Off by default: nothing is recorded.
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    try zt.expect(!C.vm_symbol_at(vm, 5, &info));
+    try zt.eq(@as(usize, 0), info.detail.len);
+
+    C.vm_set_symbol_info(vm, true);
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+
+    // A local, at its declaration and at a use. Its type is the one that was inferred.
+    try S.expect(vm, src, "total", 0, "total int", "total");
+    try S.expect(vm, src, "total", 1, "total int", "total");
+    try S.expect(vm, src, "v", 0, "v Vec2", "v");
+    // A parameter.
+    try S.expect(vm, src, "a + b", 0, "a int", "a");
+    try S.expect(vm, src, "self", 0, "self &Vec2", null);
+    // A field is declared by its name in the type.
+    try S.expect(vm, src, "x *", 0, "x float", "x");
+    // Functions, methods, types, constants: the first line of the declaration.
+    try S.expect(vm, src, "add(1", 0, "fn add(a int, b int) -> int", "fn add(a int, b int) -> int:\n    total := a + b\n    return total + limit");
+    try S.expect(vm, src, "len()", 1, "fn (&Vec2) len() -> float", null);
+    try S.expect(vm, src, "Vec2{", 0, "type Vec2", "type Vec2:\n    x float\n    y float");
+    try S.expect(vm, src, "limit", 1, "const limit = 10", "const limit = 10");
+    try S.expect(vm, src, "Color.", 0, "type Color enum", null);
+    try S.expect(vm, src, "green", 1, "case Color.green", null);
+
+    // A name from a module is declared in that module. Attributes are not part of the description.
+    var pos: u32 = @intCast(std.mem.find(u8, src, "sqrt").?);
+    try zt.expect(C.vm_symbol_at(vm, pos, &info));
+    try zt.eqStr("fn sqrt(a float) -> float", C.from_bytes(info.detail));
+    try zt.expect(info.has_def);
+    try zt.eqStr("math", C.from_bytes(info.def_uri));
+    pos = @intCast(std.mem.find(u8, src, "math.").?);
+    try zt.expect(C.vm_symbol_at(vm, pos, &info));
+    try zt.eqStr("module math", C.from_bytes(info.detail));
+    pos = @intCast(std.mem.find(u8, src, "s.len()").? + 2);
+    try zt.expect(C.vm_symbol_at(vm, pos, &info));
+    try zt.eqStr("fn (&str) len() -> int", C.from_bytes(info.detail));
+    try zt.eqStr("core", C.from_bytes(info.def_uri));
+
+    // Any other expression has its type. The smallest expression at the position is taken.
+    pos = @intCast(std.mem.find(u8, src, "1.0").?);
+    try zt.expect(C.vm_symbol_at(vm, pos, &info));
+    try zt.eqStr("1.0", src[info.pos..info.end_pos]);
+    try zt.eqStr("float", C.from_bytes(info.detail));
+    try zt.expect(!info.has_def);
+    pos = @intCast(std.mem.find(u8, src, "+ limit").?);
+    try zt.expect(C.vm_symbol_at(vm, pos, &info));
+    try zt.eqStr("total + limit", src[info.pos..info.end_pos]);
+    try zt.eqStr("int", C.from_bytes(info.detail));
+
+    // Nothing at a keyword or past the end.
+    try zt.expect(!C.vm_symbol_at(vm, 0, &info));
+    try zt.expect(!C.vm_symbol_at(vm, @intCast(src.len + 10), &info));
+
+    // A compile that fails keeps what was resolved before the error.
+    const bad = "fn add(a int, b int) -> int:\n    return a + b\nn := add(1, 2)\nprint(n + nope)";
+    try zt.eq(C.ErrorCompile, C.vm_compile(vm, "main", bad, config));
+    pos = @intCast(std.mem.find(u8, bad, "add(1").?);
+    try zt.expect(C.vm_symbol_at(vm, pos, &info));
+    try zt.eqStr("fn add(a int, b int) -> int", C.from_bytes(info.detail));
+    pos = @intCast(std.mem.find(u8, bad, "nope").?);
+    try zt.expect(!C.vm_symbol_at(vm, pos, &info));
+
+    // The references are those of the last compile.
+    try zt.eq(C.Success, C.vm_compile(vm, "main", "a := 1", config));
+    try zt.expect(C.vm_symbol_at(vm, 0, &info));
+    try zt.eqStr("a int", C.from_bytes(info.detail));
+    try zt.expect(!C.vm_symbol_at(vm, 40, &info));
+}
+
 test "Error summaries are empty when there is no error." {
     // `cl_vm_compile_error_summary` and `cl_thread_panic_summary` used to end the host process when asked
     // without an error, and a script could ask through `cy.VM` (F-52).

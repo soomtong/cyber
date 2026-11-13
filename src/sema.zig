@@ -2622,6 +2622,9 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
     type_ = type_.getBaseType();
     const mod = type_.sym().getMod();
 
+    if (c.compiler.record_refs) {
+        if (mod.getSym(name)) |member| cy.refs.recordSym(c, field, name, member);
+    }
     const sym = mod.getSym(name) orelse {
         if (type_.has_embeddings()) {
             if (try get_embedded_sym(c, type_.cast(.struct_t), name, @ptrCast(field))) |embedded_res| {
@@ -4172,6 +4175,7 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
         var_t = right.type;
         c.varStack.items[var_idx].decl_t = right.type;
         declare.cast(.declare_local).decl_t = var_t;
+        if (c.compiler.record_refs) cy.refs.recordLocalType(c, &c.varStack.items[var_idx]);
     }
     if (var_t.info.borrow_only and c.vm.config.persist_main and c.proc().func == null and c.semaBlocks.items.len == 1) {
         // Top level locals are carried over to the next eval by moving their values into new stack slots.
@@ -4269,6 +4273,7 @@ fn semaMainResultStmt(c: *cy.Chunk, node: *ast.Node) !void {
     svar = &c.varStack.items[var_idx];
     svar.decl_t = right.type;
     declare.cast(.declare_local).decl_t = right.type;
+    if (c.compiler.record_refs) cy.refs.recordLocalType(c, svar);
     svar.type = .local;
     if (var_start == c.varStack.items.len and !init_after_aux) {
         declare.cast(.declare_local).init = right.ir;
@@ -5862,6 +5867,9 @@ fn pushLocalVar(c: *cy.Chunk, _type: LocalVarType, name: []const u8, declType: *
             }},
         });
     }
+    if (c.compiler.record_refs and !hidden) {
+        cy.refs.recordLocalDecl(c, name, declType);
+    }
     try c.varStack.append(c.alloc, .{
         .decl_t = declType,
         .lifetime = Lifetime.initBlock(@intCast(proc.block_depth)),
@@ -5974,8 +5982,23 @@ const LookupIdentResult = union(enum) {
 /// Static var lookup is skipped for callExpr since there is a chance it can fail on a
 /// symbol with overloaded signatures.
 pub fn lookupIdent(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdentResult {
+    const res = try lookupIdent2(self, name, node);
+    if (self.compiler.record_refs) {
+        switch (res) {
+            .local => |id| {
+                const local = &self.varStack.items[id];
+                cy.refs.recordLocalUse(self, node, local.decl_t, local.namePtr[0..local.nameLen]);
+            },
+            .static => |sym| cy.refs.recordSym(self, node, name, sym),
+            else => {},
+        }
+    }
+    return res;
+}
+
+fn lookupIdent2(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdentResult {
     if (self.semaProcs.items.len == 0) {
-        return (try lookupStaticIdent(self, name, node)) orelse {
+        return (try lookupStaticIdent2(self, name, node)) orelse {
             return self.reportErrorFmt("Could not find the symbol `{}`.", &.{v(name)}, node);
         };
     }
@@ -6017,7 +6040,7 @@ pub fn lookupIdent(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupId
         };
     }
 
-    if (try lookupStaticIdent(self, name, node)) |res| {
+    if (try lookupStaticIdent2(self, name, node)) |res| {
         return res;
     }
 
@@ -6033,6 +6056,16 @@ pub fn lookupIdent(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupId
 }
 
 pub fn lookupStaticIdent(c: *cy.Chunk, name: []const u8, node: *ast.Node) !?LookupIdentResult {
+    const res = try lookupStaticIdent2(c, name, node);
+    if (c.compiler.record_refs) {
+        if (res) |found| {
+            if (found == .static) cy.refs.recordSym(c, node, name, found.static);
+        }
+    }
+    return res;
+}
+
+fn lookupStaticIdent2(c: *cy.Chunk, name: []const u8, node: *ast.Node) !?LookupIdentResult {
     const res = (try getResolvedName(c, name, node)) orelse {
         return null;
     };
@@ -7511,6 +7544,9 @@ pub fn semaExpr(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
     const res = try c.semaExprNoCheck(node, cstr);
     if (cy.Trace) {
         log.tracev("expr.{s}: end {s}", .{@tagName(node.type()), res.type.name()});
+    }
+    if (c.compiler.record_refs) {
+        cy.refs.recordExpr(c, node, res.type);
     }
     if (c.compiler.config.deny_raw_ptrs) {
         try check_raw_ptr(c, res.type, node);
@@ -9267,6 +9303,7 @@ fn semaInitLocal(c: *cy.Chunk, id: LocalId, init: ExprResult, node: *ast.Node) !
     local.inner.local.declIrStart = loc;
     local.decl_t = init.type;
     local.type = .local;
+    if (c.compiler.record_refs) cy.refs.recordLocalType(c, local);
 }
 
 pub fn semaPtrOrType(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {

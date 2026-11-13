@@ -1664,6 +1664,8 @@ pub const Node = struct {
             .template       => self.cast(.template).child_decl.end(),
             .trait_decl     => {
                 const decl = self.cast(.trait_decl);
+                // A marker trait has no functions (`type NoCopy trait`).
+                if (decl.funcs.len == 0) return decl.name.end();
                 const func: *Node = @ptrCast(decl.funcs.ptr[decl.funcs.len-1]);
                 return func.end();
             },

@@ -6,6 +6,9 @@
 
 ## 버그 수정
 
+- 함수가 없는 트레이트(`type NoCopy trait`)의 선언 노드에서 끝 위치를 구하면 컴파일러가 abort했다(F-115, safe 빌드는
+  `integer overflow`). 그 선언을 가리키는 컴파일 오류의 요약과 `cl_vm_compile_report`가 해당된다. 이름의 끝을 돌려준다.
+
 - 컴파일 타임 호출에 문자열 인자를 주면 컴파일러가 호스트를 끝냈다(F-112). `#print('hello')`는 `panic: Unsupported: .eval_ref`,
   `fn f(x %T)`를 `#a := f('abc')`로 평가하면 `Double free`였다(Release 빌드에서는 해제된 메모리를 다시 해제). `type.info`가
   지원하지 않는 타입은 이제 ``` `type.info` does not support the type `EvalStr`. ``` 컴파일 오류이고, 제네릭 함수의 컴파일 타임
@@ -17,6 +20,12 @@
 ## 언어와 표준 라이브러리
 
 ## 임베딩 API
+
+- `cl_vm_set_symbol_info(vm, true)`를 켜고 컴파일하면 `cl_vm_symbol_at(vm, pos, &info)`가 main 소스의 바이트 오프셋 `pos`에 있는
+  이름이나 식을 설명한다(에디터의 hover · 정의로 이동용, 기본 꺼짐). `CLSymbolInfo.detail`은 한 줄이다: 선언의 첫 줄
+  (`fn add(a int, b int) -> int`), 지역 · 매개변수 · 필드는 `이름 타입`, 그 밖의 식은 타입. `has_def` · `def_uri` · `def_pos` ·
+  `def_end_pos`는 선언의 위치다(표준 모듈이면 `def_uri`가 `core` 같은 이름). 컴파일이 실패해도 오류 전에 해석된 것은 답한다.
+  main 소스만 기록한다. 설계는 `docs/specs/2026-11-12-lsp-design.md` 8절.
 
 - `cl_vm_set_error_recovery(vm, true)`를 켜면 컴파일러가 오류 뒤에도 계속해 여러 오류를 낸다(기본은 꺼짐, `cl_vm_reset`을 넘어 유지).
   본문(main 블록 · 함수 · 메서드 · 함수 템플릿 인스턴스) 하나가 첫 오류에서 버려지고 나머지 본문은 검사된다. 본문당 오류는 하나다.
@@ -37,7 +46,7 @@
 - 언어 서버 `cyber-lsp`를 더했다(`zig build lsp`, `task build:lsp`). CLI와 같이 `libcyber` 위의 별도 프로그램이고 stdin · stdout으로
   Language Server Protocol을 말한다. 문서를 실행 없이 프로그램으로 컴파일해 컴파일 오류를 진단으로 내고(`First declared at:` ·
   템플릿 확장 호출 지점은 관련 정보), `cyber fmt`와 같은 결과의 문서 포맷, 개요(타입 · 필드 · 함수 · 메서드 · 상수 · 전역),
-  들여쓰기 기준 접기를 준다. 편집기에 열린 모듈은 디스크가 아니라 편집기의 내용으로 읽는다. 위치는 클라이언트가 `utf-8`을
+  들여쓰기 기준 접기, hover(선언의 첫 줄 또는 `이름 타입`), 정의로 이동을 준다. 편집기에 열린 모듈은 디스크가 아니라 편집기의 내용으로 읽는다. 위치는 클라이언트가 `utf-8`을
   받으면 바이트, 아니면 UTF-16이다. 오류 복구를 켜서 본문(main 블록 · 함수 · 메서드)마다 첫 오류를 진단으로 낸다. 검사 한 번은 ReleaseFast에서 약 5ms다.
   설계와 단계는 `docs/specs/2026-11-12-lsp-design.md`(P1). 릴리스 번들에는 아직 넣지 않는다.
 - `exts/vscode`가 `cyber-lsp`의 클라이언트가 됐다(`vscode-languageclient`, 설정 `cyber.lsp.enabled` · `cyber.lsp.path`, 명령

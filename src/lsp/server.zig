@@ -81,6 +81,9 @@ pub const Server = struct {
 
     docs: std.StringHashMapUnmanaged(*Document) = .empty,
 
+    /// The document that the VM compiled last, while no document changed since. Its symbol info can be asked.
+    compiled: ?*Document = null,
+
     /// Bodies of the messages to send, in order. Owned by the server until `takeOutput`.
     out: std.ArrayList([]u8) = .empty,
 
@@ -106,6 +109,8 @@ pub const Server = struct {
         c.vm_set_logger(vm, dropLog);
         // One diagnostic per body that has an error, not one per document.
         c.vm_set_error_recovery(vm, true);
+        // Hover and go to definition ask the compiler what a name refers to.
+        c.vm_set_symbol_info(vm, true);
         c.vm_set_resolver(vm, resolver);
         c.vm_set_loader(vm, loader);
         active = self;
@@ -209,6 +214,10 @@ pub const Server = struct {
             try self.onDocumentSymbol(arena, id, params);
         } else if (std.mem.eql(u8, method, "textDocument/foldingRange")) {
             try self.onFoldingRange(arena, id, params);
+        } else if (std.mem.eql(u8, method, "textDocument/hover")) {
+            try self.onHover(id, params);
+        } else if (std.mem.eql(u8, method, "textDocument/definition")) {
+            try self.onDefinition(arena, id, params);
         } else if (id != null) {
             try self.replyError(id, ErrorCode.method_not_found, "The method is not supported.");
         }
@@ -263,6 +272,10 @@ pub const Server = struct {
             try jw.write(true);
             try jw.objectField("foldingRangeProvider");
             try jw.write(true);
+            try jw.objectField("hoverProvider");
+            try jw.write(true);
+            try jw.objectField("definitionProvider");
+            try jw.write(true);
             try jw.endObject();
 
             try jw.objectField("serverInfo");
@@ -307,6 +320,7 @@ pub const Server = struct {
         var iter = self.docs.valueIterator();
         while (iter.next()) |other| other.*.dirty = true;
 
+        self.compiled = null;
         if (self.docs.get(uri)) |doc| {
             const new_text = try self.alloc.dupe(u8, text);
             self.alloc.free(doc.text);
@@ -331,6 +345,7 @@ pub const Server = struct {
         const uri = getStr(getPath(params, &.{"textDocument"}) orelse return error.InvalidParams, "uri") orelse return error.InvalidParams;
         const entry = self.docs.fetchRemove(uri) orelse return;
         const doc = entry.value;
+        self.compiled = null;
         defer {
             doc.deinit(self.alloc);
             self.alloc.destroy(doc);
@@ -368,9 +383,7 @@ pub const Server = struct {
 
         // The document is checked as a program of its own. The VM is reset first, so one check leaves
         // nothing behind for the next. Nothing is run and no code is generated.
-        var config = c.defaultCompileConfig();
-        config.skip_codegen = true;
-        const code = c.vm_compile(self.vm, doc.path, doc.text, config);
+        const code = self.compile(doc);
 
         var groups: std.ArrayList(Group) = .empty;
         try groups.append(arena, .{ .uri = doc.uri });
@@ -468,6 +481,106 @@ pub const Server = struct {
             errdefer self.alloc.free(dup);
             try doc.related.append(self.alloc, dup);
         }
+    }
+
+    fn compile(self: *Server, doc: *Document) c.ResultCode {
+        var config = c.defaultCompileConfig();
+        config.skip_codegen = true;
+        const code = c.vm_compile(self.vm, doc.path, doc.text, config);
+        self.compiled = doc;
+        return code;
+    }
+
+    /// What is at a position of a document, from the compiler. The VM holds one compile: if it is not the one
+    /// of this document, the document is compiled again first.
+    fn symbolAt(self: *Server, params: Value, out: *c.SymbolInfo) !?*Document {
+        const doc = try self.docOf(params);
+        const pos_v = getPath(params, &.{"position"}) orelse return error.InvalidParams;
+        const line = getInt(pos_v, "line") orelse return error.InvalidParams;
+        const character = getInt(pos_v, "character") orelse return error.InvalidParams;
+        if (line < 0 or character < 0) return error.InvalidParams;
+        const offset = position.toOffset(doc.text, .{
+            .line = std.math.cast(u32, line) orelse return error.InvalidParams,
+            .character = std.math.cast(u32, character) orelse return error.InvalidParams,
+        }, self.encoding);
+
+        if (self.compiled != doc) {
+            _ = self.compile(doc);
+        }
+        if (!c.vm_symbol_at(self.vm, @intCast(offset), out)) return null;
+        return doc;
+    }
+
+    /// The text of a source that the compiler names `path`, to convert offsets in it. Null if it can not be read.
+    fn sourceOf(self: *Server, arena: std.mem.Allocator, doc: *Document, path: []const u8) ?[]const u8 {
+        if (path.len == 0 or std.mem.eql(u8, path, doc.path)) return doc.text;
+        if (self.docByPath(path)) |other| return other.text;
+        if (!std.Io.Dir.path.isAbsolute(path)) return null;
+        return std.Io.Dir.cwd().readFileAlloc(stdx.io(), path, arena, .limited(1 << 26)) catch null;
+    }
+
+    fn onHover(self: *Server, id: ?Value, params: Value) !void {
+        var info: c.SymbolInfo = undefined;
+        const doc = (try self.symbolAt(params, &info)) orelse return self.replyNull(id);
+
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginObject();
+        try jw.objectField("contents");
+        try jw.beginObject();
+        try jw.objectField("kind");
+        try jw.write("markdown");
+        try jw.objectField("value");
+        const value = try std.fmt.allocPrint(self.alloc, "```cyber\n{s}\n```", .{c.from_bytes(info.detail)});
+        defer self.alloc.free(value);
+        try jw.write(value);
+        try jw.endObject();
+        try jw.objectField("range");
+        try writeRange(jw, .{
+            .start = position.fromOffset(doc.text, info.pos, self.encoding),
+            .end = position.fromOffset(doc.text, info.end_pos, self.encoding),
+        });
+        try jw.endObject();
+        try jw.endObject();
+        try self.send(&b);
+    }
+
+    fn onDefinition(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
+        var info: c.SymbolInfo = undefined;
+        const doc = (try self.symbolAt(params, &info)) orelse return self.replyNull(id);
+        if (!info.has_def) return self.replyNull(id);
+        // A declaration in a standard module has no document to go to.
+        const path = c.from_bytes(info.def_uri);
+        const src = self.sourceOf(arena, doc, path) orelse return self.replyNull(id);
+        if (info.def_end_pos > src.len) return self.replyNull(id);
+        const uri = if (std.mem.eql(u8, path, doc.path))
+            doc.uri
+        else if (self.docByPath(path)) |other|
+            other.uri
+        else
+            try pathToUri(arena, path);
+
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginObject();
+        try jw.objectField("uri");
+        try jw.write(uri);
+        try jw.objectField("range");
+        try writeRange(jw, .{
+            .start = position.fromOffset(src, info.def_pos, self.encoding),
+            .end = position.fromOffset(src, info.def_end_pos, self.encoding),
+        });
+        try jw.endObject();
+        try jw.endObject();
+        try self.send(&b);
     }
 
     fn groupOf(arena: std.mem.Allocator, groups: *std.ArrayList(Group), uri: []const u8) !*Group {

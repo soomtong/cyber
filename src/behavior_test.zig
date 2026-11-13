@@ -406,8 +406,11 @@ if (!aot) {
     run.case("concurrency/fiber_panic.cy");
     run.case("concurrency/future_wait_any.cy");
     run.case("concurrency/future_wait_any_empty_panic.cy");
-    if (!is_wasm) {
+    // The test sleeps with `os.sleep`, which calls an extern function.
+    if (!is_wasm and test_config.ffi) {
         run.case("concurrency/fiber_await_spawn.cy");
+    }
+    if (!is_wasm) {
         run.case("concurrency/spawn.cy");
     }
 }

@@ -410,3 +410,155 @@ test "Multiple evals with same VM." {
     res = C.vm_eval(vm, src, &eval_res);
     try zt.eq(C.Success, res);
 }
+
+test "A compile that fails leaves no state that the next compile trips on." {
+    // tars-agent M0: a closure that captures a local fails to compile, and the next compile of the same VM
+    // crashed. A host module whose source fails to compile crashed the third eval that used it.
+    const S = struct {
+        fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+            if (std.mem.eql(u8, C.from_bytes(uri), "badmod")) {
+                res[0].src = C.to_bytes(
+                    \\fn read(path str) -> !str:
+                    \\    return undefined_thing
+                );
+                return true;
+            }
+            return C.default_loader(vm_, mod, uri, res);
+        }
+    };
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var res: C.EvalResult = undefined;
+    const bad = [_][]const u8{
+        // A closure that captures a local. The instance of `sort` is made, its body is not checked.
+        \\names := []str{'a', 'b'}
+        \\counts := Map[str, int]{}
+        \\names.sort(|a, b| counts[a] > counts[b])
+        ,
+        // New template instances, then an error in the main block.
+        \\m := Map[int, str]{}
+        \\m[1] = 'a'
+        \\l := []float{1.0}
+        \\l.sort(|a, b| a < b)
+        \\_ = nope
+        ,
+        // An error in a function body after the main block expanded templates.
+        \\type P:
+        \\    a int
+        \\fn f() -> int:
+        \\    return nope
+        \\ps := []P{P{a=1}}
+        \\o := ?[]str(none)
+        \\_ = f()
+        ,
+        // A syntax error.
+        \\x := (
+        ,
+        // A module with extern functions, loaded first by the failed compile.
+        \\use math
+        \\_ = math.sqrt(4.0) + nope
+    };
+    const good = [_][]const u8{
+        \\counts := Map[str, int]{}
+        \\counts['a'] = 1
+        \\print(counts['a'])
+        ,
+        \\use test
+        \\names := []str{'b', 'a'}
+        \\names.sort(|a, b| a.less(b))
+        \\test.eq(names[0], 'a')
+        ,
+        \\use test
+        \\m := Map[int, str]{}
+        \\m[1] = 'a'
+        \\l := []float{2.0, 1.0}
+        \\l.sort(|a, b| a < b)
+        \\test.eq(l[0], 1.0)
+        \\test.eq(m[1], 'a')
+        ,
+        \\use test
+        \\o := ?[]str(none)
+        \\test.eq(o == none, true)
+        \\type P:
+        \\    a int
+        \\ps := []P{P{a=1}}
+        \\test.eq(ps[0].a, 1)
+        ,
+        \\use test
+        \\use math
+        \\test.eq(math.sqrt(4.0), 2.0)
+    };
+
+    for ([_]bool{ true, false }) |persist| {
+        var config = C.defaultEvalConfig();
+        config.persist_main = persist;
+        // One session for each failure, after a first eval that succeeds: a failed first compile resets the VM.
+        for (bad) |b| {
+            const vm = C.vm_initx(zt.alloc);
+            defer C.vm_deinit(vm);
+            try zt.eq(C.Success, C.vm_evalx(vm, "main", "_ = 1", config, &res));
+            for (good) |g| {
+                try zt.eq(C.ErrorCompile, C.vm_validate(vm, b));
+                try zt.eq(C.Success, C.vm_validate(vm, g));
+                try zt.eq(C.Success, C.vm_evalx(vm, "main", g, config, &res));
+                try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", b, config, &res));
+                try zt.eq(C.Success, C.vm_evalx(vm, "main", g, config, &res));
+            }
+            // Failures in a row.
+            for (bad) |b2| {
+                try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", b2, config, &res));
+            }
+            for (good) |g| {
+                try zt.eq(C.Success, C.vm_evalx(vm, "main", g, config, &res));
+            }
+        }
+        // A host module that fails to compile.
+        const vm = C.vm_initx(zt.alloc);
+        defer C.vm_deinit(vm);
+        C.vm_set_loader(vm, @ptrCast(&S.loader));
+        for (0..4) |_| {
+            try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "use badmod\nprint(badmod.read('x')!)", config, &res));
+            try zt.eq(C.Success, C.vm_evalx(vm, "main", "_ = 1 + 2", config, &res));
+        }
+    }
+}
+
+
+test "A template instance that a failed compile left behind and that does not compile fails no later compile." {
+    // `Map[[]int, int]` has no hash for its key. After an error ahead of it, its body was never checked, and
+    // the next compile, which does not use it, must not report its error.
+    C.setSilent(true);
+    defer C.setSilent(false);
+    var res: C.EvalResult = undefined;
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    const Step = struct { src: []const u8, code: C.ResultCode };
+    const seqs = [_][]const Step{
+        &.{
+            .{ .src = "_ = 1", .code = C.Success },
+            .{ .src = "m := Map[[]int, int]{}", .code = C.ErrorCompile },
+            .{ .src = "_ = 2", .code = C.Success },
+            .{ .src = "m := Map[[]int, int]{}", .code = C.ErrorCompile },
+            .{ .src = "_ = 3", .code = C.Success },
+        },
+        &.{
+            .{ .src = "_ = 1", .code = C.Success },
+            .{ .src = "m := Map[[]int, int]{}\n_ = nope", .code = C.ErrorCompile },
+            .{ .src = "_ = 2", .code = C.Success },
+        },
+        &.{
+            .{ .src = "_ = 1", .code = C.Success },
+            .{ .src = "m := Map[[]int, int]{}\n_ = nope", .code = C.ErrorCompile },
+            .{ .src = "m := Map[[]int, int]{}", .code = C.ErrorCompile },
+            .{ .src = "_ = 3", .code = C.Success },
+        },
+    };
+    for (seqs) |seq| {
+        const vm = C.vm_initx(zt.alloc);
+        defer C.vm_deinit(vm);
+        for (seq) |step| {
+            try zt.eq(step.code, C.vm_evalx(vm, "main", step.src, config, &res));
+        }
+    }
+}

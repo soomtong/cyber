@@ -162,6 +162,16 @@ pub const Compiler = struct {
     chunk_start: u32,
     type_start: u32,
 
+    /// What a failed compile made that later compiles can still reach: instances of templates declared in
+    /// surviving chunks, with arguments from surviving chunks, and the functions and types that belong to them.
+    /// They sit in the template caches (`sort[str]`) and in fields of surviving types (`copy_ctor`), but the
+    /// chunks that hold them are not compiled again, so their bodies were never checked or generated.
+    /// The next compile checks and generates them in its main chunk. The chunks that own them still destroy them.
+    carry_funcs: std.ArrayListUnmanaged(*cy.Func) = .empty,
+    carry_syms: std.ArrayListUnmanaged(*cy.Sym) = .empty,
+    /// The body of a carried function failed in this compile (`semaCarriedFuncs`).
+    carried_failed: bool = false,
+
     c_includes: std.ArrayList([]const u8),
     c_flags: std.ArrayList([]const u8),
 
@@ -216,6 +226,14 @@ pub const Compiler = struct {
     }
 
     pub fn deinit(self: *Compiler, comptime reset: bool) void {
+        // The chunks own what the lists point to.
+        if (reset) {
+            self.carry_funcs.clearRetainingCapacity();
+            self.carry_syms.clearRetainingCapacity();
+        } else {
+            self.carry_funcs.deinit(self.alloc);
+            self.carry_syms.deinit(self.alloc);
+        }
         self.await_buf.clearAndFree(self.alloc);
         self.await_any = &.{};
         self.vm.log_tracev("Deinit compiler reset={}", .{reset});
@@ -359,9 +377,6 @@ pub const Compiler = struct {
         self.compiling = true;
         defer self.compiling = false;
         
-        self.chunk_start = @intCast(self.chunks.items.len);
-        self.type_start = @intCast(self.sema.types.items.len);
-
         // The copy-and-patch JIT was removed. See docs/decisions/project_direction.md.
         if (config.backend == C.BackendJIT) {
             _ = try self.addReportFmt(.compile_err, "The JIT backend is not supported. Use the bytecode VM (default) or the C backend (-tcc, -cc).", &.{}, null, 0);
@@ -375,42 +390,109 @@ pub const Compiler = struct {
         const failed_allocs = if (acct) |a| a.failed.load(.monotonic) else 0;
         self.failed_allocs_at_start = failed_allocs;
         self.host_error = null;
-        const res = self.compileInner2(uri, src, config) catch |err_| {
-            // A callback that could not return its error ended the compile with a bare `CompileError` or null.
-            const err = self.host_error orelse err_;
-            self.last_compile_failed = true;
-            // A refused allocation can surface as any error, including a compile error reported by a comptime
-            // function (`error.OutOfMemory`), so the allocator is asked rather than the error.
-            if (err != error.CompileError or (acct != null and acct.?.failed.load(.monotonic) != failed_allocs)) {
-                self.alloc_failed = true;
-            }
-            // A failed first compile leaves core types, the core chunk and a main chunk half built while `cont`
-            // stays false. Compiling again on top of that loaded core twice (SIGSEGV after a syntax error,
-            // `@program_init has already been declared` after a sema error, F-04). `VM.eval` resets the VM first.
-            if (first_compile) {
-                self.first_compile_failed = true;
-            }
-            if (dumpCompileErrorStackTrace and !C.silent()) {
-                std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);
-            }
-            if (err == error.CompileError) {
-                return err;
-            }
-            // Without memory for the report the compile still ends in a compile error. Its summary is empty.
-            if (self.chunks.items.len > 0) {
-                // Report other errors using the main chunk.
-                _ = self.main_chunk.addReportFmt("Error: {}", &.{v(err)}, null) catch 0;
-                return error.CompileError;
-            } else {
-                _ = self.addReportFmt(.compile_err, "Error: {}", &.{v(err)}, null, 0) catch 0;
-                return error.CompileError;
-            }
+        var attempts: u32 = 0;
+        const res = while (true) {
+            self.chunk_start = @intCast(self.chunks.items.len);
+            self.type_start = @intCast(self.sema.types.items.len);
+            self.carried_failed = false;
+            break self.compileInner2(uri, src, config) catch |err_| {
+                // A callback that could not return its error ended the compile with a bare `CompileError` or null.
+                const err = self.host_error orelse err_;
+                self.last_compile_failed = true;
+                // A refused allocation can surface as any error, including a compile error reported by a comptime
+                // function (`error.OutOfMemory`), so the allocator is asked rather than the error.
+                if (err != error.CompileError or (acct != null and acct.?.failed.load(.monotonic) != failed_allocs)) {
+                    self.alloc_failed = true;
+                }
+                // A failed first compile leaves core types, the core chunk and a main chunk half built while `cont`
+                // stays false. Compiling again on top of that loaded core twice (SIGSEGV after a syntax error,
+                // `@program_init has already been declared` after a sema error, F-04). `VM.eval` resets the VM first.
+                if (first_compile) {
+                    self.first_compile_failed = true;
+                } else if (!self.alloc_failed) {
+                    // The session goes on. What the failed compile left in caches is completed by the next compile.
+                    self.carryFailedCompile() catch {
+                        self.alloc_failed = true;
+                    };
+                    // The body of a template instance that an earlier failed compile left behind does not compile
+                    // (`Map[[]int, int]` after an error ahead of it). The instance is marked failed and no longer
+                    // carried. The error is not this source's, so the source is compiled again without it. Each
+                    // attempt fails at least one more instance, and only instances that failed compiles made.
+                    if (self.carried_failed and !self.alloc_failed and attempts < max_carry_attempts) {
+                        attempts += 1;
+                        self.clearReports();
+                        continue;
+                    }
+                }
+                if (dumpCompileErrorStackTrace and !C.silent()) {
+                    std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);
+                }
+                if (err == error.CompileError) {
+                    return err;
+                }
+                // Without memory for the report the compile still ends in a compile error. Its summary is empty.
+                if (self.chunks.items.len > 0) {
+                    // Report other errors using the main chunk.
+                    _ = self.main_chunk.addReportFmt("Error: {}", &.{v(err)}, null) catch 0;
+                    return error.CompileError;
+                } else {
+                    _ = self.addReportFmt(.compile_err, "Error: {}", &.{v(err)}, null, 0) catch 0;
+                    return error.CompileError;
+                }
+            };
         };
 
         // Successful.
         self.cont = true;
         self.last_compile_failed = false;
+        if (!config.skip_codegen) {
+            // Checked and generated by this compile.
+            self.carry_funcs.clearRetainingCapacity();
+            self.carry_syms.clearRetainingCapacity();
+        }
         return res;
+    }
+
+    /// Called after a compile failed in a session that goes on (not the first compile, no refused allocation).
+    /// The failed compile's chunks are not compiled again: its main chunk is replaced by the next one, and a
+    /// module that it loaded first leaves the module cache, so the next `use` loads it again. What it added to
+    /// surviving chunks stays reachable, though: a template declared in a surviving chunk keeps the instances
+    /// it expanded (`sort[str]`), and a surviving type keeps the functions derived for it (`copy_ctor`). Their
+    /// bodies were checked in a chunk that is gone, or not at all, and no code was generated for them. They are
+    /// collected here and completed by the next compile (`carry_funcs`, `carry_syms`).
+    fn carryFailedCompile(self: *Compiler) !void {
+        const start = self.chunk_start;
+        const type_start = self.type_start;
+        var funcs: std.ArrayListUnmanaged(*cy.Func) = .empty;
+        errdefer funcs.deinit(self.alloc);
+        var syms: std.ArrayListUnmanaged(*cy.Sym) = .empty;
+        errdefer syms.deinit(self.alloc);
+
+        // Carried by an earlier failed compile and not completed since.
+        for (self.carry_funcs.items) |func| {
+            if (carryFunc(func, start, type_start)) try funcs.append(self.alloc, func);
+        }
+        for (self.carry_syms.items) |sym| {
+            if (survives(sym, start, type_start, 0)) try syms.append(self.alloc, sym);
+        }
+        for (self.newChunks()) |chunk| {
+            if (chunk != self.main_chunk and !chunk.evicted) {
+                if (self.chunk_map.get(chunk.srcUri)) |cached| {
+                    if (cached == chunk) _ = self.chunk_map.remove(chunk.srcUri);
+                }
+                chunk.evicted = true;
+            }
+            for (chunk.funcs.items) |func| {
+                if (carryFunc(func, start, type_start)) try funcs.append(self.alloc, func);
+            }
+            for (chunk.syms.items) |sym| {
+                if (sym.type == .type and survives(sym, start, type_start, 0)) try syms.append(self.alloc, sym);
+            }
+        }
+        self.carry_funcs.deinit(self.alloc);
+        self.carry_funcs = funcs;
+        self.carry_syms.deinit(self.alloc);
+        self.carry_syms = syms;
     }
 
     fn compileInner2(self: *Compiler, uri: []const u8, src_opt: ?[]const u8, config: C.CompileConfig) !CompileResult {
@@ -480,6 +562,10 @@ pub const Compiler = struct {
                     if ((self.last_compile_failed or self.main_discarded) and sym.type != .use_alias) {
                         continue;
                     }
+                    // A module that a failed compile loaded first is loaded again by the next `use`.
+                    if (sym.type == .use_alias and aliasesEvicted(sym.cast(.use_alias))) {
+                        continue;
+                    }
 
                     const resolved = switch (sym.type) {
                         .type => b: {
@@ -529,6 +615,12 @@ pub const Compiler = struct {
             try resolveChunkSyms(chunk);
         }
 
+        // Functions that a failed compile left behind are checked again in this compile's main chunk.
+        for (self.carry_funcs.items) |func| {
+            func.info.emitted = false;
+            func.info.bc_inline = 0;
+        }
+
         // Clear the previous eval's `main`, otherwise a later eval without one is rejected.
         self.main_func = null;
         if (self.main_chunk.sym.getMod().getSym("main")) |main_func| {
@@ -567,6 +659,9 @@ pub const Compiler = struct {
             self.program_ir = try sema.sema_program(mainChunk, self.main_func);
         }
 
+        // Before the chunks: what these bodies expand is appended to the main chunk and checked with it.
+        try semaCarriedFuncs(self, mainChunk);
+
         // Perform sema on all chunks.
         log.tracev("Perform sema.", .{});
         for (self.newChunks()) |chunk| {
@@ -589,41 +684,10 @@ pub const Compiler = struct {
 
         // Pass through type syms.
         for (self.newTypes()) |type_| {
-            const chunk = self.getSymChunk(&type_.sym().head);
-            switch (type_.kind()) {
-                .struct_t => {
-                    const struct_t = type_.cast(.struct_t);
-                    const impls = struct_t.impls();
-                    if (impls.len > 0) { 
-                        const sym = type_.sym();
-
-                        try sema.pushSymResolveContext(chunk, &sym.head, sym.decl.?);
-                        defer sema.popResolveContext(chunk);
-
-                        for (impls, 0..) |*impl, j| {
-                            const trait_members = impl.trait.members();
-                            const funcs = try self.alloc.alloc(*cy.Func, trait_members.len);
-                            errdefer self.alloc.free(funcs);
-
-                            for (trait_members, 0..) |member, i| {
-                                const func = type_.get_trait_method_impl(member) orelse {
-                                    const sig_str = try self.sema.allocFuncSigStr(member.func.sig, true, chunk);
-                                    defer self.alloc.free(sig_str);
-                                    const type_name = try self.sema.allocTypeName(type_);
-                                    defer self.alloc.free(type_name);
-                                    return chunk.reportErrorFmt("`{}` does not implement `fn {}{}` from `{}`.", &.{
-                                        v(type_name), v(member.func.name()), v(sig_str), 
-                                        v(impl.trait.base.name()) }, @ptrCast(sym.decl.?.cast(.struct_decl).impls.ptr[j].trait));
-                                };
-                                funcs[i] = func;
-                            }
-
-                            impl.funcs = funcs;
-                        }
-                    }
-                },
-                else => {},
-            }
+            try resolveImplFuncs(self, type_);
+        }
+        for (self.carry_syms.items) |sym| {
+            try resolveImplFuncs(self, sym.cast(.type).type);
         }
 
         // A global initializer must not reach a global that is not initialized yet (F-88).
@@ -774,6 +838,9 @@ fn performChunkSema(c: *cy.Chunk) !void {
     try semaChunkFuncs(c);
 }
 
+/// Compiles of one source after carried bodies failed (`Compiler.compile`).
+const max_carry_attempts = 8;
+
 /// Reports after which recovery stops. A compile that is this wrong gains nothing from more of them.
 const max_recover_reports = 100;
 
@@ -839,6 +906,10 @@ fn semaChunkFuncs(c: *cy.Chunk) !void {
                     continue;
                 }
                 log.tracev("sema func: {s}", .{func.name()});
+                // A template instance whose body does not compile is not handed out or carried again.
+                errdefer if (ownerInstance(func)) |inst| {
+                    inst.failed = true;
+                };
                 if (func.isMethod()) {
                     try sema.semaMethodBody(c, func);
                 } else {
@@ -1729,4 +1800,147 @@ pub fn resolveModuleUri(self: *cy.Compiler, buf: []u8, uri: []const u8) ![]const
 }
 
 test "vm compiler internals." {
+}
+/// A function that a failed compile made and that a later compile can reach (`Compiler.carryFailedCompile`).
+fn carryFunc(func: *cy.Func, start: u32, type_start: u32) bool {
+    switch (func.type) {
+        .userFunc, .extern_, .hostFunc => {},
+        // A lambda is made again with the body that holds it.
+        else => return false,
+    }
+    if (func.instance) |inst| {
+        if (!instanceSurvives(inst, start, type_start, 0)) return false;
+    }
+    if (func.decl) |decl| {
+        if (decl.src() >= start) return false;
+    }
+    return survives(func.parent, start, type_start, 0);
+}
+
+/// Whether `sym` and the symbols that it belongs to were declared in chunks from before the compile that
+/// started at chunk `start`, and every template instance among them has arguments that survive as well.
+fn survives(sym: *cy.Sym, start: u32, type_start: u32, depth: u32) bool {
+    if (depth > 32) return false;
+    var cur: ?*cy.Sym = sym;
+    while (cur) |s| : (cur = s.parent) {
+        if (s.type == .chunk) {
+            return s.cast(.chunk).chunk.id < start;
+        }
+        if (s.instance()) |inst| {
+            if (!instanceSurvives(inst, start, type_start, depth + 1)) return false;
+        }
+        if (s.declNodeOrNull()) |decl| {
+            if (decl.src() >= start) return false;
+        }
+    }
+    return true;
+}
+
+fn instanceSurvives(inst: *cy.Instance, start: u32, type_start: u32, depth: u32) bool {
+    if (inst.failed) return false;
+    for (inst.param_types, inst.params) |param_t, param| {
+        if (param_t.id() == bt.Type) {
+            if (!typeSurvives(param.asPtr(*cy.Type), start, type_start, depth + 1)) return false;
+        }
+    }
+    return true;
+}
+
+fn typeSurvives(type_: *cy.Type, start: u32, type_start: u32, depth: u32) bool {
+    if (type_.id() < type_start) return true;
+    if (depth > 32) return false;
+    switch (type_.kind()) {
+        .null => return true,
+        .func_ptr, .func, .func_sym => {
+            const sig = switch (type_.kind()) {
+                .func_ptr => type_.cast(.func_ptr).sig,
+                .func => type_.cast(.func).sig,
+                else => type_.cast(.func_sym).sig,
+            };
+            for (sig.params()) |param| {
+                if (!typeSurvives(param.get_type(), start, type_start, depth + 1)) return false;
+            }
+            return typeSurvives(sig.ret, start, type_start, depth + 1);
+        },
+        else => return survives(@ptrCast(type_.sym()), start, type_start, depth + 1),
+    }
+}
+
+/// The functions of a type that implement each of its traits.
+fn resolveImplFuncs(self: *Compiler, type_: *cy.Type) !void {
+    if (type_.kind() != .struct_t) return;
+    const struct_t = type_.cast(.struct_t);
+    const impls = struct_t.impls();
+    if (impls.len == 0) return;
+    const chunk = self.getSymChunk(&type_.sym().head);
+    const sym = type_.sym();
+
+    try sema.pushSymResolveContext(chunk, &sym.head, sym.decl.?);
+    defer sema.popResolveContext(chunk);
+
+    for (impls, 0..) |*impl, j| {
+        const trait_members = impl.trait.members();
+        const funcs = try self.alloc.alloc(*cy.Func, trait_members.len);
+        errdefer self.alloc.free(funcs);
+
+        for (trait_members, 0..) |member, i| {
+            const func = type_.get_trait_method_impl(member) orelse {
+                const sig_str = try self.sema.allocFuncSigStr(member.func.sig, true, chunk);
+                defer self.alloc.free(sig_str);
+                const type_name = try self.sema.allocTypeName(type_);
+                defer self.alloc.free(type_name);
+                return chunk.reportErrorFmt("`{}` does not implement `fn {}{}` from `{}`.", &.{
+                    v(type_name), v(member.func.name()), v(sig_str), 
+                    v(impl.trait.base.name()) }, @ptrCast(sym.decl.?.cast(.struct_decl).impls.ptr[j].trait));
+            };
+            funcs[i] = func;
+        }
+
+        // A carried type can have them from the compile that failed.
+        self.alloc.free(impl.funcs);
+        impl.funcs = funcs;
+    }
+}
+
+/// Checks the bodies that a failed compile left unchecked or without code (`Compiler.carry_funcs`) in the
+/// main chunk of this compile, so that their code is generated with it.
+fn semaCarriedFuncs(self: *Compiler, main: *cy.Chunk) !void {
+    for (self.carry_funcs.items) |func| {
+        const has_body = switch (func.type) {
+            .userFunc => !func.info.const_eval_only,
+            .extern_ => func.data.extern_.has_impl,
+            else => false,
+        };
+        if (!has_body or func.info.emitted or !func.isResolved()) {
+            continue;
+        }
+        const res = if (func.type == .userFunc and func.isMethod())
+            sema.semaMethodBody(main, func)
+        else
+            sema.semaFuncBody(main, func);
+        res catch |err| {
+            // The instance is not handed out or carried again, and the compile starts over (`Compiler.compile`).
+            if (ownerInstance(func)) |inst| inst.failed = true;
+            if (err == error.CompileError) self.carried_failed = true;
+            return err;
+        };
+    }
+}
+
+fn ownerInstance(func: *cy.Func) ?*cy.Instance {
+    if (func.instance) |inst| return inst;
+    var cur: ?*cy.Sym = func.parent;
+    while (cur) |s| : (cur = s.parent) {
+        if (s.instance()) |inst| return inst;
+    }
+    return null;
+}
+
+/// A `use` alias of a module that a failed compile loaded first and that left the module cache.
+fn aliasesEvicted(alias: *cy.sym.UseAlias) bool {
+    var cur: ?*cy.Sym = alias.sym;
+    while (cur) |s| : (cur = s.parent) {
+        if (s.type == .chunk) return s.cast(.chunk).chunk.evicted;
+    }
+    return false;
 }

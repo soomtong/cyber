@@ -188,7 +188,8 @@ fn externWithoutFFI(t: *cy.Thread) callconv(.c) C.Ret {
 fn bindExternFuncsWithoutFFI(c: *cy.Compiler) !void {
     const vm_func = cy.vm.FuncSymbol.initHostFunc(@ptrCast(@alignCast(&externWithoutFFI)));
     for (c.chunks.items) |chunk| {
-        if (!chunk.has_extern_func) {
+        // A chunk of a failed compile has no code (`Compiler.carryFailedCompile`).
+        if (!chunk.has_extern_func or !chunk.rt_ready) {
             continue;
         }
         for (chunk.funcs.items) |func| {
@@ -248,7 +249,8 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
     try compiler.createPredefinedSym((try t.c.vm.findType("c.variadic")).?.sym(), "...");
     try compiler.createPredefinedSym(compiler.base.sema.void_t.sym(), "CB_void");
     for (t.c.vm.compiler.chunks.items) |c| {
-        if (!c.has_extern_func) {
+        // A chunk of a failed compile has no code (`Compiler.carryFailedCompile`).
+        if (!c.has_extern_func or !c.rt_ready) {
             continue;
         }
 
@@ -322,7 +324,8 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
     const state = getTccState(t.c.vm);
 
     for (t.c.vm.compiler.chunks.items) |c| {
-        if (!c.has_extern_func) {
+        // A chunk of a failed compile has no code (`Compiler.carryFailedCompile`).
+        if (!c.has_extern_func or !c.rt_ready) {
             continue;
         }
 
@@ -391,7 +394,8 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
     }
 
     for (t.c.vm.compiler.chunks.items) |c| {
-        if (!c.has_extern_func) {
+        // A chunk of a failed compile has no code (`Compiler.carryFailedCompile`).
+        if (!c.has_extern_func or !c.rt_ready) {
             continue;
         }
 

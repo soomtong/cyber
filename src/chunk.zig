@@ -218,6 +218,10 @@ pub const Chunk = struct {
     /// `VM.validate` (never run) stays false and the next executed program initializes it (F-05).
     rt_inited: bool,
 
+    /// A module that a failed compile loaded first. It left the module cache, so the next `use` loads the
+    /// module again (`Compiler.carryFailedCompile`).
+    evicted: bool = false,
+
     encoder: cy.ast.Encoder,
 
     indent: u32,

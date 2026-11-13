@@ -102,29 +102,21 @@ pub fn genAll(c: *cy.Compiler) !void {
             try prepareFunc(c, func);
         }
     }
+    // What a failed compile left behind is generated with the main chunk (`Compiler.carry_funcs`).
+    for (c.carry_syms.items) |sym| {
+        try prepareSym(c, sym);
+    }
+    for (c.carry_funcs.items) |func| {
+        try prepareFunc(c, func);
+    }
 
     for (c.newChunks()) |chunk| {
         for (chunk.syms.items) |sym| {
-            switch (sym.type) {
-                .type => {
-                    const type_sym = sym.cast(.type);
-                    if (type_sym.type.kind() == .struct_t) {
-                        // rt funcs have been reserved. Create impl vtables.
-                        const struct_t = type_sym.type.cast(.struct_t);
-                        for (struct_t.impls()) |impl| {
-                            // Reserved first, so that a vtable that was allocated is always handed to `vm.vtables`.
-                            try c.vm.vtables.ensureUnusedCapacity(c.alloc, 1);
-                            try c.gen_vtables.ensureUnusedCapacity(c.alloc, 1);
-                            const vtable = try c.alloc.alloc(u64, impl.funcs.len);
-                            const vtable_idx = c.vm.vtables.items.len;
-                            c.vm.vtables.appendAssumeCapacity(vtable);
-                            c.gen_vtables.putAssumeCapacity(VtableKey{ .type = struct_t.base.id(), .trait = impl.trait.base.id() }, @intCast(vtable_idx));
-                        }
-                    }
-                },
-                else => {},
-            }
+            try reserveVtables(c, sym);
         }
+    }
+    for (c.carry_syms.items) |sym| {
+        try reserveVtables(c, sym);
     }
 
     for (c.newChunks()) |chunk| {
@@ -157,27 +149,12 @@ pub fn genAll(c: *cy.Compiler) !void {
         }
 
         for (chunk.syms.items) |sym| {
-            switch (sym.type) {
-                .type => {
-                    const type_sym = sym.cast(.type);
-                    if (type_sym.type.kind() == .struct_t) {
-                        const struct_t = type_sym.type.cast(.struct_t);
-                        for (struct_t.impls()) |impl| {
-                            const vtable_idx = c.gen_vtables.get(VtableKey{ .type = struct_t.base.id(), .trait = impl.trait.base.id() }).?;
-                            const vtable = c.vm.vtables.items[vtable_idx];
-                            for (impl.funcs, 0..) |func, i| {
-                                var ptr: u64 = @intFromPtr(&chunk.buf.ops.items[c.genSymMap.get(func).?.func.pc]);
-                                if (func.type == .hostFunc) {
-                                    ptr |= 1 << 63;
-                                }
-                                vtable[i] = ptr;
-                            }
-                        }
-                    }
-                },
-                else => {},
-            }
+            fillVtables(c, chunk, sym);
         }
+    }
+    // The carried methods were generated in the main chunk.
+    for (c.carry_syms.items) |sym| {
+        fillVtables(c, c.main_chunk, sym);
     }
 
     // Update runtime type info.
@@ -191,9 +168,11 @@ pub fn genAll(c: *cy.Compiler) !void {
             const name = try c.alloc.dupe(u8, "<null>");
             c.vm.types.appendAssumeCapacity(.{ .name_ptr = name.ptr, .name_len = name.len });
         }
+        // Every type without a name yet, by id. A failed compile adds types and generates nothing.
+        const unnamed = c.sema.types.items[c.vm.types.items.len..];
         // Reserved first, so that a name that was allocated is always handed to `vm.types`.
-        try c.vm.types.ensureUnusedCapacity(c.alloc, c.newTypes().len);
-        for (c.newTypes()) |type_| {
+        try c.vm.types.ensureUnusedCapacity(c.alloc, unnamed.len);
+        for (unnamed) |type_| {
             const name = try c.sema.allocTypeName(type_);
             c.vm.types.appendAssumeCapacity(.{ .name_ptr = name.ptr, .name_len = name.len });
         }
@@ -204,6 +183,42 @@ pub fn genAll(c: *cy.Compiler) !void {
 
     for (c.newChunks()) |chunk| {
         chunk.rt_ready = true;
+    }
+}
+
+fn reserveVtables(c: *cy.Compiler, sym: *cy.Sym) !void {
+    if (sym.type != .type) return;
+    const type_sym = sym.cast(.type);
+    if (type_sym.type.kind() != .struct_t) return;
+    // rt funcs have been reserved. Create impl vtables.
+    const struct_t = type_sym.type.cast(.struct_t);
+    for (struct_t.impls()) |impl| {
+        // Reserved first, so that a vtable that was allocated is always handed to `vm.vtables`.
+        try c.vm.vtables.ensureUnusedCapacity(c.alloc, 1);
+        try c.gen_vtables.ensureUnusedCapacity(c.alloc, 1);
+        const vtable = try c.alloc.alloc(u64, impl.funcs.len);
+        const vtable_idx = c.vm.vtables.items.len;
+        c.vm.vtables.appendAssumeCapacity(vtable);
+        c.gen_vtables.putAssumeCapacity(VtableKey{ .type = struct_t.base.id(), .trait = impl.trait.base.id() }, @intCast(vtable_idx));
+    }
+}
+
+/// `chunk` is the chunk whose code holds the methods.
+fn fillVtables(c: *cy.Compiler, chunk: *cy.Chunk, sym: *cy.Sym) void {
+    if (sym.type != .type) return;
+    const type_sym = sym.cast(.type);
+    if (type_sym.type.kind() != .struct_t) return;
+    const struct_t = type_sym.type.cast(.struct_t);
+    for (struct_t.impls()) |impl| {
+        const vtable_idx = c.gen_vtables.get(VtableKey{ .type = struct_t.base.id(), .trait = impl.trait.base.id() }).?;
+        const vtable = c.vm.vtables.items[vtable_idx];
+        for (impl.funcs, 0..) |func, i| {
+            var ptr: u64 = @intFromPtr(&chunk.buf.ops.items[c.genSymMap.get(func).?.func.pc]);
+            if (func.type == .hostFunc) {
+                ptr |= 1 << 63;
+            }
+            vtable[i] = ptr;
+        }
     }
 }
 

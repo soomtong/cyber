@@ -167,6 +167,9 @@ zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Dd
   따로 받으면 어긋난다.
 - Windows 번들과 wasi에는 넣지 않는다. Windows용은 교차 컴파일은 되지만(`x86_64-windows-gnu`, 4.6MB) 돌려 본 적이 없다.
   같은 이유로 `zig build test`는 Windows와 wasm 타깃에서 `lsp-test`를 빼고 돈다(`build.zig`). Windows에서 확인하면 둘 다 푼다.
+- 2026-11-13 보충(최종 리뷰): `install.sh`는 번들을 `mktemp` 파일로 먼저 받는다. 이전에는 `curl | tar` 앞에서 서버를 지워,
+  다운로드가 실패하면 `cyber`는 남고 `cyber-lsp`만 사라졌다. 낡은 심링크는 경로 문자열 비교가 아니라 가리키는 곳이 없는지로
+  가린다(`CYBER_HOME`의 표기가 달라도 정리된다).
 - `install.sh`: 번들에 `cyber-lsp`가 있으면 `CYBER_BIN/cyber-lsp`로 심링크한다. 풀기 전에 `CYBER_HOME/cyber-lsp`를 지우고,
   번들에 서버가 없으면(0.4.9까지의 번들) 이전 설치가 남긴 심링크도 지운다. 실행 파일과 버전이 다른 서버가 남지 않게 하기 위해서다.
   로컬 번들 둘(서버 있음 · 없음)을 `curl` 대역으로 번갈아 설치해 확인했다. 실제 릴리스에서의 확인은 다음 태그에서 한다.

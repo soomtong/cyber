@@ -30,7 +30,12 @@ pub fn parseFrame(buf: []const u8) FrameError!?Frame {
         const name = std.mem.trim(u8, line[0..colon], " \t");
         if (std.ascii.eqlIgnoreCase(name, "Content-Length")) {
             const value = std.mem.trim(u8, line[colon + 1 ..], " \t");
-            len = std.fmt.parseInt(usize, value, 10) catch return error.BadHeader;
+            // Digits only: `parseInt` also takes a sign and `_` between digits.
+            if (value.len == 0) return error.BadHeader;
+            for (value) |ch| {
+                if (!std.ascii.isDigit(ch)) return error.BadHeader;
+            }
+            len = std.fmt.parseInt(usize, value, 10) catch return error.MessageTooLarge;
         }
     }
     const body_len = len orelse return error.BadHeader;
@@ -138,6 +143,9 @@ test "A frame is complete when its body has arrived." {
 
     try t.expectError(error.BadHeader, parseFrame("Content-Type: x\r\n\r\n{}"));
     try t.expectError(error.BadHeader, parseFrame("Content-Length: two\r\n\r\n{}"));
+    try t.expectError(error.BadHeader, parseFrame("Content-Length: +2\r\n\r\n{}"));
+    try t.expectError(error.BadHeader, parseFrame("Content-Length: 1_0\r\n\r\n{}"));
+    try t.expectError(error.BadHeader, parseFrame("Content-Length:\r\n\r\n{}"));
     try t.expectError(error.BadHeader, parseFrame("no header\r\n\r\n{}"));
     try t.expectError(error.MessageTooLarge, parseFrame("Content-Length: 99999999999\r\n\r\n"));
 }

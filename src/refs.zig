@@ -206,6 +206,7 @@ pub const Range = extern struct {
 pub fn findAll(compiler: *cy.Compiler, pos: u32) ![]const Range {
     const out = &compiler.ref_ranges;
     out.clearRetainingCapacity();
+    if (compiler.refs_main == null) return out.items;
     const picked = pick(compiler, pos) orelse return out.items;
     const target = picked.ref;
     switch (target.kind) {
@@ -262,6 +263,7 @@ fn defOf(compiler: *cy.Compiler, sym: *cy.Sym) ?struct { uri: []const u8, pos: u
 pub fn findAllTo(compiler: *cy.Compiler, def_uri: []const u8, def_pos: u32) ![]const Range {
     const out = &compiler.ref_ranges;
     out.clearRetainingCapacity();
+    if (compiler.refs_main == null) return out.items;
     var target: ?*cy.Sym = null;
     var other: ?*cy.Sym = null;
     for (compiler.refs.items) |ref| {
@@ -316,11 +318,16 @@ fn declaredAt(compiler: *cy.Compiler, def_pos: u32) ?*cy.Sym {
             .cstruct_decl => decl.cast(.cstruct_decl).fields.slice(),
             else => continue,
         };
+        // An instance of a template that another module declares is a sym of this chunk too. Its fields
+        // are at offsets of that module's source.
+        if (decl.src() != main.id) continue;
         const mod = sym.getMod() orelse continue;
         for (fields) |field| {
-            if (field.name.pos() != def_pos) continue;
-            const name = main.src[field.name.pos()..@min(field.name.end(), main.src.len)];
-            const field_sym = mod.getSym(name) orelse continue;
+            const start = field.name.pos();
+            if (start != def_pos) continue;
+            const end = field.name.end();
+            if (end == cy.NullId or end <= start or end > main.src.len) continue;
+            const field_sym = mod.getSym(main.src[start..end]) orelse continue;
             if (field_sym.type == .field) return field_sym;
         }
     }
@@ -355,6 +362,7 @@ pub const Token = extern struct {
 pub fn tokens(compiler: *cy.Compiler) ![]const Token {
     const out = &compiler.ref_tokens;
     out.clearRetainingCapacity();
+    if (compiler.refs_main == null) return out.items;
     for (compiler.refs.items) |ref| {
         const kind: ItemKind = switch (ref.kind) {
             .expr => continue,
@@ -407,6 +415,9 @@ fn declNameNode(sym: *cy.Sym) ?*ast.Node {
 
 /// Describes what is at byte offset `pos` of the main source of the last compile. Null if nothing was recorded there.
 pub fn find(compiler: *cy.Compiler, pos: u32) !?Info {
+    // Nothing was recorded: no compile yet, a reset, a compile that failed before its main source, or one
+    // that did not record. `main_chunk` is not to be touched then.
+    if (compiler.refs_main == null) return null;
     const picked = pick(compiler, pos) orelse return null;
     const best_t = picked.type;
     const ref = picked.ref;
@@ -578,6 +589,7 @@ const Items = struct {
 /// of its type, or the symbols of the module or type that it names. Empty if no expression ends there.
 /// The result is valid until the next `members`, `scope` or compile.
 pub fn members(compiler: *cy.Compiler, pos: u32) ![]const Item {
+    if (compiler.refs_main == null) return &.{};
     var items = Items.init(compiler);
 
     // The smallest expression that ends at the position is the receiver: `x + v.` asks for the members of `v`.
@@ -624,6 +636,7 @@ pub fn members(compiler: *cy.Compiler, pos: u32) ![]const Item {
 /// before it in the function it is in, then what the main source declares and uses, then the builtins.
 /// The result is valid until the next `members`, `scope` or compile.
 pub fn scope(compiler: *cy.Compiler, pos: u32) ![]const Item {
+    if (compiler.refs_main == null) return &.{};
     var items = Items.init(compiler);
     const main = compiler.main_chunk;
 

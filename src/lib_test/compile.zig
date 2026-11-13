@@ -1483,6 +1483,168 @@ test "cl_vm_symbol_refs_to and cl_vm_symbol_tokens." {
     }
 }
 
+test "The symbol queries find nothing when there is no recorded compile." {
+    // They read the main chunk, which is undefined before the first compile and freed by a reset: a host that
+    // asked then crashed (final review, 2026-11-13).
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+
+    const S = struct {
+        fn expectNothing(vm_: *C.VM) !void {
+            var info: C.SymbolInfo = undefined;
+            var ranges: [*c]const C.Range = null;
+            var items: [*c]const C.Item = null;
+            var tokens: [*c]const C.Token = null;
+            for ([_]u32{ 0, 3, 100000 }) |pos| {
+                try zt.expect(!C.vm_symbol_at(vm_, pos, &info));
+                try zt.eq(@as(usize, 0), info.detail.len);
+                try zt.eq(@as(usize, 0), C.vm_symbol_refs(vm_, pos, &ranges));
+                try zt.expect(ranges == null);
+                try zt.eq(@as(usize, 0), C.vm_symbol_refs_to(vm_, C.to_bytes("main"), pos, &ranges));
+                try zt.eq(@as(usize, 0), C.vm_members_at(vm_, pos, &items));
+                try zt.eq(@as(usize, 0), C.vm_names_at(vm_, pos, &items));
+                try zt.expect(items == null);
+            }
+            try zt.eq(@as(usize, 0), C.vm_symbol_tokens(vm_, &tokens));
+        }
+    };
+    const src = "fn add(a int, b int) -> int:\n    return a + b\nn := add(1, 2)\n";
+
+    // Before any compile, with the recording off and on.
+    try S.expectNothing(vm);
+    C.vm_set_symbol_info(vm, true);
+    try S.expectNothing(vm);
+
+    // After a reset.
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    var info: C.SymbolInfo = undefined;
+    try zt.expect(C.vm_symbol_at(vm, 3, &info));
+    C.vm_reset(vm);
+    try S.expectNothing(vm);
+
+    // After a compile that failed before it had a main source: the chunk of the compile before it is gone.
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    var jit = C.defaultCompileConfig();
+    jit.backend = C.BackendJIT;
+    try zt.eq(C.ErrorCompile, C.vm_compile(vm, "main", src, jit));
+    try S.expectNothing(vm);
+
+    // A compile that did not record answers nothing, not a part: the names in declarations are known to the
+    // compiler either way, the locals are not.
+    C.vm_set_symbol_info(vm, false);
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    try S.expectNothing(vm);
+    C.vm_set_symbol_info(vm, true);
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    try zt.expect(C.vm_symbol_at(vm, 3, &info));
+}
+
+test "A method of a template instance whose signature fails is not found half built later." {
+    // The function was reserved in the module of the instance before its signature was resolved. The next body
+    // that called it (with error recovery), or the next eval of a session, read a function without a signature.
+    const src =
+        \\type W[T Any]:
+        \\    v T
+        \\fn (&W[]) bad() -> T.nope:
+        \\    return self.v
+        \\fn W[] :: make(v T) -> T.nope:
+        \\    return v
+        \\fn a() -> int:
+        \\    w := W[int]{v = 1}
+        \\    return w.bad()
+        \\fn b() -> int:
+        \\    w := W[int]{v = 1}
+        \\    return w.bad()
+        \\fn c() -> int:
+        \\    return W[int].make(1)
+        \\fn d() -> int:
+        \\    return W[int].make(2)
+    ;
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        C.vm_set_error_recovery(vm, true);
+        var res: C.EvalResult = undefined;
+        var rep: C.Report = undefined;
+        try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
+        // Every body that calls one of them reports that its signature does not resolve.
+        try zt.eq(@as(usize, 4), C.vm_compile_report_count(vm));
+        for (0..4) |i| {
+            try zt.expect(C.vm_compile_report(vm, i, &rep));
+            try zt.eqStr("Can not find the symbol `nope` in `int`.", C.from_bytes(rep.msg));
+        }
+    }
+    {
+        // A session without recovery: each eval that calls the method fails the same way.
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        var config = C.defaultEvalConfig();
+        config.persist_main = true;
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_evalx(vm, "main", "type W[T Any]:\n    v T\nfn (&W[]) bad() -> T.nope:\n    return self.v\nw := W[int]{v = 1}", config, &res));
+        for (0..3) |_| {
+            try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "x := w.bad()", config, &res));
+            var err: C.CompileError = undefined;
+            try zt.expect(C.vm_compile_error(vm, &err));
+            try zt.eqStr("Can not find the symbol `nope` in `int`.", C.from_bytes(err.msg));
+        }
+        try zt.eq(C.Success, C.vm_evalx(vm, "main", "y := w.v", config, &res));
+    }
+}
+
+test "Source that stops in the middle is a compile error, not a crash." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    var err: C.CompileError = undefined;
+
+    // The parser read one byte past the end for a parameter name at the end of the source, and unwrapped a
+    // missing expression after `return`.
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "fn f(a"));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eq(C.ReportParseError, err.kind);
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "x := 1\nfn add(a int, b"));
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "fn f():\n    return ,a\n"));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eqStr("Expected an expression after `return`.", C.from_bytes(err.msg));
+
+    // The end of a `const` declaration without a type or a value was read from a type that is not there,
+    // when the error for it was located.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "const a"));
+    var rep: C.Report = undefined;
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(@as(u32, 7), rep.end_pos);
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "x := 1\nconst b = "));
+    // A `cstruct` without fields (the end of its last field was read), and a function type whose attribute
+    // list stops after `#[`.
+    C.vm_reset(vm);
+    _ = C.vm_validate(vm, "type Foo cstruct");
+    {
+        var out: C.Bytes = C.NullStr;
+        _ = C.c.cl_vm_format(vm, C.to_bytes("type Foo cstruct"), &out);
+        if (out.ptr != null) C.vm_freeb(vm, C.from_bytes(out));
+    }
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "type Callback = #["));
+
+    // A constant that names a function (`const z = h` on the way to `const z = h()`): the signature of the
+    // function was read before it was resolved.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "fn h() -> int:\n    return 4\nconst z = h\n"));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.expect(std.mem.startsWith(u8, C.from_bytes(err.msg), "Unsupported expansion of compile-time value"));
+
+    // A lambda that returns a borrow has no signature while its return type is inferred. The check of the
+    // returned borrow read it.
+    C.vm_reset(vm);
+    try zt.eq(C.Success, C.vm_validate(vm, "local_a := 123\nborrow_a := &local_a\nstack_fn := fn() => borrow_a\n"));
+}
+
 test "Error summaries are empty when there is no error." {
     // `cl_vm_compile_error_summary` and `cl_thread_panic_summary` used to end the host process when asked
     // without an error, and a script could ask through `cy.VM` (F-52).

@@ -182,7 +182,9 @@ pub fn matchGenericFuncCt(c: *cy.Chunk, template: *cy.sym.FuncTemplate,
     const gen_func = try genFunc(c, template, &template_ctx, node);
 
     const ct_args = c.valueStack.items[arg_start..arg_start+arg_idx];
-    called = true;
+    // Only a function with a body binds the arguments. A function that the host evaluates reads them and
+    // leaves them to the callsite.
+    called = gen_func.type == .userFunc and gen_func.data.userFunc.eval == null;
     const res = try cte.evalCall(c, gen_func, ct_args, node);
     return .{
         .func = gen_func,

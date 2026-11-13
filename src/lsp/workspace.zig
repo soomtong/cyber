@@ -21,22 +21,34 @@ pub fn skipDir(name: []const u8) bool {
     return false;
 }
 
-/// Appends the paths of the `.cy` files below `root` to `files`, up to `max_files` in all. A directory that
-/// can not be read is skipped. Symbolic links are not followed. The paths are allocated in `arena`.
-pub fn collectFiles(arena: std.mem.Allocator, root: []const u8, files: *std.ArrayList([]const u8)) !void {
-    if (files.items.len >= max_files) return;
+/// Directories that one listing visits at most, and how deep it goes. A workspace folder can be a home
+/// directory or `/`: the listing has to end, and the server answers nothing else while it runs.
+pub const max_dirs = 5000;
+pub const max_depth = 24;
+
+pub const Budget = struct {
+    dirs: usize = 0,
+};
+
+/// Appends the paths of the `.cy` files below `root` to `files`, up to `max_files` in all and within `budget`.
+/// A directory that can not be read is skipped. Symbolic links are not followed. The paths are allocated in
+/// `arena`.
+pub fn collectFiles(arena: std.mem.Allocator, root: []const u8, files: *std.ArrayList([]const u8), budget: *Budget, depth: usize) !void {
+    if (files.items.len >= max_files or budget.dirs >= max_dirs or depth > max_depth) return;
+    budget.dirs += 1;
     const io = stdx.io();
     var dir = std.Io.Dir.cwd().openDir(io, root, .{ .iterate = true }) catch return;
     defer dir.close(io);
 
+    var found: std.ArrayList([]const u8) = .empty;
     var subdirs: std.ArrayList([]const u8) = .empty;
     var iter = dir.iterate();
     while (true) {
         const entry = (iter.next(io) catch break) orelse break;
         switch (entry.kind) {
             .file => {
-                if (std.mem.endsWith(u8, entry.name, ".cy") and files.items.len < max_files) {
-                    try files.append(arena, try std.Io.Dir.path.join(arena, &.{ root, entry.name }));
+                if (std.mem.endsWith(u8, entry.name, ".cy")) {
+                    try found.append(arena, try std.Io.Dir.path.join(arena, &.{ root, entry.name }));
                 }
             },
             .directory => {
@@ -48,11 +60,15 @@ pub fn collectFiles(arena: std.mem.Allocator, root: []const u8, files: *std.Arra
         }
     }
     // The order of a directory listing is not defined. Sorted, the result is the same on every run.
-    std.mem.sort([]const u8, files.items, {}, lessThan);
+    std.mem.sort([]const u8, found.items, {}, lessThan);
     std.mem.sort([]const u8, subdirs.items, {}, lessThan);
+    for (found.items) |file| {
+        if (files.items.len >= max_files) break;
+        try files.append(arena, file);
+    }
     // Recurse after the iteration so that only one directory handle is open per level at a time.
     for (subdirs.items) |subdir| {
-        try collectFiles(arena, subdir, files);
+        try collectFiles(arena, subdir, files, budget, depth + 1);
     }
 }
 

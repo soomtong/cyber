@@ -87,6 +87,13 @@ pub const Server = struct {
     /// The folders of the workspace, as paths. Searched for requests that go beyond the open documents.
     roots: std.ArrayList([]const u8) = .empty,
 
+    /// The `.cy` files of the workspace folders, listed on the first request that needs them and again after
+    /// a document was opened, saved or closed. Walking the folders for every keystroke in a symbol search is
+    /// too slow for a large workspace. A file that another program creates is seen after the next such event.
+    files: std.ArrayList([]const u8) = .empty,
+    files_arena: ?std.heap.ArenaAllocator = null,
+    files_listed: bool = false,
+
     /// The document that the VM compiled last, while no document changed since. Its symbol info can be asked.
     compiled: ?*Document = null,
 
@@ -132,6 +139,7 @@ pub const Server = struct {
         self.docs.deinit(self.alloc);
         for (self.roots.items) |root| self.alloc.free(root);
         self.roots.deinit(self.alloc);
+        if (self.files_arena) |*arena| arena.deinit();
         for (self.out.items) |msg| self.alloc.free(msg);
         self.out.deinit(self.alloc);
         cli.deinit_cli(self.vm);
@@ -169,9 +177,18 @@ pub const Server = struct {
             return self.replyError(null, ErrorCode.invalid_request, "The message is not an object.");
         }
         const id: ?Value = root.object.get("id");
+        // An id is a number or a string. It is echoed in the reply, so anything else is refused here
+        // (a deeply nested array as the id would otherwise be written back as it came).
+        if (id) |v| {
+            if (v != .integer and v != .string and v != .float and v != .number_string) {
+                return self.replyError(null, ErrorCode.invalid_request, "The id of a request is a number or a string.");
+            }
+        }
         // A message without a method is the reply to a request. The server sends none.
         const method = getStr(root, "method") orelse return;
         const params: Value = root.object.get("params") orelse .null;
+        // A request has an id. Without one there is nobody to reply to: what is not a notification is dropped.
+        if (id == null and !isNotification(method)) return;
 
         self.dispatch(arena, method, id, params) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
@@ -214,6 +231,7 @@ pub const Server = struct {
             // A saved file can be a module of any open document.
             var iter = self.docs.valueIterator();
             while (iter.next()) |doc| doc.*.dirty = true;
+            self.files_listed = false;
         } else if (std.mem.eql(u8, method, "textDocument/didClose")) {
             try self.onDidClose(params);
         } else if (std.mem.eql(u8, method, "textDocument/formatting")) {
@@ -408,27 +426,41 @@ pub const Server = struct {
             doc.dirty = true;
             return;
         }
+        const path = try documentPath(self.alloc, uri);
+        errdefer self.alloc.free(path);
+        // Two uris can name one file (`a%2Ecy` and `a.cy`, or a path through a symbolic link). The compiler
+        // knows a source by its path, so there is one document per path: the new one takes the place.
+        if (self.docByPath(path)) |other| {
+            try self.closeDocument(other);
+        }
         const doc = try self.alloc.create(Document);
         errdefer self.alloc.destroy(doc);
         const uri_dup = try self.alloc.dupe(u8, uri);
         errdefer self.alloc.free(uri_dup);
-        const path = try uriToPath(self.alloc, uri);
-        errdefer self.alloc.free(path);
         const text_dup = try self.alloc.dupe(u8, text);
         errdefer self.alloc.free(text_dup);
         doc.* = .{ .uri = uri_dup, .path = path, .text = text_dup, .version = version };
         try self.docs.put(self.alloc, uri_dup, doc);
+        self.files_listed = false;
     }
 
     fn onDidClose(self: *Server, params: Value) !void {
         const uri = getStr(getPath(params, &.{"textDocument"}) orelse return error.InvalidParams, "uri") orelse return error.InvalidParams;
-        const entry = self.docs.fetchRemove(uri) orelse return;
-        const doc = entry.value;
+        const doc = self.docs.get(uri) orelse return;
+        try self.closeDocument(doc);
+    }
+
+    fn closeDocument(self: *Server, doc: *Document) !void {
+        _ = self.docs.remove(doc.uri);
         self.compiled = null;
+        self.files_listed = false;
         defer {
             doc.deinit(self.alloc);
             self.alloc.destroy(doc);
         }
+        // A document that used this one as a module now reads the file on disk instead of the editor's text.
+        var iter = self.docs.valueIterator();
+        while (iter.next()) |other| other.*.dirty = true;
         // The diagnostics of a closed document go away with it.
         try self.publish(doc.uri, null, &.{});
         for (doc.related.items) |related| {
@@ -822,8 +854,10 @@ pub const Server = struct {
     }
 
     fn addRoot(self: *Server, uri: []const u8) !void {
-        const path = try uriToPath(self.alloc, uri);
+        // The canonical path, like the paths of the documents and of the modules that the compiler resolves.
+        const path = try documentPath(self.alloc, uri);
         errdefer self.alloc.free(path);
+        self.files_listed = false;
         // Only a folder on disk can be listed.
         if (!std.Io.Dir.path.isAbsolute(path)) {
             self.alloc.free(path);
@@ -847,11 +881,18 @@ pub const Server = struct {
             try out.append(arena, .{ .path = doc.*.path, .uri = doc.*.uri, .text = doc.*.text });
         }
         const num_open = out.items.len;
-        var files: std.ArrayList([]const u8) = .empty;
-        for (self.roots.items) |root| {
-            try workspace.collectFiles(arena, root, &files);
+        if (!self.files_listed) {
+            if (self.files_arena) |*files_arena| files_arena.deinit();
+            self.files_arena = std.heap.ArenaAllocator.init(self.alloc);
+            self.files = .empty;
+            const files_alloc = self.files_arena.?.allocator();
+            var budget: workspace.Budget = .{};
+            for (self.roots.items) |root| {
+                try workspace.collectFiles(files_alloc, root, &self.files, &budget, 0);
+            }
+            self.files_listed = true;
         }
-        for (files.items) |path| {
+        for (self.files.items) |path| {
             if (self.docByPath(path) != null) continue;
             try out.append(arena, .{ .path = path, .uri = "", .text = "" });
         }
@@ -1452,6 +1493,22 @@ fn semanticType(kind: u32) ?SemanticType {
     };
 }
 
+/// The notifications that the server acts on. Every other method is a request and needs an id.
+fn isNotification(method: []const u8) bool {
+    const known = [_][]const u8{
+        "exit",
+        "initialized",
+        "textDocument/didOpen",
+        "textDocument/didChange",
+        "textDocument/didSave",
+        "textDocument/didClose",
+    };
+    for (known) |name_| {
+        if (std.mem.eql(u8, method, name_)) return true;
+    }
+    return false;
+}
+
 /// The tokenizer takes ASCII letters, digits and `_` in a name.
 fn isIdentifier(text: []const u8) bool {
     if (text.len == 0 or std.ascii.isDigit(text[0])) return false;
@@ -1522,6 +1579,8 @@ fn dropLog(_: ?*c.VM, _: c.Bytes) callconv(.c) void {}
 fn resolver(vm: ?*c.VM, params: c.ResolverParams, res_uri_len: ?*usize) callconv(.c) bool {
     const self = active.?;
     const spec = c.from_bytes(params.uri);
+    // The path of a document is absolute or has a scheme (`documentPath`), so it is never the name of a
+    // standard module.
     if (self.docByPath(spec) != null and spec.len <= params.bufLen) {
         @memcpy(params.buf[0..spec.len], spec);
         res_uri_len.?.* = spec.len;
@@ -1543,6 +1602,38 @@ fn loader(vm: ?*c.VM, mod: ?*c.Sym, spec: c.Bytes, res: [*c]c.LoaderResult) call
 // -----------------------------------
 // [ URIs ]
 // -----------------------------------
+
+/// The name of a document for the compiler. A file is known by its canonical path, the way the compiler names
+/// a module that it resolves: a document reached through a symbolic link is then the same source as the file
+/// it links to. A file that does not exist yet keeps its path, with the directory made canonical if there is
+/// one. A uri that is not a file keeps its scheme, and a bare name gets one, so that no document is taken for
+/// a standard module (`core`).
+pub fn documentPath(alloc: std.mem.Allocator, uri: []const u8) ![]u8 {
+    const path = try uriToPath(alloc, uri);
+    errdefer alloc.free(path);
+    if (!std.Io.Dir.path.isAbsolute(path)) {
+        if (std.mem.findScalar(u8, path, ':') != null) return path;
+        const named = try std.fmt.allocPrint(alloc, "untitled:{s}", .{path});
+        alloc.free(path);
+        return named;
+    }
+    const io = stdx.io();
+    const cwd = std.Io.Dir.cwd();
+    if (cwd.realPathFileAlloc(io, path, alloc)) |real| {
+        defer alloc.free(real);
+        const copy = try alloc.dupe(u8, real);
+        alloc.free(path);
+        return copy;
+    } else |_| {}
+    const dir = std.Io.Dir.path.dirname(path) orelse return path;
+    if (cwd.realPathFileAlloc(io, dir, alloc)) |real_dir| {
+        defer alloc.free(real_dir);
+        const joined = try std.Io.Dir.path.join(alloc, &.{ real_dir, std.Io.Dir.path.basename(path) });
+        alloc.free(path);
+        return joined;
+    } else |_| {}
+    return path;
+}
 
 /// The file path of a `file:` uri. Any other uri is its own name.
 pub fn uriToPath(alloc: std.mem.Allocator, uri: []const u8) ![]u8 {

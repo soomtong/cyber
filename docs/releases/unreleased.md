@@ -6,6 +6,12 @@
 
 ## 버그 수정
 
+- 치다 만 소스가 컴파일러를 끝냈다(F-117). `fn f(a`, `return ,`, `type X = #[`, 값 없는 `const a`, 필드 없는 `type Foo cstruct`,
+  `const z = h`(함수 이름을 값으로), `fn() => borrow`. 모두 컴파일 오류가 됐다. 저장소 `.cy` 전체의 모든 접두사를 파서와
+  컴파일러에 넣어 확인한다.
+- 템플릿 인스턴스의 메서드 시그니처가 해석되지 않으면(`fn (&W[]) bad() -> T.nope`) 그 메서드를 다시 부를 때 컴파일러가 죽었다
+  (F-118). `persist_main` 세션의 다음 eval과, 오류 복구를 켠 컴파일의 다음 본문에서. 이제 부를 때마다 같은 컴파일 오류다.
+
 - private 필드(`-secret int`)가 있는 struct 값의 `print(v)` · `'%{v}'` 보간 · `v == w`가 컴파일되지 않았다(F-116,
   ``Can not access the private field `secret` in `Vec2`.``, 위치는 `core`). 같은 모듈 안에서도 그랬다. 이 연산들은 `meta.access`로
   모든 필드를 읽는데 그 접근이 `core`에서 쓴 접근으로 검사됐다. `meta.access`는 값의 필드를 가시성과 무관하게 읽는다
@@ -41,7 +47,8 @@
   `cl_vm_symbol_at` · `cl_vm_symbol_refs`는 main 소스의 선언에 있는 이름 자리에서도 답한다. `cl_vm_symbol_refs_to(vm, def_uri,
   def_pos, &ranges)`는 그 자리에 선언된 것을 가리키는 main 소스의 범위를 준다(다른 소스들에서 쓰인 곳을 찾을 때 소스마다
   main으로 컴파일해 묻는다). `cl_vm_symbol_tokens(vm, &tokens)`는 해석된 이름과 종류(`CLItemKind`)를 위치순으로 준다.
-  `CLItemKind`에 `CL_ITEM_METHOD`(수신자가 있는 함수)가 생겼다. 설계는 `docs/specs/2026-11-12-lsp-design.md` 8 · 9절.
+  `CLItemKind`에 `CL_ITEM_METHOD`(수신자가 있는 함수)가 생겼다. 이 조회 함수들은 기록이 없으면(첫 컴파일 전, `cl_vm_reset` 뒤,
+  기록을 끄고 한 컴파일 뒤, main 소스에 이르기 전에 실패한 컴파일 뒤) false · 0을 돌려준다. 설계는 `docs/specs/2026-11-12-lsp-design.md` 8 · 9절.
 
 - `cl_vm_set_error_recovery(vm, true)`를 켜면 컴파일러가 오류 뒤에도 계속해 여러 오류를 낸다(기본은 꺼짐, `cl_vm_reset`을 넘어 유지).
   본문(main 블록 · 함수 · 메서드 · 함수 템플릿 인스턴스) 하나가 첫 오류에서 버려지고 나머지 본문은 검사된다. 본문당 오류는 하나다.
@@ -61,6 +68,7 @@
 
 - Linux · macOS 릴리스 번들에 `cyber-lsp`가 들어간다. `install.sh`가 `cyber` 옆에 `cyber-lsp`도 `CYBER_BIN`에 심링크하고,
   서버가 없는 번들(0.4.9까지)을 설치하면 이전 설치의 `cyber-lsp`를 지운다(실행 파일과 버전이 다른 서버를 남기지 않는다).
+  `install.sh`는 번들을 임시 파일로 먼저 받으므로 다운로드가 실패하면 아무것도 바뀌지 않는다.
   Windows 번들에는 아직 없다(빌드는 되지만 실행을 확인하지 못했다). `zig build test`는 Windows 타깃에서 `lsp-test`를 뺀다.
 
 - 언어 서버 `cyber-lsp`를 더했다(`zig build lsp`, `task build:lsp`). CLI와 같이 `libcyber` 위의 별도 프로그램이고 stdin · stdout으로

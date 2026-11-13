@@ -579,6 +579,14 @@ fn getResolvedSym2(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *ast.N
             if (sym.type == .variant_func) {
                 const func_sym = sym.cast(.variant_func);
 
+                // The functions are reserved in the module of the instance before their signatures are resolved.
+                // If one fails, the name is taken out again: the next lookup would otherwise find a function
+                // without a signature (a crash in a session that compiles again, and with error recovery in the
+                // next body that calls it). It then fails here once more, with its report.
+                var resolved = false;
+                defer if (!resolved) {
+                    _ = mod.symMap.remove(name);
+                };
                 try sema.ensure_resolved_instance_func_decl(c, &func_sym.decl);
                 if (func_sym.decl.with_cstrs.len > 0) {
                     try sema.check_instance_func_cstr(c, variant, &func_sym.decl, node);
@@ -596,6 +604,7 @@ fn getResolvedSym2(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *ast.N
                     const func = (try c.reserveFunc(modSym, sym.name(), decl.decl)) orelse continue;
                     try sema.ensure_resolved_func(c, func, true, node);
                 }
+                resolved = true;
                 const res = mod.getSym(name) orelse return null;
                 try check_sym_visible(c, res, node);
                 return res;

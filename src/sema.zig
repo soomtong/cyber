@@ -957,7 +957,12 @@ fn semaContinue(c: *cy.Chunk, node: *ast.Node) !void {
 pub fn semaReturnExpr(c: *cy.Chunk, expr: ExprResult, node: *ast.Node) !void {
     if (expr.type.kind() == .borrow) {
         const proc = c.proc();
-        const scope_param_idx = proc.func.?.sig.scope_param_idx;
+        // The main block has no function, and a lambda whose return type is being inferred from this
+        // expression (`fn() => borrow`) has no signature yet. Neither has a `scope` parameter to check against.
+        var scope_param_idx: u8 = cy.NullU8;
+        if (proc.func) |func| {
+            if (func.isResolved()) scope_param_idx = func.sig.scope_param_idx;
+        }
         if (scope_param_idx != cy.NullU8) {
             if (expr.resType == .value) {
                 const parent_local = expr.data.value.parent_local orelse {

@@ -1,6 +1,7 @@
 //! Sessions with the server, message by message.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const t = std.testing;
 const cli = @import("../cli.zig");
 const lsp = @import("server.zig");
@@ -63,6 +64,17 @@ const Session = struct {
 
     fn change(self: *Session, uri: []const u8, version: i64, text: []const u8) !void {
         try self.textMessage("textDocument/didChange", uri, version, text, true);
+    }
+
+    /// Opens a document whose path another open document already has. The server answers at once: the
+    /// diagnostics of the document that it replaces are cleared.
+    fn openReplacing(self: *Session, uri: []const u8, version: i64, text: []const u8) ![]Value {
+        const arena = self.arena.allocator();
+        const body = try std.fmt.allocPrint(arena,
+            \\{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{s}","languageId":"cyber",
+            \\"version":{},"text":{s}}}}}}}
+        , .{ uri, version, try std.json.Stringify.valueAlloc(arena, text, .{}) });
+        return self.send(body);
     }
 
     fn textMessage(self: *Session, method: []const u8, uri: []const u8, version: i64, text: []const u8, change_: bool) !void {
@@ -1030,6 +1042,187 @@ test "Semantic tokens name what the compiler resolved." {
     try s.change(main_uri, 3, "a := (1\n");
     reply = try s.request("textDocument/semanticTokens/full", main_uri);
     try t.expectEqual(@as(usize, 0), items(reply, &.{ "result", "data" }).len);
+}
+
+test "Messages that are not well formed do not crash the server or get a stray reply." {
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+
+    // An id is a number or a string. Anything else is not echoed back.
+    var nested: std.ArrayList(u8) = .empty;
+    defer nested.deinit(t.allocator);
+    try nested.appendSlice(t.allocator, "{\"jsonrpc\":\"2.0\",\"id\":");
+    try nested.appendNTimes(t.allocator, '[', 300);
+    try nested.appendNTimes(t.allocator, ']', 300);
+    try nested.appendSlice(t.allocator, ",\"method\":\"textDocument/hover\",\"params\":{}}");
+    var out = try s.send(nested.items);
+    try t.expectEqual(@as(usize, 1), out.len);
+    try t.expectEqual(@as(i64, -32600), int(out[0], &.{ "error", "code" }));
+    try t.expect(get(out[0], &.{"id"}).? == .null);
+    out = try s.send(
+        \\{"jsonrpc":"2.0","id":{"a":1},"method":"shutdown"}
+    );
+    try t.expectEqual(@as(i64, -32600), int(out[0], &.{ "error", "code" }));
+    try t.expect(!s.server.shutdown);
+
+    // A request without an id has nobody to reply to.
+    out = try s.send(
+        \\{"jsonrpc":"2.0","method":"textDocument/hover","params":{"textDocument":{"uri":"x"},"position":{"line":0,"character":0}}}
+    );
+    try t.expectEqual(@as(usize, 0), out.len);
+    out = try s.send(
+        \\{"jsonrpc":"2.0","method":"workspace/symbol","params":{"query":""}}
+    );
+    try t.expectEqual(@as(usize, 0), out.len);
+
+    // A document can not take the place of a standard module by calling itself `core`.
+    try s.open("core", 1, "x := nope\n");
+    out = try s.flush();
+    try t.expectEqual(@as(usize, 1), out.len);
+    try t.expectEqualStrings("core", str(out[0], &.{ "params", "uri" }));
+    try t.expectEqualStrings("Undeclared variable `nope`.", str(items(out[0], &.{ "params", "diagnostics" })[0], &.{"message"}));
+    try s.open(main_uri, 1, "print(1)\n");
+    out = try s.flush();
+    for (out) |msg| {
+        if (std.mem.eql(u8, str(msg, &.{ "params", "uri" }), main_uri)) {
+            try t.expectEqual(@as(usize, 0), items(msg, &.{ "params", "diagnostics" }).len);
+        }
+    }
+
+    // Two uris for one path are one document: the later one takes the place, and the earlier one is cleared.
+    const other_uri = "file:///cyber-lsp-test/main%2Ecy";
+    out = try s.openReplacing(other_uri, 1, "print(nope)\n");
+    try t.expectEqual(@as(usize, 1), out.len);
+    try t.expectEqualStrings(main_uri, str(out[0], &.{ "params", "uri" }));
+    try t.expectEqual(@as(usize, 0), items(out[0], &.{ "params", "diagnostics" }).len);
+    try t.expect(s.server.docs.get(main_uri) == null);
+    try t.expect(s.server.docs.get(other_uri) != null);
+    try t.expectEqual(@as(u32, 2), s.server.docs.count());
+}
+
+test "Half-typed source never crashes the server." {
+    // Every prefix of a source is what the server sees while the source is typed (final review, 2026-11-13:
+    // `fn f(a` and `return ,` crashed the parser).
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+
+    const src =
+        \\use math
+        \\
+        \\type Vec2:
+        \\    x float
+        \\    -y float = 0.0
+        \\
+        \\fn (&Vec2) len() -> float:
+        \\    return math.sqrt(self.x * self.x)
+        \\
+        \\type Color enum:
+        \\    case red
+        \\
+        \\fn add[T Any](a T, b T) -> T:
+        \\    if a == b:
+        \\        return a
+        \\    for 0..3 |i|:
+        \\        print('%{i}')
+        \\    return a + b
+        \\
+        \\v := Vec2{x = 1.0}
+        \\f := fn(n int) => n + 1
+        \\print(v.len() + float(add[int](1, f(2))))
+        \\
+    ;
+    try s.open(main_uri, 0, "");
+    _ = try s.flush();
+    var version: i64 = 0;
+    var i: usize = 1;
+    while (i <= src.len) : (i += 1) {
+        version += 1;
+        try s.server.handle(try std.fmt.allocPrint(s.arena.allocator(),
+            \\{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{s}","version":{}}},
+            \\"contentChanges":[{{"text":{s}}}]}}}}
+        , .{ main_uri, version, try std.json.Stringify.valueAlloc(s.arena.allocator(), src[0..i], .{}) }));
+        // The outline parses every prefix. Compiling is slower: every sixth prefix and every end of a line.
+        _ = try s.request("textDocument/documentSymbol", main_uri);
+        if (i % 6 == 0 or src[i - 1] == '\n') {
+            _ = try s.flush();
+            const line: u32 = @intCast(std.mem.count(u8, src[0..i], "\n"));
+            const col: u32 = @intCast(i - (if (std.mem.findScalarLast(u8, src[0..i], '\n')) |nl| nl + 1 else 0));
+            // A completion compiles up to three patched copies.
+            if (i % 12 == 0) _ = try s.requestAt("textDocument/completion", main_uri, line, col);
+        }
+    }
+    // The whole source has no errors.
+    const out = try s.flush();
+    _ = out;
+    const reply = try s.request("textDocument/documentSymbol", main_uri);
+    try t.expectEqual(@as(usize, 6), items(reply, &.{"result"}).len);
+}
+
+test "Closing a module rechecks the documents that use it, and a link names the same document as its file." {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(t.io, "real");
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "real/lib.cy", .data = "fn twice(a int) -> int:\n    return a * nope\n" });
+    const dir = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(dir);
+
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+    const arena = s.arena.allocator();
+    const sep = std.Io.Dir.path.sep_str;
+    const main_real = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "real" ++ sep ++ "main.cy", .{dir}));
+    const lib_real = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "real" ++ sep ++ "lib.cy", .{dir}));
+
+    // The module on disk has an error. In the editor it is fixed.
+    try s.open(main_real, 1, "use lib './lib.cy'\nprint(lib.twice(2))\n");
+    try s.open(lib_real, 1, "fn twice(a int) -> int:\n    return a * 2\n");
+    var out = try s.flush();
+    for (out) |msg| {
+        try t.expectEqual(@as(usize, 0), items(msg, &.{ "params", "diagnostics" }).len);
+    }
+
+    // Closing the module discards the editor's text. The document that uses it reads the file again.
+    out = try s.send(try std.fmt.allocPrint(arena,
+        \\{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{s}"}}}}}}
+    , .{lib_real}));
+    try t.expect(s.server.hasPending());
+    out = try s.flush();
+    var main_has_error = false;
+    for (out) |msg| {
+        if (std.mem.eql(u8, str(msg, &.{ "params", "uri" }), main_real)) {
+            main_has_error = items(msg, &.{ "params", "diagnostics" }).len == 1;
+        }
+    }
+    try t.expect(main_has_error);
+
+    if (builtin.os.tag == .windows) return;
+    // The same files through a symbolic link to their directory: the compiler resolves the module to the real
+    // file, and the document opened through the link is that file.
+    try tmp.dir.symLink(t.io, "real", "link", .{ .is_directory = true });
+    const main_link = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "link" ++ sep ++ "main.cy", .{dir}));
+    const lib_link = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "link" ++ sep ++ "lib.cy", .{dir}));
+    try s.open(lib_link, 1, "fn twice(a int) -> int:\n    return a * 2\n");
+    out = try s.flush();
+    for (out) |msg| {
+        try t.expectEqual(@as(usize, 0), items(msg, &.{ "params", "diagnostics" }).len);
+    }
+    // Go to definition answers with the uri that the editor knows the module by.
+    const reply = try s.requestAt("textDocument/definition", main_real, 1, 11);
+    try t.expectEqualStrings(lib_link, str(reply, &.{ "result", "uri" }));
+    // Opening the main document through the link replaces the one opened by its real path.
+    out = try s.openReplacing(main_link, 1, "use lib './lib.cy'\nprint(lib.twice(3))\n");
+    try t.expectEqualStrings(main_real, str(out[0], &.{ "params", "uri" }));
+    try t.expect(s.server.docs.get(main_real) == null);
+    out = try s.flush();
+    for (out) |msg| {
+        try t.expectEqual(@as(usize, 0), items(msg, &.{ "params", "diagnostics" }).len);
+    }
 }
 
 test "A module is read from the editor when it is open, otherwise from the disk." {

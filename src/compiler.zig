@@ -79,6 +79,11 @@ pub const Compiler = struct {
     refs: std.ArrayList(cy.refs.Ref) = .empty,
     /// The text that the last `refs.find` returned.
     ref_detail: []const u8 = "",
+    /// The main chunk that `refs` belongs to. Null before a compile reached its main chunk and after a reset:
+    /// `main_chunk` is undefined or freed then, and a query has nothing to answer from.
+    refs_main: ?*cy.Chunk = null,
+    /// The failed allocations of the allocator when the compile started. Recovery stops when it moved.
+    failed_allocs_at_start: usize = 0,
     /// The ranges that the last `refs.findAll` returned.
     ref_ranges: std.ArrayList(cy.refs.Range) = .empty,
     /// The tokens that the last `refs.tokens` returned.
@@ -333,6 +338,7 @@ pub const Compiler = struct {
         self.reports.clearRetainingCapacity();
         // The references point into the symbols and sources of the compile that the reports are from.
         self.refs.clearRetainingCapacity();
+        self.refs_main = null;
         self.ref_ranges.clearRetainingCapacity();
         self.ref_tokens.clearRetainingCapacity();
         if (self.ref_arena) |*arena| arena.deinit();
@@ -367,6 +373,7 @@ pub const Compiler = struct {
         defer self.main_discarded = false;
         const acct = cy.MemAccount.of(self.alloc);
         const failed_allocs = if (acct) |a| a.failed.load(.monotonic) else 0;
+        self.failed_allocs_at_start = failed_allocs;
         self.host_error = null;
         const res = self.compileInner2(uri, src, config) catch |err_| {
             // A callback that could not return its error ended the compile with a bare `CompileError` or null.
@@ -445,6 +452,9 @@ pub const Compiler = struct {
             mainChunk = try ensureModule(self, r_uri);
         }
         self.main_chunk = mainChunk;
+        // Queries are answered for a compile that recorded. Without the recording a partial answer (the names
+        // in declarations, but no locals) would look like a complete one.
+        self.refs_main = if (self.record_refs) mainChunk else null;
 
         // Load core module. Added as fallback module for each user module.
         if (self.importCore) {
@@ -788,9 +798,14 @@ const RecoverMarks = struct {
 /// A body failed with `err`. Makes sure the error is reported, drops what the body left on the stacks and
 /// returns, so that the caller goes on with the next body. Returns the error if the compile has to end.
 fn recoverBody(self: *Compiler, c: *cy.Chunk, marks: *const RecoverMarks, err: anyerror) !void {
-    // Without memory there is nothing to go on with.
-    if (err == error.OutOfMemory or self.alloc_failed) {
+    // Without memory there is nothing to go on with. A refused allocation can arrive as any error, a compile
+    // error included, so the allocator is asked like `compile` does. What an allocation failure abandoned half
+    // built is not something the next body can be checked against.
+    if (err == error.OutOfMemory or self.alloc_failed or self.host_error != null) {
         return err;
+    }
+    if (cy.MemAccount.of(self.alloc)) |acct| {
+        if (acct.failed.load(.monotonic) != self.failed_allocs_at_start) return err;
     }
     if (err != error.CompileError) {
         // Wrap all other errors as a CompileError.

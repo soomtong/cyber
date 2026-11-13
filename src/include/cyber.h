@@ -700,6 +700,10 @@ bool cl_vm_compile_report_note(CLVM* vm, size_t idx, size_t note_idx, CLReport* 
 
 /// Whether the compiler records what the names in the main source refer to. Off by default, kept across
 /// `cl_vm_reset`. For editor tooling: see `cl_vm_symbol_at`.
+/// The functions that read the record (`cl_vm_symbol_at`, `cl_vm_symbol_refs`, `cl_vm_symbol_refs_to`,
+/// `cl_vm_members_at`, `cl_vm_names_at`, `cl_vm_symbol_tokens`) answer for the last eval, compile or validate.
+/// They find nothing (false or 0) if that one ran with the recording off, before the first compile, after
+/// `cl_vm_reset`, and after a compile that failed before it reached its main source (a uri that does not load).
 void cl_vm_set_symbol_info(CLVM* vm, bool enabled);
 
 typedef enum {
@@ -754,8 +758,8 @@ typedef struct CLRange {
 /// declared in the main source, the name in its declaration. Returns the number of ranges and sets `out` to
 /// them, sorted and without duplicates. Returns 0 and sets `out` to NULL if `pos` is not at a local or a
 /// declared name. Uses in other modules are not found: only the main source is recorded.
-/// The ranges are owned by the VM and stay valid until the next call of this function, eval, compile,
-/// validate or reset.
+/// The ranges are owned by the VM and stay valid until the next call of this function or of
+/// `cl_vm_symbol_refs_to`, eval, compile, validate or reset.
 size_t cl_vm_symbol_refs(CLVM* vm, uint32_t pos, const CLRange** out);
 
 typedef enum {

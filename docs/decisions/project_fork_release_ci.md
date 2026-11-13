@@ -90,6 +90,14 @@
   master push → Latest Build run 43226879565 성공 → annotated 태그 push → 릴리스 run 43231226185 성공(`build-833-03d24f4`, 에셋 14개)
   → `gh release edit 0.4.9 --notes-file --latest` → macOS arm64 자산을 임시 경로에 풀어 `Cyber 0.4.9 build-833-03d24f4`와
   `concurrency/scope_block.cy` 통과를 확인했다. tars-agent 안내 초안은 그 저장소의 `docs/requests/cyber-0.4.9-report.md`.
+- 0.4.10은 2026-11-13에 `3e6b02eb`로 찍었다. 버전 올림은 `15b031b0`이고 내용은 언어 서버 `cyber-lsp`(Linux · macOS 번들,
+  `install.sh`가 링크) · 컴파일 보고 · 오류 복구 · 심볼 조회 API · VS Code 클라이언트 · Playground와 버그 수정(F-112 ~ F-118)이다.
+  버전 올림의 Latest Build에서 `concurrency/fiber_await_spawn.cy`가 macOS arm64에서 실패했다. spawn 작업이 fiber의 `await` 전에
+  끝나면 fiber가 멈추지 않아 `a got`이 `b start`보다 먼저 들어가는 경쟁이다. spawn 작업이 먼저 100ms 자게 했고(`25cefc47`),
+  `os.sleep`은 extern 호출이라 FFI 없는 빌드(Windows msvc job)에서는 그 테스트를 뺐다(`3e6b02eb`). 그 Latest Build run
+  43419835825 13 job 성공 → annotated 태그 push → 릴리스 run 43421847016 성공(`build-856-3e6b02e`, 에셋 14개) →
+  `gh release edit 0.4.10 --notes-file --latest` → `install.sh 0.4.10`을 임시 경로에 설치해 `Cyber 0.4.10 build-856-3e6b02e`,
+  `cyber-lsp` 링크와 응답, `fiber_await_spawn.cy` 통과를 확인했다.
 - 번들의 `src/`는 타깃별로 다르다. `build.zig`의 `cli` 스텝이 공통 10개에 macOS(`os.macos.cy`,
   `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
   더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.

@@ -216,3 +216,59 @@ div#status.success {
 #output .error {
     color: rgb(255, 123, 123);
 }
+
+/* Language server: diagnostics, completion and hover. */
+.cm-s-cyber .CodeMirror-lint-markers {
+    width: 16px;
+}
+.CodeMirror-lint-tooltip {
+    background-color: #1b1b1b;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
+    font-size: 13px;
+    z-index: 30;
+}
+ul.CodeMirror-hints {
+    background-color: #1b1b1b;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
+    font-size: 13px;
+    max-height: 16em;
+    z-index: 30;
+}
+li.CodeMirror-hint {
+    color: var(--text);
+    max-width: 44em;
+    padding: 2px 8px;
+}
+li.CodeMirror-hint-active {
+    background-color: #3a2c14;
+    color: var(--text);
+}
+.hint-detail {
+    color: var(--text-light);
+    margin-left: 1.5em;
+}
+.lsp-hover {
+    position: fixed;
+    max-width: min(46em, 90vw);
+    padding: 6px 10px;
+    background-color: #1b1b1b;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 13px;
+    white-space: pre-wrap;
+    z-index: 30;
+}
+.lsp-hover pre {
+    margin: 0;
+    padding: 0;
+    border: none;
+    font-family: SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
+    font-size: 13px;
+    white-space: pre-wrap;
+}

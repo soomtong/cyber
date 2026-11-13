@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cyber Playground</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.11/codemirror.min.css" integrity="sha512-uf06llspW44/LZpHzHT6qBOIVODjWtv4MxCricRxkzvopAlSWnTf6hpZTFxuuZcuNE9CBQhqE0Seu1CoRk84nQ==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.11/addon/lint/lint.min.css" integrity="sha512-jP1+o6s94WQS9boYeDP3Azh8ihI5BxGgBZNjkABhx05MqH5WuDzfzSnoPxGxVzWi/gxxVHZHvWkdRM6SMy5B0Q==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.11/addon/hint/show-hint.min.css" integrity="sha512-W/cvA9Wiaq79wGy/VOkgMpOILyqxqIMU+rkneDUW2uqiUT53I6DKmrF4lmCbRG+/YrW0J69ecvanKCCyb+sIWA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,6 +18,7 @@
         <select id="example"></select>
         <button id="run" class="button" title="Ctrl+Enter" disabled>Run</button>
         <button id="stop" class="button" disabled>Stop</button>
+        <button id="format" class="button" title="Format the program" disabled>Format</button>
         <button id="share" class="button" title="Copy a link to this program">Share</button>
     </header>
     <div class="panes">
@@ -29,7 +32,10 @@
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.11/codemirror.min.js" integrity="sha512-rdFIN28+neM8H8zNsjRClhJb1fIYby2YCNmoqwnqBDEvZgpcp7MJiX8Wd+Oi6KcJOMOuvGztjrsI59rly9BsVQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.11/addon/selection/active-line.min.js" integrity="sha512-0sDhEPgX5DsfNcL5ty4kP6tR8H2vPkn40GwA0RYTshkbksURAlsRVnG4ECPPBQh7ZYU6S3rGvp5uhlGQUNrcmA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.11/addon/lint/lint.min.js" integrity="sha512-fzIkwQa9H8rjoDzpZ9sMOYhgaYwh9nKALWbE1m+7wpiry9PN5OyNcZ9LySotjEysolveRyv2C9pVJ+DbEuKtmQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.11/addon/hint/show-hint.min.js" integrity="sha512-4+hfJ/4qrBFEm8Wdz+mXpoTr/weIrB6XjJZAcc4pE2Yg5B06aKS/YLMN5iIAMXFTe0f1eneuLE5sRmnSHQqFNg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="cyber-mode.js"></script>
+    <script src="lsp-client.js"></script>
     <script src="examples.js"></script>
     <script>
         const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
@@ -38,7 +44,9 @@
             lineNumbers: true,
             indentUnit: 4,
             styleActiveLine: true,
+            gutters: ['CodeMirror-lint-markers', 'CodeMirror-linenumbers'],
             extraKeys: {
+                'Ctrl-Space': cm => lsp.complete(cm),
                 'Ctrl-Enter': () => run(),
                 'Cmd-Enter': () => run(),
                 Tab: cm => cm.execCommand('indentMore'),
@@ -53,6 +61,22 @@
         const stopButton = document.getElementById('stop');
         const shareButton = document.getElementById('share');
         const exampleSelect = document.getElementById('example');
+        const formatButton = document.getElementById('format');
+
+        // The language server: diagnostics, completion (also Ctrl+Space), hover and formatting.
+        // Without `cyber-lsp.wasm` the page still runs programs.
+        const lsp = createLspClient(editor, {
+            onStatus(ok, message) {
+                formatButton.disabled = !ok;
+                if (ok) editor.setOption('lint', { getAnnotations: lsp.lint, async: true, delay: 300 });
+                else console.warn('The language server is not available: ' + message);
+            },
+        });
+        formatButton.onclick = () => {
+            lsp.format().then(done => {
+                if (!done) setStatus('Not formatted. A program with a syntax error is left as it is.', 'error');
+            });
+        };
 
         let worker = null;
         let ready = false;

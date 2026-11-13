@@ -42,10 +42,12 @@ function normalizePath(path) {
 // `opts.args`: the argument list, starting with the program name.
 // `opts.files`: an object that maps a path to a string or a `Uint8Array`.
 // `opts.stdout(bytes)` and `opts.stderr(bytes)`: receive the `Uint8Array` of each write.
+// `opts.stdin(maxLen)`: returns the next bytes of stdin as a `Uint8Array`, empty at the end. Without it stdin is empty.
 function createWasi(opts) {
     const args = opts.args || ['cyber'];
     const onStdout = opts.stdout || (() => {});
     const onStderr = opts.stderr || (() => {});
+    const onStdin = opts.stdin || (() => new Uint8Array(0));
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
 
@@ -255,7 +257,17 @@ function createWasi(opts) {
         },
         fd_read(fd, iovs, iovsLen, nreadPtr) {
             let total = 0;
-            if (fd !== 0) {
+            if (fd === 0) {
+                // One call to `opts.stdin` per read: the reader sees the input in the pieces the host chose.
+                const v = view();
+                if (iovsLen > 0) {
+                    const ptr = v.getUint32(iovs, true);
+                    const len = v.getUint32(iovs + 4, true);
+                    const data = onStdin(len).subarray(0, len);
+                    bytes(ptr, data.length).set(data);
+                    total = data.length;
+                }
+            } else {
                 const entry = fds.get(fd);
                 if (!entry || entry.file === undefined) return ERRNO_BADF;
                 total = readIovs(iovs, iovsLen, (ptr, len) => {

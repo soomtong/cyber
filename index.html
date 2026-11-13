@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.9-dev 851-df1808a</div>
+    <div class="sub-title">v0.4.9-dev 853-98a1292</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -4916,10 +4916,19 @@ fn CreateWindow(title Ptr[c_char], w c_int, h c_int, flags WindowFlags) -> Ptr[W
 </code></pre>
 <a href="#ffi">^topic</a>
 <h3 id="extern-globals"><code>extern</code> globals. <a href="#extern-globals">#</a></h3>
-<p>An <code>extern</code> global is registered for static or runtime binding: <em>Incomplete</em></p>
-<pre><code class="language-cy">#[extern] global count Ptr[int]
+<p>An <code>extern</code> global is registered for static or runtime binding. It is declared with the type of the C variable, and the script reads and writes the variable of the library:</p>
+<pre><code class="language-cy">#[extern] global count i32
+#[extern] fn bump() -> i32
+
+print(count)       --> 5
+count = 40
+print(bump())      --> 41
 </code></pre>
-<p>Note that an <code>extern</code> global requires a pointer type.</p>
+<p>The example above would be bound to this C code:</p>
+<pre><code class="language-c">int count = 5;
+int bump(void) { return ++count; }
+</code></pre>
+<p>An extern symbol name can be declared as for a function: <code>#[extern='lib_count'] global count i32</code>. An <code>extern</code> global can not be read in the initializer of another global, because it is bound after the global initializers run.</p>
 <a href="#ffi">^topic</a>
 <h2 id="cbindgency">cbindgen.cy <a href="#cbindgency">#</a></h2>
 <p><a href="https://github.com/fubark/cyber/blob/master/src/tools/cbindgen.cy" title="">cbindgen.cy</a> is a script that automatically generates bindings given a C header file. Some example bindings that were generated include: <a href="https://github.com/fubark/ray-cyber" title="">Raylib</a>, <a href="https://github.com/fubark/cyber/blob/master/src/x/sdl" title="">SDL3</a>, <a href="https://github.com/fubark/cyber/blob/master/src/x/vk" title="">Vulkan</a>, and <a href="https://github.com/fubark/cyber/blob/master/src/tools/llvm.cy" title="">LLVM</a>.</p>

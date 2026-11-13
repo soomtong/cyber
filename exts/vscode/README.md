@@ -19,7 +19,9 @@ The main block and each function show their first error. A syntax error is shown
 
 ## Requirements
 
-Build the server from the repository root and put it in `PATH`, or point `cyber.lsp.path` at it:
+The release bundles for Linux and macOS hold `cyber-lsp` next to `cyber`, and `install.sh` links both into
+`PATH`. Nothing else is needed then. To use a build of your own, build the server from the repository root and
+put it in `PATH`, or point `cyber.lsp.path` at it:
 
 ```bash
 zig build lsp -Doptimize=ReleaseSafe

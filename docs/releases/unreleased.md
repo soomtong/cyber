@@ -55,12 +55,16 @@
 
 ## 변경
 
+- Linux · macOS 릴리스 번들에 `cyber-lsp`가 들어간다. `install.sh`가 `cyber` 옆에 `cyber-lsp`도 `CYBER_BIN`에 심링크하고,
+  서버가 없는 번들(0.4.9까지)을 설치하면 이전 설치의 `cyber-lsp`를 지운다(실행 파일과 버전이 다른 서버를 남기지 않는다).
+  Windows 번들에는 아직 없다(빌드는 되지만 실행을 확인하지 못했다). `zig build test`는 Windows 타깃에서 `lsp-test`를 뺀다.
+
 - 언어 서버 `cyber-lsp`를 더했다(`zig build lsp`, `task build:lsp`). CLI와 같이 `libcyber` 위의 별도 프로그램이고 stdin · stdout으로
   Language Server Protocol을 말한다. 문서를 실행 없이 프로그램으로 컴파일해 컴파일 오류를 진단으로 내고(`First declared at:` ·
   템플릿 확장 호출 지점은 관련 정보), `cyber fmt`와 같은 결과의 문서 포맷, 개요(타입 · 필드 · 함수 · 메서드 · 상수 · 전역),
   들여쓰기 기준 접기, hover(선언의 첫 줄 또는 `이름 타입`), 정의로 이동, 문서 안의 references · 강조, 지역과 매개변수의 rename, completion(`.` 뒤의 멤버와 범위의 이름), signatureHelp를 준다. 편집기에 열린 모듈은 디스크가 아니라 편집기의 내용으로 읽는다. 위치는 클라이언트가 `utf-8`을
   받으면 바이트, 아니면 UTF-16이다. 오류 복구를 켜서 본문(main 블록 · 함수 · 메서드)마다 첫 오류를 진단으로 낸다. 검사 한 번은 ReleaseFast에서 약 5ms다.
-  설계와 단계는 `docs/specs/2026-11-12-lsp-design.md`(P1). 릴리스 번들에는 아직 넣지 않는다.
+  설계와 단계는 `docs/specs/2026-11-12-lsp-design.md`(P1).
 - `exts/vscode/test`: 확장을 실제 VS Code에서 돌리는 테스트(`task test:vscode`, `@vscode/test-electron`). 진단 · hover ·
   definition · references · rename · 개요 · 접기 · completion · signatureHelp · 포맷 · 서버 재시작을 에디터의 명령으로 확인한다.
   VS Code 1.146.0에서 아홉 항목이 통과한다.

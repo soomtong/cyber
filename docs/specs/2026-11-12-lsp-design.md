@@ -165,7 +165,7 @@ LSP의 `Diagnostic`은 `range`(시작 · 끝), `message`, `relatedInformation`(�
 
 - 증분 동기화(`change: 2`), 범위 포맷, 워크스페이스 폴더.
 - Windows에서의 실행 확인. 경로 구분자 변환은 넣었지만 돌려 보지 않았다.
-- 릴리스 번들 · `install.sh`에 `cyber-lsp` 넣기.
+- 릴리스 번들 · `install.sh`에 `cyber-lsp` 넣기(2026-11-13에 Linux · macOS 번들에 넣었다. `project_fork_release_ci.md`의 "번들에 언어 서버").
 
 ## 7. P2 구현: sema 복구 (2026-11-12)
 

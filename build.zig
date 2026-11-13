@@ -242,7 +242,10 @@ pub fn build(b: *std.Build) !void {
         main_step.dependOn(lib_test_cmd);
         main_step.dependOn(lib_standalone_test_cmd);
         main_step.dependOn(cli_test_cmd);
-        main_step.dependOn(lsp_test_cmd);
+        // The language server has not been run on Windows yet, and it is not built for wasm.
+        if (target.os.tag != .windows and !target.cpu.arch.isWasm()) {
+            main_step.dependOn(lsp_test_cmd);
+        }
         main_step.dependOn(trace_test_cmd);
         main_step.dependOn(behavior_test_cmd);
     }

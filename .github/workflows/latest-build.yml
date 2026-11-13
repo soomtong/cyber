@@ -269,11 +269,18 @@ jobs:
       - name: Build.
         run: zig build ${{ env.BUILD_CMD }} ${{ env.ZIG_MODE_FLAG }} ${{ env.ZIG_TARGET_FLAG }} ${{ env.DEV_FLAG }} -Dbuild=${{ env.BUILD }} -Dcommit=${{ env.COMMIT }}
 
+      # The language server goes into the bundle next to the CLI. Not on Windows yet: it builds there but has
+      # not been run (docs/specs/2026-11-12-lsp-design.md).
+      - name: Build language server.
+        if: (env.BUILD_HOST == 'ubuntu-24.04' || env.BUILD_HOST == 'macos-26-intel' || env.BUILD_HOST == 'macos-26') && env.BUILD_TARGET != 'wasm32-wasi' && env.BUILD_CMD == 'cli'
+        run: zig build lsp ${{ env.ZIG_MODE_FLAG }} ${{ env.ZIG_TARGET_FLAG }} ${{ env.DEV_FLAG }} -Dbuild=${{ env.BUILD }} -Dcommit=${{ env.COMMIT }}
+
       # Remove when zig strip is fixed.
       - name: Strip (Linux)
         if: env.BUILD_TARGET == 'x86_64-linux-gnu' && env.BUILD_MODE == 'release' && env.BUILD_CMD == 'cli'
         run: |
           strip zig-out/bin/cyber
+          strip zig-out/bin/cyber-lsp
 
       # # Don't strip aarch64 since it was already code signed.
       # # TODO: Look for way to make zig strip before doing the codesign.
@@ -296,9 +303,9 @@ jobs:
 
       - name: Zip. (linux/macos)
         if: (env.BUILD_HOST == 'ubuntu-24.04' || env.BUILD_HOST == 'macos-26-intel' || env.BUILD_HOST == 'macos-26') && env.BUILD_TARGET != 'wasm32-wasi' && env.BUILD_CMD == 'cli'
-        # The CLI embeds its standard modules, so the bundle is the executable alone.
+        # The CLI and the language server embed their standard modules, so the bundle is the two executables.
         run: |
-           tar -C zig-out/bin -czvf ${{ env.BIN_ZIP }} cyber
+           tar -C zig-out/bin -czvf ${{ env.BIN_ZIP }} cyber cyber-lsp
 
       - name: Zip. (windows)
         if: env.BUILD_TARGET == 'x86_64-windows-gnu' && env.BUILD_CMD == 'cli'

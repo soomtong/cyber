@@ -224,4 +224,32 @@ t.eq([]int{1, 2, 3}.join(','), '1,2,3')
 t.eq([]int{1, 2, 3}.join('🦊'), '1🦊2🦊3')
 t.eq([]str{'한글', 'x'}.join(' · '), '한글 · x')
 
+-- An inclusive end: `a[i..=j]` is `a[i..j+1]`.
+incl := []int{1, 2, 3, 4, 5}
+t.eq(incl[1..=2].len(), 2)
+t.eq(incl[1..=2][0], 2)
+t.eq(incl[1..=2][1], 3)
+t.eq(incl[4..=4][0], 5)
+t.eq(incl[0..=4].len(), 5)
+t.eq(Array[int]{1, 2, 3}[0..=1].len(), 2)
+t.eq('abcxyz'[1..=2], 'bc')
+
+-- A list literal without a target type is a `[]T` of its first element.
+inferred := {'a', 'b'}
+inferred += 'c'
+t.eq(inferred.len(), 3)
+t.eq(type.name(type.of(inferred)), '[]str')
+t.eq(inferred[2], 'c')
+inferred_sum := 0
+for {1, 2, 3} |n|:
+    inferred_sum += n
+t.eq(inferred_sum, 6)
+
+-- Range values: `a..=b` holds `b + 1` as its exclusive end.
+r_incl := 0..=3
+t.eq(r_incl.start, 0)
+t.eq(r_incl.end, 4)
+r_excl := 0..3
+t.eq(r_excl.end, 3)
+
 --cytest: pass

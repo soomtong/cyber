@@ -238,4 +238,14 @@ m_f32[f32(1.5)] = 1
 t.eq(1, m_f32[f32(1.5)])
 t.eq(false, m_f32.contains(f32(2.5)))
 
+-- Expression keys: `(expr)=value` evaluates the key. A name without parentheses is a string key.
+k := 'z'
+m_expr := Map[str, int]{(k)=1, (k + 'y')=2, k=3}
+t.eq(1, m_expr['z'])
+t.eq(2, m_expr['zy'])
+t.eq(3, m_expr['k'])
+m_int_expr := Map[int, str]{(1 + 1)='x', 3='y'}
+t.eq('x', m_int_expr[2])
+t.eq('y', m_int_expr[3])
+
 --cytest: pass

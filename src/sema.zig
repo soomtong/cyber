@@ -2390,12 +2390,44 @@ fn semaIndexExpr2(c: *cy.Chunk, left: ExprResult, left_n: *ast.Node, arg0: ExprR
     return c.semaCallFuncSymRec2(func_sym, &args, node);
 }
 
+/// The end of `a..=b` as an exclusive end: `b + 1`.
+fn semaRangeEndPlusOne(c: *cy.Chunk, end: *ast.Node) !ExprResult {
+    const end_res = try c.semaExprCstr(end, c.sema.i64_t);
+    const one = try c.semaConst(1, c.sema.i64_t, end);
+    const add = try c.ir.newExpr(.add, c.sema.i64_t, end, .{
+        .left = end_res.ir,
+        .right = one.ir,
+    });
+    return ExprResult.initOwned(add);
+}
+
 fn semaSliceExpr(c: *cy.Chunk, left: *ast.Node, left_res: ExprResult, range: *ast.Range, node: *ast.Node) !ExprResult {
     //     // TODO: This auto conversion to `uint` should be defined by another `uint` compatible type that allows implicit conversion from `int`.
     //     //       @index doesn't need this special treatment since it accepts only one index arg.
     //     const start_res = try semaUintIndex(c, start);
     const sym = try c.accessResolvedSymOrFail(left_res.type, "@slice", node);
     const func_sym = try requireFuncSym(c, sym, node);
+    if (!range.inc) {
+        return c.reportError("A decreasing range can not be a slice index.", @ptrCast(range));
+    }
+    if (range.end_inclusive) {
+        // `a[i..=j]` is `a[i..j+1]`. The start is evaluated before the end.
+        const seq_start = c.seq_pending.items.len;
+        errdefer seqPop(c, seq_start);
+        var start_res = if (range.start) |start|
+            try c.semaExprCstr(start, c.sema.i64_t)
+        else
+            try c.semaConst(0, c.sema.i64_t, @ptrCast(range));
+        try seqPushRes(c, &start_res, @ptrCast(range));
+        const end_res = try semaRangeEndPlusOne(c, range.end.?);
+        seqPop(c, seq_start);
+        const args = [_]sema_func.Argument{
+            sema_func.Argument.initReceiver(left, left_res),
+            sema_func.Argument.initPreResolved(range.start orelse @ptrCast(range), start_res),
+            sema_func.Argument.initPreResolved(range.end.?, end_res),
+        };
+        return c.semaCallFuncSymRec2(func_sym, &args, node);
+    }
     if (range.start == null) {
         if (range.end) |end| {
             // `a[..end]` is `a[0..end]`.
@@ -8456,13 +8488,21 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                 return c.reportError("Expected range start. A range without a start is only allowed as a slice index.", node);
             };
 
+            if (!range.inc) {
+                return c.reportError("A decreasing range is only allowed in a `for` loop.", node);
+            }
+
             var b: InitBuilder = .{ .c = c };
             try b.begin(c.sema.range_t, 2, node);
 
             const start_res = try c.semaExprCstr(start, c.sema.i64_t);
             try b.pushArg(start_res, start);
 
-            const end_res = try c.semaExprCstr(end, c.sema.i64_t);
+            // `Range` is `[start, end)`, so `a..=b` holds `b + 1`.
+            const end_res = if (range.end_inclusive)
+                try semaRangeEndPlusOne(c, end)
+            else
+                try c.semaExprCstr(end, c.sema.i64_t);
             try b.pushArg(end_res, end);
 
             const loc = b.end();
@@ -8519,80 +8559,14 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                 }
             }
 
-            // TODO: Infer tuple type. Previously this initialized slices and maps.
-            return c.reportErrorFmt("TODO: infer tuple type", &.{}, node);
-
-            // const init_lit = node.cast(.init_lit);
-            // if (init_lit.array_like) {
-            //     if (init_lit.args.len == 0) {
-            //         return c.reportError("Expected array type or at least one element.", node);
-            //     }
-
-            //     // Infer list type from the first element.
-            //     const args = try c.ir.allocArray(*ir.Expr, init_lit.args.len);
-            //     var arg_res = try c.semaExpr(init_lit.args.ptr[0], .{});
-            //     arg_res = try semaOwn(c, arg_res, init_lit.args.ptr[0]);
-            //     args[0] = arg_res.ir;
-
-            //     // Constrain rest of elements to the type of the first element.
-            //     const elem_t = arg_res.type;
-            //     for (init_lit.args.slice()[1..], 1..) |arg, i| {
-            //         arg_res = try c.semaExprCstr(arg, elem_t);
-            //         arg_res = try semaOwn(c, arg_res, arg);
-            //         args[i] = arg_res.ir;
-            //     }
-
-            //     const slice_t = try get_slice_type(c, elem_t);
-            //     const init_seq = (try c.getResolvedSym(@ptrCast(slice_t.sym()), "@init_sequence", node)).?;
-
-            //     return sema_init_seq2(c, init_seq, args, node);
-            // } else {
-            //     // Assume at least one key/value pair.
-            //     // Infer map type from the first pair.
-            //     const pairs = try c.ir.allocArray(*ir.Expr, init_lit.args.len);
-            //     const first_pair = init_lit.args.ptr[0];
-            //     if (first_pair.type() != .keyValue) {
-            //         return c.reportError("Expected key value pair.", first_pair);
-            //     }
-            //     var kv = first_pair.cast(.keyValue);
-            //     var key: ExprResult = undefined;
-            //     if (kv.key.type() == .ident) {
-            //         key = try c.semaString(kv.key.cast(.ident).name.slice(), kv.key);
-            //     } else {
-            //         key = try c.semaExpr(kv.key, .{});
-            //     }
-            //     var val = try c.semaExpr(kv.value, .{});
-                
-            //     const key_t = key.type;
-            //     const val_t = val.type;
-            //     const map_t = try getMapType(c, key_t, val_t);
-            //     const init_record = (try c.getResolvedSym(@ptrCast(map_t.sym()), "@init_record", @ptrCast(init_lit))).?;
-            //     const init_record_func = try requireFuncSym(c, init_record, node);
-            //     const span_t = init_record_func.first.sig.params_ptr[0].get_type();
-            //     if (!span_t.isInstanceOf(c.sema.span_tmpl)) {
-            //         return c.reportError("Expected `[&]T` function parameter in `@init_record`.", node);
-            //     }
-            //     const pair_t = span_t.sym().instance.?.params[0].asPtr(*cy.Type);
-            //     const pair_borrow_t = try getBorrowType(c, pair_t);
-
-            //     var pair = try semaInitPair(c, pair_t, key, val, first_pair);
-            //     pairs[0] = pair.ir;
-
-            //     for (init_lit.args.slice()[1..], 1..) |arg, i| {
-            //         kv = arg.cast(.keyValue);
-            //         if (kv.key.type() == .ident) {
-            //             key = try c.semaString(kv.key.cast(.ident).name.slice(), kv.key);
-            //         } else {
-            //             key = try c.semaExprCstr(kv.key, key_t);
-            //             key = try semaOwn(c, key, kv.key);
-            //         }
-            //         val = try c.semaExprCstr(kv.value, val_t);
-            //         val = try semaOwn(c, val, kv.value);
-            //         pair = try semaInitPair(c, pair_t, key, val, arg);
-            //         pairs[i] = pair.ir;
-            //     }
-            //     return sema_call_init_span(c, init_record_func, span_t, pair_borrow_t, pair_t, pairs, node);
-            // }
+            const init_lit = node.cast(.init_lit);
+            if (!init_lit.array_like) {
+                return c.reportError("Expected a target type for a key value initializer, such as `Map[str, int]{a=1}`.", node);
+            }
+            if (init_lit.args.len == 0) {
+                return c.reportError("Expected a target type or at least one element.", node);
+            }
+            return semaInferSliceLit(c, init_lit);
         },
         .stringt => {
             const template = node.cast(.stringt);
@@ -10267,6 +10241,38 @@ fn sema_init_seq2(c: *cy.Chunk, init_seq: *cy.Sym, args: []*ir.Expr, node: *ast.
     } else {
         return sema_call_init_span(c, func_sym, init_span_t, borrow_t, elem_t, args, node);
     }
+}
+
+/// `{a, b}` without a target type is a `[]T` where `T` is the type of the first element.
+fn semaInferSliceLit(c: *cy.Chunk, lit: *ast.InitLit) !ExprResult {
+    const node: *ast.Node = @ptrCast(lit);
+    const nargs = lit.args.len;
+    const args = try c.ir.allocArray(*ir.Expr, nargs);
+
+    // An element is evaluated before a statement that a later element adds (`seqFlush`).
+    const seq_start = c.seq_pending.items.len;
+    errdefer seqPop(c, seq_start);
+
+    const first = lit.args.ptr[0];
+    var res = try c.semaExpr(first, .{});
+    res = try semaOwn(c, res, first);
+    const elem_t = res.type;
+    args[0] = res.ir;
+    try seqPush(c, &args[0], true, first);
+    for (lit.args.slice()[1..], 1..) |arg, i| {
+        res = try c.semaExprCstr(arg, elem_t);
+        res = try semaOwn(c, res, arg);
+        args[i] = res.ir;
+        try seqPush(c, &args[i], true, arg);
+    }
+    seqPop(c, seq_start);
+
+    const slice_t = try get_slice_type(c, elem_t);
+    const init_seq = (try c.getResolvedSym(@ptrCast(slice_t.sym()), "@init_sequence", node)).?;
+    const func_sym = try requireFuncSym(c, init_seq, node);
+    const span_t = func_sym.first.sig.params_ptr[0].get_type();
+    const borrow_t = try getBorrowType(c, elem_t);
+    return sema_call_init_span(c, func_sym, span_t, borrow_t, elem_t, args, node);
 }
 
 fn semaInitSequence(c: *cy.Chunk, init_seq: *cy.Sym, lit: *ast.InitLit) !ExprResult {

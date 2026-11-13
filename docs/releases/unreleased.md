@@ -18,8 +18,18 @@
   그 인스턴스를 버리고 같은 소스를 다시 컴파일하므로, 그 오류가 관계없는 다음 eval에 보고되지 않는다. 같은 인스턴스를
   다시 쓰면 "because of an earlier error" 오류다. 첫 컴파일이 실패하면 VM을 리셋하는 것은 그대로다(F-120,
   tars-agent M0 스파이크).
+- 범위식이 포함 끝과 방향을 잃었다. `a[1..=2]`가 `{2}`를 돌려줬고(이제 `{2, 3}`), `a[3..>1]`은 `InvalidArgument` panic이었다
+  (이제 컴파일 오류 "A decreasing range can not be a slice index."). 값으로 쓴 `0..=3`은 `Range{start=0, end=3}`이었다
+  (이제 `end=4`, `Range`는 끝을 포함하지 않는다). `3..>0` 같은 감소 범위는 `for` 밖에서 컴파일 오류다(F-121).
 
 ## 언어와 표준 라이브러리
+
+- 타입 없는 목록 리터럴은 첫 원소 타입의 `[]T`다: `names := {'a.py', 'b.py'}`, `for {1, 2, 3} |n|:`. 전에는
+  `TODO: infer tuple type` 오류였다. 빈 `{}`와 키-값 리터럴(`{a=1}`)은 여전히 목표 타입이 필요하고 그렇게 말하는 오류를 낸다.
+- Map 리터럴의 키를 괄호로 감싸면 식으로 계산한다: `Map[str, int]{(k)=1, (k + '2')=2}`. 괄호 없는 이름은 전처럼 문자열 키다.
+- `Map[str, int]{'app': 7}`은 "Expected `=` between a key and a value. An initializer uses `key=value`, not `key: value`."로,
+  `for ['a', 'b'] |f|:`는 "A list literal uses braces: `{a, b}` or `[]T{a, b}`."로 원인을 알려 준다
+  (전에는 `Expected closing brace.`, ``Expected `]`.``, F-122, tars-agent M0 스파이크).
 
 ## 임베딩 API
 

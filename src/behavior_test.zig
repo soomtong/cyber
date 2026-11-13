@@ -56,6 +56,13 @@ fn test_syntax(run: *Runner) void {
     run.case("syntax/adjacent_stmt_error.cy");
     run.case("syntax/range_no_end_error.cy");
     run.case("syntax/range_no_start_error.cy");
+    run.case("syntax/range_decreasing_value_error.cy");
+    run.case("syntax/slice_decreasing_range_error.cy");
+    run.case("syntax/init_colon_error.cy");
+    run.case("syntax/init_infer_empty_error.cy");
+    run.case("syntax/init_infer_pairs_error.cy");
+    run.case("syntax/bracket_list_literal_error.cy");
+    run.case("syntax/bracket_list_one_error.cy");
     run.case("control_flow/for_range_no_start_error.cy");
     run.case("control_flow/switch_range_open_error.cy");
     run.case("syntax/block_no_child_error.cy");

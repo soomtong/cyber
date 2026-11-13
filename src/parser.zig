@@ -3194,6 +3194,9 @@ pub const Parser = struct {
         };
 
         if (self.peek().tag() != .equal) {
+            if (self.peek().tag() == .colon) {
+                return self.reportError("Expected `=` between a key and a value. An initializer uses `key=value`, not `key: value`.", &.{});
+            }
             is_pair.* = false;
             return arg;
         }
@@ -3905,13 +3908,24 @@ pub const Parser = struct {
                     const size = (try self.parseExpr(.{})) orelse {
                         return self.reportError("Expected `Vector` size.", &.{});
                     };
+                    if (self.peek().tag() == .comma) {
+                        // `[a, b]` is not a list literal.
+                        return self.reportError(list_literal_hint, &.{});
+                    }
                     if (self.peek().tag() != .right_bracket) {
                         return self.reportError("Expected `]`.", &.{});
                     }
                     self.advance();
                     const elem_t = (try self.parseTightTermOpt(.{ .parse_record_expr = false, .parse_call_expr = false })) orelse {
-                        return self.reportError("Expected `Vector` element type.", &.{});
+                        return self.reportError("Expected `Vector` element type. " ++ list_literal_hint, &.{});
                     };
+                    switch (elem_t.type()) {
+                        // `for ['a'] |f|:` reads `|f|` as a lambda.
+                        .lambda_cont, .lambda_cont_expr, .lambda_expr, .lambda_multi => {
+                            return self.reportErrorAtSrc("Expected `Vector` element type. " ++ list_literal_hint, &.{}, elem_t.pos());
+                        },
+                        else => {},
+                    }
                     return self.ast.newNodeErase(.vector_type, .{
                         .child = elem_t,
                         .n = size,
@@ -4915,6 +4929,8 @@ const ParseTermConfig = struct {
     parse_infer_lambda: bool = true,
 };
 
+const list_literal_hint = "A list literal uses braces: `{a, b}` or `[]T{a, b}`.";
+
 fn isRecordKeyNodeType(node_t: ast.NodeType) bool {
     switch (node_t) {
         .ident,
@@ -4922,7 +4938,9 @@ fn isRecordKeyNodeType(node_t: ast.NodeType) bool {
         .decLit,
         .binLit,
         .octLit,
-        .hexLit => {
+        .hexLit,
+        // `(expr)=value` evaluates the key.
+        .group => {
             return true;
         },
         else => {

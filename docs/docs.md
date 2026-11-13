@@ -992,6 +992,15 @@ The intializer literal can infer the target slice type:
 var a []int = {1, 2, 3}
 ```
 
+Without a target type, a list literal is a `[]T` where `T` is the type of the first element. An empty `{}` needs a target type:
+```cy
+names := {'a.py', 'b.py'}    -- []str
+for {1, 2, 3} |n|:
+    print(n)
+```
+
+A list literal uses braces. `['a', 'b']` is not a list literal: `[n]T` is a vector type.
+
 The first element of the slice starts at index 0.
 ```cy
 print(arr[0])    --> 1
@@ -1006,9 +1015,14 @@ print(arr[0..3])    --> {1, 2, 3}
 print(arr[3..])     --> {4, 5}
 print(arr[..3])     --> {1, 2, 3}
 print(arr[..])      --> {1, 2, 3, 4, 5}
+print(arr[1..=2])   --> {2, 3}
 ```
 
 The start, the end, or both can be omitted. A missing start is `0` and a missing end is the length. A range without a start or an end is only a slice index. Anywhere else (`r := ..3`, `for ..3 |i|`, `case ..5`) it is a compile error.
+
+`a[i..=j]` includes the end: it is `a[i..j+1]`. A decreasing range (`..>`, `..>=`) can not be a slice index.
+
+A range outside a slice index or a `for` loop is a `Range{start, end}` value with an exclusive end. `0..=3` is `Range{start=0, end=4}`. A decreasing range is only allowed in a `for` loop.
 
 A sub-slice will clone the underlying buffer upon any resize operation such as `append`, `insert`, `remove`, etc.
 Once cloned, the slice will no longer point to the same elements as the original slice:
@@ -1077,6 +1091,15 @@ The initializer literal can infer the target map type:
 ```cy
 var map Map[str, int] = {a=123, b=234}
 ```
+
+A key is written `key=value`, not `key: value`. A name as a key is a string (`{a=1}` has the key `'a'`). A key in parentheses is an expression:
+```cy
+k := 'name'
+map := Map[str, int]{(k)=1, (k + '2')=2, 'my key'=3}
+ids := Map[int, str]{1='one', (1 + 1)='two'}
+```
+
+A map literal needs a target type. `{a=1}` alone is a compile error.
 
 ### Map operations.
 Here are some common map operations:
@@ -1971,7 +1994,7 @@ for arr |n|:
 
 Iterating a `Map` yields `MapEntry` values:
 ```cy
-map := {a=123, b=234}
+map := Map[str, int]{a=123, b=234}
 
 for map |entry|:
     print(entry.key)

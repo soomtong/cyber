@@ -1348,6 +1348,57 @@ test "cl_vm_members_at and cl_vm_names_at list what can be written at a place." 
     try zt.expect(S.find(items, len, "add") != null);
 }
 
+test "Compiling again and again with one VM does not grow its memory." {
+    // Every compile left about 14 compile-time objects that nothing owned. A reset kept the pages of that heap,
+    // so a host that checks sources with one VM (the language server) grew without bound (F-114).
+    var da: std.heap.DebugAllocator(.{ .enable_memory_limit = true, .stack_trace_frames = 0 }) = .init;
+    defer _ = da.deinit();
+    const vm = C.vm_initx(da.allocator());
+    defer C.vm_deinit(vm);
+    const cvm: *cy.VM = @ptrCast(@alignCast(vm));
+
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+    const src = "type Foo[T Any]:\n    a T\nfn a() -> int:\n    f := Foo[int]{a = 1}\n    return f.a\nprint(a())\n";
+    const bad = "fn a() -> int:\n    return nope\nprint(a() + 'x')\n";
+
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    C.vm_reset(vm);
+    const base = da.total_requested_bytes;
+    try zt.eq(@as(usize, 0), cvm.compiler.heap.count_objects());
+
+    var i: usize = 0;
+    while (i < 40) : (i += 1) {
+        // Sources that compile and sources that do not, also with the options of the language server.
+        C.vm_set_error_recovery(vm, i % 4 >= 2);
+        C.vm_set_symbol_info(vm, i % 4 >= 2);
+        if (i % 2 == 0) {
+            try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+        } else {
+            try zt.eq(C.ErrorCompile, C.vm_compile(vm, "main", bad, config));
+        }
+    }
+    C.vm_reset(vm);
+    try zt.eq(@as(usize, 0), cvm.compiler.heap.count_objects());
+    try zt.eq(@as(usize, 1), cvm.compiler.heap.heapPages.items.len);
+    // Buffers that keep their capacity across a reset may have grown once. They do not grow with every compile.
+    const after_40 = da.total_requested_bytes;
+    i = 0;
+    while (i < 40) : (i += 1) {
+        _ = C.vm_compile(vm, "main", if (i % 2 == 0) src else bad, config);
+    }
+    C.vm_reset(vm);
+    try zt.eq(after_40, da.total_requested_bytes);
+    try zt.expect(after_40 < base + 64 * 1024);
+
+    // An eval after all of that still runs.
+    C.vm_set_error_recovery(vm, false);
+    C.vm_set_symbol_info(vm, false);
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_eval(vm, "fn main() -> int:\n    return 7", &res));
+    try zt.eq(@as(i64, 7), @as(*i64, @ptrCast(@alignCast(res.res))).*);
+}
+
 test "Error summaries are empty when there is no error." {
     // `cl_vm_compile_error_summary` and `cl_thread_panic_summary` used to end the host process when asked
     // without an error, and a script could ask through `cy.VM` (F-52).

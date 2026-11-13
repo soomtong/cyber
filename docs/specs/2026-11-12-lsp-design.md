@@ -202,7 +202,7 @@ LSP의 `Diagnostic`은 `range`(시작 · 끝), `message`, `relatedInformation`(�
   멈추는 것이 없음을 봤다. 처음에는 하나가 죽었다(`types/trait_func_type_arg_error.cy`, 위의 해석 안 된 인스턴스).
 - 통과하는 스크립트에 오류를 여러 줄 심은 변형 202개(없는 변수 · 없는 필드 · 잘못된 호출)도 같다. 128개가 진단을 둘 이상 냈다.
 - 메모리: 오류가 있는 문서를 300번 검사해 RSS가 약 250kB 늘었다. 오류가 없는 문서도 같은 만큼 는다. 복구가 아니라 검사(컴파일 ·
-  리셋)마다 약 0.9kB가 새는 것이다(F-114, 미해결).
+  리셋)마다 약 0.9kB가 새는 것이다(F-114, 2026-11-13 수정).
 
 남은 위험: 복구는 "본문 sema가 실패해도 전역 상태(심볼 · 타입 · 템플릿 캐시)는 쓸 수 있다"는 가정에 선다. 깨지는 곳을 둘 찾아
 고쳤고 더 있을 수 있다. 깨지면 서버 프로세스가 죽고 클라이언트가 다시 띄운다. CLI는 복구를 켜지 않으므로 영향이 없다.
@@ -317,9 +317,11 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
 확인: lib 테스트 `cl_vm_members_at and cl_vm_names_at list what can be written at a place.`, 서버 테스트
 `Completion lists members and names for source that is being typed.` · `Signature help shows the function that is being called.`,
 `complete.zig`의 단위 테스트 둘. 저장소 `.cy` 154개에 completion · signatureHelp 40,476 요청(ReleaseSafe 서버), 죽는 것 없음.
-이 테스트를 쓰다가 F-116을 찾았다(private 필드가 있는 struct의 `print`가 컴파일되지 않는다, 미해결).
+이 테스트를 쓰다가 F-116을 찾았다(private 필드가 있는 struct의 `print`가 컴파일되지 않는다, 2026-11-13 수정).
 
 ## 9. 다음
 
 - 파서 복구(P2의 나머지): 들여쓰기 기준 블록 동기화로 구문 오류를 여러 개 낸다. 구문 오류가 있으면 sema는 돌지 않는다.
-- F-114: 검사마다 새는 메모리.
+- F-114(검사마다 느는 메모리)와 F-116(private 필드 struct의 `print`)은 2026-11-13에 고쳤다. F-114는 서버가 아니라
+  컴파일러의 reset이 컴파일 타임 힙을 비우지 않던 것이다. 300번 검사에 RSS가 변하지 않는다.
+- P4: workspace 심볼과 워크스페이스 전체의 references(문서마다 main으로 컴파일해 모은다), `semanticTokens`.

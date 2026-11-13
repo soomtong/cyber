@@ -2583,7 +2583,9 @@ fn semaAccessChoicePayload(c: *cy.Chunk, rec: ExprResult, name: []const u8, node
     return res;
 }
 
-fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []const u8, field: *ast.Node) !ExprResult {
+/// `check_visible` is false for `meta.access`: metaprogramming reads the fields that `type.info` lists,
+/// private ones included (docs/decisions/project_symbol_visibility.md).
+fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []const u8, field: *ast.Node, check_visible: bool) !ExprResult {
     var type_ = rec.type;
 
     if (type_.kind() == .c_union) {
@@ -2671,7 +2673,7 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
             defer c.alloc.free(type_name);
             return c.reportErrorFmt("Field `{}` does not exist in `{}`.", &.{v(name), v(type_name)}, field);
         };
-        try cy.module.check_sym_visible(c, sym, field);
+        if (check_visible) try cy.module.check_sym_visible(c, sym, field);
         if (sym.type != .field) {
             const type_name = try c.sema.allocTypeName(child_t);
             defer c.alloc.free(type_name);
@@ -2690,7 +2692,7 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
         res.addressable = true;
         return res;
     };
-    try cy.module.check_sym_visible(c, sym, field);
+    if (check_visible) try cy.module.check_sym_visible(c, sym, field);
     if (sym.type != .field) {
         const type_name = type_.name();
         return c.reportErrorFmt("Type `{}` does not have a field named `{}`.", &.{v(type_name), v(name)}, field);
@@ -10046,6 +10048,16 @@ pub fn semaAccessExpr(c: *cy.Chunk, access: *ast.AccessExpr, prefer_ct_sym: bool
 }
 
 pub fn semaAccessExpr2(c: *cy.Chunk, left_n: *ast.Node, right_name: []const u8, right_n: *ast.Node, prefer_ct_sym: bool, target_t: ?*cy.Type) !ExprResult {
+    return semaAccessExpr3(c, left_n, right_name, right_n, prefer_ct_sym, target_t, true);
+}
+
+/// `meta.access(rec, name)`. A field of a value is read whatever its visibility. A member of a module or a type
+/// is still looked up like `rec.name`.
+pub fn semaMetaAccess(c: *cy.Chunk, left_n: *ast.Node, right_name: []const u8, right_n: *ast.Node) !ExprResult {
+    return semaAccessExpr3(c, left_n, right_name, right_n, false, null, false);
+}
+
+fn semaAccessExpr3(c: *cy.Chunk, left_n: *ast.Node, right_name: []const u8, right_n: *ast.Node, prefer_ct_sym: bool, target_t: ?*cy.Type, check_visible: bool) !ExprResult {
     const rec = try c.semaExprSkipSym(left_n, .{});
     if (rec.resType == .sym) {
         const sym = rec.data.sym;
@@ -10056,7 +10068,7 @@ pub fn semaAccessExpr2(c: *cy.Chunk, left_n: *ast.Node, right_name: []const u8, 
         const rightSym = try c.getResolvedSymOrFail(sym, right_name, right_n);
         return sema.symbol2(c, rightSym, prefer_ct_sym, target_t, right_n);
     } else {
-        return semaAccessFieldName(c, left_n, rec, right_name, right_n);
+        return semaAccessFieldName(c, left_n, rec, right_name, right_n, check_visible);
     }
 }
 

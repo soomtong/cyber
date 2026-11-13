@@ -6,6 +6,14 @@
 
 ## 버그 수정
 
+- private 필드(`-secret int`)가 있는 struct 값의 `print(v)` · `'%{v}'` 보간 · `v == w`가 컴파일되지 않았다(F-116,
+  ``Can not access the private field `secret` in `Vec2`.``, 위치는 `core`). 같은 모듈 안에서도 그랬다. 이 연산들은 `meta.access`로
+  모든 필드를 읽는데 그 접근이 `core`에서 쓴 접근으로 검사됐다. `meta.access`는 값의 필드를 가시성과 무관하게 읽는다
+  (메타프로그래밍은 가시성을 검사하지 않는다는 기존 규칙). `v.secret`으로 직접 쓰는 접근은 그대로 오류다.
+- 한 VM으로 컴파일을 되풀이하면 메모리가 계속 늘었다(F-114). 컴파일마다 컴파일 타임 힙에 주인 없는 객체가 십여 개 남았고
+  `cl_vm_reset`(`cl_vm_compile`이 먼저 부른다)이 그 힙을 비우지 않았다. reset이 남은 객체를 지우고 페이지를 하나만 남긴다.
+  `cyber-lsp`는 검사 300번에 RSS가 약 250kB 늘었고 이제 늘지 않는다.
+
 - 함수가 없는 트레이트(`type NoCopy trait`)의 선언 노드에서 끝 위치를 구하면 컴파일러가 abort했다(F-115, safe 빌드는
   `integer overflow`). 그 선언을 가리키는 컴파일 오류의 요약과 `cl_vm_compile_report`가 해당된다. 이름의 끝을 돌려준다.
 

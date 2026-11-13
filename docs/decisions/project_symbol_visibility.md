@@ -53,3 +53,20 @@
 - enum · choice의 case에는 `-`가 없다.
 - 타입 별칭 `type Pub = Priv`가 private 타입을 공개 이름으로 내보내는 것은 막지 않는다(별칭은 같은 타입을 가리키므로 멤버 접근은 타입
   심볼 기준으로 검사된다. 즉 `p.Pub{}`은 되고 `p.Priv{}`은 안 된다).
+
+## 2026-11-13 보충: `meta.access` (F-116)
+
+위 결정의 "메타프로그래밍은 검사하지 않는다"가 `meta.access`에는 적용돼 있지 않았다. `meta.access(x, name)`은
+`sema.semaAccessExpr2`를 그대로 불러 `x.name`과 같은 검사를 받았고, 접근 노드가 `core.cy`에 있으므로 사용자 타입의
+private 필드에서 막혔다. `to_print_string` · `dump_str` · `@eq` · `@destruct`가 `type.info(T).fields`를 돌며 `meta.access`로
+필드를 읽기 때문에, private 필드가 하나라도 있는 struct는 `print(v)` · `'%{v}'` · `v == w`가 컴파일되지 않았다
+(같은 모듈 안에서도. 접근하는 쪽이 `core`이기 때문이다).
+
+- `meta.access`가 값의 필드를 읽을 때는 가시성을 검사하지 않는다(`sema.semaMetaAccess` → `semaAccessFieldName`의
+  `check_visible = false`). `type.info`가 private 필드를 이미 나열하므로 이름을 감추는 효과는 원래 없었다.
+- `meta.access`의 받는 쪽이 모듈이나 타입일 때(`meta.access(mod, 'name')`)는 `mod.name`과 같이 검사한다. 값의 필드만 연다.
+- `v.secret`으로 직접 쓴 접근, 초기화 · 대입 · 주소 취하기는 그대로 오류다.
+- 출력은 private 필드를 다른 필드와 같이 보여 준다(`Vec2{x=1, secret=2}`). 출력은 디버깅 수단이고 값을 통째로 보여 주는 것이 일이다.
+  감춰야 하는 값은 타입이 출력 방법을 직접 정한다.
+
+테스트 `modules/private_field_meta.cy`.

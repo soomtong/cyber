@@ -230,7 +230,7 @@ pub fn access(c: *cy.Chunk, ctx: *cy.BuiltinContext, res: *sema.ExprResult) !voi
     const name_res = try cte.evalCheck(c, ctx.args[1], c.sema.eval_str_t);
     const name = name_res.value.as_eval_str();
     defer c.heap.release(name_res.value);
-    res.* = try sema.semaAccessExpr2(c, rec_n, name, ctx.node, false, null);
+    res.* = try sema.semaMetaAccess(c, rec_n, name, ctx.node);
 }
 
 pub fn access_result_error(c: *cy.Chunk, ctx: *cy.BuiltinContext, res: *sema.ExprResult) !void {

@@ -228,10 +228,13 @@ pub const Compiler = struct {
         for (self.chunks.items) |chunk| {
             chunk.deinitCtValues();
         }
-        if (self.alloc_failed) {
+        if (self.alloc_failed or reset) {
             // A compile that ran out of memory can abandon a compile-time value half built: a string or a
             // buffer whose owner was never created. Every value that a sym owns is released by now, and the
             // types that give each object's size are still alive.
+            // A reset sweeps as well. A compile leaves a few compile-time objects that nothing owns, and the
+            // heap keeps its pages across a reset: a host that compiles again and again with one VM (the
+            // language server) would keep every one of them and grow by a page whenever they filled one (F-114).
             self.heap.sweep();
         }
         for (self.chunks.items) |chunk| {
@@ -306,6 +309,10 @@ pub const Compiler = struct {
         // Chunks depends on modules.
         self.sema.deinit(self.alloc, reset);
 
+        if (reset) {
+            // Every slot is free after the sweep. The pages that the last compile grew go back to the allocator.
+            self.heap.releaseFreePages();
+        }
         self.heap.deinit(reset);
 
         self.alloc.free(self.apiError);

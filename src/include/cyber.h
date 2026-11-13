@@ -702,8 +702,20 @@ bool cl_vm_compile_report_note(CLVM* vm, size_t idx, size_t note_idx, CLReport* 
 /// `cl_vm_reset`. For editor tooling: see `cl_vm_symbol_at`.
 void cl_vm_set_symbol_info(CLVM* vm, bool enabled);
 
+typedef enum {
+    /// An expression that is not a name. `detail` is its type.
+    CL_SYMBOL_EXPR,
+    /// A local or a parameter. It is only visible in the function that declares it.
+    CL_SYMBOL_LOCAL,
+    /// Something declared outside of a function body: a function, a type, a field, a case, a constant,
+    /// a global, a module.
+    CL_SYMBOL_DECL,
+} CLSymbolKind;
+
 /// What a name or an expression of the main source is, see `cl_vm_symbol_at`.
 typedef struct CLSymbolInfo {
+    CLSymbolKind kind;
+
     /// The range of the name or expression, as byte offsets in the main source. `end_pos` is exclusive.
     uint32_t pos;
     uint32_t end_pos;
@@ -731,6 +743,20 @@ typedef struct CLSymbolInfo {
 /// A position right after a name counts as the name. Only the main source is recorded, not the modules it uses.
 /// `detail` and `def_uri` stay valid until the next call of this function, eval, compile, validate or reset.
 bool cl_vm_symbol_at(CLVM* vm, uint32_t pos, CLSymbolInfo* out);
+
+/// A range of the main source as byte offsets. `end_pos` is exclusive.
+typedef struct CLRange {
+    uint32_t pos;
+    uint32_t end_pos;
+} CLRange;
+
+/// Finds every place in the main source that names what is named at byte offset `pos`: the uses and, if it is
+/// declared in the main source, the name in its declaration. Returns the number of ranges and sets `out` to
+/// them, sorted and without duplicates. Returns 0 and sets `out` to NULL if `pos` is not at a local or a
+/// declared name. Uses in other modules are not found: only the main source is recorded.
+/// The ranges are owned by the VM and stay valid until the next call of this function, eval, compile,
+/// validate or reset.
+size_t cl_vm_symbol_refs(CLVM* vm, uint32_t pos, const CLRange** out);
 
 // For embedded, Cyber by default uses malloc (it can be configured to use the high-perf mimalloc).
 // If the host uses a different allocator than Cyber, use `cl_vm_alloc` to allocate memory

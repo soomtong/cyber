@@ -79,6 +79,8 @@ pub const Compiler = struct {
     refs: std.ArrayList(cy.refs.Ref) = .empty,
     /// The text that the last `refs.find` returned.
     ref_detail: []const u8 = "",
+    /// The ranges that the last `refs.findAll` returned.
+    ref_ranges: std.ArrayList(cy.refs.Range) = .empty,
     
     /// Sema model resulting from the sema pass.
     sema: sema.Sema,
@@ -211,6 +213,7 @@ pub const Compiler = struct {
         self.clearReports();
         if (!reset) {
             self.refs.deinit(self.alloc);
+            self.ref_ranges.deinit(self.alloc);
             self.reports.deinit(self.alloc);
         }
 
@@ -318,6 +321,7 @@ pub const Compiler = struct {
         self.reports.clearRetainingCapacity();
         // The references point into the symbols and sources of the compile that the reports are from.
         self.refs.clearRetainingCapacity();
+        self.ref_ranges.clearRetainingCapacity();
         self.alloc.free(self.ref_detail);
         self.ref_detail = "";
     }

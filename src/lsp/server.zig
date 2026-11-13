@@ -24,6 +24,7 @@ const ErrorCode = struct {
     const invalid_params = -32602;
     const internal_error = -32603;
     const server_not_initialized = -32002;
+    const request_failed = -32803;
 };
 
 const Document = struct {
@@ -218,6 +219,14 @@ pub const Server = struct {
             try self.onHover(id, params);
         } else if (std.mem.eql(u8, method, "textDocument/definition")) {
             try self.onDefinition(arena, id, params);
+        } else if (std.mem.eql(u8, method, "textDocument/references")) {
+            try self.onReferences(id, params);
+        } else if (std.mem.eql(u8, method, "textDocument/documentHighlight")) {
+            try self.onDocumentHighlight(id, params);
+        } else if (std.mem.eql(u8, method, "textDocument/prepareRename")) {
+            try self.onPrepareRename(id, params);
+        } else if (std.mem.eql(u8, method, "textDocument/rename")) {
+            try self.onRename(id, params);
         } else if (id != null) {
             try self.replyError(id, ErrorCode.method_not_found, "The method is not supported.");
         }
@@ -276,6 +285,15 @@ pub const Server = struct {
             try jw.write(true);
             try jw.objectField("definitionProvider");
             try jw.write(true);
+            try jw.objectField("referencesProvider");
+            try jw.write(true);
+            try jw.objectField("documentHighlightProvider");
+            try jw.write(true);
+            try jw.objectField("renameProvider");
+            try jw.beginObject();
+            try jw.objectField("prepareProvider");
+            try jw.write(true);
+            try jw.endObject();
             try jw.endObject();
 
             try jw.objectField("serverInfo");
@@ -583,6 +601,141 @@ pub const Server = struct {
         try self.send(&b);
     }
 
+    /// The places in the document that name what `info` describes. Owned by the VM until its next call.
+    fn rangesOf(self: *Server, info: c.SymbolInfo) []const c.Range {
+        var ptr: [*c]const c.Range = null;
+        const len = c.vm_symbol_refs(self.vm, info.pos, &ptr);
+        if (len == 0 or ptr == null) return &.{};
+        return ptr[0..len];
+    }
+
+    fn rangeIn(self: *Server, doc: *Document, range: c.Range) Range {
+        return .{
+            .start = position.fromOffset(doc.text, range.pos, self.encoding),
+            .end = position.fromOffset(doc.text, range.end_pos, self.encoding),
+        };
+    }
+
+    /// The uses in this document. A use in another document is not found: the compiler records the names of the
+    /// source it compiles as the program, not those of the modules.
+    fn onReferences(self: *Server, id: ?Value, params: Value) !void {
+        var info: c.SymbolInfo = undefined;
+        const doc = (try self.symbolAt(params, &info)) orelse return self.replyNull(id);
+        var include_decl = true;
+        if (getPath(params, &.{ "context", "includeDeclaration" })) |v| {
+            include_decl = !(v == .bool and !v.bool);
+        }
+        const decl_here = info.has_def and std.mem.eql(u8, c.from_bytes(info.def_uri), doc.path);
+
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginArray();
+        var skipped = false;
+        for (self.rangesOf(info)) |range| {
+            // The name in the declaration is the first range inside the declaration.
+            if (!include_decl and !skipped and decl_here and range.pos >= info.def_pos and range.end_pos <= info.def_end_pos) {
+                skipped = true;
+                continue;
+            }
+            try jw.beginObject();
+            try jw.objectField("uri");
+            try jw.write(doc.uri);
+            try jw.objectField("range");
+            try writeRange(jw, self.rangeIn(doc, range));
+            try jw.endObject();
+        }
+        try jw.endArray();
+        try jw.endObject();
+        try self.send(&b);
+    }
+
+    fn onDocumentHighlight(self: *Server, id: ?Value, params: Value) !void {
+        var info: c.SymbolInfo = undefined;
+        const doc = (try self.symbolAt(params, &info)) orelse return self.replyNull(id);
+
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginArray();
+        for (self.rangesOf(info)) |range| {
+            try jw.beginObject();
+            try jw.objectField("range");
+            try writeRange(jw, self.rangeIn(doc, range));
+            try jw.endObject();
+        }
+        try jw.endArray();
+        try jw.endObject();
+        try self.send(&b);
+    }
+
+    /// Only a local or a parameter that is declared in the document is renamed. All of its uses are in the
+    /// function that declares it. A function or a type can be used by modules that the server does not see
+    /// from here, and renaming it in one document would break them.
+    fn canRename(info: c.SymbolInfo) bool {
+        return info.kind == c.SymbolLocal and info.has_def;
+    }
+
+    fn onPrepareRename(self: *Server, id: ?Value, params: Value) !void {
+        var info: c.SymbolInfo = undefined;
+        const doc = (try self.symbolAt(params, &info)) orelse return self.replyNull(id);
+        if (!canRename(info)) return self.replyNull(id);
+
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        try beginReply(&b.jw, id);
+        try b.jw.objectField("result");
+        try writeRange(&b.jw, self.rangeIn(doc, .{ .pos = info.pos, .end_pos = info.end_pos }));
+        try b.jw.endObject();
+        try self.send(&b);
+    }
+
+    fn onRename(self: *Server, id: ?Value, params: Value) !void {
+        const new_name = getStr(params, "newName") orelse return error.InvalidParams;
+        var info: c.SymbolInfo = undefined;
+        const doc = (try self.symbolAt(params, &info)) orelse {
+            return self.replyError(id, ErrorCode.request_failed, "There is nothing to rename here.");
+        };
+        if (!canRename(info)) {
+            return self.replyError(id, ErrorCode.request_failed, "Only a local variable or a parameter can be renamed.");
+        }
+        if (!isIdentifier(new_name)) {
+            return self.replyError(id, ErrorCode.request_failed, "The new name is not an identifier.");
+        }
+
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginObject();
+        try jw.objectField("changes");
+        try jw.beginObject();
+        try jw.objectField(doc.uri);
+        try jw.beginArray();
+        for (self.rangesOf(info)) |range| {
+            try jw.beginObject();
+            try jw.objectField("range");
+            try writeRange(jw, self.rangeIn(doc, range));
+            try jw.objectField("newText");
+            try jw.write(new_name);
+            try jw.endObject();
+        }
+        try jw.endArray();
+        try jw.endObject();
+        try jw.endObject();
+        try jw.endObject();
+        try self.send(&b);
+    }
+
     fn groupOf(arena: std.mem.Allocator, groups: *std.ArrayList(Group), uri: []const u8) !*Group {
         for (groups.items) |*group| {
             if (std.mem.eql(u8, group.uri, uri)) return group;
@@ -867,6 +1020,15 @@ fn validText(arena: std.mem.Allocator, bytes: []const u8) ![]const u8 {
         }
     }
     return out;
+}
+
+/// The tokenizer takes ASCII letters, digits and `_` in a name.
+fn isIdentifier(text: []const u8) bool {
+    if (text.len == 0 or std.ascii.isDigit(text[0])) return false;
+    for (text) |ch| {
+        if (!std.ascii.isAlphanumeric(ch) and ch != '_') return false;
+    }
+    return true;
 }
 
 /// Opens the object of a reply. The caller writes `result` or `error` and closes it.

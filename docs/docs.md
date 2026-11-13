@@ -4563,7 +4563,9 @@ if (cl_vm_symbol_at(vm, pos, &info)) {
     }
 }
 ```
-`detail` is the first line of the declaration for a function, a type, a constant or a global, `name Type` for a local, a parameter or a field, and the type for any other expression. The compile may have failed: what was resolved before the error is still answered. `detail` and `def_uri` are owned by the VM and stay valid until the next call, eval, compile, validate or reset. The language server `cyber-lsp` uses this for hover and go to definition.
+`detail` is the first line of the declaration for a function, a type, a constant or a global, `name Type` for a local, a parameter or a field, and the type for any other expression. The compile may have failed: what was resolved before the error is still answered. `detail` and `def_uri` are owned by the VM and stay valid until the next call, eval, compile, validate or reset. `info.kind` tells a local (`CL_SYMBOL_LOCAL`) from something declared outside of a function body (`CL_SYMBOL_DECL`) and from an expression that is not a name (`CL_SYMBOL_EXPR`).
+
+`cl_vm_symbol_refs(vm, pos, &ranges)` returns the number of places in the main source that name the same thing as the name at `pos`, and sets `ranges` to them: the uses and, if it is declared in the main source, the name in the declaration. Uses in other modules are not found. The language server `cyber-lsp` uses these for hover, go to definition, references and renaming a local.
 
 ### Checking a script without running it.
 `cl_vm_validate` compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (`persist_main`) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (`use math`) is initialized by the next eval that runs.

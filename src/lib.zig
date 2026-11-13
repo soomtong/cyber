@@ -552,6 +552,11 @@ export fn cl_vm_symbol_at(vm: *cy.VM, pos: u32, out: *C.SymbolInfo) bool {
     out.* = std.mem.zeroes(C.SymbolInfo);
     const info = (cy.refs.find(vm.compiler, pos) catch return false) orelse return false;
     out.* = .{
+        .kind = switch (info.kind) {
+            .expr => C.SymbolExpr,
+            .local => C.SymbolLocal,
+            .sym => C.SymbolDecl,
+        },
         .pos = info.pos,
         .end_pos = info.end,
         .detail = C.to_bytes(info.detail),
@@ -561,6 +566,14 @@ export fn cl_vm_symbol_at(vm: *cy.VM, pos: u32, out: *C.SymbolInfo) bool {
         .def_end_pos = info.def_end,
     };
     return true;
+}
+
+export fn cl_vm_symbol_refs(vm: *cy.VM, pos: u32, out: *[*c]const C.Range) usize {
+    out.* = null;
+    const ranges = cy.refs.findAll(vm.compiler, pos) catch return 0;
+    if (ranges.len == 0) return 0;
+    out.* = @ptrCast(ranges.ptr);
+    return ranges.len;
 }
 
 export fn cl_vm_set_error_recovery(vm: *cy.VM, enabled: bool) void {

@@ -1,6 +1,6 @@
 # LSP 서버 설계와 단계 계획
 
-2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 · P1 · P2의 sema 복구 · P3의 hover와 definition 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P3 구현" 절). 파서 복구, P3의 나머지(references · completion · signatureHelp), P4 이후는 미구현.
+2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 · P1 · P2의 sema 복구 · P3의 hover · definition · references · 지역 rename 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P3 구현" 절). 파서 복구, P3의 나머지(completion · signatureHelp), P4 이후는 미구현.
 앞선 결정은 `docs/decisions/project_fmt.md`의 "내장 도구의 기준"(LSP는 CLI에 넣지 않고 라이브러리 위의 별도 프로그램),
 사실 근거는 `docs/study/01-pipeline-front-end.md` 6절과 `docs/decisions/project_compile_error_report.md`이다.
 
@@ -260,9 +260,27 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
 - 문서 주석. 선언 위의 `--|` 줄을 hover에 싣는 일은 서버가 `def_pos`와 소스로 할 수 있다.
 - capture된 지역, `use`의 경로 문자열, 필드 초기화(`Vec2{x = 1}`의 `x`).
 
+### references · documentHighlight · rename (2026-11-13)
+
+같은 기록을 대상 기준으로 뒤집는다.
+
+- `size_t cl_vm_symbol_refs(vm, pos, &ranges)`: `pos`의 이름과 같은 것을 가리키는 main 소스의 모든 범위(`CLRange{pos, end_pos}`,
+  정렬 · 중복 없음, VM 소유). 쓰인 곳과, main 소스에 선언돼 있으면 선언의 이름. 지역은 선언 위치가 같으면 같은 지역이고
+  (가려진 이름과 구별된다), 심볼은 포인터가 같으면 같다. 템플릿 본문의 이름은 인스턴스마다 기록되지만 한 번만 나온다.
+- `CLSymbolInfo.kind`: `CL_SYMBOL_EXPR` · `CL_SYMBOL_LOCAL` · `CL_SYMBOL_DECL`. 호스트가 "이것을 한 파일 안에서 다 볼 수 있는가"를 안다.
+- 서버: `textDocument/references`(`includeDeclaration`을 따른다) · `textDocument/documentHighlight` ·
+  `textDocument/prepareRename` · `textDocument/rename`.
+- 한계: 이 문서 안의 것만 찾는다. 컴파일러는 main 소스만 기록하므로 다른 문서에서 이 함수를 쓰는 곳은 모른다.
+  그래서 rename은 지역과 매개변수만 받는다. 그 쓰임은 모두 선언한 함수 안에 있다. 함수 · 타입 · 필드의 rename은
+  `Only a local variable or a parameter can be renamed.`로 거절한다. 한 문서만 고치면 그것을 쓰는 모듈이 깨지기 때문이다.
+  워크스페이스 전체의 references는 P4의 workspace 심볼과 같이 한다(문서마다 main으로 컴파일해 모으면 된다).
+- rename은 새 이름이 식별자인지만 본다. 같은 범위의 다른 이름과 겹치는지는 보지 않는다. 겹치면 다음 검사의 진단으로 나온다.
+
+확인: lib 테스트 `cl_vm_symbol_refs finds the places that name the same thing.`, 서버 테스트
+`References, highlights and the rename of a local.` 저장소 `.cy` 231개에 references · prepareRename 108,928 요청, 죽는 것 없음.
+
 ## 9. 다음
 
-- P3의 나머지: `references`(기록을 대상 기준으로 뒤집으면 한 문서 안에서는 바로 된다), `completion` · `signatureHelp`
-  (미완성 식 `a.`을 파서가 노드로 남겨야 한다. 2절의 "감수하는 것" 첫째).
+- P3의 나머지: `completion` · `signatureHelp`(미완성 식 `a.`을 파서가 노드로 남겨야 한다. 2절의 "감수하는 것" 첫째).
 - 파서 복구(P2의 나머지): 들여쓰기 기준 블록 동기화로 구문 오류를 여러 개 낸다. 구문 오류가 있으면 sema는 돌지 않는다.
 - F-114: 검사마다 새는 메모리.

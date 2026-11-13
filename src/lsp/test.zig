@@ -95,6 +95,17 @@ const Session = struct {
         return out[0];
     }
 
+    /// A request at a position with more members of `params`, given as JSON that starts with a comma.
+    fn requestWith(self: *Session, method: []const u8, uri: []const u8, line: u32, character: u32, more: []const u8) !Value {
+        const body = try std.fmt.allocPrint(self.arena.allocator(),
+            \\{{"jsonrpc":"2.0","id":9,"method":"{s}","params":{{"textDocument":{{"uri":"{s}"}},
+            \\"position":{{"line":{},"character":{}}}{s}}}}}
+        , .{ method, uri, line, character, more });
+        const out = try self.send(body);
+        try t.expectEqual(@as(usize, 1), out.len);
+        return out[0];
+    }
+
     fn request(self: *Session, method: []const u8, uri: []const u8) !Value {
         const body = try std.fmt.allocPrint(self.arena.allocator(),
             \\{{"jsonrpc":"2.0","id":7,"method":"{s}","params":{{"textDocument":{{"uri":"{s}"}}}}}}
@@ -165,6 +176,9 @@ test "The server follows the lifecycle of the protocol." {
     try t.expect(get(out[0], &.{ "result", "capabilities", "foldingRangeProvider" }).?.bool);
     try t.expect(get(out[0], &.{ "result", "capabilities", "hoverProvider" }).?.bool);
     try t.expect(get(out[0], &.{ "result", "capabilities", "definitionProvider" }).?.bool);
+    try t.expect(get(out[0], &.{ "result", "capabilities", "referencesProvider" }).?.bool);
+    try t.expect(get(out[0], &.{ "result", "capabilities", "documentHighlightProvider" }).?.bool);
+    try t.expect(get(out[0], &.{ "result", "capabilities", "renameProvider", "prepareProvider" }).?.bool);
     try t.expectEqualStrings("cyber-lsp", str(out[0], &.{ "result", "serverInfo", "name" }));
 
     out = try s.send(
@@ -522,6 +536,75 @@ test "Hover describes a name and go to definition finds its declaration." {
     // A position is required.
     const bad = try s.request("textDocument/hover", a_uri);
     try t.expectEqual(@as(i64, -32602), int(bad, &.{ "error", "code" }));
+}
+
+test "References, highlights and the rename of a local." {
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+
+    try s.open(main_uri, 1,
+        \\fn add(a int, b int) -> int:
+        \\    total := a + b
+        \\    return total + a
+        \\
+        \\print('한글' + str(add(1, 2)))
+        \\print(add(3, 4))
+        \\
+    );
+
+    // The calls and the name in the declaration, asked at a call.
+    var reply = try s.requestWith("textDocument/references", main_uri, 5, 7, ",\"context\":{\"includeDeclaration\":true}");
+    var locs = items(reply, &.{"result"});
+    try t.expectEqual(@as(usize, 3), locs.len);
+    try t.expectEqualStrings(main_uri, str(locs[0], &.{"uri"}));
+    try expectRange(get(locs[0], &.{"range"}).?, 0, 3, 0, 6);
+    // After two Korean characters: UTF-16 code units.
+    try expectRange(get(locs[1], &.{"range"}).?, 4, 17, 4, 20);
+    try expectRange(get(locs[2], &.{"range"}).?, 5, 6, 5, 9);
+
+    // Without the declaration.
+    reply = try s.requestWith("textDocument/references", main_uri, 5, 7, ",\"context\":{\"includeDeclaration\":false}");
+    locs = items(reply, &.{"result"});
+    try t.expectEqual(@as(usize, 2), locs.len);
+    try expectRange(get(locs[0], &.{"range"}).?, 4, 17, 4, 20);
+
+    // The highlights of a parameter: the declaration and two uses.
+    reply = try s.requestAt("textDocument/documentHighlight", main_uri, 1, 13);
+    locs = items(reply, &.{"result"});
+    try t.expectEqual(@as(usize, 3), locs.len);
+    try expectRange(get(locs[0], &.{"range"}).?, 0, 7, 0, 8);
+    try expectRange(get(locs[1], &.{"range"}).?, 1, 13, 1, 14);
+    try expectRange(get(locs[2], &.{"range"}).?, 2, 19, 2, 20);
+    // A literal has no highlights.
+    reply = try s.requestAt("textDocument/documentHighlight", main_uri, 5, 10);
+    try t.expectEqual(@as(usize, 0), items(reply, &.{"result"}).len);
+
+    // A local can be renamed. The edits are all in this document.
+    reply = try s.requestAt("textDocument/prepareRename", main_uri, 2, 12);
+    try expectRange(get(reply, &.{"result"}).?, 2, 11, 2, 16);
+    reply = try s.requestWith("textDocument/rename", main_uri, 2, 12, ",\"newName\":\"sum_\"");
+    const edits = items(reply, &.{ "result", "changes", main_uri });
+    try t.expectEqual(@as(usize, 2), edits.len);
+    try expectRange(get(edits[0], &.{"range"}).?, 1, 4, 1, 9);
+    try expectRange(get(edits[1], &.{"range"}).?, 2, 11, 2, 16);
+    try t.expectEqualStrings("sum_", str(edits[1], &.{"newText"}));
+
+    // A function is not renamed: a module that uses it is not seen from here.
+    reply = try s.requestAt("textDocument/prepareRename", main_uri, 5, 7);
+    try t.expect(get(reply, &.{"result"}).? == .null);
+    reply = try s.requestWith("textDocument/rename", main_uri, 5, 7, ",\"newName\":\"plus\"");
+    try t.expectEqual(@as(i64, -32803), int(reply, &.{ "error", "code" }));
+    try t.expectEqualStrings("Only a local variable or a parameter can be renamed.", str(reply, &.{ "error", "message" }));
+
+    // A new name has to be an identifier, and there has to be something to rename.
+    reply = try s.requestWith("textDocument/rename", main_uri, 2, 12, ",\"newName\":\"my total\"");
+    try t.expectEqualStrings("The new name is not an identifier.", str(reply, &.{ "error", "message" }));
+    reply = try s.requestWith("textDocument/rename", main_uri, 3, 0, ",\"newName\":\"x\"");
+    try t.expectEqualStrings("There is nothing to rename here.", str(reply, &.{ "error", "message" }));
+    reply = try s.requestAt("textDocument/rename", main_uri, 2, 12);
+    try t.expectEqual(@as(i64, -32602), int(reply, &.{ "error", "code" }));
 }
 
 test "A module is read from the editor when it is open, otherwise from the disk." {

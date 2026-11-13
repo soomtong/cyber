@@ -1118,6 +1118,105 @@ test "cl_vm_symbol_at describes the names of the main source." {
     try zt.expect(!C.vm_symbol_at(vm, 40, &info));
 }
 
+test "cl_vm_symbol_refs finds the places that name the same thing." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_symbol_info(vm, true);
+
+    const src =
+        \\type Vec2:
+        \\    x float
+        \\    y float
+        \\
+        \\fn (&Vec2) sum() -> float:
+        \\    return self.x + self.y + self.x
+        \\
+        \\fn add(a int, b int) -> int:
+        \\    total := a + b
+        \\    if total > 0:
+        \\        total := a
+        \\        return total
+        \\    return total + a
+        \\
+        \\fn id[T Any](x T) -> T:
+        \\    return x
+        \\
+        \\v := Vec2{x = 1.0, y = 2.0}
+        \\print(v.sum() + float(add(1, 2)))
+        \\print(add(id[int](3), 4))
+        \\print(id[float](1.5))
+    ;
+    const S = struct {
+        /// The texts of the lines that the ranges for the `nth` occurrence of `needle` start on are not useful
+        /// to compare, so the ranges are compared as offsets of the occurrences of `needle` listed in `expected`.
+        fn expect(vm_: *C.VM, src_: []const u8, needle: []const u8, nth: usize, expected: []const usize) !void {
+            var offsets: [16]u32 = undefined;
+            var n: usize = 0;
+            var pos: usize = 0;
+            while (std.mem.findPos(u8, src_, pos, needle)) |found| : (n += 1) {
+                offsets[n] = @intCast(found);
+                pos = found + 1;
+            }
+            var ptr: [*c]const C.Range = null;
+            const len = C.vm_symbol_refs(vm_, offsets[nth], &ptr);
+            try zt.eq(expected.len, len);
+            for (expected, 0..) |occurrence, i| {
+                try zt.eq(offsets[occurrence], ptr[i].pos);
+            }
+        }
+    };
+
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+
+    var info: C.SymbolInfo = undefined;
+    var ptr: [*c]const C.Range = null;
+
+    // A local: its declaration and its uses. The inner `total` is another local, asked from any of its places.
+    try S.expect(vm, src, "total", 0, &.{ 0, 1, 4 });
+    try S.expect(vm, src, "total", 4, &.{ 0, 1, 4 });
+    try S.expect(vm, src, "total", 2, &.{ 2, 3 });
+    try S.expect(vm, src, "total", 3, &.{ 2, 3 });
+    try zt.expect(C.vm_symbol_at(vm, @intCast(std.mem.find(u8, src, "total").?), &info));
+    try zt.eq(C.SymbolLocal, info.kind);
+
+    // A function: the name in its declaration and the calls. Asked at a call or at the declaration.
+    try S.expect(vm, src, "add(", 1, &.{ 0, 1, 2 });
+    try zt.expect(C.vm_symbol_at(vm, @intCast(std.mem.find(u8, src, "add(1").?), &info));
+    try zt.eq(C.SymbolDecl, info.kind);
+
+    // A field and a method.
+    // `self` is not declared in the source. Its uses in the method are still found.
+    try S.expect(vm, src, "self.", 0, &.{ 0, 1, 2 });
+    const field_use: u32 = @intCast(std.mem.find(u8, src, "self.x").? + 5);
+    var len = C.vm_symbol_refs(vm, field_use, &ptr);
+    try zt.eq(@as(usize, 3), len);
+    try zt.eqStr("x float", src[ptr[0].pos .. ptr[0].pos + 7]);
+    try zt.eqStr("x + self.y", src[ptr[1].pos .. ptr[1].pos + 10]);
+    try zt.eq(@as(u32, 1), ptr[0].end_pos - ptr[0].pos);
+    try S.expect(vm, src, "sum()", 1, &.{ 0, 1 });
+
+    // A type.
+    try S.expect(vm, src, "Vec2", 2, &.{ 0, 1, 2 });
+
+    // A name inside a template is checked once per instance and listed once.
+    const x_use: u32 = @intCast(std.mem.find(u8, src, "return x").? + 7);
+    len = C.vm_symbol_refs(vm, x_use, &ptr);
+    try zt.eq(@as(usize, 2), len);
+    try zt.eqStr("x T)", src[ptr[0].pos .. ptr[0].pos + 4]);
+    try zt.eq(x_use, ptr[1].pos);
+    try S.expect(vm, src, "id[", 1, &.{ 0, 1, 2 });
+
+    // An expression that is not a name, and a place without anything.
+    len = C.vm_symbol_refs(vm, @intCast(std.mem.find(u8, src, "1.0").?), &ptr);
+    try zt.eq(@as(usize, 0), len);
+    try zt.expect(ptr == null);
+    try zt.eq(@as(usize, 0), C.vm_symbol_refs(vm, 0, &ptr));
+    try zt.expect(C.vm_symbol_at(vm, @intCast(std.mem.find(u8, src, "1.0").?), &info));
+    try zt.eq(C.SymbolExpr, info.kind);
+}
+
 test "Error summaries are empty when there is no error." {
     // `cl_vm_compile_error_summary` and `cl_thread_panic_summary` used to end the host process when asked
     // without an error, and a script could ask through `cy.VM` (F-52).

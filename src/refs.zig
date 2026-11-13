@@ -91,6 +91,8 @@ fn declPos(c: *cy.Chunk, name: []const u8) u32 {
 }
 
 pub const Info = struct {
+    kind: Kind = .expr,
+
     /// The range of the name or expression at the position.
     pos: u32 = 0,
     end: u32 = 0,
@@ -105,8 +107,14 @@ pub const Info = struct {
     def_end: u32 = 0,
 };
 
-/// Describes what is at byte offset `pos` of the main source of the last compile. Null if nothing was recorded there.
-pub fn find(compiler: *cy.Compiler, pos: u32) !?Info {
+const Picked = struct {
+    ref: Ref,
+    /// The type of the expression with the same range, if one was recorded.
+    type: ?*cy.Type,
+};
+
+/// The reference at byte offset `pos`.
+fn pick(compiler: *cy.Compiler, pos: u32) ?Picked {
     // The smallest range that holds the position is the name itself. For the same range a symbol or a local
     // says more than the type of the expression, and the last one recorded is the most resolved.
     var best: ?Ref = null;
@@ -130,13 +138,102 @@ pub fn find(compiler: *cy.Compiler, pos: u32) !?Info {
         if (ref.kind == .expr) best_t = ref.type;
         best = ref;
     }
-    const ref = best orelse return null;
+    return .{ .ref = best orelse return null, .type = best_t };
+}
+
+pub const Range = extern struct {
+    pos: u32,
+    end: u32,
+};
+
+/// Every place in the main source that names what is named at `pos`: the uses and, if it is declared in the
+/// main source, the name in the declaration. Sorted, without duplicates. Empty if `pos` is not at a local or a
+/// symbol. The result is valid until the next call or compile.
+pub fn findAll(compiler: *cy.Compiler, pos: u32) ![]const Range {
+    const out = &compiler.ref_ranges;
+    out.clearRetainingCapacity();
+    const picked = pick(compiler, pos) orelse return out.items;
+    const target = picked.ref;
+    switch (target.kind) {
+        .expr => return out.items,
+        .local => {
+            // A local is the same local where the declaration is the same. One that is not declared in the
+            // source (`self`) is told apart by its name and type instead.
+            const name = compiler.main_chunk.src[target.pos..target.end];
+            for (compiler.refs.items) |ref| {
+                if (ref.kind != .local or ref.data.local_decl != target.data.local_decl) continue;
+                if (target.data.local_decl == cy.NullId) {
+                    if (ref.type != target.type) continue;
+                    if (!std.mem.eql(u8, compiler.main_chunk.src[ref.pos..ref.end], name)) continue;
+                }
+                try out.append(compiler.alloc, .{ .pos = ref.pos, .end = ref.end });
+            }
+        },
+        .sym => {
+            const sym = target.data.sym;
+            for (compiler.refs.items) |ref| {
+                if (ref.kind != .sym or ref.data.sym != sym) continue;
+                try out.append(compiler.alloc, .{ .pos = ref.pos, .end = ref.end });
+            }
+            if (declNameNode(sym)) |name_n| {
+                if (name_n.src() == compiler.main_chunk.id) {
+                    const start = name_n.pos();
+                    const end = name_n.end();
+                    if (start != cy.NullId and end != cy.NullId and start < end and end <= compiler.main_chunk.src.len) {
+                        try out.append(compiler.alloc, .{ .pos = start, .end = end });
+                    }
+                }
+            }
+        },
+    }
+    std.mem.sort(Range, out.items, {}, struct {
+        fn lessThan(_: void, x: Range, y: Range) bool {
+            return x.pos < y.pos or (x.pos == y.pos and x.end < y.end);
+        }
+    }.lessThan);
+    // A name inside a template is recorded once per instance.
+    var len: usize = 0;
+    for (out.items) |range| {
+        if (len > 0 and out.items[len - 1].pos == range.pos and out.items[len - 1].end == range.end) continue;
+        out.items[len] = range;
+        len += 1;
+    }
+    out.items.len = len;
+    return out.items;
+}
+
+/// The node of the name in the declaration of `sym`.
+fn declNameNode(sym: *cy.Sym) ?*ast.Node {
+    if (sym.type == .field) return fieldNameNode(sym);
+    var decl = declOf(sym) orelse return null;
+    if (decl.type() == .template) decl = decl.cast(.template).child_decl;
+    return switch (decl.type()) {
+        .funcDecl => decl.cast(.funcDecl).name,
+        .struct_decl => decl.cast(.struct_decl).name,
+        .cstruct_decl => decl.cast(.cstruct_decl).name,
+        .cunion_decl => decl.cast(.cunion_decl).name,
+        .enumDecl => decl.cast(.enumDecl).name,
+        .trait_decl => decl.cast(.trait_decl).name,
+        .type_alias_decl => decl.cast(.type_alias_decl).name,
+        .type_const_decl => decl.cast(.type_const_decl).name,
+        .custom_type_decl => decl.cast(.custom_type_decl).name,
+        .const_decl => decl.cast(.const_decl).name,
+        .global_decl => decl.cast(.global_decl).name,
+        else => null,
+    };
+}
+
+/// Describes what is at byte offset `pos` of the main source of the last compile. Null if nothing was recorded there.
+pub fn find(compiler: *cy.Compiler, pos: u32) !?Info {
+    const picked = pick(compiler, pos) orelse return null;
+    const best_t = picked.type;
+    const ref = picked.ref;
     const main = compiler.main_chunk;
 
     var buf = std.Io.Writer.Allocating.init(compiler.alloc);
     defer buf.deinit();
     const w = &buf.writer;
-    var info: Info = .{ .pos = ref.pos, .end = ref.end };
+    var info: Info = .{ .pos = ref.pos, .end = ref.end, .kind = ref.kind };
     const name = main.src[ref.pos..ref.end];
 
     switch (ref.kind) {

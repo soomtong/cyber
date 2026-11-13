@@ -688,6 +688,15 @@ pub fn deinit_sym_ct_values(heap: *cy.Heap, sym: *Sym) void {
                 cy.Instance.deinitValues(heap, variant);
             }
         },
+        .template => {
+            // The parameters of the instances of a type template (`Tag['x']` owns a string). They used to be
+            // released when the sym was destroyed, after the point where a sweep of the heap expects every
+            // owned value to be gone (`Compiler.deinit`).
+            const template = sym.cast(.template);
+            for (template.instances.items) |variant| {
+                cy.Instance.releaseValues(heap, variant);
+            }
+        },
         else => {},
     }
 }
@@ -710,6 +719,7 @@ pub fn deinitConstValue(heap: *cy.Heap, const_: *Const) void {
 fn deinitTemplate(heap: *cy.Heap, template: *Template) void {
     template.getMod().deinit(heap.alloc);
 
+    // The values of the instances were released by `deinit_sym_ct_values` if it ran. What is left is the storage.
     for (template.instances.items) |variant| {
         cy.Instance.deinitValues(heap, variant);
         heap.alloc.destroy(variant);

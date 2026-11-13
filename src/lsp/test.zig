@@ -180,6 +180,9 @@ test "The server follows the lifecycle of the protocol." {
     try t.expect(get(out[0], &.{ "result", "capabilities", "documentHighlightProvider" }).?.bool);
     try t.expect(get(out[0], &.{ "result", "capabilities", "renameProvider", "prepareProvider" }).?.bool);
     try t.expectEqualStrings(".", items(out[0], &.{ "result", "capabilities", "completionProvider", "triggerCharacters" })[0].string);
+    try t.expect(get(out[0], &.{ "result", "capabilities", "workspaceSymbolProvider" }).?.bool);
+    try t.expect(get(out[0], &.{ "result", "capabilities", "semanticTokensProvider", "full" }).?.bool);
+    try t.expectEqualStrings("namespace", items(out[0], &.{ "result", "capabilities", "semanticTokensProvider", "legend", "tokenTypes" })[0].string);
     try t.expectEqual(@as(usize, 2), items(out[0], &.{ "result", "capabilities", "signatureHelpProvider", "triggerCharacters" }).len);
     try t.expectEqualStrings("cyber-lsp", str(out[0], &.{ "result", "serverInfo", "name" }));
 
@@ -776,6 +779,257 @@ test "Signature help shows the function that is being called." {
     try t.expect(get(reply, &.{"result"}).? == .null);
     reply = try S.help(&s, 8, "n := nope(");
     try t.expect(get(reply, &.{"result"}).? == .null);
+}
+
+test "Workspace symbols and references across the sources of the workspace." {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "lib.cy", .data = "type Point:\n    x int\n\nfn twice(a int) -> int:\n    return a * 2\n\nfn unused() -> int:\n    return twice(1)\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "other.cy", .data = "use lib './lib.cy'\n\nfn twice_more(a int) -> int:\n    return lib.twice(lib.twice(a))\n" });
+    // Has the word but another function of that name, and a source that does not compile.
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "own.cy", .data = "fn twice(a int) -> int:\n    return a + a\nprint(twice(2))\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "broken.cy", .data = "fn twice(a int -> int:\n" });
+    // A module that declares a function and does not use it itself.
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "util.cy", .data = "fn helper(a int) -> int:\n    return a + 1\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "use_util.cy", .data = "use util './util.cy'\nprint(util.helper(1))\n" });
+    try tmp.dir.createDirPath(t.io, "sub");
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "sub/deep.cy", .data = "use lib '../lib.cy'\nprint(lib.twice(3))\n" });
+    try tmp.dir.createDirPath(t.io, ".hidden");
+    try tmp.dir.writeFile(t.io, .{ .sub_path = ".hidden/skipped.cy", .data = "fn twice_hidden() -> int:\n    return 1\n" });
+    const dir = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(dir);
+
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    const arena = s.arena.allocator();
+    const sep = std.Io.Dir.path.sep_str;
+    const uriOf = struct {
+        fn f(a: std.mem.Allocator, d: []const u8, comptime rel: []const u8) ![]u8 {
+            return lsp.pathToUri(a, try std.fmt.allocPrint(a, "{s}" ++ sep ++ rel, .{d}));
+        }
+    }.f;
+    const root_uri = try lsp.pathToUri(arena, dir);
+    const a_uri = try uriOf(arena, dir, "a.cy");
+    const lib_uri = try uriOf(arena, dir, "lib.cy");
+    const other_uri = try uriOf(arena, dir, "other.cy");
+    const deep_uri = try uriOf(arena, dir, "sub" ++ sep ++ "deep.cy");
+
+    _ = try s.send(try std.fmt.allocPrint(arena,
+        \\{{"jsonrpc":"2.0","id":0,"method":"initialize","params":{{"capabilities":{{}},
+        \\"workspaceFolders":[{{"uri":"{s}","name":"ws"}}]}}}}
+    , .{root_uri}));
+
+    // `a.cy` only exists in the editor. It is part of the workspace like the files.
+    try s.open(a_uri, 1, "use lib './lib.cy'\n\nfn local_fn() -> int:\n    return lib.twice(4)\n");
+
+    // Symbols: the query matches letters in order, without regard to case. Hidden directories are skipped,
+    // a source that does not parse has no symbols, and the locals of main blocks are left out.
+    var out = try s.send(
+        \\{"jsonrpc":"2.0","id":1,"method":"workspace/symbol","params":{"query":"twi"}}
+    );
+    var found = items(out[0], &.{"result"});
+    var names: std.ArrayList([]const u8) = .empty;
+    for (found) |sym| {
+        try names.append(arena, try std.fmt.allocPrint(arena, "{s}@{s}", .{ str(sym, &.{"name"}), std.Io.Dir.path.basename(str(sym, &.{ "location", "uri" })) }));
+    }
+    std.mem.sort([]const u8, names.items, {}, struct {
+        fn lessThan(_: void, x: []const u8, y: []const u8) bool {
+            return std.mem.order(u8, x, y) == .lt;
+        }
+    }.lessThan);
+    try t.expectEqual(@as(usize, 3), names.items.len);
+    try t.expectEqualStrings("twice@lib.cy", names.items[0]);
+    try t.expectEqualStrings("twice@own.cy", names.items[1]);
+    try t.expectEqualStrings("twice_more@other.cy", names.items[2]);
+
+    out = try s.send(
+        \\{"jsonrpc":"2.0","id":2,"method":"workspace/symbol","params":{"query":"LOCAL"}}
+    );
+    found = items(out[0], &.{"result"});
+    try t.expectEqual(@as(usize, 1), found.len);
+    try t.expectEqualStrings("local_fn", str(found[0], &.{"name"}));
+    try t.expectEqualStrings(a_uri, str(found[0], &.{ "location", "uri" }));
+    try t.expectEqual(@as(i64, 12), int(found[0], &.{"kind"}));
+    try expectRange(get(found[0], &.{ "location", "range" }).?, 2, 3, 2, 11);
+
+    // A field has its type as the container.
+    out = try s.send(
+        \\{"jsonrpc":"2.0","id":3,"method":"workspace/symbol","params":{"query":"x"}}
+    );
+    found = items(out[0], &.{"result"});
+    try t.expectEqual(@as(usize, 1), found.len);
+    try t.expectEqualStrings("Point", str(found[0], &.{"containerName"}));
+
+    // References of `lib.twice`, asked at a call in the open document: the call here, the declaration and
+    // the call in `lib.cy`, the calls in the files that use the module. Not the `twice` of `own.cy`.
+    var reply = try s.requestWith("textDocument/references", a_uri, 3, 16, ",\"context\":{\"includeDeclaration\":true}");
+    var locs = items(reply, &.{"result"});
+    var counts = std.StringHashMap(usize).init(arena);
+    for (locs) |loc| {
+        const entry = try counts.getOrPutValue(str(loc, &.{"uri"}), 0);
+        entry.value_ptr.* += 1;
+    }
+    try t.expectEqual(@as(usize, 6), locs.len);
+    try t.expectEqual(@as(usize, 1), counts.get(a_uri).?);
+    try t.expectEqual(@as(usize, 2), counts.get(lib_uri).?);
+    try t.expectEqual(@as(usize, 2), counts.get(other_uri).?);
+    try t.expectEqual(@as(usize, 1), counts.get(deep_uri).?);
+    try t.expectEqual(@as(usize, 4), counts.count());
+    // The document that was asked comes first.
+    try t.expectEqualStrings(a_uri, str(locs[0], &.{"uri"}));
+    try expectRange(get(locs[0], &.{"range"}).?, 3, 15, 3, 20);
+    for (locs) |loc| {
+        if (!std.mem.eql(u8, str(loc, &.{"uri"}), lib_uri)) continue;
+        // The name in the declaration, then the call in `unused`.
+        try expectRange(get(loc, &.{"range"}).?, 3, 3, 3, 8);
+        break;
+    }
+
+    // Without the declaration.
+    reply = try s.requestWith("textDocument/references", a_uri, 3, 16, ",\"context\":{\"includeDeclaration\":false}");
+    locs = items(reply, &.{"result"});
+    try t.expectEqual(@as(usize, 5), locs.len);
+    for (locs) |loc| {
+        if (!std.mem.eql(u8, str(loc, &.{"uri"}), lib_uri)) continue;
+        try expectRange(get(loc, &.{"range"}).?, 7, 11, 7, 16);
+    }
+
+    // A source that is open is searched as it is in the editor, not as it is on disk.
+    try s.open(other_uri, 1, "use lib './lib.cy'\nprint(lib.twice(1))\n");
+    reply = try s.requestWith("textDocument/references", a_uri, 3, 16, ",\"context\":{\"includeDeclaration\":false}");
+    locs = items(reply, &.{"result"});
+    try t.expectEqual(@as(usize, 4), locs.len);
+
+    // Asked at the declaration itself, in the document that declares it.
+    try s.open(lib_uri, 1, "type Point:\n    x int\n\nfn twice(a int) -> int:\n    return a * 2\n\nfn unused() -> int:\n    return twice(1)\n");
+    reply = try s.requestWith("textDocument/references", lib_uri, 3, 5, ",\"context\":{\"includeDeclaration\":true}");
+    locs = items(reply, &.{"result"});
+    try t.expectEqual(@as(usize, 5), locs.len);
+    try t.expectEqualStrings(lib_uri, str(locs[0], &.{"uri"}));
+    try expectRange(get(locs[0], &.{"range"}).?, 3, 3, 3, 8);
+    reply = try s.requestAt("textDocument/hover", lib_uri, 3, 5);
+    try t.expectEqualStrings("```cyber\nfn twice(a int) -> int\n```", str(reply, &.{ "result", "contents", "value" }));
+
+    // The declaration is found in a source that only declares the function.
+    const use_util_uri = try uriOf(arena, dir, "use_util.cy");
+    try s.open(use_util_uri, 1, "use util './util.cy'\nprint(util.helper(1))\n");
+    reply = try s.requestWith("textDocument/references", use_util_uri, 1, 12, ",\"context\":{\"includeDeclaration\":true}");
+    locs = items(reply, &.{"result"});
+    try t.expectEqual(@as(usize, 2), locs.len);
+    try t.expectEqualStrings(use_util_uri, str(locs[0], &.{"uri"}));
+    try t.expectEqualStrings(try uriOf(arena, dir, "util.cy"), str(locs[1], &.{"uri"}));
+    try expectRange(get(locs[1], &.{"range"}).?, 0, 3, 0, 9);
+    reply = try s.requestWith("textDocument/references", use_util_uri, 1, 12, ",\"context\":{\"includeDeclaration\":false}");
+    try t.expectEqual(@as(usize, 1), items(reply, &.{"result"}).len);
+
+    // A parameter stays in its document. The requests do not disturb the diagnostics that follow.
+    reply = try s.requestWith("textDocument/references", lib_uri, 4, 11, ",\"context\":{\"includeDeclaration\":true}");
+    try t.expectEqual(@as(usize, 2), items(reply, &.{"result"}).len);
+    out = try s.flush();
+    for (out) |msg| {
+        try t.expectEqual(@as(usize, 0), items(msg, &.{ "params", "diagnostics" }).len);
+    }
+}
+
+const SemanticToken = struct {
+    line: i64,
+    char: i64,
+    len: i64,
+    type: i64,
+    modifiers: i64,
+};
+
+/// The tokens of a `semanticTokens/full` reply with absolute positions.
+fn decodeTokens(arena: std.mem.Allocator, reply: Value) ![]SemanticToken {
+    const data = items(reply, &.{ "result", "data" });
+    try t.expectEqual(@as(usize, 0), data.len % 5);
+    const out = try arena.alloc(SemanticToken, data.len / 5);
+    var line: i64 = 0;
+    var char: i64 = 0;
+    for (out, 0..) |*token, i| {
+        const d = data[i * 5 ..][0..5];
+        if (d[0].integer != 0) char = 0;
+        line += d[0].integer;
+        char += d[1].integer;
+        token.* = .{ .line = line, .char = char, .len = d[2].integer, .type = d[3].integer, .modifiers = d[4].integer };
+    }
+    return out;
+}
+
+fn tokenAt(tokens: []SemanticToken, line: i64, char: i64) ?SemanticToken {
+    for (tokens) |token| {
+        if (token.line == line and token.char == char) return token;
+    }
+    return null;
+}
+
+test "Semantic tokens name what the compiler resolved." {
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+    const arena = s.arena.allocator();
+
+    try s.open(main_uri, 1,
+        \\use math
+        \\
+        \\type Vec2:
+        \\    x float
+        \\
+        \\fn (&Vec2) len() -> float:
+        \\    return math.sqrt(self.x)
+        \\
+        \\const limit = 10
+        \\
+        \\v := Vec2{x = 1.0}
+        \\print('한글' + str(v.len() + float(limit)))
+        \\
+    );
+    var reply = try s.request("textDocument/semanticTokens/full", main_uri);
+    var tokens = try decodeTokens(arena, reply);
+    // The legend: namespace 0, type 1, enumMember 2, function 3, method 4, property 5, variable 6. Modifier 1 is readonly.
+    const expected = [_]SemanticToken{
+        .{ .line = 6, .char = 11, .len = 4, .type = 0, .modifiers = 0 }, // math
+        .{ .line = 6, .char = 16, .len = 4, .type = 3, .modifiers = 0 }, // sqrt
+        .{ .line = 6, .char = 21, .len = 4, .type = 6, .modifiers = 0 }, // self
+        .{ .line = 6, .char = 26, .len = 1, .type = 5, .modifiers = 0 }, // x
+        .{ .line = 10, .char = 0, .len = 1, .type = 6, .modifiers = 0 }, // v
+        .{ .line = 10, .char = 5, .len = 4, .type = 1, .modifiers = 0 }, // Vec2
+        .{ .line = 11, .char = 0, .len = 5, .type = 3, .modifiers = 0 }, // print
+        // After two Korean characters: UTF-16 code units.
+        .{ .line = 11, .char = 17, .len = 1, .type = 6, .modifiers = 0 }, // v
+        .{ .line = 11, .char = 19, .len = 3, .type = 4, .modifiers = 0 }, // len
+        .{ .line = 11, .char = 27, .len = 5, .type = 1, .modifiers = 0 }, // float
+        .{ .line = 11, .char = 33, .len = 5, .type = 6, .modifiers = 1 }, // limit
+    };
+    for (expected) |exp| {
+        const token = tokenAt(tokens, exp.line, exp.char) orelse {
+            std.debug.print("no token at {}:{}\n", .{ exp.line, exp.char });
+            return error.TestExpectedEqual;
+        };
+        try t.expectEqual(exp, token);
+    }
+    // Sorted, no overlaps, and nothing for keywords and literals.
+    for (tokens[1..], 0..) |token, i| {
+        const prev = tokens[i];
+        try t.expect(token.line > prev.line or (token.line == prev.line and token.char >= prev.char + prev.len));
+    }
+    try t.expect(tokenAt(tokens, 0, 0) == null);
+    try t.expect(tokenAt(tokens, 10, 14) == null);
+
+    // A name after the first error of its body was not reached and has no token. What came before has.
+    try s.change(main_uri, 2, "a := 1\nb := a + nope\nc := a\n");
+    reply = try s.request("textDocument/semanticTokens/full", main_uri);
+    tokens = try decodeTokens(arena, reply);
+    try t.expect(tokenAt(tokens, 0, 0) != null);
+    try t.expect(tokenAt(tokens, 1, 5) != null);
+    try t.expect(tokenAt(tokens, 2, 5) == null);
+
+    // A document that does not parse has none.
+    try s.change(main_uri, 3, "a := (1\n");
+    reply = try s.request("textDocument/semanticTokens/full", main_uri);
+    try t.expectEqual(@as(usize, 0), items(reply, &.{ "result", "data" }).len);
 }
 
 test "A module is read from the editor when it is open, otherwise from the disk." {

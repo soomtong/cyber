@@ -26,6 +26,9 @@ pub const Instance = struct {
     /// or a session compiles again after a failed compile.
     failed: bool = false,
 
+    /// `releaseValues` ran. The params are still there but own nothing.
+    values_released: bool = false,
+
     map: union {
         two: struct {
             first: []const u8,
@@ -114,11 +117,19 @@ pub const Instance = struct {
         }
     }
 
-    pub fn deinitValues(heap: *cy.Heap, variant: *Instance) void {
+    /// Releases the values of the params and keeps the instance usable as a description of its type: a sweep
+    /// of the heap still reads the type params of the objects it frees (the element type of an `EvalBuffer[T]`).
+    pub fn releaseValues(heap: *cy.Heap, variant: *Instance) void {
+        if (variant.values_released) return;
+        variant.values_released = true;
         for (0..variant.params.len) |i| {
             const param = variant.getParamAt(i);
             heap.destructValue(param);
         }
+    }
+
+    pub fn deinitValues(heap: *cy.Heap, variant: *Instance) void {
+        releaseValues(heap, variant);
         if (variant.params.len > 2) {
             variant.map.map.deinit(heap.alloc);
         }

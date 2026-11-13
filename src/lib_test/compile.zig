@@ -1191,7 +1191,8 @@ test "cl_vm_symbol_refs finds the places that name the same thing." {
     try S.expect(vm, src, "self.", 0, &.{ 0, 1, 2 });
     const field_use: u32 = @intCast(std.mem.find(u8, src, "self.x").? + 5);
     var len = C.vm_symbol_refs(vm, field_use, &ptr);
-    try zt.eq(@as(usize, 3), len);
+    // The declaration, two uses in the method, and the name in the initializer `Vec2{x = 1.0, ...}`.
+    try zt.eq(@as(usize, 4), len);
     try zt.eqStr("x float", src[ptr[0].pos .. ptr[0].pos + 7]);
     try zt.eqStr("x + self.y", src[ptr[1].pos .. ptr[1].pos + 10]);
     try zt.eq(@as(u32, 1), ptr[0].end_pos - ptr[0].pos);
@@ -1285,7 +1286,7 @@ test "cl_vm_members_at and cl_vm_names_at list what can be written at a place." 
     try zt.eqStr("x float", C.from_bytes(S.find(items, len, "x").?.detail));
     try zt.eq(C.ItemField, S.find(items, len, "x").?.kind);
     try zt.eqStr("fn (&Vec2) sum() -> float", C.from_bytes(S.find(items, len, "sum").?.detail));
-    try zt.eq(C.ItemFunction, S.find(items, len, "sum").?.kind);
+    try zt.eq(C.ItemMethod, S.find(items, len, "sum").?.kind);
     try zt.expect(S.find(items, len, "secret") != null);
     try zt.expect(S.find(items, len, "y") != null);
     // Sorted by name.
@@ -1315,6 +1316,9 @@ test "cl_vm_members_at and cl_vm_names_at list what can be written at a place." 
     try zt.eqStr("case Color.green", C.from_bytes(S.find(items, len, "green").?.detail));
     len = C.vm_members_at(vm, S.after(src, ":= Vec2", 0), &items);
     try zt.eqStr("fn Vec2 :: zero() -> Vec2", C.from_bytes(S.find(items, len, "zero").?.detail));
+    // A function of a type without a receiver is a function, one with a receiver is a method.
+    try zt.eq(C.ItemFunction, S.find(items, len, "zero").?.kind);
+    try zt.eq(C.ItemMethod, S.find(items, len, "sum").?.kind);
 
     // Nothing ends at a keyword.
     try zt.eq(@as(usize, 0), C.vm_members_at(vm, 3, &items));
@@ -1359,7 +1363,8 @@ test "Compiling again and again with one VM does not grow its memory." {
 
     var config = C.defaultCompileConfig();
     config.skip_codegen = true;
-    const src = "type Foo[T Any]:\n    a T\nfn a() -> int:\n    f := Foo[int]{a = 1}\n    return f.a\nprint(a())\n";
+    // The template has a string parameter: its instance owns a compile-time object, which the syms release.
+    const src = "type Foo[T Any]:\n    a T\ntype Tag[const S EvalStr]:\n    v int\nfn a() -> int:\n    f := Foo[int]{a = 1}\n    t := Tag['x']{v = 2}\n    return f.a + t.v\nprint(a())\n";
     const bad = "fn a() -> int:\n    return nope\nprint(a() + 'x')\n";
 
     try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
@@ -1397,6 +1402,85 @@ test "Compiling again and again with one VM does not grow its memory." {
     var res: C.EvalResult = undefined;
     try zt.eq(C.Success, C.vm_eval(vm, "fn main() -> int:\n    return 7", &res));
     try zt.eq(@as(i64, 7), @as(*i64, @ptrCast(@alignCast(res.res))).*);
+}
+
+test "cl_vm_symbol_refs_to and cl_vm_symbol_tokens." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_symbol_info(vm, true);
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+
+    const src =
+        \\type Vec2:
+        \\    x float
+        \\
+        \\fn (&Vec2) get() -> float:
+        \\    return self.x
+        \\
+        \\fn add(a int, b int) -> int:
+        \\    return a + b
+        \\
+        \\const limit = 10
+        \\v := Vec2{x = 1.0}
+        \\print(v.get() + float(add(limit, 2)))
+        \\print(add(1, 2))
+    ;
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    var info: C.SymbolInfo = undefined;
+    var ranges: [*c]const C.Range = null;
+
+    // The name in a declaration can be asked like a use of it.
+    const decl_name: u32 = @intCast(std.mem.find(u8, src, "add(a int").?);
+    try zt.expect(C.vm_symbol_at(vm, decl_name, &info));
+    try zt.eq(C.SymbolDecl, info.kind);
+    try zt.eqStr("add", src[info.pos..info.end_pos]);
+    try zt.eqStr("fn add(a int, b int) -> int", C.from_bytes(info.detail));
+    try zt.eq(@as(usize, 3), C.vm_symbol_refs(vm, decl_name, &ranges));
+    try zt.eq(decl_name, ranges[0].pos);
+    // A field and a type too.
+    try zt.expect(C.vm_symbol_at(vm, @intCast(std.mem.find(u8, src, "x float").?), &info));
+    try zt.eqStr("x float", C.from_bytes(info.detail));
+    try zt.eq(@as(usize, 3), C.vm_symbol_refs(vm, info.pos, &ranges));
+    try zt.expect(C.vm_symbol_at(vm, 6, &info));
+    try zt.eqStr("type Vec2", C.from_bytes(info.detail));
+
+    // The places that name the declaration at a location: the same answer as asking at one of them.
+    try zt.expect(C.vm_symbol_at(vm, @intCast(std.mem.find(u8, src, "add(1").?), &info));
+    const def_pos = info.def_pos;
+    try zt.eq(@as(usize, 3), C.vm_symbol_refs_to(vm, C.to_bytes("main"), def_pos, &ranges));
+    try zt.eq(decl_name, ranges[0].pos);
+    try zt.eq(@as(u32, 3), ranges[0].end_pos - ranges[0].pos);
+    // Another source, or another place, declares something else.
+    try zt.eq(@as(usize, 0), C.vm_symbol_refs_to(vm, C.to_bytes("other"), def_pos, &ranges));
+    try zt.expect(ranges == null);
+    try zt.eq(@as(usize, 0), C.vm_symbol_refs_to(vm, C.to_bytes("main"), def_pos + 1, &ranges));
+
+    // The resolved names with what they are, sorted, one per name.
+    var tokens: [*c]const C.Token = null;
+    const len = C.vm_symbol_tokens(vm, &tokens);
+    try zt.expect(len > 10);
+    const S = struct {
+        fn kindOf(src_: []const u8, tokens_: [*c]const C.Token, len_: usize, needle: []const u8) ?u32 {
+            const pos = std.mem.find(u8, src_, needle).?;
+            for (tokens_[0..len_]) |token| {
+                if (token.pos == pos) return token.kind;
+            }
+            return null;
+        }
+    };
+    try zt.eq(@as(?u32, C.ItemLocal), S.kindOf(src, tokens, len, "self.x"));
+    try zt.eq(@as(?u32, C.ItemField), S.kindOf(src, tokens, len, "x\n\nfn add"));
+    try zt.eq(@as(?u32, C.ItemLocal), S.kindOf(src, tokens, len, "v := "));
+    try zt.eq(@as(?u32, C.ItemType), S.kindOf(src, tokens, len, "Vec2{"));
+    try zt.eq(@as(?u32, C.ItemMethod), S.kindOf(src, tokens, len, "get() +"));
+    try zt.eq(@as(?u32, C.ItemFunction), S.kindOf(src, tokens, len, "add(limit"));
+    try zt.eq(@as(?u32, C.ItemConstant), S.kindOf(src, tokens, len, "limit, 2"));
+    try zt.eq(@as(?u32, null), S.kindOf(src, tokens, len, "1.0"));
+    try zt.eq(@as(?u32, null), S.kindOf(src, tokens, len, "return a"));
+    for (1..len) |i| {
+        try zt.expect(tokens[i].pos >= tokens[i - 1].end_pos);
+    }
 }
 
 test "Error summaries are empty when there is no error." {

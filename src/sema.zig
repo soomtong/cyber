@@ -2848,6 +2848,10 @@ pub fn checkSymInitField(c: *cy.Chunk, type_sym: *cy.Sym, name: []const u8, node
         // }
     };
     try cy.module.check_sym_visible(c, sym, node);
+    if (c.compiler.record_refs) {
+        // The name of a field in an initializer: `Vec2{x = 1.0}`.
+        cy.refs.recordSym(c, node, name, sym);
+    }
     if (sym.type != .field) {
         const type_name = type_sym.name();
         return c.reportErrorFmt("Type `{}` does not have a field named `{}`.", &.{v(type_name), v(name)}, node);

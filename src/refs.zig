@@ -138,7 +138,61 @@ fn pick(compiler: *cy.Compiler, pos: u32) ?Picked {
         if (ref.kind == .expr) best_t = ref.type;
         best = ref;
     }
+    // The name in a declaration is not a use and has no reference of its own, but it is where "find the
+    // uses" is asked most. A name is never inside an expression that is not also a name, so it wins over one.
+    if (best == null or best.?.kind == .expr) {
+        if (declAt(compiler, pos)) |decl_ref| {
+            return .{ .ref = decl_ref, .type = null };
+        }
+    }
     return .{ .ref = best orelse return null, .type = best_t };
+}
+
+/// The declaration of the main source whose name is at `pos`, as a reference to the symbol it declares.
+fn declAt(compiler: *cy.Compiler, pos: u32) ?Ref {
+    const main = compiler.main_chunk;
+    for (main.funcs.items) |func| {
+        const decl = func.decl orelse continue;
+        if (decl.type() != .funcDecl) continue;
+        // An instance of a template shares the declaration of the template, which is found as a symbol below.
+        if (func.parent.type != .func) continue;
+        if (nameRange(main, decl.cast(.funcDecl).name, pos)) |range| {
+            return .{ .pos = range[0], .end = range[1], .kind = .sym, .data = .{ .sym = func.parent } };
+        }
+    }
+    for (main.syms.items) |sym| {
+        if (declNameNode(sym)) |name_n| {
+            if (nameRange(main, name_n, pos)) |range| {
+                return .{ .pos = range[0], .end = range[1], .kind = .sym, .data = .{ .sym = sym } };
+            }
+        }
+        // The fields are symbols of the type, found through its declaration.
+        const decl = declOf(sym) orelse continue;
+        const fields = switch (decl.type()) {
+            .struct_decl => decl.cast(.struct_decl).fields.slice(),
+            .cstruct_decl => decl.cast(.cstruct_decl).fields.slice(),
+            else => continue,
+        };
+        const mod = sym.getMod() orelse continue;
+        for (fields) |field| {
+            const range = nameRange(main, field.name, pos) orelse continue;
+            const field_sym = mod.getSym(main.src[range[0]..range[1]]) orelse continue;
+            if (field_sym.type != .field) continue;
+            return .{ .pos = range[0], .end = range[1], .kind = .sym, .data = .{ .sym = field_sym } };
+        }
+    }
+    return null;
+}
+
+/// The range of a name node of the main source if `pos` is in it or right after it.
+fn nameRange(main: *cy.Chunk, name_n: *ast.Node, pos: u32) ?[2]u32 {
+    if (name_n.type() == .null) return null;
+    const start = name_n.pos();
+    if (start == cy.NullId or pos < start) return null;
+    const end = name_n.end();
+    if (end == cy.NullId or pos > end or end <= start or end > main.src.len) return null;
+    if (name_n.src() != main.id) return null;
+    return .{ start, end };
 }
 
 pub const Range = extern struct {
@@ -186,6 +240,94 @@ pub fn findAll(compiler: *cy.Compiler, pos: u32) ![]const Range {
             }
         },
     }
+    sortRanges(out);
+    return out.items;
+}
+
+/// Where `sym` is declared, the way `Info.def_uri` and `Info.def_pos` give it.
+fn defOf(compiler: *cy.Compiler, sym: *cy.Sym) ?struct { uri: []const u8, pos: u32 } {
+    const decl = (if (sym.type == .field) fieldNameNode(sym) else declOf(sym)) orelse return null;
+    const chunk_id = decl.src();
+    if (chunk_id >= compiler.chunks.items.len) return null;
+    const pos = decl.pos();
+    if (pos == cy.NullId) return null;
+    return .{ .uri = compiler.chunks.items[chunk_id].srcUri, .pos = pos };
+}
+
+/// Every place in the main source that names the symbol declared at byte offset `def_pos` of the source
+/// `def_uri`, the way `find` reports a declaration. For a host that looks for the uses of a symbol in the
+/// other sources of a project: it compiles each one as the main source and asks here.
+/// The name in the declaration is included when the main source is the one that declares it.
+/// Sorted, without duplicates. The result is valid until the next call, `findAll` or compile.
+pub fn findAllTo(compiler: *cy.Compiler, def_uri: []const u8, def_pos: u32) ![]const Range {
+    const out = &compiler.ref_ranges;
+    out.clearRetainingCapacity();
+    var target: ?*cy.Sym = null;
+    var other: ?*cy.Sym = null;
+    for (compiler.refs.items) |ref| {
+        if (ref.kind != .sym) continue;
+        const sym = ref.data.sym;
+        // Most names refer to a few symbols: the last answers are remembered.
+        if (sym != target) {
+            if (sym == other) continue;
+            const def = defOf(compiler, sym);
+            if (def == null or def.?.pos != def_pos or !std.mem.eql(u8, def.?.uri, def_uri)) {
+                other = sym;
+                continue;
+            }
+            target = sym;
+        }
+        try out.append(compiler.alloc, .{ .pos = ref.pos, .end = ref.end });
+    }
+    // The source that declares the symbol may not use it. The declaration is then found by its place.
+    if (target == null and std.mem.eql(u8, compiler.main_chunk.srcUri, def_uri)) {
+        target = declaredAt(compiler, def_pos);
+    }
+    if (target) |sym| {
+        if (declNameNode(sym)) |name_n| {
+            if (name_n.src() == compiler.main_chunk.id) {
+                const start = name_n.pos();
+                const end = name_n.end();
+                if (start != cy.NullId and end != cy.NullId and start < end and end <= compiler.main_chunk.src.len) {
+                    try out.append(compiler.alloc, .{ .pos = start, .end = end });
+                }
+            }
+        }
+    }
+    sortRanges(out);
+    return out.items;
+}
+
+/// The symbol of the main source whose declaration is at `def_pos`, as `defOf` gives the place.
+fn declaredAt(compiler: *cy.Compiler, def_pos: u32) ?*cy.Sym {
+    const main = compiler.main_chunk;
+    for (main.funcs.items) |func| {
+        if (func.parent.type != .func) continue;
+        const def = defOf(compiler, func.parent) orelse continue;
+        if (def.pos == def_pos and std.mem.eql(u8, def.uri, main.srcUri)) return func.parent;
+    }
+    for (main.syms.items) |sym| {
+        if (defOf(compiler, sym)) |def| {
+            if (def.pos == def_pos and std.mem.eql(u8, def.uri, main.srcUri)) return sym;
+        }
+        const decl = declOf(sym) orelse continue;
+        const fields = switch (decl.type()) {
+            .struct_decl => decl.cast(.struct_decl).fields.slice(),
+            .cstruct_decl => decl.cast(.cstruct_decl).fields.slice(),
+            else => continue,
+        };
+        const mod = sym.getMod() orelse continue;
+        for (fields) |field| {
+            if (field.name.pos() != def_pos) continue;
+            const name = main.src[field.name.pos()..@min(field.name.end(), main.src.len)];
+            const field_sym = mod.getSym(name) orelse continue;
+            if (field_sym.type == .field) return field_sym;
+        }
+    }
+    return null;
+}
+
+fn sortRanges(out: *std.ArrayList(Range)) void {
     std.mem.sort(Range, out.items, {}, struct {
         fn lessThan(_: void, x: Range, y: Range) bool {
             return x.pos < y.pos or (x.pos == y.pos and x.end < y.end);
@@ -196,6 +338,46 @@ pub fn findAll(compiler: *cy.Compiler, pos: u32) ![]const Range {
     for (out.items) |range| {
         if (len > 0 and out.items[len - 1].pos == range.pos and out.items[len - 1].end == range.end) continue;
         out.items[len] = range;
+        len += 1;
+    }
+    out.items.len = len;
+}
+
+pub const Token = extern struct {
+    pos: u32,
+    end: u32,
+    kind: u32,
+};
+
+/// The names of the main source that were resolved, with what each one is, for highlighting by meaning.
+/// Sorted by position, one entry per name. Keywords, literals and names that did not resolve are not listed.
+/// The result is valid until the next call or compile.
+pub fn tokens(compiler: *cy.Compiler) ![]const Token {
+    const out = &compiler.ref_tokens;
+    out.clearRetainingCapacity();
+    for (compiler.refs.items) |ref| {
+        const kind: ItemKind = switch (ref.kind) {
+            .expr => continue,
+            .local => .local,
+            .sym => itemKind(ref.data.sym),
+        };
+        try out.append(compiler.alloc, .{ .pos = ref.pos, .end = ref.end, .kind = @intFromEnum(kind) });
+    }
+    // A stable sort keeps the order of recording for the same name: the last one is the most resolved.
+    std.mem.sort(Token, out.items, {}, struct {
+        fn lessThan(_: void, x: Token, y: Token) bool {
+            return x.pos < y.pos;
+        }
+    }.lessThan);
+    var len: usize = 0;
+    for (out.items) |token| {
+        if (len > 0 and out.items[len - 1].pos == token.pos) {
+            out.items[len - 1] = token;
+            continue;
+        }
+        // A name does not overlap the one before it.
+        if (len > 0 and token.pos < out.items[len - 1].end) continue;
+        out.items[len] = token;
         len += 1;
     }
     out.items.len = len;
@@ -311,6 +493,8 @@ pub const ItemKind = enum(u8) {
     global,
     module,
     other,
+    /// A function with a receiver.
+    method,
 };
 
 /// A name that can be written at a position, for completion.
@@ -323,7 +507,8 @@ pub const Item = struct {
 
 fn itemKind(sym: *cy.Sym) ItemKind {
     return switch (sym.type) {
-        .func, .func_template, .variant_func => .function,
+        .func => if (sym.cast(.func).numFuncs > 0 and sym.cast(.func).first.isMethod()) .method else .function,
+        .func_template, .variant_func => .function,
         .type, .type_alias, .type_const, .template => .type,
         .field => .field,
         .enum_case, .choice_case, .union_case => .case,
@@ -507,6 +692,8 @@ fn writeTypeName(compiler: *cy.Compiler, w: *std.Io.Writer, type_: *cy.Type) !vo
 }
 
 fn declOf(sym: *cy.Sym) ?*ast.Node {
+    // A function symbol is reserved before its first function. After a compile that failed in between it has none.
+    if (sym.type == .func and sym.cast(.func).numFuncs == 0) return null;
     const decl = sym.declNodeOrNull() orelse return null;
     if (decl.type() == .null or decl.pos() == cy.NullId) return null;
     return decl;

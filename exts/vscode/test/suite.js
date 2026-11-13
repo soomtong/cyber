@@ -90,6 +90,39 @@ test('References and highlights', async () => {
     assert.strictEqual(marks.length, 2);
 });
 
+test('References across files and workspace symbols', async () => {
+    // `lib.cy` is not open. The use here and the declaration there are both found.
+    const refs = await vscode.commands.executeCommand('vscode.executeReferenceProvider', doc.uri, positionOf(doc, 'twice', 1));
+    const files = refs.map((r) => path.basename(r.uri.fsPath)).sort();
+    assert.deepStrictEqual(files, ['lib.cy', 'main.cy']);
+
+    const syms = await vscode.commands.executeCommand('vscode.executeWorkspaceSymbolProvider', 'twi');
+    assert.ok(syms.some((s) => s.name === 'twice' && path.basename(s.location.uri.fsPath) === 'lib.cy'), JSON.stringify(syms.map((s) => s.name)));
+    const all = await vscode.commands.executeCommand('vscode.executeWorkspaceSymbolProvider', 'scale');
+    assert.ok(all.some((s) => s.name === 'Vec2.scale'));
+});
+
+test('Semantic tokens', async () => {
+    const legend = await vscode.commands.executeCommand('vscode.provideDocumentSemanticTokensLegend', doc.uri);
+    assert.ok(legend.tokenTypes.includes('method') && legend.tokenTypes.includes('namespace'));
+    const tokens = await vscode.commands.executeCommand('vscode.provideDocumentSemanticTokens', doc.uri);
+    assert.ok(tokens.data.length >= 5 * 10, `tokens: ${tokens.data.length / 5}`);
+    // Decode to (line, char, type name) and look for the method call and the module name.
+    const found = [];
+    let line = 0;
+    let char = 0;
+    for (let i = 0; i < tokens.data.length; i += 5) {
+        if (tokens.data[i] !== 0) char = 0;
+        line += tokens.data[i];
+        char += tokens.data[i + 1];
+        const text = doc.getText(new vscode.Range(line, char, line, char + tokens.data[i + 2]));
+        found.push(`${text}:${legend.tokenTypes[tokens.data[i + 3]]}`);
+    }
+    for (const want of ['scale:method', 'lib:namespace', 'twice:function', 'Vec2:type', 'x:property', 'n:variable']) {
+        assert.ok(found.includes(want), `${want} in ${found}`);
+    }
+});
+
 test('Rename of a local, and no rename of a function', async () => {
     const edits = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', doc.uri, positionOf(doc, 'total :='), 'sum_');
     const changes = edits.entries();

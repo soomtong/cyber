@@ -1,6 +1,6 @@
 # LSP 서버 설계와 단계 계획
 
-2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 · P1 · P2의 sema 복구 · P3(hover · definition · references · 지역 rename · completion · signatureHelp) 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P3 구현" 절). 파서 복구와 P4 이후는 미구현.
+2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 ~ P4 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P4 구현" 절). 남은 것은 파서 복구(P2의 나머지)와 P5.
 앞선 결정은 `docs/decisions/project_fmt.md`의 "내장 도구의 기준"(LSP는 CLI에 넣지 않고 라이브러리 위의 별도 프로그램),
 사실 근거는 `docs/study/01-pipeline-front-end.md` 6절과 `docs/decisions/project_compile_error_report.md`이다.
 
@@ -258,7 +258,7 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
 - 오버로드 중 실제로 고른 함수. 함수 이름은 심볼(오버로드 묶음)로 기록되고 `detail`은 첫 선언에 `(+N overloads)`를 붙인다.
 - 템플릿 본문 안의 이름은 인스턴스마다 기록되고 마지막 인스턴스의 것이 보인다(`x T`가 `x int`로).
 - 문서 주석. 선언 위의 `--|` 줄을 hover에 싣는 일은 서버가 `def_pos`와 소스로 할 수 있다.
-- capture된 지역, `use`의 경로 문자열, 필드 초기화(`Vec2{x = 1}`의 `x`).
+- capture된 지역, `use`의 경로 문자열. (필드 초기화의 이름은 P4에서 기록한다.)
 
 ### references · documentHighlight · rename (2026-11-13)
 
@@ -336,9 +336,48 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
   남긴 편집들로 줄인다. 그래서 6절의 "편집 하나"는 그대로 둔다.
 - VS Code의 사용자 데이터 디렉터리는 짧은 경로여야 한다(그 안의 소켓 경로가 100자쯤에서 잘린다). 러너가 임시 디렉터리를 준다.
 
-## 9. 다음
+## 9. P4 구현: 워크스페이스 (2026-11-13)
+
+서버는 색인을 두지 않는다. 워크스페이스 전체가 필요한 요청은 그때 폴더를 다시 훑는다. 파일이 바뀐 것을 따라갈 장치가 필요 없고,
+이 저장소(`.cy` 약 470개)에서 심볼 요청이 25 ~ 106ms, references가 19ms다.
+
+- 워크스페이스: `initialize`의 `workspaceFolders`(없으면 `rootUri`)를 경로로 둔다. `src/lsp/workspace.zig`가 `.cy` 파일을
+  모은다(숨은 디렉터리 · `node_modules` · `zig-out` · `zig-cache` · `zig-pkg` 제외, 심링크는 따라가지 않음, 2000개까지, 이름순).
+  열린 문서는 편집기의 본문으로, 나머지는 디스크에서 읽는다. 디스크에 없는 열린 문서도 워크스페이스의 소스다.
+- `workspace/symbol`: 소스마다 파서만 돌려(개요와 같은 함수) 선언을 모으고 질의로 거른다. 질의는 글자가 순서대로 들어 있으면
+  맞는다(`vsc`가 `Vec2.scale`). 필드와 case는 `containerName`에 타입 이름이 들어간다. main 블록의 지역은 뺀다. 1000개까지.
+- 워크스페이스 전체 `references`: 지역이 아닌 이름이면, 이름이 단어로 들어 있는 소스만 골라 하나씩 main으로 컴파일하고
+  `cl_vm_symbol_refs_to(vm, def_uri, def_pos, &ranges)`로 "그 자리에 선언된 것을 가리키는 범위"를 묻는다. 같은 이름의 다른
+  함수는 선언 위치가 달라 섞이지 않는다. 선언만 하고 쓰지 않는 소스에서도 선언의 이름은 나온다. 요청 하나에 300개까지 컴파일한다.
+  표준 모듈에 선언된 것(`print`)은 문서 안에서만 찾는다.
+- 선언의 이름에서 묻기: 선언의 이름은 쓰임이 아니라 기록이 없었다. `cl_vm_symbol_at` · `cl_vm_symbol_refs`가 main 소스의 선언
+  (함수 · 타입 · 필드 등)의 이름 자리에서도 답한다. "쓰인 곳 찾기"를 가장 많이 묻는 자리다. hover도 같이 된다.
+- 필드 초기화의 이름(`Vec2{x = 1.0}`의 `x`)을 참조로 기록한다(8절의 "하지 않은 것"에서 뺀다).
+- `textDocument/semanticTokens/full`: `cl_vm_symbol_tokens(vm, &tokens)`가 컴파일러가 해석한 이름과 종류를 위치순으로 준다.
+  범례는 `namespace` · `type` · `enumMember` · `function` · `method` · `property` · `variable`, 수식자는 `readonly`(상수).
+  키워드 · 리터럴 · 해석되지 않은 이름은 토큰이 없고 문법 색을 그대로 쓴다. 본문의 첫 오류 뒤는 해석되지 않으므로 토큰이 없다.
+  매개변수와 지역은 구별하지 않는다(둘 다 `variable`).
+- `CLItemKind`에 `CL_ITEM_METHOD`를 더했다(수신자가 있는 함수). completion의 종류도 이것을 쓴다.
+- rename은 그대로 지역 · 매개변수만이다. 워크스페이스의 쓰임을 찾을 수 있게 됐지만, 컴파일되지 않는 소스와 워크스페이스 밖의
+  소스가 쓰는 곳은 여전히 모른다. 함수 rename은 그 한계를 정한 뒤에 한다.
+
+확인:
+
+- lib 테스트 `cl_vm_symbol_refs_to and cl_vm_symbol_tokens.`, 서버 테스트
+  `Workspace symbols and references across the sources of the workspace.` · `Semantic tokens name what the compiler resolved.`,
+  `workspace.zig`의 단위 테스트, VS Code 테스트에 두 항목 추가(파일을 넘는 references와 workspace 심볼, semantic tokens. 열한 항목 통과).
+- 저장소 `.cy` 463개에 hover · 강조 · semantic tokens 118,183 요청(Debug 서버), 죽는 것 없음. 그 과정에서 찾은 것 셋:
+  1. 실패한 컴파일 뒤 함수가 하나도 없는 함수 심볼(`FuncSym.first`가 없음)의 선언을 읽다 죽었다. `refs.declOf`가 가린다.
+  2. 선언만 있고 쓰임이 없는 소스에서 `cl_vm_symbol_refs_to`가 선언을 못 찾았다(VS Code 테스트가 잡았다).
+  3. F-114 수정(reset의 sweep)이 타입 템플릿 인스턴스의 객체 param을 먼저 지워, 심볼이 지워질 때 한 번 더 해제했다
+     (`Tag['x']`처럼 문자열 param을 가진 인스턴스를 컴파일한 뒤 다음 컴파일에서 `Double free`). 다음 파일을 열 때 서버가 죽는
+     꼴로 보였다. 인스턴스의 값은 다른 컴파일 타임 값과 같이 sweep 전에 놓고(`Instance.releaseValues`), param 배열은 sweep이
+     객체의 타입 인자를 읽을 수 있게 심볼이 지워질 때까지 둔다. F-114의 회귀 테스트에 그런 템플릿을 넣었다.
+
+## 10. 다음
 
 - 파서 복구(P2의 나머지): 들여쓰기 기준 블록 동기화로 구문 오류를 여러 개 낸다. 구문 오류가 있으면 sema는 돌지 않는다.
 - F-114(검사마다 느는 메모리)와 F-116(private 필드 struct의 `print`)은 2026-11-13에 고쳤다. F-114는 서버가 아니라
   컴파일러의 reset이 컴파일 타임 힙을 비우지 않던 것이다. 300번 검사에 RSS가 변하지 않는다.
-- P4: workspace 심볼과 워크스페이스 전체의 references(문서마다 main으로 컴파일해 모은다), `semanticTokens`.
+- P5: 함수 · 타입의 rename(워크스페이스 references 위에서, 한계를 정한 뒤), code action, inlay hint.
+- Windows에서의 실행 확인.

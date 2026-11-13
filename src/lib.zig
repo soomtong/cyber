@@ -576,6 +576,22 @@ export fn cl_vm_symbol_refs(vm: *cy.VM, pos: u32, out: *[*c]const C.Range) usize
     return ranges.len;
 }
 
+export fn cl_vm_symbol_refs_to(vm: *cy.VM, def_uri: C.Bytes, def_pos: u32, out: *[*c]const C.Range) usize {
+    out.* = null;
+    const ranges = cy.refs.findAllTo(vm.compiler, C.from_bytes(def_uri), def_pos) catch return 0;
+    if (ranges.len == 0) return 0;
+    out.* = @ptrCast(ranges.ptr);
+    return ranges.len;
+}
+
+export fn cl_vm_symbol_tokens(vm: *cy.VM, out: *[*c]const C.Token) usize {
+    out.* = null;
+    const tokens = cy.refs.tokens(vm.compiler) catch return 0;
+    if (tokens.len == 0) return 0;
+    out.* = @ptrCast(tokens.ptr);
+    return tokens.len;
+}
+
 fn toItems(vm: *cy.VM, items: []const cy.refs.Item, out: *[*c]const C.Item) usize {
     out.* = null;
     if (items.len == 0) return 0;
@@ -596,6 +612,7 @@ fn toItems(vm: *cy.VM, items: []const cy.refs.Item, out: *[*c]const C.Item) usiz
                 .global => C.ItemGlobal,
                 .module => C.ItemModule,
                 .other => C.ItemOther,
+                .method => C.ItemMethod,
             },
         };
     }

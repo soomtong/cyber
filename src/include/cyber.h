@@ -770,6 +770,8 @@ typedef enum {
     CL_ITEM_GLOBAL,
     CL_ITEM_MODULE,
     CL_ITEM_OTHER,
+    /// A function with a receiver.
+    CL_ITEM_METHOD,
 } CLItemKind;
 
 /// A name that can be written at a place in the source, for completion.
@@ -798,6 +800,27 @@ size_t cl_vm_members_at(CLVM* vm, uint32_t pos, const CLItem** out);
 /// a local of a block that ended before `pos` is listed too.
 /// Returns, needs and owns like `cl_vm_members_at`.
 size_t cl_vm_names_at(CLVM* vm, uint32_t pos, const CLItem** out);
+
+/// Finds every place in the main source that names the symbol declared at byte offset `def_pos` of the source
+/// `def_uri`, as `cl_vm_symbol_at` reports a declaration (`def_uri`, `def_pos`). For the uses of a symbol in the
+/// other sources of a project: the host compiles each of them as the main source and asks here.
+/// The name in the declaration is included when the main source is the one that declares it.
+/// Returns and owns like `cl_vm_symbol_refs`, and replaces its result.
+size_t cl_vm_symbol_refs_to(CLVM* vm, CLBytes def_uri, uint32_t def_pos, const CLRange** out);
+
+/// A name of the main source and what it is. `kind` is a `CLItemKind`.
+typedef struct CLToken {
+    uint32_t pos;
+    uint32_t end_pos;
+    uint32_t kind;
+} CLToken;
+
+/// Lists the names of the main source that the last compile resolved, with what each one is, for highlighting
+/// by meaning. Sorted by position, one entry per name, no overlaps. Keywords, literals, and names that did not
+/// resolve or were not reached are not listed. Needs `cl_vm_set_symbol_info`.
+/// The tokens are owned by the VM and stay valid until the next call of this function, eval, compile,
+/// validate or reset.
+size_t cl_vm_symbol_tokens(CLVM* vm, const CLToken** out);
 
 // For embedded, Cyber by default uses malloc (it can be configured to use the high-perf mimalloc).
 // If the host uses a different allocator than Cyber, use `cl_vm_alloc` to allocate memory

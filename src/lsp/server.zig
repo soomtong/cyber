@@ -12,6 +12,7 @@ const cli = @import("../cli.zig");
 const position = @import("position.zig");
 const symbols = @import("symbols.zig");
 const complete = @import("complete.zig");
+const workspace = @import("workspace.zig");
 
 const Value = std.json.Value;
 const Encoding = position.Encoding;
@@ -83,6 +84,9 @@ pub const Server = struct {
 
     docs: std.StringHashMapUnmanaged(*Document) = .empty,
 
+    /// The folders of the workspace, as paths. Searched for requests that go beyond the open documents.
+    roots: std.ArrayList([]const u8) = .empty,
+
     /// The document that the VM compiled last, while no document changed since. Its symbol info can be asked.
     compiled: ?*Document = null,
 
@@ -126,6 +130,8 @@ pub const Server = struct {
             self.alloc.destroy(doc.*);
         }
         self.docs.deinit(self.alloc);
+        for (self.roots.items) |root| self.alloc.free(root);
+        self.roots.deinit(self.alloc);
         for (self.out.items) |msg| self.alloc.free(msg);
         self.out.deinit(self.alloc);
         cli.deinit_cli(self.vm);
@@ -224,8 +230,12 @@ pub const Server = struct {
             try self.onCompletion(arena, id, params);
         } else if (std.mem.eql(u8, method, "textDocument/signatureHelp")) {
             try self.onSignatureHelp(arena, id, params);
+        } else if (std.mem.eql(u8, method, "workspace/symbol")) {
+            try self.onWorkspaceSymbol(arena, id, params);
+        } else if (std.mem.eql(u8, method, "textDocument/semanticTokens/full")) {
+            try self.onSemanticTokens(arena, id, params);
         } else if (std.mem.eql(u8, method, "textDocument/references")) {
-            try self.onReferences(id, params);
+            try self.onReferences(arena, id, params);
         } else if (std.mem.eql(u8, method, "textDocument/documentHighlight")) {
             try self.onDocumentHighlight(id, params);
         } else if (std.mem.eql(u8, method, "textDocument/prepareRename")) {
@@ -255,6 +265,19 @@ pub const Server = struct {
         self.related_information = false;
         if (getPath(params, &.{ "capabilities", "textDocument", "publishDiagnostics", "relatedInformation" })) |v| {
             self.related_information = v == .bool and v.bool;
+        }
+        for (self.roots.items) |root| self.alloc.free(root);
+        self.roots.clearRetainingCapacity();
+        if (getPath(params, &.{"workspaceFolders"})) |folders| {
+            if (folders == .array) {
+                for (folders.array.items) |folder| {
+                    if (getStr(folder, "uri")) |uri| try self.addRoot(uri);
+                }
+            }
+        }
+        // Clients from before workspace folders name one root.
+        if (self.roots.items.len == 0) {
+            if (getStr(params, "rootUri")) |uri| try self.addRoot(uri);
         }
         self.initialized = true;
 
@@ -292,6 +315,24 @@ pub const Server = struct {
             try jw.write(true);
             try jw.objectField("referencesProvider");
             try jw.write(true);
+            try jw.objectField("workspaceSymbolProvider");
+            try jw.write(true);
+            try jw.objectField("semanticTokensProvider");
+            try jw.beginObject();
+            try jw.objectField("legend");
+            try jw.beginObject();
+            try jw.objectField("tokenTypes");
+            try jw.beginArray();
+            for (semantic_types) |name_| try jw.write(name_);
+            try jw.endArray();
+            try jw.objectField("tokenModifiers");
+            try jw.beginArray();
+            try jw.write("readonly");
+            try jw.endArray();
+            try jw.endObject();
+            try jw.objectField("full");
+            try jw.write(true);
+            try jw.endObject();
             try jw.objectField("completionProvider");
             try jw.beginObject();
             try jw.objectField("triggerCharacters");
@@ -697,8 +738,8 @@ pub const Server = struct {
     fn completionKind(item: c.Item) u8 {
         return switch (item.kind) {
             c.ItemLocal, c.ItemGlobal => 6,
-            // A function with a receiver (`fn (&Vec2) len()`) is a method.
-            c.ItemFunction => if (std.mem.startsWith(u8, c.from_bytes(item.detail), "fn (")) 2 else 3,
+            c.ItemMethod => 2,
+            c.ItemFunction => 3,
             c.ItemType => 22,
             c.ItemField => 5,
             c.ItemCase => 20,
@@ -780,16 +821,71 @@ pub const Server = struct {
         };
     }
 
-    /// The uses in this document. A use in another document is not found: the compiler records the names of the
-    /// source it compiles as the program, not those of the modules.
-    fn onReferences(self: *Server, id: ?Value, params: Value) !void {
+    fn addRoot(self: *Server, uri: []const u8) !void {
+        const path = try uriToPath(self.alloc, uri);
+        errdefer self.alloc.free(path);
+        // Only a folder on disk can be listed.
+        if (!std.Io.Dir.path.isAbsolute(path)) {
+            self.alloc.free(path);
+            return;
+        }
+        try self.roots.append(self.alloc, path);
+    }
+
+    const Source = struct {
+        path: []const u8,
+        uri: []const u8,
+        text: []const u8,
+    };
+
+    /// The sources of the workspace: the open documents with the text of the editor, and the `.cy` files of the
+    /// workspace folders that are not open, with their paths only (`text` is empty until `load`).
+    fn sources(self: *Server, arena: std.mem.Allocator) ![]Source {
+        var out: std.ArrayList(Source) = .empty;
+        var iter = self.docs.valueIterator();
+        while (iter.next()) |doc| {
+            try out.append(arena, .{ .path = doc.*.path, .uri = doc.*.uri, .text = doc.*.text });
+        }
+        const num_open = out.items.len;
+        var files: std.ArrayList([]const u8) = .empty;
+        for (self.roots.items) |root| {
+            try workspace.collectFiles(arena, root, &files);
+        }
+        for (files.items) |path| {
+            if (self.docByPath(path) != null) continue;
+            try out.append(arena, .{ .path = path, .uri = "", .text = "" });
+        }
+        // The open documents in a fixed order too: the map has none.
+        std.mem.sort(Source, out.items[0..num_open], {}, struct {
+            fn lessThan(_: void, x: Source, y: Source) bool {
+                return std.mem.order(u8, x.path, y.path) == .lt;
+            }
+        }.lessThan);
+        return out.items;
+    }
+
+    /// Reads a source that `sources` listed by path. False if it can not be read.
+    fn load(arena: std.mem.Allocator, src: *Source) !bool {
+        if (src.uri.len > 0) return true;
+        src.text = workspace.readFile(arena, src.path) orelse return false;
+        src.uri = try pathToUri(arena, src.path);
+        return true;
+    }
+
+    /// The uses of a name. A local is only used in its function. Anything else can be used by every source of
+    /// the workspace: each one that has the name in its text is compiled as a program of its own, and the
+    /// compiler is asked for the places that name the same declaration.
+    fn onReferences(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
         var info: c.SymbolInfo = undefined;
         const doc = (try self.symbolAt(params, &info)) orelse return self.replyNull(id);
         var include_decl = true;
         if (getPath(params, &.{ "context", "includeDeclaration" })) |v| {
             include_decl = !(v == .bool and !v.bool);
         }
-        const decl_here = info.has_def and std.mem.eql(u8, c.from_bytes(info.def_uri), doc.path);
+        // What the VM owns is copied: it compiles other sources below.
+        const def_path = try arena.dupe(u8, c.from_bytes(info.def_uri));
+        const name_ = try arena.dupe(u8, doc.text[info.pos..info.end_pos]);
+        const decl_here = info.has_def and std.mem.eql(u8, def_path, doc.path);
 
         var b: Builder = undefined;
         b.init(self.alloc);
@@ -798,21 +894,163 @@ pub const Server = struct {
         try beginReply(jw, id);
         try jw.objectField("result");
         try jw.beginArray();
-        var skipped = false;
-        for (self.rangesOf(info)) |range| {
-            // The name in the declaration is the first range inside the declaration.
-            if (!include_decl and !skipped and decl_here and range.pos >= info.def_pos and range.end_pos <= info.def_end_pos) {
+        try self.writeLocations(jw, doc.uri, doc.text, self.rangesOf(info), if (!include_decl and decl_here) info.def_pos else null);
+
+        // A declaration in a standard module has no place that other sources could be matched against.
+        const everywhere = info.kind == c.SymbolDecl and info.has_def and
+            (decl_here or std.Io.Dir.path.isAbsolute(def_path) or self.docByPath(def_path) != null);
+        if (everywhere) {
+            var compiled: usize = 0;
+            for (try self.sources(arena)) |*src| {
+                if (std.mem.eql(u8, src.path, doc.path)) continue;
+                if (compiled >= max_reference_compiles) break;
+                if (!try load(arena, src)) continue;
+                if (!workspace.hasWord(src.text, name_)) continue;
+                var config = c.defaultCompileConfig();
+                config.skip_codegen = true;
+                _ = c.vm_compile(self.vm, src.path, src.text, config);
+                self.compiled = null;
+                compiled += 1;
+                var ptr: [*c]const c.Range = null;
+                const len = c.vm_symbol_refs_to(self.vm, c.to_bytes(def_path), info.def_pos, &ptr);
+                if (len == 0 or ptr == null) continue;
+                const declares = std.mem.eql(u8, src.path, def_path);
+                try self.writeLocations(jw, src.uri, src.text, ptr[0..len], if (!include_decl and declares) info.def_pos else null);
+            }
+        }
+        try jw.endArray();
+        try jw.endObject();
+        try self.send(&b);
+    }
+
+    /// With `skip_decl_at`, the first range at or after that offset is left out: the name in the declaration.
+    fn writeLocations(self: *Server, jw: *std.json.Stringify, uri: []const u8, text: []const u8, ranges: []const c.Range, skip_decl_at: ?u32) !void {
+        var skipped = skip_decl_at == null;
+        for (ranges) |range| {
+            if (range.end_pos > text.len) continue;
+            if (!skipped and range.pos >= skip_decl_at.?) {
                 skipped = true;
                 continue;
             }
             try jw.beginObject();
             try jw.objectField("uri");
-            try jw.write(doc.uri);
+            try jw.write(uri);
             try jw.objectField("range");
-            try writeRange(jw, self.rangeIn(doc, range));
+            try writeRange(jw, .{
+                .start = position.fromOffset(text, range.pos, self.encoding),
+                .end = position.fromOffset(text, range.end_pos, self.encoding),
+            });
             try jw.endObject();
         }
+    }
+
+    /// The declarations of every source of the workspace whose name matches the query. Only the parser runs.
+    fn onWorkspaceSymbol(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
+        const query = getStr(params, "query") orelse "";
+
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginArray();
+        var count: usize = 0;
+        for (try self.sources(arena)) |*src| {
+            if (count >= max_workspace_symbols) break;
+            if (!try load(arena, src)) continue;
+            const syms = (try symbols.documentSymbols(arena, src.text)) orelse continue;
+            try self.writeWorkspaceSymbols(jw, src.*, syms, "", query, &count);
+        }
         try jw.endArray();
+        try jw.endObject();
+        try self.send(&b);
+    }
+
+    fn writeWorkspaceSymbols(self: *Server, jw: *std.json.Stringify, src: Source, syms: []const symbols.Symbol, container: []const u8, query: []const u8, count: *usize) !void {
+        for (syms) |sym| {
+            if (count.* >= max_workspace_symbols) return;
+            // The locals of a main block are not what a search across files is for.
+            if (container.len == 0 and sym.kind == .variable) continue;
+            if (workspace.matches(sym.name, query)) {
+                count.* += 1;
+                try jw.beginObject();
+                try jw.objectField("name");
+                try jw.write(sym.name);
+                try jw.objectField("kind");
+                try jw.write(@intFromEnum(sym.kind));
+                if (container.len > 0) {
+                    try jw.objectField("containerName");
+                    try jw.write(container);
+                }
+                try jw.objectField("location");
+                try jw.beginObject();
+                try jw.objectField("uri");
+                try jw.write(src.uri);
+                try jw.objectField("range");
+                try writeRange(jw, .{
+                    .start = position.fromOffset(src.text, sym.name_pos, self.encoding),
+                    .end = position.fromOffset(src.text, sym.name_end, self.encoding),
+                });
+                try jw.endObject();
+                try jw.endObject();
+            }
+            try self.writeWorkspaceSymbols(jw, src, sym.children, sym.name, query, count);
+        }
+    }
+
+    /// The names that the compiler resolved, by what they are. A name that the compiler did not reach (after
+    /// the first error of its body) has no token and keeps the color of the grammar.
+    fn onSemanticTokens(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
+        const doc = try self.docOf(params);
+        if (self.compiled != doc) {
+            _ = self.compile(doc);
+        }
+        var ptr: [*c]const c.Token = null;
+        const len = c.vm_symbol_tokens(self.vm, &ptr);
+        const tokens: []const c.Token = if (len == 0 or ptr == null) &.{} else ptr[0..len];
+
+        // Five numbers per token: the line and the start relative to the token before, the length, the type
+        // and the modifiers. The tokens come sorted, so the text is walked once.
+        var data: std.ArrayList(u32) = .empty;
+        var offset: usize = 0;
+        var line: u32 = 0;
+        var line_start: usize = 0;
+        var prev_line: u32 = 0;
+        var prev_char: u32 = 0;
+        for (tokens) |token| {
+            if (token.end_pos > doc.text.len or token.pos < offset) continue;
+            const semantic = semanticType(token.kind) orelse continue;
+            while (offset < token.pos) : (offset += 1) {
+                if (doc.text[offset] == '\n') {
+                    line += 1;
+                    line_start = offset + 1;
+                }
+            }
+            const char = position.units(doc.text[line_start..token.pos], self.encoding);
+            try data.appendSlice(arena, &.{
+                line - prev_line,
+                if (line == prev_line) char - prev_char else char,
+                position.units(doc.text[token.pos..token.end_pos], self.encoding),
+                semantic.type,
+                semantic.modifiers,
+            });
+            prev_line = line;
+            prev_char = char;
+        }
+
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginObject();
+        try jw.objectField("data");
+        try jw.beginArray();
+        for (data.items) |n| try jw.write(n);
+        try jw.endArray();
+        try jw.endObject();
         try jw.endObject();
         try self.send(&b);
     }
@@ -1184,6 +1422,34 @@ fn validText(arena: std.mem.Allocator, bytes: []const u8) ![]const u8 {
         }
     }
     return out;
+}
+
+/// Sources that one references request compiles at most. Each takes a few milliseconds.
+const max_reference_compiles = 300;
+
+const max_workspace_symbols = 1000;
+
+/// The token types of the legend, by index.
+const semantic_types = [_][]const u8{ "namespace", "type", "enumMember", "function", "method", "property", "variable" };
+
+const SemanticType = struct {
+    type: u32,
+    /// Bit 0 is `readonly`.
+    modifiers: u32 = 0,
+};
+
+fn semanticType(kind: u32) ?SemanticType {
+    return switch (kind) {
+        c.ItemModule => .{ .type = 0 },
+        c.ItemType => .{ .type = 1 },
+        c.ItemCase => .{ .type = 2 },
+        c.ItemFunction => .{ .type = 3 },
+        c.ItemMethod => .{ .type = 4 },
+        c.ItemField => .{ .type = 5 },
+        c.ItemLocal, c.ItemGlobal => .{ .type = 6 },
+        c.ItemConstant => .{ .type = 6, .modifiers = 1 },
+        else => null,
+    };
 }
 
 /// The tokenizer takes ASCII letters, digits and `_` in a name.

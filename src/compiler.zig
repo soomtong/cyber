@@ -81,6 +81,8 @@ pub const Compiler = struct {
     ref_detail: []const u8 = "",
     /// The ranges that the last `refs.findAll` returned.
     ref_ranges: std.ArrayList(cy.refs.Range) = .empty,
+    /// The tokens that the last `refs.tokens` returned.
+    ref_tokens: std.ArrayList(cy.refs.Token) = .empty,
     /// Owns the items that the last `refs.members` or `refs.scope` returned.
     ref_arena: ?std.heap.ArenaAllocator = null,
     
@@ -216,6 +218,7 @@ pub const Compiler = struct {
         if (!reset) {
             self.refs.deinit(self.alloc);
             self.ref_ranges.deinit(self.alloc);
+            self.ref_tokens.deinit(self.alloc);
             self.reports.deinit(self.alloc);
         }
 
@@ -331,6 +334,7 @@ pub const Compiler = struct {
         // The references point into the symbols and sources of the compile that the reports are from.
         self.refs.clearRetainingCapacity();
         self.ref_ranges.clearRetainingCapacity();
+        self.ref_tokens.clearRetainingCapacity();
         if (self.ref_arena) |*arena| arena.deinit();
         self.ref_arena = null;
         self.alloc.free(self.ref_detail);

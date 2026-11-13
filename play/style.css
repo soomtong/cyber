@@ -1,0 +1,218 @@
+:root {
+    --bg: #0c0c0c;
+    --border: #614721;
+    --text: white;
+    --text-light: #888888;
+    --accent: #ffa430;
+    --marked: #ffa430;
+}
+
+html, body {
+    background-color: var(--bg);
+    color: var(--text);
+    height: 100%;
+    margin: 0;
+    font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+}
+
+.bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #222;
+}
+.bar .title {
+    color: var(--accent);
+    font-weight: 600;
+}
+.bar .spacer {
+    flex: 1;
+}
+.bar select {
+    background-color: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--text-light);
+    border-radius: 5px;
+    height: 30px;
+}
+.muted {
+    color: var(--text-light);
+    font-size: 14px;
+}
+
+.panes {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.clear {
+    clear: both;
+}
+
+pre {
+    padding: 10px;
+    font-size: 15px;
+    border: 1px solid var(--border);
+}
+
+ul li {
+    padding-top: 10px;
+}
+
+.cm-s-cyber.CodeMirror {
+    background-color: transparent;
+    border: 0px solid var(--border);
+    height: 100%;
+    font-family: SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
+    font-size: 16px;
+}
+
+.cm-s-cyber .CodeMirror-cursor {
+    border-left: 2px solid var(--accent);
+}
+
+pre span {
+    color: white;
+}
+
+.cm-s-cyber .CodeMirror-line {
+}
+
+.cm-s-cyber .CodeMirror-linenumber {
+    padding: 2px 10px 0 5px
+}
+
+.cm-s-cyber.CodeMirror-focused .CodeMirror-selected {
+    background-color: #666;
+}
+.cm-s-cyber .CodeMirror-selected {
+    background-color: #666;
+}
+
+.cm-s-cyber .CodeMirror-gutters {
+    background-color: var(--bg);
+    border-right: 2px solid #222;
+}
+
+.cm-s-cyber .CodeMirror-activeline-background {
+    background-color: #222;
+}
+
+.cm-s-cyber .CodeMirror-activeline-gutter {
+    background-color: var(--accent);
+}
+.cm-s-cyber .CodeMirror-activeline-gutter .CodeMirror-linenumber {
+    color: #222;
+}
+.cm-s-cyber .cm-line,
+.cm-s-cyber .cm-variable {
+    color: white;
+}
+.cm-s-cyber .cm-keyword {
+    color: #fab760;
+}
+.cm-s-cyber .cm-string,
+.cm-s-cyber .cm-number {
+    color: rgb(120, 206, 120);
+}
+.cm-s-cyber .cm-comment {
+    color: var(--text-light);
+}
+
+.examples {
+    font-size: 14px;
+    color: var(--text-light);
+}
+.examples a {
+    color: var(--text-light);
+    text-decoration: none;
+    margin-right: 5px;
+}
+.examples a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
+button.button {
+    background-color: transparent;
+    border: 1px solid var(--text-light);
+    border-radius: 5px;
+    color: var(--accent);
+    height: 30px;
+    padding: 0;
+    width: 100px;
+}
+button.button:hover:enabled {
+    border-color: var(--accent);
+    cursor: pointer;
+}
+button.button:disabled {
+    color: var(--text-light);
+    opacity: 0.6;
+}
+button.button:focus {
+    filter: none;
+}
+
+main.full-width {
+    grid-column: 1 / -1;
+    padding-left: 20px;
+    padding-right: 20px;
+}
+
+.editor-left {
+    flex: 55;
+    min-width: 0;
+    position: relative;
+}
+
+.editor-right {
+    flex: 45;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid #222;
+}
+
+@media (max-width: 720px) {
+    .panes {
+        flex-direction: column;
+    }
+    .editor-right {
+        border-left: none;
+        border-top: 1px solid #222;
+    }
+}
+
+div#output {
+    flex: 1;
+    overflow: auto;
+    padding: 10px;
+    font-family: SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
+    font-size: 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+div#status {
+    padding: 6px 10px;
+    border-top: 1px solid #222;
+}
+div#status.error {
+    color: rgb(255, 123, 123);
+}
+div#status.success {
+    color: rgb(120, 206, 120);
+}
+
+#output .error {
+    color: rgb(255, 123, 123);
+}

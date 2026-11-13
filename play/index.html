@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyber Playground</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.11/codemirror.min.css" integrity="sha512-uf06llspW44/LZpHzHT6qBOIVODjWtv4MxCricRxkzvopAlSWnTf6hpZTFxuuZcuNE9CBQhqE0Seu1CoRk84nQ==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="bar">
+        <span class="title">Cyber Playground</span>
+        <span id="version" class="muted"></span>
+        <span class="spacer"></span>
+        <label class="muted" for="example">Example</label>
+        <select id="example"></select>
+        <button id="run" class="button" title="Ctrl+Enter" disabled>Run</button>
+        <button id="stop" class="button" disabled>Stop</button>
+        <button id="share" class="button" title="Copy a link to this program">Share</button>
+    </header>
+    <div class="panes">
+        <div class="editor-left">
+            <textarea id="editor"></textarea>
+        </div>
+        <div class="editor-right">
+            <div id="output"></div>
+            <div id="status" class="muted">Loading the VM...</div>
+        </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.11/codemirror.min.js" integrity="sha512-rdFIN28+neM8H8zNsjRClhJb1fIYby2YCNmoqwnqBDEvZgpcp7MJiX8Wd+Oi6KcJOMOuvGztjrsI59rly9BsVQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.11/addon/selection/active-line.min.js" integrity="sha512-0sDhEPgX5DsfNcL5ty4kP6tR8H2vPkn40GwA0RYTshkbksURAlsRVnG4ECPPBQh7ZYU6S3rGvp5uhlGQUNrcmA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="cyber-mode.js"></script>
+    <script src="examples.js"></script>
+    <script>
+        const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
+            theme: 'cyber',
+            mode: 'cyber',
+            lineNumbers: true,
+            indentUnit: 4,
+            styleActiveLine: true,
+            extraKeys: {
+                'Ctrl-Enter': () => run(),
+                'Cmd-Enter': () => run(),
+                Tab: cm => cm.execCommand('indentMore'),
+                'Shift-Tab': cm => cm.execCommand('indentLess'),
+            },
+        });
+
+        const output = document.getElementById('output');
+        const status = document.getElementById('status');
+        const versionElem = document.getElementById('version');
+        const runButton = document.getElementById('run');
+        const stopButton = document.getElementById('stop');
+        const shareButton = document.getElementById('share');
+        const exampleSelect = document.getElementById('example');
+
+        let worker = null;
+        let ready = false;
+        let running = false;
+        // A run that was requested before the VM was loaded.
+        let pendingRun = false;
+
+        function setStatus(text, className) {
+            status.textContent = text;
+            status.className = className || 'muted';
+        }
+
+        function appendOutput(text, className) {
+            // Program output is always inserted as text, never as HTML.
+            const last = output.lastChild;
+            if (last && last.className === className) {
+                last.textContent += text;
+            } else {
+                const span = document.createElement('span');
+                span.className = className;
+                span.textContent = text;
+                output.appendChild(span);
+            }
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function updateButtons() {
+            runButton.disabled = !ready || running;
+            stopButton.disabled = !running;
+        }
+
+        function startWorker() {
+            ready = false;
+            running = false;
+            worker = new Worker('worker.js');
+            worker.onmessage = (e) => {
+                const msg = e.data;
+                if (msg.type === 'ready') {
+                    ready = true;
+                    versionElem.textContent = msg.version;
+                    setStatus('Ready. Ctrl+Enter runs the program.');
+                    if (pendingRun) run();
+                } else if (msg.type === 'out') {
+                    appendOutput(msg.text, 'out');
+                } else if (msg.type === 'err') {
+                    appendOutput(msg.text, 'error');
+                } else if (msg.type === 'done') {
+                    running = false;
+                    if (msg.code === 0) setStatus('Done in ' + msg.ms + ' ms.', 'success');
+                    else setStatus('Exit code ' + msg.code + ' after ' + msg.ms + ' ms.', 'error');
+                } else if (msg.type === 'fail') {
+                    setStatus(msg.message, 'error');
+                }
+                updateButtons();
+            };
+            worker.onerror = (e) => {
+                running = false;
+                setStatus('The worker failed: ' + e.message, 'error');
+                updateButtons();
+            };
+            updateButtons();
+        }
+
+        function run() {
+            if (running) return;
+            if (!ready) {
+                pendingRun = true;
+                return;
+            }
+            pendingRun = false;
+            running = true;
+            output.textContent = '';
+            setStatus('Running...');
+            updateButtons();
+            worker.postMessage({ type: 'run', src: editor.getValue() });
+        }
+
+        function stop() {
+            if (!running) return;
+            // The run is synchronous inside the worker, so the only way to stop it is to end the worker.
+            worker.terminate();
+            startWorker();
+            setStatus('Stopped. Loading the VM again...', 'error');
+        }
+
+        // The program is kept in the URL fragment so that a link reproduces it.
+        function encodeSource(src) {
+            const bytes = new TextEncoder().encode(src);
+            let bin = '';
+            for (const b of bytes) bin += String.fromCharCode(b);
+            return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+
+        function decodeSource(text) {
+            const bin = atob(text.replace(/-/g, '+').replace(/_/g, '/'));
+            return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+        }
+
+        function share() {
+            const url = location.origin + location.pathname + '#code=' + encodeSource(editor.getValue());
+            history.replaceState(null, '', url);
+            const done = () => setStatus('The link is in the address bar and in the clipboard.');
+            if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, done);
+            else done();
+        }
+
+        for (const example of EXAMPLES) {
+            const option = document.createElement('option');
+            option.value = example.id;
+            option.textContent = example.title;
+            exampleSelect.appendChild(option);
+        }
+        exampleSelect.onchange = () => {
+            const example = EXAMPLES.find(e => e.id === exampleSelect.value);
+            editor.setValue(example.src);
+            history.replaceState(null, '', location.pathname);
+            run();
+        };
+        runButton.onclick = run;
+        stopButton.onclick = stop;
+        shareButton.onclick = share;
+
+        let initial = EXAMPLES[0].src;
+        if (location.hash.startsWith('#code=')) {
+            try {
+                initial = decodeSource(location.hash.slice('#code='.length));
+            } catch (err) {
+                // An invalid link falls back to the first example.
+            }
+        }
+        editor.setValue(initial);
+        startWorker();
+        run();
+    </script>
+</body>
+</html>

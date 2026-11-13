@@ -1054,11 +1054,11 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.9-dev 835-264deee</div>
+    <div class="sub-title">v0.4.9-dev 836-172c767</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
-        <li><a href="https://cyberscript.dev/play.html" target="_blank" rel="noopener">Playground</a></li>
+        <li><a href="play/" target="_blank" rel="noopener">Playground</a></li>
         <li><a href="https://github.com/soomtong/cyber/edit/master/docs/docs.md" target="_blank" rel="noopener">Edit Page</a></li>
     </ul>
     <div class="sub-title">Table of Contents</div>
@@ -3786,7 +3786,7 @@ print(spawn(sum, {Point{x = 1, y = 2}}).await())    --> 3
 <a href="#concurrency">^topic</a>
 <h3 id="worker-threads">Worker threads. <a href="#worker-threads">#</a></h3>
 <p>Spawned threads run on a pool of operating system threads that belongs to the VM. A worker is started when a thread is spawned and no worker is idle, up to one less than the number of CPU cores. A spawned thread that no worker picks up stays queued, and a thread that waits in <code>await</code> runs the queued threads itself.</p>
-<p>On a target without operating system threads, such as WebAssembly, the pool has no workers. A spawned thread then runs when its <code>Future</code> is awaited.</p>
+<p>The WebAssembly builds have no threads: <code>spawn</code> is not available there and stops the VM. Fibers, <code>scope</code> blocks and generators work on every target.</p>
 <p>There is no API to create or to name an operating system thread from a script.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="growable-stacks">Growable stacks. <a href="#growable-stacks">#</a></h3>

@@ -24,3 +24,7 @@
   (`aio` 모듈 예제 삭제, `then_spawn` · 채널 · 공유 메모리 · `await` union · SIMD · `os.openLib` · `c.source` 등).
 - 최상위 `#if` 예제가 컴파일 오류가 나는 형태였다. 함수 본문 안의 예제로 바꿨다. 깨진 앵커 세 개를 고쳤다.
 - 문서 사이트의 Edit Page 링크와 libcyber 장의 헤더 · 예제 링크가 이 저장소를 가리킨다.
+- Playground를 문서 사이트의 `play/`에 올린다. 서버 없이 `cyber-wasi.wasm`(CLI)을 브라우저의 Web Worker에서 돌린다
+  (`examples/web-playground`: 최소 WASI 호스트 `wasi.js`, `worker.js`, 예제 8개). Stop은 worker를 끝내서 멈추지 않는
+  프로그램을 중단하고, Share는 소스를 URL에 담는다. wasm 빌드에는 스레드(`spawn`) · FFI · 파일 시스템이 없다.
+  `gen-docs.yml`이 `latest` 릴리스의 wasm을 받아 같이 배포한다. 로컬은 `task playground:wasm` 뒤 `task playground:serve`.

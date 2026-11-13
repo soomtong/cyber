@@ -3237,7 +3237,7 @@ Types that don't implement `Sendable` include:
 ### Worker threads.
 Spawned threads run on a pool of operating system threads that belongs to the VM. A worker is started when a thread is spawned and no worker is idle, up to one less than the number of CPU cores. A spawned thread that no worker picks up stays queued, and a thread that waits in `await` runs the queued threads itself.
 
-On a target without operating system threads, such as WebAssembly, the pool has no workers. A spawned thread then runs when its `Future` is awaited.
+The WebAssembly builds have no threads: `spawn` is not available there and stops the VM. Fibers, `scope` blocks and generators work on every target.
 
 There is no API to create or to name an operating system thread from a script.
 

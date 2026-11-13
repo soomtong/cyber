@@ -71,7 +71,7 @@ html := """<html lang="en">
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
-        <li><a href="https://cyberscript.dev/play.html" target="_blank" rel="noopener">Playground</a></li>
+        <li><a href="play/" target="_blank" rel="noopener">Playground</a></li>
         <li><a href="https://github.com/soomtong/cyber/edit/master/docs/docs.md" target="_blank" rel="noopener">Edit Page</a></li>
     </ul>
     <div class="sub-title">Table of Contents</div>

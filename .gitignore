@@ -21,6 +21,7 @@
 /examples/libfoo.dylib
 /examples/foo.o
 /examples/web-playground/cyber.wasm
+/examples/web-playground/cyber-lsp.wasm
 /cyber.s
 /scratch.zig
 /scratch

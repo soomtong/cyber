@@ -109,4 +109,8 @@
 - Playground를 문서 사이트의 `play/`에 올린다. 서버 없이 `cyber-wasi.wasm`(CLI)을 브라우저의 Web Worker에서 돌린다
   (`examples/web-playground`: 최소 WASI 호스트 `wasi.js`, `worker.js`, 예제 8개). Stop은 worker를 끝내서 멈추지 않는
   프로그램을 중단하고, Share는 소스를 URL에 담는다. wasm 빌드에는 스레드(`spawn`) · FFI · 파일 시스템이 없다.
-  `gen-docs.yml`이 `latest` 릴리스의 wasm을 받아 같이 배포한다. 로컬은 `task playground:wasm` 뒤 `task playground:serve`.
+  `gen-docs.yml`이 그 커밋에서 wasm을 빌드해 같이 배포한다. 로컬은 `task playground:build` 뒤 `task playground:serve`.
+- Playground의 편집기에 언어 서버를 붙였다: 진단(밑줄 · 여백 표시), completion(`.` 뒤와 이름 두 글자부터, Ctrl+Space),
+  hover, Format 버튼. `cyber-lsp`의 WASI 빌드(`cyber-lsp.wasm`)를 별도 worker에서 돌린다. 서버는 stdin에서 멈춰
+  기다리므로 띄워 두지 않고, 요청마다 새 인스턴스에 `initialize` → `didOpen` → 요청 → `exit`를 넣는다(약 50ms).
+  서버 코드는 바꾸지 않았다. `wasi.js`가 stdin을 메시지 하나씩 넘겨 서버가 `didOpen` 뒤에 진단을 내보낸다.

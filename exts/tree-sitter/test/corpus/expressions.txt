@@ -4,6 +4,7 @@ Operators and precedence
 
 a := 1 + 2 * 3 ** 4 << 1
 b := not x and y or z
+e := not a == b
 c := a.b.c(1, name: 2)[0]
 d := -x.!y.?.*
 
@@ -23,11 +24,17 @@ d := -x.!y.?.*
             (number))))))
   (variable_declaration
     (identifier)
+    (binary_expression
+      (binary_expression
+        (not_expression
+          (identifier))
+        (identifier))
+      (identifier)))
+  (variable_declaration
+    (identifier)
     (not_expression
       (binary_expression
-        (binary_expression
-          (identifier)
-          (identifier))
+        (identifier)
         (identifier))))
   (variable_declaration
     (identifier)

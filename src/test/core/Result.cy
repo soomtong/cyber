@@ -77,4 +77,15 @@ ints_copy := ints
 test.eq(2, ints_copy!.len())
 test.eq(2, ints![1])
 
+-- Generic code can print a `!T`: the value or the error. Script code has to unwrap it first.
+fn print_str(x %T) -> str:
+    return '%{x}'
+fn maybe(ok bool) -> !int:
+    if ok:
+        return 7
+    return error.Bad
+test.eq('7', print_str(maybe(true)))
+test.eq('error.Bad', print_str(maybe(false)))
+test.eq('7', to_print_string(maybe(true)!))
+
 --cytest: pass

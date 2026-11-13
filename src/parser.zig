@@ -4114,9 +4114,12 @@ pub const Parser = struct {
             },
             .not_k => {
                 self.advance();
-                const child = (try self.parseExpr(.{})) orelse {
+                // `not` binds weaker than a comparison and tighter than `and` and `or`:
+                // `not a == b` is `not (a == b)` and `not a and b` is `(not a) and b`.
+                const term = (try self.parseTermExpr(.{})) orelse {
                     return self.reportError("Expected `not` expression.", &.{});
                 };
+                const child = try self.parseRightExpr2(.and_op, term);
                 return self.ast.newNodeErase(.unary_expr, .{
                     .child = child,
                     .op = .lnot,

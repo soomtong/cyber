@@ -307,7 +307,7 @@ These keywords only have meaning in a certain context.
 ## Operators.
 The following operators are supported.
 They are ordered from highest to lowest precedence.
-All infix operators have left-to-right associativity and all prefix operators have the same precedence and right-to-left associativity.
+All infix operators have left-to-right associativity and all prefix operators have the same precedence and right-to-left associativity, except `not`, which has its own row.
 
 |Operator|Kind|Description|
 |---|---|---|
@@ -327,6 +327,7 @@ All infix operators have left-to-right associativity and all prefix operators ha
 | `/` `%` `*` | infix | Division, modulus, multiplication. |
 | `+` `-` | infix | Addition, subtraction. |
 | `>` `>=`<br/>`<` `<=`</br>`!=` `==` | infix | Greater, greater or equal, less, less or equal, not equals, equals. |
+| `not` | prefix | Logical not. |
 | `and` | infix | Logical and. |
 | `or` | infix | Logical or. |
 | `..` | infix | Range. |
@@ -390,6 +391,13 @@ not false     --> true
 not true      --> false
 !false        --> true
 !true         --> false
+```
+
+`not` binds weaker than a comparison and tighter than `and` and `or`, as in Python. `!` binds as tightly as the other prefix operators:
+```cy
+not a == b      -- not (a == b)
+not a and b     -- (not a) and b
+!a == b         -- (!a) == b
 ```
 
 ### Bitwise operators.
@@ -3017,6 +3025,8 @@ fn content_length(path str) -> !int:
     data := os.read_file(path)!
     return data.len()
 ```
+
+A result can not be printed before it is unwrapped. `print(os.read_file(path))` and `'%{os.read_file(path)}'` are compile errors that say to unwrap it with `!` or to handle the error. Generic code (a `%T` parameter that is a result) prints the payload or the error.
 
 ### Unwrap or default.
 The `!else` expression either unwraps a result's payload or defaults to a value:

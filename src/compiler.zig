@@ -1208,6 +1208,14 @@ fn loadBuiltinChunk(c: *cy.Chunk) !void {
     c.sema.scope_abort_fn = core.getSym("@scope_abort").?.cast(.func).first;
     c.sema.scope_join_fn = core.getSym("@scope_join").?.cast(.func).first;
     c.sema.scope_start_sym = core.getSym("Scope").?.getMod().?.getSym("start").?.cast(.func);
+    c.sema.print_syms = .{
+        core.getSym("print").?.cast(.func),
+        core.getSym("prints").?.cast(.func),
+        core.getSym("eprint").?.cast(.func),
+        core.getSym("eprints").?.cast(.func),
+        core.getSym("log").?.cast(.func),
+        core.getSym("to_print_string").?.cast(.func),
+    };
     c.sema.track_main_local_fn = core.getSym("@trackMainLocal").?.cast(.func).first;
     c.sema.main_result_fn = core.getSym("@mainResult").?.cast(.func).first;
 

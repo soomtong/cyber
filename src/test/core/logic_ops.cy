@@ -47,4 +47,16 @@ t.eq(not true, false)
 t.eq(!false, true)
 t.eq(!true, false)
 
+-- `not` binds weaker than a comparison and tighter than `and` and `or`.
+na := false
+nb := false
+t.eq(not na and nb, false)
+t.eq((not na) and nb, false)
+t.eq(not (na and nb), true)
+t.eq(not true or true, true)
+t.eq(not na or nb, true)
+t.eq(not 1 == 2, true)
+t.eq(not 1 < 2 and true, false)
+t.eq(nb or not na, true)
+
 --cytest: pass

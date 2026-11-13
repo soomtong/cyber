@@ -289,6 +289,12 @@ fn to_print_string(x %T) -> str:
                     return '{' + parts.join(', ') + '}'
                 #else:
                     return to_print_string(x.*)
+            #case .result:
+                -- Script code can not print a `!T` (`checkPrintCall`). Generic code such as `test.eq` prints the
+                -- value or the error.
+                val := x !else |err|:
+                    return str(err)
+                return to_print_string(val)
             #case .ptr |ptr|:
                 return '@' + (as[r64] x).fmt()
             #case .func |func|:

@@ -1699,6 +1699,37 @@ fn semaScopeStart(c: *cy.Chunk, rec: *ast.Node, rec_res: ExprResult, call: *ast.
     return res;
 }
 
+/// Code that the script wrote for one type: not a builtin module and not an instance of a generic function or
+/// of a template's method, whose `T` can be a `!T` without the writer knowing (`test.eq`).
+fn inGenericCode(c: *cy.Chunk) bool {
+    if (c.is_builtin) return true;
+    var i = c.semaProcs.items.len;
+    while (i > 0) {
+        i -= 1;
+        const func = c.semaProcs.items[i].func orelse continue;
+        if (func.instance != null) return true;
+        if (func.parent.getStaticType()) |parent_t| {
+            if (parent_t.sym().instance != null) return true;
+        }
+    }
+    return false;
+}
+
+/// `print(f())` where `f` returns `!T` is a compile error at the call: the value has to be unwrapped first.
+pub fn checkPrintCall(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, func: *cy.Func, node: *ast.Node) !void {
+    if (inGenericCode(c)) return;
+    for (c.sema.print_syms) |sym| {
+        if (sym != func_sym) continue;
+        const params = func.sig.params();
+        if (params.len != 1) return;
+        const arg_t = params[0].get_type();
+        if (arg_t.kind() != .result) return;
+        const type_name = try c.sema.allocTypeName(arg_t);
+        defer c.alloc.free(type_name);
+        return c.reportErrorFmt("Can not print `{}`. Unwrap it with `!` first, or handle the error with `!else` or `try`.", &.{v(type_name)}, node);
+    }
+}
+
 /// Reports a `Scope.start` whose arguments hold a borrow, unless it is the call that `semaScopeStart` checks.
 pub fn checkScopeStartCall(c: *cy.Chunk, func: *cy.Func, node: *ast.Node) !void {
     if (c.scope_start_call == node) return;
@@ -4914,6 +4945,11 @@ pub fn semaStringTemplate(c: *cy.Chunk, template: *ast.StringTemplate) !ExprResu
     for (0..nexprs) |i| {
         const expr = template.parts[1 + i*2].cast(.stringt_expr);
         const res = try c.semaExpr(expr.child, .{});
+        if (res.type.kind() == .result and !inGenericCode(c)) {
+            const type_name = try c.sema.allocTypeName(res.type);
+            defer c.alloc.free(type_name);
+            return c.reportErrorFmt("Can not print `{}`. Unwrap it with `!` first, or handle the error with `!else` or `try`.", &.{v(type_name)}, expr.child);
+        }
 
         const to_print_string_func = try getToPrintStringFunc(c, res.type, expr.child);
         const expr_arg = Argument.initPreResolved(expr.child, res);
@@ -10818,6 +10854,8 @@ pub const Sema = struct {
     scope_join_fn: *cy.Func = undefined,
     /// `Scope.start`.
     scope_start_sym: *cy.sym.FuncSym = undefined,
+    /// `print` and the functions like it, which do not take a `!T` (`checkPrintCall`).
+    print_syms: [6]*cy.sym.FuncSym = undefined,
     to_print_string_fn: *cy.Func = undefined,
     access_fn: *cy.Func = undefined,
     builtin_sig: *FuncSig = undefined,

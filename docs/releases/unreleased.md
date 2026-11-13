@@ -30,9 +30,18 @@
 - `Map[str, int]{'app': 7}`은 "Expected `=` between a key and a value. An initializer uses `key=value`, not `key: value`."로,
   `for ['a', 'b'] |f|:`는 "A list literal uses braces: `{a, b}` or `[]T{a, b}`."로 원인을 알려 준다
   (전에는 `Expected closing brace.`, ``Expected `]`.``, F-122, tars-agent M0 스파이크).
+- 스크립트 코드에서 `!T`를 풀지 않고 출력하면 컴파일 오류다: `print(f())`, `log(x)`, `'%{f()}'`는
+  "Can not print `!str`. Unwrap it with `!` first, or handle the error with `!else` or `try`."를 낸다. 전에는 값 대신
+  타입 이름(`!str`, `!int`)을 찍었다. 제네릭 코드(`%T`가 결과인 `test.eq` 등)는 성공 값이나 `error.Name`을 찍는다
+  (F-124, tars-agent M0 스파이크 02).
 
 ## 임베딩 API
 
 ## 변경
+
+- `not`의 우선순위를 Python과 같게 바꿨다: 비교보다 약하고 `and` · `or`보다 강하다. 전에는 뒤의 식 전체를 받아
+  `not a and b`가 `not (a and b)`였고, 문서의 연산자 표에는 `not`이 없었다. 이제 `(not a) and b`다.
+  `not a == b`는 여전히 `not (a == b)`다. 오류 없이 값이 바뀌므로 `not`을 `and` · `or`와 섞어 쓴 코드는 확인이
+  필요하다(F-123, tars-agent M0 스파이크 02).
 
 ## 문서

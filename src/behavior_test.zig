@@ -454,6 +454,8 @@ fn test_core(run: *Runner) void {
     run.case("core/raw_string_single_quote_error.cy");
     run.case("core/raw_string_new_line_error.cy");
     run.case("core/Result.cy");
+    run.case("core/print_result_error.cy");
+    run.case("core/interpolate_result_error.cy");
     run.case("core/result_unwrap_block_reachable_error.cy");
     run.case("core/result_infer_return.cy");
     run.case("core/rune_empty_lit_error.cy");

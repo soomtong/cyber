@@ -13,22 +13,23 @@
 // Binary operator precedence mirrors `getBinOpPrecedence` in src/parser.zig.
 const PREC = {
   lambda: -2,
-  not: -1,
+  move: -1,
   default: 0, // ?else, !else
   range: 1,
   or: 2,
   and: 3,
-  compare: 4,
-  plus: 6,
-  times: 7,
-  power: 8,
-  bitor: 9, // `||`, `~`
-  bitand: 10, // `&&`
-  shift: 11, // `<<`, `>>`
-  prefix: 14, // `-x`, `!x`, `~x`, `&x`, `*x`, `^x`, `?T`
-  type_prefix: 15, // `[]T`, `[N]T`, `[&]T`
-  postfix: 16,
-  call: 17,
+  not: 4, // weaker than a comparison, tighter than `and`
+  compare: 5,
+  plus: 7,
+  times: 8,
+  power: 9,
+  bitor: 10, // `||`, `~`
+  bitand: 11, // `&&`
+  shift: 12, // `<<`, `>>`
+  prefix: 15, // `-x`, `!x`, `~x`, `&x`, `*x`, `^x`, `?T`
+  type_prefix: 16, // `[]T`, `[N]T`, `[&]T`
+  postfix: 17,
+  call: 18,
 };
 
 const commaSep1 = (rule) => seq(rule, repeat(seq(',', rule)));
@@ -625,7 +626,7 @@ module.exports = grammar({
 
     not_expression: ($) => prec(PREC.not, seq('not', field('argument', $._expression))),
 
-    move_expression: ($) => prec(PREC.not, seq('move', field('argument', $._expression))),
+    move_expression: ($) => prec(PREC.move, seq('move', field('argument', $._expression))),
 
     unary_expression: ($) =>
       prec(PREC.prefix, seq(field('operator', choice('-', '~', '!')), field('argument', $._term))),

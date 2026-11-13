@@ -1,7 +1,11 @@
 use test
+use os
 
 -- An `await` inside a fiber suspends the fiber instead of waiting. The other fibers go on.
+-- `slow` sleeps first: without it the thread of `a` could finish before `a` awaits, so `a` would not
+-- suspend and its result would come before `b start`.
 fn slow(n int) -> int:
+    os.sleep(100000000).unwrap()
     sum := 0
     for 0..n |i|:
         sum += i

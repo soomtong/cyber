@@ -126,8 +126,24 @@ cs.sort_by_key(|c| c.n)                       -- []Count, 오름차순
 2. A는 fiber 스택 이동과의 관계를 먼저 조사하고 정한다. `&T` 캡처가 이미 안전한지가 갈림길이다.
 3. `sort()` · `sort_by_key`는 이름과 방향 규칙을 정한 뒤.
 
+## 진행 (2026-11-13)
+
+사용자 지시 "C와 B 먼저 진행해".
+
+- B: 넣었다. `sema.zig` 암시 변환의 `.borrow` 분기가 같은 시그니처의 `Func` · `OpaqueFunc` 값을 빌린 뒤 `&OpaqueFunc`로,
+  `&Func`는 그대로 `&OpaqueFunc`로 비트캐스트한다(둘 다 같은 힙 함수 유니언이고 `opaque_` 표시만 다르다). 캡처 오류 문구:
+  "... Declare it with `^T`, or borrow it before the lambda (`b := &counts`) and use `b` in the lambda." fiber 본문에서도 같은
+  오류가 나므로 `^T`를 먼저 적었다.
+- C: `str`의 `<` `<=` `>` `>=`(`compare`로), 인자 없는 `sort()`(`#[cond=meta.has_decl(T, '<')]`, `<`가 없는 원소에서는
+  `sort()`가 없어 호출 자리에서 인자 수 오류). `sort_by_key`는 넣지 못했다:
+  - `fn sort_by_key(key &OpaqueFunc[KeyFn[T, %K]])`는 람다 `|c| c.n`의 타입을 추론하지 못한다("Can not infer function
+    type."). `inferLambdaFuncSig`는 목표 타입이 정해져 있어야 하고, 제네릭 `%K`를 람다 본문의 반환 타입으로 추론하는 길이 없다.
+  - 키 타입별 오버로드(`KeyFn[T, int]` · `KeyFn[T, str]`)도 첫 오버로드의 목표로 람다를 검사해 ``Expected type `str`, got
+    `int`.``가 난다.
+  - 필요한 것: 람다 매개변수는 목표에서, 반환 타입은 본문에서 추론해 제네릭 인자를 정하는 단계. 안 A와 같이 검토한다.
+
 ## 결정할 것
 
 - A를 할지, 한다면 B · C 뒤에 할지.
-- 키 정렬의 이름: Rust의 `sort_by_key` 또는 Swift 풍의 다른 이름.
+- 키 정렬: 람다 반환 타입으로 제네릭을 추론하는 기능을 넣을지, 넣는다면 이름(Rust의 `sort_by_key` 또는 다른 이름).
 - 인자 없는 `sort()`의 원소 조건: `<`를 가진 타입(트레이트로 둘지).

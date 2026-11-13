@@ -93,4 +93,14 @@ t.eq(true, 'abc'.index_rune(-1) == none)
 t.eq(1, 'abc'.index_rune(98).?)
 t.eq(6, 'ab'.repeat(3).len())
 
+-- Comparison operators compare the bytes, like `compare`.
+t.eq('a' < 'b', true)
+t.eq('b' < 'a', false)
+t.eq('a' < 'ab', true)
+t.eq('a' <= 'a', true)
+t.eq('b' <= 'a', false)
+t.eq('ab' > 'a', true)
+t.eq('a' >= 'a', true)
+t.eq('a' >= 'b', false)
+
 --cytest: pass

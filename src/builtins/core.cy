@@ -1531,6 +1531,11 @@ fn (&Slice[]) size_up(new_len int, init T) -> Self:
 fn (&Slice[]) set_last(val T) -> void:
     self[self._len-1] = val
 
+--| Sorts in ascending order with `<`. The element type needs a `<` operator.
+#[cond=meta.has_decl(T, '<')]
+fn (&Slice[]) sort():
+    self.span().sort(|a, b| a < b)
+
 --| Sorts the array with the given `less` function.
 --| If element `a` should be ordered before `b`, the function should return `true` otherwise `false`.
 fn (&Slice[]) sort(less &OpaqueFunc[LessFn[T]]):
@@ -1651,6 +1656,11 @@ fn (&Span[]) set(o Self):
 
 fn (&Span[]) set(val T):
     @unsafeCast(&PtrSpan[T], self).set(val)
+
+--| Sorts in ascending order with `<`. The element type needs a `<` operator.
+#[cond=meta.has_decl(T, '<')]
+fn (&Span[]) sort():
+    self.sort(|a, b| a < b)
 
 --| Sorts the span with the given `less` function.
 --| If element `a` should be ordered before `b`, the function should return `true` otherwise `false`.
@@ -2150,6 +2160,11 @@ fn (&&Array[]) size_up(new_len int, init T):
 #[cond=type.is_copyable(T)]
 fn (&Array[]) setLast(val T) -> void:
     self[self.length-1] = val
+
+--| Sorts in ascending order with `<`. The element type needs a `<` operator.
+#[cond=meta.has_decl(T, '<')]
+fn (&Array[]) sort():
+    self[0..].sort(|a, b| a < b)
 
 --| Sorts the array with the given `less` function.
 --| If element `a` should be ordered before `b`, the function should return `true` otherwise `false`.
@@ -3973,6 +3988,19 @@ fn (&str) len() -> int:
 #[bind]
 fn (str) less(other str) -> bool:
     return @compare(other) == .lt
+
+--| Compares two strings by their bytes, like `compare`.
+fn (str) `<`(right str) -> bool:
+    return self.compare(right) == .lt
+
+fn (str) `<=`(right str) -> bool:
+    return self.compare(right) != .gt
+
+fn (str) `>`(right str) -> bool:
+    return self.compare(right) == .gt
+
+fn (str) `>=`(right str) -> bool:
+    return self.compare(right) != .lt
 
 --| Returns this string in lowercase.
 #[bind]

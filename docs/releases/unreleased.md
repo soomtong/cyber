@@ -44,6 +44,12 @@
   snake_case로, 나머지는 철자가 가까운 멤버로 찾는다. 대상이 그 타입에 있을 때만 말한다. `str.join`은 "`join` is a method
   of a list: `xs.join(sep)`.", `pop`은 "Use `last()` and `remove(i)`.", Map의 `items`는 `for m |e|:`를 알려 준다(F-126,
   tars-agent M0 스파이크 02).
+- `str`에 `<` · `<=` · `>` · `>=`가 생겼다(바이트 순, `compare`와 같음). 전에는 `a.less(b)`만 됐다.
+- 원소 타입에 `<`가 있으면 `xs.sort()`가 오름차순으로 정렬한다(`Slice` · `Span` · `Array`).
+- `^T`나 `&T`를 캡처한 클로저와 `Func` 변수를 `sort`처럼 `&OpaqueFunc`를 받는 자리에 넘길 수 있다:
+  `c := &counts` 뒤 `names.sort(|a, b| c[a] > c[b])`. 전에는 ``Expected argument `&OpaqueFunc[...]`, found `Func[...]` ``였다.
+  일반 지역을 캡처하는 오류는 `^T`로 선언하거나 람다 앞에서 빌리라고(`b := &counts`) 안내한다. 일반 지역 캡처 자체는
+  설계 검토 중이다(`docs/decisions/project_sort_closures.md`, F-127, tars-agent M0 스파이크 02).
 
 ## 임베딩 API
 

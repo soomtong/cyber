@@ -133,6 +133,25 @@ t.eq(1, a2[0].*)
 t.eq(2, a2[1].*)
 t.eq(3, a2[2].*)
 
+-- sort() without a function sorts with `<`.
+a = {3, 1, 2}
+a.sort()
+t.eq_slice([]int{1, 2, 3}, a)
+names := []str{'web', 'app', 'db'}
+names.sort()
+t.eq_slice([]str{'app', 'db', 'web'}, names)
+
+-- A closure that captures `^T` or `&T` can be passed to `sort`.
+counts := Map[str, int]{app=7, db=8, web=23}
+counts_b := &counts
+by_count := counts.keys()
+by_count.sort(|x, y| counts_b[x] > counts_b[y])
+t.eq_slice([]str{'web', 'db', 'app'}, by_count)
+scale := ^2
+mod_sorted := []int{3, 1, 2}
+mod_sorted.sort(|x, y| x % scale.* < y % scale.*)
+t.eq_slice([]int{2, 3, 1}, mod_sorted)
+
 -- Iteration.
 a = {1, 2, 3, 4, 5}
 sum := 0

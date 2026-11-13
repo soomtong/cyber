@@ -6154,7 +6154,7 @@ pub fn lookupSelf(self: *cy.Chunk, node: *ast.Node) !?LookupSelfResult {
         // TODO: Capture non-reference stack variables too.
         const decl_t = self.varStack.items[res.varId].decl_t;
         if (!decl_t.isObjectLike() and decl_t.kind() != .borrow) {
-            return self.reportErrorFmt("Can only capture variables declared with the reference types `^T` or `&T`.", &.{}, node);
+            return self.reportErrorFmt("Can only capture variables declared with the reference types `^T` or `&T`. Declare it with `^T`, or borrow it before the lambda (`b := &{}`) and use `b` in the lambda.", &.{v("self")}, node);
         }
 
         // Create a local captured variable.
@@ -6229,7 +6229,7 @@ fn lookupIdent2(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdent
         // TODO: Capture non-reference stack variables too.
         const decl_t = self.varStack.items[res.varId].decl_t;
         if (!decl_t.isObjectLike() and decl_t.kind() != .borrow) {
-            return self.reportErrorFmt("Can only capture variables declared with the reference types `^T` or `&T`.", &.{}, node);
+            return self.reportErrorFmt("Can only capture variables declared with the reference types `^T` or `&T`. Declare it with `^T`, or borrow it before the lambda (`b := &{}`) and use `b` in the lambda.", &.{v(name)}, node);
         }
 
         // Create a local captured variable.
@@ -11744,6 +11744,21 @@ fn semaFitTarget(c: *cy.Chunk, expr: ExprResult, target_t: *cy.Type, node: *ast.
                     });
                     const new = ExprResult.initOwned(ir_expr);
                     return try semaBorrow(c, new, node);
+                }
+                // A closure (`Func` or `OpaqueFunc`) or a borrow of one is borrowed as an `OpaqueFunc`.
+                // Both are the same function union, so only the type changes.
+                const target_func = borrow.child_t.cast(.func);
+                if (target_func.opaque_) {
+                    if (expr.type.kind() == .func and expr.type.cast(.func).sig == target_func.sig) {
+                        const res = try semaBorrow(c, expr, node);
+                        return try semaBitcast(c, res, target_t, node);
+                    }
+                    if (expr.type.kind() == .borrow) {
+                        const child_t = expr.type.cast(.borrow).child_t;
+                        if (child_t.kind() == .func and child_t.cast(.func).sig == target_func.sig) {
+                            return try semaBitcast(c, expr, target_t, node);
+                        }
+                    }
                 }
             }
         },

@@ -717,6 +717,13 @@ res := 'abc' + 'xyz'
 res = res.concat('end')
 ```
 
+### String comparison.
+`<`, `<=`, `>` and `>=` compare two strings by their bytes, like `str.compare`. `==` compares the contents:
+```cy
+'a' < 'b'       --> true
+'a' < 'ab'      --> true
+```
+
 ### String interpolation.
 String templates wrap expressions in `%{}` which converts them to strings using the builtin `to_print_string`:
 ```cy
@@ -1069,8 +1076,9 @@ arr = arr.insert(1, 345)
 -- Get the length.
 print(arr.len())  --> 2
 
--- Sort the slice in place.
+-- Sort the slice in place. Without a function, `sort` uses `<` of the element type.
 arr.sort(|a, b| a < b)
+arr.sort()
 
 -- Iterating a slice.
 for arr |it|:
@@ -2316,6 +2324,14 @@ type AddFn = fn(int, int) -> int
 
 var func Func[AddFn] = |a, b| a + b + c.*
 func(10, 20)       --> 35
+```
+
+A parameter of type `&OpaqueFunc[FN]` (such as the `less` function of `sort`) takes a function, a lambda, or a closure that captures `^T` or `&T` variables. A local variable that is not a reference can not be captured yet: borrow it first.
+```cy
+counts := Map[str, int]{app=7, db=8, web=23}
+c := &counts
+names := counts.keys()
+names.sort(|a, b| c[a] > c[b])    -- {'web', 'db', 'app'}
 ```
 
 ## Function calls.

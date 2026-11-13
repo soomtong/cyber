@@ -10,7 +10,8 @@ With the language server running:
   Related places (`First declared at:`, the call that expanded a template) are attached to the error.
 * Hover: the declaration line of a function or type, the type of a local, a field or an expression.
 * Go to Definition, within the document and into the modules it uses.
-* Find References and highlights within the document. Rename for locals and parameters.
+* Find References across the workspace, highlights, and Go to Symbol in Workspace. Rename for locals and parameters.
+* Semantic highlighting of the names that the compiler resolved.
 * Completion: the members after a `.`, and the names in scope. Signature help inside a call.
 * Format Document, the same result as `cyber fmt`.
 * Outline (types with their fields, functions, methods, constants, globals) and folding by indentation.

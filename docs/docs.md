@@ -27,12 +27,12 @@ The areas of focus for the language include:
 * Memory safety. Favors structured and flat memory use through borrowing and reference counting. (No garbage collector.)
 * Value ownership and deinitializers.
 * Metaprogramming with templates, inline evaluation, and compiler hooks.
-* Concurrency. Channels, futures, and `await` to synchronize green threads. Fibers and generators for cooperative coroutines.
+* Concurrency. Threads that run in parallel, futures and `await` to wait for them, fibers and `scope` blocks for structured concurrency, and generators.
 * Compilation ahead-of-time to C or interpeted from its virtual machine.
 * Sandbox mode that restricts the language to only safe constructs. *Planned Feature*
 * Introspection. Much of the internals such as the builtin types and runtime is written in Cyber and can be inspected from the source code or the [API docs](api.html).
 
-These docs provide a reference manual for the language. It can be read in order or browsed from the navigation. Features that are marked `Incomplete`, `Planned`, or `TBD` have not been completed at the time of writing.
+These docs provide a reference manual for the language. It can be read in order or browsed from the navigation. Features that are marked `Incomplete` or `Planned` have not been completed at the time of writing.
 
 ## Hello World.
 Here is a simple example that offers a sneak peek into the language:
@@ -286,7 +286,7 @@ There are `25` general keywords. This list categorizes them:
 - [Variables](#variables): [`var`](#local-variables) [`global`](#global-variables)
 - [Functions](#functions): `fn` `return`
 - [Ownership](#value-ownership): [`move`](#moving)
-- [Concurrency](#concurrency): [`yield`](#generators) [`fiber`](#fibers) [`suspend`](#fibers). `generator` is a modifier in front of `fn` and is not reserved. [`scope`](#fibers) starts a block of fibers (`scope |s|:`) and is a lifetime modifier in a type.
+- [Concurrency](#concurrency): [`yield`](#generators) [`fiber`](#fibers) [`suspend`](#suspend-and-resume). `generator` is a modifier in front of `fn` and is not reserved. [`scope`](#scope-block) starts a block of fibers (`scope |s|:`) and is a lifetime modifier in a type.
 - [Types](#custom-types): `type` `with`
 - [Error handling](#error-handling): [`try`](#unwrap-block)
 - [Modules](#modules): `use`
@@ -300,7 +300,7 @@ These keywords only have meaning in a certain context.
 
 ### Literals.
 - [Boolean literal](#booleans): `true` `false`
-- [Error literal](#error-value): `error`
+- [Error literal](#error-literal): `error`
 - None: `none`
 - Undefined: `undef`
 
@@ -818,7 +818,7 @@ Earlier versions wrote a symbol literal as `@usd`. That is a compile error that 
 
 ## References.
 A reference type is denoted as `^T` where `T` is the type of the value that the reference points to. 
-References are safe to use because the memory that they point to are [automatically managed](#automatic-memory).
+References are safe to use because the memory that they point to are [automatically managed](#shared-references).
 
 Separating values and references provides more control over how data is laid out in memory. For example, some types may benefit from compacted members to leverage cache locality and reduce object indirection.
 
@@ -2520,7 +2520,7 @@ The methods that copy an element, such as `clone`, `last`, `contains` and `index
 Some types such as `Array` disallows copying but can still be [cloned](#cloning) or [moved](#moving).
 
 ### Cloning.
-Some value types cannot be implicitly copied but can be explicitly cloned: *Planned feature*
+Some value types cannot be implicitly copied but can be explicitly cloned. The builtin `clone` is not available yet. Until then, a type provides its own method, such as `Array.clone`: `b := a.clone()`. *Planned Feature*
 ```cy
 a := Array[int]{1, 2, 3}
 b := clone(a)
@@ -2845,14 +2845,16 @@ For example, passing a reference to a function call doesn't need a retain since 
 Currently, `mimalloc` is used as the default heap allocator for objects, but it can be swapped with libc `malloc` or a custom allocator.
 
 ### Weak references.
-> _TBD_
+> _Planned Feature_
+
+There is no weak reference type. A back reference from a child to its parent can not be a `^T` without forming a cycle. Keep an index or a key of the parent instead, or pass the parent to the function that needs it.
 
 ### Cycle detection.
 When shared references form a reference cycle, it's considered a runtime error.
 Cycle detection is dispatched at the end of a thread.
 The thread will panic if a cycle is detected which subsequently begins the runtime's [fatal deinitialization procedure](#deinitializers).
 
-When enabled, the cycle detector can also be invoked manually `@check_cycles`: *TBD*
+Invoking the cycle detector manually with `@check_cycles` is not available yet: *Planned Feature*
 ```cy
 fn foo():
     -- Create a reference cycle.
@@ -2872,13 +2874,30 @@ print(res.num_cyc_objs)       --> 2
 ```
 
 ## Manual memory.
-> _Planned Feature_
+Memory can be managed by hand with pointers. This memory is not tracked: the compiler and the runtime do not check its lifetime or its bounds.
 
 ### Pointers.
 See [FFI / Pointers](#pointers-1).
 
 ### Memory allocations.
-> _Planned Feature_
+`alloc` allocates memory with the default allocator and `free` returns it. Both are unsafe. `alloc(T)` returns a `Ptr[T]` to one value and `alloc(T, n)` returns a `PtrSpan[T]` of `n` values. The memory is not initialized:
+```cy
+p := alloc(int)
+p.* = 5
+print(p.*)         --> 5
+free(p)
+
+s := alloc(int, 4)
+s[0] = 3
+print(s[0])        --> 3
+print(s.len())     --> 4
+free(s.ptr)
+```
+A negative length panics, and a length of zero returns an empty span without an allocation. `free` does not run a `@deinit`, and using the memory after `free` is undefined.
+
+An embedding host can reject raw pointers in scripts with the `deny_raw_ptrs` compile option (see [Denying raw pointers](#denying-raw-pointers)).
+
+An allocator that is chosen per allocation is not available yet. *Planned Feature*
 
 # Error handling.
 <table><tr>
@@ -2918,10 +2937,12 @@ if err == error.Oops:
 ```
 
 ### `error` payload.
-A payload value can be attached when creating an error value. *TBD*
+An `error` value holds only its name. Attaching a payload value when creating an error is not available yet. *Planned Feature*
+
+To return details with a failure, return a struct or a choice type that describes it, or keep the details in a value that the caller passes in.
 
 ### `error` set type.
-An error set type is an exhaustive type of possible error values: *TBD*
+An error set type is an exhaustive type of possible error values: *Planned Feature*
 ```cy
 type MyError error:
     case Boom
@@ -2995,7 +3016,16 @@ res := do_something() !else |err|:
 An `!else` block can not reach its end. It must end with `return`, `panic`, `break` or `continue`. To continue after handling the error, use the [unwrap block](#unwrap-block).
 
 ### Unwrap or guard.
-*TBD*
+An `!else` block that captures the error is a guard: it handles the failure and leaves the function, and the code after it sees the payload:
+```cy
+fn load(path str) -> !Config:
+    data := os.read_file(path) !else |err|:
+        eprint('Can not read %{path}: %{err}')
+        return err
+
+    return parse(data)
+```
+The block can return another error or a value of the function's return type. In a loop it can end with `break` or `continue`. There is no separate guard statement.
 
 ### Unwrap block.
 Sometimes it can be useful to handle every rethrow in a block at one place. A `try` block runs its body, and when a `!` in the body meets an error, execution jumps to the `else` block with that error instead of rethrowing or panicking:
@@ -3041,9 +3071,9 @@ panic('oops')
 Panics can not be caught. Once `panic` is invoked, the current thread stops execution and begins to unwind its call stack. Afterwards, the thread can not be used and transitions to a panic state.
 If the main thread panics, then the program aborts without unwinding other child threads.
 
-A parent thread can obtain the status of a child thread. *TBD*
+A panic of a spawned thread reaches the thread that awaits its `Future`: `await` panics with `Spawned thread panicked: <message>`. A parent thread can not query the status of a child thread in another way. *Planned Feature*
 
-A panic reports the [stack trace](#stack-trace) automatically to the console.
+A panic reports the [stack trace](#stack-traces) automatically to the console.
 
 ## Stack traces.
 The builtin `stack_trace()` and `stack_trace_info()` are used to obtain the stack trace info at any point in the program:
@@ -3062,28 +3092,78 @@ fn some_nested_func():
 <table><tr>
 <td valign="top">
 
+* [Overview.](#overview)
 * [Threads.](#threads)
   * [Spawn threads.](#spawn-threads)
   * [`Sendable` values.](#sendable-values)
-  * [Fibers.](#fibers)
+  * [Worker threads.](#worker-threads)
   * [Growable stacks.](#growable-stacks)
-  * [Gas mileage.](#gas-mileage)
-* [OS threads.](#os-threads)
-* [SIMD.](#simd)
-</td><td valign="top">
-
+  * [Fuel and interrupts.](#fuel-and-interrupts)
 * [Futures.](#futures)
   * [Future `await`.](#future-await)
-  * [Future chains.](#future-chains)
+  * [Waiting for the first future.](#waiting-for-the-first-future)
   * [Resolving futures.](#resolving-futures)
-* [Shared memory.](#shared-memory)
-  * [Channels.](#channels)
-* [`await` union.](#await-union)
+* [Fibers.](#fibers)
+  * [Creating fibers.](#creating-fibers)
+  * [`suspend` and `resume`.](#suspend-and-resume)
+  * [Sharing state.](#sharing-state)
+  * [`fiber` blocks.](#fiber-blocks)
+  * [Fiber entry rules.](#fiber-entry-rules)
+  * [`await` in a fiber.](#await-in-a-fiber)
+  * [Waiting for fibers.](#waiting-for-fibers)
+  * [Fiber panics.](#fiber-panics)
+</td><td valign="top">
+
+* [Structured concurrency.](#structured-concurrency)
+  * [`scope` block.](#scope-block)
+  * [Scope errors.](#scope-errors)
+  * [Scope borrows.](#scope-borrows)
+  * [`Scope` type.](#scope-type)
+* [Cancellation.](#cancellation)
+  * [`cancel`.](#cancel)
+  * [Destructing a fiber.](#destructing-a-fiber)
+  * [Cancellation limits.](#cancellation-limits)
 * [Generators.](#generators)
+  * [Generator rules.](#generator-rules)
+  * [Resuming a generator.](#resuming-a-generator)
+  * [Ending a generator.](#ending-a-generator)
+* [Planned concurrency features.](#planned-concurrency-features)
 </td>
 </tr></table>
 
 [^top](#table-of-contents)
+
+## Overview.
+Cyber has three units of concurrency. They differ in what they share and in who decides when they run:
+
+| | Runs | Memory | Gives up control | Result |
+| --- | --- | --- | --- | --- |
+| [Thread](#threads) | In parallel, on a worker thread. | Its own heap. Values are sent. | Never. The runtime schedules it. | `Future[T]` |
+| [Fiber](#fibers) | Interleaved on the thread that resumes it. | The heap of its thread. | At `suspend` and at `await`. | None. It writes to shared state. |
+| [Generator](#generators) | Inside the call to `next`. | The heap of its thread. | At `yield`. | The yielded values. |
+
+A [`Future`](#futures) is the result of work that is not done yet, and `await` is the one way to wait for it. What `await` does depends on where it is called: in the main block and in a spawned thread it blocks, and inside a fiber it suspends only that fiber.
+
+Threads do the CPU bound work and fibers keep several waits in progress on one thread. A [`scope` block](#scope-block) starts a group of fibers and ends when all of them are done:
+```cy
+fn fib(n int) -> int:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+fn compute(n int, out &int) -> !void:
+    -- The fiber is suspended while the thread computes.
+    out.* = spawn(fib, {n}).await()
+
+fn main() -> !void:
+    a := 0
+    b := 0
+    scope |s|:
+        s.start(compute, {20, &a})
+        s.start(compute, {25, &b})
+    -- Both threads ran at the same time and both fibers are done here.
+    print('%{a} %{b}')     --> 6765 75025
+```
 
 ## Threads.
 Threads are light-weight virtual threads that have their own execution context and heap memory. The program can spawn many threads but only some of them can run in parallel depending on the operating system and the number of CPU cores.
@@ -3101,14 +3181,15 @@ fn fib(n int) -> int:
     return fib(n - 1) + fib(n - 2)
 ```
 
-Similarly, a thread can be spawned with a lambda as the entry point: *TBD*
+The entry point can be a lambda. It can not capture variables, because a closure is not `Sendable`:
 ```cy
-task := spawn(|_| -> int, {}):
-    -- Do computation.
+task := spawn(fn(n int) -> int => n + 1, {3})
+print(task.await())    --> 4
 ```
 
 `spawn` returns a `Future[T]` where `T` is the return type of the entry function. If the runtime could not dispatch the thread, a panic is raised.
 The `Future` contains the asynchronous result of the new thread.
+A thread can not be stopped from the script and its status can not be queried. The `Future` is the only handle to it.
 
 ### `Sendable` values.
 Values that can be transferred from one thread to another must be types that implement `Sendable`.
@@ -3121,7 +3202,22 @@ The arguments of `spawn` and the return value of the entry function are sent. Th
 
 Sending another type is a compile error: `Expected sendable: []int`.
 
-These types are planned to be `Sendable`: *Planned Feature*
+A struct is sent with its `@send` method. It receives the thread that the value is sent to and returns the value for that thread:
+```cy
+type Point:
+    x int
+    y int
+
+fn (&Point) @send(dst Thread) -> Point:
+    return Point{x = self.x, y = self.y}
+
+fn sum(p Point) -> int:
+    return p.x + p.y
+
+print(spawn(sum, {Point{x = 1, y = 2}}).await())    --> 3
+```
+
+These types are not `Sendable` yet: *Planned Feature*
 * `?T` if `T` is `Sendable`
 * `!T` if `T` is `Sendable`
 * `[]T` if `T` is `Sendable`. `[]T` is cloned when sending.
@@ -3138,10 +3234,95 @@ Types that don't implement `Sendable` include:
 * Reference types: `^T`, `&T`, `&&T`, `[&]T`.
 * Function unions. (Closures are not `Sendable`)
 
-### Fibers.
+### Worker threads.
+Spawned threads run on a pool of operating system threads that belongs to the VM. A worker is started when a thread is spawned and no worker is idle, up to one less than the number of CPU cores. A spawned thread that no worker picks up stays queued, and a thread that waits in `await` runs the queued threads itself.
+
+The WebAssembly builds have no threads: `spawn` is not available there and stops the VM. Fibers, `scope` blocks and generators work on every target.
+
+There is no API to create or to name an operating system thread from a script.
+
+### Growable stacks.
+When running on Cyber's VM, threads can grow their stack on demand.
+The compiler generates pointer layouts that tells the runtime where pointer values are so they can be patched with new addresses.
+
+Growable stacks allow threads to be lighter. They can be initialized with a smaller stack and grow on demand. However, this feature is not available when compiling AOT where stacks are fixed in size.
+
+A [fiber](#fibers) has a growable stack of its own.
+
+### Fuel and interrupts.
+A script can not limit its own run time. The host that embeds the VM can: it gives an eval a number of checkpoints (loop back edges and calls) as fuel, or it interrupts the eval from another thread. See [Limiting an eval](#limiting-an-eval).
+
+A spawned thread that was interrupted or ran out of fuel interrupts the thread that awaits it.
+
+## Futures.
+A `Future` is an asynchronous result type. It represents the result of work that will either complete or fail at some point in the future.
+This abstraction allows the current thread to continue execution without waiting for the completion of the `Future`.
+
+Futures can represent asynchronous work that is run in parallel or on a single thread.
+I/O bound work can be delegated to the operating system and CPU bound work can be run across multiple threads. A `Future` is not concerned with how the work is accomplished.
+
+`spawn` returns a `Future`, and so does a host function that answers later:
+```cy
+work := spawn(fib, {30})
+-- `work` is a `Future[int]`. The main block continues while `fib` runs.
+print(work.await())    --> 832040
+```
+There is no asynchronous I/O module yet: the functions of `os` and `io` block the thread that calls them.
+
+Futures can be created with a completed value:
+```cy
+work := Future.complete(100)
+print(work.await())
+--> 100
+```
+
+A `Future` is a reference to a shared result. A copy of it waits for the same result.
+
+### Future `await`.
+`Future.await()` asynchronously waits for a `Future` to complete.
+
+`await` blocks the current thread until the `Future` completes. It can be called from the main thread and from spawned threads. While a thread waits, it runs other spawned threads that are still queued, so waiting on nested `spawn` calls does not deadlock the worker pool.
+
+If the spawned thread panicked, `await` panics with `Spawned thread panicked: <message>`. If the spawned thread was interrupted or ran out of fuel, the waiting thread is interrupted too.
+
+A future that no spawned thread completes (one from a host function, or from `FutureResolver` before `complete`) can only be completed from outside the running program. Awaiting it on the main thread suspends the whole program and returns to the host, which completes the future and resumes the program at the `await` (see [Suspending an eval](#suspending-an-eval)). This works at any call depth and in a generator body. Inside a fiber the `await` suspends the fiber instead (see [Fibers](#fibers)). The `cyber` command completes no futures, so there the program ends with `panic: Abandoned while awaiting a future.` A spawned thread can not wait for such a future, and neither can a function that a host function called: both panic.
+
+When `await` returns, the expression evaluates to the completed value of the `Future`:
+```cy
+a := spawn(fib, {20})
+b := spawn(fib, {25})
+print(a.await() + b.await())    --> 81790
+```
+
+`await` can be used in any function which makes asynchronous functions **colorless**. They do not need a special function modifier. This means that asynchronous work can be wrapped in a synchronous API.
+
+### Waiting for the first future.
+`Future.wait_any` waits for the first of several futures and returns its index in the list. When several are done it returns the first of them in the list. The future at that index does not wait when it is awaited:
+```cy
+futs := []Future[str]{tool_async('a'), tool_async('b'), tool_async('c')}
+i := Future.wait_any(futs.span())
+print(futs[i].await())
+```
+Futures of spawned threads are waited for inside the VM. When none of the futures belongs to a spawned thread, the program is suspended until the host completes one of them (see [Suspending an eval](#suspending-an-eval)). An empty list panics.
+
+The futures of one call have the same type `T`.
+
+### Resolving futures.
+A `FutureResolver` produces a `Future` and completes it later. `FutureResolver.new` takes the type of the value, `future` returns the `Future`, and `complete` sets the value:
+```cy
+r := FutureResolver.new(int)
+f := r.future()
+
+r.complete(234)
+print(f.await())    --> 234
+```
+The resolver is not `Sendable`, so it completes a future for a fiber of the same thread. A host function can return such a future and complete it later (see [Suspending an eval](#suspending-an-eval)).
+
+## Fibers.
 A fiber is a cooperative execution context that belongs to a thread. It has its own stack and shares the thread's heap.
 A fiber waits and gives up control. It carries no value: use a [generator](#generators) to produce values.
 
+### Creating fibers.
 `fiber` in front of a call creates a `Fiber`. The arguments are evaluated at once and the function is called at the first `resume`:
 ```cy
 fn two_steps(name str):
@@ -3157,6 +3338,9 @@ _ = f.resume()         --> a: last
 print(f.status())      --> FiberStatus.done
 ```
 
+Each fiber starts with a stack of 512 bytes that grows on demand like the thread's stack. A spawned thread can create fibers of its own. Fibers are not available when compiling AOT.
+
+### `suspend` and `resume`.
 `suspend` gives control back to the `resume` call that is running the fiber. It takes no value and it can be used at any call depth, in a function of any signature:
 ```cy
 fn crunch(data ^ArrayStore[int]) -> int:
@@ -3171,6 +3355,9 @@ Outside of a fiber, `suspend` does nothing.
 
 `resume` returns `.suspended` when the fiber suspended and `.done` when its function returned. Resuming a fiber that is done returns `.done` again. `status` returns `.suspended`, `.running` or `.done`. A fiber that resumed another fiber is `.running` until the other one gives control back.
 
+A generator can be consumed inside a fiber, and `suspend` in a generator body suspends the fiber that consumes the generator. The generator stays `.running` until that fiber is resumed.
+
+### Sharing state.
 Fibers interleave on the same heap. Share state with a `^T` reference:
 ```cy
 fn worker(name str, log ^ArrayStore[str]):
@@ -3187,6 +3374,9 @@ while a.status() != .done or b.status() != .done:
 --> log: a 0, b 0, a 1, b 1
 ```
 
+A fiber of a [`scope` block](#scope-block) can borrow a value instead (see [Scope borrows](#scope-borrows)).
+
+### `fiber` blocks.
 `fiber:` takes a body instead of a call. The body is a closure, so it captures variables that are declared with a reference type:
 ```cy
 log := ^ArrayStore[str]{}
@@ -3199,6 +3389,7 @@ _ = t.resume()         -- log: step 1
 _ = t.resume()         -- log: step 1, step 2
 ```
 
+### Fiber entry rules.
 The rules of a fiber entry are checked at the `fiber` expression:
 ```cy
 generator fn countdown(n int) -> int:
@@ -3236,8 +3427,7 @@ g := fiber job.work(2)     --> CompileError: A fiber entry cannot be a method ca
 ```
 The receiver follows the rules of a parameter, so a method with a `&T` receiver can not be a fiber entry.
 
-A generator can be consumed inside a fiber, and `suspend` in a generator body suspends the fiber that consumes the generator. The generator stays `.running` until that fiber is resumed.
-
+### `await` in a fiber.
 `Future.await()` inside a fiber does not block. When the future is not done, the fiber is suspended and `resume` returns `.suspended`, so the other fibers can run. `Future.wait_any` inside a fiber behaves the same way. A fiber that waits is not entered by `resume`: it returns `.suspended` at once until the future is done. `waiting` tells such a fiber apart from one that stopped at `suspend`:
 ```cy
 fn waiter(fut Future[int], out ^int):
@@ -3254,6 +3444,9 @@ print(w.resume())     --> FiberStatus.done
 print(out.*)          --> 7
 ```
 
+In the root context, outside of any fiber, `await` waits as before.
+
+### Waiting for fibers.
 A loop that resumes fibers calls `Fiber.wait_ready()` when every fiber waits. It blocks the root context until a future that a suspended fiber awaits is done and returns `true`. It returns `false` at once when no fiber awaits a future:
 ```cy
 fn fetch(name str, n int, log ^ArrayStore[str]):
@@ -3271,8 +3464,20 @@ while a.status() != .done or b.status() != .done:
 ```
 Both computations are started before either result is taken. A loop that resumes fibers needs `Fiber.wait_ready()`: without it the loop spins while the fibers wait, and it does not end when nothing else completes the futures. That is the case on a machine without spare worker threads, where the waiting root context runs the spawned tasks itself, and for futures that only the host can complete. For those, `Fiber.wait_ready()` suspends the program and the host sees the futures of all fibers (see [Suspending an eval](#suspending-an-eval)). Called inside a fiber, `Fiber.wait_ready()` suspends that fiber until a future of another fiber is done.
 
-In the root context, outside of any fiber, `await` waits as before.
+A [`scope` block](#scope-block) does this loop itself.
 
+### Fiber panics.
+When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the `resume` call of each fiber down to the main block.
+
+A fiber can not resume itself or a fiber that is waiting for it:
+```cy
+--> panic: Fiber is already running.
+```
+
+## Structured concurrency.
+Structured concurrency ties the lifetime of a group of fibers to a block of code. The fibers are started in the block, and the block is not left before all of them are done. A failure of one fiber ends the others, and the error leaves the block like any other error.
+
+### `scope` block.
 A `scope` block runs a group of fibers and does that loop itself. The name between the bars is a `Scope` that lives for the block. `start` adds a fiber: the arguments are evaluated at once, and the fibers run when the body is done. A fiber that stops at `suspend` gives the others a turn, and when every fiber waits for a future the block waits like `Fiber.wait_ready()`:
 ```cy
 fn fetch(name str, n int, log ^ArrayStore[str]) -> !void:
@@ -3291,9 +3496,41 @@ fn fetch_all(log ^ArrayStore[str]) -> !void:
 The fibers of a scope do not outlive the block:
 
 * When the body reaches its end, the block waits until every fiber is done.
-* The entry function of a fiber returns `void` or `!void`. When a fiber returns an error, the other fibers are cancelled (see `cancel` below) and the error leaves the block like a failing `!`: the function returns it, or it goes to the `else` block of an enclosing `try`, or it panics at the top level.
+* `return`, `break` and `continue` leave the block after the fibers are done. The result of `return expr` is evaluated after that, so it sees what the fibers did.
+
+Blocks can be nested, and a fiber of a scope can have a `scope` block of its own.
+
+### Scope errors.
+The entry function of a fiber returns `void` or `!void`. An error ends the whole group:
+
+* When a fiber returns an error, the other fibers are [cancelled](#cancellation) and the error leaves the block like a failing `!`: the function returns it, or it goes to the `else` block of an enclosing `try`, or it panics at the top level. The fibers that come after it in the same round are cancelled at once.
 * When a `!` in the body fails, the fibers that were started are cancelled and the error goes on the same way.
-* `return`, `break` and `continue` leave the block after the fibers are done. The result of `return expr` is evaluated after that, so it sees what the fibers did. When a fiber returns an error, the error leaves the block instead of the statement.
+* When a fiber returns an error while the block is left with `return`, `break` or `continue`, the error leaves the block instead of the statement.
+* A fiber that can not be cancelled runs to its end instead.
+
+```cy
+fn slow(log ^ArrayStore[str]) -> !void:
+    log << 'slow: start'
+    suspend
+    suspend
+    log << 'slow: end'
+
+fn fail() -> !void:
+    suspend
+    return error.Failed
+
+fn run(log ^ArrayStore[str]) -> !void:
+    scope |s|:
+        s.start(slow, {log})
+        s.start(fail, {})
+
+log := ^ArrayStore[str]{}
+try:
+    run(log)!
+else |err|:
+    print(err)         --> error.Failed
+-- log: slow: start
+```
 
 Since an error leaves the block like a failing `!`, a `scope` block in a function needs a `!T` or `error` return type, or an enclosing `try` block:
 ```cy
@@ -3302,6 +3539,8 @@ fn run() -> int:
         s.start(work, {})
     return 1
 ```
+
+### Scope borrows.
 Because the fibers are done when the block is left, `start` on the name of the block takes borrows. A fiber can read and write a value of the function that holds the block without a `^T` reference:
 ```cy
 fn add(out &int, n int):
@@ -3322,17 +3561,41 @@ The rules follow from the lifetime of the fibers:
 * The arguments are written as a literal at the call: `s.start(func, {&a, 1})`.
 * Only the name of a `scope` block takes borrows. `start` on any other `Scope`, including a `&Scope` that is passed to a function, and `fiber f(&a)` are compile errors: `Cannot borrow a stack value across fibers.`
 
-Blocks can be nested, and a fiber of a scope can have a `scope` block of its own. A fiber that can not be cancelled runs to its end instead.
+### `Scope` type.
+The block is built on the `Scope` type, which can be used directly when the group does not fit a block:
 
-The block is built on the `Scope` type, which can be used directly when the group does not fit a block. `Scope.new()` returns an empty scope, `join() -> !void` runs the fibers and returns the first error after cancelling the others, `abort()` cancels the fibers, and `active()` returns how many are not done. A `Scope` value that is destructed joins its fibers first, and an error that is left then panics.
+* `Scope.new()` returns an empty scope.
+* `start(func, {args})` adds a fiber. It does not take borrows.
+* `join() -> !void` runs the fibers until all are done. It returns the first error after cancelling the others.
+* `abort()` cancels the fibers that are not done.
+* `active()` returns how many fibers are not done.
 
-When a fiber panics, the thread panics and all of its fibers are terminated. The stack trace continues at the `resume` call of each fiber down to the main block.
-
-A fiber can not resume itself or a fiber that is waiting for it:
 ```cy
---> panic: Fiber is already running.
-```
+fn work(n int, log ^ArrayStore[int]) -> !void:
+    suspend
+    if n == 2:
+        return error.Two
+    log << n
 
+log := ^ArrayStore[int]{}
+s := Scope.new()
+s.start(work, {1, log})
+s.start(work, {2, log})
+s.start(work, {3, log})
+print(s.active())      --> 3
+try:
+    s.join()!
+else |err|:
+    print(err)         --> error.Two
+print(s.active())      --> 0
+print(log.len())       --> 1
+```
+A `Scope` value that is destructed joins its fibers first, and an error that is left then panics. A fiber that calls `join` on the scope that is running it panics: `The scope is already running its fibers.`
+
+## Cancellation.
+Cancellation ends a fiber at the point where it is suspended. It is how a [scope](#scope-errors) ends the fibers that are left after a failure, and it is what happens to a fiber that is dropped before it is done. Threads and generators are not cancelled: a thread runs to its end, and a generator is [ended](#ending-a-generator).
+
+### `cancel`.
 `cancel` ends a fiber that is not done without running the rest of its function. Every call that the fiber is in returns at once, from the innermost one out, and the values that the calls own are destructed as at a `return`. No code of the fiber runs after the point where it was suspended, except the `@deinit` of those values:
 ```cy
 type Conn:
@@ -3359,6 +3622,9 @@ print(f.status())          --> FiberStatus.done
 
 A fiber that is suspended inside the body of a generator is cancelled like any other: the body's values are destructed, the generator is done, and the function that consumes it returns.
 
+A fiber that holds a `Scope`, or that waits in a `scope` block of its own, cancels the fibers of that scope when it is cancelled.
+
+### Destructing a fiber.
 A fiber that is destructed while it is in progress is cancelled first, and so is every fiber that its frames hold. A fiber that can not be cancelled panics when it is destructed:
 ```cy
 type Res:
@@ -3378,134 +3644,10 @@ start()
 --> panic: Fiber is still in progress.
 ```
 
-A value in the middle of an expression is destructed too when it is an operand of an operator, an argument, or an element of a literal (`use(Res{}, wait())`, `'a' + wait()`). In other positions such a value is not released when the fiber is cancelled inside a later part of the same expression.
-
-Each fiber starts with a stack of 512 bytes that grows on demand like the thread's stack. Fibers are not available when compiling AOT.
-
-### Growable stacks.
-When running on Cyber's VM, threads can grow their stack on demand.
-The compiler generates pointer layouts that tells the runtime where pointer values are so they can be patched with new addresses.
-
-Growable stacks allow threads to be lighter. They can be initialized with a smaller stack and grow on demand. However, this feature is not available when compiling AOT where stacks are fixed in size.
-
-### Gas mileage.
-*TBD*
-
-## OS threads.
-*TBD*
-
-## SIMD.
-*TBD*
-
-## Futures.
-A `Future` is an asynchronous result type. It represents the result of work that will either complete or fail at some point in the future.
-This abstraction allows the current thread to continue execution without waiting for the completion of the `Future`.
-
-Futures can represent asynchronous work that is run in parallel or on a single thread.
-I/O bound work can be delegated to the operating system and CPU bound work can be run across multiple threads. A `Future` is not concerned with how the work is accomplished.
-
-The `aio` module in the examples below does not exist yet. *Planned Feature*
-
-If an API function is meant to do work asynchronously, it would return a `Future`:
-```cy
-use aio
-
-work := aio.delay(1000)
-print(work)
---> Future[void]
-```
-
-Futures can hold a result value when they are completed:
-```cy
-use aio
-
-work := aio.read_file_defer('foo.txt')
-print(work)
---> Future[[]byte]
-```
-
-Futures can be created with a completed value:
-```cy
-work := Future.complete(100)
-print(work.await())
---> 100
-```
-
-### Future `await`.
-`Future.await()` asynchronously waits for a `Future` to complete.
-
-`await` blocks the current thread until the `Future` completes. It can be called from the main thread and from spawned threads. While a thread waits, it runs other spawned threads that are still queued, so waiting on nested `spawn` calls does not deadlock the worker pool.
-
-If the spawned thread panicked, `await` panics with `Spawned thread panicked: <message>`. If the spawned thread was interrupted or ran out of fuel, the waiting thread is interrupted too.
-
-A future that no spawned thread completes (one from a host function, or from `FutureResolver` before `complete`) can only be completed from outside the running program. Awaiting it on the main thread suspends the whole program and returns to the host, which completes the future and resumes the program at the `await` (see [Suspending an eval](#suspending-an-eval)). This works at any call depth and in a generator body. Inside a fiber the `await` suspends the fiber instead (see [Fibers](#fibers)). The `cyber` command completes no futures, so there the program ends with `panic: Abandoned while awaiting a future.` A spawned thread can not wait for such a future, and neither can a function that a host function called: both panic.
-
-When `await` resumes, the expression evaluates to the completed value of the `Future`:
-```cy
-use aio
-
-work := aio.read_file_defer('foo.txt')
-print(work.await())
---> "foo.txt contents"
-```
-
-`Future.wait_any` waits for the first of several futures and returns its index in the list. When several are done it returns the first of them in the list. The future at that index does not wait when it is awaited:
-```cy
-futs := []Future[str]{tool_async('a'), tool_async('b'), tool_async('c')}
-i := Future.wait_any(futs.span())
-print(futs[i].await())
-```
-Futures of spawned threads are waited for inside the VM. When none of the futures belongs to a spawned thread, the program is suspended until the host completes one of them (see [Suspending an eval](#suspending-an-eval)). An empty list panics.
-
-`await` can be used in any function which makes asynchronous functions **colorless**. They do not need a special function modifier. This means that asynchronous work can be wrapped in a synchronous API.
-
-### Future chains.
-`Future.then_spawn` spawns another thread that is when the future completes, thereby creating an asynchronous chain. The runtime prefers to reuse the same worker that completed the future when possible: *TBD*
-```cy
-use aio
-
-res := aio.read_file_defer('foo.txt').then_spawn(|contents|):
-    print(contents)
-    --> "foo.txt contents"
-
-print(res)
---> Future[void]
-```
-
-Like `spawn`, the continuation can return a value:
-```cy
-res := aio.read_file_defer('foo.txt').then_spawn(|contents| -> int):
-    return contents.len()
-
-print(res)
---> Future[int]
-
-print(res.await())
---> 3
-```
-
-### Resolving futures. 
-A `Future` can be produced and completed by a `FutureResolver`: *TBD*
-```cy
-r := FutureResolver(int)
-f := r.future()
-
-spawn(|r Resolver|, {r}):
-    r.complete(234)
-
-v := f.await()
-print(v)
---> 234
-```
-
-## Shared memory.
-*TBD*
-
-### Channels.
-*TBD*
-
-## `await` union.
-*TBD*
+### Cancellation limits.
+* A fiber that is suspended inside the `@deinit` of a `^T` reference, or inside a `@deinit` that the end of a generator runs, can not be cancelled. Do not use `suspend` or `await` in a `@deinit`.
+* A `@deinit` that is cut short by a cancel does not release the fields of its value. A `@deinit` that suspends while its fiber is cancelled panics: `A fiber was suspended while it was cancelled.`
+* A value in the middle of an expression is destructed when it is an operand of an operator, an argument, or an element of a literal (`use(Res{}, wait())`, `'a' + wait()`). In other positions such a value is not released when the fiber is cancelled inside a later part of the same expression.
 
 ## Generators.
 Generators are stackless coroutines that are intended to yield values incrementally.
@@ -3521,6 +3663,7 @@ print(gen)
 ```
 `yield` pauses the current generator and returns a value back to the call site of `Generator.next`.
 
+### Generator rules.
 A generator outlives the call that created it, so its parameters (including a method's receiver) can not be borrow types such as `&T`, `[&]T`, `?&T` or a struct that holds a borrow. Pass a value or a `^T` pointer instead:
 ```cy
 generator fn watch(p &int) -> int:    --> CompileError: A `generator fn` can not take the borrow type `&int` as a parameter.
@@ -3564,6 +3707,7 @@ for rep2('a', 3) |s|:
 
 The `#[generator]` attribute of earlier versions was removed. It is a parse error that names the replacement: ``The `#[generator]` attribute was replaced by `generator fn`.``
 
+### Resuming a generator.
 A generator begins and resumes execution with `next` which returns the next yielded value as an optional:
 ```cy
 while gen.next() |res|:
@@ -3593,7 +3737,30 @@ print(gen.status())
 --> GeneratorStatus.done
 ```
 
-A generator can be reset to its entry point with the original arguments or different arguments: *TBD*
+`next` returns `none` once when the function returns. After that the generator is `.done`, and another `next` panics: `Generator is already done.`
+
+### Ending a generator.
+`end` ends a generator that is not done. The values of its body are destructed and the status becomes `.done`:
+```cy
+gen := iterate()
+print(gen.next())      --> 123
+gen.end()
+print(gen.status())    --> GeneratorStatus.done
+```
+A generator that is destructed before it is done is ended the same way.
+
+A generator can not be reset to its entry point. Call the function again for a new generator.
+
+## Planned concurrency features.
+These features are not implemented. The names are not final:
+
+* Future chains. A `Future.then_spawn` that spawns a thread with the result of a future. Until then, a fiber that awaits the future and continues does the same on one thread.
+* Shared memory between threads, and channels to pass messages between them. Until then, threads exchange values through the arguments and the result of `spawn`.
+* An `await` that waits for futures of different types. `Future.wait_any` takes futures of one type.
+* Thread status. A parent thread can only `await` the result of a child thread.
+* SIMD vector types. The runtime uses SIMD internally (for example in `str.index`), but the language has no vector operations.
+* More `Sendable` types (see [`Sendable` values](#sendable-values)).
+
 
 # Metaprogramming.
 
@@ -3672,11 +3839,13 @@ type MyType[T Any] const:
 ### `#if` inline.
 The `#if` statement performs inline evaluation on the condition expression and inserts it's child statements if the condition evaluates to `true`:
 ```cy
-#if meta.system() == .windows:
-    print('Running on Windows.')
-#else:
-    print('Running on %{meta.system()}')
+fn report():
+    #if meta.system() == .windows:
+        print('Running on Windows.')
+    #else:
+        print('Running on %{meta.system()}')
 ```
+See [Conditional compilation](#conditional-compilation) for what an `#if` can hold at the top level of a file.
 
 ### `#for` inline.
 The `#for` statement iterates at compile-time and inserts it's child statements on every iteration. The following prints the name of every field in the type `Foo`:
@@ -3722,7 +3891,24 @@ Compile-time variables are assigned with a leading `#`:
 ```
 
 ## Conditional compilation.
-*TBD*
+Code is compiled conditionally with [`#if`](#if-inline) and a condition that is known at compile-time. Only the branch that is taken is analyzed, so the other branch can use declarations that do not exist on the current target:
+```cy
+use meta
+
+fn path_sep() -> str:
+    #if meta.system() == .windows:
+        return '\\'
+    #else:
+        return '/'
+```
+
+The `meta` module provides the conditions:
+
+* `meta.system()` returns the target system (`.macos`, `.linux`, `.windows`, ...), `meta.cpu()` the CPU architecture, `meta.endian()` the byte order and `meta.pointer_width()` the width of a pointer in bits.
+* `meta.is_vm_target()` tells whether the program is compiled for the VM and not for the C backend.
+* `meta.build_mode()` returns the build mode of the compiler, and `meta.build_flag(name)` and `meta.build_option(name)` read the options of the build.
+
+At the top level of a file, an `#if` can only hold compile-time statements such as `#c.bind_lib(...)` or a compile-time variable. A statement that runs is a compile error: `Only compile-time statements are allowed in this context.` A declaration (`fn`, `type`, `use`) can not be placed in an `#if`. Declare one function and select inside its body, as in the example above.
 
 ## Runtime execution.
 The `cy` module provides an API to [libcyber](#libcyber).
@@ -3802,13 +3988,13 @@ fn less(a Shape, b Shape):
 ```
 When a function parameter contains a generic type, the function becomes generic. The function is then specialized by the call site arguments.
 
-Type templates are considered generic types: *TBD*
+Type templates are planned to be generic types. Until then, expand the template or use an inferred parameter (`c MyContainer[%T]`): *Planned Feature*
 ```cy
 fn size(c MyContainer) -> int:
     return type.size(type.of(c))
 ```
 
-Composing a generic type creates another generic type: *TBD*
+Composing a generic type is planned to create another generic type: *Planned Feature*
 ```cy
 fn size(c ?MyContainer) -> int:
     return type.size(type.of(c))
@@ -4322,11 +4508,11 @@ When compiled AOT, the libraries can be linked statically.
 There are different approaches to binding a C library:
 1. Static binding. The application and C library is compiled into a single executable. 
 2. Runtime binding. The C library is loaded and binded upon program start-up.
-3. `os.open_lib` binding. The user is responsible for loading the C library at runtime.
+3. `os.open_lib` binding. The user is responsible for loading the C library at runtime. *Planned Feature*
 4. When embedding [`libcyber`](#libcyber), compiler hooks can bind VM or C functions with the host language.
 
 ### Static binding.
-When targeting the C backend, the C library's source or static library can be included for compilation. The final output will be a statically linked executable. *TODO*
+When targeting the C backend, the C library's source or static library can be included for compilation. The final output will be a statically linked executable. *Incomplete: the C backend is in progress. `c.flag` and `c.include` exist, `c.source` and `c.static_lib` do not yet.*
 
 `extern` functions and variables are required to link with the C library. They can be autogenerated with [`cbindgen.cy`](#cbindgency) and the library's header file.
 
@@ -4367,7 +4553,9 @@ A module can be configured to use static binding when building an executable or 
 ```
 
 ### `open_lib` binding.
-*TODO*
+> _Planned Feature_
+
+`os.openLib` is declared but not implemented: calling it panics. Use [runtime binding](#runtime-binding) with `c.bind_lib` instead. The paragraph below describes the planned behavior.
 
 If the path argument to `open_lib` is just a filename, the search steps for the library is specific to the operating system. Provide an absolute (eg. '/foo/mylib.so') or relative (eg. './mylib.so') path to load from a direct location instead. When the path argument is `none`, it loads the currently running executable as a library.
 
@@ -4390,7 +4578,7 @@ SDL_Window* SDL_CreateWindow(const char *title, int w, int h, SDL_WindowFlags fl
 ```
 
 ### `extern` globals.
-An `extern` global is registered for static or runtime binding: *TBD*
+An `extern` global is registered for static or runtime binding: *Incomplete*
 ```cy
 #[extern] global count Ptr[int]
 ```
@@ -4408,14 +4596,19 @@ Note that an `extern` global requires a pointer type.
 * [Override `print`.](#override-print)
 * [Eval script.](#eval-script)
   * [Eval return.](#eval-return)
+  * [Compile errors.](#compile-errors)
+  * [Checking a script without running it.](#checking-a-script-without-running-it)
+  * [Limiting an eval.](#limiting-an-eval)
 * [Module loader.](#module-loader)
+  * [Denying raw pointers.](#denying-raw-pointers)
+  * [Allocation failure.](#allocation-failure)
+</td><td valign="top">
+
 * [Function binding.](#function-binding)
   * [VM functions.](#vm-functions)
   * [Suspending an eval.](#suspending-an-eval)
 * [Global binding.](#global-binding)
 * [Type binding.](#type-binding)
-</td><td valign="top">
-
 </td>
 </tr></table>
 
@@ -4423,8 +4616,8 @@ Note that an `extern` global requires a pointer type.
 
 `libcyber` allows embedding the Cyber compiler and VM into an application. Cyber's builtin types, functions, and the CLI app were built using `libcyber`.
 
-The API is defined in the [C header file](https://github.com/fubark/cyber/blob/master/src/include/cyber.h).
-The examples shown below can be found in the repository under [libcyber](https://github.com/fubark/cyber/blob/master/examples/libcyber). The examples are in C, but it can be easily translated to C++ or any C-ABI compatible language.
+The API is defined in the [C header file](https://github.com/soomtong/cyber/blob/master/src/include/cyber.h).
+The examples shown below can be found in the repository under [libcyber](https://github.com/soomtong/cyber/blob/master/examples/libcyber). The examples are in C, but it can be easily translated to C++ or any C-ABI compatible language.
 
 Types and constants from the C-API begin with `CL` and functions begin with `cl`.
 
@@ -4580,6 +4773,26 @@ if (code == CL_ERROR_COMPILE) {
 ```
 `cl_vm_compile` and `cl_vm_compile_path` compile a whole program instead. They reset the VM first, like `cl_vm_reset`, so persisted state is gone afterwards.
 
+### Limiting an eval.
+A host that runs scripts it does not trust bounds the time, the stack and the memory of an eval:
+
+* `cl_vm_interrupt(vm)` asks the running eval to stop at its next checkpoint (a loop back edge or a call). It is safe to call from another thread, for example from a wall clock timer. The eval returns `CL_ERROR_INTERRUPT` after unwinding like a panic, and the VM can be used again. Each eval clears an earlier request when it starts.
+* `cl_vm_set_fuel(vm, fuel)` limits each following eval to `fuel` checkpoints. An eval that runs out returns `CL_ERROR_INTERRUPT`. Zero or less removes the limit. Unlike a timer, fuel gives the same result on every run.
+* `cl_vm_set_stack_limit(vm, bytes)` caps the stack of the main thread and of the threads it spawns. The default is 128 MiB. A call that needs more panics with `Stack overflow.`
+* `cl_vm_set_memory_limit(vm, bytes)` limits the memory that the VM holds through its allocator. An allocation of the script that does not fit panics with `OutOfMemory`. `cl_vm_memory_used(vm)` returns what the VM holds now, so a host that gives a script N bytes sets `cl_vm_memory_used(vm) + N`.
+
+```c
+cl_vm_set_fuel(vm, 10 * 1000 * 1000);
+cl_vm_set_memory_limit(vm, cl_vm_memory_used(vm) + 64 * 1024 * 1024);
+
+CLEvalResult res;
+CLResultCode code = cl_vm_eval(vm, src, &res);
+if (code == CL_ERROR_INTERRUPT) {
+    // The script ran out of fuel or `cl_vm_interrupt` was called.
+}
+```
+A script has no access to these limits. An eval that is suspended at an `await` keeps the fuel that is left (see [Suspending an eval](#suspending-an-eval)).
+
 ## Module loader.
 A module loader is set with `cl_vm_set_loader`.
 It describes how a module is loaded when triggered by a `use` import statement:
@@ -4726,8 +4939,24 @@ cl_mod_add_global(mod, CL_BYTES("my_global"), CL_BIND_GLOBAL(&myglobal));
 ```
 
 ## Type binding.
-A type binding describes how to load a `#[bind]` type:
-*TODO: example*
+A type binding describes how to load a `#[bind]` type. The module's source declares the type with `#[bind]` and the loader answers with `cl_mod_add_type`:
+```c
+const char* src = (
+    "#[bind] type MyNode:\n"
+    "  data float\n"
+);
+
+// Use the declaration from the source. `CL_NULLID` generates a new type id.
+cl_mod_add_type(mod, CL_BYTES("MyNode"), CL_BIND_DECL_TYPE(CL_NULLID));
+```
+
+There are three kinds of type bindings:
+
+* `CL_BIND_DECL_TYPE(type_id)` uses the declaration from the source, with a predefined type id or with a generated one (`CL_NULLID`).
+* `CL_BIND_CREATE_TYPE(create_fn)` calls a `CLCreateTypeFn` that creates the type from the declaration node. Returning `NULL` fails the compile.
+* `CL_BIND_ALIAS_TYPE(resolve_fn)` calls a `CLResolveAliasFn` that returns the symbol that the name is an alias of.
+
+A type that needs no host callback does not need `#[bind]`. Its methods can still be bound as [functions](#function-binding).
 
 Types in Cyber have the same memory layout as a C type (assuming the member types are mapped correctly):
 

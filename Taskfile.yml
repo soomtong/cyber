@@ -282,6 +282,12 @@ tasks:
       - mv docs/docs.html {{.DOCS_OUT}}/docs.html
       - mv docs/api.html {{.DOCS_OUT}}/api.html
       - ln -sf docs.html {{.DOCS_OUT}}/index.html
+      # The playground, when its wasm was fetched (task playground:wasm).
+      - |
+        if [ -f examples/web-playground/cyber.wasm ]; then
+          mkdir -p {{.DOCS_OUT}}/play
+          cp examples/web-playground/index.html examples/web-playground/style.css examples/web-playground/*.js examples/web-playground/cyber.wasm {{.DOCS_OUT}}/play/
+        fi
 
   docs:serve:
     desc: 'Serve docs/public on http://localhost:8000.'
@@ -296,11 +302,25 @@ tasks:
 
   # --------------------------------------------------------------- playground
 
+  playground:wasm:
+    desc: 'Download the WASI build of the CLI into examples/web-playground/cyber.wasm. TAG= picks a release (default: latest).'
+    vars:
+      TAG: '{{.TAG | default "latest"}}'
+    cmds:
+      - curl -fsSL --retry 3 -o examples/web-playground/cyber.wasm https://github.com/soomtong/cyber/releases/download/{{.TAG}}/cyber-wasi.wasm
+
+  playground:build:
+    desc: 'Build the WASI CLI from this checkout into examples/web-playground/cyber.wasm.'
+    deps: ['zig:check']
+    cmds:
+      - zig build cli -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe -p .zig-cache/playground
+      - cp .zig-cache/playground/bin/cyber.wasm examples/web-playground/cyber.wasm
+
   playground:serve:
-    desc: 'Serve the web playground example on http://localhost:8000. Needs cyber.wasm in examples/web-playground (the web-lib build step is currently disabled in build.zig).'
+    desc: 'Serve the web playground on http://localhost:8000. Needs examples/web-playground/cyber.wasm.'
     preconditions:
       - sh: test -f examples/web-playground/cyber.wasm
-        msg: 'examples/web-playground/cyber.wasm is missing; copy a cyber-web.wasm release asset there.'
+        msg: 'examples/web-playground/cyber.wasm is missing; run `task playground:wasm` or `task playground:build`.'
     cmds:
       - python3 -m http.server 8000 --directory examples/web-playground
 

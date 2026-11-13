@@ -71,8 +71,8 @@ html := """<html lang="en">
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
-        <li><a href="https://cyberscript.dev/play.html" target="_blank" rel="noopener">Playground</a></li>
-        <li><a href="https://github.com/fubark/cyber/edit/master/docs/docs.md" target="_blank" rel="noopener">Edit Page</a></li>
+        <li><a href="play/" target="_blank" rel="noopener">Playground</a></li>
+        <li><a href="https://github.com/soomtong/cyber/edit/master/docs/docs.md" target="_blank" rel="noopener">Edit Page</a></li>
     </ul>
     <div class="sub-title">Table of Contents</div>
     <ul>
@@ -88,7 +88,7 @@ hljs.registerLanguage('cy', function() {
     return {
     keywords: {
         keyword: [
-            'fn', 'mod', 'for', 'coinit', 'coresume', 'coyield', 'use', 'await', 'global', 'const', 'scope', 'sink',
+            'fn', 'mod', 'for', 'fiber', 'suspend', 'yield', 'generator', 'use', 'await', 'global', 'const', 'scope', 'sink',
             'return', 'if', 'else', 'as', 'while', 'var', 'let', 'struct', 'cstruct', 'with',
             'break', 'continue', 'switch', 'pass', 'or', 'and', 'not', 'is', 'error', 'throws', 'move',
             'true', 'false', 'none', 'throw', 'try', 'catch', 'recover', 'enum', 'type', 'case', 'trait'

@@ -10,6 +10,47 @@
 html, body {
     background-color: var(--bg);
     color: var(--text);
+    height: 100%;
+    margin: 0;
+    font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+}
+
+.bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #222;
+}
+.bar .title {
+    color: var(--accent);
+    font-weight: 600;
+}
+.bar .spacer {
+    flex: 1;
+}
+.bar select {
+    background-color: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--text-light);
+    border-radius: 5px;
+    height: 30px;
+}
+.muted {
+    color: var(--text-light);
+    font-size: 14px;
+}
+
+.panes {
+    display: flex;
+    flex: 1;
+    min-height: 0;
 }
 
 .clear {
@@ -109,9 +150,13 @@ button.button {
     padding: 0;
     width: 100px;
 }
-button.button:hover {
-    border: 2px solid var(--accent);
-    filter: none;
+button.button:hover:enabled {
+    border-color: var(--accent);
+    cursor: pointer;
+}
+button.button:disabled {
+    color: var(--text-light);
+    opacity: 0.6;
 }
 button.button:focus {
     filter: none;
@@ -124,40 +169,50 @@ main.full-width {
 }
 
 .editor-left {
-    float: left;
-    width: 55%;
+    flex: 55;
+    min-width: 0;
     position: relative;
 }
 
 .editor-right {
-    float: left;
-    width: 44%;
+    flex: 45;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
     border-left: 1px solid #222;
-    height: 100%;
-    padding-left: 10px;
 }
 
 @media (max-width: 720px) {
-    .editor-left {
-        width: 100%;
+    .panes {
+        flex-direction: column;
     }
     .editor-right {
-        width: 100%;
-        float: none;
-        clear: both;
+        border-left: none;
+        border-top: 1px solid #222;
     }
 }
 
 div#output {
+    flex: 1;
+    overflow: auto;
+    padding: 10px;
     font-family: SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
     font-size: 14px;
-    white-space: pre;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
-div.error {
+div#status {
+    padding: 6px 10px;
+    border-top: 1px solid #222;
+}
+div#status.error {
     color: rgb(255, 123, 123);
 }
-
-div.success {
+div#status.success {
     color: rgb(120, 206, 120);
+}
+
+#output .error {
+    color: rgb(255, 123, 123);
 }

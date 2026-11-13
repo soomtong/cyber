@@ -8,6 +8,8 @@ on:
     paths:
       - 'docs/**'
       - 'src/builtins/**'
+      - 'examples/web-playground/**'
+      - '.github/workflows/gen-docs.yml'
 permissions:
   contents: write
 jobs:
@@ -111,6 +113,15 @@ jobs:
           mv docs/docs.html docs/public/docs.html
           mv docs/api.html docs/public/api.html
           ln -sf docs.html docs/public/index.html
+
+      # The playground is a static page that runs the WASI build of the CLI in the browser.
+      # The wasm comes from the `latest` release, which latest-build.yml replaces on every push to master.
+      - name: Assemble playground.
+        run: |
+          mkdir -p docs/public/play
+          cp examples/web-playground/index.html examples/web-playground/style.css docs/public/play/
+          cp examples/web-playground/*.js docs/public/play/
+          curl -fsSL --retry 3 -o docs/public/play/cyber.wasm https://github.com/${{ github.repository }}/releases/download/latest/cyber-wasi.wasm
 
       - name: Deploy.
         uses: peaceiris/actions-gh-pages@v4

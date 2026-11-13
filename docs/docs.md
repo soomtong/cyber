@@ -4578,11 +4578,22 @@ SDL_Window* SDL_CreateWindow(const char *title, int w, int h, SDL_WindowFlags fl
 ```
 
 ### `extern` globals.
-An `extern` global is registered for static or runtime binding: *Incomplete*
+An `extern` global is registered for static or runtime binding. It is declared with the type of the C variable, and the script reads and writes the variable of the library:
 ```cy
-#[extern] global count Ptr[int]
+#[extern] global count i32
+#[extern] fn bump() -> i32
+
+print(count)       --> 5
+count = 40
+print(bump())      --> 41
 ```
-Note that an `extern` global requires a pointer type.
+
+The example above would be bound to this C code:
+```c
+int count = 5;
+int bump(void) { return ++count; }
+```
+An extern symbol name can be declared as for a function: `#[extern='lib_count'] global count i32`. An `extern` global can not be read in the initializer of another global, because it is bound after the global initializers run.
 
 ## cbindgen.cy
 [cbindgen.cy](https://github.com/fubark/cyber/blob/master/src/tools/cbindgen.cy) is a script that automatically generates bindings given a C header file. Some example bindings that were generated include: [Raylib](https://github.com/fubark/ray-cyber), [SDL3](https://github.com/fubark/cyber/blob/master/src/x/sdl), [Vulkan](https://github.com/fubark/cyber/blob/master/src/x/vk), and [LLVM](https://github.com/fubark/cyber/blob/master/src/tools/llvm.cy).

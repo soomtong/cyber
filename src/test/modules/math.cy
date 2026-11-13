@@ -49,6 +49,8 @@ if meta.is_vm_target():
     -- random
     rand := m.random()
     t.eq(true, rand >= 0 and rand < 1)
+    -- Two values of one sequence differ.
+    t.eq(true, m.random() != m.random())
 
 t.eq(1.0, m.exp(0))
 t.eqNear(2.7182818, m.exp(1))

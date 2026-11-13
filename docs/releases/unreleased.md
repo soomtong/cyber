@@ -31,6 +31,14 @@
 - `use x 'https://…'`가 해석된 주소 대신 초기화되지 않은 버퍼를 읽었다(F-113). 오류 메시지에 쓰레기 바이트가 들어가고 모듈은
   로드되지 않았다. CLI의 resolver가 http(s) 지정자를 결과 버퍼에 쓰지 않고 길이만 돌려줬다. GitHub 저장소 주소는 원래 맞았다.
 
+- `#meta.log('text')`처럼 컴파일 타임 문자열을 `meta.log`에 넘기면 컴파일러가 죽었다(`panic: integer overflow`,
+  Debug 빌드는 `Double free`). 파일 최상위와 함수 본문 모두 그랬다. 호스트가 평가하는 함수의 참조 인자는 호출 자리가
+  해제하는데(F-112의 규칙) `log`가 한 번 더 해제했다. 죽지 않은 경우에도 문자열 대신 주소가 숫자로 찍혔다.
+- `math.random()`이 고정 시드 0으로 시작해 실행마다 같은 수열을 돌려줬다(첫 값이 늘 `0.3650744641604983`).
+  이제 첫 호출 때 시스템 엔트로피로 시드한다.
+- WASI 빌드의 CLI가 사전 개방 디렉터리 이름과 소스 경로를 구분자 없이 붙였다. `cyber main.cy`는 `.main.cy`를 찾다
+  `error.FileNotFound`였고, `cyber ./main.cy`는 `../main.cy`를 열었다. 이제 `./main.cy`로 합친다.
+
 ## 언어와 표준 라이브러리
 
 ## 임베딩 API
@@ -94,6 +102,9 @@
 - 구현되지 않은 것은 TBD 대신 Planned Feature · Incomplete로 통일하고 지금 쓸 수 있는 대안을 적었다
   (`aio` 모듈 예제 삭제, `then_spawn` · 채널 · 공유 메모리 · `await` union · SIMD · `os.openLib` · `c.source` 등).
 - 최상위 `#if` 예제가 컴파일 오류가 나는 형태였다. 함수 본문 안의 예제로 바꿨다. 깨진 앵커 세 개를 고쳤다.
+- `extern` 전역의 문서 예제가 틀렸다. `#[extern] global count Ptr[int]`와 "포인터 타입이 필요하다"는 설명대로 쓰면
+  C의 `int count`를 포인터로 읽어 Segmentation fault가 난다. 전역은 C 변수의 타입 그대로 선언한다
+  (`#[extern] global count i32`). 구현은 바뀌지 않았다.
 - 문서 사이트의 Edit Page 링크와 libcyber 장의 헤더 · 예제 링크가 이 저장소를 가리킨다.
 - Playground를 문서 사이트의 `play/`에 올린다. 서버 없이 `cyber-wasi.wasm`(CLI)을 브라우저의 Web Worker에서 돌린다
   (`examples/web-playground`: 최소 WASI 호스트 `wasi.js`, `worker.js`, 예제 8개). Stop은 worker를 끝내서 멈추지 않는

@@ -365,6 +365,7 @@ fn test_meta(run: *Runner) void {
     run.case("meta/get_panic.cy"); 
     run.case("meta/get_set.cy"); 
     run.case("meta/init_record.cy"); 
+    run.case("meta/log.cy");
     run.case("meta/init_record_error.cy"); 
     run.case("meta/set_panic.cy"); 
     run.case("meta/type.cy");

@@ -2,6 +2,7 @@ const std = @import("std");
 const cy = @import("../cyber.zig");
 const C = @import("../capi.zig");
 const vmc = cy.vmc;
+const stdx = @import("stdx");
 const Value = cy.Value;
 const bt = cy.types.BuiltinTypes;
 
@@ -272,9 +273,18 @@ pub fn pow(t: *cy.Thread) callconv(.c) C.Ret {
 }
 
 /// Returns a pseudo-random number between 0 and 1.
+/// Seeded from the system's entropy at the first call. With the fixed seed it had before, every run of a
+/// program returned the same sequence.
 pub var rand = std.Random.DefaultPrng.init(0);
+var rand_seeded = false;
 pub fn random(t: *cy.Thread) callconv(.c) C.Ret {
     const ret = t.ret(f64);
+    if (!rand_seeded) {
+        var seed: u64 = undefined;
+        std.Io.random(stdx.io(), std.mem.asBytes(&seed));
+        rand = std.Random.DefaultPrng.init(seed);
+        rand_seeded = true;
+    }
     ret.* = rand.random().float(f64);
     return C.RetOk;
 }

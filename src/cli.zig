@@ -373,6 +373,17 @@ fn wasi_realpath(cwd: std.Io.Dir, path: []const u8, out: []u8) ![]u8 {
             return error.MissingCwd;
         }
         try w.writeAll(buf[0..len]);
+        // The preopened directory and the path are joined with a separator. Without it `main.cy` in the
+        // directory `.` became `.main.cy`, and `./main.cy` became `../main.cy`.
+        if (len > 0 and buf[len - 1] != '/') {
+            try w.writeByte('/');
+        }
+        var rel = path;
+        while (std.mem.startsWith(u8, rel, "./")) {
+            rel = rel[2..];
+        }
+        try w.writeAll(rel);
+        return w.buffered();
     }
     try w.writeAll(path);
     return w.buffered();

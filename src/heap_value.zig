@@ -1027,8 +1027,8 @@ pub fn writeValue(self: *const cy.Heap, w: *std.Io.Writer, val_t: cy.TypeId, val
             return true;
         },
         bt.EvalStr => {
-            try w.print("{}", .{val.as_eval_int()});
-            return true;
+            try w.writeAll(val.as_eval_str());
+            return false;
         },
         bt.Str => {
             const str = val.asPtr(*cy.heap.Str);

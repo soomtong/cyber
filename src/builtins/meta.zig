@@ -453,7 +453,9 @@ pub fn error_(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
 pub fn log_(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     const val_t = ctx.func.instance.?.params[0].asPtr(*cy.Type);
     const val = ctx.args[0];
-    defer c.heap.destructValue2(val_t, val);
+    // A function that the host evaluates leaves its reference arguments to the call site (`matchGenericFuncCt`),
+    // an `EvalStr` among them. Releasing those here as well freed the string twice.
+    defer if (!val_t.isObjectLike()) c.heap.destructValue2(val_t, val);
 
     var w = std.Io.Writer.Allocating.init(c.alloc);
     defer w.deinit();

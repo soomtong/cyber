@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.9-dev 836-172c767</div>
+    <div class="sub-title">v0.4.9-dev 851-df1808a</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -5049,6 +5049,45 @@ if (cl_vm_compile_error(vm, &err)) {
 }
 </code></pre>
 <p><code>msg</code> and <code>uri</code> are owned by the VM and stay valid until its next eval, compile, validate or reset. <code>kind</code> is <code>CL_REPORT_TOKEN_ERROR</code>, <code>CL_REPORT_PARSE_ERROR</code> or <code>CL_REPORT_COMPILE_ERROR</code>. <code>cl_vm_compile_error</code> returns false if the last result was not <code>CL_ERROR_COMPILE</code>.</p>
+<p><code>cl_vm_compile_report</code> returns the whole reported range and <code>cl_vm_compile_report_note</code> the other places that the summary prints with an error, for a host that marks errors in an editor:</p>
+<pre><code class="language-c">size_t count = cl_vm_compile_report_count(vm);
+for (size_t i = 0; i < count; i += 1) {
+    CLReport rep;
+    cl_vm_compile_report(vm, i, &rep);
+    // Lines and columns start at 0, columns count bytes, and the end is exclusive.
+    // `pos` and `end_pos` are the same range as byte offsets in the source.
+    if (rep.has_loc) {
+        printf("%u:%u-%u:%u: ", rep.line + 1, rep.col + 1, rep.end_line + 1, rep.end_col + 1);
+    }
+    printf("%.*s\n", (int)rep.msg.len, rep.msg.ptr);
+
+    CLReport note;
+    for (size_t j = 0; cl_vm_compile_report_note(vm, i, j, &note); j += 1) {
+        // `First declared at:` with the first declaration, or the call that expanded a template (empty `msg`).
+    }
+}
+</code></pre>
+<p>A range can end on a later line than it starts. A token or parse error reports a position: its range is the code point there, or empty at the end of a line.
+By default the compiler stops at its first error and the count is 0 or 1. <code>cl_vm_set_error_recovery(vm, true)</code> lets it go on: the main block, each function and each method is abandoned at its first error and the others are still checked, so every body reports at most one error. A syntax error or an error in a declaration (a type, a signature, a global) still ends the compile. The result is <code>CL_ERROR_COMPILE</code> either way and nothing is run. The summary and <code>cl_vm_compile_error</code> describe the first error.</p>
+<a href="#libcyber">^topic</a>
+<h3 id="asking-what-a-name-is">Asking what a name is. <a href="#asking-what-a-name-is">#</a></h3>
+<p>For editor tooling, <code>cl_vm_set_symbol_info(vm, true)</code> makes the compiler record what the names in the main source refer to. After a compile, <code>cl_vm_symbol_at</code> describes what is at a byte offset:</p>
+<pre><code class="language-c">cl_vm_set_symbol_info(vm, true);
+cl_vm_validate(vm, src);
+
+CLSymbolInfo info;
+if (cl_vm_symbol_at(vm, pos, &info)) {
+    // `fn add(a int, b int) -> int`, `total int`, or the type of an expression.
+    printf("%.*s\n", (int)info.detail.len, info.detail.ptr);
+    if (info.has_def) {
+        // The declaration is at bytes `def_pos`..`def_end_pos` of the source `def_uri`.
+    }
+}
+</code></pre>
+<p><code>detail</code> is the first line of the declaration for a function, a type, a constant or a global, <code>name Type</code> for a local, a parameter or a field, and the type for any other expression. The compile may have failed: what was resolved before the error is still answered. <code>detail</code> and <code>def_uri</code> are owned by the VM and stay valid until the next call, eval, compile, validate or reset. <code>info.kind</code> tells a local (<code>CL_SYMBOL_LOCAL</code>) from something declared outside of a function body (<code>CL_SYMBOL_DECL</code>) and from an expression that is not a name (<code>CL_SYMBOL_EXPR</code>).</p>
+<p><code>cl_vm_symbol_refs(vm, pos, &ranges)</code> returns the number of places in the main source that name the same thing as the name at <code>pos</code>, and sets <code>ranges</code> to them: the uses and, if it is declared in the main source, the name in the declaration. Uses in other modules are not found.
+For completion, <code>cl_vm_members_at(vm, pos, &items)</code> lists the members of the expression that ends at <code>pos</code> (the fields and methods of its type, or what a module or a type declares), and <code>cl_vm_names_at(vm, pos, &items)</code> lists the names that can be used at <code>pos</code>: the locals and parameters of the function around it, what the main source declares and uses, and the builtins. Each <code>CLItem</code> has a <code>name</code>, a one line <code>detail</code> and a <code>kind</code>. Source that is being typed usually does not parse, so a host compiles a copy without the unfinished part (<code>v.</code> as <code>v</code>) and asks at the end of the receiver.
+A name in a declaration of the main source can be asked like a use of it. To find the uses of a symbol in the other sources of a project, a host compiles each of them as the main source and calls <code>cl_vm_symbol_refs_to(vm, def_uri, def_pos, &ranges)</code> with the declaration that <code>cl_vm_symbol_at</code> reported. <code>cl_vm_symbol_tokens(vm, &tokens)</code> lists every resolved name of the main source with its <code>CLItemKind</code>, for highlighting by meaning. The language server <code>cyber-lsp</code> uses all of these.</p>
 <a href="#libcyber">^topic</a>
 <h3 id="checking-a-script-without-running-it">Checking a script without running it. <a href="#checking-a-script-without-running-it">#</a></h3>
 <p><code>cl_vm_validate</code> compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (<code>persist_main</code>) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (<code>use math</code>) is initialized by the next eval that runs.</p>

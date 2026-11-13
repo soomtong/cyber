@@ -39,6 +39,11 @@
   타입 오류 문구는 문법에 없는 이름 대신 쓰는 표기를 말한다: ``Expected `Vector` element type.``은
   ``Expected the element type of `[n]T`.``, `Slice` · `Span` · `PartialVector`도 `[]T` · `[&]T` · `[..n]T`로(F-125,
   tars-agent M0 스파이크 02).
+- 없는 메서드 오류가 대신 쓸 이름을 말한다: ``Can not find the symbol `startsWith` in `str`. Did you mean `starts_with`?``.
+  Python · JS 이름(`startswith`, `find`, `strip`, `push`, `toUpperCase`, `length` 등)은 Cyber 이름으로, camelCase는
+  snake_case로, 나머지는 철자가 가까운 멤버로 찾는다. 대상이 그 타입에 있을 때만 말한다. `str.join`은 "`join` is a method
+  of a list: `xs.join(sep)`.", `pop`은 "Use `last()` and `remove(i)`.", Map의 `items`는 `for m |e|:`를 알려 준다(F-126,
+  tars-agent M0 스파이크 02).
 
 ## 임베딩 API
 

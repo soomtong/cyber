@@ -459,6 +459,10 @@ fn test_core(run: *Runner) void {
     run.case("core/Result.cy");
     run.case("core/print_result_error.cy");
     run.case("core/interpolate_result_error.cy");
+    run.case("core/method_suggest_camel_error.cy");
+    run.case("core/method_suggest_alias_error.cy");
+    run.case("core/method_suggest_join_error.cy");
+    run.case("core/method_suggest_none_error.cy");
     run.case("core/result_unwrap_block_reachable_error.cy");
     run.case("core/result_infer_return.cy");
     run.case("core/rune_empty_lit_error.cy");

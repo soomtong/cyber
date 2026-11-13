@@ -1699,6 +1699,126 @@ fn semaScopeStart(c: *cy.Chunk, rec: *ast.Node, rec_res: ExprResult, call: *ast.
     return res;
 }
 
+const member_aliases = [_][2][]const u8{
+    .{ "startswith", "starts_with" }, .{ "startsWith", "starts_with" }, .{ "hasPrefix", "starts_with" },
+    .{ "endswith", "ends_with" }, .{ "endsWith", "ends_with" }, .{ "hasSuffix", "ends_with" },
+    .{ "find", "index" }, .{ "indexOf", "index" },
+    .{ "strip", "trim" }, .{ "lstrip", "trim" }, .{ "rstrip", "trim" }, .{ "trimSpace", "trim" },
+    .{ "toLowerCase", "lower" }, .{ "toUpperCase", "upper" },
+    .{ "push", "append" }, .{ "add", "append" },
+    .{ "length", "len" }, .{ "size", "len" }, .{ "count", "len" },
+    // `Map` has `size` instead of `len`.
+    .{ "length", "size" }, .{ "len", "size" }, .{ "count", "size" },
+    .{ "includes", "contains" }, .{ "has", "contains" },
+};
+
+var suggest_buf: [256]u8 = undefined;
+
+/// A hint for a member that `rec_t` does not have: ` Did you mean `x`?`, or an empty string.
+/// Names from Python and JavaScript are mapped to the Cyber names, then a camelCase name is tried
+/// as snake_case, then a member whose name is close.
+pub fn suggestMember(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast.Node) ![]const u8 {
+    var base_t = rec_t;
+    switch (rec_t.kind()) {
+        .pointer => base_t = rec_t.cast(.pointer).child_t,
+        .borrow => base_t = rec_t.cast(.borrow).child_t,
+        .ex_borrow => base_t = rec_t.cast(.ex_borrow).child_t,
+        else => {},
+    }
+    if (name.len == 0 or name.len > 64) return "";
+
+    if (base_t.id() == bt.Str and std.mem.eql(u8, name, "join")) {
+        return " `join` is a method of a list: `xs.join(sep)`.";
+    }
+    if (std.mem.eql(u8, name, "pop") and try hasMember(c, base_t, "remove", node)) {
+        return " Use `last()` and `remove(i)`.";
+    }
+    if (std.mem.eql(u8, name, "items") and try hasMember(c, base_t, "keys", node)) {
+        return " Iterate the map with `for m |e|:` and use `e.key` and `e.value`.";
+    }
+    for (member_aliases) |alias| {
+        if (std.mem.eql(u8, alias[0], name) and try hasMember(c, base_t, alias[1], node)) {
+            return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{alias[1]}) catch "";
+        }
+    }
+
+    // camelCase to snake_case.
+    var snake_buf: [128]u8 = undefined;
+    var snake_len: usize = 0;
+    var has_upper = false;
+    for (name, 0..) |ch, i| {
+        if (std.ascii.isUpper(ch)) {
+            has_upper = true;
+            if (i > 0) {
+                snake_buf[snake_len] = '_';
+                snake_len += 1;
+            }
+            snake_buf[snake_len] = std.ascii.toLower(ch);
+        } else {
+            snake_buf[snake_len] = ch;
+        }
+        snake_len += 1;
+    }
+    const snake = snake_buf[0..snake_len];
+    if (has_upper and try hasMember(c, base_t, snake, node)) {
+        return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{snake}) catch "";
+    }
+
+    // A member whose name is close. Short names only match one edit away.
+    const max_dist: usize = if (name.len >= 5) 2 else if (name.len >= 3) 1 else 0;
+    if (max_dist == 0) return "";
+    var best: ?[]const u8 = null;
+    var best_dist: usize = max_dist + 1;
+    const mods = [_]?*cy.Module{
+        base_t.sym().getMod(),
+        if (base_t.sym().instance) |inst| (if (inst.type == .sym) inst.getSymTemplate().getMod() else null) else null,
+    };
+    for (mods) |opt_mod| {
+        const mod = opt_mod orelse continue;
+        var iter = mod.symMap.iterator();
+        while (iter.next()) |entry| {
+            const cand = entry.key_ptr.*;
+            if (cand.len == 0 or !(std.ascii.isAlphabetic(cand[0]) or cand[0] == '_')) continue;
+            if (std.mem.eql(u8, cand, name)) continue;
+            const d = editDistance(name, cand, best_dist) orelse continue;
+            if (d < best_dist or (d == best_dist and best != null and std.mem.lessThan(u8, cand, best.?))) {
+                best = cand;
+                best_dist = d;
+            }
+        }
+    }
+    if (best) |cand| {
+        return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{cand}) catch "";
+    }
+    return "";
+}
+
+fn hasMember(c: *cy.Chunk, type_: *cy.Type, name: []const u8, node: *ast.Node) !bool {
+    return (try c.accessResolvedSym(type_, name, node)) != null;
+}
+
+/// Levenshtein distance, or null when it is more than `limit`.
+fn editDistance(a: []const u8, b: []const u8, limit: usize) ?usize {
+    if (a.len > 64 or b.len > 64) return null;
+    const diff = if (a.len > b.len) a.len - b.len else b.len - a.len;
+    if (diff > limit) return null;
+    var prev: [65]usize = undefined;
+    var cur: [65]usize = undefined;
+    for (0..b.len + 1) |j| prev[j] = j;
+    for (a, 0..) |ach, i| {
+        cur[0] = i + 1;
+        var row_min = cur[0];
+        for (b, 0..) |bch, j| {
+            const cost: usize = if (std.ascii.toLower(ach) == std.ascii.toLower(bch)) 0 else 1;
+            cur[j + 1] = @min(@min(prev[j + 1] + 1, cur[j] + 1), prev[j] + cost);
+            row_min = @min(row_min, cur[j + 1]);
+        }
+        if (row_min > limit) return null;
+        @memcpy(prev[0 .. b.len + 1], cur[0 .. b.len + 1]);
+    }
+    return if (prev[b.len] <= limit) prev[b.len] else null;
+}
+
 /// Code that the script wrote for one type: not a builtin module and not an instance of a generic function or
 /// of a template's method, whose `T` can be a `!T` without the writer knowing (`test.eq`).
 fn inGenericCode(c: *cy.Chunk) bool {
@@ -8897,7 +9017,8 @@ pub fn semaCallExpr(c: *cy.Chunk, node: *ast.Node, opt_target: ?*cy.Type) !ExprR
                     }
                     const type_name = try c.sema.allocTypeName(leftRes.type);
                     defer c.alloc.free(type_name);
-                    return c.reportErrorFmt("Can not find the symbol `{}` in `{}`.", &.{v(right_name), v(type_name)}, callee.right);
+                    const hint = try suggestMember(c, leftRes.type, right_name, callee.right);
+                    return c.reportErrorFmt("Can not find the symbol `{}` in `{}`.{}", &.{v(right_name), v(type_name), v(hint)}, callee.right);
                 };
 
                 if (rightSym.type == .func) {
@@ -8931,7 +9052,8 @@ pub fn semaCallExpr(c: *cy.Chunk, node: *ast.Node, opt_target: ?*cy.Type) !ExprR
                 }
                 const type_name = try c.sema.allocTypeName(leftRes.type);
                 defer c.alloc.free(type_name);
-                return c.reportErrorFmt("Can not find the symbol `{}` in `{}`.", &.{v(right_name), v(type_name)}, callee.right);
+                const hint = try suggestMember(c, leftRes.type, right_name, callee.right);
+                return c.reportErrorFmt("Can not find the symbol `{}` in `{}`.{}", &.{v(right_name), v(type_name), v(hint)}, callee.right);
             };
 
             if (rightSym.type == .func) {

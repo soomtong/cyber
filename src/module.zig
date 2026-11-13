@@ -665,7 +665,8 @@ pub fn accessResolvedSymOrFail(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, 
     return (try c.accessResolvedSym(rec_t, name, node)) orelse {
         const type_name = try c.sema.allocTypeName(rec_t);
         defer c.alloc.free(type_name);
-        return c.reportErrorFmt("Can not find the symbol `{}` for `{}`.", &.{v(name), v(type_name)}, node);
+        const hint = try cy.sema.suggestMember(c, rec_t, name, node);
+        return c.reportErrorFmt("Can not find the symbol `{}` for `{}`.{}", &.{v(name), v(type_name), v(hint)}, node);
     };
 }
 

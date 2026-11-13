@@ -34,6 +34,11 @@
   "Can not print `!str`. Unwrap it with `!` first, or handle the error with `!else` or `try`."를 낸다. 전에는 값 대신
   타입 이름(`!str`, `!int`)을 찍었다. 제네릭 코드(`%T`가 결과인 `test.eq` 등)는 성공 값이나 `error.Name`을 찍는다
   (F-124, tars-agent M0 스파이크 02).
+- `for x in xs:`는 "A `for` loop is written `for xs |x|:` or `for 0..n |i|:`, not `for x in xs:`."를,
+  `for 'a', 'b' |p|:`는 "To loop over values, put them in a list literal: `for {a, b} |x|:`."를 덧붙인다(전에는 `Expected :.`만).
+  타입 오류 문구는 문법에 없는 이름 대신 쓰는 표기를 말한다: ``Expected `Vector` element type.``은
+  ``Expected the element type of `[n]T`.``, `Slice` · `Span` · `PartialVector`도 `[]T` · `[&]T` · `[..n]T`로(F-125,
+  tars-agent M0 스파이크 02).
 
 ## 임베딩 API
 

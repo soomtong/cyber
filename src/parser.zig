@@ -2357,6 +2357,17 @@ pub const Parser = struct {
         return res;
     }
 
+    /// The token after the iterable of a `for` is neither `:` nor `|`.
+    fn reportForHeadError(self: *Parser, token: Token) anyerror {
+        if (token.tag() == .ident and std.mem.eql(u8, self.ast.src[token.pos()..token.data.end], "in")) {
+            return self.reportError("Expected `:` or `|x|:`. A `for` loop is written `for xs |x|:` or `for 0..n |i|:`, not `for x in xs:`.", &.{});
+        }
+        if (token.tag() == .comma) {
+            return self.reportError("Expected `:` or `|x|:`. To loop over values, put them in a list literal: `for {a, b} |x|:`.", &.{});
+        }
+        return self.reportError("Expected :.", &.{});
+    }
+
     fn parseForStatement(self: *Parser, comptime ct: bool) !*ast.Node {
         const start = self.next_pos;
         // Assumes first token is the `for` keyword.
@@ -2469,7 +2480,7 @@ pub const Parser = struct {
                 return self.reportError("Expected :.", &.{});
             }
         } else {
-            return self.reportError("Expected :.", &.{});
+            return self.reportForHeadError(token);
         }
 
         const stmts = try self.parseSingleOrIndentedBodyStmts();
@@ -3854,7 +3865,7 @@ pub const Parser = struct {
                     self.advance();
 
                     const elem_t = (try self.parseTightTermOpt(.{ .parse_record_expr = false })) orelse {
-                        return self.reportError("Expected `Vector` element type.", &.{});
+                        return self.reportError("Expected the element type of `[n]T`.", &.{});
                     };
                     return self.ast.newNodeErase(.generic_vector_type, .{
                         .elem_t = elem_t,
@@ -3868,7 +3879,7 @@ pub const Parser = struct {
                     }
                     self.advance();
                     const elem_t = (try self.parseTightTermOpt(.{ .parse_record_expr = false, .parse_call_expr = false })) orelse {
-                        return self.reportError("Expected `Span` element type.", &.{});
+                        return self.reportError("Expected the element type of `[&]T`.", &.{});
                     };
                     return self.ast.newNodeErase(.span_type, .{
                         .child = elem_t,
@@ -3879,7 +3890,7 @@ pub const Parser = struct {
                     self.advance();
 
                     const elem_t = (try self.parseTightTermOpt(.{ .parse_record_expr = false, .parse_call_expr = false })) orelse {
-                        return self.reportError("Expected `Slice` element type.", &.{});
+                        return self.reportError("Expected the element type of `[]T`.", &.{});
                     };
                     return self.ast.newNodeErase(.slice_type, .{
                         .child = elem_t,
@@ -3889,14 +3900,14 @@ pub const Parser = struct {
                     // partial_vector_type
                     self.advance();
                     const size = (try self.parseExpr(.{})) orelse {
-                        return self.reportError("Expected `PartialVector` size.", &.{});
+                        return self.reportError("Expected the size of `[..n]T`.", &.{});
                     };
                     if (self.peek().tag() != .right_bracket) {
                         return self.reportError("Expected `]`.", &.{});
                     }
                     self.advance();
                     const elem_t = (try self.parseTightTermOpt(.{ .parse_record_expr = false, .parse_call_expr = false })) orelse {
-                        return self.reportError("Expected `PartialVector` element type.", &.{});
+                        return self.reportError("Expected the element type of `[..n]T`.", &.{});
                     };
                     return self.ast.newNodeErase(.partial_vector_type, .{
                         .child = elem_t,
@@ -3906,7 +3917,7 @@ pub const Parser = struct {
                 } else {
                     // vector_type
                     const size = (try self.parseExpr(.{})) orelse {
-                        return self.reportError("Expected `Vector` size.", &.{});
+                        return self.reportError("Expected the size of `[n]T`.", &.{});
                     };
                     if (self.peek().tag() == .comma) {
                         // `[a, b]` is not a list literal.
@@ -3917,12 +3928,12 @@ pub const Parser = struct {
                     }
                     self.advance();
                     const elem_t = (try self.parseTightTermOpt(.{ .parse_record_expr = false, .parse_call_expr = false })) orelse {
-                        return self.reportError("Expected `Vector` element type. " ++ list_literal_hint, &.{});
+                        return self.reportError("Expected the element type of `[n]T`. " ++ list_literal_hint, &.{});
                     };
                     switch (elem_t.type()) {
                         // `for ['a'] |f|:` reads `|f|` as a lambda.
                         .lambda_cont, .lambda_cont_expr, .lambda_expr, .lambda_multi => {
-                            return self.reportErrorAtSrc("Expected `Vector` element type. " ++ list_literal_hint, &.{}, elem_t.pos());
+                            return self.reportErrorAtSrc("Expected the element type of `[n]T`. " ++ list_literal_hint, &.{}, elem_t.pos());
                         },
                         else => {},
                     }

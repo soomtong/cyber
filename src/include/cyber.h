@@ -617,6 +617,8 @@ typedef enum {
     CL_REPORT_TOKEN_ERROR = 0,
     CL_REPORT_PARSE_ERROR,
     CL_REPORT_COMPILE_ERROR,
+    /// An entry of the chain behind a report, see `cl_vm_compile_report_note`.
+    CL_REPORT_NOTE,
 } CLReportKind;
 
 typedef struct CLCompileError {
@@ -646,6 +648,183 @@ typedef struct CLCompileError {
 /// returns true. Returns false and zeroes `out` if the last result was not `CL_ERROR_COMPILE`.
 /// `msg` and `uri` stay valid until the next eval, compile, validate or reset of the VM.
 bool cl_vm_compile_error(CLVM* vm, CLCompileError* out);
+
+/// A compile error or a note of one, with the reported range. See `cl_vm_compile_report`.
+typedef struct CLReport {
+    CLReportKind kind;
+
+    /// The message without the location. Owned by the VM.
+    /// Empty for a note that only names a place: the call that expanded a template.
+    CLBytes msg;
+
+    /// The source that the range is in. Empty if the report does not belong to a source. Owned by the VM.
+    CLBytes uri;
+
+    /// Whether the fields below are set. A report can belong to a source without a position in it.
+    bool has_loc;
+
+    /// Start of the range. `line` starts at 0, `col` is the byte offset in the line.
+    uint32_t line;
+    uint32_t col;
+
+    /// End of the range, exclusive. A range can end on a later line than it starts.
+    uint32_t end_line;
+    uint32_t end_col;
+
+    /// The same range as byte offsets in the source.
+    /// A token or parse error reports a position: the range is the code point there, or empty at the end of a line.
+    uint32_t pos;
+    uint32_t end_pos;
+} CLReport;
+
+/// Whether the compiler goes on after a compile error to report more than one. Off by default.
+/// With it a body (the main block, a function, a method) that has an error is abandoned at its first error and
+/// the other bodies are still checked, so there is at most one error per body. A syntax error or an error in a
+/// declaration (a type, a signature, a global) still ends the compile at once.
+/// The result is `CL_ERROR_COMPILE` as before and nothing is run. `cl_vm_compile_error` and the summary describe
+/// the first error, `cl_vm_compile_report` gives all of them. The setting is kept across `cl_vm_reset`.
+void cl_vm_set_error_recovery(CLVM* vm, bool enabled);
+
+/// The number of compile errors of the last `cl_vm_eval`, `cl_vm_compile` or `cl_vm_validate`.
+/// 0 if the last result was not `CL_ERROR_COMPILE`. At most 1 unless `cl_vm_set_error_recovery` is on.
+size_t cl_vm_compile_report_count(CLVM* vm);
+
+/// Writes compile error `idx` to `out` and returns true. Returns false and zeroes `out` if there is no such error.
+/// `msg` and `uri` stay valid until the next eval, compile, validate or reset of the VM.
+bool cl_vm_compile_report(CLVM* vm, size_t idx, CLReport* out);
+
+/// Writes note `note_idx` of compile error `idx` to `out` and returns true. Returns false and zeroes `out` after the
+/// last note. Notes are in the order the summary prints them: context such as `First declared at:` with its place,
+/// then the calls that expanded the template the error is in, innermost first. `kind` is `CL_REPORT_NOTE`.
+bool cl_vm_compile_report_note(CLVM* vm, size_t idx, size_t note_idx, CLReport* out);
+
+/// Whether the compiler records what the names in the main source refer to. Off by default, kept across
+/// `cl_vm_reset`. For editor tooling: see `cl_vm_symbol_at`.
+/// The functions that read the record (`cl_vm_symbol_at`, `cl_vm_symbol_refs`, `cl_vm_symbol_refs_to`,
+/// `cl_vm_members_at`, `cl_vm_names_at`, `cl_vm_symbol_tokens`) answer for the last eval, compile or validate.
+/// They find nothing (false or 0) if that one ran with the recording off, before the first compile, after
+/// `cl_vm_reset`, and after a compile that failed before it reached its main source (a uri that does not load).
+void cl_vm_set_symbol_info(CLVM* vm, bool enabled);
+
+typedef enum {
+    /// An expression that is not a name. `detail` is its type.
+    CL_SYMBOL_EXPR,
+    /// A local or a parameter. It is only visible in the function that declares it.
+    CL_SYMBOL_LOCAL,
+    /// Something declared outside of a function body: a function, a type, a field, a case, a constant,
+    /// a global, a module.
+    CL_SYMBOL_DECL,
+} CLSymbolKind;
+
+/// What a name or an expression of the main source is, see `cl_vm_symbol_at`.
+typedef struct CLSymbolInfo {
+    CLSymbolKind kind;
+
+    /// The range of the name or expression, as byte offsets in the main source. `end_pos` is exclusive.
+    uint32_t pos;
+    uint32_t end_pos;
+
+    /// One line that describes it: the first line of the declaration (`fn add(a int, b int) -> int`),
+    /// `name Type` for a local or a field, the type for any other expression. Owned by the VM.
+    CLBytes detail;
+
+    /// Whether it has a declaration in a source. A builtin type has none.
+    bool has_def;
+
+    /// The source that declares it, as the compiler names it: the resolved uri of the module.
+    /// A standard module is embedded and has a name like `core`. Owned by the VM.
+    CLBytes def_uri;
+
+    /// The range of the declaration as byte offsets in that source: the name of a local or a field,
+    /// otherwise the whole declaration.
+    uint32_t def_pos;
+    uint32_t def_end_pos;
+} CLSymbolInfo;
+
+/// Describes what is at byte offset `pos` of the main source of the last `cl_vm_compile`, `cl_vm_validate` or
+/// `cl_vm_eval`, which has to have run with `cl_vm_set_symbol_info` on. The compile may have failed: what was
+/// resolved before the error is there. Returns false and zeroes `out` if nothing was recorded at `pos`.
+/// A position right after a name counts as the name. Only the main source is recorded, not the modules it uses.
+/// `detail` and `def_uri` stay valid until the next call of this function, eval, compile, validate or reset.
+bool cl_vm_symbol_at(CLVM* vm, uint32_t pos, CLSymbolInfo* out);
+
+/// A range of the main source as byte offsets. `end_pos` is exclusive.
+typedef struct CLRange {
+    uint32_t pos;
+    uint32_t end_pos;
+} CLRange;
+
+/// Finds every place in the main source that names what is named at byte offset `pos`: the uses and, if it is
+/// declared in the main source, the name in its declaration. Returns the number of ranges and sets `out` to
+/// them, sorted and without duplicates. Returns 0 and sets `out` to NULL if `pos` is not at a local or a
+/// declared name. Uses in other modules are not found: only the main source is recorded.
+/// The ranges are owned by the VM and stay valid until the next call of this function or of
+/// `cl_vm_symbol_refs_to`, eval, compile, validate or reset.
+size_t cl_vm_symbol_refs(CLVM* vm, uint32_t pos, const CLRange** out);
+
+typedef enum {
+    /// A local or a parameter.
+    CL_ITEM_LOCAL,
+    CL_ITEM_FUNCTION,
+    CL_ITEM_TYPE,
+    CL_ITEM_FIELD,
+    /// A case of an enum, a choice or a C union.
+    CL_ITEM_CASE,
+    CL_ITEM_CONSTANT,
+    CL_ITEM_GLOBAL,
+    CL_ITEM_MODULE,
+    CL_ITEM_OTHER,
+    /// A function with a receiver.
+    CL_ITEM_METHOD,
+} CLItemKind;
+
+/// A name that can be written at a place in the source, for completion.
+typedef struct CLItem {
+    CLBytes name;
+
+    /// One line, like `CLSymbolInfo.detail`.
+    CLBytes detail;
+
+    CLItemKind kind;
+} CLItem;
+
+/// Lists the members of the expression that ends at byte offset `pos` of the main source: the fields and
+/// methods of its type (through `&T` and `^T`), or what a module or a type declares when the expression names
+/// one (`math`, `Color`). Returns the number of items and sets `out` to them, sorted by name. Returns 0 and
+/// sets `out` to NULL if no expression ends at `pos`.
+/// To complete `v.` the host compiles the source without the `.` and asks at the end of `v`.
+/// Needs `cl_vm_set_symbol_info`. Private members of other modules, hooks and operators are left out.
+/// The items are owned by the VM and stay valid until the next call of this function or of `cl_vm_names_at`,
+/// eval, compile, validate or reset.
+size_t cl_vm_members_at(CLVM* vm, uint32_t pos, const CLItem** out);
+
+/// Lists the names that can be used at byte offset `pos` of the main source: the locals and parameters that
+/// the function around `pos` declares before it, what the main source declares and uses, and the builtins.
+/// A name that is declared more than once is listed as the innermost declaration. Blocks are not told apart:
+/// a local of a block that ended before `pos` is listed too.
+/// Returns, needs and owns like `cl_vm_members_at`.
+size_t cl_vm_names_at(CLVM* vm, uint32_t pos, const CLItem** out);
+
+/// Finds every place in the main source that names the symbol declared at byte offset `def_pos` of the source
+/// `def_uri`, as `cl_vm_symbol_at` reports a declaration (`def_uri`, `def_pos`). For the uses of a symbol in the
+/// other sources of a project: the host compiles each of them as the main source and asks here.
+/// The name in the declaration is included when the main source is the one that declares it.
+/// Returns and owns like `cl_vm_symbol_refs`, and replaces its result.
+size_t cl_vm_symbol_refs_to(CLVM* vm, CLBytes def_uri, uint32_t def_pos, const CLRange** out);
+
+/// A name of the main source and what it is. `kind` is a `CLItemKind`.
+typedef struct CLToken {
+    uint32_t pos;
+    uint32_t end_pos;
+    uint32_t kind;
+} CLToken;
+
+/// Lists the names of the main source that the last compile resolved, with what each one is, for highlighting
+/// by meaning. Sorted by position, one entry per name, no overlaps. Keywords, literals, and names that did not
+/// resolve or were not reached are not listed. Needs `cl_vm_set_symbol_info`.
+/// The tokens are owned by the VM and stay valid until the next call of this function, eval, compile,
+/// validate or reset.
+size_t cl_vm_symbol_tokens(CLVM* vm, const CLToken** out);
 
 // For embedded, Cyber by default uses malloc (it can be configured to use the high-perf mimalloc).
 // If the host uses a different allocator than Cyber, use `cl_vm_alloc` to allocate memory

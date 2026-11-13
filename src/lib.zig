@@ -544,6 +544,98 @@ export fn cl_vm_set_error_color(vm: *cy.VM, enabled: bool) void {
     vm.compiler.report_color = enabled;
 }
 
+export fn cl_vm_set_symbol_info(vm: *cy.VM, enabled: bool) void {
+    vm.compiler.record_refs = enabled;
+}
+
+export fn cl_vm_symbol_at(vm: *cy.VM, pos: u32, out: *C.SymbolInfo) bool {
+    out.* = std.mem.zeroes(C.SymbolInfo);
+    const info = (cy.refs.find(vm.compiler, pos) catch return false) orelse return false;
+    out.* = .{
+        .kind = switch (info.kind) {
+            .expr => C.SymbolExpr,
+            .local => C.SymbolLocal,
+            .sym => C.SymbolDecl,
+        },
+        .pos = info.pos,
+        .end_pos = info.end,
+        .detail = C.to_bytes(info.detail),
+        .has_def = info.def_uri.len > 0,
+        .def_uri = C.to_bytes(info.def_uri),
+        .def_pos = info.def_pos,
+        .def_end_pos = info.def_end,
+    };
+    return true;
+}
+
+export fn cl_vm_symbol_refs(vm: *cy.VM, pos: u32, out: *[*c]const C.Range) usize {
+    out.* = null;
+    const ranges = cy.refs.findAll(vm.compiler, pos) catch return 0;
+    if (ranges.len == 0) return 0;
+    out.* = @ptrCast(ranges.ptr);
+    return ranges.len;
+}
+
+export fn cl_vm_symbol_refs_to(vm: *cy.VM, def_uri: C.Bytes, def_pos: u32, out: *[*c]const C.Range) usize {
+    out.* = null;
+    const ranges = cy.refs.findAllTo(vm.compiler, C.from_bytes(def_uri), def_pos) catch return 0;
+    if (ranges.len == 0) return 0;
+    out.* = @ptrCast(ranges.ptr);
+    return ranges.len;
+}
+
+export fn cl_vm_symbol_tokens(vm: *cy.VM, out: *[*c]const C.Token) usize {
+    out.* = null;
+    const tokens = cy.refs.tokens(vm.compiler) catch return 0;
+    if (tokens.len == 0) return 0;
+    out.* = @ptrCast(tokens.ptr);
+    return tokens.len;
+}
+
+fn toItems(vm: *cy.VM, items: []const cy.refs.Item, out: *[*c]const C.Item) usize {
+    out.* = null;
+    if (items.len == 0) return 0;
+    // The arena of the items owns the array too. It is used in place: a copy would lose the allocation.
+    const arena = if (vm.compiler.ref_arena) |*a| a.allocator() else return 0;
+    const res = arena.alloc(C.Item, items.len) catch return 0;
+    for (items, 0..) |item, i| {
+        res[i] = .{
+            .name = C.to_bytes(item.name),
+            .detail = C.to_bytes(item.detail),
+            .kind = switch (item.kind) {
+                .local => C.ItemLocal,
+                .function => C.ItemFunction,
+                .type => C.ItemType,
+                .field => C.ItemField,
+                .case => C.ItemCase,
+                .constant => C.ItemConstant,
+                .global => C.ItemGlobal,
+                .module => C.ItemModule,
+                .other => C.ItemOther,
+                .method => C.ItemMethod,
+            },
+        };
+    }
+    out.* = res.ptr;
+    return res.len;
+}
+
+export fn cl_vm_members_at(vm: *cy.VM, pos: u32, out: *[*c]const C.Item) usize {
+    out.* = null;
+    const items = cy.refs.members(vm.compiler, pos) catch return 0;
+    return toItems(vm, items, out);
+}
+
+export fn cl_vm_names_at(vm: *cy.VM, pos: u32, out: *[*c]const C.Item) usize {
+    out.* = null;
+    const items = cy.refs.scope(vm.compiler, pos) catch return 0;
+    return toItems(vm, items, out);
+}
+
+export fn cl_vm_set_error_recovery(vm: *cy.VM, enabled: bool) void {
+    vm.compiler.recover = enabled;
+}
+
 export fn cl_vm_compile_error(vm: *cy.VM, out: *C.CompileError) bool {
     out.* = std.mem.zeroes(C.CompileError);
     // `last_res` rather than the report list alone: the list is only cleared when the next compile starts.
@@ -566,6 +658,61 @@ export fn cl_vm_compile_error(vm: *cy.VM, out: *C.CompileError) bool {
         .len = loc.len,
     };
     return true;
+}
+
+fn toReport(vm: *cy.VM, report: cy.Report, kind: C.ReportKind) C.Report {
+    const loc = cy.debug.reportLoc(vm.compiler, report);
+    return .{
+        .kind = kind,
+        .msg = C.to_bytes(report.msg),
+        .uri = C.to_bytes(loc.uri),
+        .has_loc = loc.has_pos,
+        .line = loc.line,
+        .col = loc.col,
+        .end_line = loc.end_line,
+        .end_col = loc.end_col,
+        .pos = loc.pos,
+        .end_pos = loc.end_pos,
+    };
+}
+
+export fn cl_vm_compile_report_count(vm: *cy.VM) usize {
+    // `last_res` rather than the report list alone: the list is only cleared when the next compile starts.
+    if (vm.last_res != C.ErrorCompile) {
+        return 0;
+    }
+    return vm.compiler.reports.items.len;
+}
+
+export fn cl_vm_compile_report(vm: *cy.VM, idx: usize, out: *C.Report) bool {
+    out.* = std.mem.zeroes(C.Report);
+    if (idx >= cl_vm_compile_report_count(vm)) {
+        return false;
+    }
+    const report = vm.compiler.reports.items[idx];
+    out.* = toReport(vm, report, switch (report.type) {
+        .token_err => C.ReportTokenError,
+        .parse_err => C.ReportParseError,
+        .compile_err, .context => C.ReportCompileError,
+    });
+    return true;
+}
+
+export fn cl_vm_compile_report_note(vm: *cy.VM, idx: usize, note_idx: usize, out: *C.Report) bool {
+    out.* = std.mem.zeroes(C.Report);
+    if (idx >= cl_vm_compile_report_count(vm)) {
+        return false;
+    }
+    var note: ?*cy.Report = vm.compiler.reports.items[idx].next;
+    var i: usize = 0;
+    while (note) |n| : (i += 1) {
+        if (i == note_idx) {
+            out.* = toReport(vm, n.*, C.ReportNote);
+            return true;
+        }
+        note = n.next;
+    }
+    return false;
 }
 
 export fn cl_thread_panic_summary(t: *cy.Thread) C.Bytes {

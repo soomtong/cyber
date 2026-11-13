@@ -932,6 +932,9 @@ pub fn exprToValue(c: *cy.Chunk, expr: Expr, node: *ast.Node) !TypeValue {
                 .func => {
                     const func_sym = sym.cast(.func);
                     if (func_sym.numFuncs == 1) {
+                        // A constant is evaluated when the declarations are resolved, which can be before the
+                        // function that it names: `const z = h` read the signature of `h` before it had one.
+                        try sema.ensure_resolved_func(c, func_sym.first, true, node);
                         const func_t = try cy.sema.getFuncSymType(c, func_sym.first.sig);
                         return TypeValue{
                             .type = func_t,

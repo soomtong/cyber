@@ -320,6 +320,7 @@ fn test_modules(run: *Runner) void {
         run.case("modules/import_sym_alias.cy");
         run.case("modules/visibility.cy");
         run.case("modules/visibility_import_all.cy");
+        run.case("modules/private_field_meta.cy");
         run.case("modules/private_func_error.cy");
         run.case("modules/private_method_error.cy");
         run.case("modules/private_field_error.cy");

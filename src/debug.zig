@@ -281,6 +281,16 @@ pub const ReportLoc = struct {
 
     /// Bytes of the reported range that lie on `line`. 1 for a token or parse error, which reports a position.
     len: u32 = 0,
+
+    /// Byte offsets of the reported range in the source. `end_pos` is exclusive.
+    /// A node that continues on later lines ends on its last line here, `len` stops at the end of `line`.
+    /// A token or parse error covers the code point at its position, or nothing at the end of a line.
+    pos: u32 = 0,
+    end_pos: u32 = 0,
+
+    /// Line and byte offset in that line of `end_pos`. Start at 0.
+    end_line: u32 = 0,
+    end_col: u32 = 0,
 };
 
 pub fn reportLoc(c: *const cy.Compiler, report: cy.Report) ReportLoc {
@@ -298,6 +308,14 @@ pub fn reportLoc(c: *const cy.Compiler, report: cy.Report) ReportLoc {
             }
             chunk.ast.computeLinePos(pos, &res.line, &res.col, &line_pos);
             res.len = 1;
+            res.pos = @min(pos, @as(u32, @intCast(chunk.src.len)));
+            res.end_pos = res.pos;
+            if (res.pos < chunk.src.len and chunk.src[res.pos] != '\n' and chunk.src[res.pos] != '\r') {
+                const cp_len = std.unicode.utf8ByteSequenceLength(chunk.src[res.pos]) catch 1;
+                res.end_pos = @intCast(@min(res.pos + cp_len, chunk.src.len));
+            }
+            res.end_line = res.line;
+            res.end_col = res.col + (res.end_pos - res.pos);
         },
         .compile_err, .context => {
             const addr: usize = @intCast(report.loc);
@@ -309,6 +327,11 @@ pub fn reportLoc(c: *const cy.Compiler, report: cy.Report) ReportLoc {
             const line_end = std.mem.findScalarPos(u8, chunk.src, line_pos, '\n') orelse chunk.src.len;
             const end_pos = @min(node.end(), line_end);
             res.len = @intCast(end_pos -| start_pos);
+            res.pos = start_pos;
+            // A node that reports an empty or reversed range keeps its position.
+            res.end_pos = @intCast(@min(@max(node.end(), start_pos), chunk.src.len));
+            var end_line_pos: u32 = undefined;
+            chunk.ast.computeLinePos(res.end_pos, &res.end_line, &res.end_col, &end_line_pos);
         },
     }
     res.has_pos = true;

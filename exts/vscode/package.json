@@ -1,25 +1,70 @@
 {
   "name": "cyber",
   "displayName": "Cyber",
-  "description": "",
-  "version": "0.0.1",
+  "description": "Cyber language support: syntax highlighting and the cyber-lsp language server.",
+  "version": "0.1.0",
   "engines": {
-    "vscode": "^1.74.0"
+    "vscode": "^1.82.0"
   },
   "categories": [
     "Programming Languages"
   ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:cyber"
+  ],
   "contributes": {
-    "languages": [{
-      "id": "cyber",
-      "aliases": ["Cyber", "cyber"],
-      "extensions": [".cy", ".cys", ".cyber"],
-      "configuration": "./language-configuration.json"
-    }],
-    "grammars": [{
-      "language": "cyber",
-      "scopeName": "source.cyber",
-      "path": "./syntaxes/cyber.tmLanguage.json"
-    }]
+    "languages": [
+      {
+        "id": "cyber",
+        "aliases": [
+          "Cyber",
+          "cyber"
+        ],
+        "extensions": [
+          ".cy",
+          ".cys",
+          ".cyber"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "cyber",
+        "scopeName": "source.cyber",
+        "path": "./syntaxes/cyber.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "cyber.restartServer",
+        "title": "Cyber: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "Cyber",
+      "properties": {
+        "cyber.lsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the language server (diagnostics, formatting, outline, folding)."
+        },
+        "cyber.lsp.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path of the cyber-lsp executable. Empty: `cyber-lsp` is looked up in PATH."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "scripts": {
+    "test": "node test/runTest.js"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "^3.1.0"
   }
 }

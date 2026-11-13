@@ -957,7 +957,12 @@ fn semaContinue(c: *cy.Chunk, node: *ast.Node) !void {
 pub fn semaReturnExpr(c: *cy.Chunk, expr: ExprResult, node: *ast.Node) !void {
     if (expr.type.kind() == .borrow) {
         const proc = c.proc();
-        const scope_param_idx = proc.func.?.sig.scope_param_idx;
+        // The main block has no function, and a lambda whose return type is being inferred from this
+        // expression (`fn() => borrow`) has no signature yet. Neither has a `scope` parameter to check against.
+        var scope_param_idx: u8 = cy.NullU8;
+        if (proc.func) |func| {
+            if (func.isResolved()) scope_param_idx = func.sig.scope_param_idx;
+        }
         if (scope_param_idx != cy.NullU8) {
             if (expr.resType == .value) {
                 const parent_local = expr.data.value.parent_local orelse {
@@ -2583,7 +2588,9 @@ fn semaAccessChoicePayload(c: *cy.Chunk, rec: ExprResult, name: []const u8, node
     return res;
 }
 
-fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []const u8, field: *ast.Node) !ExprResult {
+/// `check_visible` is false for `meta.access`: metaprogramming reads the fields that `type.info` lists,
+/// private ones included (docs/decisions/project_symbol_visibility.md).
+fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []const u8, field: *ast.Node, check_visible: bool) !ExprResult {
     var type_ = rec.type;
 
     if (type_.kind() == .c_union) {
@@ -2622,6 +2629,9 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
     type_ = type_.getBaseType();
     const mod = type_.sym().getMod();
 
+    if (c.compiler.record_refs) {
+        if (mod.getSym(name)) |member| cy.refs.recordSym(c, field, name, member);
+    }
     const sym = mod.getSym(name) orelse {
         if (type_.has_embeddings()) {
             if (try get_embedded_sym(c, type_.cast(.struct_t), name, @ptrCast(field))) |embedded_res| {
@@ -2668,7 +2678,7 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
             defer c.alloc.free(type_name);
             return c.reportErrorFmt("Field `{}` does not exist in `{}`.", &.{v(name), v(type_name)}, field);
         };
-        try cy.module.check_sym_visible(c, sym, field);
+        if (check_visible) try cy.module.check_sym_visible(c, sym, field);
         if (sym.type != .field) {
             const type_name = try c.sema.allocTypeName(child_t);
             defer c.alloc.free(type_name);
@@ -2687,7 +2697,7 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
         res.addressable = true;
         return res;
     };
-    try cy.module.check_sym_visible(c, sym, field);
+    if (check_visible) try cy.module.check_sym_visible(c, sym, field);
     if (sym.type != .field) {
         const type_name = type_.name();
         return c.reportErrorFmt("Type `{}` does not have a field named `{}`.", &.{v(type_name), v(name)}, field);
@@ -2843,6 +2853,10 @@ pub fn checkSymInitField(c: *cy.Chunk, type_sym: *cy.Sym, name: []const u8, node
         // }
     };
     try cy.module.check_sym_visible(c, sym, node);
+    if (c.compiler.record_refs) {
+        // The name of a field in an initializer: `Vec2{x = 1.0}`.
+        cy.refs.recordSym(c, node, name, sym);
+    }
     if (sym.type != .field) {
         const type_name = type_sym.name();
         return c.reportErrorFmt("Type `{}` does not have a field named `{}`.", &.{v(type_name), v(name)}, node);
@@ -4172,6 +4186,7 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
         var_t = right.type;
         c.varStack.items[var_idx].decl_t = right.type;
         declare.cast(.declare_local).decl_t = var_t;
+        if (c.compiler.record_refs) cy.refs.recordLocalType(c, &c.varStack.items[var_idx]);
     }
     if (var_t.info.borrow_only and c.vm.config.persist_main and c.proc().func == null and c.semaBlocks.items.len == 1) {
         // Top level locals are carried over to the next eval by moving their values into new stack slots.
@@ -4269,6 +4284,7 @@ fn semaMainResultStmt(c: *cy.Chunk, node: *ast.Node) !void {
     svar = &c.varStack.items[var_idx];
     svar.decl_t = right.type;
     declare.cast(.declare_local).decl_t = right.type;
+    if (c.compiler.record_refs) cy.refs.recordLocalType(c, svar);
     svar.type = .local;
     if (var_start == c.varStack.items.len and !init_after_aux) {
         declare.cast(.declare_local).init = right.ir;
@@ -5311,6 +5327,113 @@ pub fn popProc2(self: *cy.Chunk, destruct_locals: bool) !cy.ir.StmtBlock {
     return stmtBlock;
 }
 
+/// The depth of everything that sema stacks up in a chunk while it checks one body. With error recovery
+/// (`Compiler.recover`) a body that fails is abandoned where the error was reported: `restore` drops what
+/// it left behind and the compiler goes on with the next body.
+/// Nothing is generated from a compile that reported an error, so the IR of the abandoned body is only dropped
+/// from the list of blocks. Its memory belongs to the arena of the chunk.
+pub const StackMark = struct {
+    procs: usize,
+    blocks: usize,
+    vars: usize,
+    var_shadows: usize,
+    active_fields: usize,
+    types: usize,
+    values: usize,
+    exprs: usize,
+    func_params: usize,
+    func_template_params: usize,
+    list_data: usize,
+    block_jumps: usize,
+    seq_entries: usize,
+    scope_start_borrows: usize,
+    scope_blocks: usize,
+    scope_borrows: usize,
+    resolve_contexts: usize,
+    ir_stmt_blocks: usize,
+    ir_func_blocks: usize,
+    ir_seq_pending: usize,
+    cur_cont_expr: ?*ast.LambdaContExpr,
+    scope_start_call: ?*ast.Node,
+    scope_start_lit: ?*ast.Node,
+    resolving_ct_stmts: bool,
+
+    pub fn take(c: *cy.Chunk) StackMark {
+        return .{
+            .procs = c.semaProcs.items.len,
+            .blocks = c.semaBlocks.items.len,
+            .vars = c.varStack.items.len,
+            .var_shadows = c.varShadowStack.items.len,
+            .active_fields = c.active_field_stack.items.len,
+            .types = c.typeStack.items.len,
+            .values = c.valueStack.items.len,
+            .exprs = c.expr_stack.items.len,
+            .func_params = c.func_param_stack.items.len,
+            .func_template_params = c.func_template_param_stack.items.len,
+            .list_data = c.listDataStack.items.len,
+            .block_jumps = c.blockJumpStack.items.len,
+            .seq_entries = c.seq_pending.items.len,
+            .scope_start_borrows = c.scope_start_borrows.items.len,
+            .scope_blocks = c.scope_blocks.items.len,
+            .scope_borrows = c.scope_borrows.items.len,
+            .resolve_contexts = c.resolve_stack.items.len,
+            .ir_stmt_blocks = c.ir.stmtBlockStack.items.len,
+            .ir_func_blocks = c.ir.func_blocks.items.len,
+            .ir_seq_pending = c.ir.seq_pending,
+            .cur_cont_expr = c.cur_cont_expr,
+            .scope_start_call = c.scope_start_call,
+            .scope_start_lit = c.scope_start_lit,
+            .resolving_ct_stmts = c.resolving_ct_stmts,
+        };
+    }
+
+    /// A stack that is not deeper than the mark is left alone. Nothing here can fail.
+    pub fn restore(self: StackMark, c: *cy.Chunk) void {
+        while (c.resolve_stack.items.len > self.resolve_contexts) {
+            popResolveContext(c);
+        }
+        while (c.semaProcs.items.len > self.procs) {
+            c.semaProcs.items[c.semaProcs.items.len - 1].deinit(c.alloc);
+            c.semaProcs.items.len -= 1;
+        }
+        if (c.semaProcs.items.len > 0) {
+            c.cur_sema_proc = &c.semaProcs.items[c.semaProcs.items.len - 1];
+        }
+        truncate(&c.semaBlocks, self.blocks);
+        truncate(&c.varStack, self.vars);
+        truncate(&c.varShadowStack, self.var_shadows);
+        truncate(&c.active_field_stack, self.active_fields);
+        truncate(&c.typeStack, self.types);
+        truncate(&c.valueStack, self.values);
+        truncate(&c.expr_stack, self.exprs);
+        truncate(&c.func_param_stack, self.func_params);
+        truncate(&c.func_template_param_stack, self.func_template_params);
+        truncate(&c.listDataStack, self.list_data);
+        truncate(&c.blockJumpStack, self.block_jumps);
+        truncate(&c.seq_pending, self.seq_entries);
+        truncate(&c.scope_start_borrows, self.scope_start_borrows);
+        truncate(&c.scope_blocks, self.scope_blocks);
+        truncate(&c.scope_borrows, self.scope_borrows);
+        truncate(&c.ir.stmtBlockStack, self.ir_stmt_blocks);
+        truncate(&c.ir.func_blocks, self.ir_func_blocks);
+        c.ir.seq_pending = @min(c.ir.seq_pending, self.ir_seq_pending);
+        c.seq_flushing = false;
+        c.cur_cont_expr = self.cur_cont_expr;
+        c.scope_start_call = self.scope_start_call;
+        c.scope_start_lit = self.scope_start_lit;
+        c.resolving_ct_stmts = self.resolving_ct_stmts;
+        // A cancel pad is built inside one body and never across two.
+        c.cancel_pad_building = false;
+        c.cancel_pad_var_end = null;
+        c.cancel_replay = false;
+        c.cancel_replay_last = false;
+    }
+
+    fn truncate(list: anytype, len: usize) void {
+        if (list.items.len > len) list.items.len = len;
+    }
+};
+
 pub fn pushLambdaProc(c: *cy.Chunk, func: *cy.Func) !ProcId {
     return pushFuncProc(c, func);
 }
@@ -5755,6 +5878,9 @@ fn pushLocalVar(c: *cy.Chunk, _type: LocalVarType, name: []const u8, declType: *
             }},
         });
     }
+    if (c.compiler.record_refs and !hidden) {
+        cy.refs.recordLocalDecl(c, name, declType);
+    }
     try c.varStack.append(c.alloc, .{
         .decl_t = declType,
         .lifetime = Lifetime.initBlock(@intCast(proc.block_depth)),
@@ -5867,8 +5993,23 @@ const LookupIdentResult = union(enum) {
 /// Static var lookup is skipped for callExpr since there is a chance it can fail on a
 /// symbol with overloaded signatures.
 pub fn lookupIdent(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdentResult {
+    const res = try lookupIdent2(self, name, node);
+    if (self.compiler.record_refs) {
+        switch (res) {
+            .local => |id| {
+                const local = &self.varStack.items[id];
+                cy.refs.recordLocalUse(self, node, local.decl_t, local.namePtr[0..local.nameLen]);
+            },
+            .static => |sym| cy.refs.recordSym(self, node, name, sym),
+            else => {},
+        }
+    }
+    return res;
+}
+
+fn lookupIdent2(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdentResult {
     if (self.semaProcs.items.len == 0) {
-        return (try lookupStaticIdent(self, name, node)) orelse {
+        return (try lookupStaticIdent2(self, name, node)) orelse {
             return self.reportErrorFmt("Could not find the symbol `{}`.", &.{v(name)}, node);
         };
     }
@@ -5910,7 +6051,7 @@ pub fn lookupIdent(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupId
         };
     }
 
-    if (try lookupStaticIdent(self, name, node)) |res| {
+    if (try lookupStaticIdent2(self, name, node)) |res| {
         return res;
     }
 
@@ -5926,6 +6067,16 @@ pub fn lookupIdent(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupId
 }
 
 pub fn lookupStaticIdent(c: *cy.Chunk, name: []const u8, node: *ast.Node) !?LookupIdentResult {
+    const res = try lookupStaticIdent2(c, name, node);
+    if (c.compiler.record_refs) {
+        if (res) |found| {
+            if (found == .static) cy.refs.recordSym(c, node, name, found.static);
+        }
+    }
+    return res;
+}
+
+fn lookupStaticIdent2(c: *cy.Chunk, name: []const u8, node: *ast.Node) !?LookupIdentResult {
     const res = (try getResolvedName(c, name, node)) orelse {
         return null;
     };
@@ -7404,6 +7555,9 @@ pub fn semaExpr(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
     const res = try c.semaExprNoCheck(node, cstr);
     if (cy.Trace) {
         log.tracev("expr.{s}: end {s}", .{@tagName(node.type()), res.type.name()});
+    }
+    if (c.compiler.record_refs) {
+        cy.refs.recordExpr(c, node, res.type);
     }
     if (c.compiler.config.deny_raw_ptrs) {
         try check_raw_ptr(c, res.type, node);
@@ -9160,6 +9314,7 @@ fn semaInitLocal(c: *cy.Chunk, id: LocalId, init: ExprResult, node: *ast.Node) !
     local.inner.local.declIrStart = loc;
     local.decl_t = init.type;
     local.type = .local;
+    if (c.compiler.record_refs) cy.refs.recordLocalType(c, local);
 }
 
 pub fn semaPtrOrType(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
@@ -9902,6 +10057,16 @@ pub fn semaAccessExpr(c: *cy.Chunk, access: *ast.AccessExpr, prefer_ct_sym: bool
 }
 
 pub fn semaAccessExpr2(c: *cy.Chunk, left_n: *ast.Node, right_name: []const u8, right_n: *ast.Node, prefer_ct_sym: bool, target_t: ?*cy.Type) !ExprResult {
+    return semaAccessExpr3(c, left_n, right_name, right_n, prefer_ct_sym, target_t, true);
+}
+
+/// `meta.access(rec, name)`. A field of a value is read whatever its visibility. A member of a module or a type
+/// is still looked up like `rec.name`.
+pub fn semaMetaAccess(c: *cy.Chunk, left_n: *ast.Node, right_name: []const u8, right_n: *ast.Node) !ExprResult {
+    return semaAccessExpr3(c, left_n, right_name, right_n, false, null, false);
+}
+
+fn semaAccessExpr3(c: *cy.Chunk, left_n: *ast.Node, right_name: []const u8, right_n: *ast.Node, prefer_ct_sym: bool, target_t: ?*cy.Type, check_visible: bool) !ExprResult {
     const rec = try c.semaExprSkipSym(left_n, .{});
     if (rec.resType == .sym) {
         const sym = rec.data.sym;
@@ -9912,7 +10077,7 @@ pub fn semaAccessExpr2(c: *cy.Chunk, left_n: *ast.Node, right_name: []const u8, 
         const rightSym = try c.getResolvedSymOrFail(sym, right_name, right_n);
         return sema.symbol2(c, rightSym, prefer_ct_sym, target_t, right_n);
     } else {
-        return semaAccessFieldName(c, left_n, rec, right_name, right_n);
+        return semaAccessFieldName(c, left_n, rec, right_name, right_n, check_visible);
     }
 }
 

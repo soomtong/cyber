@@ -1438,11 +1438,17 @@ pub const Node = struct {
                 if (decl.right) |right| {
                     return right.end();
                 }
-                return decl.type.?.end();
+                // `const a` without a type or a value does not compile, and the error is reported at this node.
+                if (decl.type) |type_n| {
+                    return type_n.end();
+                }
+                return decl.name.end();
             },
             .continueStmt   => self.cast(.continueStmt).pos + 8,
             .cstruct_decl   => {
                 const decl = self.cast(.cstruct_decl);
+                // `type Foo cstruct` without fields.
+                if (decl.fields.len == 0) return decl.name.end();
                 const field: *Node = @ptrCast(decl.fields.ptr[decl.fields.len-1]);
                 return field.end();
             },
@@ -1664,6 +1670,8 @@ pub const Node = struct {
             .template       => self.cast(.template).child_decl.end(),
             .trait_decl     => {
                 const decl = self.cast(.trait_decl);
+                // A marker trait has no functions (`type NoCopy trait`).
+                if (decl.funcs.len == 0) return decl.name.end();
                 const func: *Node = @ptrCast(decl.funcs.ptr[decl.funcs.len-1]);
                 return func.end();
             },

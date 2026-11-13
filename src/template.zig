@@ -21,6 +21,14 @@ pub const Instance = struct {
     /// Separated from param names since `params` is used as a variant cache key.
     params: []const cy.Value,
 
+    /// The expansion failed after the instance entered the cache. Its sym or func is reserved but not resolved
+    /// and must not be handed out again. Only reached when a compile goes on after an error (`Compiler.recover`)
+    /// or a session compiles again after a failed compile.
+    failed: bool = false,
+
+    /// `releaseValues` ran. The params are still there but own nothing.
+    values_released: bool = false,
+
     map: union {
         two: struct {
             first: []const u8,
@@ -109,11 +117,19 @@ pub const Instance = struct {
         }
     }
 
-    pub fn deinitValues(heap: *cy.Heap, variant: *Instance) void {
+    /// Releases the values of the params and keeps the instance usable as a description of its type: a sweep
+    /// of the heap still reads the type params of the objects it frees (the element type of an `EvalBuffer[T]`).
+    pub fn releaseValues(heap: *cy.Heap, variant: *Instance) void {
+        if (variant.values_released) return;
+        variant.values_released = true;
         for (0..variant.params.len) |i| {
             const param = variant.getParamAt(i);
             heap.destructValue(param);
         }
+    }
+
+    pub fn deinitValues(heap: *cy.Heap, variant: *Instance) void {
+        releaseValues(heap, variant);
         if (variant.params.len > 2) {
             variant.map.map.deinit(heap.alloc);
         }
@@ -370,6 +386,7 @@ pub fn expand_template2(c: *cy.Chunk, template: *cy.sym.Template, arg_types: []c
         res.key_ptr.* = .{ .param_types = instance.param_types, .params = instance.params };
         res.value_ptr.* = instance;
         template.instances.appendAssumeCapacity(instance);
+        errdefer instance.failed = true;
 
         const new_sym = try sema_type.reserve_template_instance(c, template, template.decl.child_decl, instance);
 
@@ -394,7 +411,17 @@ pub fn expand_template2(c: *cy.Chunk, template: *cy.sym.Template, arg_types: []c
     } 
 
     const variant = res.value_ptr.*;
+    if (variant.failed) return failedInstance(c, node orelse template.decl.child_decl);
     return variant.data.sym.sym;
+}
+
+/// An instance whose expansion failed is asked for again. The error was reported where it failed, so with
+/// error recovery the body that asks is given up without another report.
+fn failedInstance(c: *cy.Chunk, node: *ast.Node) anyerror {
+    if (c.compiler.recover and c.compiler.reports.items.len > 0) {
+        return error.CompileError;
+    }
+    return c.reportError("The template could not be expanded with these arguments because of an earlier error.", node);
 }
 
 pub fn resolveTemplateArgs(c: *cy.Chunk, args: []const *ast.Node, template: *cy.sym.Template, template_ctx: *sema.ResolveContext, node: *ast.Node) !void {
@@ -650,6 +677,7 @@ pub fn expandResolvedFuncTemplate(
         res.key_ptr.* = .{ .param_types = variant.param_types, .params = variant.params };
         res.value_ptr.* = variant;
         template.instances.appendAssumeCapacity(variant);
+        errdefer variant.failed = true;
 
         try sema.resolveFuncVariant(c, new_func, resolve_new_types, node);
 
@@ -657,5 +685,6 @@ pub fn expandResolvedFuncTemplate(
     } 
 
     const variant = res.value_ptr.*;
+    if (variant.failed) return failedInstance(c, node orelse @as(*ast.Node, @ptrCast(template.decl)));
     return variant.data.func.func;
 }

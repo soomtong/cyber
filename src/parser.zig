@@ -551,7 +551,7 @@ pub const Parser = struct {
             name_type = (try self.parseTermExpr(.{})) orelse {
                 return self.reportError("Expected param.", &.{});
             };
-        } else if (next.tag() == .ident and self.ast.src[self.tokenEnd(self.next_pos)] == ' ') {
+        } else if (next.tag() == .ident and self.tokenEnd(self.next_pos) < self.ast.src.len and self.ast.src[self.tokenEnd(self.next_pos)] == ' ') {
             name_type = @ptrCast(try self.newIdentNode(self.next_pos));
             self.advance();
         } else {
@@ -1073,7 +1073,9 @@ pub const Parser = struct {
                         return self.reportError("Expected `[`.", &.{});
                     }
                     self.advance();
-                    const attr = (try self.parseAttr()).?;
+                    const attr = (try self.parseAttr()) orelse {
+                        return self.reportError("Expected an attribute.", &.{});
+                    };
                     if (attr.type != .extern_) {
                         return self.reportError("Only the call convention attribute `@extern` is recognized in a function type.", &.{});
                     }
@@ -4611,7 +4613,9 @@ pub const Parser = struct {
                 return self.newTokenNode(.returnStmt, start);
             },
             else => {
-                const right = (try self.parseExpr(.{ .first_expr = true })).?;
+                const right = (try self.parseExpr(.{ .first_expr = true })) orelse {
+                    return self.reportError("Expected an expression after `return`.", &.{});
+                };
                 return self.ast.newNodeErase(.returnExprStmt, .{
                     .child = right,
                     .pos = self.tokenPos(start),

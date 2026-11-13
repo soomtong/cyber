@@ -66,6 +66,30 @@ pub const Compiler = struct {
     /// Whether a compile error summary marks the reported source range with ANSI escape codes
     /// (`cl_vm_set_error_color`). Off by default: a host that logs or parses the summary gets plain text.
     report_color: bool = false,
+
+    /// Go on after a compile error where that is safe, to report more than one (`cl_vm_set_error_recovery`).
+    /// A body (the main block, a function, a method) that fails is abandoned at its first error and the
+    /// next body is checked. Errors outside of a body (syntax, declarations) still end the compile.
+    /// The compile fails as before, with every report in `reports`. Kept across `cl_vm_reset` like `report_color`.
+    recover: bool = false,
+
+    /// Record what the names of the main source refer to (`cl_vm_set_symbol_info`, `refs.zig`).
+    /// Kept across `cl_vm_reset` like `report_color`. The references are those of the last compile.
+    record_refs: bool = false,
+    refs: std.ArrayList(cy.refs.Ref) = .empty,
+    /// The text that the last `refs.find` returned.
+    ref_detail: []const u8 = "",
+    /// The main chunk that `refs` belongs to. Null before a compile reached its main chunk and after a reset:
+    /// `main_chunk` is undefined or freed then, and a query has nothing to answer from.
+    refs_main: ?*cy.Chunk = null,
+    /// The failed allocations of the allocator when the compile started. Recovery stops when it moved.
+    failed_allocs_at_start: usize = 0,
+    /// The ranges that the last `refs.findAll` returned.
+    ref_ranges: std.ArrayList(cy.refs.Range) = .empty,
+    /// The tokens that the last `refs.tokens` returned.
+    ref_tokens: std.ArrayList(cy.refs.Token) = .empty,
+    /// Owns the items that the last `refs.members` or `refs.scope` returned.
+    ref_arena: ?std.heap.ArenaAllocator = null,
     
     /// Sema model resulting from the sema pass.
     sema: sema.Sema,
@@ -197,6 +221,9 @@ pub const Compiler = struct {
         self.vm.log_tracev("Deinit compiler reset={}", .{reset});
         self.clearReports();
         if (!reset) {
+            self.refs.deinit(self.alloc);
+            self.ref_ranges.deinit(self.alloc);
+            self.ref_tokens.deinit(self.alloc);
             self.reports.deinit(self.alloc);
         }
 
@@ -209,10 +236,13 @@ pub const Compiler = struct {
         for (self.chunks.items) |chunk| {
             chunk.deinitCtValues();
         }
-        if (self.alloc_failed) {
+        if (self.alloc_failed or reset) {
             // A compile that ran out of memory can abandon a compile-time value half built: a string or a
             // buffer whose owner was never created. Every value that a sym owns is released by now, and the
             // types that give each object's size are still alive.
+            // A reset sweeps as well. A compile leaves a few compile-time objects that nothing owns, and the
+            // heap keeps its pages across a reset: a host that compiles again and again with one VM (the
+            // language server) would keep every one of them and grow by a page whenever they filled one (F-114).
             self.heap.sweep();
         }
         for (self.chunks.items) |chunk| {
@@ -287,6 +317,10 @@ pub const Compiler = struct {
         // Chunks depends on modules.
         self.sema.deinit(self.alloc, reset);
 
+        if (reset) {
+            // Every slot is free after the sweep. The pages that the last compile grew go back to the allocator.
+            self.heap.releaseFreePages();
+        }
         self.heap.deinit(reset);
 
         self.alloc.free(self.apiError);
@@ -302,6 +336,15 @@ pub const Compiler = struct {
             report.deinit(self.alloc);
         }
         self.reports.clearRetainingCapacity();
+        // The references point into the symbols and sources of the compile that the reports are from.
+        self.refs.clearRetainingCapacity();
+        self.refs_main = null;
+        self.ref_ranges.clearRetainingCapacity();
+        self.ref_tokens.clearRetainingCapacity();
+        if (self.ref_arena) |*arena| arena.deinit();
+        self.ref_arena = null;
+        self.alloc.free(self.ref_detail);
+        self.ref_detail = "";
     }
 
     pub fn newTypes(self: *Compiler) []*cy.Type {
@@ -330,6 +373,7 @@ pub const Compiler = struct {
         defer self.main_discarded = false;
         const acct = cy.MemAccount.of(self.alloc);
         const failed_allocs = if (acct) |a| a.failed.load(.monotonic) else 0;
+        self.failed_allocs_at_start = failed_allocs;
         self.host_error = null;
         const res = self.compileInner2(uri, src, config) catch |err_| {
             // A callback that could not return its error ended the compile with a bare `CompileError` or null.
@@ -408,6 +452,9 @@ pub const Compiler = struct {
             mainChunk = try ensureModule(self, r_uri);
         }
         self.main_chunk = mainChunk;
+        // Queries are answered for a compile that recorded. Without the recording a partial answer (the names
+        // in declarations, but no locals) would look like a complete one.
+        self.refs_main = if (self.record_refs) mainChunk else null;
 
         // Load core module. Added as fallback module for each user module.
         if (self.importCore) {
@@ -508,7 +555,17 @@ pub const Compiler = struct {
 
         // Generate main first to expand any templates.
         log.tracev("emit program.", .{});
-        self.program_ir = try sema.sema_program(mainChunk, self.main_func);
+        if (self.recover) {
+            var marks = try RecoverMarks.take(self);
+            defer marks.deinit(self);
+            if (sema.sema_program(mainChunk, self.main_func)) |program_ir| {
+                self.program_ir = program_ir;
+            } else |err| {
+                try recoverBody(self, mainChunk, &marks, err);
+            }
+        } else {
+            self.program_ir = try sema.sema_program(mainChunk, self.main_func);
+        }
 
         // Perform sema on all chunks.
         log.tracev("Perform sema.", .{});
@@ -523,6 +580,11 @@ pub const Compiler = struct {
                 }
                 return err;
             };
+        }
+
+        // With recovery the bodies that failed were skipped. What follows needs all of them.
+        if (self.reports.items.len > 0) {
+            return error.CompileError;
         }
 
         // Pass through type syms.
@@ -712,7 +774,55 @@ fn performChunkSema(c: *cy.Chunk) !void {
     try semaChunkFuncs(c);
 }
 
+/// Reports after which recovery stops. A compile that is this wrong gains nothing from more of them.
+const max_recover_reports = 100;
+
+/// The stacks of every chunk before a body is checked. The body belongs to one chunk, but a template that it
+/// expands is resolved in the chunk that declares it.
+const RecoverMarks = struct {
+    marks: []sema.StackMark,
+
+    fn take(self: *Compiler) !RecoverMarks {
+        const marks = try self.alloc.alloc(sema.StackMark, self.chunks.items.len);
+        for (self.chunks.items, 0..) |chunk, i| {
+            marks[i] = sema.StackMark.take(chunk);
+        }
+        return .{ .marks = marks };
+    }
+
+    fn deinit(self: *RecoverMarks, compiler: *Compiler) void {
+        compiler.alloc.free(self.marks);
+    }
+};
+
+/// A body failed with `err`. Makes sure the error is reported, drops what the body left on the stacks and
+/// returns, so that the caller goes on with the next body. Returns the error if the compile has to end.
+fn recoverBody(self: *Compiler, c: *cy.Chunk, marks: *const RecoverMarks, err: anyerror) !void {
+    // Without memory there is nothing to go on with. A refused allocation can arrive as any error, a compile
+    // error included, so the allocator is asked like `compile` does. What an allocation failure abandoned half
+    // built is not something the next body can be checked against.
+    if (err == error.OutOfMemory or self.alloc_failed or self.host_error != null) {
+        return err;
+    }
+    if (cy.MemAccount.of(self.alloc)) |acct| {
+        if (acct.failed.load(.monotonic) != self.failed_allocs_at_start) return err;
+    }
+    if (err != error.CompileError) {
+        // Wrap all other errors as a CompileError.
+        _ = try c.addReportFmt("error.{}", &.{v(err)}, c.curNode);
+    }
+    if (self.reports.items.len == 0 or self.reports.items.len >= max_recover_reports) {
+        return error.CompileError;
+    }
+    for (marks.marks, 0..) |mark, i| {
+        mark.restore(self.chunks.items[i]);
+    }
+}
+
 fn semaChunkFuncs(c: *cy.Chunk) !void {
+    if (c.compiler.recover) {
+        return semaChunkFuncsRecover(c);
+    }
     // Iterate funcs with explicit index since lambdas could be appended.
     var i: u32 = 0;
     while (i < c.funcs.items.len) : (i += 1) {
@@ -746,6 +856,38 @@ fn semaChunkFuncs(c: *cy.Chunk) !void {
             },
             else => {},
         }
+    }
+}
+
+/// `semaChunkFuncs` with error recovery: a function that fails is skipped and the next one is checked.
+fn semaChunkFuncsRecover(c: *cy.Chunk) !void {
+    const self = c.compiler;
+    var i: u32 = 0;
+    while (i < c.funcs.items.len) : (i += 1) {
+        const func = c.funcs.items[i];
+        const has_body = switch (func.type) {
+            .userFunc => !func.info.const_eval_only,
+            .extern_ => func.data.extern_.has_impl,
+            else => false,
+        };
+        if (!has_body or func.info.emitted) {
+            continue;
+        }
+        // An instance of a function template whose signature failed to resolve. The error is reported already.
+        if (!func.isResolved()) {
+            continue;
+        }
+        var marks = try RecoverMarks.take(self);
+        defer marks.deinit(self);
+        const res = if (func.type == .userFunc and func.isMethod())
+            sema.semaMethodBody(c, func)
+        else
+            sema.semaFuncBody(c, func);
+        res catch |err| {
+            try recoverBody(self, c, &marks, err);
+            // The body is not checked again when something else refers to the function.
+            func.info.emitted = true;
+        };
     }
 }
 

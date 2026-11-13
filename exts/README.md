@@ -1,6 +1,13 @@
 # Extensions
 
+## Language server
+
+* `cyber-lsp` in this repository (`zig build lsp`, sources in `src/lsp`). Diagnostics, formatting, outline and folding
+  over the Language Server Protocol. Design and stages: `docs/specs/2026-11-12-lsp-design.md`.
+
 ## VS Code
+
+* [vscode](./vscode) Syntax highlighting and the client of `cyber-lsp`. See its README to install.
 
 * [cyber-vscode](https://github.com/daelonsuzuka/cyber-vscode), [Marketplace](https://marketplace.visualstudio.com/items?itemName=DaelonSuzuka.cyber) by @daelonsuzuka
 

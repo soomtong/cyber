@@ -1,0 +1,424 @@
+# LSP 서버 설계와 단계 계획
+
+2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 ~ P4 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P4 구현" 절). 남은 것은 파서 복구(P2의 나머지)와 P5.
+앞선 결정은 `docs/decisions/project_fmt.md`의 "내장 도구의 기준"(LSP는 CLI에 넣지 않고 라이브러리 위의 별도 프로그램),
+사실 근거는 `docs/study/01-pipeline-front-end.md` 6절과 `docs/decisions/project_compile_error_report.md`이다.
+
+---
+
+## 1. 개요
+
+Cyber용 LSP 서버 `cyber-lsp`를 `libcyber` 위의 별도 프로그램으로 Zig로 쓴다. 컴파일러 프런트엔드(토크나이저 · 파서 · sema)를
+그대로 쓰고, 문서가 바뀔 때마다 파일 전체를 다시 검사한다. 증분 분석과 질의 기반 재작성은 하지 않는다.
+
+계획의 전제가 되는 현재 상태(0.4.9):
+
+| 항목 | 현재 상태 | LSP에 주는 영향 |
+| --- | --- | --- |
+| 진단 | 파서 · sema가 첫 오류에서 `error.CompileError`로 풀린다. `Compiler.reports`는 항상 한 개(F-78) | 오류 복구 전에는 진단이 파일당 한 개 |
+| 위치 | `Report.loc`은 토큰 · 파싱 오류면 바이트 위치, sema 오류면 `*ast.Node`. 열은 바이트 단위 | 범위와 UTF-16 변환이 필요 |
+| 심볼 해석 | sema가 노드 → `Sym` 대응을 남기지 않는다. `ir.Expr.node` · `ir.Stmt.node`로 IR에서 노드로만 간다 | hover · 정의 이동에는 해석 기록이 필요 |
+| 분석 범위 | `semaChunkFuncs`가 청크의 모든 함수 본문을 분석한다. 템플릿은 확장될 때만 | 확장되지 않은 템플릿 본문은 진단이 없다 |
+| 있는 것 | `cl_vm_validate`(실행 없이 컴파일), `cl_vm_format`, `cl_vm_set_loader`, `Node.pos()` · `Node.end()` | 진단 · 포맷 · 저장 전 버퍼 overlay는 바로 가능 |
+| 에디터 | `exts/vscode`는 TextMate 문법만, `exts/tree-sitter`는 문법과 쿼리 네 개 | VS Code 클라이언트를 더한다 |
+
+0.4.9에서 달라진 문법(`scope |s|:` 블록, 0.4.7 · 0.4.8의 `generator fn` · `fiber` · `suspend`)은 P0와 무관하다.
+P1에서 `documentSymbol` · `foldingRange`가 `scope` 블록 노드를 다뤄야 하고, 에디터 문법은 따로 맞춘다
+(`exts/tree-sitter/grammar.js`에 `scope |s|:` 블록 문장이 없고, `exts/vscode`의 TextMate 문법에는 `fiber` · `suspend` ·
+`generator`가 없다).
+
+## 2. 핵심 디자인
+
+1. 프로세스 구조: 서버는 `src/lsp/`에 두고 `cy` 모듈을 직접 import한다. AST와 `Sym`을 읽어야 해서 C API만으로는 모자라다.
+   빌드 단계는 `zig build lsp`, 산출물은 `zig-out/bin/cyber-lsp`. 전송은 stdio와 `Content-Length` 프레이밍, JSON은 `std.json`.
+2. 문서 모델: full sync로 시작한다. 열린 버퍼는 loader 콜백으로 덮고 나머지는 `default_loader`가 디스크에서 읽는다.
+3. 분석 단위: 변경 뒤 약 150ms를 기다렸다가 파일 전체를 컴파일한다. 결과의 문서 버전이 지금과 다르면 버린다.
+4. 위치 인코딩: LSP 3.17 `positionEncoding`으로 `utf-8`을 협상한다. 받지 않는 클라이언트에만 UTF-16으로 바꾼다.
+   컴파일러는 바이트 위치만 낸다(P0의 `pos` · `end_pos`).
+5. 격리: 컴파일러 panic(F-80 같은 것)과 컴파일 타임 평가의 무한 루프가 서버를 끝낼 수 있다. 분석은 워커 스레드에서 돌리고
+   컴파일 타임 평가에 연료를 건다. 서버가 죽으면 클라이언트가 다시 띄운다.
+
+### 단계
+
+| 단계 | 내용 | 컴파일러 변경 |
+| --- | --- | --- |
+| P0 | 리포트의 범위(시작 · 끝)와 목록 · 문맥 사슬을 데이터로 노출 | 작음 |
+| P1 | 서버 뼈대, `publishDiagnostics`, `formatting`, AST 기반 `documentSymbol` · `foldingRange`, VS Code 클라이언트 | 없음 |
+| P2 | 오류 복구: 파서는 들여쓰기 기준 블록 동기화, sema는 함수 단위로 계속 진행 | 중간. 가장 위험 |
+| P3 | 해석 기록으로 `hover` · `definition` · `references` · `completion` · `signatureHelp` | 중간 |
+| P4 | core 청크를 든 VM 재사용, `semanticTokens`, workspace 심볼 | 작음 |
+| P5 | `rename`, code action, inlay hint | 없음 |
+
+## 3. pros vs cons
+
+| 접근 | 장점 | 단점 |
+| --- | --- | --- |
+| A. 컴파일러 재사용(선택) | 진단이 `cyber` 실행 결과와 같다. 버전이 함께 잠긴다. 타입 정보가 정확하다 | fail-fast 구조를 고쳐야 한다. 컴파일러 버그가 서버 종료가 된다 |
+| B. tree-sitter 구문 전용 | 오류 복구가 이미 있다. 컴파일러를 건드리지 않는다 | 타입 · 오버로드 · 템플릿을 모른다. 문법이 이미 컴파일러와 두 군데서 다르다(`project_tree_sitter.md`) |
+| C. Cyber로 작성 | dogfooding | JSON이 없다. `cy.parse`가 노드 페이로드를 `void`로 숨긴다. sema에 닿지 못한다 |
+
+A에서 감수하는 것:
+
+- 편집 중인 미완성 코드(`a.`)에서 completion을 주려면 파서가 불완전한 식을 노드로 남겨야 한다(P3).
+- sema를 함수 단위로 복구하면 실패한 함수의 proc · block 스택을 되감아야 한다. 반쯤 만들어진 상태가 남는 버그
+  (`first_compile_failed`와 같은 종류)가 생기기 쉽다(P2).
+
+## 4. 선례와 이 설계의 자리
+
+- LSP(2016): 에디터 m개 × 언어 n개를 프로토콜 하나로 줄였다. 뿌리는 Roslyn의 "서비스로서의 컴파일러"다.
+- RLS → rust-analyzer: RLS는 배치 컴파일러의 분석 덤프를 썼고 응답이 느려 밀려났다. rust-analyzer는 질의 기반(salsa)으로
+  프런트엔드를 다시 썼다.
+- zls: 컴파일러가 sema를 내주지 않아 분석기를 따로 유지한다. comptime의 정확도에서 비용을 치른다.
+- Cyber: 파일은 스크립트 크기이고 컴파일러는 약 6만 줄이다. RLS식 재사용의 약점(느림)은 작고, zls식 이중 구현의
+  약점(불일치)은 `#` 컴파일 타임 평가 때문에 크다. 그래서 A를 고르고 질의 기반 재작성은 하지 않는다.
+
+P0와 P2는 LSP가 없어도 에이전트 루프에 쓸모가 있다(`01-pipeline-front-end.md` 6절의 "한 번 실행에 여러 진단").
+
+## 5. P0 구현 (2026-11-12)
+
+LSP의 `Diagnostic`은 `range`(시작 · 끝), `message`, `relatedInformation`(다른 위치와 설명)으로 이뤄진다.
+`cl_vm_compile_error`는 시작 위치와 첫 줄 안의 길이, 사슬의 머리만 준다. P0는 나머지를 데이터로 낸다.
+
+- `debug.ReportLoc`에 `pos` · `end_pos`(소스의 바이트 오프셋)와 `end_line` · `end_col`을 더했다. `len`은 그대로다.
+  - sema 오류: 노드의 `pos()` ~ `end()`. 여러 줄에 걸친 노드는 끝 줄까지 간다(`len`은 지금처럼 첫 줄에서 끊는다).
+  - 토큰 · 파싱 오류: 위치 하나만 알고 있으므로 그 자리의 코드포인트 하나. 줄 끝이나 소스 끝이면 빈 범위다.
+    토큰 전체로 넓히는 일은 서버가 한다(파싱이 끝난 뒤 토큰 배열은 남지 않는다).
+- C API(`cyber.h`):
+  - `size_t cl_vm_compile_report_count(CLVM* vm)`: 마지막 eval · compile · validate의 컴파일 오류 수. 지금은 0 또는 1이고
+    P2부터 늘어난다.
+  - `bool cl_vm_compile_report(CLVM* vm, size_t idx, CLReport* out)`.
+  - `bool cl_vm_compile_report_note(CLVM* vm, size_t idx, size_t note_idx, CLReport* out)`: 리포트에 달린 사슬을 순서대로 준다.
+    `kind`는 `CL_REPORT_NOTE`. `First declared at:` 같은 문맥은 `msg`가 있고, 템플릿 확장을 부른 지점은 `msg`가 비어 있다.
+    끝을 넘으면 false.
+  - `CLReport{ kind, msg, uri, has_loc, line, col, end_line, end_col, pos, end_pos }`. 줄 · 열은 0부터, 열은 바이트 단위,
+    끝은 범위에 들지 않는다. `msg` · `uri`는 VM 소유이고 다음 eval · compile · validate · reset까지 유효하다.
+- `cl_vm_compile_error` · `CLCompileError`는 그대로 둔다(ABI). 첫 리포트의 머리를 준다.
+
+하지 않은 것:
+
+- UTF-16 열. 서버가 `pos` · `end_pos`와 소스로 바꾼다(2절 4번).
+- 진단의 심각도 · 코드. 컴파일러는 오류만 낸다.
+- `cy.VM`(Cyber 쪽)에 같은 API. 필요해지면 더한다.
+
+확인: lib 테스트 `Compile reports give the range and the notes of a compile error.`
+
+## 6. P1 구현 (2026-11-12)
+
+`zig build lsp`가 `zig-out/bin/cyber-lsp`를 만든다. 테스트는 `zig build lsp-test`(`zig build test`에 포함).
+
+구조. 2절 1번에서 달라진 점: 서버는 `cy` 모듈을 통째로 import하지 않는다. CLI와 같은 꼴이다.
+
+- 진입점은 `src/lsp_main.zig`, 나머지는 `src/lsp/`. Zig 모듈은 루트 파일의 디렉터리 밖을 import하지 못하고 서버는
+  `cli.zig`(표준 모듈 `os` · `io` 등의 resolver · loader)를 써야 하므로 루트 파일을 `src/`에 둔다.
+- 컴파일은 `libcyber`의 C API로 한다(`cl_vm_compile` + P0의 `cl_vm_compile_report*`). 개요는 `cyber fmt`처럼 서버 쪽에서
+  `cy.Parser`만 돌려 AST를 읽는다. VM과 컴파일러의 상태는 라이브러리 쪽에만 있다.
+- P3에서 `Sym`을 읽어야 할 때는 해석 기록을 C API로 내는 쪽을 먼저 본다(서버가 컴파일러 내부 구조체를 직접 읽지 않게).
+
+| 파일 | 내용 |
+| --- | --- |
+| `src/lsp_main.zig` | 인자, 메시지 루프, 종료 코드(`shutdown` 뒤 `exit`면 0, 아니면 1) |
+| `src/lsp/transport.zig` | `Content-Length` 프레이밍, stdin 읽기와 대기 |
+| `src/lsp/server.zig` | 요청 처리, 문서 저장, 진단, VM 콜백, uri ↔ 경로 |
+| `src/lsp/position.zig` | 바이트 오프셋 ↔ 줄 · 문자(UTF-8 · UTF-16) |
+| `src/lsp/symbols.zig` | 개요(파서), 접기(들여쓰기) |
+| `src/lsp/test.zig` | 서버에 메시지를 하나씩 넣는 세션 테스트 |
+
+동작:
+
+- 수명 주기: `initialize` · `initialized` · `shutdown` · `exit`. `initialize` 전의 요청은 `-32002`, 모르는 요청은 `-32601`,
+  `shutdown` 뒤의 요청은 `-32600`. 알림은 조용히 넘긴다.
+- 동기화: full sync(`change: 1`). `didOpen` · `didChange` · `didSave` · `didClose`.
+- 진단: 문서를 `cl_vm_compile(vm, 경로, 본문, skip_codegen)`으로 컴파일한다. 전체 프로그램으로 보고 VM을 먼저 리셋하므로
+  검사 사이에 남는 상태가 없다. 실행하지 않고 코드도 생성하지 않는다. 리포트가 `Diagnostic`이 되고 딸린 위치는
+  `relatedInformation`이다(클라이언트가 받는다고 했을 때만). 템플릿 확장 호출 지점은 `Template expanded here.`.
+- 디바운스: 변경은 표시만 하고, 클라이언트가 150ms 동안 조용하면 표시된 문서를 검사한다. 스레드 없이 stdin을 `poll`로 기다린다
+  (Windows는 `poll`이 없어 메시지마다 바로 검사한다). 버전 비교는 필요 없다: 검사는 메시지 사이에서만 돌고 항상 마지막 본문을 본다.
+- 모듈: 열린 문서는 loader가 편집기의 본문으로 준다. 열린 문서는 resolver가 자기 자신으로 해석하므로 저장한 적 없는 문서도
+  검사된다. 그 밖은 CLI와 같다. 문서 하나가 바뀌면 열린 문서 모두를 다시 검사한다(누가 누구를 쓰는지 추적하지 않는다).
+- 다른 파일의 오류: 문서가 쓰는 모듈에 오류가 있으면 그 모듈의 uri로 진단을 내고, 문서에는 0:0에 `` In `경로`: 메시지 ``를
+  관련 정보와 함께 낸다. 그 모듈이 열려 있으면 모듈의 진단은 모듈 자신의 검사에서만 낸다(두 검사가 같은 문서의 진단을 서로 덮지 않게).
+- 포맷: `cl_vm_format` 결과로 문서 전체를 바꾸는 편집 하나. 이미 포맷된 문서는 빈 목록, 구문 오류면 `null`.
+- 개요: 타입(필드 · case · 트레이트 함수를 자식으로), 함수, 메서드(`Vec2.len`), 상수, 전역, main 블록의 `:=` 지역.
+  파싱되지 않는 문서는 빈 목록.
+- 접기: 들여쓰기만 본다. 파싱되지 않아도 동작하고 `scope |s|:` 같은 새 블록 문장에도 그대로 맞는다.
+- stdout은 프로토콜 전용이다. VM의 print · eprint · log 콜백은 버리고 `clSilent`를 켠다.
+
+확인한 것(5절 뒤에 남겨 둔 질문):
+
+- 컴파일 시간: ReleaseFast에서 검사 한 번(VM 리셋 + core 로드 + sema)이 약 5ms, Debug 빌드는 약 85ms다. P4의 VM 재사용은
+  서두를 이유가 없다.
+- 검사 중 부작용: 컴파일 타임 평가는 루프(`while`)를 지원하지 않고 재귀는 `Maximum resolve depth reached.`로 끝난다.
+  `os.write_file` 같은 호스트 함수는 컴파일 타임에 불리지 않았다(인자 타입에서 컴파일 오류). `#[extern]` 선언은 `skip_codegen`
+  이라 라이브러리를 열지 않는다. `use 'https://…'`는 CLI처럼 네트워크에서 읽는다.
+- 서버를 끝내는 입력이 있었다: `#print('x')`가 컴파일러 panic이었다(F-112, 같은 날 수정). 컴파일러의 panic은 워커 스레드로
+  막지 못한다(막으려면 자식 프로세스다). 그래서 격리보다 panic을 컴파일 오류로 바꾸는 쪽을 먼저 한다.
+- 표준 모듈 안의 오류: `core`처럼 서버에 내장된 모듈은 클라이언트가 열 문서가 없다. 그 모듈로는 진단을 내지 않고, 문서 안에서
+  거기에 이른 자리(가장 바깥 템플릿 확장 호출)에 `` In `core`: 메시지 ``를 낸다. 관련 정보도 열 수 있는 위치만 싣는다.
+
+에디터:
+
+- `exts/vscode`: `extension.js`가 `vscode-languageclient`로 서버를 띄운다. 설정 `cyber.lsp.enabled` · `cyber.lsp.path`.
+  TextMate 문법은 키워드 목록만 지금 문법으로 바꿨다. VS Code 안에서의 확인은 아래 "VS Code에서의 확인" 절(2026-11-13).
+- `exts/tree-sitter`의 `scope |s|:` 블록 문장은 아직 없다(`tree-sitter` CLI로 코퍼스를 돌려야 해서 따로 한다).
+
+하지 않은 것:
+
+- 증분 동기화(`change: 2`), 범위 포맷, 워크스페이스 폴더.
+- Windows에서의 실행 확인. 경로 구분자 변환은 넣었지만 돌려 보지 않았다.
+- 릴리스 번들 · `install.sh`에 `cyber-lsp` 넣기(2026-11-13에 Linux · macOS 번들에 넣었다. `project_fork_release_ci.md`의 "번들에 언어 서버").
+
+## 7. P2 구현: sema 복구 (2026-11-12)
+
+`cl_vm_set_error_recovery(vm, true)`를 켜면 컴파일러가 오류 뒤에도 안전한 곳에서 계속한다. 기본은 꺼짐이고 `cyber` CLI의
+동작은 그대로다. `cyber-lsp`는 켠다.
+
+규칙: 본문 하나에 오류 하나.
+
+- 본문은 main 블록, 함수, 메서드, 함수 템플릿의 인스턴스(인스턴스마다 따로)다. 람다는 자기를 둘러싼 본문에 속한다.
+- 본문은 첫 오류에서 버리고 다음 본문으로 간다. 본문 안에서 문장 단위로 잇지 않는다. 실패한 `x := …` 뒤의 `x`가
+  `Undeclared variable`로 줄줄이 따라 나오는 일을 만들지 않기 위해서다. 함수는 main의 지역을 못 보므로 본문 사이에는 그런 연쇄가 없다.
+- 구문 오류와 선언의 오류(타입, 시그니처, 전역 초기화)는 지금처럼 컴파일을 끝낸다. 본문 밖에서는 반쯤 해석된 심볼을 되돌릴 방법이 없다.
+- 결과 코드는 그대로 `CL_ERROR_COMPILE`이고 아무것도 실행하지 않는다. 본문 sema가 끝난 뒤 리포트가 하나라도 있으면 거기서
+  끝낸다(트레이트 구현 검사, 코드 생성으로 가지 않는다). 리포트 순서는 main 블록, 그다음 청크의 함수 순서. 상한은 100개.
+
+구현:
+
+- `sema.StackMark`: sema가 본문 하나를 보는 동안 청크에 쌓는 것들의 깊이(proc · block · 지역 · resolve context · 값/타입 스택 ·
+  IR 블록 등 스무 개 남짓)를 기록하고 `restore`로 되돌린다. proc과 resolve context는 자기 `deinit`을 거쳐 내린다.
+  템플릿은 선언한 청크에서 해석되므로 본문 하나를 보기 전에 모든 청크의 mark를 뜬다(`compiler.RecoverMarks`).
+- `compiler.semaChunkFuncsRecover`: 함수 루프에서 실패한 본문을 `recoverBody`로 되돌리고 `emitted`로 표시해 다시 보지 않는다.
+  `OutOfMemory`와 할당 실패는 복구하지 않는다.
+- 실패한 템플릿 인스턴스: 인스턴스는 순환 참조 때문에 해석 전에 캐시에 들어간다. 해석이 실패하면 반쯤 만들어진 심볼이
+  캐시에 남고, 다음 본문이 같은 인스턴스를 물으면 그것을 받았다(`Foo[int]`를 두 함수가 쓰면 둘째가 `error.OutOfMemory`).
+  `Instance.failed`를 세우고, 다시 물으면 그 본문을 새 리포트 없이 버린다(오류는 실패한 자리에 이미 있다).
+  시그니처가 해석되지 않은 함수 템플릿 인스턴스는 본문 검사에서 건너뛴다(`func.isResolved()`).
+- IR은 되돌리지 않는다. 오류가 있는 컴파일은 코드를 만들지 않고, 버린 본문의 IR은 청크 arena의 것이다.
+
+확인:
+
+- lib 테스트 `With error recovery every body reports its first error.` · `With error recovery a template that failed to expand is reported once.`,
+  서버 테스트 `Every body with an error gets a diagnostic.`
+- 저장소의 `.cy` 469개(`src/test` · `examples` · `docs` · `src/tools`, 오류 기대 테스트 215개 포함)를 Debug 서버에 넣어 죽거나
+  멈추는 것이 없음을 봤다. 처음에는 하나가 죽었다(`types/trait_func_type_arg_error.cy`, 위의 해석 안 된 인스턴스).
+- 통과하는 스크립트에 오류를 여러 줄 심은 변형 202개(없는 변수 · 없는 필드 · 잘못된 호출)도 같다. 128개가 진단을 둘 이상 냈다.
+- 메모리: 오류가 있는 문서를 300번 검사해 RSS가 약 250kB 늘었다. 오류가 없는 문서도 같은 만큼 는다. 복구가 아니라 검사(컴파일 ·
+  리셋)마다 약 0.9kB가 새는 것이다(F-114, 2026-11-13 수정).
+
+남은 위험: 복구는 "본문 sema가 실패해도 전역 상태(심볼 · 타입 · 템플릿 캐시)는 쓸 수 있다"는 가정에 선다. 깨지는 곳을 둘 찾아
+고쳤고 더 있을 수 있다. 깨지면 서버 프로세스가 죽고 클라이언트가 다시 띄운다. CLI는 복구를 켜지 않으므로 영향이 없다.
+
+## 8. P3 구현: 해석 기록, hover, definition (2026-11-13)
+
+sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨다"를 적어 두고, 호스트는 위치로 묻는다. 6절에 적은 대로 서버는
+컴파일러 구조체를 읽지 않고 C API로만 받는다.
+
+- `cl_vm_set_symbol_info(vm, true)`: 기록을 켠다(기본 꺼짐, `cl_vm_reset`을 넘어 유지). main 소스만 기록한다. 모듈의 것을
+  알고 싶은 호스트는 그 모듈을 main으로 컴파일한다(서버가 문서마다 그렇게 한다).
+- `bool cl_vm_symbol_at(vm, pos, &info)`: 마지막 컴파일의 main 소스에서 바이트 오프셋 `pos`에 있는 것.
+  `CLSymbolInfo{ pos, end_pos, detail, has_def, def_uri, def_pos, def_end_pos }`.
+  - `detail`은 한 줄이다. 선언이 있는 심볼은 선언의 첫 줄(`fn add(a int, b int) -> int`, `type Vec2`, `const limit = 10`,
+    앞의 `#[…]` 속성과 끝의 `:`는 뺀다), 지역 · 매개변수 · 필드는 `이름 타입`, enum · choice case는 `case Color.green`,
+    그 밖의 식은 타입 이름. 시그니처를 다시 조립하지 않고 소스의 줄을 그대로 쓰므로 매개변수 이름이 보인다.
+  - 선언 위치는 지역 · 매개변수 · 필드는 이름, 나머지는 선언 전체다. 표준 모듈의 것은 `def_uri`가 `core` · `math` 같은 이름이다.
+  - 이름 바로 뒤의 위치도 그 이름으로 친다(커서가 단어 끝에 있을 때). 컴파일이 실패해도 오류 전에 해석된 것은 남는다.
+
+기록하는 자리(`src/refs.zig`, sema 쪽 훅은 모두 `Compiler.record_refs`가 켜졌을 때만):
+
+| 자리 | 기록 |
+| --- | --- |
+| `sema.semaExpr` | 식 노드의 범위와 타입 |
+| `sema.lookupIdent` · `lookupStaticIdent` | 식별자 → 지역 또는 심볼. 타입 자리의 이름과 호출되는 함수 이름도 여기를 지난다 |
+| `module.getResolvedSym` · `semaAccessFieldName` | `a.b`의 `b` → 필드 · 메서드 · 모듈 멤버 |
+| `sema.pushLocalVar`와 타입 추론이 끝나는 세 곳 | 지역의 선언 자리와 타입(`x := …`는 초기화 식 뒤에 타입이 정해진다) |
+
+- 노드의 원문이 찾은 이름과 같을 때만 적는다. 리터럴을 대신해 `@init_sequence`를 찾는 것 같은 내부 조회가 그 리터럴의 참조로
+  남지 않게 하기 위해서다.
+- 지역의 선언 위치는 `Local`에 필드를 더하지 않고 이름 슬라이스의 주소에서 얻는다. 선언된 지역의 이름은 소스의 슬라이스이고
+  숨은 지역의 이름은 아니다.
+- 조회는 위치를 품는 가장 작은 범위를 고른다. 같은 범위면 식의 타입보다 심볼 · 지역이 앞서고, 나중에 적힌 것이 앞선다.
+- 필드는 선언 노드를 갖지 않는다. 부모 타입의 `struct_decl`에서 인덱스로 이름 노드를 찾는다.
+
+서버:
+
+- `textDocument/hover`: `detail`을 `cyber` 코드 블록으로 준다. `textDocument/definition`: 선언의 `Location`.
+  표준 모듈 안의 선언은 열 문서가 없어 `null`.
+- VM은 컴파일 하나만 들고 있다. 요청이 온 문서가 마지막에 컴파일한 문서가 아니거나 그 뒤로 무엇이든 바뀌었으면 그 문서를
+  다시 컴파일하고 답한다(`Server.compiled`). 검사 한 번이 수 ms라 캐시를 두지 않는다. 디바운스 전에 온 요청도 새 본문으로 답한다.
+
+확인:
+
+- lib 테스트 `cl_vm_symbol_at describes the names of the main source.`, 서버 테스트
+  `Hover describes a name and go to definition finds its declaration.`
+- 저장소 `.cy` 462개의 모든 줄에서 세 칸마다 hover와 definition을 물었다(Debug 서버, 216,672 요청, hover 응답 50,105 ·
+  정의 12,368). 죽는 것이 없다. 처음에는 둘이 죽었고 원인은 `ast.Node.end()`였다: 함수가 없는 트레이트
+  (`type NoCopy trait`)에서 `funcs.len - 1`이 넘쳤다(F-115, 수정). 이 노드에 컴파일 오류가 나도 같은 자리에서 죽었을 것이다.
+
+하지 않은 것:
+
+- 오버로드 중 실제로 고른 함수. 함수 이름은 심볼(오버로드 묶음)로 기록되고 `detail`은 첫 선언에 `(+N overloads)`를 붙인다.
+- 템플릿 본문 안의 이름은 인스턴스마다 기록되고 마지막 인스턴스의 것이 보인다(`x T`가 `x int`로).
+- 문서 주석. 선언 위의 `--|` 줄을 hover에 싣는 일은 서버가 `def_pos`와 소스로 할 수 있다.
+- capture된 지역, `use`의 경로 문자열. (필드 초기화의 이름은 P4에서 기록한다.)
+
+### references · documentHighlight · rename (2026-11-13)
+
+같은 기록을 대상 기준으로 뒤집는다.
+
+- `size_t cl_vm_symbol_refs(vm, pos, &ranges)`: `pos`의 이름과 같은 것을 가리키는 main 소스의 모든 범위(`CLRange{pos, end_pos}`,
+  정렬 · 중복 없음, VM 소유). 쓰인 곳과, main 소스에 선언돼 있으면 선언의 이름. 지역은 선언 위치가 같으면 같은 지역이고
+  (가려진 이름과 구별된다), 심볼은 포인터가 같으면 같다. 템플릿 본문의 이름은 인스턴스마다 기록되지만 한 번만 나온다.
+- `CLSymbolInfo.kind`: `CL_SYMBOL_EXPR` · `CL_SYMBOL_LOCAL` · `CL_SYMBOL_DECL`. 호스트가 "이것을 한 파일 안에서 다 볼 수 있는가"를 안다.
+- 서버: `textDocument/references`(`includeDeclaration`을 따른다) · `textDocument/documentHighlight` ·
+  `textDocument/prepareRename` · `textDocument/rename`.
+- 한계: 이 문서 안의 것만 찾는다. 컴파일러는 main 소스만 기록하므로 다른 문서에서 이 함수를 쓰는 곳은 모른다.
+  그래서 rename은 지역과 매개변수만 받는다. 그 쓰임은 모두 선언한 함수 안에 있다. 함수 · 타입 · 필드의 rename은
+  `Only a local variable or a parameter can be renamed.`로 거절한다. 한 문서만 고치면 그것을 쓰는 모듈이 깨지기 때문이다.
+  워크스페이스 전체의 references는 P4의 workspace 심볼과 같이 한다(문서마다 main으로 컴파일해 모으면 된다).
+- rename은 새 이름이 식별자인지만 본다. 같은 범위의 다른 이름과 겹치는지는 보지 않는다. 겹치면 다음 검사의 진단으로 나온다.
+
+확인: lib 테스트 `cl_vm_symbol_refs finds the places that name the same thing.`, 서버 테스트
+`References, highlights and the rename of a local.` 저장소 `.cy` 231개에 references · prepareRename 108,928 요청, 죽는 것 없음.
+
+### completion · signatureHelp (2026-11-13)
+
+2절의 "감수하는 것" 첫째(파서가 미완성 식 `a.`을 노드로 남긴다)는 하지 않았다. 파서를 건드리는 대신 서버가 커서 둘레의
+본문을 파싱되도록 고친 사본을 컴파일하고, 그 사본에 대해 컴파일러에게 묻는다. 파서 복구를 하게 되면 이 보정은 줄어든다.
+
+컴파일러:
+
+- `size_t cl_vm_members_at(vm, pos, &items)`: `pos`에서 끝나는 식의 멤버. 값이면 그 타입의 필드와 메서드(`&T` · `^T`는 벗겨서),
+  모듈이나 타입 이름이면 그것이 선언한 것(`math.` · `Color.` · `Vec2.`). `pos`에서 끝나는 식이 여럿이면 가장 작은 것이
+  받는 쪽이다(`x + v.`는 `v`).
+- `size_t cl_vm_names_at(vm, pos, &items)`: `pos`에서 쓸 수 있는 이름. `pos`를 둘러싼 함수가 그 앞에서 선언한 지역과 매개변수,
+  main 소스가 선언하거나 `use`한 것, 폴백 모듈(`core`)의 것. 같은 이름은 안쪽 선언 하나만. 블록은 가리지 않는다
+  (끝난 블록의 지역도 나온다). main 블록에서는 함수 안의 지역이 빠진다.
+- `CLItem{ name, detail, kind }`. `detail`은 hover와 같은 한 줄이다. 다른 모듈의 private 심볼, `@init` · `$get` 같은 훅과
+  연산자는 뺀다. 목록은 이름순이고 VM 소유다.
+
+서버(`src/lsp/complete.zig`의 보정은 순수 함수이고 단위 테스트가 있다):
+
+- `textDocument/completion`: 커서 앞이 `.`이면 멤버, 아니면 범위의 이름. 보정을 덜 고치는 것부터 세 번까지 시도한다.
+  0. 커서의 단어만: `v.le|n`은 `v`로, 빈 자리에는 자리표시 이름을 넣는다.
+  1. 커서 뒤 줄의 나머지를 버리고 그 줄에서 연 괄호를 닫는다(`print(add(v.|, 2 +`).
+  2. 줄을 받는 쪽 식(또는 자리표시 이름) 하나로 바꾼다(`if v.|`처럼 블록 머리라 본문 없이는 파싱되지 않는 줄).
+  구문 오류로 끝난 시도는 버린다. 목록은 걸러 내지 않고 다 보낸다(클라이언트가 친 글자로 거른다). 트리거 문자는 `.`.
+- `textDocument/signatureHelp`: 커서를 감싼 호출의 `(`를 뒤로 훑어 찾고, 그 앞 이름을 `cl_vm_symbol_at`으로 물어 선언의 첫 줄을
+  라벨로 준다. 매개변수는 라벨에서 최상위 쉼표로 나누고, 메서드의 수신자 `(&Vec2)`는 뺀다. 활성 매개변수는 커서 앞의 최상위
+  쉼표 수다. 그대로 컴파일해 보고, 안 되면 커서에서 자르고 괄호를 닫은 사본으로 한 번 더 한다. 트리거 문자는 `(` · `,`.
+- 보정한 사본을 컴파일한 뒤에는 VM이 문서의 컴파일을 들고 있지 않다고 표시한다. 진단은 언제나 문서 본문 그대로의 것이다.
+
+한계:
+
+- 글자 수준의 보정이다. 문자열이나 주석 안의 커서를 가리지 못하고, 여러 줄에 걸친 호출의 바깥 괄호는 닫지 못한다.
+- 본문당 오류 하나(7절)의 영향을 받는다. 같은 본문에서 커서보다 앞에 오류가 있으면 그 뒤의 지역은 기록되지 않아 목록에 없다.
+  멤버 completion은 받는 쪽 식까지 sema가 가야 답한다.
+- 오버로드는 첫 선언의 시그니처 하나만 보인다.
+
+확인: lib 테스트 `cl_vm_members_at and cl_vm_names_at list what can be written at a place.`, 서버 테스트
+`Completion lists members and names for source that is being typed.` · `Signature help shows the function that is being called.`,
+`complete.zig`의 단위 테스트 둘. 저장소 `.cy` 154개에 completion · signatureHelp 40,476 요청(ReleaseSafe 서버), 죽는 것 없음.
+이 테스트를 쓰다가 F-116을 찾았다(private 필드가 있는 struct의 `print`가 컴파일되지 않는다, 2026-11-13 수정).
+
+### VS Code에서의 확인 (2026-11-13)
+
+그때까지의 확인은 모두 테스트와 스크립트로 쓴 클라이언트였다. `exts/vscode/test`가 확장을 실제 VS Code에서 돌린다.
+
+- `test/runTest.js`가 `@vscode/test-electron`으로 VS Code를 받아(처음 한 번) 임시 워크스페이스로 띄우고, `test/suite.js`가
+  그 안에서 에디터의 명령(`vscode.executeHoverProvider` 등)으로 묻는다. 확장이 서버를 띄우고 `vscode-languageclient`를 거쳐
+  답이 오는 길 전체가 검사된다.
+- 실행: `task test:vscode`, 또는 `exts/vscode`에서 `npm install` 뒤 `npm test -- ../../zig-out/bin/cyber-lsp`.
+  디스플레이가 없는 Linux는 `xvfb-run -a`로 감싼다. CI에는 넣지 않았다(VS Code 다운로드와 node가 필요하다).
+- 항목 아홉: 활성화와 진단(편집으로 오류 둘을 넣고 지운다), hover, 문서 안과 모듈로의 definition, references와 강조,
+  지역 rename과 함수 rename 거절, 개요와 접기, 입력 중의 completion과 signatureHelp, 문서 포맷, 서버 재시작 명령.
+- 결과: VS Code 1.146.0(Linux x64), ReleaseSafe 서버에서 아홉 모두 통과. 서버 쪽은 고칠 것이 없었다.
+- 에디터가 프로토콜 위에서 하는 일 둘을 알게 됐다. rename은 `prepareRename`을 먼저 묻고 `null`이면 자기 문구
+  (`The element can't be renamed.`)로 거절한다. 포맷은 서버가 문서 전체를 바꾸는 편집 하나를 보내도 에디터가 달라진 부분만
+  남긴 편집들로 줄인다. 그래서 6절의 "편집 하나"는 그대로 둔다.
+- VS Code의 사용자 데이터 디렉터리는 짧은 경로여야 한다(그 안의 소켓 경로가 100자쯤에서 잘린다). 러너가 임시 디렉터리를 준다.
+
+## 9. P4 구현: 워크스페이스 (2026-11-13)
+
+서버는 색인을 두지 않는다. 워크스페이스 전체가 필요한 요청은 그때 폴더를 다시 훑는다. 파일이 바뀐 것을 따라갈 장치가 필요 없고,
+이 저장소(`.cy` 약 470개)에서 심볼 요청이 25 ~ 106ms, references가 19ms다.
+
+- 워크스페이스: `initialize`의 `workspaceFolders`(없으면 `rootUri`)를 경로로 둔다. `src/lsp/workspace.zig`가 `.cy` 파일을
+  모은다(숨은 디렉터리 · `node_modules` · `zig-out` · `zig-cache` · `zig-pkg` 제외, 심링크는 따라가지 않음, 2000개까지, 이름순).
+  열린 문서는 편집기의 본문으로, 나머지는 디스크에서 읽는다. 디스크에 없는 열린 문서도 워크스페이스의 소스다.
+- `workspace/symbol`: 소스마다 파서만 돌려(개요와 같은 함수) 선언을 모으고 질의로 거른다. 질의는 글자가 순서대로 들어 있으면
+  맞는다(`vsc`가 `Vec2.scale`). 필드와 case는 `containerName`에 타입 이름이 들어간다. main 블록의 지역은 뺀다. 1000개까지.
+- 워크스페이스 전체 `references`: 지역이 아닌 이름이면, 이름이 단어로 들어 있는 소스만 골라 하나씩 main으로 컴파일하고
+  `cl_vm_symbol_refs_to(vm, def_uri, def_pos, &ranges)`로 "그 자리에 선언된 것을 가리키는 범위"를 묻는다. 같은 이름의 다른
+  함수는 선언 위치가 달라 섞이지 않는다. 선언만 하고 쓰지 않는 소스에서도 선언의 이름은 나온다. 요청 하나에 300개까지 컴파일한다.
+  표준 모듈에 선언된 것(`print`)은 문서 안에서만 찾는다.
+- 선언의 이름에서 묻기: 선언의 이름은 쓰임이 아니라 기록이 없었다. `cl_vm_symbol_at` · `cl_vm_symbol_refs`가 main 소스의 선언
+  (함수 · 타입 · 필드 등)의 이름 자리에서도 답한다. "쓰인 곳 찾기"를 가장 많이 묻는 자리다. hover도 같이 된다.
+- 필드 초기화의 이름(`Vec2{x = 1.0}`의 `x`)을 참조로 기록한다(8절의 "하지 않은 것"에서 뺀다).
+- `textDocument/semanticTokens/full`: `cl_vm_symbol_tokens(vm, &tokens)`가 컴파일러가 해석한 이름과 종류를 위치순으로 준다.
+  범례는 `namespace` · `type` · `enumMember` · `function` · `method` · `property` · `variable`, 수식자는 `readonly`(상수).
+  키워드 · 리터럴 · 해석되지 않은 이름은 토큰이 없고 문법 색을 그대로 쓴다. 본문의 첫 오류 뒤는 해석되지 않으므로 토큰이 없다.
+  매개변수와 지역은 구별하지 않는다(둘 다 `variable`).
+- `CLItemKind`에 `CL_ITEM_METHOD`를 더했다(수신자가 있는 함수). completion의 종류도 이것을 쓴다.
+- rename은 그대로 지역 · 매개변수만이다. 워크스페이스의 쓰임을 찾을 수 있게 됐지만, 컴파일되지 않는 소스와 워크스페이스 밖의
+  소스가 쓰는 곳은 여전히 모른다. 함수 rename은 그 한계를 정한 뒤에 한다.
+
+확인:
+
+- lib 테스트 `cl_vm_symbol_refs_to and cl_vm_symbol_tokens.`, 서버 테스트
+  `Workspace symbols and references across the sources of the workspace.` · `Semantic tokens name what the compiler resolved.`,
+  `workspace.zig`의 단위 테스트, VS Code 테스트에 두 항목 추가(파일을 넘는 references와 workspace 심볼, semantic tokens. 열한 항목 통과).
+- 저장소 `.cy` 463개에 hover · 강조 · semantic tokens 118,183 요청(Debug 서버), 죽는 것 없음. 그 과정에서 찾은 것 셋:
+  1. 실패한 컴파일 뒤 함수가 하나도 없는 함수 심볼(`FuncSym.first`가 없음)의 선언을 읽다 죽었다. `refs.declOf`가 가린다.
+  2. 선언만 있고 쓰임이 없는 소스에서 `cl_vm_symbol_refs_to`가 선언을 못 찾았다(VS Code 테스트가 잡았다).
+  3. F-114 수정(reset의 sweep)이 타입 템플릿 인스턴스의 객체 param을 먼저 지워, 심볼이 지워질 때 한 번 더 해제했다
+     (`Tag['x']`처럼 문자열 param을 가진 인스턴스를 컴파일한 뒤 다음 컴파일에서 `Double free`). 다음 파일을 열 때 서버가 죽는
+     꼴로 보였다. 인스턴스의 값은 다른 컴파일 타임 값과 같이 sweep 전에 놓고(`Instance.releaseValues`), param 배열은 sweep이
+     객체의 타입 인자를 읽을 수 있게 심볼이 지워질 때까지 둔다. F-114의 회귀 테스트에 그런 템플릿을 넣었다.
+
+## 10. 최종 리뷰 (2026-11-13)
+
+독립된 리뷰어 셋에게 영역을 나눠(컴파일러 변경 · 서버 · 공개 API와 릴리스) 코드만 주고 읽게 했다. 발견마다 실패 시나리오와
+실행으로 확인했는지를 적게 했다. 확인된 것은 모두 고쳤고 회귀 테스트를 붙였다.
+
+컴파일러:
+
+- 조회 API(`cl_vm_symbol_at` 등 여섯)가 컴파일 전 · reset 뒤 · main 소스에 이르기 전에 실패한 컴파일 뒤에 불리면 죽었다
+  (`main_chunk`가 미정이거나 해제됨). 두 리뷰어가 따로 찾았다. `Compiler.refs_main`이 "기록이 있는 main 청크"를 가리키고
+  없으면 조회는 false · 0이다. 기록을 끄고 한 컴파일에도 답하지 않는다(선언의 이름만 답하는 부분 결과를 내지 않는다).
+- 템플릿 인스턴스의 메서드는 시그니처를 해석하기 전에 인스턴스의 모듈에 예약된다. 해석이 실패하면 다음 조회가 시그니처 없는
+  함수를 받았다(복구 모드의 다음 본문, 복구 없이도 `persist_main` 세션의 다음 eval). 실패하면 이름을 모듈에서 뺀다.
+- 복구가 할당 실패 뒤에도 계속했다. 메모리 부족은 `CompileError`로도 도착하므로 `compile`처럼 allocator의 실패 수를 본다.
+- `declaredAt`이 다른 청크의 오프셋으로 main 소스를 잘랐다. 제네릭 컴파일 타임 호출의 인자는 본문이 있는 함수일 때만
+  피호출 쪽 것이다(호스트가 평가하는 함수는 인자를 묶지 않는다).
+
+서버:
+
+- 치다 만 소스가 파서를 죽였다(`fn f(a`, `return ,`). 서버는 그런 소스를 키 입력마다 본다. 리뷰어의 제안대로 소스의 모든
+  접두사를 넣어 봤다: 저장소 `.cy` 463개의 접두사 293,814개를 파서에, 300개의 접두사 63,954개를 컴파일러에. 더 나온 것:
+  값 없는 `const a` · 필드 없는 `cstruct`의 `Node.end()`, `type X = #[`의 속성, `const z = h`(함수 이름을 값으로, 시그니처 해석 전),
+  반환 타입을 추론 중인 람다의 빌림 반환(`fn() => borrow`). 모두 컴파일 오류가 됐고 지금은 둘 다 0건이다.
+- 문서의 경로를 정규 경로로 둔다(`documentPath`). 심링크를 거쳐 연 문서가 컴파일러가 해석한 모듈 경로와 달라 편집기의
+  본문이 쓰이지 않았다. 같은 경로의 uri 둘은 문서 하나다(나중 것이 자리를 차지). 스킴이 없는 이름(`core`)은 `untitled:`를
+  붙여 표준 모듈로 오인되지 않게 한다.
+- 문서를 닫으면 남은 문서를 다시 검사한다(닫힌 모듈의 편집기 본문 대신 디스크를 읽게 된다).
+- 워크스페이스 목록: 디렉터리 5000개 · 깊이 24까지, 그리고 문서를 열고 · 저장하고 · 닫을 때까지 목록을 둔다. 루트가 `/`일 때
+  요청 하나가 12.8초였고 지금은 0.1초다. 9절의 "요청 때마다 훑는다"는 이렇게 바뀐다. 다른 프로그램이 만든 파일은 다음 그런
+  사건 뒤에 보인다.
+- 요청의 `id`는 수나 문자열만 받는다(깊이 256 이상의 배열을 그대로 되돌려 쓰다 죽었다). `id` 없는 요청에는 답하지 않는다.
+  `Content-Length`는 숫자만.
+- VS Code 클라이언트: 시작과 중지를 한 줄로 세운다(시작 중의 재시작이나 연속된 설정 변경이 서버를 고아로 남길 수 있었다).
+
+릴리스:
+
+- `install.sh`가 받기 전에 이전 `cyber-lsp`를 지워, 다운로드가 실패하면 서버만 사라졌다. 임시 파일로 먼저 받는다.
+  낡은 심링크는 경로 문자열 비교가 아니라 "가리키는 곳이 없는 링크"로 가린다.
+
+고치지 않은 것: `CYBER_HOME`에 작은따옴표가 든 경우(master에도 있던 인용 방식), Windows의 드라이브 문자 대소문자,
+`StackMark`가 되돌리지 않는 작은 목록 둘(누수만, reset에서 풀림).
+
+## 11. 다음
+
+- 파서 복구(P2의 나머지): 들여쓰기 기준 블록 동기화로 구문 오류를 여러 개 낸다. 구문 오류가 있으면 sema는 돌지 않는다.
+- F-114(검사마다 느는 메모리)와 F-116(private 필드 struct의 `print`)은 2026-11-13에 고쳤다. F-114는 서버가 아니라
+  컴파일러의 reset이 컴파일 타임 힙을 비우지 않던 것이다. 300번 검사에 RSS가 변하지 않는다.
+- P5: 함수 · 타입의 rename(워크스페이스 references 위에서, 한계를 정한 뒤), code action, inlay hint.
+- Windows에서의 실행 확인.

@@ -44,6 +44,7 @@ fi
 
 # The bundle holds the executable. Its standard modules are embedded since 0.4.7;
 # older bundles also hold `src/`, which the executable looks up next to itself.
+# Bundles after 0.4.9 also hold the language server `cyber-lsp`, which is linked the same way.
 # Unpack under CYBER_HOME and link the binary into CYBER_BIN, which should be on PATH.
 CYBER_HOME="${CYBER_HOME:-/usr/local/lib/cyber}"
 CYBER_BIN="${CYBER_BIN:-/usr/local/bin}"
@@ -84,9 +85,29 @@ else
 fi
 
 echo "Downloading ${CYBER_BUNDLE}."
+# The bundle is downloaded to a temporary file first, so that a download that fails changes nothing.
+CYBER_TMP="$(mktemp "${TMPDIR:-/tmp}/cyber-bundle.XXXXXX")" || abort "Install failed."
+trap 'rm -f "${CYBER_TMP}"' EXIT
+curl -fsSL "${CYBER_BUNDLE}" -o "${CYBER_TMP}" || abort "Download failed."
+chmod a+r "${CYBER_TMP}"
+
+# A language server left by an earlier install is removed before unpacking: it has to be the version of the
+# executable, and a bundle up to 0.4.9 does not replace it. If the bundle brings none, a link to it that
+# now points nowhere goes too.
 ${SUDO} sh -c "mkdir -p '${CYBER_HOME}' '${CYBER_BIN}' && \
-    curl -fsSL '${CYBER_BUNDLE}' | tar -xz -C '${CYBER_HOME}' && \
+    rm -f '${CYBER_HOME}/cyber-lsp' && \
+    tar -xzf '${CYBER_TMP}' -C '${CYBER_HOME}' && \
     chmod a+x '${CYBER_HOME}/cyber' && \
-    ln -sf '${CYBER_HOME}/cyber' '${CYBER_BIN}/cyber'" \
+    ln -sf '${CYBER_HOME}/cyber' '${CYBER_BIN}/cyber' && \
+    if [ -f '${CYBER_HOME}/cyber-lsp' ]; then \
+      chmod a+x '${CYBER_HOME}/cyber-lsp' && \
+      ln -sf '${CYBER_HOME}/cyber-lsp' '${CYBER_BIN}/cyber-lsp'; \
+    elif [ -L '${CYBER_BIN}/cyber-lsp' ] && [ ! -e '${CYBER_BIN}/cyber-lsp' ]; then \
+      rm -f '${CYBER_BIN}/cyber-lsp'; \
+    fi" \
   || abort "Install failed."
 echo "Installed to ${CYBER_HOME}, linked as ${CYBER_BIN}/cyber."
+if [[ -f "${CYBER_HOME}/cyber-lsp" ]]
+then
+  echo "The language server is linked as ${CYBER_BIN}/cyber-lsp."
+fi

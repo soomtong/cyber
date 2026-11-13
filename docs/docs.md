@@ -4719,6 +4719,49 @@ if (cl_vm_compile_error(vm, &err)) {
 ```
 `msg` and `uri` are owned by the VM and stay valid until its next eval, compile, validate or reset. `kind` is `CL_REPORT_TOKEN_ERROR`, `CL_REPORT_PARSE_ERROR` or `CL_REPORT_COMPILE_ERROR`. `cl_vm_compile_error` returns false if the last result was not `CL_ERROR_COMPILE`.
 
+`cl_vm_compile_report` returns the whole reported range and `cl_vm_compile_report_note` the other places that the summary prints with an error, for a host that marks errors in an editor:
+```c
+size_t count = cl_vm_compile_report_count(vm);
+for (size_t i = 0; i < count; i += 1) {
+    CLReport rep;
+    cl_vm_compile_report(vm, i, &rep);
+    // Lines and columns start at 0, columns count bytes, and the end is exclusive.
+    // `pos` and `end_pos` are the same range as byte offsets in the source.
+    if (rep.has_loc) {
+        printf("%u:%u-%u:%u: ", rep.line + 1, rep.col + 1, rep.end_line + 1, rep.end_col + 1);
+    }
+    printf("%.*s\n", (int)rep.msg.len, rep.msg.ptr);
+
+    CLReport note;
+    for (size_t j = 0; cl_vm_compile_report_note(vm, i, j, &note); j += 1) {
+        // `First declared at:` with the first declaration, or the call that expanded a template (empty `msg`).
+    }
+}
+```
+A range can end on a later line than it starts. A token or parse error reports a position: its range is the code point there, or empty at the end of a line. 
+By default the compiler stops at its first error and the count is 0 or 1. `cl_vm_set_error_recovery(vm, true)` lets it go on: the main block, each function and each method is abandoned at its first error and the others are still checked, so every body reports at most one error. A syntax error or an error in a declaration (a type, a signature, a global) still ends the compile. The result is `CL_ERROR_COMPILE` either way and nothing is run. The summary and `cl_vm_compile_error` describe the first error.
+
+### Asking what a name is.
+For editor tooling, `cl_vm_set_symbol_info(vm, true)` makes the compiler record what the names in the main source refer to. After a compile, `cl_vm_symbol_at` describes what is at a byte offset:
+```c
+cl_vm_set_symbol_info(vm, true);
+cl_vm_validate(vm, src);
+
+CLSymbolInfo info;
+if (cl_vm_symbol_at(vm, pos, &info)) {
+    // `fn add(a int, b int) -> int`, `total int`, or the type of an expression.
+    printf("%.*s\n", (int)info.detail.len, info.detail.ptr);
+    if (info.has_def) {
+        // The declaration is at bytes `def_pos`..`def_end_pos` of the source `def_uri`.
+    }
+}
+```
+`detail` is the first line of the declaration for a function, a type, a constant or a global, `name Type` for a local, a parameter or a field, and the type for any other expression. The compile may have failed: what was resolved before the error is still answered. `detail` and `def_uri` are owned by the VM and stay valid until the next call, eval, compile, validate or reset. `info.kind` tells a local (`CL_SYMBOL_LOCAL`) from something declared outside of a function body (`CL_SYMBOL_DECL`) and from an expression that is not a name (`CL_SYMBOL_EXPR`).
+
+`cl_vm_symbol_refs(vm, pos, &ranges)` returns the number of places in the main source that name the same thing as the name at `pos`, and sets `ranges` to them: the uses and, if it is declared in the main source, the name in the declaration. Uses in other modules are not found. 
+For completion, `cl_vm_members_at(vm, pos, &items)` lists the members of the expression that ends at `pos` (the fields and methods of its type, or what a module or a type declares), and `cl_vm_names_at(vm, pos, &items)` lists the names that can be used at `pos`: the locals and parameters of the function around it, what the main source declares and uses, and the builtins. Each `CLItem` has a `name`, a one line `detail` and a `kind`. Source that is being typed usually does not parse, so a host compiles a copy without the unfinished part (`v.` as `v`) and asks at the end of the receiver. 
+A name in a declaration of the main source can be asked like a use of it. To find the uses of a symbol in the other sources of a project, a host compiles each of them as the main source and calls `cl_vm_symbol_refs_to(vm, def_uri, def_pos, &ranges)` with the declaration that `cl_vm_symbol_at` reported. `cl_vm_symbol_tokens(vm, &tokens)` lists every resolved name of the main source with its `CLItemKind`, for highlighting by meaning. The language server `cyber-lsp` uses all of these.
+
 ### Checking a script without running it.
 `cl_vm_validate` compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (`persist_main`) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (`use math`) is initialized by the next eval that runs.
 ```c

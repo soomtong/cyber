@@ -660,6 +660,991 @@ test "cl_vm_compile_error returns the location of a compile error." {
     try zt.expect(!C.vm_compile_error(vm, &err));
 }
 
+test "Compile reports give the range and the notes of a compile error." {
+    // `cl_vm_compile_error` gives the start, the length on the first line and the head of the chain only.
+    // A language server needs the whole range and the related places (docs/specs/2026-11-12-lsp-design.md, P0).
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    var rep: C.Report = undefined;
+
+    // Nothing was compiled yet.
+    try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
+    try zt.expect(!C.vm_compile_report(vm, 0, &rep));
+    try zt.expect(!C.vm_compile_report_note(vm, 0, 0, &rep));
+    try zt.eq(@as(usize, 0), rep.msg.len);
+
+    // The range of a node, as lines and columns and as byte offsets. The end is exclusive.
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "a := 1\nprint(nope)", &res));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(C.ReportCompileError, rep.kind);
+    try zt.eqStr("Undeclared variable `nope`.", C.from_bytes(rep.msg));
+    try zt.eqStr("eval", C.from_bytes(rep.uri));
+    try zt.expect(rep.has_loc);
+    try zt.eq(@as(u32, 1), rep.line);
+    try zt.eq(@as(u32, 6), rep.col);
+    try zt.eq(@as(u32, 1), rep.end_line);
+    try zt.eq(@as(u32, 10), rep.end_col);
+    try zt.eq(@as(u32, 13), rep.pos);
+    try zt.eq(@as(u32, 17), rep.end_pos);
+    // There is no other report and this one has no notes.
+    try zt.expect(!C.vm_compile_report(vm, 1, &rep));
+    try zt.expect(!rep.has_loc);
+    try zt.expect(!C.vm_compile_report_note(vm, 0, 0, &rep));
+    try zt.expect(!C.vm_compile_report_note(vm, 1, 0, &rep));
+
+    // Columns count bytes: `한글` is 6 bytes.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "x := '한글' + nope", &res));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(@as(u32, 16), rep.col);
+    try zt.eq(@as(u32, 20), rep.end_col);
+    try zt.eq(@as(u32, 16), rep.pos);
+    try zt.eq(@as(u32, 20), rep.end_pos);
+
+    // A node that continues on later lines ends on its last line. `CLCompileError.len` stops at the first.
+    // A context note carries its message and the place it points to.
+    C.vm_reset(vm);
+    const dup_src = "type A:\n  a int\n\ntype A:\n  b int\n";
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, dup_src, &res));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("`A` has already been declared as a `type`", C.from_bytes(rep.msg));
+    try zt.eq(@as(u32, 3), rep.line);
+    try zt.eq(@as(u32, 0), rep.col);
+    try zt.eq(@as(u32, 4), rep.end_line);
+    try zt.eq(@as(u32, 7), rep.end_col);
+    try zt.eqStr("type A:\n  b int", dup_src[rep.pos..rep.end_pos]);
+    try zt.expect(C.vm_compile_report_note(vm, 0, 0, &rep));
+    try zt.eq(C.ReportNote, rep.kind);
+    try zt.eqStr("First declared at:", C.from_bytes(rep.msg));
+    try zt.eqStr("eval", C.from_bytes(rep.uri));
+    try zt.expect(rep.has_loc);
+    try zt.eq(@as(u32, 0), rep.line);
+    try zt.eq(@as(u32, 0), rep.col);
+    try zt.eq(@as(u32, 1), rep.end_line);
+    try zt.eqStr("type A:\n  a int", dup_src[rep.pos..rep.end_pos]);
+    try zt.expect(!C.vm_compile_report_note(vm, 0, 1, &rep));
+    try zt.eq(@as(usize, 0), rep.msg.len);
+
+    // An error inside a template has the call that expanded it as a note without a message.
+    C.vm_reset(vm);
+    const tmpl_src = "type Foo[T Any]:\n  a T.nope\n\nfn main():\n  f := Foo[int]{a = 1}\n";
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, tmpl_src, &res));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("Can not find the symbol `nope` in `int`.", C.from_bytes(rep.msg));
+    try zt.eq(@as(u32, 1), rep.line);
+    try zt.eqStr("nope", tmpl_src[rep.pos..rep.end_pos]);
+    try zt.expect(C.vm_compile_report_note(vm, 0, 0, &rep));
+    try zt.eq(C.ReportNote, rep.kind);
+    try zt.eq(@as(usize, 0), rep.msg.len);
+    try zt.eq(@as(u32, 4), rep.line);
+    try zt.eq(@as(u32, 7), rep.col);
+    try zt.eqStr("Foo[int]", tmpl_src[rep.pos..rep.end_pos]);
+    try zt.expect(!C.vm_compile_report_note(vm, 0, 1, &rep));
+
+    // A parse error and a token error report a position. The range is the code point there.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "a := 'abc", &res));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(C.ReportTokenError, rep.kind);
+    try zt.eq(@as(u32, 0), rep.line);
+    try zt.eq(@as(u32, 6), rep.col);
+    try zt.eq(@as(u32, 0), rep.end_line);
+    try zt.eq(@as(u32, 7), rep.end_col);
+    try zt.eq(@as(u32, 6), rep.pos);
+    try zt.eq(@as(u32, 7), rep.end_pos);
+
+    // At the end of the source the range is empty.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "a := 1\nb := a +\n", &res));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(C.ReportParseError, rep.kind);
+    try zt.expect(rep.has_loc);
+    try zt.eq(@as(u32, 2), rep.line);
+    try zt.eq(@as(u32, 0), rep.col);
+    try zt.eq(@as(u32, 2), rep.end_line);
+    try zt.eq(@as(u32, 0), rep.end_col);
+    try zt.eq(@as(u32, 16), rep.pos);
+    try zt.eq(@as(u32, 16), rep.end_pos);
+
+    // `cl_vm_validate` records its error the same way.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "print(nope)"));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(@as(u32, 6), rep.pos);
+    try zt.eq(@as(u32, 10), rep.end_pos);
+
+    // An error that does not belong to a source has no location.
+    C.vm_reset(vm);
+    var config = C.defaultEvalConfig();
+    config.backend = C.BackendJIT;
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "a := 1", config, &res));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(@as(usize, 0), rep.uri.len);
+    try zt.expect(!rep.has_loc);
+
+    // The reports are those of the last compile.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "print(nope)", &res));
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm, "panic('boom')", &res));
+    try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
+    try zt.expect(!C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(C.Success, C.vm_eval(vm, "a := 1", &res));
+    try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
+}
+
+test "A compile-time call with a string argument does not end the host." {
+    // `#print('x')` ended the process with `panic: Unsupported: .eval_ref`, and a generic function evaluated
+    // with a string freed the string twice (F-112). A host that only compiles, like the language server, died too.
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    var err: C.CompileError = undefined;
+
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "#print('hello')\nprint(1)", &res));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eqStr("`type.info` does not support the type `EvalStr`.", C.from_bytes(err.msg));
+
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "#print('hello')"));
+
+    // The callee owns the argument, also when it passes it on and when it fails.
+    C.vm_reset(vm);
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\fn g(x %T) -> int:
+        \\    return 2
+        \\fn f(x %T) -> int:
+        \\    return g(x)
+        \\#a := f('abc')
+    , &res));
+
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\fn f(x %T) -> int:
+        \\    return nope
+        \\#a := f('abc')
+    , &res));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eqStr("Could not find the symbol `nope`.", C.from_bytes(err.msg));
+}
+
+test "With error recovery every body reports its first error." {
+    // docs/specs/2026-11-12-lsp-design.md, P2.
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    var res: C.EvalResult = undefined;
+    var rep: C.Report = undefined;
+    var err: C.CompileError = undefined;
+
+    const src =
+        \\fn a() -> int:
+        \\    return nope1
+        \\
+        \\fn b() -> int:
+        \\    x := 1
+        \\    if x == 1:
+        \\        return nope2
+        \\    return nope2b
+        \\
+        \\type T:
+        \\    v int
+        \\
+        \\fn (&T) m() -> int:
+        \\    f := fn(y int) -> int:
+        \\        return y + self.zz
+        \\    return f(1)
+        \\
+        \\fn ok() -> int:
+        \\    return 1
+        \\
+        \\print(a() + nope3)
+        \\print(nope4)
+    ;
+
+    // Off by default: the compile ends at the first error, which is in the main block.
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("Undeclared variable `nope3`.", C.from_bytes(rep.msg));
+
+    // On: the main block and each function report their first error. A body is given up at that error,
+    // so `nope4` and `nope2b` are not reported. The setting is kept across a reset.
+    C.vm_set_error_recovery(vm, true);
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
+    try zt.eq(@as(usize, 4), C.vm_compile_report_count(vm));
+    const expected = [_]struct { line: u32, msg: []const u8 }{
+        .{ .line = 20, .msg = "Undeclared variable `nope3`." },
+        .{ .line = 1, .msg = "Undeclared variable `nope1`." },
+        .{ .line = 6, .msg = "Undeclared variable `nope2`." },
+        .{ .line = 14, .msg = "Field `zz` does not exist in `T`." },
+    };
+    for (expected, 0..) |exp, i| {
+        try zt.expect(C.vm_compile_report(vm, i, &rep));
+        try zt.eq(C.ReportCompileError, rep.kind);
+        try zt.eq(exp.line, rep.line);
+        try zt.eqStr(exp.msg, C.from_bytes(rep.msg));
+    }
+    try zt.expect(!C.vm_compile_report(vm, 4, &rep));
+    // The summary and `cl_vm_compile_error` describe the first one.
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eqStr("Undeclared variable `nope3`.", C.from_bytes(err.msg));
+
+    // Nothing ran, and the next compile starts clean.
+    try zt.eq(C.Success, C.vm_eval(vm, "fn main() -> int:\n    return 7", &res));
+    try zt.eq(@as(i64, 7), @as(*i64, @ptrCast(@alignCast(res.res))).*);
+    try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
+
+    // `cl_vm_validate` recovers the same way.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "fn a() -> int:\n    return nope1\nfn b() -> int:\n    return nope2"));
+    try zt.eq(@as(usize, 2), C.vm_compile_report_count(vm));
+
+    // A syntax error and an error in a declaration still end the compile.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "fn a() -> int:\n    return nope1\nfn b( -> int:\n    return nope2", &res));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(C.ReportParseError, rep.kind);
+
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "fn a(x Nope) -> int:\n    return 1\nfn b() -> int:\n    return nope2", &res));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+}
+
+test "With error recovery a template that failed to expand is reported once." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_error_recovery(vm, true);
+
+    var res: C.EvalResult = undefined;
+    var rep: C.Report = undefined;
+
+    // `Foo[int]` fails in `a`. `b` asks for the same instance: it is given up without a second report, and
+    // without using the instance that was left half resolved. `c` expands another instance, which has its own error.
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\type Foo[T Any]:
+        \\    a T.nope
+        \\
+        \\fn a():
+        \\    f := Foo[int]{a = 1}
+        \\
+        \\fn b():
+        \\    g := Foo[int]{a = 2}
+        \\
+        \\fn c():
+        \\    h := Foo[str]{a = 2}
+    , &res));
+    try zt.eq(@as(usize, 2), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("Can not find the symbol `nope` in `int`.", C.from_bytes(rep.msg));
+    try zt.expect(C.vm_compile_report_note(vm, 0, 0, &rep));
+    try zt.eq(@as(u32, 4), rep.line);
+    try zt.expect(C.vm_compile_report(vm, 1, &rep));
+    try zt.eqStr("Can not find the symbol `nope` in `str`.", C.from_bytes(rep.msg));
+    try zt.expect(C.vm_compile_report_note(vm, 1, 0, &rep));
+    try zt.eq(@as(u32, 10), rep.line);
+
+    // The body of a function template is a body of its own, per instance.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\fn id[T Any](x T) -> T:
+        \\    return x.nope
+        \\
+        \\fn a() -> int:
+        \\    return id[int](1)
+        \\
+        \\fn b() -> float:
+        \\    return id[float](1.0) + nope2
+    , &res));
+    try zt.eq(@as(usize, 3), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("Undeclared variable `nope2`.", C.from_bytes(rep.msg));
+    try zt.expect(C.vm_compile_report(vm, 1, &rep));
+    try zt.eqStr("Field `nope` does not exist in `int`.", C.from_bytes(rep.msg));
+    try zt.expect(C.vm_compile_report(vm, 2, &rep));
+    try zt.eqStr("Field `nope` does not exist in `float`.", C.from_bytes(rep.msg));
+
+    // An instance whose signature does not resolve has no body to check (this aborted the compiler).
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\type Shape trait:
+        \\    fn area() -> float
+        \\fn hash[K Any](key K) -> int:
+        \\    return 1
+        \\x := hash[Shape]
+    , &res));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("Expected a value type for the parameter. `Shape` is a trait.", C.from_bytes(rep.msg));
+}
+
+test "cl_vm_symbol_at describes the names of the main source." {
+    // docs/specs/2026-11-12-lsp-design.md, P3.
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    const src =
+        \\use math
+        \\
+        \\type Vec2:
+        \\    x float
+        \\    y float
+        \\
+        \\fn (&Vec2) len() -> float:
+        \\    return math.sqrt(self.x * self.x + self.y * self.y)
+        \\
+        \\type Color enum:
+        \\    case red
+        \\    case green
+        \\
+        \\const limit = 10
+        \\
+        \\fn add(a int, b int) -> int:
+        \\    total := a + b
+        \\    return total + limit
+        \\
+        \\v := Vec2{x = 1.0, y = 2.0}
+        \\n := add(1, 2)
+        \\c := Color.green
+        \\print(v.len() + float(n))
+        \\s := 'abc'
+        \\print(s.len())
+    ;
+    const S = struct {
+        /// Asks at the `nth` occurrence of `needle` and checks the range, the description and the declaration.
+        fn expect(vm_: *C.VM, src_: []const u8, needle: []const u8, nth: usize, detail: []const u8, def: ?[]const u8) !void {
+            var pos: usize = 0;
+            var n: usize = 0;
+            while (true) : (n += 1) {
+                pos = std.mem.findPos(u8, src_, pos, needle).?;
+                if (n == nth) break;
+                pos += 1;
+            }
+            var info: C.SymbolInfo = undefined;
+            try zt.expect(C.vm_symbol_at(vm_, @intCast(pos), &info));
+            // `needle` starts with the name and can go on to tell one occurrence from another.
+            try zt.eq(@as(u32, @intCast(pos)), info.pos);
+            try zt.expect(std.mem.startsWith(u8, needle, src_[info.pos..info.end_pos]));
+            try zt.eqStr(detail, C.from_bytes(info.detail));
+            if (def) |text| {
+                try zt.expect(info.has_def);
+                try zt.eqStr("main", C.from_bytes(info.def_uri));
+                try zt.eqStr(text, src_[info.def_pos..info.def_end_pos]);
+            }
+            // The position right after the name finds it too.
+            var after: C.SymbolInfo = undefined;
+            try zt.expect(C.vm_symbol_at(vm_, info.end_pos, &after));
+            try zt.eq(info.pos, after.pos);
+        }
+    };
+
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+    var info: C.SymbolInfo = undefined;
+
+    // Off by default: nothing is recorded.
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    try zt.expect(!C.vm_symbol_at(vm, 5, &info));
+    try zt.eq(@as(usize, 0), info.detail.len);
+
+    C.vm_set_symbol_info(vm, true);
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+
+    // A local, at its declaration and at a use. Its type is the one that was inferred.
+    try S.expect(vm, src, "total", 0, "total int", "total");
+    try S.expect(vm, src, "total", 1, "total int", "total");
+    try S.expect(vm, src, "v", 0, "v Vec2", "v");
+    // A parameter.
+    try S.expect(vm, src, "a + b", 0, "a int", "a");
+    try S.expect(vm, src, "self", 0, "self &Vec2", null);
+    // A field is declared by its name in the type.
+    try S.expect(vm, src, "x *", 0, "x float", "x");
+    // Functions, methods, types, constants: the first line of the declaration.
+    try S.expect(vm, src, "add(1", 0, "fn add(a int, b int) -> int", "fn add(a int, b int) -> int:\n    total := a + b\n    return total + limit");
+    try S.expect(vm, src, "len()", 1, "fn (&Vec2) len() -> float", null);
+    try S.expect(vm, src, "Vec2{", 0, "type Vec2", "type Vec2:\n    x float\n    y float");
+    try S.expect(vm, src, "limit", 1, "const limit = 10", "const limit = 10");
+    try S.expect(vm, src, "Color.", 0, "type Color enum", null);
+    try S.expect(vm, src, "green", 1, "case Color.green", null);
+
+    // A name from a module is declared in that module. Attributes are not part of the description.
+    var pos: u32 = @intCast(std.mem.find(u8, src, "sqrt").?);
+    try zt.expect(C.vm_symbol_at(vm, pos, &info));
+    try zt.eqStr("fn sqrt(a float) -> float", C.from_bytes(info.detail));
+    try zt.expect(info.has_def);
+    try zt.eqStr("math", C.from_bytes(info.def_uri));
+    pos = @intCast(std.mem.find(u8, src, "math.").?);
+    try zt.expect(C.vm_symbol_at(vm, pos, &info));
+    try zt.eqStr("module math", C.from_bytes(info.detail));
+    pos = @intCast(std.mem.find(u8, src, "s.len()").? + 2);
+    try zt.expect(C.vm_symbol_at(vm, pos, &info));
+    try zt.eqStr("fn (&str) len() -> int", C.from_bytes(info.detail));
+    try zt.eqStr("core", C.from_bytes(info.def_uri));
+
+    // Any other expression has its type. The smallest expression at the position is taken.
+    pos = @intCast(std.mem.find(u8, src, "1.0").?);
+    try zt.expect(C.vm_symbol_at(vm, pos, &info));
+    try zt.eqStr("1.0", src[info.pos..info.end_pos]);
+    try zt.eqStr("float", C.from_bytes(info.detail));
+    try zt.expect(!info.has_def);
+    pos = @intCast(std.mem.find(u8, src, "+ limit").?);
+    try zt.expect(C.vm_symbol_at(vm, pos, &info));
+    try zt.eqStr("total + limit", src[info.pos..info.end_pos]);
+    try zt.eqStr("int", C.from_bytes(info.detail));
+
+    // Nothing at a keyword or past the end.
+    try zt.expect(!C.vm_symbol_at(vm, 0, &info));
+    try zt.expect(!C.vm_symbol_at(vm, @intCast(src.len + 10), &info));
+
+    // A compile that fails keeps what was resolved before the error.
+    const bad = "fn add(a int, b int) -> int:\n    return a + b\nn := add(1, 2)\nprint(n + nope)";
+    try zt.eq(C.ErrorCompile, C.vm_compile(vm, "main", bad, config));
+    pos = @intCast(std.mem.find(u8, bad, "add(1").?);
+    try zt.expect(C.vm_symbol_at(vm, pos, &info));
+    try zt.eqStr("fn add(a int, b int) -> int", C.from_bytes(info.detail));
+    pos = @intCast(std.mem.find(u8, bad, "nope").?);
+    try zt.expect(!C.vm_symbol_at(vm, pos, &info));
+
+    // The references are those of the last compile.
+    try zt.eq(C.Success, C.vm_compile(vm, "main", "a := 1", config));
+    try zt.expect(C.vm_symbol_at(vm, 0, &info));
+    try zt.eqStr("a int", C.from_bytes(info.detail));
+    try zt.expect(!C.vm_symbol_at(vm, 40, &info));
+}
+
+test "cl_vm_symbol_refs finds the places that name the same thing." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_symbol_info(vm, true);
+
+    const src =
+        \\type Vec2:
+        \\    x float
+        \\    y float
+        \\
+        \\fn (&Vec2) sum() -> float:
+        \\    return self.x + self.y + self.x
+        \\
+        \\fn add(a int, b int) -> int:
+        \\    total := a + b
+        \\    if total > 0:
+        \\        total := a
+        \\        return total
+        \\    return total + a
+        \\
+        \\fn id[T Any](x T) -> T:
+        \\    return x
+        \\
+        \\v := Vec2{x = 1.0, y = 2.0}
+        \\print(v.sum() + float(add(1, 2)))
+        \\print(add(id[int](3), 4))
+        \\print(id[float](1.5))
+    ;
+    const S = struct {
+        /// The texts of the lines that the ranges for the `nth` occurrence of `needle` start on are not useful
+        /// to compare, so the ranges are compared as offsets of the occurrences of `needle` listed in `expected`.
+        fn expect(vm_: *C.VM, src_: []const u8, needle: []const u8, nth: usize, expected: []const usize) !void {
+            var offsets: [16]u32 = undefined;
+            var n: usize = 0;
+            var pos: usize = 0;
+            while (std.mem.findPos(u8, src_, pos, needle)) |found| : (n += 1) {
+                offsets[n] = @intCast(found);
+                pos = found + 1;
+            }
+            var ptr: [*c]const C.Range = null;
+            const len = C.vm_symbol_refs(vm_, offsets[nth], &ptr);
+            try zt.eq(expected.len, len);
+            for (expected, 0..) |occurrence, i| {
+                try zt.eq(offsets[occurrence], ptr[i].pos);
+            }
+        }
+    };
+
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+
+    var info: C.SymbolInfo = undefined;
+    var ptr: [*c]const C.Range = null;
+
+    // A local: its declaration and its uses. The inner `total` is another local, asked from any of its places.
+    try S.expect(vm, src, "total", 0, &.{ 0, 1, 4 });
+    try S.expect(vm, src, "total", 4, &.{ 0, 1, 4 });
+    try S.expect(vm, src, "total", 2, &.{ 2, 3 });
+    try S.expect(vm, src, "total", 3, &.{ 2, 3 });
+    try zt.expect(C.vm_symbol_at(vm, @intCast(std.mem.find(u8, src, "total").?), &info));
+    try zt.eq(C.SymbolLocal, info.kind);
+
+    // A function: the name in its declaration and the calls. Asked at a call or at the declaration.
+    try S.expect(vm, src, "add(", 1, &.{ 0, 1, 2 });
+    try zt.expect(C.vm_symbol_at(vm, @intCast(std.mem.find(u8, src, "add(1").?), &info));
+    try zt.eq(C.SymbolDecl, info.kind);
+
+    // A field and a method.
+    // `self` is not declared in the source. Its uses in the method are still found.
+    try S.expect(vm, src, "self.", 0, &.{ 0, 1, 2 });
+    const field_use: u32 = @intCast(std.mem.find(u8, src, "self.x").? + 5);
+    var len = C.vm_symbol_refs(vm, field_use, &ptr);
+    // The declaration, two uses in the method, and the name in the initializer `Vec2{x = 1.0, ...}`.
+    try zt.eq(@as(usize, 4), len);
+    try zt.eqStr("x float", src[ptr[0].pos .. ptr[0].pos + 7]);
+    try zt.eqStr("x + self.y", src[ptr[1].pos .. ptr[1].pos + 10]);
+    try zt.eq(@as(u32, 1), ptr[0].end_pos - ptr[0].pos);
+    try S.expect(vm, src, "sum()", 1, &.{ 0, 1 });
+
+    // A type.
+    try S.expect(vm, src, "Vec2", 2, &.{ 0, 1, 2 });
+
+    // A name inside a template is checked once per instance and listed once.
+    const x_use: u32 = @intCast(std.mem.find(u8, src, "return x").? + 7);
+    len = C.vm_symbol_refs(vm, x_use, &ptr);
+    try zt.eq(@as(usize, 2), len);
+    try zt.eqStr("x T)", src[ptr[0].pos .. ptr[0].pos + 4]);
+    try zt.eq(x_use, ptr[1].pos);
+    try S.expect(vm, src, "id[", 1, &.{ 0, 1, 2 });
+
+    // An expression that is not a name, and a place without anything.
+    len = C.vm_symbol_refs(vm, @intCast(std.mem.find(u8, src, "1.0").?), &ptr);
+    try zt.eq(@as(usize, 0), len);
+    try zt.expect(ptr == null);
+    try zt.eq(@as(usize, 0), C.vm_symbol_refs(vm, 0, &ptr));
+    try zt.expect(C.vm_symbol_at(vm, @intCast(std.mem.find(u8, src, "1.0").?), &info));
+    try zt.eq(C.SymbolExpr, info.kind);
+}
+
+test "cl_vm_members_at and cl_vm_names_at list what can be written at a place." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_symbol_info(vm, true);
+
+    const src =
+        \\use math
+        \\
+        \\type Vec2:
+        \\    x float
+        \\    y float
+        \\    -secret int
+        \\
+        \\fn (&Vec2) sum() -> float:
+        \\    return self.x + self.y
+        \\
+        \\fn Vec2 :: zero() -> Vec2:
+        \\    return Vec2{x = 0.0, y = 0.0, secret = 0}
+        \\
+        \\type Color enum:
+        \\    case red
+        \\    case green
+        \\
+        \\const limit = 10
+        \\
+        \\fn add(first int, second int) -> int:
+        \\    total := first + second
+        \\    if total > limit:
+        \\        inner := 1
+        \\        return inner
+        \\    return total
+        \\
+        \\v := Vec2.zero()
+        \\s := 'abc'
+        \\print(v.x)
+        \\print(math.pi)
+        \\print(s)
+        \\c := Color.red
+    ;
+    const S = struct {
+        fn find(items: [*c]const C.Item, len: usize, name: []const u8) ?C.Item {
+            for (items[0..len]) |item| {
+                if (std.mem.eql(u8, C.from_bytes(item.name), name)) return item;
+            }
+            return null;
+        }
+        /// The offset right after the `nth` occurrence of `needle`.
+        fn after(src_: []const u8, needle: []const u8, nth: usize) u32 {
+            var pos: usize = 0;
+            var n: usize = 0;
+            while (true) : (n += 1) {
+                pos = std.mem.findPos(u8, src_, pos, needle).?;
+                if (n == nth) return @intCast(pos + needle.len);
+                pos += 1;
+            }
+        }
+    };
+
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    var items: [*c]const C.Item = null;
+
+    // The members of a value: its fields and methods, also the private ones of a type of the main source.
+    var len = C.vm_members_at(vm, S.after(src, "print(v", 0), &items);
+    try zt.eqStr("x float", C.from_bytes(S.find(items, len, "x").?.detail));
+    try zt.eq(C.ItemField, S.find(items, len, "x").?.kind);
+    try zt.eqStr("fn (&Vec2) sum() -> float", C.from_bytes(S.find(items, len, "sum").?.detail));
+    try zt.eq(C.ItemMethod, S.find(items, len, "sum").?.kind);
+    try zt.expect(S.find(items, len, "secret") != null);
+    try zt.expect(S.find(items, len, "y") != null);
+    // Sorted by name.
+    for (1..len) |i| {
+        try zt.expect(std.mem.order(u8, C.from_bytes(items[i - 1].name), C.from_bytes(items[i].name)) == .lt);
+    }
+
+    // Through a borrow: `self` is `&Vec2`.
+    len = C.vm_members_at(vm, S.after(src, "self", 0), &items);
+    try zt.expect(S.find(items, len, "x") != null);
+    try zt.expect(S.find(items, len, "sum") != null);
+
+    // A builtin type has methods and no hooks or operators in the list.
+    len = C.vm_members_at(vm, S.after(src, "print(s", 0), &items);
+    try zt.eqStr("fn (&str) len() -> int", C.from_bytes(S.find(items, len, "len").?.detail));
+    for (items[0..len]) |item| {
+        const name = C.from_bytes(item.name);
+        try zt.expect(std.ascii.isAlphabetic(name[0]) or name[0] == '_');
+    }
+
+    // A module and a type are asked for what they declare.
+    len = C.vm_members_at(vm, S.after(src, "print(math", 0), &items);
+    try zt.eqStr("fn sqrt(a float) -> float", C.from_bytes(S.find(items, len, "sqrt").?.detail));
+    try zt.expect(S.find(items, len, "pi") != null);
+    len = C.vm_members_at(vm, S.after(src, ":= Color", 0), &items);
+    try zt.eq(C.ItemCase, S.find(items, len, "red").?.kind);
+    try zt.eqStr("case Color.green", C.from_bytes(S.find(items, len, "green").?.detail));
+    len = C.vm_members_at(vm, S.after(src, ":= Vec2", 0), &items);
+    try zt.eqStr("fn Vec2 :: zero() -> Vec2", C.from_bytes(S.find(items, len, "zero").?.detail));
+    // A function of a type without a receiver is a function, one with a receiver is a method.
+    try zt.eq(C.ItemFunction, S.find(items, len, "zero").?.kind);
+    try zt.eq(C.ItemMethod, S.find(items, len, "sum").?.kind);
+
+    // Nothing ends at a keyword.
+    try zt.eq(@as(usize, 0), C.vm_members_at(vm, 3, &items));
+    try zt.expect(items == null);
+
+    // The names in a function: its parameters and the locals declared before the position, the declarations
+    // of the source, the module it uses and the builtins. Not the locals of the main block or of later lines.
+    len = C.vm_names_at(vm, S.after(src, "return inner", 0), &items);
+    try zt.eqStr("first int", C.from_bytes(S.find(items, len, "first").?.detail));
+    try zt.eq(C.ItemLocal, S.find(items, len, "first").?.kind);
+    try zt.eqStr("total int", C.from_bytes(S.find(items, len, "total").?.detail));
+    try zt.expect(S.find(items, len, "inner") != null);
+    try zt.eqStr("fn add(first int, second int) -> int", C.from_bytes(S.find(items, len, "add").?.detail));
+    try zt.eq(C.ItemType, S.find(items, len, "Vec2").?.kind);
+    try zt.eq(C.ItemConstant, S.find(items, len, "limit").?.kind);
+    try zt.eq(C.ItemModule, S.find(items, len, "math").?.kind);
+    try zt.eqStr("fn print(x %T)", C.from_bytes(S.find(items, len, "print").?.detail));
+    try zt.expect(S.find(items, len, "int") != null);
+    try zt.expect(S.find(items, len, "v") == null);
+    try zt.expect(S.find(items, len, "s") == null);
+    len = C.vm_names_at(vm, S.after(src, "total := first", 0), &items);
+    try zt.expect(S.find(items, len, "first") != null);
+    try zt.expect(S.find(items, len, "inner") == null);
+
+    // In the main block: its locals declared so far, not those of a function.
+    len = C.vm_names_at(vm, S.after(src, "print(s", 0), &items);
+    try zt.eqStr("v Vec2", C.from_bytes(S.find(items, len, "v").?.detail));
+    try zt.eqStr("s str", C.from_bytes(S.find(items, len, "s").?.detail));
+    try zt.expect(S.find(items, len, "c") == null);
+    try zt.expect(S.find(items, len, "total") == null);
+    try zt.expect(S.find(items, len, "add") != null);
+}
+
+test "Compiling again and again with one VM does not grow its memory." {
+    // Every compile left about 14 compile-time objects that nothing owned. A reset kept the pages of that heap,
+    // so a host that checks sources with one VM (the language server) grew without bound (F-114).
+    var da: std.heap.DebugAllocator(.{ .enable_memory_limit = true, .stack_trace_frames = 0 }) = .init;
+    defer _ = da.deinit();
+    const vm = C.vm_initx(da.allocator());
+    defer C.vm_deinit(vm);
+    const cvm: *cy.VM = @ptrCast(@alignCast(vm));
+
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+    // The template has a string parameter: its instance owns a compile-time object, which the syms release.
+    const src = "type Foo[T Any]:\n    a T\ntype Tag[const S EvalStr]:\n    v int\nfn a() -> int:\n    f := Foo[int]{a = 1}\n    t := Tag['x']{v = 2}\n    return f.a + t.v\nprint(a())\n";
+    const bad = "fn a() -> int:\n    return nope\nprint(a() + 'x')\n";
+
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    C.vm_reset(vm);
+    const base = da.total_requested_bytes;
+    try zt.eq(@as(usize, 0), cvm.compiler.heap.count_objects());
+
+    var i: usize = 0;
+    while (i < 40) : (i += 1) {
+        // Sources that compile and sources that do not, also with the options of the language server.
+        C.vm_set_error_recovery(vm, i % 4 >= 2);
+        C.vm_set_symbol_info(vm, i % 4 >= 2);
+        if (i % 2 == 0) {
+            try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+        } else {
+            try zt.eq(C.ErrorCompile, C.vm_compile(vm, "main", bad, config));
+        }
+    }
+    C.vm_reset(vm);
+    try zt.eq(@as(usize, 0), cvm.compiler.heap.count_objects());
+    try zt.eq(@as(usize, 1), cvm.compiler.heap.heapPages.items.len);
+    // Buffers that keep their capacity across a reset may have grown once. They do not grow with every compile.
+    const after_40 = da.total_requested_bytes;
+    i = 0;
+    while (i < 40) : (i += 1) {
+        _ = C.vm_compile(vm, "main", if (i % 2 == 0) src else bad, config);
+    }
+    C.vm_reset(vm);
+    try zt.eq(after_40, da.total_requested_bytes);
+    try zt.expect(after_40 < base + 64 * 1024);
+
+    // An eval after all of that still runs.
+    C.vm_set_error_recovery(vm, false);
+    C.vm_set_symbol_info(vm, false);
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_eval(vm, "fn main() -> int:\n    return 7", &res));
+    try zt.eq(@as(i64, 7), @as(*i64, @ptrCast(@alignCast(res.res))).*);
+}
+
+test "cl_vm_symbol_refs_to and cl_vm_symbol_tokens." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_symbol_info(vm, true);
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+
+    const src =
+        \\type Vec2:
+        \\    x float
+        \\
+        \\fn (&Vec2) get() -> float:
+        \\    return self.x
+        \\
+        \\fn add(a int, b int) -> int:
+        \\    return a + b
+        \\
+        \\const limit = 10
+        \\v := Vec2{x = 1.0}
+        \\print(v.get() + float(add(limit, 2)))
+        \\print(add(1, 2))
+    ;
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    var info: C.SymbolInfo = undefined;
+    var ranges: [*c]const C.Range = null;
+
+    // The name in a declaration can be asked like a use of it.
+    const decl_name: u32 = @intCast(std.mem.find(u8, src, "add(a int").?);
+    try zt.expect(C.vm_symbol_at(vm, decl_name, &info));
+    try zt.eq(C.SymbolDecl, info.kind);
+    try zt.eqStr("add", src[info.pos..info.end_pos]);
+    try zt.eqStr("fn add(a int, b int) -> int", C.from_bytes(info.detail));
+    try zt.eq(@as(usize, 3), C.vm_symbol_refs(vm, decl_name, &ranges));
+    try zt.eq(decl_name, ranges[0].pos);
+    // A field and a type too.
+    try zt.expect(C.vm_symbol_at(vm, @intCast(std.mem.find(u8, src, "x float").?), &info));
+    try zt.eqStr("x float", C.from_bytes(info.detail));
+    try zt.eq(@as(usize, 3), C.vm_symbol_refs(vm, info.pos, &ranges));
+    try zt.expect(C.vm_symbol_at(vm, 6, &info));
+    try zt.eqStr("type Vec2", C.from_bytes(info.detail));
+
+    // The places that name the declaration at a location: the same answer as asking at one of them.
+    try zt.expect(C.vm_symbol_at(vm, @intCast(std.mem.find(u8, src, "add(1").?), &info));
+    const def_pos = info.def_pos;
+    try zt.eq(@as(usize, 3), C.vm_symbol_refs_to(vm, C.to_bytes("main"), def_pos, &ranges));
+    try zt.eq(decl_name, ranges[0].pos);
+    try zt.eq(@as(u32, 3), ranges[0].end_pos - ranges[0].pos);
+    // Another source, or another place, declares something else.
+    try zt.eq(@as(usize, 0), C.vm_symbol_refs_to(vm, C.to_bytes("other"), def_pos, &ranges));
+    try zt.expect(ranges == null);
+    try zt.eq(@as(usize, 0), C.vm_symbol_refs_to(vm, C.to_bytes("main"), def_pos + 1, &ranges));
+
+    // The resolved names with what they are, sorted, one per name.
+    var tokens: [*c]const C.Token = null;
+    const len = C.vm_symbol_tokens(vm, &tokens);
+    try zt.expect(len > 10);
+    const S = struct {
+        fn kindOf(src_: []const u8, tokens_: [*c]const C.Token, len_: usize, needle: []const u8) ?u32 {
+            const pos = std.mem.find(u8, src_, needle).?;
+            for (tokens_[0..len_]) |token| {
+                if (token.pos == pos) return token.kind;
+            }
+            return null;
+        }
+    };
+    try zt.eq(@as(?u32, C.ItemLocal), S.kindOf(src, tokens, len, "self.x"));
+    try zt.eq(@as(?u32, C.ItemField), S.kindOf(src, tokens, len, "x\n\nfn add"));
+    try zt.eq(@as(?u32, C.ItemLocal), S.kindOf(src, tokens, len, "v := "));
+    try zt.eq(@as(?u32, C.ItemType), S.kindOf(src, tokens, len, "Vec2{"));
+    try zt.eq(@as(?u32, C.ItemMethod), S.kindOf(src, tokens, len, "get() +"));
+    try zt.eq(@as(?u32, C.ItemFunction), S.kindOf(src, tokens, len, "add(limit"));
+    try zt.eq(@as(?u32, C.ItemConstant), S.kindOf(src, tokens, len, "limit, 2"));
+    try zt.eq(@as(?u32, null), S.kindOf(src, tokens, len, "1.0"));
+    try zt.eq(@as(?u32, null), S.kindOf(src, tokens, len, "return a"));
+    for (1..len) |i| {
+        try zt.expect(tokens[i].pos >= tokens[i - 1].end_pos);
+    }
+}
+
+test "The symbol queries find nothing when there is no recorded compile." {
+    // They read the main chunk, which is undefined before the first compile and freed by a reset: a host that
+    // asked then crashed (final review, 2026-11-13).
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+
+    const S = struct {
+        fn expectNothing(vm_: *C.VM) !void {
+            var info: C.SymbolInfo = undefined;
+            var ranges: [*c]const C.Range = null;
+            var items: [*c]const C.Item = null;
+            var tokens: [*c]const C.Token = null;
+            for ([_]u32{ 0, 3, 100000 }) |pos| {
+                try zt.expect(!C.vm_symbol_at(vm_, pos, &info));
+                try zt.eq(@as(usize, 0), info.detail.len);
+                try zt.eq(@as(usize, 0), C.vm_symbol_refs(vm_, pos, &ranges));
+                try zt.expect(ranges == null);
+                try zt.eq(@as(usize, 0), C.vm_symbol_refs_to(vm_, C.to_bytes("main"), pos, &ranges));
+                try zt.eq(@as(usize, 0), C.vm_members_at(vm_, pos, &items));
+                try zt.eq(@as(usize, 0), C.vm_names_at(vm_, pos, &items));
+                try zt.expect(items == null);
+            }
+            try zt.eq(@as(usize, 0), C.vm_symbol_tokens(vm_, &tokens));
+        }
+    };
+    const src = "fn add(a int, b int) -> int:\n    return a + b\nn := add(1, 2)\n";
+
+    // Before any compile, with the recording off and on.
+    try S.expectNothing(vm);
+    C.vm_set_symbol_info(vm, true);
+    try S.expectNothing(vm);
+
+    // After a reset.
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    var info: C.SymbolInfo = undefined;
+    try zt.expect(C.vm_symbol_at(vm, 3, &info));
+    C.vm_reset(vm);
+    try S.expectNothing(vm);
+
+    // After a compile that failed before it had a main source: the chunk of the compile before it is gone.
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    var jit = C.defaultCompileConfig();
+    jit.backend = C.BackendJIT;
+    try zt.eq(C.ErrorCompile, C.vm_compile(vm, "main", src, jit));
+    try S.expectNothing(vm);
+
+    // A compile that did not record answers nothing, not a part: the names in declarations are known to the
+    // compiler either way, the locals are not.
+    C.vm_set_symbol_info(vm, false);
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    try S.expectNothing(vm);
+    C.vm_set_symbol_info(vm, true);
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    try zt.expect(C.vm_symbol_at(vm, 3, &info));
+}
+
+test "A method of a template instance whose signature fails is not found half built later." {
+    // The function was reserved in the module of the instance before its signature was resolved. The next body
+    // that called it (with error recovery), or the next eval of a session, read a function without a signature.
+    const src =
+        \\type W[T Any]:
+        \\    v T
+        \\fn (&W[]) bad() -> T.nope:
+        \\    return self.v
+        \\fn W[] :: make(v T) -> T.nope:
+        \\    return v
+        \\fn a() -> int:
+        \\    w := W[int]{v = 1}
+        \\    return w.bad()
+        \\fn b() -> int:
+        \\    w := W[int]{v = 1}
+        \\    return w.bad()
+        \\fn c() -> int:
+        \\    return W[int].make(1)
+        \\fn d() -> int:
+        \\    return W[int].make(2)
+    ;
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        C.vm_set_error_recovery(vm, true);
+        var res: C.EvalResult = undefined;
+        var rep: C.Report = undefined;
+        try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
+        // Every body that calls one of them reports that its signature does not resolve.
+        try zt.eq(@as(usize, 4), C.vm_compile_report_count(vm));
+        for (0..4) |i| {
+            try zt.expect(C.vm_compile_report(vm, i, &rep));
+            try zt.eqStr("Can not find the symbol `nope` in `int`.", C.from_bytes(rep.msg));
+        }
+    }
+    {
+        // A session without recovery: each eval that calls the method fails the same way.
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        var config = C.defaultEvalConfig();
+        config.persist_main = true;
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_evalx(vm, "main", "type W[T Any]:\n    v T\nfn (&W[]) bad() -> T.nope:\n    return self.v\nw := W[int]{v = 1}", config, &res));
+        for (0..3) |_| {
+            try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "x := w.bad()", config, &res));
+            var err: C.CompileError = undefined;
+            try zt.expect(C.vm_compile_error(vm, &err));
+            try zt.eqStr("Can not find the symbol `nope` in `int`.", C.from_bytes(err.msg));
+        }
+        try zt.eq(C.Success, C.vm_evalx(vm, "main", "y := w.v", config, &res));
+    }
+}
+
+test "Source that stops in the middle is a compile error, not a crash." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    var err: C.CompileError = undefined;
+
+    // The parser read one byte past the end for a parameter name at the end of the source, and unwrapped a
+    // missing expression after `return`.
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "fn f(a"));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eq(C.ReportParseError, err.kind);
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "x := 1\nfn add(a int, b"));
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "fn f():\n    return ,a\n"));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.eqStr("Expected an expression after `return`.", C.from_bytes(err.msg));
+
+    // The end of a `const` declaration without a type or a value was read from a type that is not there,
+    // when the error for it was located.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "const a"));
+    var rep: C.Report = undefined;
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eq(@as(u32, 7), rep.end_pos);
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "x := 1\nconst b = "));
+    // A `cstruct` without fields (the end of its last field was read), and a function type whose attribute
+    // list stops after `#[`.
+    C.vm_reset(vm);
+    _ = C.vm_validate(vm, "type Foo cstruct");
+    {
+        var out: C.Bytes = C.NullStr;
+        _ = C.c.cl_vm_format(vm, C.to_bytes("type Foo cstruct"), &out);
+        if (out.ptr != null) C.vm_freeb(vm, C.from_bytes(out));
+    }
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "type Callback = #["));
+
+    // A constant that names a function (`const z = h` on the way to `const z = h()`): the signature of the
+    // function was read before it was resolved.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "fn h() -> int:\n    return 4\nconst z = h\n"));
+    try zt.expect(C.vm_compile_error(vm, &err));
+    try zt.expect(std.mem.startsWith(u8, C.from_bytes(err.msg), "Unsupported expansion of compile-time value"));
+
+    // A lambda that returns a borrow has no signature while its return type is inferred. The check of the
+    // returned borrow read it.
+    C.vm_reset(vm);
+    try zt.eq(C.Success, C.vm_validate(vm, "local_a := 123\nborrow_a := &local_a\nstack_fn := fn() => borrow_a\n"));
+}
+
 test "Error summaries are empty when there is no error." {
     // `cl_vm_compile_error_summary` and `cl_thread_panic_summary` used to end the host process when asked
     // without an error, and a script could ask through `cy.VM` (F-52).

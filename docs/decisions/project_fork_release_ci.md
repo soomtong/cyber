@@ -157,3 +157,20 @@ zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Dd
   `.zig-cache`를 `actions/cache`로 복원하므로 0.17.1에서는 같은 문제가 생길 수 있었다).
 - 워크플로의 `push.paths`가 `.github/**` · `**.md`를 제외하므로 워크플로만 고친 커밋은 Latest Build를 트리거하지 않는다. 확인하려면
   `gh workflow run latest-build.yml -R soomtong/cyber --ref master`로 직접 실행한다.
+
+## 번들에 언어 서버 (2026-11-13)
+
+- Linux · macOS 번들은 `cyber`와 `cyber-lsp` 둘을 담는다(0.4.9 다음 릴리스부터). `latest-build.yml`의 `cli` 작업이
+  `zig build lsp`를 같은 옵션(`-Dbuild` · `-Dcommit` 포함)으로 한 번 더 돌리고 `tar`에 둘 다 넣는다. Linux는 둘 다 strip한다.
+  `x86_64-selinux-gnu` 번들도 같다.
+- 한 번들에 둔 이유: 서버는 스크립트를 실행하는 `cyber`와 같은 버전이어야 한다(진단이 실행 결과와 같다는 것이 이 서버의 전제다).
+  따로 받으면 어긋난다.
+- Windows 번들과 wasi에는 넣지 않는다. Windows용은 교차 컴파일은 되지만(`x86_64-windows-gnu`, 4.6MB) 돌려 본 적이 없다.
+  같은 이유로 `zig build test`는 Windows와 wasm 타깃에서 `lsp-test`를 빼고 돈다(`build.zig`). Windows에서 확인하면 둘 다 푼다.
+- 2026-11-13 보충(최종 리뷰): `install.sh`는 번들을 `mktemp` 파일로 먼저 받는다. 이전에는 `curl | tar` 앞에서 서버를 지워,
+  다운로드가 실패하면 `cyber`는 남고 `cyber-lsp`만 사라졌다. 낡은 심링크는 경로 문자열 비교가 아니라 가리키는 곳이 없는지로
+  가린다(`CYBER_HOME`의 표기가 달라도 정리된다).
+- `install.sh`: 번들에 `cyber-lsp`가 있으면 `CYBER_BIN/cyber-lsp`로 심링크한다. 풀기 전에 `CYBER_HOME/cyber-lsp`를 지우고,
+  번들에 서버가 없으면(0.4.9까지의 번들) 이전 설치가 남긴 심링크도 지운다. 실행 파일과 버전이 다른 서버가 남지 않게 하기 위해서다.
+  로컬 번들 둘(서버 있음 · 없음)을 `curl` 대역으로 번갈아 설치해 확인했다. 실제 릴리스에서의 확인은 다음 태그에서 한다.
+- 크기(ReleaseSafe, strip 전): Linux x64 `cyber-lsp` 약 5MB, macOS arm64 3.4MB, macOS x64 3.9MB.

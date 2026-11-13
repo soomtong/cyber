@@ -12,7 +12,9 @@
 /temp.cy
 /test.txt
 /src/test/assets/write.txt
-/exts/vscode/cyber-0.0.1.vsix
+/exts/vscode/*.vsix
+/exts/vscode/node_modules/
+/exts/vscode/.vscode-test/
 /examples/libcyber/bind_module
 /examples/libcyber/main
 /examples/libfoo.so

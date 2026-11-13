@@ -14,21 +14,34 @@
     "onLanguage:cyber"
   ],
   "contributes": {
-    "languages": [{
-      "id": "cyber",
-      "aliases": ["Cyber", "cyber"],
-      "extensions": [".cy", ".cys", ".cyber"],
-      "configuration": "./language-configuration.json"
-    }],
-    "grammars": [{
-      "language": "cyber",
-      "scopeName": "source.cyber",
-      "path": "./syntaxes/cyber.tmLanguage.json"
-    }],
-    "commands": [{
-      "command": "cyber.restartServer",
-      "title": "Cyber: Restart Language Server"
-    }],
+    "languages": [
+      {
+        "id": "cyber",
+        "aliases": [
+          "Cyber",
+          "cyber"
+        ],
+        "extensions": [
+          ".cy",
+          ".cys",
+          ".cyber"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "cyber",
+        "scopeName": "source.cyber",
+        "path": "./syntaxes/cyber.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "cyber.restartServer",
+        "title": "Cyber: Restart Language Server"
+      }
+    ],
     "configuration": {
       "title": "Cyber",
       "properties": {
@@ -47,5 +60,11 @@
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
+  },
+  "scripts": {
+    "test": "node test/runTest.js"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "^3.1.0"
   }
 }

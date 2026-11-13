@@ -46,6 +46,22 @@ Open VS Code, under Extensions click "Install from VSIX..." and pick the generat
 
 The command "Cyber: Restart Language Server" starts the server again, for example after rebuilding it.
 
+## Testing
+
+The tests run the extension in a real VS Code, which is downloaded on first use, against a built server.
+They open a workspace, edit a document and check diagnostics, hover, go to definition, references, rename,
+outline, folding, completion, signature help and formatting through the editor's own commands.
+
+```bash
+npm install
+```
+
+```bash
+npm test -- ../../zig-out/bin/cyber-lsp
+```
+
+On Linux without a display, run it under `xvfb-run -a`.
+
 ## Other editors
 
 `cyber-lsp` speaks the Language Server Protocol over stdin and stdout, so any client can start it.

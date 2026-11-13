@@ -158,7 +158,7 @@ LSP의 `Diagnostic`은 `range`(시작 · 끝), `message`, `relatedInformation`(�
 에디터:
 
 - `exts/vscode`: `extension.js`가 `vscode-languageclient`로 서버를 띄운다. 설정 `cyber.lsp.enabled` · `cyber.lsp.path`.
-  이 환경에서는 VS Code로 실행해 보지 못했다(`node --check`만). TextMate 문법은 키워드 목록만 지금 문법으로 바꿨다.
+  TextMate 문법은 키워드 목록만 지금 문법으로 바꿨다. VS Code 안에서의 확인은 아래 "VS Code에서의 확인" 절(2026-11-13).
 - `exts/tree-sitter`의 `scope |s|:` 블록 문장은 아직 없다(`tree-sitter` CLI로 코퍼스를 돌려야 해서 따로 한다).
 
 하지 않은 것:
@@ -318,6 +318,23 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
 `Completion lists members and names for source that is being typed.` · `Signature help shows the function that is being called.`,
 `complete.zig`의 단위 테스트 둘. 저장소 `.cy` 154개에 completion · signatureHelp 40,476 요청(ReleaseSafe 서버), 죽는 것 없음.
 이 테스트를 쓰다가 F-116을 찾았다(private 필드가 있는 struct의 `print`가 컴파일되지 않는다, 2026-11-13 수정).
+
+### VS Code에서의 확인 (2026-11-13)
+
+그때까지의 확인은 모두 테스트와 스크립트로 쓴 클라이언트였다. `exts/vscode/test`가 확장을 실제 VS Code에서 돌린다.
+
+- `test/runTest.js`가 `@vscode/test-electron`으로 VS Code를 받아(처음 한 번) 임시 워크스페이스로 띄우고, `test/suite.js`가
+  그 안에서 에디터의 명령(`vscode.executeHoverProvider` 등)으로 묻는다. 확장이 서버를 띄우고 `vscode-languageclient`를 거쳐
+  답이 오는 길 전체가 검사된다.
+- 실행: `task test:vscode`, 또는 `exts/vscode`에서 `npm install` 뒤 `npm test -- ../../zig-out/bin/cyber-lsp`.
+  디스플레이가 없는 Linux는 `xvfb-run -a`로 감싼다. CI에는 넣지 않았다(VS Code 다운로드와 node가 필요하다).
+- 항목 아홉: 활성화와 진단(편집으로 오류 둘을 넣고 지운다), hover, 문서 안과 모듈로의 definition, references와 강조,
+  지역 rename과 함수 rename 거절, 개요와 접기, 입력 중의 completion과 signatureHelp, 문서 포맷, 서버 재시작 명령.
+- 결과: VS Code 1.146.0(Linux x64), ReleaseSafe 서버에서 아홉 모두 통과. 서버 쪽은 고칠 것이 없었다.
+- 에디터가 프로토콜 위에서 하는 일 둘을 알게 됐다. rename은 `prepareRename`을 먼저 묻고 `null`이면 자기 문구
+  (`The element can't be renamed.`)로 거절한다. 포맷은 서버가 문서 전체를 바꾸는 편집 하나를 보내도 에디터가 달라진 부분만
+  남긴 편집들로 줄인다. 그래서 6절의 "편집 하나"는 그대로 둔다.
+- VS Code의 사용자 데이터 디렉터리는 짧은 경로여야 한다(그 안의 소켓 경로가 100자쯤에서 잘린다). 러너가 임시 디렉터리를 준다.
 
 ## 9. 다음
 

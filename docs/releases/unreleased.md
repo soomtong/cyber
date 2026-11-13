@@ -61,6 +61,9 @@
   들여쓰기 기준 접기, hover(선언의 첫 줄 또는 `이름 타입`), 정의로 이동, 문서 안의 references · 강조, 지역과 매개변수의 rename, completion(`.` 뒤의 멤버와 범위의 이름), signatureHelp를 준다. 편집기에 열린 모듈은 디스크가 아니라 편집기의 내용으로 읽는다. 위치는 클라이언트가 `utf-8`을
   받으면 바이트, 아니면 UTF-16이다. 오류 복구를 켜서 본문(main 블록 · 함수 · 메서드)마다 첫 오류를 진단으로 낸다. 검사 한 번은 ReleaseFast에서 약 5ms다.
   설계와 단계는 `docs/specs/2026-11-12-lsp-design.md`(P1). 릴리스 번들에는 아직 넣지 않는다.
+- `exts/vscode/test`: 확장을 실제 VS Code에서 돌리는 테스트(`task test:vscode`, `@vscode/test-electron`). 진단 · hover ·
+  definition · references · rename · 개요 · 접기 · completion · signatureHelp · 포맷 · 서버 재시작을 에디터의 명령으로 확인한다.
+  VS Code 1.146.0에서 아홉 항목이 통과한다.
 - `exts/vscode`가 `cyber-lsp`의 클라이언트가 됐다(`vscode-languageclient`, 설정 `cyber.lsp.enabled` · `cyber.lsp.path`, 명령
   `Cyber: Restart Language Server`). TextMate 문법의 키워드를 지금 문법으로 바꿨다(`fn` · `use` · `fiber` · `suspend` · `scope` 등).
 

@@ -171,6 +171,15 @@ tasks:
       - task: zig:build
         vars: { STEP: lsp-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', CLI_ARGS: '{{.CLI_ARGS}}' }
 
+  test:vscode:
+    desc: 'Run the VS Code extension in a real VS Code against the built language server (needs node, downloads VS Code once).'
+    dir: exts/vscode
+    cmds:
+      - task: build:lsp
+        vars: { OPT: ReleaseSafe }
+      - npm install --no-audit --no-fund
+      - '{{if eq OS "linux"}}xvfb-run -a {{end}}npm test -- ../../zig-out/bin/cyber-lsp'
+
   test:trace:
     desc: 'Run the trace tests (a separate lib build with -Dtrace).'
     cmds:

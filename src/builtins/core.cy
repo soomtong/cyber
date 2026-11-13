@@ -2915,7 +2915,7 @@ fn @copy(src Ptr[%T]) -> T:
 
         #case .result |result_t|:
             if meta.is_result_error(src):
-                return meta.access_result_error(src)
+                return meta.access_result_error(src.*)
             else:
                 payload := *meta.access_result_payload(src.*)
                 return payload.*

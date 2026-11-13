@@ -74,6 +74,12 @@ const Host = struct {
     fn ask_void(t: *C.Thread) callconv(.c) C.Ret {
         return pending(t, "Future[!void]", 0);
     }
+    fn ask_res_str(t: *C.Thread) callconv(.c) C.Ret {
+        return pending(t, "Future[!str]", 0);
+    }
+    fn ask_res_ints(t: *C.Thread) callconv(.c) C.Ret {
+        return pending(t, "Future[![]int]", 0);
+    }
     /// Returns a future that is already completed with `n * 2`.
     fn ask_done(t: *C.Thread) callconv(.c) C.Ret {
         // A value slot is 8 bytes on every target. A pointer is not.
@@ -101,6 +107,8 @@ const Host = struct {
             C.mod_add_func(mod, "ask_res", C.BIND_FUNC(&ask_res));
             C.mod_add_func(mod, "ask_str", C.BIND_FUNC(&ask_str));
             C.mod_add_func(mod, "ask_void", C.BIND_FUNC(&ask_void));
+            C.mod_add_func(mod, "ask_res_str", C.BIND_FUNC(&ask_res_str));
+            C.mod_add_func(mod, "ask_res_ints", C.BIND_FUNC(&ask_res_ints));
             C.mod_add_func(mod, "ask_done", C.BIND_FUNC(&ask_done));
             C.mod_add_func(mod, "stop", C.BIND_FUNC(&stop));
             res[0].src = C.to_bytes(
@@ -108,6 +116,8 @@ const Host = struct {
                 \\#[bind] fn ask_res(n int) -> Future[!int]
                 \\#[bind] fn ask_str() -> Future[str]
                 \\#[bind] fn ask_void() -> Future[!void]
+                \\#[bind] fn ask_res_str() -> Future[!str]
+                \\#[bind] fn ask_res_ints() -> Future[![]int]
                 \\#[bind] fn ask_done(n int) -> Future[int]
                 \\#[bind] fn stop()
             );
@@ -443,6 +453,44 @@ test "A host future completes with a value or an error." {
     try zt.eq(false, C.future_complete_error(vm, f, C.symbol(vm, "Denied")));
     const s = C.str_init(t, "from the host");
     try zt.eq(true, C.future_complete(vm, f, &s));
+    try zt.eq(C.Success, C.vm_resume(vm, &res));
+}
+
+test "A host future of a result with a managed payload completes with a value or an error." {
+    const vm = Host.init();
+    defer C.vm_deinit(vm);
+    const t = C.vm_main_thread(vm);
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Await, C.vm_eval(vm,
+        \\use host
+        \\use test
+        \\s := host.ask_res_str().await()
+        \\copy := s
+        \\test.eq(copy!, 'from the host')
+        \\test.eq(s!, 'from the host')
+        \\e := host.ask_res_str().await()
+        \\test.eq(e !else 'denied', 'denied')
+        \\ints := host.ask_res_ints().await()
+        \\ints2 := ints
+        \\test.eq(ints2!.len(), 2)
+        \\test.eq(ints![0], 1)
+        \\test.eq(ints![1], 2)
+        \\ie := host.ask_res_ints().await()
+        \\test.eq(ie.unwrap_error(), error.Denied)
+    , &res));
+    const s = C.str_init(t, "from the host");
+    try zt.eq(true, C.future_complete(vm, C.vm_pending_future(vm), &s));
+    try zt.eq(C.Await, C.vm_resume(vm, &res));
+    try zt.eq(true, C.future_complete_error(vm, C.vm_pending_future(vm), C.symbol(vm, "Denied")));
+    try zt.eq(C.Await, C.vm_resume(vm, &res));
+    const ints = C.slice_init(t, 2, 8);
+    const elems: [*]i64 = @ptrCast(@alignCast(ints.ptr));
+    elems[0] = 1;
+    elems[1] = 2;
+    try zt.eq(true, C.future_complete(vm, C.vm_pending_future(vm), &ints));
+    try zt.eq(C.Await, C.vm_resume(vm, &res));
+    try zt.eq(true, C.future_complete_error(vm, C.vm_pending_future(vm), C.symbol(vm, "Denied")));
     try zt.eq(C.Success, C.vm_resume(vm, &res));
 }
 

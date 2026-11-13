@@ -57,4 +57,24 @@ fn foo2() -> int:
         return 0
 test.eq(0, foo2())
 
+-- A result with a managed payload is copied, as a value and as an error.
+fn str_ok() -> !str:
+    return 'abc'
+fn str_err() -> !str:
+    return error.Invalid
+s := str_ok()
+s_copy := s
+test.eq('abc', s_copy!)
+test.eq('abc', s!)
+e := str_err()
+e_copy := e
+test.eq(error.Invalid, e_copy.unwrap_error())
+test.eq(error.Invalid, e.unwrap_error())
+fn ints_ok() -> ![]int:
+    return {1, 2}
+ints := ints_ok()
+ints_copy := ints
+test.eq(2, ints_copy!.len())
+test.eq(2, ints![1])
+
 --cytest: pass

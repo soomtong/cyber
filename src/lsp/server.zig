@@ -11,6 +11,7 @@ const c = @import("../capi.zig");
 const cli = @import("../cli.zig");
 const position = @import("position.zig");
 const symbols = @import("symbols.zig");
+const complete = @import("complete.zig");
 
 const Value = std.json.Value;
 const Encoding = position.Encoding;
@@ -219,6 +220,10 @@ pub const Server = struct {
             try self.onHover(id, params);
         } else if (std.mem.eql(u8, method, "textDocument/definition")) {
             try self.onDefinition(arena, id, params);
+        } else if (std.mem.eql(u8, method, "textDocument/completion")) {
+            try self.onCompletion(arena, id, params);
+        } else if (std.mem.eql(u8, method, "textDocument/signatureHelp")) {
+            try self.onSignatureHelp(arena, id, params);
         } else if (std.mem.eql(u8, method, "textDocument/references")) {
             try self.onReferences(id, params);
         } else if (std.mem.eql(u8, method, "textDocument/documentHighlight")) {
@@ -287,6 +292,21 @@ pub const Server = struct {
             try jw.write(true);
             try jw.objectField("referencesProvider");
             try jw.write(true);
+            try jw.objectField("completionProvider");
+            try jw.beginObject();
+            try jw.objectField("triggerCharacters");
+            try jw.beginArray();
+            try jw.write(".");
+            try jw.endArray();
+            try jw.endObject();
+            try jw.objectField("signatureHelpProvider");
+            try jw.beginObject();
+            try jw.objectField("triggerCharacters");
+            try jw.beginArray();
+            try jw.write("(");
+            try jw.write(",");
+            try jw.endArray();
+            try jw.endObject();
             try jw.objectField("documentHighlightProvider");
             try jw.write(true);
             try jw.objectField("renameProvider");
@@ -596,6 +616,150 @@ pub const Server = struct {
             .start = position.fromOffset(src, info.def_pos, self.encoding),
             .end = position.fromOffset(src, info.def_end_pos, self.encoding),
         });
+        try jw.endObject();
+        try jw.endObject();
+        try self.send(&b);
+    }
+
+    fn offsetOf(self: *Server, doc: *Document, params: Value) !usize {
+        const pos_v = getPath(params, &.{"position"}) orelse return error.InvalidParams;
+        const line = getInt(pos_v, "line") orelse return error.InvalidParams;
+        const character = getInt(pos_v, "character") orelse return error.InvalidParams;
+        return position.toOffset(doc.text, .{
+            .line = std.math.cast(u32, line) orelse return error.InvalidParams,
+            .character = std.math.cast(u32, character) orelse return error.InvalidParams,
+        }, self.encoding);
+    }
+
+    /// Compiles `text` in place of the document. Returns whether it got past the parser: after a syntax error
+    /// the compiler has resolved nothing that could be asked about.
+    fn compilePatched(self: *Server, doc: *Document, text: []const u8) bool {
+        var config = c.defaultCompileConfig();
+        config.skip_codegen = true;
+        const code = c.vm_compile(self.vm, doc.path, text, config);
+        // What the VM holds now is not the document.
+        self.compiled = null;
+        if (code != c.ErrorCompile) return code == c.Success;
+        var rep: c.Report = undefined;
+        if (!c.vm_compile_report(self.vm, 0, &rep)) return false;
+        return rep.kind == c.ReportCompileError;
+    }
+
+    /// The source around the cursor is patched until it parses (`complete.zig`), and the compiler lists the
+    /// members of the receiver or the names in scope. The client filters the list by what is typed.
+    fn onCompletion(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
+        const doc = try self.docOf(params);
+        const offset = try self.offsetOf(doc, params);
+
+        var items: []const c.Item = &.{};
+        var attempt: usize = 0;
+        while (attempt < complete.num_attempts) : (attempt += 1) {
+            const patch = (try complete.patchCompletion(arena, doc.text, offset, attempt)) orelse continue;
+            if (!self.compilePatched(doc, patch.text)) continue;
+            var ptr: [*c]const c.Item = null;
+            const len = switch (patch.kind) {
+                .member => c.vm_members_at(self.vm, @intCast(patch.pos), &ptr),
+                .scope => c.vm_names_at(self.vm, @intCast(patch.pos), &ptr),
+            };
+            if (len == 0 or ptr == null) continue;
+            items = ptr[0..len];
+            break;
+        }
+
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginObject();
+        try jw.objectField("isIncomplete");
+        try jw.write(false);
+        try jw.objectField("items");
+        try jw.beginArray();
+        for (items) |item| {
+            try jw.beginObject();
+            try jw.objectField("label");
+            try jw.write(c.from_bytes(item.name));
+            try jw.objectField("kind");
+            try jw.write(completionKind(item));
+            try jw.objectField("detail");
+            try jw.write(c.from_bytes(item.detail));
+            try jw.endObject();
+        }
+        try jw.endArray();
+        try jw.endObject();
+        try jw.endObject();
+        try self.send(&b);
+    }
+
+    /// `CompletionItemKind` of the protocol.
+    fn completionKind(item: c.Item) u8 {
+        return switch (item.kind) {
+            c.ItemLocal, c.ItemGlobal => 6,
+            // A function with a receiver (`fn (&Vec2) len()`) is a method.
+            c.ItemFunction => if (std.mem.startsWith(u8, c.from_bytes(item.detail), "fn (")) 2 else 3,
+            c.ItemType => 22,
+            c.ItemField => 5,
+            c.ItemCase => 20,
+            c.ItemConstant => 21,
+            c.ItemModule => 9,
+            else => 1,
+        };
+    }
+
+    /// The header of the function whose call the cursor is in, and the argument it is at.
+    fn onSignatureHelp(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
+        const doc = try self.docOf(params);
+        const offset = try self.offsetOf(doc, params);
+        const call = complete.enclosingCall(doc.text, offset) orelse return self.replyNull(id);
+
+        var label: []const u8 = "";
+        var attempt: usize = 0;
+        while (attempt < 2) : (attempt += 1) {
+            const text = (try complete.patchCall(arena, doc.text, offset, call, attempt)) orelse continue;
+            if (!self.compilePatched(doc, text)) continue;
+            var info: c.SymbolInfo = undefined;
+            // The name that is called ends where the arguments begin. Its place is the same in the patch.
+            if (!c.vm_symbol_at(self.vm, @intCast(call.callee_end), &info)) continue;
+            if (info.kind != c.SymbolDecl or info.end_pos != call.callee_end) continue;
+            const detail = c.from_bytes(info.detail);
+            if (!std.mem.startsWith(u8, detail, "fn ")) continue;
+            label = try arena.dupe(u8, detail);
+            break;
+        }
+        if (label.len == 0) return self.replyNull(id);
+        // `fn add(a int) -> int (+1 overloads)`: the note is not part of the header.
+        if (std.mem.find(u8, label, " (+")) |note| label = label[0..note];
+        const sig_params = try complete.signatureParams(arena, label);
+
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginObject();
+        try jw.objectField("signatures");
+        try jw.beginArray();
+        try jw.beginObject();
+        try jw.objectField("label");
+        try jw.write(label);
+        try jw.objectField("parameters");
+        try jw.beginArray();
+        for (sig_params) |param| {
+            try jw.beginObject();
+            try jw.objectField("label");
+            try jw.write(label[param.start..param.end]);
+            try jw.endObject();
+        }
+        try jw.endArray();
+        try jw.endObject();
+        try jw.endArray();
+        try jw.objectField("activeSignature");
+        try jw.write(0);
+        try jw.objectField("activeParameter");
+        try jw.write(call.arg);
         try jw.endObject();
         try jw.endObject();
         try self.send(&b);

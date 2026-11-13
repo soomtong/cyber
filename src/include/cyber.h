@@ -758,6 +758,47 @@ typedef struct CLRange {
 /// validate or reset.
 size_t cl_vm_symbol_refs(CLVM* vm, uint32_t pos, const CLRange** out);
 
+typedef enum {
+    /// A local or a parameter.
+    CL_ITEM_LOCAL,
+    CL_ITEM_FUNCTION,
+    CL_ITEM_TYPE,
+    CL_ITEM_FIELD,
+    /// A case of an enum, a choice or a C union.
+    CL_ITEM_CASE,
+    CL_ITEM_CONSTANT,
+    CL_ITEM_GLOBAL,
+    CL_ITEM_MODULE,
+    CL_ITEM_OTHER,
+} CLItemKind;
+
+/// A name that can be written at a place in the source, for completion.
+typedef struct CLItem {
+    CLBytes name;
+
+    /// One line, like `CLSymbolInfo.detail`.
+    CLBytes detail;
+
+    CLItemKind kind;
+} CLItem;
+
+/// Lists the members of the expression that ends at byte offset `pos` of the main source: the fields and
+/// methods of its type (through `&T` and `^T`), or what a module or a type declares when the expression names
+/// one (`math`, `Color`). Returns the number of items and sets `out` to them, sorted by name. Returns 0 and
+/// sets `out` to NULL if no expression ends at `pos`.
+/// To complete `v.` the host compiles the source without the `.` and asks at the end of `v`.
+/// Needs `cl_vm_set_symbol_info`. Private members of other modules, hooks and operators are left out.
+/// The items are owned by the VM and stay valid until the next call of this function or of `cl_vm_names_at`,
+/// eval, compile, validate or reset.
+size_t cl_vm_members_at(CLVM* vm, uint32_t pos, const CLItem** out);
+
+/// Lists the names that can be used at byte offset `pos` of the main source: the locals and parameters that
+/// the function around `pos` declares before it, what the main source declares and uses, and the builtins.
+/// A name that is declared more than once is listed as the innermost declaration. Blocks are not told apart:
+/// a local of a block that ended before `pos` is listed too.
+/// Returns, needs and owns like `cl_vm_members_at`.
+size_t cl_vm_names_at(CLVM* vm, uint32_t pos, const CLItem** out);
+
 // For embedded, Cyber by default uses malloc (it can be configured to use the high-perf mimalloc).
 // If the host uses a different allocator than Cyber, use `cl_vm_alloc` to allocate memory
 // that is handed over to Cyber so it knows how to free it.

@@ -1217,6 +1217,137 @@ test "cl_vm_symbol_refs finds the places that name the same thing." {
     try zt.eq(C.SymbolExpr, info.kind);
 }
 
+test "cl_vm_members_at and cl_vm_names_at list what can be written at a place." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_symbol_info(vm, true);
+
+    const src =
+        \\use math
+        \\
+        \\type Vec2:
+        \\    x float
+        \\    y float
+        \\    -secret int
+        \\
+        \\fn (&Vec2) sum() -> float:
+        \\    return self.x + self.y
+        \\
+        \\fn Vec2 :: zero() -> Vec2:
+        \\    return Vec2{x = 0.0, y = 0.0, secret = 0}
+        \\
+        \\type Color enum:
+        \\    case red
+        \\    case green
+        \\
+        \\const limit = 10
+        \\
+        \\fn add(first int, second int) -> int:
+        \\    total := first + second
+        \\    if total > limit:
+        \\        inner := 1
+        \\        return inner
+        \\    return total
+        \\
+        \\v := Vec2.zero()
+        \\s := 'abc'
+        \\print(v.x)
+        \\print(math.pi)
+        \\print(s)
+        \\c := Color.red
+    ;
+    const S = struct {
+        fn find(items: [*c]const C.Item, len: usize, name: []const u8) ?C.Item {
+            for (items[0..len]) |item| {
+                if (std.mem.eql(u8, C.from_bytes(item.name), name)) return item;
+            }
+            return null;
+        }
+        /// The offset right after the `nth` occurrence of `needle`.
+        fn after(src_: []const u8, needle: []const u8, nth: usize) u32 {
+            var pos: usize = 0;
+            var n: usize = 0;
+            while (true) : (n += 1) {
+                pos = std.mem.findPos(u8, src_, pos, needle).?;
+                if (n == nth) return @intCast(pos + needle.len);
+                pos += 1;
+            }
+        }
+    };
+
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    var items: [*c]const C.Item = null;
+
+    // The members of a value: its fields and methods, also the private ones of a type of the main source.
+    var len = C.vm_members_at(vm, S.after(src, "print(v", 0), &items);
+    try zt.eqStr("x float", C.from_bytes(S.find(items, len, "x").?.detail));
+    try zt.eq(C.ItemField, S.find(items, len, "x").?.kind);
+    try zt.eqStr("fn (&Vec2) sum() -> float", C.from_bytes(S.find(items, len, "sum").?.detail));
+    try zt.eq(C.ItemFunction, S.find(items, len, "sum").?.kind);
+    try zt.expect(S.find(items, len, "secret") != null);
+    try zt.expect(S.find(items, len, "y") != null);
+    // Sorted by name.
+    for (1..len) |i| {
+        try zt.expect(std.mem.order(u8, C.from_bytes(items[i - 1].name), C.from_bytes(items[i].name)) == .lt);
+    }
+
+    // Through a borrow: `self` is `&Vec2`.
+    len = C.vm_members_at(vm, S.after(src, "self", 0), &items);
+    try zt.expect(S.find(items, len, "x") != null);
+    try zt.expect(S.find(items, len, "sum") != null);
+
+    // A builtin type has methods and no hooks or operators in the list.
+    len = C.vm_members_at(vm, S.after(src, "print(s", 0), &items);
+    try zt.eqStr("fn (&str) len() -> int", C.from_bytes(S.find(items, len, "len").?.detail));
+    for (items[0..len]) |item| {
+        const name = C.from_bytes(item.name);
+        try zt.expect(std.ascii.isAlphabetic(name[0]) or name[0] == '_');
+    }
+
+    // A module and a type are asked for what they declare.
+    len = C.vm_members_at(vm, S.after(src, "print(math", 0), &items);
+    try zt.eqStr("fn sqrt(a float) -> float", C.from_bytes(S.find(items, len, "sqrt").?.detail));
+    try zt.expect(S.find(items, len, "pi") != null);
+    len = C.vm_members_at(vm, S.after(src, ":= Color", 0), &items);
+    try zt.eq(C.ItemCase, S.find(items, len, "red").?.kind);
+    try zt.eqStr("case Color.green", C.from_bytes(S.find(items, len, "green").?.detail));
+    len = C.vm_members_at(vm, S.after(src, ":= Vec2", 0), &items);
+    try zt.eqStr("fn Vec2 :: zero() -> Vec2", C.from_bytes(S.find(items, len, "zero").?.detail));
+
+    // Nothing ends at a keyword.
+    try zt.eq(@as(usize, 0), C.vm_members_at(vm, 3, &items));
+    try zt.expect(items == null);
+
+    // The names in a function: its parameters and the locals declared before the position, the declarations
+    // of the source, the module it uses and the builtins. Not the locals of the main block or of later lines.
+    len = C.vm_names_at(vm, S.after(src, "return inner", 0), &items);
+    try zt.eqStr("first int", C.from_bytes(S.find(items, len, "first").?.detail));
+    try zt.eq(C.ItemLocal, S.find(items, len, "first").?.kind);
+    try zt.eqStr("total int", C.from_bytes(S.find(items, len, "total").?.detail));
+    try zt.expect(S.find(items, len, "inner") != null);
+    try zt.eqStr("fn add(first int, second int) -> int", C.from_bytes(S.find(items, len, "add").?.detail));
+    try zt.eq(C.ItemType, S.find(items, len, "Vec2").?.kind);
+    try zt.eq(C.ItemConstant, S.find(items, len, "limit").?.kind);
+    try zt.eq(C.ItemModule, S.find(items, len, "math").?.kind);
+    try zt.eqStr("fn print(x %T)", C.from_bytes(S.find(items, len, "print").?.detail));
+    try zt.expect(S.find(items, len, "int") != null);
+    try zt.expect(S.find(items, len, "v") == null);
+    try zt.expect(S.find(items, len, "s") == null);
+    len = C.vm_names_at(vm, S.after(src, "total := first", 0), &items);
+    try zt.expect(S.find(items, len, "first") != null);
+    try zt.expect(S.find(items, len, "inner") == null);
+
+    // In the main block: its locals declared so far, not those of a function.
+    len = C.vm_names_at(vm, S.after(src, "print(s", 0), &items);
+    try zt.eqStr("v Vec2", C.from_bytes(S.find(items, len, "v").?.detail));
+    try zt.eqStr("s str", C.from_bytes(S.find(items, len, "s").?.detail));
+    try zt.expect(S.find(items, len, "c") == null);
+    try zt.expect(S.find(items, len, "total") == null);
+    try zt.expect(S.find(items, len, "add") != null);
+}
+
 test "Error summaries are empty when there is no error." {
     // `cl_vm_compile_error_summary` and `cl_thread_panic_summary` used to end the host process when asked
     // without an error, and a script could ask through `cy.VM` (F-52).

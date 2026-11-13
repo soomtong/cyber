@@ -1,6 +1,6 @@
 # LSP 서버 설계와 단계 계획
 
-2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 · P1 · P2의 sema 복구 · P3의 hover · definition · references · 지역 rename 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P3 구현" 절). 파서 복구, P3의 나머지(completion · signatureHelp), P4 이후는 미구현.
+2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 · P1 · P2의 sema 복구 · P3(hover · definition · references · 지역 rename · completion · signatureHelp) 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P3 구현" 절). 파서 복구와 P4 이후는 미구현.
 앞선 결정은 `docs/decisions/project_fmt.md`의 "내장 도구의 기준"(LSP는 CLI에 넣지 않고 라이브러리 위의 별도 프로그램),
 사실 근거는 `docs/study/01-pipeline-front-end.md` 6절과 `docs/decisions/project_compile_error_report.md`이다.
 
@@ -279,8 +279,47 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
 확인: lib 테스트 `cl_vm_symbol_refs finds the places that name the same thing.`, 서버 테스트
 `References, highlights and the rename of a local.` 저장소 `.cy` 231개에 references · prepareRename 108,928 요청, 죽는 것 없음.
 
+### completion · signatureHelp (2026-11-13)
+
+2절의 "감수하는 것" 첫째(파서가 미완성 식 `a.`을 노드로 남긴다)는 하지 않았다. 파서를 건드리는 대신 서버가 커서 둘레의
+본문을 파싱되도록 고친 사본을 컴파일하고, 그 사본에 대해 컴파일러에게 묻는다. 파서 복구를 하게 되면 이 보정은 줄어든다.
+
+컴파일러:
+
+- `size_t cl_vm_members_at(vm, pos, &items)`: `pos`에서 끝나는 식의 멤버. 값이면 그 타입의 필드와 메서드(`&T` · `^T`는 벗겨서),
+  모듈이나 타입 이름이면 그것이 선언한 것(`math.` · `Color.` · `Vec2.`). `pos`에서 끝나는 식이 여럿이면 가장 작은 것이
+  받는 쪽이다(`x + v.`는 `v`).
+- `size_t cl_vm_names_at(vm, pos, &items)`: `pos`에서 쓸 수 있는 이름. `pos`를 둘러싼 함수가 그 앞에서 선언한 지역과 매개변수,
+  main 소스가 선언하거나 `use`한 것, 폴백 모듈(`core`)의 것. 같은 이름은 안쪽 선언 하나만. 블록은 가리지 않는다
+  (끝난 블록의 지역도 나온다). main 블록에서는 함수 안의 지역이 빠진다.
+- `CLItem{ name, detail, kind }`. `detail`은 hover와 같은 한 줄이다. 다른 모듈의 private 심볼, `@init` · `$get` 같은 훅과
+  연산자는 뺀다. 목록은 이름순이고 VM 소유다.
+
+서버(`src/lsp/complete.zig`의 보정은 순수 함수이고 단위 테스트가 있다):
+
+- `textDocument/completion`: 커서 앞이 `.`이면 멤버, 아니면 범위의 이름. 보정을 덜 고치는 것부터 세 번까지 시도한다.
+  0. 커서의 단어만: `v.le|n`은 `v`로, 빈 자리에는 자리표시 이름을 넣는다.
+  1. 커서 뒤 줄의 나머지를 버리고 그 줄에서 연 괄호를 닫는다(`print(add(v.|, 2 +`).
+  2. 줄을 받는 쪽 식(또는 자리표시 이름) 하나로 바꾼다(`if v.|`처럼 블록 머리라 본문 없이는 파싱되지 않는 줄).
+  구문 오류로 끝난 시도는 버린다. 목록은 걸러 내지 않고 다 보낸다(클라이언트가 친 글자로 거른다). 트리거 문자는 `.`.
+- `textDocument/signatureHelp`: 커서를 감싼 호출의 `(`를 뒤로 훑어 찾고, 그 앞 이름을 `cl_vm_symbol_at`으로 물어 선언의 첫 줄을
+  라벨로 준다. 매개변수는 라벨에서 최상위 쉼표로 나누고, 메서드의 수신자 `(&Vec2)`는 뺀다. 활성 매개변수는 커서 앞의 최상위
+  쉼표 수다. 그대로 컴파일해 보고, 안 되면 커서에서 자르고 괄호를 닫은 사본으로 한 번 더 한다. 트리거 문자는 `(` · `,`.
+- 보정한 사본을 컴파일한 뒤에는 VM이 문서의 컴파일을 들고 있지 않다고 표시한다. 진단은 언제나 문서 본문 그대로의 것이다.
+
+한계:
+
+- 글자 수준의 보정이다. 문자열이나 주석 안의 커서를 가리지 못하고, 여러 줄에 걸친 호출의 바깥 괄호는 닫지 못한다.
+- 본문당 오류 하나(7절)의 영향을 받는다. 같은 본문에서 커서보다 앞에 오류가 있으면 그 뒤의 지역은 기록되지 않아 목록에 없다.
+  멤버 completion은 받는 쪽 식까지 sema가 가야 답한다.
+- 오버로드는 첫 선언의 시그니처 하나만 보인다.
+
+확인: lib 테스트 `cl_vm_members_at and cl_vm_names_at list what can be written at a place.`, 서버 테스트
+`Completion lists members and names for source that is being typed.` · `Signature help shows the function that is being called.`,
+`complete.zig`의 단위 테스트 둘. 저장소 `.cy` 154개에 completion · signatureHelp 40,476 요청(ReleaseSafe 서버), 죽는 것 없음.
+이 테스트를 쓰다가 F-116을 찾았다(private 필드가 있는 struct의 `print`가 컴파일되지 않는다, 미해결).
+
 ## 9. 다음
 
-- P3의 나머지: `completion` · `signatureHelp`(미완성 식 `a.`을 파서가 노드로 남겨야 한다. 2절의 "감수하는 것" 첫째).
 - 파서 복구(P2의 나머지): 들여쓰기 기준 블록 동기화로 구문 오류를 여러 개 낸다. 구문 오류가 있으면 sema는 돌지 않는다.
 - F-114: 검사마다 새는 메모리.

@@ -252,37 +252,13 @@ pub fn find(compiler: *cy.Compiler, pos: u32) !?Info {
         },
         .sym => {
             const sym = ref.data.sym;
+            try writeSymDetail(compiler, w, sym, best_t);
             if (sym.type == .field) {
-                const field = sym.cast(.field);
-                try w.writeAll(name);
-                try w.writeAll(" ");
-                try writeTypeName(compiler, w, field.type);
                 if (fieldNameNode(sym)) |name_n| {
                     setDef(compiler, &info, name_n);
                 }
             } else if (declOf(sym)) |decl| {
-                const chunk = compiler.chunks.items[decl.src()];
-                if (sym.type == .chunk) {
-                    try w.print("module {s}", .{chunk.srcUri});
-                } else {
-                    try w.writeAll(headerLine(chunk.src, decl));
-                    if (sym.type == .func and sym.cast(.func).numFuncs > 1) {
-                        try w.print(" (+{} overloads)", .{sym.cast(.func).numFuncs - 1});
-                    }
-                }
                 setDef(compiler, &info, decl);
-            } else if (sym.type == .enum_case or sym.type == .choice_case or sym.type == .union_case) {
-                if (sym.parent) |parent| {
-                    try w.print("case {s}.{s}", .{ parent.name(), sym.name() });
-                } else {
-                    try w.print("case {s}", .{sym.name()});
-                }
-            } else {
-                try w.print("{s} {s}", .{ symKindName(sym.type), sym.name() });
-                if (best_t) |type_| {
-                    try w.writeAll(" ");
-                    try writeTypeName(compiler, w, type_);
-                }
             }
         },
     }
@@ -292,6 +268,236 @@ pub fn find(compiler: *cy.Compiler, pos: u32) !?Info {
     compiler.ref_detail = try buf.toOwnedSlice();
     info.detail = compiler.ref_detail;
     return info;
+}
+
+/// One line for a symbol: `name Type` for a field, the header of its declaration, or its kind and name.
+fn writeSymDetail(compiler: *cy.Compiler, w: *std.Io.Writer, sym: *cy.Sym, expr_t: ?*cy.Type) !void {
+    if (sym.type == .field) {
+        try w.writeAll(sym.name());
+        try w.writeAll(" ");
+        try writeTypeName(compiler, w, sym.cast(.field).type);
+    } else if (declOf(sym)) |decl| {
+        const chunk = compiler.chunks.items[decl.src()];
+        if (sym.type == .chunk) {
+            try w.print("module {s}", .{chunk.srcUri});
+        } else {
+            try w.writeAll(headerLine(chunk.src, decl));
+            if (sym.type == .func and sym.cast(.func).numFuncs > 1) {
+                try w.print(" (+{} overloads)", .{sym.cast(.func).numFuncs - 1});
+            }
+        }
+    } else if (sym.type == .enum_case or sym.type == .choice_case or sym.type == .union_case) {
+        if (sym.parent) |parent| {
+            try w.print("case {s}.{s}", .{ parent.name(), sym.name() });
+        } else {
+            try w.print("case {s}", .{sym.name()});
+        }
+    } else {
+        try w.print("{s} {s}", .{ symKindName(sym.type), sym.name() });
+        if (expr_t) |type_| {
+            try w.writeAll(" ");
+            try writeTypeName(compiler, w, type_);
+        }
+    }
+}
+
+pub const ItemKind = enum(u8) {
+    local,
+    function,
+    type,
+    field,
+    case,
+    constant,
+    global,
+    module,
+    other,
+};
+
+/// A name that can be written at a position, for completion.
+pub const Item = struct {
+    name: []const u8,
+    /// Like `Info.detail`.
+    detail: []const u8,
+    kind: ItemKind,
+};
+
+fn itemKind(sym: *cy.Sym) ItemKind {
+    return switch (sym.type) {
+        .func, .func_template, .variant_func => .function,
+        .type, .type_alias, .type_const, .template => .type,
+        .field => .field,
+        .enum_case, .choice_case, .union_case => .case,
+        .const_ => .constant,
+        .userVar, .hostVar, .extern_var => .global,
+        .chunk, .module_alias => .module,
+        .use_alias => if (sym.cast(.use_alias).resolved) itemKind(sym.cast(.use_alias).sym) else .other,
+        else => .other,
+    };
+}
+
+const Items = struct {
+    compiler: *cy.Compiler,
+    arena: std.mem.Allocator,
+    list: std.ArrayList(Item) = .empty,
+    seen: std.StringHashMapUnmanaged(void) = .empty,
+
+    /// The lists of the last call are dropped. They are owned by the compiler.
+    fn init(compiler: *cy.Compiler) Items {
+        if (compiler.ref_arena) |*arena| arena.deinit();
+        compiler.ref_arena = std.heap.ArenaAllocator.init(compiler.alloc);
+        return .{ .compiler = compiler, .arena = compiler.ref_arena.?.allocator() };
+    }
+
+    /// A name that was added before hides this one, like an inner declaration hides an outer one.
+    fn add(self: *Items, name: []const u8, detail: []const u8, kind: ItemKind) !void {
+        const res = try self.seen.getOrPut(self.arena, name);
+        if (res.found_existing) return;
+        try self.list.append(self.arena, .{ .name = name, .detail = detail, .kind = kind });
+    }
+
+    /// The symbols of a module that a script can name from the main source.
+    fn addModule(self: *Items, mod: *cy.Module) !void {
+        var iter = mod.symMap.iterator();
+        while (iter.next()) |entry| {
+            const name = entry.key_ptr.*;
+            var sym = entry.value_ptr.*;
+            // Hooks and operators (`@init`, `$get`) are not called by their names.
+            if (name.len == 0 or !(std.ascii.isAlphabetic(name[0]) or name[0] == '_')) continue;
+            if (sym.getMetadata().private and sym.type != .use_alias and sym.type != .module_alias) {
+                if (sym.getRootChunk() != self.compiler.main_chunk) continue;
+            }
+            if (sym.type == .use_alias) {
+                const alias = sym.cast(.use_alias);
+                if (!alias.resolved) continue;
+                sym = alias.sym;
+            } else if (sym.type == .module_alias) {
+                sym = sym.cast(.module_alias).sym;
+            }
+            var buf = std.Io.Writer.Allocating.init(self.arena);
+            try writeSymDetail(self.compiler, &buf.writer, sym, null);
+            try self.add(try self.arena.dupe(u8, name), buf.written(), itemKind(sym));
+        }
+    }
+
+    fn finish(self: *Items) []const Item {
+        std.mem.sort(Item, self.list.items, {}, struct {
+            fn lessThan(_: void, x: Item, y: Item) bool {
+                return std.mem.order(u8, x.name, y.name) == .lt;
+            }
+        }.lessThan);
+        return self.list.items;
+    }
+};
+
+/// The members of the expression that ends at byte offset `pos` of the main source: the fields and methods
+/// of its type, or the symbols of the module or type that it names. Empty if no expression ends there.
+/// The result is valid until the next `members`, `scope` or compile.
+pub fn members(compiler: *cy.Compiler, pos: u32) ![]const Item {
+    var items = Items.init(compiler);
+
+    // The smallest expression that ends at the position is the receiver: `x + v.` asks for the members of `v`.
+    var best: ?Ref = null;
+    var best_t: ?*cy.Type = null;
+    for (compiler.refs.items) |ref| {
+        if (ref.end != pos) continue;
+        if (best) |b| {
+            if (ref.pos < b.pos) continue;
+            if (ref.pos == b.pos and ref.kind == .expr) {
+                best_t = ref.type;
+                continue;
+            }
+            if (ref.pos > b.pos) best_t = null;
+        }
+        if (ref.kind == .expr) best_t = ref.type;
+        best = ref;
+    }
+    const ref = best orelse return items.finish();
+
+    var type_: ?*cy.Type = switch (ref.kind) {
+        .expr, .local => ref.type,
+        .sym => best_t,
+    };
+    if (ref.kind == .sym) {
+        const sym = ref.data.sym;
+        switch (sym.type) {
+            // A module or a type is asked for what it declares: `math.`, `Color.`.
+            .chunk, .type, .template, .type_const => {
+                if (sym.getMod()) |mod| try items.addModule(mod);
+                return items.finish();
+            },
+            .field => type_ = sym.cast(.field).type,
+            else => {},
+        }
+    }
+    const value_t = type_ orelse return items.finish();
+    const base_t = value_t.getBaseType();
+    if (base_t.sym().head.getMod()) |mod| try items.addModule(mod);
+    return items.finish();
+}
+
+/// The names that can be used at byte offset `pos` of the main source: the locals and parameters declared
+/// before it in the function it is in, then what the main source declares and uses, then the builtins.
+/// The result is valid until the next `members`, `scope` or compile.
+pub fn scope(compiler: *cy.Compiler, pos: u32) ![]const Item {
+    var items = Items.init(compiler);
+    const main = compiler.main_chunk;
+
+    // The outermost function around the position. A lambda in it sees its locals too.
+    var body_start: u32 = 0;
+    var body_end: u32 = @intCast(main.src.len);
+    var in_func = false;
+    for (main.funcs.items) |func| {
+        const decl = func.decl orelse continue;
+        if (decl.type() != .funcDecl) continue;
+        const start = decl.pos();
+        if (start == cy.NullId or decl.src() != main.id) continue;
+        const end = decl.end();
+        if (end == cy.NullId or pos < start or pos > end) continue;
+        if (!in_func or start < body_start) {
+            body_start = start;
+            body_end = end;
+            in_func = true;
+        }
+    }
+
+    // Blocks are not told apart: a local of a block that has ended is still offered.
+    // The latest declaration of a name before the position is the one in scope.
+    var i = compiler.refs.items.len;
+    while (i > 0) {
+        i -= 1;
+        const ref = compiler.refs.items[i];
+        if (ref.kind != .local or ref.data.local_decl == cy.NullId) continue;
+        const decl_pos = ref.data.local_decl;
+        if (decl_pos != ref.pos or decl_pos >= pos) continue;
+        if (decl_pos < body_start or decl_pos > body_end) continue;
+        if (!in_func and insideFunc(main, decl_pos)) continue;
+        const name = main.src[ref.pos..ref.end];
+        var buf = std.Io.Writer.Allocating.init(items.arena);
+        try buf.writer.writeAll(name);
+        try buf.writer.writeAll(" ");
+        try writeTypeName(compiler, &buf.writer, ref.type.?);
+        try items.add(name, buf.written(), .local);
+    }
+
+    if (main.sym.head.getMod()) |mod| try items.addModule(mod);
+    var m = main.fallback_modules.items.len;
+    while (m > 0) {
+        m -= 1;
+        if (main.fallback_modules.items[m].getMod()) |mod| try items.addModule(mod);
+    }
+    return items.finish();
+}
+
+fn insideFunc(main: *cy.Chunk, pos: u32) bool {
+    for (main.funcs.items) |func| {
+        const decl = func.decl orelse continue;
+        if (decl.type() != .funcDecl) continue;
+        const start = decl.pos();
+        if (start == cy.NullId or decl.src() != main.id) continue;
+        const end = decl.end();
+        if (end != cy.NullId and pos >= start and pos <= end) return true;
+    }
+    return false;
 }
 
 fn writeTypeName(compiler: *cy.Compiler, w: *std.Io.Writer, type_: *cy.Type) !void {

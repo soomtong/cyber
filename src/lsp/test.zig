@@ -179,6 +179,8 @@ test "The server follows the lifecycle of the protocol." {
     try t.expect(get(out[0], &.{ "result", "capabilities", "referencesProvider" }).?.bool);
     try t.expect(get(out[0], &.{ "result", "capabilities", "documentHighlightProvider" }).?.bool);
     try t.expect(get(out[0], &.{ "result", "capabilities", "renameProvider", "prepareProvider" }).?.bool);
+    try t.expectEqualStrings(".", items(out[0], &.{ "result", "capabilities", "completionProvider", "triggerCharacters" })[0].string);
+    try t.expectEqual(@as(usize, 2), items(out[0], &.{ "result", "capabilities", "signatureHelpProvider", "triggerCharacters" }).len);
     try t.expectEqualStrings("cyber-lsp", str(out[0], &.{ "result", "serverInfo", "name" }));
 
     out = try s.send(
@@ -188,7 +190,7 @@ test "The server follows the lifecycle of the protocol." {
 
     // A request that the server does not know gets an error, a notification is skipped, a reply is ignored.
     out = try s.send(
-        \\{"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{}}
+        \\{"jsonrpc":"2.0","id":3,"method":"textDocument/typeDefinition","params":{}}
     );
     try t.expectEqual(@as(i64, -32601), int(out[0], &.{ "error", "code" }));
     out = try s.send(
@@ -605,6 +607,175 @@ test "References, highlights and the rename of a local." {
     try t.expectEqualStrings("There is nothing to rename here.", str(reply, &.{ "error", "message" }));
     reply = try s.requestAt("textDocument/rename", main_uri, 2, 12);
     try t.expectEqual(@as(i64, -32602), int(reply, &.{ "error", "code" }));
+}
+
+fn findItem(list: []Value, label: []const u8) ?Value {
+    for (list) |item| {
+        if (std.mem.eql(u8, str(item, &.{"label"}), label)) return item;
+    }
+    return null;
+}
+
+test "Completion lists members and names for source that is being typed." {
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+
+    const head =
+        \\use math
+        \\
+        \\type Vec2:
+        \\    x float
+        \\    y float
+        \\
+        \\fn (&Vec2) scale(by float) -> Vec2:
+        \\    return Vec2{x = self.x * by, y = self.y * by}
+        \\
+        \\fn add(first int, second int) -> int:
+        \\    total := first + second
+        \\    return total
+        \\
+        \\v := Vec2{x = 1.0, y = 2.0}
+        \\
+    ;
+    const S = struct {
+        /// Opens `head` plus `last` as the document and asks for completions at the end of `last`.
+        fn complete(session: *Session, version: i64, comptime last: []const u8) ![]Value {
+            try session.change(main_uri, version, head ++ last);
+            const line: u32 = @intCast(std.mem.count(u8, head ++ last, "\n"));
+            const col: u32 = @intCast(last.len - (if (std.mem.findScalarLast(u8, last, '\n')) |nl| nl + 1 else 0));
+            const reply = try session.requestAt("textDocument/completion", main_uri, line, col);
+            try t.expect(!get(reply, &.{ "result", "isIncomplete" }).?.bool);
+            return items(reply, &.{ "result", "items" });
+        }
+    };
+    try s.open(main_uri, 1, head);
+
+    // The members of a value, while the line ends in the `.`: the document does not parse as it is.
+    var list = try S.complete(&s, 2, "w := v.");
+    try t.expectEqualStrings("x float", str(findItem(list, "x").?, &.{"detail"}));
+    try t.expectEqual(@as(i64, 5), int(findItem(list, "x").?, &.{"kind"}));
+    try t.expectEqualStrings("fn (&Vec2) scale(by float) -> Vec2", str(findItem(list, "scale").?, &.{"detail"}));
+    try t.expectEqual(@as(i64, 2), int(findItem(list, "scale").?, &.{"kind"}));
+    try t.expect(findItem(list, "add") == null);
+
+    // With a part of the member typed, the whole list is still sent: the client filters.
+    list = try S.complete(&s, 3, "w := v.sc");
+    try t.expect(findItem(list, "scale") != null);
+    try t.expect(findItem(list, "x") != null);
+
+    // Inside a call that is not closed, and after a call.
+    list = try S.complete(&s, 4, "print(add(1, 2) + v.");
+    try t.expect(findItem(list, "y") != null);
+    list = try S.complete(&s, 5, "w := v.scale(2.0).");
+    try t.expect(findItem(list, "scale") != null);
+
+    // In the header of a block, which never parses without its body.
+    list = try S.complete(&s, 6, "if v.");
+    try t.expect(findItem(list, "x") != null);
+
+    // A module and a type.
+    list = try S.complete(&s, 7, "w := math.");
+    try t.expectEqualStrings("fn sqrt(a float) -> float", str(findItem(list, "sqrt").?, &.{"detail"}));
+    try t.expectEqual(@as(i64, 3), int(findItem(list, "sqrt").?, &.{"kind"}));
+    try t.expect(findItem(list, "x") == null);
+
+    // The names in scope: locals of the main block, declarations, the module and builtins.
+    list = try S.complete(&s, 8, "w := ");
+    try t.expectEqualStrings("v Vec2", str(findItem(list, "v").?, &.{"detail"}));
+    try t.expectEqual(@as(i64, 6), int(findItem(list, "v").?, &.{"kind"}));
+    try t.expectEqualStrings("fn add(first int, second int) -> int", str(findItem(list, "add").?, &.{"detail"}));
+    try t.expectEqual(@as(i64, 22), int(findItem(list, "Vec2").?, &.{"kind"}));
+    try t.expectEqual(@as(i64, 9), int(findItem(list, "math").?, &.{"kind"}));
+    try t.expect(findItem(list, "print") != null);
+    try t.expect(findItem(list, "total") == null);
+    try t.expect(findItem(list, "cy_lsp_placeholder_") == null);
+    list = try S.complete(&s, 9, "print(ad");
+    try t.expect(findItem(list, "add") != null);
+
+    // Inside a function: its parameters and locals.
+    list = try S.complete(&s, 10, "fn more(count int) -> int:\n    step := 2\n    return ");
+    try t.expectEqualStrings("count int", str(findItem(list, "count").?, &.{"detail"}));
+    try t.expectEqualStrings("step int", str(findItem(list, "step").?, &.{"detail"}));
+    try t.expect(findItem(list, "v") == null);
+    try t.expect(findItem(list, "add") != null);
+
+    // Nothing after a number. The reply is an empty list.
+    list = try S.complete(&s, 11, "w := 12");
+    try t.expectEqual(@as(usize, 0), list.len);
+
+    // The patched source is not the document: the diagnostics are those of the text as it is.
+    const out = try s.flush();
+    const diags = items(out[0], &.{ "params", "diagnostics" });
+    try t.expectEqual(@as(usize, 0), diags.len);
+}
+
+test "Signature help shows the function that is being called." {
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+
+    const head =
+        \\type Vec2:
+        \\    x float
+        \\
+        \\fn (&Vec2) scale(by float, times int) -> float:
+        \\    return self.x * by
+        \\
+        \\fn add(first int, second int) -> int:
+        \\    return first + second
+        \\
+        \\v := Vec2{x = 1.0}
+        \\
+    ;
+    const S = struct {
+        fn help(session: *Session, version: i64, comptime last: []const u8) !Value {
+            try session.change(main_uri, version, head ++ last);
+            const line: u32 = @intCast(std.mem.count(u8, head, "\n"));
+            return session.requestAt("textDocument/signatureHelp", main_uri, line, @intCast(last.len));
+        }
+    };
+    try s.open(main_uri, 1, head);
+
+    // Right after the bracket, and after a comma: neither parses as it is.
+    var reply = try S.help(&s, 2, "n := add(");
+    var sigs = items(reply, &.{ "result", "signatures" });
+    try t.expectEqual(@as(usize, 1), sigs.len);
+    try t.expectEqualStrings("fn add(first int, second int) -> int", str(sigs[0], &.{"label"}));
+    var sig_params = items(sigs[0], &.{"parameters"});
+    try t.expectEqual(@as(usize, 2), sig_params.len);
+    try t.expectEqualStrings("first int", str(sig_params[0], &.{"label"}));
+    try t.expectEqualStrings("second int", str(sig_params[1], &.{"label"}));
+    try t.expectEqual(@as(i64, 0), int(reply, &.{ "result", "activeParameter" }));
+
+    reply = try S.help(&s, 3, "n := add(1, ");
+    try t.expectEqual(@as(i64, 1), int(reply, &.{ "result", "activeParameter" }));
+    try t.expectEqualStrings("fn add(first int, second int) -> int", str(items(reply, &.{ "result", "signatures" })[0], &.{"label"}));
+
+    // A call that is complete, with the cursor in its second argument.
+    reply = try S.help(&s, 4, "n := add(1, 2");
+    try t.expectEqual(@as(i64, 1), int(reply, &.{ "result", "activeParameter" }));
+
+    // A method: the receiver is not one of the arguments.
+    reply = try S.help(&s, 5, "f := v.scale(2.0, ");
+    sigs = items(reply, &.{ "result", "signatures" });
+    try t.expectEqualStrings("fn (&Vec2) scale(by float, times int) -> float", str(sigs[0], &.{"label"}));
+    sig_params = items(sigs[0], &.{"parameters"});
+    try t.expectEqual(@as(usize, 2), sig_params.len);
+    try t.expectEqualStrings("times int", str(sig_params[1], &.{"label"}));
+    try t.expectEqual(@as(i64, 1), int(reply, &.{ "result", "activeParameter" }));
+
+    // The inner call of a nested one.
+    reply = try S.help(&s, 6, "n := add(1, add(");
+    try t.expectEqual(@as(i64, 0), int(reply, &.{ "result", "activeParameter" }));
+
+    // Not in a call, and a call of something that is not a function of a source.
+    reply = try S.help(&s, 7, "n := 1 + ");
+    try t.expect(get(reply, &.{"result"}).? == .null);
+    reply = try S.help(&s, 8, "n := nope(");
+    try t.expect(get(reply, &.{"result"}).? == .null);
 }
 
 test "A module is read from the editor when it is open, otherwise from the disk." {

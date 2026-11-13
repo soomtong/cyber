@@ -12,6 +12,7 @@ test {
     _ = @import("lsp/position.zig");
     _ = @import("lsp/transport.zig");
     _ = @import("lsp/symbols.zig");
+    _ = @import("lsp/complete.zig");
     _ = @import("lsp/server.zig");
     _ = @import("lsp/test.zig");
 }

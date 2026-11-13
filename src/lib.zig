@@ -576,6 +576,45 @@ export fn cl_vm_symbol_refs(vm: *cy.VM, pos: u32, out: *[*c]const C.Range) usize
     return ranges.len;
 }
 
+fn toItems(vm: *cy.VM, items: []const cy.refs.Item, out: *[*c]const C.Item) usize {
+    out.* = null;
+    if (items.len == 0) return 0;
+    // The arena of the items owns the array too. It is used in place: a copy would lose the allocation.
+    const arena = if (vm.compiler.ref_arena) |*a| a.allocator() else return 0;
+    const res = arena.alloc(C.Item, items.len) catch return 0;
+    for (items, 0..) |item, i| {
+        res[i] = .{
+            .name = C.to_bytes(item.name),
+            .detail = C.to_bytes(item.detail),
+            .kind = switch (item.kind) {
+                .local => C.ItemLocal,
+                .function => C.ItemFunction,
+                .type => C.ItemType,
+                .field => C.ItemField,
+                .case => C.ItemCase,
+                .constant => C.ItemConstant,
+                .global => C.ItemGlobal,
+                .module => C.ItemModule,
+                .other => C.ItemOther,
+            },
+        };
+    }
+    out.* = res.ptr;
+    return res.len;
+}
+
+export fn cl_vm_members_at(vm: *cy.VM, pos: u32, out: *[*c]const C.Item) usize {
+    out.* = null;
+    const items = cy.refs.members(vm.compiler, pos) catch return 0;
+    return toItems(vm, items, out);
+}
+
+export fn cl_vm_names_at(vm: *cy.VM, pos: u32, out: *[*c]const C.Item) usize {
+    out.* = null;
+    const items = cy.refs.scope(vm.compiler, pos) catch return 0;
+    return toItems(vm, items, out);
+}
+
 export fn cl_vm_set_error_recovery(vm: *cy.VM, enabled: bool) void {
     vm.compiler.recover = enabled;
 }

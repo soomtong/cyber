@@ -81,6 +81,8 @@ pub const Compiler = struct {
     ref_detail: []const u8 = "",
     /// The ranges that the last `refs.findAll` returned.
     ref_ranges: std.ArrayList(cy.refs.Range) = .empty,
+    /// Owns the items that the last `refs.members` or `refs.scope` returned.
+    ref_arena: ?std.heap.ArenaAllocator = null,
     
     /// Sema model resulting from the sema pass.
     sema: sema.Sema,
@@ -322,6 +324,8 @@ pub const Compiler = struct {
         // The references point into the symbols and sources of the compile that the reports are from.
         self.refs.clearRetainingCapacity();
         self.ref_ranges.clearRetainingCapacity();
+        if (self.ref_arena) |*arena| arena.deinit();
+        self.ref_arena = null;
         self.alloc.free(self.ref_detail);
         self.ref_detail = "";
     }

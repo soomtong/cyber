@@ -580,10 +580,7 @@ pub const Thread = struct {
         // This is similar to `callSym` except it does not patch any bytecode.
         const host_func = (func_ptr.val >> 63) != 0;
         if (host_func) {
-            self.c.fp = ret_ + ret_size;
-            ret_[ret_size] = buildHostCallInfo(false);
-            ret_[ret_size + 1] = Value{ .retPcPtr = cur_pc };
-            ret_[ret_size + 2] = Value{ .retFramePtr = self.c.fp };
+            self.enterHostFrame(ret_ + ret_size, cur_pc, ret_ + ret_size);
             const ptr: vmc.HostFn = @ptrFromInt(@as(usize, @truncate(func_ptr.val & ~(@as(u64, 1) << 63))));
             const res = ptr.?(@ptrCast(self));
             if (res != 0) {
@@ -927,6 +924,17 @@ pub const Thread = struct {
         return cur_fp[ret];
     }
 
+    /// Sets up the frame of a host function call at `frame` and makes it the current frame. `fp_end` points at the
+    /// first parameter, so a host function can read its parameters before or after it takes the return slot
+    /// (`cl_thread_ret` sets the same). `vm.c` `CALL_HOST` does the same for a direct call.
+    inline fn enterHostFrame(self: *Thread, frame: [*]Value, ret_pc: [*]cy.Inst, ret_fp: [*]Value) void {
+        frame[0] = buildHostCallInfo(false);
+        frame[1] = Value{ .retPcPtr = ret_pc };
+        frame[2] = Value{ .retFramePtr = ret_fp };
+        self.c.fp = @ptrCast(frame);
+        self.c.fp_end = @ptrCast(frame + CallArgStart);
+    }
+
     pub fn callPtrInst(self: *Thread, pc: [*]cy.Inst, fp: [*]Value, base: u16) !PcFp {
         const base_ptr = fp + base;
         const callee = base_ptr[3];
@@ -935,10 +943,7 @@ pub const Thread = struct {
         const host_func = (callee.val >> 63) != 0;
         if (host_func) {
             self.c.pc = @ptrCast(pc);
-            self.c.fp = @ptrCast(fp + base);
-            base_ptr[0] = buildHostCallInfo(false);
-            base_ptr[1] = Value{ .retPcPtr = pc };
-            base_ptr[2] = Value{ .retFramePtr = fp };
+            self.enterHostFrame(base_ptr, pc, fp);
             const host_fn: vmc.HostFn = @ptrCast(@alignCast(ptr));
             const res: c.Ret = host_fn.?(@ptrCast(self));
             if (res != 0) {
@@ -968,10 +973,7 @@ pub const Thread = struct {
             // @as(*align(1) u48, @ptrCast(pc + 4)).* = @intCast(@intFromPtr(func.data.host_func));
 
             self.c.pc = @ptrCast(pc);
-            self.c.fp = @ptrCast(fp + base);
-            fp[base] = buildHostCallInfo(false);
-            fp[base+1] = Value{ .retPcPtr = pc };
-            fp[base+2] = Value{ .retFramePtr = fp };
+            self.enterHostFrame(fp + base, pc, fp);
 
             const ptr: vmc.HostFn = @ptrCast(@alignCast(func_ptr));
             const res: c.Ret = @bitCast(ptr.?(@ptrCast(self)));
@@ -1026,10 +1028,7 @@ pub const Thread = struct {
             },
             .host => {
                 self.c.pc = @ptrCast(pc);
-                self.c.fp = @ptrCast(fp + base);
-                fp[base + 0] = buildHostCallInfo(false);
-                fp[base + 1] = Value{ .retPcPtr = pc };
-                fp[base + 2] = Value{ .retFramePtr = fp };
+                self.enterHostFrame(fp + base, pc, fp);
                 const res: c.Ret = @bitCast(func.data.host.ptr.?(@ptrCast(self)));
                 if (res != 0) {
                     return error.Panic;

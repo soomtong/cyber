@@ -213,11 +213,11 @@ fn fillVtables(c: *cy.Compiler, chunk: *cy.Chunk, sym: *cy.Sym) void {
         const vtable_idx = c.gen_vtables.get(VtableKey{ .type = struct_t.base.id(), .trait = impl.trait.base.id() }).?;
         const vtable = c.vm.vtables.items[vtable_idx];
         for (impl.funcs, 0..) |func, i| {
-            var ptr: u64 = @intFromPtr(&chunk.buf.ops.items[c.genSymMap.get(func).?.func.pc]);
-            if (func.type == .hostFunc) {
-                ptr |= 1 << 63;
-            }
-            vtable[i] = ptr;
+            // A host function has no bytecode: the entry is the function pointer with the top bit set (`zCallTrait`).
+            vtable[i] = if (func.type == .hostFunc)
+                @as(u64, @intFromPtr(func.data.hostFunc.ptr)) | (@as(u64, 1) << 63)
+            else
+                @intFromPtr(&chunk.buf.ops.items[c.genSymMap.get(func).?.func.pc]);
         }
     }
 }

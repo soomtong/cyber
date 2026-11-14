@@ -271,6 +271,78 @@ test "A host function can read its parameters before it takes the return slot." 
     , &res));
 }
 
+test "A host function called through a function value reads its parameters first." {
+    // Only the direct call set `fp_end` before a host call. A function pointer, a function union, a call from a
+    // builtin method (`sort`) and a trait call left the `fp_end` of an earlier call, so reading a parameter before
+    // `cl_thread_ret` read another value without an error.
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    const S = struct {
+        fn first(t_: *C.Thread) callconv(.c) C.Ret {
+            var s = C.thread_str(t_);
+            const len: i64 = @intCast(C.str_bytes(s).len);
+            C.str_deinit(t_, &s);
+            C.thread_ret(t_, i64).* = len;
+            return C.RetOk;
+        }
+        fn less(t_: *C.Thread) callconv(.c) C.Ret {
+            var a = C.thread_str(t_);
+            defer C.str_deinit(t_, &a);
+            var b = C.thread_str(t_);
+            defer C.str_deinit(t_, &b);
+            const res = std.mem.order(u8, C.str_bytes(a), C.str_bytes(b)) == .lt;
+            C.thread_ret(t_, bool).* = res;
+            return C.RetOk;
+        }
+        fn measure(t_: *C.Thread) callconv(.c) C.Ret {
+            const box = C.thread_param(t_, *const i64);
+            const k = C.thread_int(t_);
+            C.thread_ret(t_, i64).* = box.* * 10 + k;
+            return C.RetOk;
+        }
+        fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+            const name = C.from_bytes(uri);
+            if (std.mem.eql(u8, name, "mod")) {
+                C.mod_add_func(mod, "first", C.BIND_FUNC(&first));
+                C.mod_add_func(mod, "less", C.BIND_FUNC(&less));
+                C.mod_add_func(mod, "Box.measure", C.BIND_FUNC(&measure));
+                res[0].src = C.to_bytes(
+                    \\#[bind] fn first(s str) -> int
+                    \\#[bind] fn less(a str, b str) -> bool
+                    \\type Measure trait:
+                    \\    fn measure(k int) -> int
+                    \\type Box:
+                    \\    with Measure
+                    \\    n int
+                    \\#[bind] fn (&Box) measure(k int) -> int
+                );
+                return true;
+            } else {
+                return C.default_loader(vm_, mod, uri, res);
+            }
+        }
+    };
+    C.vm_set_loader(vm, @ptrCast(&S.loader));
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use mod
+        \\use test
+        \\type F = fn(str) -> int
+        \\test.eq(mod.first('hello'), 5)
+        \\var f F = mod.first
+        \\test.eq(f('hello'), 5)
+        \\var g Func[F] = mod.first
+        \\test.eq(g('hello'), 5)
+        \\xs := {'b', 'c', 'a'}
+        \\xs.sort(mod.less)
+        \\test.eq_slice({'a', 'b', 'c'}, xs)
+        \\var m ^Dyn[mod.Measure] = ^mod.Box{n=4}
+        \\test.eq(m.measure(2), 42)
+    , &res));
+}
+
 test "Host functions release their owned str params." {
     // Leak-checking allocator: a host function that skips `str_deinit` leaks the heap string.
     // The strings are longer than 32 bytes so they are big objects allocated outside the heap pages.

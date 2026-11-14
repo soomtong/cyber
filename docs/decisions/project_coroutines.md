@@ -601,6 +601,15 @@ move 결과를 `ExprResult.initOwned`(값, 자리 아님)로 돌려주고 그 IR
   `semaDestructLocal`은 `Chunk.cancel_pad_skip`으로 그 지역 하나를 패드에서 뺀다.
 - 남은 것: 취소 도중 `@deinit`이 다시 멈추면 panic(설계대로. 매뉴얼 예제를 이것으로 바꿨다).
 - 테스트 `concurrency/fiber_cancel_deinit.cy`(블록 끝, `release`, 목록 리터럴의 임시 값, `Generator.end`).
+- 리뷰 뒤 정리(2026-11-14). (1) keep 표지는 `*ir.Stmt` 맵에 넣던 전역 sentinel(`sema.cancel_keep`) 대신
+  `sema.CancelPad` union(`keep` · `pad`)이다. (2) `isCancelKeepFunc`는 이름 문자열 대신 템플릿 동일성(`Sema.dtor_fn` ·
+  `partial_dtor_fn` · `deinit_obj_tmpl`, `Sema.destruct_box_fn`)으로 판정하고 `Func.info.cancel_keep`에 캐시한다. builtin
+  `@deinit`만 언어가 정한 이름으로 본다. 쓰이지 않는 `@destruct_span`은 keep이 아니다(쓰게 되면 `@destruct` 안에서
+  인라인되거나 패드를 받아 나머지 원소를 놓치므로 판정에 더해야 한다). (3) `semaReleaseLocal`은 대상 타입의 소멸이
+  스크립트 코드를 부를 수 있을 때(`destructMayRunScript`)만 지점을 단다. 그 판정은 제너레이터 인스턴스를 명시적으로
+  true로 본다(본문의 deinit 블록이 스크립트 코드다).
+- `move x`의 표시는 `Chunk.moved_locals`(IR 포인터 키의 사이드 테이블) 대신 `ir.Local.moved` 플래그다. 표가 seqPush에
+  닿지 않은 move 항목을 chunk 끝까지 들고 있었고, IR 버퍼 재사용 때 주소가 겹칠 수 있었다.
 
 ## `scope` 블록 규칙 사용자 확정 (2026-11-14)
 

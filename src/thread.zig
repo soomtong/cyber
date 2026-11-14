@@ -123,18 +123,40 @@ fn allocContextTrace(t: *Thread, cx: PcFpOff) ![]c.StackFrame {
     return frames.toOwnedSlice(t.alloc);
 }
 
+/// The value of a register as an address of the target. A pointer of a 32-bit target is the low half of the
+/// register. The high half can be anything when the pointer is a payload that is narrower than the register
+/// (a result of `&T`).
+inline fn reg_addr_bits(val: u64) u64 {
+    return if (@sizeOf(usize) == 4) val & 0xffffffff else val;
+}
+
+/// Whether the tag checks of `slot` hold for the register at `idx` (`bytecode.PtrSlot`).
+fn ptr_slot_tags_hold(stack: [*]cy.Value, idx: usize, slot: cy.bytecode.PtrSlot) bool {
+    const checks = [2]struct { back: usize, tags: u16 }{
+        .{ .back = slot.back0, .tags = slot.tags0 },
+        .{ .back = slot.back1, .tags = slot.tags1 },
+    };
+    for (checks) |check| {
+        if (check.back == 0) continue;
+        const tag = reg_addr_bits(stack[idx - check.back].val);
+        if (tag > cy.bytecode.PtrSlot.max_tag) return false;
+        if ((check.tags >> @intCast(tag)) & 1 == 0) return false;
+    }
+    return true;
+}
+
 /// Patches the registers of the frame at `fp` in `stack` that `layout` marks and that hold an address inside the
 /// stack that moves (`old_bytes` bytes at `old_start`, now at `new_start`). `stack` is the new copy of the moved
 /// stack, or the stack of a suspended fiber that borrows from it (`Thread.patchFiberPtrs`).
-pub fn patch_frame_ptrs(stack: [*]cy.Value, fp: usize, layout: []bool, old_start: usize, old_bytes: usize, new_start: usize) void {
-    for (layout, 0..) |is_ptr, i| {
-        if (!is_ptr) continue;
+pub fn patch_frame_ptrs(stack: [*]cy.Value, fp: usize, layout: []const cy.bytecode.PtrSlot, old_start: usize, old_bytes: usize, new_start: usize) void {
+    for (layout, 0..) |slot, i| {
+        if (!slot.ptr) continue;
+        // A register inside a result, a choice or an option holds the pointer only in its case.
+        if (!ptr_slot_tags_hold(stack, fp + i, slot)) continue;
 
-        // A marked register can hold something else than an address (the other case of an option, a pointer
-        // field that was not set), so the value is compared as 64 bits before it is taken as an address.
-        // A pointer of a 32-bit target is the low half of the register. The high half can be anything when the
-        // pointer is a payload that is narrower than the register (a result of `&T`).
-        const bits: u64 = if (@sizeOf(usize) == 4) stack[fp + i].val & 0xffffffff else stack[fp + i].val;
+        // A marked register can still hold something else than an address (a pointer field that was not set,
+        // a case whose check did not fit), so the value is compared before it is taken as an address.
+        const bits = reg_addr_bits(stack[fp + i].val);
         if (bits >= old_start and bits < old_start + old_bytes) {
             const ptr: usize = @intCast(bits);
             const byte_off = ptr - old_start;
@@ -144,7 +166,7 @@ pub fn patch_frame_ptrs(stack: [*]cy.Value, fp: usize, layout: []bool, old_start
 }
 
 pub const CancelTarget = union(enum) {
-    /// The frame keeps running: it is a destruction routine (`sema.cancel_keep`).
+    /// The frame keeps running: it is a destruction routine (`sema.CancelPad.keep`).
     keep,
     pad: [*]cy.Inst,
 };
@@ -165,7 +187,7 @@ pub fn get_cancel_pad(vm: *cy.VM, pc: [*]cy.Inst) ?CancelTarget {
     return .{ .pad = entry.ptr + table[idx].pad };
 }
 
-pub fn get_ptr_layout(vm: *cy.VM, pc: [*]cy.Inst) ?[]bool {
+pub fn get_ptr_layout(vm: *cy.VM, pc: [*]cy.Inst) ?[]const cy.bytecode.PtrSlot {
     const table_idx = cy.debug.indexOfTableEntry(vm.debug_tables, pc) orelse return null;
     const entry = vm.debug_tables[table_idx];
     const table = entry.chunk.buf.ptr_table.items;

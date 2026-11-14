@@ -441,6 +441,9 @@ pub const ForRangeStmt = extern struct {
 pub const Local = extern struct {
     base: Expr = undefined,
     id: u8,
+    /// The read of `move x`: the local is dead from here on and the value is owned by the consumer
+    /// (`sema.seqPush`).
+    moved: bool = false,
 };
 
 pub const Lambda = extern struct {

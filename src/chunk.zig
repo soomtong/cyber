@@ -116,9 +116,6 @@ pub const Chunk = struct {
     /// See `sema.seqFlush`.
     seq_pending: std.ArrayList(cy.sema.SeqEntry) = .empty,
     seq_flushing: bool = false,
-    /// The IR of `move x`: a read of `x`, which is dead from then on. `sema.seqPush` keeps it pending so that a
-    /// cancel before the consumer takes it still destructs the value.
-    moved_locals: std.AutoHashMapUnmanaged(*cy.ir.Expr, void) = .empty,
 
     /// The `s.start(func, {args})` call of a `scope` block that is being analyzed, and its argument literal.
     /// `semaTupleInit` records the borrows of that literal in `scope_start_borrows`. See `sema.semaScopeStart`.
@@ -135,7 +132,7 @@ pub const Chunk = struct {
     /// `await_` stmt. A pad is a statement list that destructs the locals that are alive at the node and
     /// returns. A fiber that is cancelled while one of its frames is at the node continues there.
     /// See `sema.semaCancelPad` and `bc_gen.push_cancel_site`.
-    cancel_pads: std.AutoHashMapUnmanaged(usize, *cy.ir.Stmt) = .empty,
+    cancel_pads: std.AutoHashMapUnmanaged(usize, cy.sema.CancelPad) = .empty,
     /// A pad is being analyzed. Its own calls (destructors) get no pad.
     cancel_pad_building: bool = false,
     /// While the locals of a block are destructed from the youngest down (`sema.semaDestructBlock2`): the index
@@ -345,7 +342,6 @@ pub const Chunk = struct {
         self.blockJumpStack.deinit(self.alloc);
         self.varShadowStack.deinit(self.alloc);
         self.seq_pending.deinit(self.alloc);
-        self.moved_locals.deinit(self.alloc);
         self.scope_start_borrows.deinit(self.alloc);
         self.scope_borrows.deinit(self.alloc);
         self.scope_blocks.deinit(self.alloc);

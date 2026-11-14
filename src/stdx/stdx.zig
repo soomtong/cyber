@@ -25,6 +25,11 @@ pub fn io() std.Io {
     return threaded.io();
 }
 
+/// Whether `io` was built. Lets a signal handler use it without building it (`initThreadedOnce` allocates).
+pub fn ioReady() bool {
+    return threaded_state.load(.acquire) == threaded_ready;
+}
+
 var threaded: std.Io.Threaded = .init_single_threaded;
 
 const threaded_uninit: u8 = 0;

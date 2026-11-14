@@ -45,4 +45,29 @@ fb := fiber work(o)
 _ = fb.resume()
 test.eq(o.*, 12)
 
+-- An `int` of another case keeps its value even when it looks like an address in the stack that moves.
+type Slot enum:
+    case num int
+    case one &int
+
+fn keep_num() -> int:
+    y := 5
+    addr := as[int] *y
+    s := Slot.num(addr)
+    _ = rec(20000)
+    switch s:
+        case .num |n|:
+            return n - addr
+        else:
+            return -1
+test.eq(keep_num(), 0)
+
+-- In a fiber whose own stack moves.
+fn keep_num_fiber(out ^int) -> void:
+    out.* = keep_num()
+o2 := ^int(-1)
+fb2 := fiber keep_num_fiber(o2)
+_ = fb2.resume()
+test.eq(o2.*, 0)
+
 --cytest: pass

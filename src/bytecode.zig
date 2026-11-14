@@ -55,10 +55,10 @@ pub const ByteCodeBuffer = struct {
     /// Ordered by `pc`. Where a frame at a call, a `suspend` or an `await` goes on when its fiber is cancelled.
     cancel_table: std.ArrayList(PcCancelPad),
 
-    ptr_layouts: std.ArrayList([]bool),
-    ptr_layout_map: std.HashMapUnmanaged([]const bool, usize, PtrLayoutContext, 80),
+    ptr_layouts: std.ArrayList([]PtrSlot),
+    ptr_layout_map: std.HashMapUnmanaged([]const PtrSlot, usize, PtrLayoutContext, 80),
 
-    ptr_layout_builder: std.ArrayList(bool),
+    ptr_layout_builder: std.ArrayList(PtrSlot),
 
     /// Pc ranges of inlined callee bodies, ordered by `start`. See `bc_gen.gen_inline_call`.
     inline_sites: std.ArrayList(InlineSite),
@@ -866,7 +866,7 @@ pub const InlineSite = struct {
 pub const PcCancelPad = extern struct {
     pc: u32,
     /// The pc of the pad: it destructs the frame's locals and returns. `keep`: the frame has no pad and keeps
-    /// running (a destruction routine, `sema.cancel_keep`).
+    /// running (a destruction routine, `sema.CancelPad.keep`).
     pad: u32,
 
     pub const keep: u32 = std.math.maxInt(u32);
@@ -1244,12 +1244,34 @@ test "bytecode internals." {
 }
 
 pub const PtrLayoutContext = struct {
-    pub fn hash(_: @This(), key: []const bool) u64 {
+    pub fn hash(_: @This(), key: []const PtrSlot) u64 {
         var c = std.hash.Wyhash.init(0);
         c.update(std.mem.sliceAsBytes(key));
         return c.final();
     }
-    pub fn eql(_: @This(), a: []const bool, b: []const bool) bool {
-        return std.mem.eql(bool, a, b);
+    pub fn eql(_: @This(), a: []const PtrSlot, b: []const PtrSlot) bool {
+        return std.mem.eql(u8, std.mem.sliceAsBytes(a), std.mem.sliceAsBytes(b));
+    }
+};
+
+/// One register of a frame's pointer layout (`bc_gen.mark_stack_ptr_regs`, `thread.patch_frame_ptrs`).
+/// A register inside a result, a choice or an option with a tag holds a pointer only in some cases. Up to two
+/// tag checks, outermost first, say which: the register `back` registers before this one holds a tag whose bit
+/// is set in `tags`. `back == 0` is no check. A check that does not fit is left out, which only makes the
+/// register patched in more cases (the range check of the value still applies).
+pub const PtrSlot = packed struct(u64) {
+    ptr: bool = false,
+    _pad: u1 = 0,
+    back0: u15 = 0,
+    tags0: u16 = 0,
+    back1: u15 = 0,
+    tags1: u16 = 0,
+
+    pub const max_back = std.math.maxInt(u15);
+    /// A tag value above this has no bit.
+    pub const max_tag = 15;
+
+    pub fn eql(a: PtrSlot, b: PtrSlot) bool {
+        return @as(u64, @bitCast(a)) == @as(u64, @bitCast(b));
     }
 };

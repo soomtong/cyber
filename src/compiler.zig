@@ -1266,6 +1266,7 @@ fn loadBuiltinChunk(c: *cy.Chunk) !void {
     c.sema.dtor_fn = try resolveFirstFunc(c, mod, "@destruct");
     c.sema.partial_dtor_fn = try resolveFirstFunc(c, mod, "@partial_destruct");
     c.sema.deinit_obj_tmpl = core.getSym("@deinitObject").?.cast(.func_template);
+    c.sema.destruct_box_fn = try resolveFirstFunc(c, mod, "@destructBox");
     c.sema.to_print_string_fn = try resolveFirstFunc(c, mod, "to_print_string");
     c.sema.eq_fn = try resolveFirstFunc(c, mod, "@eq");
 

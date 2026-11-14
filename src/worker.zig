@@ -75,6 +75,20 @@ pub const Pool = struct {
         stdx.io().futexWake(u32, &progress.raw, std.math.maxInt(u32));
     }
 
+    /// `notifyProgress` for a signal handler (`cl_vm_interrupt`). It does not build the process `Io`: before it
+    /// is built no thread waits in `waitProgress`, which builds it first. The wake itself is one system call on
+    /// Linux, the Apple systems and FreeBSD. Elsewhere the futex can be a userland one with locks (Windows), so
+    /// only the epoch moves, and a waiter sees it within the timeout of `waitProgress`.
+    pub fn notifyProgressFromSignal(self: *Pool) void {
+        _ = self;
+        if (comptime builtin.single_threaded) return;
+        _ = progress.fetchAdd(1, .release);
+        const syscall_wake = comptime builtin.os.tag == .linux or builtin.os.tag == .freebsd or builtin.os.tag.isDarwin();
+        if (!syscall_wake) return;
+        if (!stdx.ioReady()) return;
+        stdx.io().futexWake(u32, &progress.raw, std.math.maxInt(u32));
+    }
+
     /// Sleeps until `notifyProgress` is called after `seen` was read. Also wakes up after a few ms, for what
     /// does not notify (fuel, a spawned thread's own interrupt flag).
     pub fn waitProgress(self: *Pool, seen: u32) void {

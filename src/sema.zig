@@ -5936,7 +5936,10 @@ fn semaReleaseLocal(c: *cy.Chunk, local: *Local, optional: bool, type_: *cy.Type
         .deinit_obj = deinit_obj,
     });
     // The last release calls the object's destructor in this frame. A fiber can be cancelled inside its `@deinit`.
-    try semaCancelPad(c, @intFromPtr(stmt), node);
+    // A destructor that runs no script code cannot suspend, so the release needs no site.
+    if (destructMayRunScript(c, type_, 0)) {
+        try semaCancelPad(c, @intFromPtr(stmt), node);
+    }
 }
 
 /// `local` can be invalidated after this function returns.
@@ -7164,25 +7167,13 @@ fn seqOrderFree(expr: *ir.Expr) bool {
     };
 }
 
-/// Whether `expr` reads a local of the current proc that is dead: one that was moved from.
-fn isDeadLocalRead(c: *cy.Chunk, expr: *ir.Expr) bool {
-    if (expr.code != .local) return false;
-    const id = expr.cast(.local).id;
-    const b = c.procBlock();
-    for (c.varStack.items[b.varStart..]) |*local| {
-        if (local.type == .local and local.inner.local.id == id) return false;
-        if (local.type == .dead and local.inner.local.id == id) return true;
-    }
-    return false;
-}
-
 /// Registers the IR slot of an operand that is done. The caller pops with `seqPop` once the operands after it
 /// are analyzed, on every path (`defer`).
 pub fn seqPush(c: *cy.Chunk, slot: **ir.Expr, owned: bool, node: *ast.Node) !void {
     const expr = slot.*;
     // A moved local is read like a local, but the local is dead: until the consumer takes the value, nothing
     // destructs it. Pending, a cancel pad of a later operand's call destructs it (`semaCancelHoist`).
-    const moved = owned and c.moved_locals.remove(expr) and isDeadLocalRead(c, expr);
+    const moved = owned and expr.code == .local and expr.cast(.local).moved;
     if (!moved and seqOrderFree(expr)) return;
     const type_ = expr.type;
     // A borrow stays tied to its owner. It is not held in another local.
@@ -7574,23 +7565,50 @@ pub fn sema_call_ir(c: *cy.Chunk, func: *cy.Func, args: []const *ir.Expr, node: 
 /// Whether the code that is analyzed can run in a frame of a fiber that is cancelled.
 /// The main block is never on a fiber's stack. A generator body can be: its frame runs on the stack of the
 /// fiber that consumes it, and its pad ends the generator (`semaCancelPad`).
-/// Marks a cancel site that has no pad: the frame keeps running when the fiber is cancelled (`Chunk.cancel_pads`).
-/// The sites of a destruction routine are like this. A fiber cancelled inside a `@deinit` that `@destruct` called
-/// returns from the `@deinit` to the rest of `@destruct`, which destructs the fields.
-pub var cancel_keep: ir.Stmt = undefined;
+/// Where a frame goes when its fiber is cancelled at a site (`Chunk.cancel_pads`).
+pub const CancelPad = union(enum) {
+    /// The frame keeps running: the sites of a destruction routine (`isCancelKeepFunc`) are like this. A fiber
+    /// cancelled inside a `@deinit` that `@destruct` called returns from the `@deinit` to the rest of
+    /// `@destruct`, which destructs the fields.
+    keep,
+    /// The statements that destruct the locals that are alive at the site and return.
+    pad: *ir.Stmt,
+};
 
-/// Whether `func` destructs a value: `@destruct` and the other destructor templates of the builtin modules, and a
-/// `@deinit` declared there (`Generator.@deinit`, the collections). Their code only destructs, so a cancel lets a
-/// frame of theirs finish (`cancel_keep`). A `@deinit` of a script is not one: a cancel does not run more of it.
+/// Whether `func` destructs a value: an instance of the destructor templates (`@destruct`, `@partial_destruct`,
+/// `@deinitObject`), `@destructBox`, and a `@deinit` declared in a builtin module (`Generator.@deinit`, the
+/// collections). Their code only destructs, so a cancel lets a frame of theirs finish (`CancelPad.keep`).
+/// A `@deinit` of a script is not one: a cancel does not run more of it.
+/// The templates are compared by identity (`Sema.dtor_fn` and the others), so a renamed one is still found.
+/// The answer is cached in `func.info.cancel_keep`.
 pub fn isCancelKeepFunc(compiler: *cy.Compiler, func: *cy.Func) bool {
+    switch (func.info.cancel_keep) {
+        1 => return true,
+        2 => return false,
+        else => {},
+    }
+    const keep = computeCancelKeep(compiler, func);
+    func.info.cancel_keep = if (keep) 1 else 2;
+    return keep;
+}
+
+fn computeCancelKeep(compiler: *cy.Compiler, func: *cy.Func) bool {
+    if (func.type == .userLambda) return false;
     const decl = func.decl orelse return false;
     const src = decl.src();
     if (src >= compiler.chunks.items.len or !compiler.chunks.items[src].is_builtin) return false;
-    if (func.type == .userLambda) return false;
-    const name = func.name();
-    return std.mem.eql(u8, name, "@deinit") or std.mem.eql(u8, name, "@destruct") or
-        std.mem.eql(u8, name, "@partial_destruct") or std.mem.eql(u8, name, "@deinitObject") or
-        std.mem.eql(u8, name, "@destructBox");
+    const s = &compiler.sema;
+    if (func.instance) |inst| {
+        if (inst.type == .func) {
+            const tmpl = inst.data.func.template;
+            if (tmpl == s.dtor_fn.data.generic or tmpl == s.partial_dtor_fn.data.generic or tmpl == s.deinit_obj_tmpl) {
+                return true;
+            }
+        }
+    }
+    if (s.destruct_box_fn == func) return true;
+    // The destructor hook of a builtin type. The name is the language's, like `meta.has_decl(T, '@deinit')`.
+    return std.mem.eql(u8, func.name(), "@deinit");
 }
 
 /// Whether destructing a `type_` can run a `@deinit` of a script: code that can suspend a fiber.
@@ -7616,6 +7634,8 @@ pub fn destructMayRunScript(c: *cy.Chunk, type_: *cy.Type, depth: u32) bool {
         .vector => return destructMayRunScript(c, type_.cast(.vector).elem_t, depth + 1),
         .partial_vector => return destructMayRunScript(c, type_.cast(.partial_vector).elem_t, depth + 1),
         .struct_t => {
+            // Dropping a generator runs the deinit block of its body (`Generator.end`), which is script code.
+            if (type_.isInstanceOf(c.sema.generator_tmpl)) return true;
             if (type_.sym().getMod().getSym("@deinit")) |deinit_sym| {
                 if (deinit_sym.type == .func) {
                     if (deinit_sym.cast(.func).first.decl) |decl| {
@@ -7687,7 +7707,7 @@ pub fn semaCancelPad(c: *cy.Chunk, key: usize, node: *ast.Node) anyerror!void {
     if (!cancelPadApplies(c)) return;
     const proc = c.proc();
     if (isCancelKeepFunc(c.compiler, proc.func.?)) {
-        try c.cancel_pads.put(c.alloc, key, &cancel_keep);
+        try c.cancel_pads.put(c.alloc, key, .keep);
         return;
     }
 
@@ -7711,7 +7731,7 @@ pub fn semaCancelPad(c: *cy.Chunk, key: usize, node: *ast.Node) anyerror!void {
     const sig = hasher.final() | 1;
     if (proc.cancel_pad) |pad| {
         if (proc.cancel_pad_sig == sig) {
-            try c.cancel_pads.put(c.alloc, key, pad);
+            try c.cancel_pads.put(c.alloc, key, .{ .pad = pad });
             return;
         }
     }
@@ -7747,7 +7767,7 @@ pub fn semaCancelPad(c: *cy.Chunk, key: usize, node: *ast.Node) anyerror!void {
     const cur = c.proc();
     cur.cancel_pad = block.first;
     cur.cancel_pad_sig = sig;
-    try c.cancel_pads.put(c.alloc, key, block.first.?);
+    try c.cancel_pads.put(c.alloc, key, .{ .pad = block.first.? });
 }
 
 pub fn semaCallFuncResult(c: *cy.Chunk, res: sema_func.FuncResult, node: *ast.Node) !ExprResult {
@@ -9096,7 +9116,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                 }
                 local.type = .dead;
                 if (res.ir.code == .local) {
-                    try c.moved_locals.put(c.alloc, res.ir, {});
+                    res.ir.cast(.local).moved = true;
                 }
                 // A value like a call result, not a read of a local: the local is dead.
                 return ExprResult.initOwned(res.ir);
@@ -11291,6 +11311,7 @@ pub const Sema = struct {
     dtor_fn: *cy.Func = undefined,
     eq_fn: *cy.Func = undefined,
     deinit_obj_tmpl: *cy.sym.FuncTemplate = undefined,
+    destruct_box_fn: ?*cy.Func = null,
     panic_fn: *cy.Func = undefined,
     panic_unwrap_error_fn: *cy.Func = undefined,
     track_main_local_fn: *cy.Func = undefined,

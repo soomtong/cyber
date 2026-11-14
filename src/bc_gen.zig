@@ -1796,7 +1796,8 @@ pub const CancelSite = struct {
     /// The pad of the site, then the pad of each inlined call that the site is inside of, innermost first.
     parts: [inline_max_depth + 1]Part,
     num_parts: u8,
-    /// The frame keeps running when the fiber is cancelled (`sema.cancel_keep`). No pad is generated.
+    /// The frame keeps running when the fiber is cancelled (`sema.CancelPad.keep`). No pad is generated and
+    /// `parts` is empty.
     keep: bool = false,
 
     pub const Part = struct {
@@ -2801,7 +2802,7 @@ fn reserveFuncSlots(c: *Chunk, params: []align(1) const ir.FuncParam, ret_t: *cy
 
     c.buf.ptr_layout_builder.clearRetainingCapacity();
     try c.buf.ptr_layout_builder.resize(c.alloc, c.cur_proc.reg_end);
-    @memset(c.buf.ptr_layout_builder.items, false);
+    @memset(c.buf.ptr_layout_builder.items, .{});
 
     c.bc_local_map.clearRetainingCapacity();
 
@@ -2839,22 +2840,99 @@ fn reserve_reg(c: *Chunk, local_t: *cy.Type) !Reg {
         c.cur_proc.max_regs = c.cur_proc.reg_end;
     }
 
-    @memset(c.buf.ptr_layout_builder.items[reg..reg + reg_size], false);
-    c.cur_proc.num_ptr_locals += mark_stack_ptr_regs(c, local_t, reg);
+    @memset(c.buf.ptr_layout_builder.items[reg..reg + reg_size], .{});
+    c.cur_proc.num_ptr_locals += mark_stack_ptr_regs(c, local_t, reg, .{});
     return reg;
+}
+
+/// The tag checks that lead to a register of a local (`bytecode.PtrSlot`), outermost first.
+const PtrConds = struct {
+    items: [2]Cond = undefined,
+    len: u8 = 0,
+
+    const Cond = struct {
+        /// The register that holds the tag. `null`: the check could not be expressed and is left out.
+        tag_reg: ?usize,
+        tags: u16,
+    };
+
+    /// Adds the check that the tag at `tag_reg` is `tag`. A third check is left out.
+    fn with(self: PtrConds, tag_reg: usize, tag: u64) PtrConds {
+        if (self.len == self.items.len) return self;
+        var res = self;
+        res.items[res.len] = if (tag <= cy.bytecode.PtrSlot.max_tag)
+            .{ .tag_reg = tag_reg, .tags = @as(u16, 1) << @intCast(tag) }
+        else
+            .{ .tag_reg = null, .tags = 0 };
+        res.len += 1;
+        return res;
+    }
+
+    fn slot(self: PtrConds, reg: usize) cy.bytecode.PtrSlot {
+        var res = cy.bytecode.PtrSlot{ .ptr = true };
+        var n: usize = 0;
+        for (self.items[0..self.len]) |cond| {
+            const tag_reg = cond.tag_reg orelse continue;
+            const back = reg - tag_reg;
+            if (back == 0 or back > cy.bytecode.PtrSlot.max_back) continue;
+            if (n == 0) {
+                res.back0 = @intCast(back);
+                res.tags0 = cond.tags;
+            } else {
+                res.back1 = @intCast(back);
+                res.tags1 = cond.tags;
+            }
+            n += 1;
+        }
+        return res;
+    }
+};
+
+/// The slot of a register that two cases of a choice mark: a pointer while either one's checks hold.
+fn merge_ptr_slots(a: cy.bytecode.PtrSlot, b: cy.bytecode.PtrSlot) cy.bytecode.PtrSlot {
+    var res = cy.bytecode.PtrSlot{ .ptr = true };
+    if (a.back0 == 0 or a.back0 != b.back0) return res;
+    if (a.back1 == b.back1 and a.tags1 == b.tags1) {
+        // Only the first check differs.
+        res.back0 = a.back0;
+        res.tags0 = a.tags0 | b.tags0;
+        res.back1 = a.back1;
+        res.tags1 = a.tags1;
+        return res;
+    }
+    if (a.tags0 == b.tags0 and a.back1 != 0 and a.back1 == b.back1) {
+        // Only the second check differs.
+        res.back0 = a.back0;
+        res.tags0 = a.tags0;
+        res.back1 = a.back1;
+        res.tags1 = a.tags1 | b.tags1;
+        return res;
+    }
+    // Both differ: the first check of either one still has to hold.
+    res.back0 = a.back0;
+    res.tags0 = a.tags0 | b.tags0;
+    return res;
 }
 
 /// Marks the registers of a local of type `type_` at `reg` that can hold a pointer into the stack, and returns
 /// how many there are. Growing the stack can move it, and these registers are patched then (only when the
 /// value is an address inside the stack, so a register that holds another address is left alone).
 /// Besides `&T` and `Ptr[T]` that is an exclusive borrow (`&&T`, the receiver of a mutating method) and every
-/// such pointer inside a struct, an option, a result, a choice or a vector: the `base` of a span over an array literal's elements
-/// points into the frame that holds them.
-fn mark_stack_ptr_regs(c: *Chunk, type_: *cy.Type, reg: usize) usize {
+/// such pointer inside a struct, an option, a result, a choice or a vector: the `base` of a span over an array
+/// literal's elements points into the frame that holds them.
+/// A pointer inside a result, a choice or an option with a tag is a pointer only in its case. The slot records
+/// the tag checks (`bytecode.PtrSlot`), so a register that holds an `int` of another case is not patched when
+/// its value happens to be in the moved range.
+fn mark_stack_ptr_regs(c: *Chunk, type_: *cy.Type, reg: usize, conds: PtrConds) usize {
     if (type_.is_stack_ptr() or type_.kind() == .ex_borrow) {
-        // The cases of a choice can mark the same register. Count it once: `gen_pop_locals` counts registers.
-        if (c.buf.ptr_layout_builder.items[reg]) return 0;
-        c.buf.ptr_layout_builder.items[reg] = true;
+        const new = conds.slot(reg);
+        const cur = &c.buf.ptr_layout_builder.items[reg];
+        if (cur.ptr) {
+            // The cases of a choice can mark the same register. Count it once: `gen_pop_locals` counts registers.
+            cur.* = merge_ptr_slots(cur.*, new);
+            return 0;
+        }
+        cur.* = new;
         return 1;
     }
     var count: usize = 0;
@@ -2864,24 +2942,26 @@ fn mark_stack_ptr_regs(c: *Chunk, type_: *cy.Type, reg: usize) usize {
             for (struct_t.fields()) |field| {
                 // A pointer field is 8 byte aligned. Smaller fields share a register and hold no pointer.
                 if (field.offset % 8 != 0) continue;
-                count += mark_stack_ptr_regs(c, field.type, reg + field.offset / 8);
+                count += mark_stack_ptr_regs(c, field.type, reg + field.offset / 8, conds);
             }
         },
         .option => {
             const option_t = type_.cast(.option);
-            // A zero union is the payload itself. Otherwise the payload follows the tag.
-            const payload_reg = if (option_t.zero_union) reg else reg + 1;
-            count += mark_stack_ptr_regs(c, option_t.child_t, payload_reg);
+            // A zero union is the payload itself. Otherwise the payload follows the tag, which is 1 for some.
+            if (option_t.zero_union) {
+                count += mark_stack_ptr_regs(c, option_t.child_t, reg, conds);
+            } else {
+                count += mark_stack_ptr_regs(c, option_t.child_t, reg + 1, conds.with(reg, 1));
+            }
         },
         .result => {
-            // The payload follows the tag. The error case holds no pointer.
-            count += mark_stack_ptr_regs(c, type_.cast(.result).child_t, reg + 1);
+            // The payload follows the tag, which is 1 for the value. The error case holds no pointer.
+            count += mark_stack_ptr_regs(c, type_.cast(.result).child_t, reg + 1, conds.with(reg, 1));
         },
         .choice => {
-            // The payload follows the tag. The registers of every case are marked: a register that holds
-            // something else in the current case is left alone unless its value is an address in the moved range.
+            // The payload follows the tag. A register that two cases mark is a pointer in either one.
             for (type_.cast(.choice).cases()) |case| {
-                count += mark_stack_ptr_regs(c, case.payload_t, reg + 1);
+                count += mark_stack_ptr_regs(c, case.payload_t, reg + 1, conds.with(reg, case.val));
             }
         },
         .vector => {
@@ -2889,7 +2969,7 @@ fn mark_stack_ptr_regs(c: *Chunk, type_: *cy.Type, reg: usize) usize {
             const elem_size = vector_t.elem_t.size();
             if (elem_size > 0 and elem_size % 8 == 0) {
                 for (0..vector_t.n) |i| {
-                    const marked = mark_stack_ptr_regs(c, vector_t.elem_t, reg + i * (elem_size / 8));
+                    const marked = mark_stack_ptr_regs(c, vector_t.elem_t, reg + i * (elem_size / 8), conds);
                     // The elements have the same layout: no pointer in the first one, none in the others.
                     if (marked == 0) break;
                     count += marked;
@@ -3046,7 +3126,7 @@ pub fn reserveMainRegs(c: *Chunk) !void {
 
     c.buf.ptr_layout_builder.clearRetainingCapacity();
     try c.buf.ptr_layout_builder.resize(c.alloc, c.cur_proc.reg_end);
-    @memset(c.buf.ptr_layout_builder.items, false);
+    @memset(c.buf.ptr_layout_builder.items, .{});
 
     c.bc_local_map.clearRetainingCapacity();
 }
@@ -3448,8 +3528,8 @@ fn gen_pop_locals(c: *Chunk, stmt: *ir.PopLocals, node: *ast.Node) !void {
     c.bc_local_map.items.len = local_end;
 
     var num_ptr_locals: usize = 0;
-    for (c.buf.ptr_layout_builder.items[reg_start..c.cur_proc.reg_end]) |ptr| {
-        if (ptr) num_ptr_locals += 1;
+    for (c.buf.ptr_layout_builder.items[reg_start..c.cur_proc.reg_end]) |slot| {
+        if (slot.ptr) num_ptr_locals += 1;
     }
     if (num_ptr_locals > 0) {
         c.cur_proc.num_ptr_locals -= num_ptr_locals;
@@ -3513,7 +3593,7 @@ pub fn popBlock(c: *Chunk) !void {
 
     const b = c.blocks.pop().?;
     if (c.cur_proc.num_ptr_locals > b.saved_num_ptr_locals) {
-        @memset(c.buf.ptr_layout_builder.items[b.reg_start..c.cur_proc.reg_end], false);
+        @memset(c.buf.ptr_layout_builder.items[b.reg_start..c.cur_proc.reg_end], .{});
     }
 
     c.bc_local_map.items.len = b.local_start;
@@ -3541,7 +3621,7 @@ pub const Block = struct {
 
     saved_num_ptr_locals: usize,
 
-    last_ptr_layout: []const bool = &.{},
+    last_ptr_layout: []const cy.bytecode.PtrSlot = &.{},
     last_ptr_layout_id: usize = 0,
 };
 
@@ -3698,9 +3778,9 @@ fn genConstInt(c: *Chunk, val: i64, dst: GenValue, node: *ast.Node) !void {
     try genConst64_(c, @bitCast(val), dst.reg, node);
 }
 
-fn get_uniq_ptr_layout(c: *cy.Chunk, layout: []const bool) !usize {
+fn get_uniq_ptr_layout(c: *cy.Chunk, layout: []const cy.bytecode.PtrSlot) !usize {
     const b = c.genBlock();
-    if (std.mem.eql(bool, b.last_ptr_layout, layout)) {
+    if (cy.bytecode.PtrLayoutContext.eql(.{}, b.last_ptr_layout, layout)) {
         return b.last_ptr_layout_id;
     }
 
@@ -3709,7 +3789,7 @@ fn get_uniq_ptr_layout(c: *cy.Chunk, layout: []const bool) !usize {
         // The new entry's key still points at the caller's `layout`.
         errdefer c.buf.ptr_layout_map.removeByPtr(res.key_ptr);
         try c.buf.ptr_layouts.ensureUnusedCapacity(c.alloc, 1);
-        const dupe = try c.alloc.dupe(bool, layout);
+        const dupe = try c.alloc.dupe(cy.bytecode.PtrSlot, layout);
         const id = c.buf.ptr_layouts.items.len;
         c.buf.ptr_layouts.appendAssumeCapacity(dupe);
         res.key_ptr.* = dupe;
@@ -3754,7 +3834,7 @@ fn pushCall(c: *cy.Chunk, base: Reg, func: *cy.Func, node: *ast.Node) !void {
 /// The pad of the IR node at `key`. The node belongs to the chunk that is generated, or to the chunk of a
 /// function that is inlined here (a `core` method in a user function): the pad is kept by the chunk that
 /// analyzed the node.
-fn find_cancel_pad(c: *cy.Chunk, key: usize) ?*ir.Stmt {
+fn find_cancel_pad(c: *cy.Chunk, key: usize) ?cy.sema.CancelPad {
     if (c.cancel_pads.get(key)) |pad| return pad;
     if (c.inline_ctx == null) return null;
     for (c.compiler.chunks.items) |chunk| {
@@ -3767,29 +3847,40 @@ fn find_cancel_pad(c: *cy.Chunk, key: usize) ?*ir.Stmt {
 fn push_cancel_site(c: *cy.Chunk, key: usize, pc: usize) !void {
     if (c.cancel_replay) return;
     if (c.cur_proc.type == .main) return;
-    const pad = find_cancel_pad(c, key) orelse return;
     var site = CancelSite{
         .pc = @intCast(pc),
         .reg_end = c.cur_proc.reg_end,
         .local_map = &.{},
         .parts = undefined,
-        .num_parts = 1,
+        .num_parts = 0,
     };
-    site.parts[0] = .{ .head = pad, .local_base = c.inline_local_base };
-    var num_keep: usize = @intFromBool(pad == &cy.sema.cancel_keep);
+    // The site's own pad, then the pad of each inlined call that it is inside of.
+    var num_frames: usize = 1;
+    var num_keep: usize = 0;
+    switch (find_cancel_pad(c, key) orelse return) {
+        .keep => num_keep += 1,
+        .pad => |head| {
+            site.parts[site.num_parts] = .{ .head = head, .local_base = c.inline_local_base };
+            site.num_parts += 1;
+        },
+    }
     var opt_ctx = c.inline_ctx;
     while (opt_ctx) |ctx| : (opt_ctx = ctx.parent) {
+        num_frames += 1;
         // The inlined call has no pad when its own proc needs none. Then this site has none either.
-        const outer = find_cancel_pad(c, ctx.call_key) orelse return;
-        site.parts[site.num_parts] = .{ .head = outer, .local_base = ctx.outer_local_base };
-        site.num_parts += 1;
-        if (outer == &cy.sema.cancel_keep) num_keep += 1;
+        switch (find_cancel_pad(c, ctx.call_key) orelse return) {
+            .keep => num_keep += 1,
+            .pad => |head| {
+                site.parts[site.num_parts] = .{ .head = head, .local_base = ctx.outer_local_base };
+                site.num_parts += 1;
+            },
+        }
     }
     if (num_keep > 0) {
         // A frame that keeps running continues after the call. Inside an inlined body that is only right when
         // the whole frame is a destruction routine. `inline_cost_fits` keeps the other cases from happening
         // where a fiber can stop; a site that is left over gets no entry, and a cancel there returns false.
-        if (num_keep != site.num_parts) return;
+        if (num_keep != num_frames) return;
         site.keep = true;
     }
     site.local_map = try c.alloc.dupe(LocalSlot, c.bc_local_map.items);
@@ -4092,14 +4183,14 @@ pub fn pop_regs(c: *Chunk, end: Reg, node: *ast.Node) !void {
         return c.reportErrorFmt("Expected to trunc regs to {}, but found {}.", &.{v(end), v(c.cur_proc.reg_end)}, node);
     }
     if (end + 1 == c.cur_proc.reg_end) {
-        if (c.buf.ptr_layout_builder.items[end]) {
+        if (c.buf.ptr_layout_builder.items[end].ptr) {
             c.cur_proc.num_ptr_locals -= 1;
         }
         c.buf.ptr_layout_builder.items.len -= 1;
     } else {
         var num_stack_ptrs: usize = 0;
-        for (c.buf.ptr_layout_builder.items[end..c.cur_proc.reg_end]) |ptr| {
-            if (ptr) {
+        for (c.buf.ptr_layout_builder.items[end..c.cur_proc.reg_end]) |slot| {
+            if (slot.ptr) {
                 num_stack_ptrs += 1;
             }
         }

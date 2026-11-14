@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.10-dev 857-9490dda</div>
+    <div class="sub-title">v0.4.10-dev 866-f62dbfe</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1337,8 +1337,8 @@ const lib = switch meta.system():
 <h2 id="operators">Operators. <a href="#operators">#</a></h2>
 <p>The following operators are supported.
 They are ordered from highest to lowest precedence.
-All infix operators have left-to-right associativity and all prefix operators have the same precedence and right-to-left associativity.</p>
-<table><thead><tr><th>Operator</th><th>Kind</th><th>Description</th></tr></thead><tbody><tr><td><code>()</code></td><td>special</td><td>Grouping.</td></tr><tr><td><code>.</code></td><td>infix</td><td>Accessor.</td></tr><tr><td><code>[]</code></td><td>special</td><td>Indexing.</td></tr><tr><td><code>as</code></td><td>prefix</td><td>Type casting.</td></tr><tr><td><code>!</code></td><td>prefix</td><td>Logic not.</td></tr><tr><td><code>~</code></td><td>prefix</td><td>Bitwise not.</td></tr><tr><td><code>^</code></td><td>prefix</td><td>Lift.</td></tr><tr><td><code>&</code></td><td>prefix</td><td>Borrow.</td></tr><tr><td><code>*</code></td><td>prefix</td><td>Address of.</td></tr><tr><td><code><<</code> <code>>></code></td><td>infix</td><td>Bitwise left shift, right shift.</td></tr><tr><td><code>&&</code></td><td>infix</td><td>Bitwise and.</td></tr><tr><td><code>||</code> <code>~</code></td><td>infix</td><td>Bitwise or, exclusive or.</td></tr><tr><td><code>**</code></td><td>infix</td><td>Power or repeat.</td></tr><tr><td><code>/</code> <code>%</code> <code>*</code></td><td>infix</td><td>Division, modulus, multiplication.</td></tr><tr><td><code>+</code> <code>-</code></td><td>infix</td><td>Addition, subtraction.</td></tr><tr><td><code>></code> <code>>=</code><br/><code><</code> <code><=</code></br><code>!=</code> <code>==</code></td><td>infix</td><td>Greater, greater or equal, less, less or equal, not equals, equals.</td></tr><tr><td><code>and</code></td><td>infix</td><td>Logical and.</td></tr><tr><td><code>or</code></td><td>infix</td><td>Logical or.</td></tr><tr><td><code>..</code></td><td>infix</td><td>Range.</td></tr></tbody></table><a href="#syntax">^topic</a>
+All infix operators have left-to-right associativity and all prefix operators have the same precedence and right-to-left associativity, except <code>not</code>, which has its own row.</p>
+<table><thead><tr><th>Operator</th><th>Kind</th><th>Description</th></tr></thead><tbody><tr><td><code>()</code></td><td>special</td><td>Grouping.</td></tr><tr><td><code>.</code></td><td>infix</td><td>Accessor.</td></tr><tr><td><code>[]</code></td><td>special</td><td>Indexing.</td></tr><tr><td><code>as</code></td><td>prefix</td><td>Type casting.</td></tr><tr><td><code>!</code></td><td>prefix</td><td>Logic not.</td></tr><tr><td><code>~</code></td><td>prefix</td><td>Bitwise not.</td></tr><tr><td><code>^</code></td><td>prefix</td><td>Lift.</td></tr><tr><td><code>&</code></td><td>prefix</td><td>Borrow.</td></tr><tr><td><code>*</code></td><td>prefix</td><td>Address of.</td></tr><tr><td><code><<</code> <code>>></code></td><td>infix</td><td>Bitwise left shift, right shift.</td></tr><tr><td><code>&&</code></td><td>infix</td><td>Bitwise and.</td></tr><tr><td><code>||</code> <code>~</code></td><td>infix</td><td>Bitwise or, exclusive or.</td></tr><tr><td><code>**</code></td><td>infix</td><td>Power or repeat.</td></tr><tr><td><code>/</code> <code>%</code> <code>*</code></td><td>infix</td><td>Division, modulus, multiplication.</td></tr><tr><td><code>+</code> <code>-</code></td><td>infix</td><td>Addition, subtraction.</td></tr><tr><td><code>></code> <code>>=</code><br/><code><</code> <code><=</code></br><code>!=</code> <code>==</code></td><td>infix</td><td>Greater, greater or equal, less, less or equal, not equals, equals.</td></tr><tr><td><code>not</code></td><td>prefix</td><td>Logical not.</td></tr><tr><td><code>and</code></td><td>infix</td><td>Logical and.</td></tr><tr><td><code>or</code></td><td>infix</td><td>Logical or.</td></tr><tr><td><code>..</code></td><td>infix</td><td>Range.</td></tr></tbody></table><a href="#syntax">^topic</a>
 <h3 id="arithmetic-operators">Arithmetic operators. <a href="#arithmetic-operators">#</a></h3>
 <p>The following arithmetic operators are supported for <a href="#numbers" title="">numeric data types</a>.
 Some types such as <code>math.Vec</code> and <code>math.Mat</code> also overload these operators.</p>
@@ -1388,6 +1388,11 @@ a <= b          --> `true` if a is less than or equal to b
 not true      --> false
 !false        --> true
 !true         --> false
+</code></pre>
+<p><code>not</code> binds weaker than a comparison and tighter than <code>and</code> and <code>or</code>, as in Python. <code>!</code> binds as tightly as the other prefix operators:</p>
+<pre><code class="language-cy">not a == b      -- not (a == b)
+not a and b     -- (not a) and b
+!a == b         -- (!a) == b
 </code></pre>
 <a href="#syntax">^topic</a>
 <h3 id="bitwise-operators">Bitwise operators. <a href="#bitwise-operators">#</a></h3>
@@ -1643,6 +1648,12 @@ print(a[1..])   --> bcxyz
 res = res.concat('end')
 </code></pre>
 <a href="#basic-types">^topic</a>
+<h3 id="string-comparison">String comparison. <a href="#string-comparison">#</a></h3>
+<p><code><</code>, <code><=</code>, <code>></code> and <code>>=</code> compare two strings by their bytes, like <code>str.compare</code>. <code>==</code> compares the contents:</p>
+<pre><code class="language-cy">'a' < 'b'       --> true
+'a' < 'ab'      --> true
+</code></pre>
+<a href="#basic-types">^topic</a>
 <h3 id="string-interpolation">String interpolation. <a href="#string-interpolation">#</a></h3>
 <p>String templates wrap expressions in <code>%{}</code> which converts them to strings using the builtin <code>to_print_string</code>:</p>
 <pre><code class="language-cy">name := 'Rex'
@@ -1868,6 +1879,12 @@ Slices grow or shrink when inserting or removing elements.</p>
 <p>The intializer literal can infer the target slice type:</p>
 <pre><code class="language-cy">var a []int = {1, 2, 3}
 </code></pre>
+<p>Without a target type, a list literal is a <code>[]T</code> where <code>T</code> is the type of the first element. An empty <code>{}</code> needs a target type:</p>
+<pre><code class="language-cy">names := {'a.py', 'b.py'}    -- []str
+for {1, 2, 3} |n|:
+    print(n)
+</code></pre>
+<p>A list literal uses braces. <code>['a', 'b']</code> is not a list literal: <code>[n]T</code> is a vector type.</p>
 <p>The first element of the slice starts at index 0.</p>
 <pre><code class="language-cy">print(arr[0])    --> 1
 </code></pre>
@@ -1880,8 +1897,11 @@ print(arr[0..3])    --> {1, 2, 3}
 print(arr[3..])     --> {4, 5}
 print(arr[..3])     --> {1, 2, 3}
 print(arr[..])      --> {1, 2, 3, 4, 5}
+print(arr[1..=2])   --> {2, 3}
 </code></pre>
 <p>The start, the end, or both can be omitted. A missing start is <code>0</code> and a missing end is the length. A range without a start or an end is only a slice index. Anywhere else (<code>r := ..3</code>, <code>for ..3 |i|</code>, <code>case ..5</code>) it is a compile error.</p>
+<p><code>a[i..=j]</code> includes the end: it is <code>a[i..j+1]</code>. A decreasing range (<code>..></code>, <code>..>=</code>) can not be a slice index.</p>
+<p>A range outside a slice index or a <code>for</code> loop is a <code>Range{start, end}</code> value with an exclusive end. <code>0..=3</code> is <code>Range{start=0, end=4}</code>. A decreasing range is only allowed in a <code>for</code> loop.</p>
 <p>A sub-slice will clone the underlying buffer upon any resize operation such as <code>append</code>, <code>insert</code>, <code>remove</code>, etc.
 Once cloned, the slice will no longer point to the same elements as the original slice:</p>
 <pre><code class="language-cy">arr := []int{1, 2, 3}
@@ -1914,8 +1934,9 @@ arr = arr.insert(1, 345)
 -- Get the length.
 print(arr.len())  --> 2
 
--- Sort the slice in place.
+-- Sort the slice in place. Without a function, `sort` uses `<` of the element type.
 arr.sort(|a, b| a < b)
+arr.sort()
 
 -- Iterating a slice.
 for arr |it|:
@@ -1939,6 +1960,12 @@ The default functions accept these key types: <code>str</code>, integers (<code>
 <p>The initializer literal can infer the target map type:</p>
 <pre><code class="language-cy">var map Map[str, int] = {a=123, b=234}
 </code></pre>
+<p>A key is written <code>key=value</code>, not <code>key: value</code>. A name as a key is a string (<code>{a=1}</code> has the key <code>'a'</code>). A key in parentheses is an expression:</p>
+<pre><code class="language-cy">k := 'name'
+map := Map[str, int]{(k)=1, (k + '2')=2, 'my key'=3}
+ids := Map[int, str]{1='one', (1 + 1)='two'}
+</code></pre>
+<p>A map literal needs a target type. <code>{a=1}</code> alone is a compile error.</p>
 <a href="#basic-types">^topic</a>
 <h3 id="map-operations">Map operations. <a href="#map-operations">#</a></h3>
 <p>Here are some common map operations:</p>
@@ -2658,7 +2685,7 @@ for arr |n|:
     print(n)
 </code></pre>
 <p>Iterating a <code>Map</code> yields <code>MapEntry</code> values:</p>
-<pre><code class="language-cy">map := {a=123, b=234}
+<pre><code class="language-cy">map := Map[str, int]{a=123, b=234}
 
 for map |entry|:
     print(entry.key)
@@ -2945,6 +2972,12 @@ type AddFn = fn(int, int) -> int
 
 var func Func[AddFn] = |a, b| a + b + c.*
 func(10, 20)       --> 35
+</code></pre>
+<p>A parameter of type <code>&OpaqueFunc[FN]</code> (such as the <code>less</code> function of <code>sort</code>) takes a function, a lambda, or a closure that captures <code>^T</code> or <code>&T</code> variables. A local variable that is not a reference can not be captured yet: borrow it first.</p>
+<pre><code class="language-cy">counts := Map[str, int]{app=7, db=8, web=23}
+c := &counts
+names := counts.keys()
+names.sort(|a, b| c[a] > c[b])    -- {'web', 'db', 'app'}
 </code></pre>
 <a href="#functions">^topic</a>
 <h2 id="function-calls">Function calls. <a href="#function-calls">#</a></h2>
@@ -3565,6 +3598,7 @@ res = 'abcxyz'
     data := os.read_file(path)!
     return data.len()
 </code></pre>
+<p>A result can not be printed before it is unwrapped. <code>print(os.read_file(path))</code> and <code>'%{os.read_file(path)}'</code> are compile errors that say to unwrap it with <code>!</code> or to handle the error. Generic code (a <code>%T</code> parameter that is a result) prints the payload or the error.</p>
 <a href="#error-handling">^topic</a>
 <h3 id="unwrap-or-default-1">Unwrap or default. <a href="#unwrap-or-default-1">#</a></h3>
 <p>The <code>!else</code> expression either unwraps a result's payload or defaults to a value:</p>
@@ -5078,6 +5112,7 @@ for (size_t i = 0; i < count; i += 1) {
 </code></pre>
 <p>A range can end on a later line than it starts. A token or parse error reports a position: its range is the code point there, or empty at the end of a line.
 By default the compiler stops at its first error and the count is 0 or 1. <code>cl_vm_set_error_recovery(vm, true)</code> lets it go on: the main block, each function and each method is abandoned at its first error and the others are still checked, so every body reports at most one error. A syntax error or an error in a declaration (a type, a signature, a global) still ends the compile. The result is <code>CL_ERROR_COMPILE</code> either way and nothing is run. The summary and <code>cl_vm_compile_error</code> describe the first error.</p>
+<p>A compile error does not end a session. The next eval or validate compiles on top of what the evals before the failed one left: with <code>persist_main</code> their locals and declarations are still there, and nothing that the failed script declared is kept. A module that the failed compile loaded for the first time is loaded again by the next <code>use</code>. The template instances that it expanded from earlier modules (<code>[]str</code> with <code>sort</code>) are checked and generated by the next compile. If the body of such an instance does not compile (<code>Map[[]int, int]</code> behind an earlier error), the next compile drops the instance instead of reporting its error, and a later use of it reports that it could not be expanded. When the first compile of a VM fails, the next eval resets the VM.</p>
 <a href="#libcyber">^topic</a>
 <h3 id="asking-what-a-name-is">Asking what a name is. <a href="#asking-what-a-name-is">#</a></h3>
 <p>For editor tooling, <code>cl_vm_set_symbol_info(vm, true)</code> makes the compiler record what the names in the main source refer to. After a compile, <code>cl_vm_symbol_at</code> describes what is at a byte offset:</p>

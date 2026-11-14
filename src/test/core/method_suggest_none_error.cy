@@ -1,9 +1,9 @@
-i := 'abc'.rfind('b')
+i := 'abc'.zzz('b')
 
 --cytest: error
---CompileError: Can not find the symbol `rfind` in `str`.
+--CompileError: Can not find the symbol `zzz` in `str`.
 --
 --@MainPath():1:12:
---i := 'abc'.rfind('b')
---           ^~~~~
+--i := 'abc'.zzz('b')
+--           ^~~
 --

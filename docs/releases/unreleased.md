@@ -55,6 +55,21 @@
   `c := &counts` 뒤 `names.sort(|a, b| c[a] > c[b])`. 전에는 ``Expected argument `&OpaqueFunc[...]`, found `Func[...]` ``였다.
   일반 지역을 캡처하는 오류는 `^T`로 선언하거나 람다 앞에서 빌리라고(`b := &counts`) 안내한다. 일반 지역 캡처 자체는
   설계 검토 중이다(`docs/decisions/project_sort_closures.md`, F-127, tars-agent M0 스파이크 02).
+- `deny_raw_ptrs`를 켠 VM에서 오버로드된 함수에 타입 없는 목록 리터럴을 넘기면(`s.trim({'a', 'z'})`) Debug 빌드가
+  "Null type does not have a symbol." panic으로 죽었다. 오버로드를 고르는 동안의 타입 없는 인자를 원시 포인터 검사가 건너뛴다.
+- `str`에 인자 없는 `trim()`이 생겼다. 양 끝의 공백, 탭, 줄바꿈을 자른다(Python `strip()`). 전에는 자를 문자가 필요했다.
+- 원인만 말하던 오류 문구가 고치는 법을 덧붙인다(F-129, tars-agent M0 스파이크 03):
+  - 처음 쓰는 이름에 `=`로 대입하면 ``Undeclared variable `report`. To declare a new variable, write `report := ...`.``
+  - `else if c:`는 "Write `else cond:`, not `else if cond:`.", 괄호 없는 if 식(`if c a else b`)은
+    "An `if` expression is written `if (cond) a else b`."
+  - 처리하지 않은 `!void` 호출문은 "Add `!` after the call to unwrap it, or handle the error with `!else` or `try`."
+  - `!T` · `?T`에서 `T`의 메서드를 부르면(`r().len()`) `!`나 `.?`로 먼저 풀라고 한다.
+  - `!`를 `str`이나 `?int`에 붙이면 `!` · `!else` · `try`가 `!T`에 쓰인다는 것과 그 값에 맞는 연산자를 말한다(`?int`면 `.?` · `?else`). `.?`를 `!T`에 붙인 경우도 같다.
+  - `opt ?else '' == 'x'`처럼 `?else` · `!else`의 기본값이 비교식이면 우선순위를 말하고 괄호를 권한다. 연산자 표에
+    `?else` · `!else` 줄을 더했다(오른쪽이 식의 나머지 전부를 받는다).
+  - `^int` · `&float` 같은 참조에 산술 · 비교 연산자를 쓰면(`n += 2`, `r < 2.0`) ``Cannot invoke the reserved function `int.+`.`` 대신
+    ``Can not use `+` on `^int`. ... write `n.* += ...`.``처럼 역참조를 말한다. `Ptr[T]`의 포인터 산술은 그대로다.
+  - 없는 필드(`s.length`)에도 메서드 제안을 한다: "Did you mean the method `len()`?" `rfind` · `rindex`는 `lastIndexOf`를 제안한다.
 
 ## 임베딩 API
 

@@ -1832,6 +1832,10 @@ pub const Parser = struct {
             return res;
         } else {
             // else if block.
+            if (token.tag() == .if_k and self.peekAhead(1).tag() != .left_paren) {
+                // `else if c:` from Python and C. `if (c) a else b` is still an if expression.
+                return self.reportError("Expected a condition or `:`. Write `else cond:`, not `else if cond:`.", &.{});
+            }
             const cond = (try self.parseExpr(.{})) orelse {
                 return self.reportError("Expected else if condition.", &.{});
             };
@@ -3394,7 +3398,7 @@ pub const Parser = struct {
         self.advance();
 
         if (self.peek().tag() != .left_paren) {
-            return self.reportError("Expected `(`.", &.{});
+            return self.reportError("Expected `(`. An `if` expression is written `if (cond) a else b`.", &.{});
         }
         self.advance();
 

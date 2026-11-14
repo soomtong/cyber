@@ -278,6 +278,8 @@ test "deny_raw_ptrs rejects raw pointers in script chunks." {
             \\test.eq(xs[3] + sp[2] + m['a'] + r.*, 4 + 6 + 1 + 42)
             \\s := 'ab%{x}'
             \\test.eq(s.len(), 4)
+            \\test.eq('xay'.trim({'x', 'y'}), 'a')
+            \\test.eq(' a\n'.trim(), 'a')
             \\
         ;
         try zt.eq(C.Success, C.vm_evalx(vm, "t", src, config, &res));

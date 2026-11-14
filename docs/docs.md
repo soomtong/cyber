@@ -331,6 +331,7 @@ All infix operators have left-to-right associativity and all prefix operators ha
 | `and` | infix | Logical and. |
 | `or` | infix | Logical or. |
 | `..` | infix | Range. |
+| `?else` `!else` | infix | Default value for an optional or a result. The right side takes the rest of the expression, so `opt ?else '' == 'x'` compares the default. Write `(opt ?else '') == 'x'`. |
 
 ### Arithmetic operators.
 The following arithmetic operators are supported for [numeric data types](#numbers).

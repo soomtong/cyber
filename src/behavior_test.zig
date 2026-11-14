@@ -500,6 +500,9 @@ fn test_core(run: *Runner) void {
     run.case("core/Vector_neg_oob_panic.cy");
     run.case("core/Vector_oob_panic.cy");
     run.case("core/wyhash.cy");
+    run.case("core/field_suggest_method_error.cy");
+    run.case("core/method_suggest_rfind_error.cy");
+    run.case("core/method_suggest_unwrap_error.cy");
 }
 
 fn test_vars(run: *Runner) void {
@@ -516,6 +519,8 @@ fn test_vars(run: *Runner) void {
     run.case("vars/local_no_shadow_for_capture.cy");
     run.case("vars/op_assign.cy");
     run.case("vars/op_assign_ref_error.cy");
+    run.case("vars/op_assign_ref_int_error.cy");
+    run.case("vars/ref_operand_error.cy");
     run.case("vars/read_undeclared_error.cy");
     run.case("vars/read_undeclared_diff_scope_error.cy");
     run.case("vars/read_outside_if_var_error.cy");
@@ -536,6 +541,7 @@ fn test_vars(run: *Runner) void {
     run.case("vars/global_init_ref_error.cy");
     run.case("vars/global_init_ref_self_error.cy");
     run.case("vars/global_init_type_error.cy");
+    run.case("vars/assign_undeclared_hint_error.cy");
 }
 
 fn test_control_flow(run: *Runner) void {
@@ -553,6 +559,7 @@ fn test_control_flow(run: *Runner) void {
     run.case("functions/func_sym_addr_error.cy");
     run.case("syntax/func_parent_no_name_error.cy");
     run.case("syntax/global_parent_no_name_error.cy");
+    run.case("syntax/if_expr_no_paren_error.cy");
     run.case("types/trait_option_child_error.cy");
     run.case("types/trait_field_error.cy");
     run.case("concurrency/generator_copy_error.cy");
@@ -584,6 +591,11 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/while_cond.cy");
     run.case("control_flow/while_inf.cy");
     run.case("control_flow/while_unwrap.cy");
+    run.case("control_flow/else_default_prec_error.cy");
+    run.case("control_flow/else_if_error.cy");
+    run.case("control_flow/result_unhandled_error.cy");
+    run.case("control_flow/unwrap_not_result_error.cy");
+    run.case("control_flow/unwrap_option_with_bang_error.cy");
 }
 
 // TODO: This could be split into compiler only tests and backend tests.

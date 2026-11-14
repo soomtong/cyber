@@ -457,7 +457,7 @@ fn semaExprStmtEnd(c: *cy.Chunk, expr: ExprResult, var_start: usize, node: *ast.
         defer c.alloc.free(name);
 
         if (expr.type.kind() == .result) {
-            return c.reportErrorFmt("Expected to handle the error case for `{}`.", &.{v(name)}, node);
+            return c.reportErrorFmt("Expected to handle the error case for `{}`. Add `!` after the call to unwrap it, or handle the error with `!else` or `try`.", &.{v(name)}, node);
         } else {
             return c.reportErrorFmt("Expected assignment to a variable or placeholder for `{}`.", &.{v(name)}, node);
         }
@@ -1703,6 +1703,7 @@ const member_aliases = [_][2][]const u8{
     .{ "startswith", "starts_with" }, .{ "startsWith", "starts_with" }, .{ "hasPrefix", "starts_with" },
     .{ "endswith", "ends_with" }, .{ "endsWith", "ends_with" }, .{ "hasSuffix", "ends_with" },
     .{ "find", "index" }, .{ "indexOf", "index" },
+    .{ "rfind", "lastIndexOf" }, .{ "rindex", "lastIndexOf" }, .{ "last_index", "lastIndexOf" },
     .{ "strip", "trim" }, .{ "lstrip", "trim" }, .{ "rstrip", "trim" }, .{ "trimSpace", "trim" },
     .{ "toLowerCase", "lower" }, .{ "toUpperCase", "upper" },
     .{ "push", "append" }, .{ "add", "append" },
@@ -1727,6 +1728,12 @@ pub fn suggestMember(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast
     }
     if (name.len == 0 or name.len > 64) return "";
 
+    if (base_t.kind() == .result and try hasMember(c, base_t.cast(.result).child_t, name, node)) {
+        return " Unwrap it with `!` first, or handle the error with `!else` or `try`.";
+    }
+    if (base_t.kind() == .option and try hasMember(c, base_t.cast(.option).child_t, name, node)) {
+        return " Unwrap it with `.?` first, or give a default with `?else`.";
+    }
     if (base_t.id() == bt.Str and std.mem.eql(u8, name, "join")) {
         return " `join` is a method of a list: `xs.join(sep)`.";
     }
@@ -1791,6 +1798,26 @@ pub fn suggestMember(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast
         return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{cand}) catch "";
     }
     return "";
+}
+
+/// `suggestMember` for a field access `x.name`. A suggested method is written as a call: `len()`.
+pub fn suggestField(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast.Node) ![]const u8 {
+    const hint = try suggestMember(c, rec_t, name, node);
+    const prefix = " Did you mean `";
+    if (!std.mem.startsWith(u8, hint, prefix) or !std.mem.endsWith(u8, hint, "`?")) {
+        return hint;
+    }
+    var target_buf: [128]u8 = undefined;
+    const target_src = hint[prefix.len .. hint.len - 2];
+    if (target_src.len > target_buf.len) return hint;
+    @memcpy(target_buf[0..target_src.len], target_src);
+    const target = target_buf[0..target_src.len];
+    const base_t = rec_t.getRefLikeChild() orelse rec_t;
+    const sym = (try c.accessResolvedSym(base_t, target, node)) orelse return hint;
+    if (sym.type != .func) {
+        return hint;
+    }
+    return std.fmt.bufPrint(&suggest_buf, " Did you mean the method `{s}()`?", .{target}) catch "";
 }
 
 fn hasMember(c: *cy.Chunk, type_: *cy.Type, name: []const u8, node: *ast.Node) !bool {
@@ -2410,7 +2437,14 @@ fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.
         },
         .ident => {
             var right_res: ExprResult = undefined;
-            const leftRes = try c.semaExprSkipSym(left_n, .{});
+            if (!opts.rhsOpAssignBinExpr) {
+                c.assign_left = left_n;
+            }
+            const leftRes = c.semaExprSkipSym(left_n, .{}) catch |err| {
+                c.assign_left = null;
+                return err;
+            };
+            c.assign_left = null;
             const leftT = leftRes.type;
             if (leftRes.resType == .value_local) {
                 const id = leftRes.data.value_local;
@@ -2853,13 +2887,15 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
         } else {
             const type_name = try c.sema.allocTypeName(type_);
             defer c.alloc.free(type_name);
-            return c.reportErrorFmt("Field `{}` does not exist in `{}`.", &.{v(name), v(type_name)}, field);
+            const hint = try suggestField(c, type_, name, field);
+            return c.reportErrorFmt("Field `{}` does not exist in `{}`.{}", &.{v(name), v(type_name), v(hint)}, field);
         }
         const child_ts = child_t.sym();
         const sym = child_ts.getMod().getSym(name) orelse {
             const type_name = try c.sema.allocTypeName(child_t);
             defer c.alloc.free(type_name);
-            return c.reportErrorFmt("Field `{}` does not exist in `{}`.", &.{v(name), v(type_name)}, field);
+            const hint = try suggestField(c, child_t, name, field);
+            return c.reportErrorFmt("Field `{}` does not exist in `{}`.{}", &.{v(name), v(type_name), v(hint)}, field);
         };
         if (check_visible) try cy.module.check_sym_visible(c, sym, field);
         if (sym.type != .field) {
@@ -6251,6 +6287,9 @@ fn lookupIdent2(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdent
             }
         }
     }
+    if (self.assign_left == node) {
+        return self.reportErrorFmt("Undeclared variable `{}`. To declare a new variable, write `{} := ...`.", &.{v(name), v(name)}, node);
+    }
     return self.reportErrorFmt("Undeclared variable `{}`.", &.{v(name)}, node);
 }
 
@@ -7783,6 +7822,10 @@ fn checkExprCstr(c: *cy.Chunk, res: ExprResult, cstr: Cstr, node: *ast.Node) !Ex
 /// because the core library is built on raw pointers. `^T` and `&T` can not be cast from an integer and stay allowed.
 fn check_raw_ptr(c: *cy.Chunk, type_: *cy.Type, node: *ast.Node) !void {
     var ptr_t = type_;
+    if (ptr_t.kind() == .null) {
+        // An argument probed against overloads (`s.trim({' ', '\t'})`) has no type yet.
+        return;
+    }
     if (ptr_t.kind() == .option) {
         ptr_t = ptr_t.cast(.option).child_t;
     }
@@ -8483,6 +8526,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                 // Push error branch.
                 _ = try pushBlock(c, node);
                 {
+                    try checkElseDefaultPrec(c, "!else", unwrap.default, payload_t);
                     const else_body = try c.semaExprCstr(unwrap.default, payload_t);
                     _ = try c.ir.pushStmt(.set_local, unwrap.default, .{
                         .id = @intCast(dst_local.ir_id),
@@ -8582,6 +8626,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                 try semaUnwrapOrStmt(c, opt, res_local.ir_id, outer, unwrap.opt);
 
                 // Else.
+                try checkElseDefaultPrec(c, "?else", unwrap.default, payload_t);
                 var else_body = try c.semaExprCstr(unwrap.default, payload_t);
                 else_body = try semaOwn(c, else_body, unwrap.default);
                 _ = try c.ir.pushStmt(.set_local, unwrap.default, .{
@@ -9949,6 +9994,29 @@ fn sema_bin_expr2(c: *cy.Chunk, left: ExprResult, left_n: *ast.Node, right: Expr
     return c.semaCallFuncSymRec2(func_sym, &args, node);
 }
 
+/// `n + 1` where `n` is a `^int` or `&float`: the operator is on the value it points to. Without this the lookup
+/// found the reserved `int.+` and reported ``Cannot invoke the reserved function `int.+`.``.
+fn checkRefOperand(c: *cy.Chunk, left_t: *cy.Type, op: cy.BinaryExprOp, left_n: *ast.Node, node: *ast.Node) !void {
+    // Raw `Ptr[T]` keeps pointer arithmetic.
+    if (left_t.kind() == .pointer and !left_t.isRefPointer()) return;
+    const child_t = left_t.getRefLikeChild() orelse return;
+    switch (child_t.kind()) {
+        .int, .raw, .float => {},
+        else => return,
+    }
+    const name = try c.sema.allocTypeName(left_t);
+    defer c.alloc.free(name);
+    const left_s = c.ast.nodeString(left_n);
+    if (node.type() == .op_assign_stmt) {
+        return c.reportErrorFmt("Can not use `{}` on `{}`. To change the value that `{}` points to, write `{}.* {}= ...`.", &.{
+            v(op.name()), v(name), v(left_s), v(left_s), v(op.name()),
+        }, node);
+    }
+    return c.reportErrorFmt("Can not use `{}` on `{}`. Dereference it first: `{}.* {} ...`.", &.{
+        v(op.name()), v(name), v(left_s), v(op.name()),
+    }, node);
+}
+
 pub fn semaBinExpr(c: *cy.Chunk, expr: Cstr, left_n: *ast.Node, op: cy.BinaryExprOp, right_n: *ast.Node, node: *ast.Node) !ExprResult {
     switch (op) {
         .and_op => {
@@ -9962,6 +10030,7 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: Cstr, left_n: *ast.Node, op: cy.BinaryExp
         .less,
         .less_equal => {
             var left = try c.semaExpr(left_n, .{});
+            try checkRefOperand(c, left.type, op, left_n, node);
             switch (left.type.kind()) {
                 .int,
                 .raw,
@@ -10000,6 +10069,7 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: Cstr, left_n: *ast.Node, op: cy.BinaryExp
                 else => {},
             }
             var left = try c.semaExprHint(left_n, expr.target_t);
+            try checkRefOperand(c, left.type, op, left_n, node);
             if (left.type.kind() == .int or left.type.kind() == .raw) {
                 var right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = false, .fit_target = true });
                 if (left.type.id() != right.type.id()) {
@@ -12231,12 +12301,46 @@ fn sema_at_symbol(c: *cy.Chunk, name: []const u8, node: *ast.Node) !ExprResult {
     return c.semaConst(@intCast(id), c.sema.symbol_t, node);
 }
 
+/// `opt ?else '' == 'x'` parses as `opt ?else ('' == 'x')`. When the default is a comparison and the payload
+/// is not a `bool`, say so instead of only ``Expected type `str`, got `bool`.``.
+fn checkElseDefaultPrec(c: *cy.Chunk, op: []const u8, default_n: *ast.Node, payload_t: *cy.Type) !void {
+    if (default_n.type() != .binExpr or payload_t.id() == bt.Bool) return;
+    const bin = default_n.cast(.binExpr);
+    switch (bin.op) {
+        .equal_equal, .bang_equal, .less, .less_equal, .greater, .greater_equal, .and_op, .or_op => {},
+        else => return,
+    }
+    const name = try c.sema.allocTypeName(payload_t);
+    defer c.alloc.free(name);
+    const op_name = switch (bin.op) {
+        .equal_equal => "==",
+        .bang_equal => "!=",
+        .and_op => "and",
+        .or_op => "or",
+        else => bin.op.name(),
+    };
+    return c.reportErrorFmt("Expected type `{}`, got `bool`. `{}` binds weaker than `{}`, so this is the default value. Put the unwrap in parentheses: `(x {} default) {} y`.", &.{
+        v(name), v(op), v(op_name), v(op), v(op_name),
+    }, default_n);
+}
+
 pub fn sema_expr_cstr_template(c: *cy.Chunk, node: *ast.Node, template: *cy.sym.Template) !ExprResult {
     const res = try c.semaExpr(node, .{});
     if (!res.type.isInstanceOf(template)) {
         const type_name = try c.sema.allocTypeName(res.type);
         defer c.alloc.free(type_name);
-        return c.reportErrorFmt("Expected type instance of `{}`, found `{}`.", &.{v(template.head.name()), v(type_name)}, node);
+        // Say which operator fits the value. Models write `!` on a `str` or a `?int`.
+        var hint: []const u8 = "";
+        if (template == c.sema.result_tmpl) {
+            if (res.type.kind() == .option) {
+                hint = std.fmt.bufPrint(&suggest_buf, " `!`, `!else` and `try` handle a `!T`. For `{s}`, use `.?` or `?else`.", .{type_name}) catch "";
+            } else if (res.type.id() != bt.Never) {
+                hint = std.fmt.bufPrint(&suggest_buf, " `!`, `!else` and `try` handle a `!T`. `{s}` has no error case, so use the value as it is.", .{type_name}) catch "";
+            }
+        } else if (template == c.sema.option_tmpl and res.type.kind() == .result) {
+            hint = std.fmt.bufPrint(&suggest_buf, " `.?` and `?else` handle a `?T`. For `{s}`, use `!` or `!else`.", .{type_name}) catch "";
+        }
+        return c.reportErrorFmt("Expected type instance of `{}`, found `{}`.{}", &.{v(template.head.name()), v(type_name), v(hint)}, node);
     }
     return res;
 }

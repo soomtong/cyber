@@ -76,6 +76,9 @@ pub const Chunk = struct {
     /// location context for helper methods that simply return no context errors.
     curNode: ?*ast.Node,
 
+    /// The left side of a plain `x = y` that sema is resolving. An undeclared name there gets a `:=` hint.
+    assign_left: ?*ast.Node = null,
+
     /// The current expr that has a continuation body, otherwise null.
     cur_cont_expr: ?*ast.LambdaContExpr,
 

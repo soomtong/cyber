@@ -736,7 +736,7 @@ name := 'Rex'
 points := 123
 title := 'Scoreboard: %{name} %{points}'
 ```
-String templates can not contain nested string templates.
+String templates can not contain nested string templates: `'%{'L%{n}'.len()}'` is an error. Assign the inner template to a variable first. The expression inside `%{}` is code, so it can not contain a backslash escape such as `\"`: write a string there with the other quote, `"%{f('b')}"`.
 
 `to_print_string` renders a struct as a record literal with its type name, a choice as its case with the payload, and a slice or vector as its elements. A string nested in one of those keeps its quotes:
 ```cy
@@ -943,6 +943,12 @@ The `if` statement can be amended to unwrap an optional value with the capture `
 var opt ?str = 'abc'
 if opt |value|:
     print(value)    --> abc
+```
+The capture unwraps the whole condition. An operand of `and` or `or` is a `bool`, so `if ok and s.index('=') |i|:` is a compile error. Put the unwrap in an `if` of its own:
+```cy
+if ok:
+    if s.index('=') |i|:
+        print(i)
 ```
 
 ### `while` unwrap. 
@@ -1919,6 +1925,7 @@ else a == 20:
 else:
     print('neither 10 nor 20')
 ```
+An `else` with a condition is written `else cond:`. `else if cond:` and `elif cond:` are compile errors that say so.
 
 ### `if` expression.
 An `if` expression evaluates to a value depending on the condition.
@@ -4830,7 +4837,7 @@ For completion, `cl_vm_members_at(vm, pos, &items)` lists the members of the exp
 A name in a declaration of the main source can be asked like a use of it. To find the uses of a symbol in the other sources of a project, a host compiles each of them as the main source and calls `cl_vm_symbol_refs_to(vm, def_uri, def_pos, &ranges)` with the declaration that `cl_vm_symbol_at` reported. `cl_vm_symbol_tokens(vm, &tokens)` lists every resolved name of the main source with its `CLItemKind`, for highlighting by meaning. The language server `cyber-lsp` uses all of these.
 
 ### Checking a script without running it.
-`cl_vm_validate` compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (`persist_main`) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (`use math`) is initialized by the next eval that runs.
+`cl_vm_validate` compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (`persist_main`) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (`use math`) is initialized by the next eval that runs. It checks with the options of the last eval (`persist_main`, `deny_raw_ptrs`, `deny_spawn`). Before the first eval they are all off, so eval a prelude with the session's config first.
 ```c
 CLResultCode code = cl_vm_validate(vm, src);
 if (code == CL_ERROR_COMPILE) {

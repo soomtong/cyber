@@ -174,6 +174,8 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 | F-134 | 세션에서 틀린 곳으로 이끄는 문구 넷: `persist_main` 최상위 캡처 오류의 빌림 제안, `xs.len`의 `_len` 제안, `not`을 `?T`에 쓴 오류가 `!`를 말함, `to_upper`에 제안 없음 | `sema.zig` `lookupIdent2` · `suggestField` · `suggestMember` · `semaUnExpr` | tars-agent M0 요청서(2026-11-14, 6절) | 중간 | 2026-11-14 수정. `captureHintFmt`, 같은 이름의 메서드 제안, `not` 전용 문구, `to_` 접두사와 별칭 |
 | F-135 | 타입 없는 목록 `{1, 'a'}`가 `{1, 97}`이 된다(첫 원소 타입 추론과 한 글자 문자열의 코드 포인트 변환이 겹침). `{1.5, 2}`도 `[]float` | `sema.zig` `semaInferSliceLit` | tars-agent M0 요청서(2026-11-14, 7절) | 낮음 | 2026-11-14 수정(사용자 결정: 암시적 변환 불허). 문자열 리터럴은 `str` 원소에만, 정수 리터럴은 float 원소에 못 옴. 타입을 쓴 리터럴은 그대로 |
 | F-136 | `&T`를 캡처한 클로저(pinned closure)가 스택이 옮겨진 뒤 해제된 스택을 읽는다. main에서는 쓰레기 값, `sort` 비교 함수 안에서 스택이 자라면 Segmentation fault, fiber 스택도 같다. 캡처 값은 힙 객체에 있어 프레임 포인터 레이아웃의 보정 밖이었다 | `heap.zig` `allocClosure` · `patchPinnedClosures`, `thread.zig` `growStackPrecise` | 정렬 안 A 사전 조사(2026-11-14, 사용자 지시) | 높음 | 2026-11-14 수정. heap이 살아 있는 pinned closure를 등록하고 스택 이동 때 옛 스택 범위를 가리키는 캡처 값을 옮긴다 |
+| F-137 | 호스트 함수를 값으로 부르는 경로(함수 포인터 값, `Func` union 값, `sort` 같은 표준 메서드가 부르는 함수, trait 호출)에서 매개변수를 `cl_thread_ret`보다 먼저 읽으면 오류 없이 다른 값을 읽는다(`sort`가 잘못 정렬). F-133은 직접 호출만 고쳤다 | `thread.zig` `callFunc2` · `callPtrInst` · `callUnionInst` · `callTraitSymInst` | tars-agent M0 요청서(2026-11-14 `cd7b218`, 1절) | 중간 | 2026-11-14 수정. 네 경로가 `enterHostFrame`으로 `fp_end`를 첫 매개변수에 둔다 |
+| F-138 | `#[bind]` 메서드로 trait를 구현하면 vtable을 채울 때 컴파일러가 panic(index out of bounds). 호스트 함수에 없는 바이트코드 주소를 읽었다 | `bc_gen.zig` `fillVtables` | F-137 테스트 작성 중(2026-11-14) | 중간 | 2026-11-14 수정. 호스트 함수는 함수 포인터에 상위 비트를 세운 값을 넣는다(`zCallTrait`가 그렇게 읽는다) |
 
 ## 우선순위 한 장 요약
 

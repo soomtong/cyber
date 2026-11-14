@@ -4148,6 +4148,14 @@ fn (&str) trim(delims AsSpan[str]) -> str:
 fn (&str) trim() -> str:
     return self.trim({' ', '\t', '\r', '\n'})
 
+--| Returns the string with spaces, tabs and line breaks trimmed from the start.
+fn (&str) trimLeft() -> str:
+    return self.trimLeft({' ', '\t', '\r', '\n'})
+
+--| Returns the string with spaces, tabs and line breaks trimmed from the end.
+fn (&str) trimRight() -> str:
+    return self.trimRight({' ', '\t', '\r', '\n'})
+
 --| Returns this string in uppercase.
 #[bind]
 fn (&str) upper() -> str:

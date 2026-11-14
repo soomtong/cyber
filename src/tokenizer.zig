@@ -625,6 +625,9 @@ pub const Tokenizer = struct {
                         if (t.ignoreErrors) {
                             try t.pushToken(.err, start);
                             return .{ .stateT = .token };
+                        } else if (ch == '\\' and state.stateT == .stringt_expr) {
+                            // `"%{s.ends_with(\"b\")}"`: the expression is code, not string content.
+                            try t.reportErrorAt("A backslash can not be used inside `%{...}`: it is code, not part of the string. Write a string there with the other quote: `\"%{f('b')}\"`.", &.{}, start);
                         } else {
                             try t.reportErrorAt("unknown character: {} ({}) at {}", &.{ cy.fmt.char(ch), v(ch), v(start) }, start);
                         }
@@ -851,6 +854,11 @@ pub const Tokenizer = struct {
                 '%' => {
                     const ch2 = peekAhead(t, 1) orelse 0;
                     if (ch2 == '{') {
+                        if (state.stateT == .stringt_expr and !t.ignoreErrors) {
+                            // This string is inside `%{...}` of another one. The state has one level, so the outer
+                            // string would be lost.
+                            try t.reportErrorAt("An interpolated string can not contain another interpolated string. Assign the inner string to a variable first.", &.{}, t.nextPos);
+                        }
                         var next = state;
                         if (state.has_template_expr == 0) {
                             // Encounter first expression.

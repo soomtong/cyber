@@ -181,6 +181,8 @@ t.eq('bcxy', s.trim({'a', 'z'}))
 -- Without arguments, spaces, tabs and line breaks.
 t.eq('a b', ' \t a b\r\n'.trim())
 t.eq('', '  '.trim())
+t.eq('a b\r\n', ' \t a b\r\n'.trimLeft())
+t.eq(' \t a b', ' \t a b\r\n'.trimRight())
 
 -- upper()
 t.eq('ABCXYZ', s.upper())

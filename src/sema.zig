@@ -953,6 +953,29 @@ fn semaContinue(c: *cy.Chunk, node: *ast.Node) !void {
     c.block().endReachable = false;
 }
 
+/// An `!else` or `?else` block reaches its end. Says how it can end here: `return` only in a function, `break` and
+/// `continue` only in a loop. The main block can not `return`, so it gets the other forms.
+fn reportElseBlockEnd(c: *cy.Chunk, kind: enum { result, option }, node: *ast.Node) anyerror {
+    const op: []const u8 = if (kind == .result) "!else" else "?else";
+    const in_func = c.proc().func != null;
+    const in_loop = c.loopBlock(c.proc().block_start) != null;
+    const ends: []const u8 = if (in_func and in_loop)
+        "`return`, `panic(...)`, `break` or `continue`"
+    else if (in_func)
+        "`return` or `panic(...)`"
+    else if (in_loop)
+        "`panic(...)`, `break` or `continue`"
+    else
+        "`panic(...)`";
+    const other: []const u8 = if (in_func)
+        ""
+    else if (kind == .result)
+        " To go on after the error at the top level, give a default value (`f() !else default`) or handle the error in a `try:` block with an `else:` block."
+    else
+        " To go on at the top level, give a default value (`x ?else default`) or unwrap it with `if x |v|:`.";
+    return c.reportErrorFmt("An `{}` block must not reach its end. End it with {}.{}", &.{v(op), v(ends), v(other)}, node);
+}
+
 /// Assumes `expr` is owned or has unmanaged type.
 pub fn semaReturnExpr(c: *cy.Chunk, expr: ExprResult, node: *ast.Node) !void {
     if (expr.type.kind() == .borrow) {
@@ -1251,12 +1274,25 @@ fn semaCaptureUnwrap(c: *cy.Chunk, opt_t: *cy.Type, get_opt: ExprResult, capture
     }
 }
 
+/// An operand of `and` or `or` is a `bool`. An option gets a note: `if ok and s.index(x) |i|:` unwraps the whole
+/// condition, so the `|i|` does not reach the operand.
+fn semaLogicOperand(c: *cy.Chunk, node: *ast.Node) !ExprResult {
+    const res = try c.semaExprTarget(node, c.sema.bool_t);
+    if (res.type.id() == bt.Bool or res.type.id() == bt.Never) return res;
+    if (res.type.kind() == .option) {
+        const type_name = try c.sema.allocTypeName(res.type);
+        defer c.alloc.free(type_name);
+        return c.reportErrorFmt("Expected type `bool`, got `{}`. An operand of `and` and `or` is not unwrapped: `|v|` applies to the whole condition of the `if`. Unwrap the option in an `if` of its own inside this one: `if x |v|:`, or compare it with `none`.", &.{v(type_name)}, node);
+    }
+    return reportExpectedType(c, c.sema.bool_t, res.type, node);
+}
+
 fn semaLogicOr(c: *cy.Chunk, left: *ast.Node, right: *ast.Node, node: *ast.Node) !ExprResult {
     const res_local = try declareHiddenLocal(c, "_temp", c.sema.bool_t, null, node);
 
     const outer = try pushBlock(c, node);
     {
-        const cond = try c.semaExprCstr(left, c.sema.bool_t);
+        const cond = try semaLogicOperand(c, left);
 
         _ = try pushBlock(c, left);
         {
@@ -1273,7 +1309,7 @@ fn semaLogicOr(c: *cy.Chunk, left: *ast.Node, right: *ast.Node, node: *ast.Node)
             .body_head = block.first,
         });
 
-        const right_value = try c.semaExprCstr(right, c.sema.bool_t);
+        const right_value = try semaLogicOperand(c, right);
         _ = try c.ir.pushStmt(.set_local, right, .{
             .id = @intCast(res_local.ir_id),
             .right = right_value.ir,
@@ -1292,7 +1328,7 @@ fn semaLogicAnd(c: *cy.Chunk, left: *ast.Node, right: *ast.Node, node: *ast.Node
 
     const outer = try pushBlock(c, node);
     {
-        var cond = try c.semaExprCstr(left, c.sema.bool_t);
+        var cond = try semaLogicOperand(c, left);
         const expr = try c.ir.newExpr(.unary_op, c.sema.bool_t, left, .{
             .childT = c.sema.bool_t, .op = .lnot, .expr = cond.ir,
         });
@@ -1313,7 +1349,7 @@ fn semaLogicAnd(c: *cy.Chunk, left: *ast.Node, right: *ast.Node, node: *ast.Node
             .body_head = block.first,
         });
 
-        const right_value = try c.semaExprCstr(right, c.sema.bool_t);
+        const right_value = try semaLogicOperand(c, right);
         _ = try c.ir.pushStmt(.set_local, right, .{
             .id = @intCast(res_local.ir_id),
             .right = right_value.ir,
@@ -1706,7 +1742,9 @@ const member_aliases = [_][2][]const u8{
     .{ "endswith", "ends_with" }, .{ "endsWith", "ends_with" }, .{ "hasSuffix", "ends_with" },
     .{ "find", "index" }, .{ "indexOf", "index" },
     .{ "rfind", "lastIndexOf" }, .{ "rindex", "lastIndexOf" }, .{ "last_index", "lastIndexOf" },
-    .{ "strip", "trim" }, .{ "lstrip", "trim" }, .{ "rstrip", "trim" }, .{ "trimSpace", "trim" },
+    .{ "strip", "trim" }, .{ "trimSpace", "trim" },
+    .{ "lstrip", "trimLeft" }, .{ "trimStart", "trimLeft" }, .{ "trim_start", "trimLeft" }, .{ "ltrim", "trimLeft" },
+    .{ "rstrip", "trimRight" }, .{ "trimEnd", "trimRight" }, .{ "trim_end", "trimRight" }, .{ "rtrim", "trimRight" },
     .{ "toLowerCase", "lower" }, .{ "toUpperCase", "upper" },
     .{ "toLower", "lower" }, .{ "toUpper", "upper" }, .{ "lowercase", "lower" }, .{ "uppercase", "upper" },
     .{ "to_lowercase", "lower" }, .{ "to_uppercase", "upper" },
@@ -2180,8 +2218,7 @@ fn semaAssignToAccessStmt(c: *cy.Chunk, var_start: usize, rec_n: *ast.Node, rec:
 
     try cy.module.check_sym_visible(c, sym, access_right_n);
     if (sym.type != .field) {
-        const type_name = type_sym.type.name();
-        return c.reportErrorFmt("Type `{}` does not have a field named `{}`.", &.{v(type_name), v(access_right_name)}, access_right_n);
+        return reportNotField(c, type_sym.type.name(), access_right_name, sym, access_right_n);
     }
     const field_s = sym.cast(.field);
 
@@ -2920,10 +2957,7 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
         if (sym.type != .field) {
             const type_name = try c.sema.allocTypeName(child_t);
             defer c.alloc.free(type_name);
-            if (sym.type == .func) {
-                return c.reportErrorFmt("Type `{}` does not have a field named `{}`. Did you mean the method `{}()`?", &.{v(type_name), v(name), v(name)}, field);
-            }
-            return c.reportErrorFmt("Type `{}` does not have a field named `{}`.", &.{v(type_name), v(name)}, field);
+            return reportNotField(c, type_name, name, sym, field);
         }
         const field_s = sym.cast(.field);
         // Access on typed pointer.
@@ -2940,11 +2974,18 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
     };
     if (check_visible) try cy.module.check_sym_visible(c, sym, field);
     if (sym.type != .field) {
-        const type_name = type_.name();
-        return c.reportErrorFmt("Type `{}` does not have a field named `{}`.", &.{v(type_name), v(name)}, field);
+        return reportNotField(c, type_.name(), name, sym, field);
     }
     const field_sym = sym.cast(.field);
     return semaField(c, rec, rec_n, field_sym.idx, field_sym.type, field);
+}
+
+/// `name` is a member of the type but not a field. A method of the same name is suggested with a call: `s.len()`.
+fn reportNotField(c: *cy.Chunk, type_name: []const u8, name: []const u8, sym: *cy.Sym, node: *ast.Node) error{CompileError, OutOfMemory, FormatError, WriteFailed} {
+    if (sym.type == .func) {
+        return c.reportErrorFmt("Type `{}` does not have a field named `{}`. Did you mean the method `{}()`?", &.{v(type_name), v(name), v(name)}, node);
+    }
+    return c.reportErrorFmt("Type `{}` does not have a field named `{}`.", &.{v(type_name), v(name)}, node);
 }
 
 /// The accessed member is alive when any of its states is active.
@@ -8618,7 +8659,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                 }
                 try semaStmts(c, unwrap.else_stmts);
                 if (c.block().endReachable) {
-                    return c.reportError("Expected unreachable block end.", node);
+                    return reportElseBlockEnd(c, .result, node);
                 }
             }
             const stmts = try popBlock2(c, false);
@@ -8695,7 +8736,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                 // Else.
                 try semaStmts(c, unwrap.else_stmts);
                 if (c.block().endReachable) {
-                    return c.reportError("Expected unreachable block end.", node);
+                    return reportElseBlockEnd(c, .option, node);
                 }
             }
             const block = try popBlock(c);
@@ -10552,10 +10593,15 @@ fn semaInferSliceLit(c: *cy.Chunk, lit: *ast.InitLit) !ExprResult {
     try seqPush(c, &args[0], true, first);
     for (lit.args.slice()[1..], 1..) |arg, i| {
         // The list has the type of its first element. A literal of another kind is not converted to it:
-        // `{1, 'a'}` is not `{1, 97}` and `{1.5, 2}` is not `{1.5, 2.0}`.
+        // `{1, 'a'}` is not `{1, 97}` and `{1.5, 2}` is not `{1.5, 2.0}`. The same note is given in either order
+        // when the first element is a `str`, an integer, a float or a `bool`: `{'a', 1}`.
+        const elem_is_str = elem_t.id() == bt.Str;
+        const elem_kind = elem_t.kind();
         const lit_name: ?[]const u8 = switch (arg.type()) {
-            .string_lit, .string_multi_lit, .sq_string_lit, .sq_string_multi_lit, .raw_string_lit => if (elem_t.id() != bt.Str) "str" else null,
-            .decLit, .hexLit, .binLit, .octLit => if (elem_t.kind() == .float) "int" else null,
+            .string_lit, .string_multi_lit, .sq_string_lit, .sq_string_multi_lit, .raw_string_lit => if (!elem_is_str) "str" else null,
+            .decLit, .hexLit, .binLit, .octLit => if (elem_is_str or elem_kind == .float or elem_kind == .bool) "int" else null,
+            .floatLit => if (elem_is_str or elem_kind == .int or elem_kind == .bool) "float" else null,
+            .trueLit, .falseLit => if (elem_is_str or elem_kind == .int or elem_kind == .float) "bool" else null,
             else => null,
         };
         if (lit_name) |name| {

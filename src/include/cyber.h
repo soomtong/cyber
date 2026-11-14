@@ -588,6 +588,9 @@ CLResultCode cl_vm_compile_path(CLVM* vm, CLBytes uri, CLCompileConfig config);
 // Persisted locals and declarations from earlier evals are visible to it, and nothing it declares is kept for
 // the next eval. A module the source loads first (`use math`) is initialized by the next eval that runs.
 // On `CL_ERROR_COMPILE` the report is available from `cl_vm_compile_error_summary`.
+// It checks with the options of the last eval (`persist_main`, `deny_raw_ptrs`, `deny_spawn` of its `CLEvalConfig`).
+// Before the first eval of the VM they are all off, so eval a prelude with the session's config first: a
+// `spawn` passes the check on a new VM and is a compile error after an eval with `deny_spawn`.
 CLResultCode cl_vm_validate(CLVM* vm, CLBytes src);
 
 /// Convenience function to return the last error summary.

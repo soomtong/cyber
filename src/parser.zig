@@ -2711,11 +2711,24 @@ pub const Parser = struct {
     };
 
     /// Does not consume line end.
+    /// `elif cond:` from Python: the identifier `elif` followed by the start of an expression on the same line.
+    fn isElifStmt(self: *Parser) bool {
+        const token = self.peek();
+        if (!std.mem.eql(u8, self.ast.src[token.pos()..token.data.end], "elif")) return false;
+        return switch (self.peekAhead(1).tag()) {
+            .ident, .dec, .float, .hex, .bin, .oct, .string, .sq_string, .raw_string, .true_k, .false_k, .none_k, .not_k => true,
+            else => false,
+        };
+    }
+
     fn parseStatement(self: *Parser, config: ParseStmtConfig) anyerror!*ast.Node {
         const start = self.next_pos;
         switch (self.peek().tag()) {
             .ident => {
                 const token2 = self.peekAhead(1);
+                if (self.isElifStmt()) {
+                    return self.reportError("`elif` is not a keyword. Write `else cond:`, not `elif cond:`.", &.{});
+                }
                 if (token2.tag() == .fn_k and self.isGeneratorFn(0)) {
                     self.advance();
                     return self.parseFuncDecl(start, .{ .attrs = &.{}, .hidden = false, .allow_decl = config.allow_decls, .generator = true });

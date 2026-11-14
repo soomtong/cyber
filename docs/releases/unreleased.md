@@ -38,6 +38,11 @@
 - `&T`를 캡처한 클로저가 스택이 옮겨진 뒤 해제된 스택을 읽었다. `c := &counts` 뒤 `names.sort(|a, b| c[a] > c[b])`에서 비교
   함수 안의 호출이 스택을 키우면 Segmentation fault였고, 캡처와 호출 사이에 깊은 호출이 있으면 쓰레기 값을 읽었다(fiber도 같다).
   스택이 옮겨질 때 프레임 안의 포인터만 고치고 클로저 객체 안의 캡처 값은 고치지 않았다. 이제 그것도 고친다(F-136).
+- 호스트 함수를 값으로 부르면(함수 포인터 값 `var f F = mod.first`, `Func[F]` 값, `xs.sort(mod.less)`처럼 표준 메서드가
+  부르는 함수, trait 호출) 매개변수를 `cl_thread_ret`보다 먼저 읽을 때 오류 없이 다른 값을 읽었다. `sort`는 잘못 정렬했다.
+  F-133은 직접 호출만 고쳤다. 이제 모든 경로에서 순서와 관계없다(F-137, tars-agent M0 요청서 `cd7b218` 1절).
+- `#[bind]` 메서드로 trait를 구현하면 컴파일러가 panic(index out of bounds)으로 죽었다. 이제 그 메서드를 trait로 부를 수
+  있다(F-138).
 
 ## 언어와 표준 라이브러리
 
@@ -91,6 +96,19 @@
     `x == none` · `if x |v|:` · `?else`(옵션), `!` · `!else` · `try`(결과) 안내를 낸다.
   - `to_upper` · `to_lower` · `uppercase` · `lowercase` · `toUpper` · `toLower`가 `upper` · `lower`를 제안한다. `to_` 접두사를 뗀
     이름이 그 타입에 있으면 그것을 제안한다.
+- 모델이 쓴 코드에서 나온 문구(tars-agent M0 요청서 `cd7b218` 3 · 5 · 6절):
+  - `str`의 `s.len`도 ``Did you mean the method `len()`?``를 낸다(같은 이름의 메서드가 있는 필드 자리 모두).
+  - 타입 없는 목록의 원소 오류가 순서와 관계없이 같은 설명을 붙인다: `{'a', 1}`, `{1, true}`, `{1, 1.5}`(첫 원소가 `str` ·
+    정수 · float · `bool`일 때).
+  - `elif cond:`는 "`elif` is not a keyword. Write `else cond:`, not `elif cond:`."(전에는 ``Expected end of line or file. Got ident.``).
+  - `!else` · `?else` 블록이 끝에 닿으면 ``Expected unreachable block end.`` 대신 그 자리에서 쓸 수 있는 끝(`return`은 함수 안,
+    `break` · `continue`는 반복 안)을 말하고, 최상위에서는 기본값이나 `try:` 블록(`?else`면 `if x |v|:`)을 권한다.
+  - `if ok and t.index('=') |i|:`처럼 `and` · `or`의 피연산자가 옵션이면 `|v|`가 조건 전체에 붙는다는 것과 안쪽 `if`로 풀라는 것을 말한다.
+  - 보간 안의 보간(`'%{'L%{n}'.len()}'`)은 ``Encountered new line in single line literal.`` 대신 "An interpolated string can not
+    contain another interpolated string. Assign the inner string to a variable first."
+  - `%{...}` 안의 백슬래시(`"%{s.ends_with(\"b\")}"`)는 ``unknown character: \ (92) at 37`` 대신 다른 따옴표를 쓰라고 한다.
+- `str`에 인자 없는 `trimLeft()` · `trimRight()`가 생겼다(한쪽 끝의 공백, 탭, 줄바꿈). `lstrip` · `trimStart` · `trim_start` ·
+  `ltrim`은 `trimLeft`를, `rstrip` · `trimEnd` · `trim_end` · `rtrim`은 `trimRight`를 제안한다(전에는 `lstrip`이 `trim`을 제안했다).
 
 ## 임베딩 API
 
@@ -106,6 +124,8 @@
   정적 라이브러리를 링크하고, `cyber.h`는 그 아티팩트의 include 경로로 따라온다. `ffi`는 `lib` 스텝처럼 기본 false다.
   `commit` · `build` 인자가 버전 문자열에 들어간다(`Cyber 0.4.10-DEV build-0-63e35e8`). 이 때문에 인자 없는 `zig build`가
   라이브러리를 빌드한다(tars-agent M0 요청서 3절).
+- `cl_vm_validate`는 마지막 eval의 설정(`persist_main`, `deny_raw_ptrs`, `deny_spawn`)으로 검사한다. 첫 eval 전에는 모두
+  꺼져 있다. `cyber.h`와 매뉴얼에 적었다(tars-agent M0 요청서 `cd7b218` 4절).
 
 ## 변경
 

@@ -1410,6 +1410,24 @@ pub fn reportCallFuncMismatch(c: *cy.Chunk, pre_args: []const Argument, end_args
             "An index"
         else
             null;
+        if (what == null and arg_idx == 2 and std.mem.eql(u8, func_name, "@set_index")) {
+            // `a[i] = v`: name the container and its element type.
+            var rec_t = sig.params()[0].get_type();
+            switch (rec_t.kind()) {
+                .pointer => rec_t = rec_t.cast(.pointer).child_t,
+                .borrow => rec_t = rec_t.cast(.borrow).child_t,
+                .ex_borrow => rec_t = rec_t.cast(.ex_borrow).child_t,
+                else => {},
+            }
+            const rec_name = try c.sema.allocTypeName(rec_t);
+            defer c.alloc.free(rec_name);
+            const hint: []const u8 = switch (match_err.arg_t.kind()) {
+                .option => " Unwrap it first: `if x |v|:` or `x.?`.",
+                .result => " Unwrap it with `!` first, or handle the error with `!else` or `try`.",
+                else => "",
+            };
+            return c.reportErrorFmt("An element of `{}` must be `{}`, got `{}`.{}", &.{v(rec_name), v(paramt_name), v(argt_name), v(hint)}, err_node);
+        }
         if (what) |what_| {
             const hint: []const u8 = switch (match_err.arg_t.kind()) {
                 .option => " Unwrap it first: `if s.index(x) |i|:` or `x.?`.",

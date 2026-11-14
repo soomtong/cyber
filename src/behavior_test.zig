@@ -527,6 +527,8 @@ fn test_core(run: *Runner) void {
     run.case("syntax/return_multiple_error.cy");
     run.case("core/slice_bound_option_error.cy");
     run.case("core/index_option_error.cy");
+    run.case("core/set_index_value_error.cy");
+    run.case("core/set_index_value_option_error.cy");
 }
 
 fn test_vars(run: *Runner) void {

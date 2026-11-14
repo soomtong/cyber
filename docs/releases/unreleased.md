@@ -116,6 +116,9 @@
   - 한 줄 문자열 안의 줄바꿈 오류가 `\n`이나 여러 줄 문자열(`'''...'''`, `"""..."""`)을 쓰라고 덧붙인다.
   - `s[h..]` · `xs[h]`의 경계나 인덱스가 `?int`이면 내부 이름 `@slice` · `@index`를 보이던 인자 불일치 문구 대신 "A slice bound
     must be `int`, got `?int`. Unwrap it first: ..."(`!int`면 `!` 안내).
+  - `xs[0] = 'ab'`처럼 `a[i] = v`의 값이 원소 타입과 다르면 ``Expected argument `int`, found `str`, when calling `fn
+    @set_index(...)`.`` 대신 "An element of `[]int` must be `int`, got `str`."(`Map`도 같고, 옵션 · 결과면 풀기 안내. tars-agent
+    M0 요청서 `b450f535` 기준 2절).
 - `str`에 인자 없는 `trimLeft()` · `trimRight()`가 생겼다(한쪽 끝의 공백, 탭, 줄바꿈). `lstrip` · `trimStart` · `trim_start` ·
   `ltrim`은 `trimLeft`를, `rstrip` · `trimEnd` · `trim_end` · `rtrim`은 `trimRight`를 제안한다(전에는 `lstrip`이 `trim`을 제안했다).
 

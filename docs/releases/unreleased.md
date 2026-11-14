@@ -21,6 +21,11 @@
 - 범위식이 포함 끝과 방향을 잃었다. `a[1..=2]`가 `{2}`를 돌려줬고(이제 `{2, 3}`), `a[3..>1]`은 `InvalidArgument` panic이었다
   (이제 컴파일 오류 "A decreasing range can not be a slice index."). 값으로 쓴 `0..=3`은 `Range{start=0, end=3}`이었다
   (이제 `end=4`, `Range`는 끝을 포함하지 않는다). `3..>0` 같은 감소 범위는 `for` 밖에서 컴파일 오류다(F-121).
+- `^[]T`나 `&[]T` 지역에 `+=` 같은 복합 대입을 하면 메모리가 깨졌다. `out := ^[]str{}` 뒤 `out += 'x'`를 두 번 하면
+  Segmentation fault, 한 번이면 붙지 않거나 길이가 쓰레기 값이었다(0.4.9부터). `x op= y`는 `x = x op y`인데, 이 경로만
+  결과 타입을 대입 대상과 비교하지 않아 `+`가 돌려준 `[]T`를 `^[]T` 자리에 넣었다. 이제 일반 대입처럼 검사하고,
+  결과가 가리키는 값의 타입이면 ``Expected type `^[]str`, got `[]str`. To change the value that `out` points to, write
+  `out.* += ...`.``를 낸다. 가리키는 값을 바꾸려면 `out.* += 'x'`(F-128, tars-agent M0 스파이크 03).
 
 ## 언어와 표준 라이브러리
 

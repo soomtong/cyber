@@ -7751,6 +7751,10 @@ pub fn semaExpr(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) !ExprResult {
         try check_raw_ptr(c, res.type, node);
     }
 
+    return checkExprCstr(c, res, cstr, node);
+}
+
+fn checkExprCstr(c: *cy.Chunk, res: ExprResult, cstr: Cstr, node: *ast.Node) !ExprResult {
     if (cstr.target_t) |target_t| {
         if (target_t == res.type) {
             return res;
@@ -9136,7 +9140,23 @@ pub fn semaExprOrOpAssignBinExpr(c: *cy.Chunk, node: *ast.Node, cstr: Cstr, opAs
         return try c.semaExpr(node, cstr);
     } else {
         const stmt = node.cast(.op_assign_stmt);
-        return try c.semaBinExpr(cstr, stmt.left, stmt.op, stmt.right, node);
+        const res = try c.semaBinExpr(cstr, stmt.left, stmt.op, stmt.right, node);
+        // `x op= y` is `x = x op y`. Check the result like a plain assignment does. Without this, `^[]T += v`
+        // stored the `[]T` that `+` returns into the `^[]T` local and corrupted memory.
+        if (cstr.target_t) |target_t| {
+            if (target_t != res.type and cstr.reqTypeCstr) {
+                if (target_t.getRefLikeChild() == res.type) {
+                    const name = try c.sema.allocTypeName(target_t);
+                    defer c.alloc.free(name);
+                    const op = try c.sema.allocTypeName(res.type);
+                    defer c.alloc.free(op);
+                    return c.reportErrorFmt("Expected type `{}`, got `{}`. To change the value that `{}` points to, write `{}.* {}= ...`.", &.{
+                        v(name), v(op), v(c.ast.nodeString(stmt.left)), v(c.ast.nodeString(stmt.left)), v(stmt.op.name()),
+                    }, node);
+                }
+            }
+        }
+        return checkExprCstr(c, res, cstr, node);
     }
 }
 

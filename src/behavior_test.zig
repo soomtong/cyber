@@ -515,6 +515,7 @@ fn test_vars(run: *Runner) void {
     run.case("vars/local_shadow.cy");
     run.case("vars/local_no_shadow_for_capture.cy");
     run.case("vars/op_assign.cy");
+    run.case("vars/op_assign_ref_error.cy");
     run.case("vars/read_undeclared_error.cy");
     run.case("vars/read_undeclared_diff_scope_error.cy");
     run.case("vars/read_outside_if_var_error.cy");

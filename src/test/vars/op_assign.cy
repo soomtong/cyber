@@ -25,4 +25,11 @@ b := []int{1}
 b[0] += 1
 t.eq(b[0], 2)
 
+-- Op assign through a reference changes the value it points to.
+out := ^[]str{}
+out.* += 'x'
+out.* += 'y'
+t.eq(out.len(), 2)
+t.eq(out[1], 'y')
+
 --cytest: pass

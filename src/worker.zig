@@ -25,6 +25,12 @@ pub const Task = struct {
     },
 };
 
+/// Bumped when a task is queued or finishes, and on an interrupt. A thread that waits for a spawned thread
+/// (`await`, `Future.wait_any`, `Fiber.wait_ready`) sleeps on it instead of spinning.
+/// Not behind `Pool.mutex`: `cl_vm_interrupt` can be called from a signal handler. One for the process, not a
+/// `Pool` field: `vm.h` mirrors the layout of `VM`. Another VM's event only wakes a waiter once more.
+var progress: std.atomic.Value(u32) = .init(0);
+
 pub const Pool = struct {
     vm: *cy.VM,
     alloc: std.mem.Allocator,
@@ -54,16 +60,44 @@ pub const Pool = struct {
         };
     }
 
+    /// Read before checking what to wait for, then pass to `waitProgress`. A change between the read and the
+    /// wait makes the wait return at once.
+    pub fn progressEpoch(self: *Pool) u32 {
+        _ = self;
+        return progress.load(.acquire);
+    }
+
+    /// Wakes the threads in `waitProgress`.
+    pub fn notifyProgress(self: *Pool) void {
+        _ = self;
+        if (comptime builtin.single_threaded) return;
+        _ = progress.fetchAdd(1, .release);
+        stdx.io().futexWake(u32, &progress.raw, std.math.maxInt(u32));
+    }
+
+    /// Sleeps until `notifyProgress` is called after `seen` was read. Also wakes up after a few ms, for what
+    /// does not notify (fuel, a spawned thread's own interrupt flag).
+    pub fn waitProgress(self: *Pool, seen: u32) void {
+        _ = self;
+        if (comptime builtin.single_threaded) {
+            std.atomic.spinLoopHint();
+            return;
+        }
+        const timeout: std.Io.Timeout = .{ .duration = .{ .raw = .fromMilliseconds(10), .clock = .awake } };
+        stdx.io().futexWaitTimeout(u32, &progress.raw, seen, timeout) catch {};
+    }
+
     /// Waits until no task is queued or running. Queued tasks are run on the calling thread when
     /// no worker picks them up (a pool without workers, or workers that are all busy).
     pub fn wait_idle(self: *Pool) void {
         while (true) {
+            const epoch = self.progressEpoch();
             if (self.run_queued_task()) continue;
             self.mutex.lockUncancelable(stdx.io());
             const idle = self.active_workers == 0 and self.task_queue.first == null;
             self.mutex.unlock(stdx.io());
             if (idle) return;
-            std.atomic.spinLoopHint();
+            self.waitProgress(epoch);
         }
     }
 
@@ -131,6 +165,8 @@ pub const Pool = struct {
         }
 
         self.cond.signal(stdx.io());
+        // A thread that waits in `await` can run the task itself.
+        self.notifyProgress();
         log.tracev("signal new thread task", .{});
     }
 
@@ -199,6 +235,7 @@ pub const Pool = struct {
                     }
                     thread.deinit(false);
                     pool.alloc.destroy(thread);
+                    pool.notifyProgress();
                     return;
                 };
 
@@ -215,6 +252,7 @@ pub const Pool = struct {
                 }
 
                 @atomicStore(u8, &sync_state.state, 2, .release);
+                pool.notifyProgress();
 
                 if (cy.Trace) {
                     const grc = thread.heap.c.refCounts;
@@ -253,6 +291,8 @@ pub const Worker = struct {
             defer {
                 pool.mutex.lockUncancelable(stdx.io());
                 pool.active_workers -= 1;
+                // `wait_idle` waits for this.
+                pool.notifyProgress();
             }
             pool.run_task(task);
         }

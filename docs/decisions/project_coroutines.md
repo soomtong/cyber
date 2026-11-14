@@ -542,7 +542,11 @@ panic 대신 취소. 목표는 0.5.
   본체는 `fiber_cancel(state)`로 빼서 `Scope`가 `Fiber` 값 없이 쓴다. `Array[Fiber]`를 유지하지 않은 이유: `NoCopy` 원소를
   배열 밖으로 옮기는 연산이 없어 끝난 것만 골라 버릴 수 없다.
 - 고치지 않은 관찰: (1) 루트의 `await`와 `Fiber.wait_ready`는 워커 스레드를 기다릴 때 spin한다(큐에 남은 작업은 직접
-  돌린다. 이번 시즌 이전부터의 설계). 오래 걸리는 작업을 워커가 잡고 있으면 코어 하나를 쓴다. (2) `Fiber.waiting()`은
+  돌린다. 이번 시즌 이전부터의 설계). 오래 걸리는 작업을 워커가 잡고 있으면 코어 하나를 쓴다. 2026-11-14 고침: `worker.zig`의
+  프로세스 전역 세대 값 `progress`(작업 큐 추가 · 작업 끝 · 워커 유휴 · `cl_vm_interrupt`에서 올리고 futex로 깨움)에서
+  `waitProgress`로 잠든다. 기다리는 쪽은 상태를 보기 전에 세대를 읽어 놓으므로 그 사이의 사건을 놓치지 않는다. 10ms
+  시간 제한은 알림이 없는 연료 소진 · spawn한 스레드의 interrupt 표시를 위한 것이다. `Pool` 필드가 아닌 이유는 `vm.h`가
+  `VM`의 배치를 미러하기 때문이다. lib 테스트 `A thread that awaits a spawned thread sleeps instead of spinning.`(이전 코드에서 실패). (2) `Fiber.waiting()`은
   `wait_ready`로 멈춘 fiber에 대해 스레드의 모든 fiber를 훑는다. 중첩 그룹이 많으면 라운드당 그룹 수 × fiber 수다.
   (3) 양보만 하는 fiber와 Future를 기다리는 fiber가 섞이면 `Scope.run`은 쉬지 않고 돈다(설계대로).
 - 측정(ReleaseFast, M 계열): fiber 100개 × 2만 번 양보 0.12초, fiber 하나짜리 `scope` 블록 20만 번 0.09초,

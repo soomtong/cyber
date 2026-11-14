@@ -1136,7 +1136,9 @@ fn zAwait(t: *cy.Thread, fut_value_bits: u64) callconv(.c) vmc.ResultCode {
         // awaiting inside spawned threads can not exhaust the worker pool and deadlock: the task it waits
         // for is either running on another worker or in the queue where it can pick it up.
         // The main thread helps too, which also covers a pool without workers (one cpu).
+        const pool = &t.c.vm.worker_pool;
         while (true) {
+            const epoch = pool.progressEpoch();
             const state = @atomicLoad(u8, &shared_state.state, .acquire);
             if (state == 2) {
                 return vmc.RES_SUCCESS;
@@ -1155,10 +1157,10 @@ fn zAwait(t: *cy.Thread, fut_value_bits: u64) callconv(.c) vmc.ResultCode {
             if (@atomicLoad(u8, t.c.interrupt, .acquire) != 0) {
                 return vmc.RES_INTERRUPT;
             }
-            if (t.c.vm.worker_pool.run_queued_task()) {
+            if (pool.run_queued_task()) {
                 continue;
             }
-            std.atomic.spinLoopHint();
+            pool.waitProgress(epoch);
         }
     } else {
         if (!future.completed) {

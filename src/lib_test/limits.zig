@@ -619,3 +619,55 @@ test "Spawn without args works in every VM." {
         , &res));
     }
 }
+
+test "A thread that awaits a spawned thread sleeps instead of spinning." {
+    if (is_wasm or @import("builtin").os.tag == .windows) return;
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    const S = struct {
+        fn nap(ms: i64) void {
+            std.Io.sleep(stdx.io(), .fromMilliseconds(ms), .awake) catch {};
+        }
+        fn mod_nap(t_: *C.Thread) callconv(.c) C.Ret {
+            _ = C.thread_ret(t_, void);
+            nap(C.thread_int(t_));
+            return C.RetOk;
+        }
+        fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+            const name = C.from_bytes(uri);
+            if (std.mem.eql(u8, name, "mod")) {
+                C.mod_add_func(mod, "nap", C.BIND_FUNC(&mod_nap));
+                res[0].src = C.to_bytes("#[bind] fn nap(ms int)");
+                return true;
+            } else {
+                return C.default_loader(vm_, mod, uri, res);
+            }
+        }
+        fn cpuMicros() i64 {
+            const ru = std.posix.getrusage(std.posix.rusage.SELF);
+            return @as(i64, @intCast(ru.utime.sec + ru.stime.sec)) * 1000000 + @as(i64, @intCast(ru.utime.usec + ru.stime.usec));
+        }
+    };
+    C.vm_set_loader(vm, @ptrCast(&S.loader));
+    var res: C.EvalResult = undefined;
+
+    // The short nap lets a worker take the task, so `await` has to wait for another thread.
+    // A waiting thread used to spin: the process used about as much cpu time as the wait took.
+    const start = S.cpuMicros();
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use mod
+        \\use test
+        \\fn work(n int) -> int:
+        \\  mod.nap(400)
+        \\  return n
+        \\f := spawn(work, {1})
+        \\mod.nap(30)
+        \\test.eq(1, f.await())
+        \\fs := {spawn(work, {2})}
+        \\mod.nap(30)
+        \\test.eq(0, Future.wait_any(fs.span()))
+    , &res));
+    const used = S.cpuMicros() - start;
+    try zt.expect(used < 200000);
+}

@@ -1560,7 +1560,9 @@ pub fn await_any(t: *cy.Thread) anyerror!C.Ret {
             futures = fiberFutures(fiber);
         }
     }
+    const pool = &t.c.vm.worker_pool;
     while (true) {
+        const epoch = pool.progressEpoch();
         var has_shared = false;
         for (futures, 0..) |future, i| {
             // 2: done. 3 and 4: the thread failed or was stopped, which the `await` of that future reports.
@@ -1605,10 +1607,10 @@ pub fn await_any(t: *cy.Thread) anyerror!C.Ret {
             ret.* = -1;
             return C.RetOk;
         }
-        if (t.c.vm.worker_pool.run_queued_task()) {
+        if (pool.run_queued_task()) {
             continue;
         }
-        std.atomic.spinLoopHint();
+        pool.waitProgress(epoch);
     }
 }
 
@@ -2153,7 +2155,9 @@ pub fn fibers_wait(t: *cy.Thread) anyerror!C.Ret {
             return C.RetOk;
         }
     }
+    const pool = &t.c.vm.worker_pool;
     while (true) {
+        const epoch = pool.progressEpoch();
         var num_awaiting: usize = 0;
         var has_shared = false;
         var opt_fiber = t.c.fibers;
@@ -2186,7 +2190,7 @@ pub fn fibers_wait(t: *cy.Thread) anyerror!C.Ret {
         }
         // The root context waits. It runs queued thread tasks itself like `await` does, which also covers a
         // pool without workers.
-        if (has_shared and t.c.vm.worker_pool.run_queued_task()) {
+        if (has_shared and pool.run_queued_task()) {
             continue;
         }
         if (!has_shared) {
@@ -2206,7 +2210,7 @@ pub fn fibers_wait(t: *cy.Thread) anyerror!C.Ret {
             ret.* = -1;
             return C.RetOk;
         }
-        std.atomic.spinLoopHint();
+        pool.waitProgress(epoch);
     }
 }
 

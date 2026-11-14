@@ -412,6 +412,8 @@ export fn cl_future_complete_error(vm: *cy.VM, future: *cy.heap.FutureValue, err
 
 export fn cl_vm_interrupt(vm: *cy.VM) void {
     @atomicStore(u8, vm.main_thread.c.interrupt, 1, .release);
+    // A thread that waits for a spawned thread sleeps until something happens.
+    vm.worker_pool.notifyProgress();
 }
 
 export fn cl_vm_set_fuel(vm: *cy.VM, fuel: i64) void {

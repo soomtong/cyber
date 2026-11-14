@@ -8,6 +8,8 @@ on:
     paths:
       - 'docs/**'
       - 'src/builtins/**'
+      # `member_aliases` for api.json.
+      - 'src/sema.zig'
       - 'examples/web-playground/**'
       - 'src/lsp/**'
       - '.github/workflows/gen-docs.yml'
@@ -110,9 +112,11 @@ jobs:
       - name: Generate docs.
         run: |
           LD_LIBRARY_PATH=`pwd`/md4c/build/src zig-out/bin/cyber docs/gen-docs.cy -version="${{ format('v{0}-dev {1}-{2}', env.SHORT_VERSION, env.BUILD, env.COMMIT) }}"
+          zig-out/bin/cyber docs/gen-api-json.cy -version="${{ format('v{0}-dev {1}-{2}', env.SHORT_VERSION, env.BUILD, env.COMMIT) }}"
           mkdir -p docs/public
           mv docs/docs.html docs/public/docs.html
           mv docs/api.html docs/public/api.html
+          mv docs/api.json docs/public/api.json
           ln -sf docs.html docs/public/index.html
 
       # The playground is a static page that runs the WASI builds of the CLI and of the language server

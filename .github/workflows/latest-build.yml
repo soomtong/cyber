@@ -470,6 +470,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           LD_LIBRARY_PATH=`pwd`/md4c/build/src zig-out/bin/cyber docs/gen-docs.cy -version v${{ env.SHORT_VERSION }}
+          zig-out/bin/cyber docs/gen-api-json.cy -version=v${{ env.SHORT_VERSION }} -out=api.json
           mv docs/docs.md docs.md
           mv docs/docs.html docs.html
           mv docs/api.html api.html
@@ -478,6 +479,7 @@ jobs:
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: |
           LD_LIBRARY_PATH=`pwd`/md4c/build/src zig-out/bin/cyber docs/gen-docs.cy -version "${{ format('v{0}-DEV {1}-{2}', env.SHORT_VERSION, env.BUILD, env.COMMIT) }}"
+          zig-out/bin/cyber docs/gen-api-json.cy -version="${{ format('v{0}-DEV {1}-{2}', env.SHORT_VERSION, env.BUILD, env.COMMIT) }}" -out=api.json
           mv docs/docs.md docs.md
           mv docs/docs.html docs.html
           mv docs/api.html api.html
@@ -490,6 +492,7 @@ jobs:
             docs.html
             docs.md
             api.html
+            api.json
 
   release:
     needs: [build, docs]
@@ -539,6 +542,7 @@ jobs:
             docs.html
             docs.md
             api.html
+            api.json
 
       # Auto dispatch.
       - name: Github Release.
@@ -562,3 +566,4 @@ jobs:
             docs.html
             docs.md
             api.html
+            api.json

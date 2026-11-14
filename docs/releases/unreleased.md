@@ -120,3 +120,9 @@
   2026-11-14, F-135, tars-agent M0 요청서 7절).
 
 ## 문서
+
+- `api.json`: core · std 모듈의 공개 API를 기계가 읽는 형태로 낸다. 타입마다 쓰는 표기(`Slice`는 `[]T`), 메서드(수신자,
+  시그니처, `#[cond=...]` 조건, 문서 첫 문단), 타입 함수, 다른 언어 이름의 대응(`startswith` → `starts_with`, 컴파일러의
+  `Did you mean` 표에서 그 타입에 있는 것만)을 담는다. `docs/gen-api-json.cy`가 만들고(md4c 필요 없음,
+  `cyber docs/gen-api-json.cy -out=api.json`), 릴리스 자산과 문서 사이트(`api.json`)에 올라간다(tars-agent M0 요청서의
+  메서드 목록 요청).

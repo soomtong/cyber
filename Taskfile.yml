@@ -259,7 +259,7 @@ tasks:
           {{.MD4C_DIR}}/src/md4c.c {{.MD4C_DIR}}/src/md4c-html.c {{.MD4C_DIR}}/src/entity.c
 
   docs:gen:
-    desc: 'Generate docs/docs.html and docs/api.html from docs/docs.md with docs/gen-docs.cy. VERSION= overrides the version string.'
+    desc: 'Generate docs/docs.html and docs/api.html from docs/docs.md with docs/gen-docs.cy, and docs/api.json with docs/gen-api-json.cy. VERSION= overrides the version string.'
     deps: [{ task: build, vars: { CLI_ARGS: '' } }, 'docs:md4c']
     vars:
       SHORT_VERSION:
@@ -273,6 +273,7 @@ tasks:
       LD_LIBRARY_PATH: '{{.MD4C_LIB_DIR}}'
     cmds:
       - '{{.BIN}} docs/gen-docs.cy -version="{{.VERSION}}"'
+      - '{{.BIN}} docs/gen-api-json.cy -version="{{.VERSION}}"'
 
   docs:site:
     desc: 'Generate the docs and assemble the static site into docs/public (what gen-docs.yml deploys to GitHub Pages).'
@@ -281,6 +282,7 @@ tasks:
       - mkdir -p {{.DOCS_OUT}}
       - mv docs/docs.html {{.DOCS_OUT}}/docs.html
       - mv docs/api.html {{.DOCS_OUT}}/api.html
+      - mv docs/api.json {{.DOCS_OUT}}/api.json
       - ln -sf docs.html {{.DOCS_OUT}}/index.html
       # The playground, when its wasm was fetched (task playground:wasm).
       - |
@@ -298,7 +300,7 @@ tasks:
   docs:clean:
     desc: 'Remove generated docs output.'
     cmds:
-      - rm -rf {{.DOCS_OUT}} docs/docs.html docs/api.html
+      - rm -rf {{.DOCS_OUT}} docs/docs.html docs/api.html docs/api.json
 
   # --------------------------------------------------------------- playground
 

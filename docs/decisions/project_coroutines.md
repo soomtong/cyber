@@ -564,3 +564,46 @@ panic 대신 취소. 목표는 0.5.
   (3) fiber 스택 위에서 도는 제너레이터 본문 프레임. (4) panic 경로는 힙을 통째로 버려 프레임별 해제가 없으니 재사용 불가.
   (5) 호스트 쪽 `destructValueAt`은 사용자 `@deinit`을 부르지 않으므로 표 + 호스트 해제 방식은 정리 의미가 달라진다.
 
+
+## `scope` 블록 규칙 사용자 확정 (2026-11-14)
+
+2026-11-12에 내가 정해 구현한 네 규칙을 사용자가 확정했다.
+
+1. `return` · `break` · `continue`는 취소가 아니라 합류다. 출구 문장 앞에서 fiber가 끝나기를 기다리고, 그 사이 fiber의
+   오류는 문장 대신 블록을 떠난다. `return expr`은 합류 뒤에 계산한다. 확정. 사용자 요청: LSP나 lint가 블록 안의 이 문장이
+   즉시 나가지 않는다는 것을 알려 주면 좋겠다. 다른 언어의 처리를 검토한다(아래).
+2. 함수 안의 블록은 `!T` · `error` 반환이나 바깥 `try`가 필요하다. 확정.
+3. 빌림은 블록보다 먼저 선언된 값만, 블록 끝까지, 인자는 리터럴로만. 확정. 우리 언어의 규칙으로 정한 것이고, 디자인을
+   바꿀 필요가 생기면 다시 검토한다.
+4. fiber가 실패하면 같은 라운드의 뒤쪽 형제도 바로 취소한다. 확정.
+
+### 다른 언어의 블록 안 조기 탈출
+
+| 언어 | 블록 | body의 `return` · `break` | 확인 |
+|---|---|---|---|
+| Python Trio · anyio | `async with open_nursery()` | 자식이 끝나기를 기다린다. 취소하지 않는다 | flake8-async ASYNC121 |
+| Python asyncio | `async with TaskGroup()` | 같다(나갈 때 기다림, body 예외만 취소) | 언어 문서 기억, 미확인 |
+| Swift | `withTaskGroup` | 남은 자식을 기다린다. 정상 종료에서는 취소하지 않는다 | Apple 문서, SE-0304 |
+| Kotlin | `coroutineScope { }` | 블록은 자식이 끝날 때 끝난다. 비지역 `return`은 쓸 수 없고 `return@coroutineScope`도 기다린다 | 기억, 미확인 |
+| Rust | `std::thread::scope` | 남은 스레드를 join한 뒤 돌아온다 | 기억, 미확인 |
+| Java 25 (JEP 505, preview) | `try (var scope = StructuredTaskScope.open())` | `join()` 없이 닫으면 `close`가 `IllegalStateException`("Owner did not join"). 조기 탈출을 오류로 본다 | OpenJDK 커밋 설명 |
+
+정리: 대부분(Trio, asyncio, Swift, Kotlin, Rust)은 우리와 같이 기다린다. Java만 합류 없는 탈출을 실행 시 오류로 만든다.
+도구로 알리는 선례는 flake8-async ASYNC121(`control-flow-in-taskgroup`)이다: "return, continue, and break inside a
+TaskGroup / Nursery can lead to counterintuitive behaviour". 고치는 법으로 블록 안에서 cancel scope를 취소하고 문장을 블록
+밖에 두라고 권한다. SonarSource S7514도 같은 패턴을 짚는다(다른 fiber의 오류가 `return` 값을 이긴다).
+
+### 우리 쪽 안 (미구현, 사용자 결정 대기)
+
+컴파일러에는 경고가 없고 LSP 진단은 오류(severity 1)뿐이다(`src/lsp/server.zig`).
+
+- 안 1: sema의 `semaScopeExitJoin`이 합류를 넣는 출구 문장의 위치를 `Chunk`에 메모로 남기고, LSP가 그 위치에 severity 3
+  (Information) 진단을 낸다: "`return` waits for the fibers of the `scope` block before it leaves. Errors of the fibers
+  replace its result." 컴파일 결과(CLI · `cl_vm_eval`)에는 나오지 않는다. 메모 통로를 새로 만든다.
+- 안 2: hover만. `return` 위에 같은 문장. 작지만 사람이 마우스를 올려야 보인다.
+- 안 3: inlay hint(P5 계획)로 문장 끝에 `waits for fibers`. P5 기반이 먼저 필요하다.
+- Java처럼 오류로 만드는 것은 확정한 규칙 1과 맞지 않아 제외한다.
+
+출처: https://flake8-async.readthedocs.io/en/latest/rules.html, https://rules.sonarsource.com/python/RSPEC-7514,
+https://developer.apple.com/documentation/swift/withtaskgroup(of:returning:isolation:body:),
+https://git.openjdk.org/loom/commit/ef84eca96d7ac8929b0dd5ba9d9d56f7722fd274

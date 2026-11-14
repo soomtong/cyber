@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.10-dev 867-63e35e8</div>
+    <div class="sub-title">v0.4.10-dev 875-b450f53</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1167,6 +1167,7 @@ if year > 2020 and year <= 2030 and
 
 a := 123   -- This is a comment on the same line as a statement.
 </code></pre>
+<p><code>#</code> does not start a comment. A <code>#</code> followed by a space or the end of the line is a parse error that says to use <code>--</code>.</p>
 <a href="#syntax">^topic</a>
 <h2 id="blocks">Blocks. <a href="#blocks">#</a></h2>
 <p>Some statements can start a new block with a colon.
@@ -1596,11 +1597,13 @@ line "b"
 line %{title}
 """
 </code></pre>
+<p>A single line literal can not contain a line break. Write <code>\n</code> for one, or use a multi-line literal.</p>
 <p>A string literal can hold at most 65535 bytes. Each literal piece of an interpolated string counts on its own. A longer literal is a compile error; split the text into several literals and join them at runtime.</p>
 <a href="#basic-types">^topic</a>
 <h3 id="escape-sequences">Escape sequences. <a href="#escape-sequences">#</a></h3>
 <p>The following escape sequences are supported in string literals:</p>
-<table><thead><tr><th>Sequence</th><th>Code</th><th>Character</th></tr></thead><tbody><tr><td><code>\0</code></td><td>0x00</td><td>Null</td></tr><tr><td><code>\a</code></td><td>0x07</td><td>Terminal bell</td></tr><tr><td><code>\b</code></td><td>0x08</td><td>Backspace</td></tr><tr><td><code>\e</code></td><td>0x1b</td><td>Escape</td></tr><tr><td><code>\n</code></td><td>0x0a</td><td>Line feed</td></tr><tr><td><code>\r</code></td><td>0x0d</td><td>Carriage return</td></tr><tr><td><code>\t</code></td><td>0x09</td><td>Horizontal tab</td></tr><tr><td><code>\"</code></td><td>0x22</td><td>Double quote</td></tr><tr><td><code>\\</code></td><td>0x5c</td><td>Backslash</td></tr><tr><td><code>\x??</code></td><td>--</td><td>Hexidecimal number</td></tr></tbody></table><p>Example:</p>
+<table><thead><tr><th>Sequence</th><th>Code</th><th>Character</th></tr></thead><tbody><tr><td><code>\0</code></td><td>0x00</td><td>Null</td></tr><tr><td><code>\a</code></td><td>0x07</td><td>Terminal bell</td></tr><tr><td><code>\b</code></td><td>0x08</td><td>Backspace</td></tr><tr><td><code>\e</code></td><td>0x1b</td><td>Escape</td></tr><tr><td><code>\n</code></td><td>0x0a</td><td>Line feed</td></tr><tr><td><code>\r</code></td><td>0x0d</td><td>Carriage return</td></tr><tr><td><code>\t</code></td><td>0x09</td><td>Horizontal tab</td></tr><tr><td><code>\"</code></td><td>0x22</td><td>Double quote</td></tr><tr><td><code>\'</code></td><td>0x27</td><td>Single quote</td></tr><tr><td><code>\`</code></td><td>0x60</td><td>Backtick</td></tr><tr><td><code>\\</code></td><td>0x5c</td><td>Backslash</td></tr><tr><td><code>\x??</code></td><td>--</td><td>Hexidecimal number</td></tr></tbody></table><p>Any other character after a backslash is a compile error. Write <code>\\</code> for a backslash: <code>'TODO\\|Todo'</code>.</p>
+<p>Example:</p>
 <pre><code class="language-cy">print('\xF0\x9F\x90\xB6')    --> 🐶
 </code></pre>
 <a href="#basic-types">^topic</a>
@@ -1660,7 +1663,7 @@ res = res.concat('end')
 points := 123
 title := 'Scoreboard: %{name} %{points}'
 </code></pre>
-<p>String templates can not contain nested string templates.</p>
+<p>String templates can not contain nested string templates: <code>'%{'L%{n}'.len()}'</code> is an error. Assign the inner template to a variable first. The expression inside <code>%{}</code> is code, so it can not contain a backslash escape such as <code>\"</code>: write a string there with the other quote, <code>"%{f('b')}"</code>.</p>
 <p><code>to_print_string</code> renders a struct as a record literal with its type name, a choice as its case with the payload, and a slice or vector as its elements. A string nested in one of those keeps its quotes:</p>
 <pre><code class="language-cy">type Point:
     x int
@@ -1828,6 +1831,11 @@ print(v)     --> 123
 if opt |value|:
     print(value)    --> abc
 </code></pre>
+<p>The capture unwraps the whole condition. An operand of <code>and</code> or <code>or</code> is a <code>bool</code>, so <code>if ok and s.index('=') |i|:</code> is a compile error. Put the unwrap in an <code>if</code> of its own:</p>
+<pre><code class="language-cy">if ok:
+    if s.index('=') |i|:
+        print(i)
+</code></pre>
 <a href="#basic-types">^topic</a>
 <h3 id="while-unwrap"><code>while</code> unwrap. <a href="#while-unwrap">#</a></h3>
 <p>The <code>while</code> statement can be amended to unwrap an optional value using the capture <code>|_|</code> clause.
@@ -1879,7 +1887,7 @@ Slices grow or shrink when inserting or removing elements.</p>
 <p>The intializer literal can infer the target slice type:</p>
 <pre><code class="language-cy">var a []int = {1, 2, 3}
 </code></pre>
-<p>Without a target type, a list literal is a <code>[]T</code> where <code>T</code> is the type of the first element. An empty <code>{}</code> needs a target type:</p>
+<p>Without a target type, a list literal is a <code>[]T</code> where <code>T</code> is the type of the first element. The other elements are not converted to it: <code>{1, 'a'}</code> and <code>{1.5, 2}</code> are compile errors, write <code>[]int{1, 'a'}</code> or <code>[]float{1.5, 2}</code>. An empty <code>{}</code> needs a target type:</p>
 <pre><code class="language-cy">names := {'a.py', 'b.py'}    -- []str
 for {1, 2, 3} |n|:
     print(n)
@@ -2605,6 +2613,7 @@ else a == 20:
 else:
     print('neither 10 nor 20')
 </code></pre>
+<p>An <code>else</code> with a condition is written <code>else cond:</code>. <code>else if cond:</code> and <code>elif cond:</code> are compile errors that say so.</p>
 <a href="#control-flow">^topic</a>
 <h3 id="if-expression"><code>if</code> expression. <a href="#if-expression">#</a></h3>
 <p>An <code>if</code> expression evaluates to a value depending on the condition.
@@ -2684,6 +2693,7 @@ while running:
 for arr |n|:
     print(n)
 </code></pre>
+<p>The values come first and the name goes in <code>|_|</code>. <code>for n |{1, 2}|:</code> is a parse error that says so.</p>
 <p>Iterating a <code>Map</code> yields <code>MapEntry</code> values:</p>
 <pre><code class="language-cy">map := Map[str, int]{a=123, b=234}
 
@@ -2840,7 +2850,17 @@ fn dist(x0, y0, x1, y1 float) -> float:
 fn foo():
     print(a)    --> error: Undeclared variable `a`.
 </code></pre>
-<p>Functions can only return one value. However, the value can be destructured: <em>Planned Feature</em></p>
+<p>Functions can only return one value. To return several, declare a <a href="#tuples" title="">tuple</a> type and return that:</p>
+<pre><code class="language-cy">type Pair(a int, b int)
+
+fn f() -> Pair:
+    return {1, 2}
+
+p := f()
+print(p.a + p.b)    --> 3
+</code></pre>
+<p>A return type that lists several types, <code>-> (int, int)</code>, and <code>return 1, 2</code> are parse errors that say so.</p>
+<p>The returned value can also be destructured: <em>Planned Feature</em></p>
 <pre><code class="language-cy">use math
 
 fn compute(rad float) -> [2]float:
@@ -5134,7 +5154,7 @@ For completion, <code>cl_vm_members_at(vm, pos, &items)</code> lists the members
 A name in a declaration of the main source can be asked like a use of it. To find the uses of a symbol in the other sources of a project, a host compiles each of them as the main source and calls <code>cl_vm_symbol_refs_to(vm, def_uri, def_pos, &ranges)</code> with the declaration that <code>cl_vm_symbol_at</code> reported. <code>cl_vm_symbol_tokens(vm, &tokens)</code> lists every resolved name of the main source with its <code>CLItemKind</code>, for highlighting by meaning. The language server <code>cyber-lsp</code> uses all of these.</p>
 <a href="#libcyber">^topic</a>
 <h3 id="checking-a-script-without-running-it">Checking a script without running it. <a href="#checking-a-script-without-running-it">#</a></h3>
-<p><code>cl_vm_validate</code> compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (<code>persist_main</code>) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (<code>use math</code>) is initialized by the next eval that runs.</p>
+<p><code>cl_vm_validate</code> compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (<code>persist_main</code>) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (<code>use math</code>) is initialized by the next eval that runs. It checks with the options of the last eval (<code>persist_main</code>, <code>deny_raw_ptrs</code>, <code>deny_spawn</code>). Before the first eval they are all off, so eval a prelude with the session's config first.</p>
 <pre><code class="language-c">CLResultCode code = cl_vm_validate(vm, src);
 if (code == CL_ERROR_COMPILE) {
     CLBytes summary = cl_vm_compile_error_summary(vm);
@@ -5209,6 +5229,15 @@ cfg.deny_raw_ptrs = true;
 cl_vm_evalx(vm, CL_BYTES("turn"), src, cfg, &res);
 </code></pre>
 <a href="#libcyber">^topic</a>
+<h3 id="denying-threads">Denying threads. <a href="#denying-threads">#</a></h3>
+<p><code>spawn</code> runs a function on another thread, and a host function that the function calls runs on that thread too. A host whose functions only work on the thread of the eval sets <code>deny_spawn</code> in <code>CLEvalConfig</code> or <code>CLCompileConfig</code>. A call to <code>spawn</code> in a chunk that is not a standard module is then a compile error. Fibers and <code>scope</code> blocks stay available: they run on the thread of the eval.</p>
+<pre><code class="language-c">CLEvalConfig cfg = clDefaultEvalConfig();
+cfg.deny_spawn = true;
+</code></pre>
+<a href="#libcyber">^topic</a>
+<h3 id="session-reset">Session reset. <a href="#session-reset">#</a></h3>
+<p>A session (<code>persist_main</code>) keeps its locals, functions and <code>use</code> imports across evals, and a compile error in one eval keeps them. A panic drops the main locals and keeps the functions and imports. Two failures drop everything: the first compile of a VM, and an allocation that fails in the compiler or while the main locals are carried over. The next <code>cl_vm_eval</code> or <code>cl_vm_validate</code> then starts from a reset VM, like <code>cl_vm_reset</code>. <code>cl_vm_reset_pending(vm)</code> returns true when that is the case, so a host asks it after an eval that did not return <code>CL_SUCCESS</code> and sets the session up again (and tells the writer of the scripts that the variables are gone).</p>
+<a href="#libcyber">^topic</a>
 <h3 id="allocation-failure">Allocation failure. <a href="#allocation-failure">#</a></h3>
 <p>A host can give the VM its own allocator (<code>cl_vm_init_mem</code>, <code>cl_vm_initx</code>). When that allocator fails during an eval, the eval returns an error and the VM can be used again:</p>
 <table><thead><tr><th>Where</th><th>Result</th></tr></thead><tbody><tr><td>In the compiler</td><td><code>CL_ERROR_COMPILE</code>. The summary names <code>OutOfMemory</code>, or <code>WriteFailed</code> when the allocation was behind a text writer, or it is empty without memory for the report. The next eval starts from a reset VM, like <code>cl_vm_reset</code>: locals and declarations persisted by earlier evals (<code>persist_main</code>) are gone.</td></tr><tr><td>In the script</td><td><code>CL_ERROR_PANIC</code> with <code>panic: OutOfMemory</code>. Without memory for the message or the stack trace of another panic, its message is replaced by <code>OutOfMemory</code> and its trace is empty.</td></tr><tr><td>After the run (the result value, the persisted locals)</td><td><code>CL_ERROR_UNKNOWN</code>, with no summary.</td></tr></tbody></table><p>A summary function returns the null string if there is no memory for the text. Creating a VM (<code>cl_vm_init</code>, <code>cl_vm_initx</code>, <code>cl_vm_init_mem</code>) still aborts the process if the allocator fails, and so do the functions a host calls to create values (<code>cl_str_init</code>, <code>cl_array_empty</code>, ...).</p>
@@ -5232,6 +5261,7 @@ cl_mod_add_func(mod, CL_BYTES("add"), CL_BIND_FUNC(add));
     return CL_RET_OK;
 }
 </code></pre>
+<p>The parameters are read one by one in the order they are declared, each with the function of its type (<code>cl_thread_int</code>, <code>cl_thread_str</code>, ..., or <code>cl_thread_param</code> with a size). Each call moves on to the next parameter. <code>cl_thread_ret</code> may come before or after the parameters, but not in between: it starts the parameters over from the first.</p>
 <a href="#libcyber">^topic</a>
 <h3 id="suspending-an-eval">Suspending an eval. <a href="#suspending-an-eval">#</a></h3>
 <p>A host function that can not answer at once (it needs the user's approval, or a slow tool) returns a pending <code>Future</code> instead of blocking inside the call. When the script awaits it, the eval returns <code>CL_AWAIT</code>. The script is suspended with its stack, its locals and its remaining fuel intact. The host completes the future and calls <code>cl_vm_resume</code>:</p>

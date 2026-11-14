@@ -10549,6 +10549,18 @@ fn semaInferSliceLit(c: *cy.Chunk, lit: *ast.InitLit) !ExprResult {
     args[0] = res.ir;
     try seqPush(c, &args[0], true, first);
     for (lit.args.slice()[1..], 1..) |arg, i| {
+        // The list has the type of its first element. A literal of another kind is not converted to it:
+        // `{1, 'a'}` is not `{1, 97}` and `{1.5, 2}` is not `{1.5, 2.0}`.
+        const lit_name: ?[]const u8 = switch (arg.type()) {
+            .string_lit, .string_multi_lit, .sq_string_lit, .sq_string_multi_lit, .raw_string_lit => if (elem_t.id() != bt.Str) "str" else null,
+            .decLit, .hexLit, .binLit, .octLit => if (elem_t.kind() == .float) "int" else null,
+            else => null,
+        };
+        if (lit_name) |name| {
+            const elem_name = try c.sema.allocTypeName(elem_t);
+            defer c.alloc.free(elem_name);
+            return c.reportErrorFmt("Expected type `{}`, got `{}`. A list literal without a type takes the type of its first element and does not convert the others. Write the element type: `[]T{...}`.", &.{v(elem_name), v(name)}, arg);
+        }
         res = try c.semaExprCstr(arg, elem_t);
         res = try semaOwn(c, res, arg);
         args[i] = res.ir;

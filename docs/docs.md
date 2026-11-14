@@ -1012,7 +1012,7 @@ The intializer literal can infer the target slice type:
 var a []int = {1, 2, 3}
 ```
 
-Without a target type, a list literal is a `[]T` where `T` is the type of the first element. An empty `{}` needs a target type:
+Without a target type, a list literal is a `[]T` where `T` is the type of the first element. The other elements are not converted to it: `{1, 'a'}` and `{1.5, 2}` are compile errors, write `[]int{1, 'a'}` or `[]float{1.5, 2}`. An empty `{}` needs a target type:
 ```cy
 names := {'a.py', 'b.py'}    -- []str
 for {1, 2, 3} |n|:

@@ -507,6 +507,8 @@ fn test_core(run: *Runner) void {
     run.case("core/field_suggest_same_name_error.cy");
     run.case("core/field_suggest_str_method_error.cy");
     run.case("core/not_option_error.cy");
+    run.case("core/list_infer_str_elem_error.cy");
+    run.case("core/list_infer_int_elem_error.cy");
     run.case("syntax/string_escape_error.cy");
     run.case("syntax/string_escape_hex_error.cy");
 }

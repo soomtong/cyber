@@ -110,5 +110,10 @@
   `not a and b`가 `not (a and b)`였고, 문서의 연산자 표에는 `not`이 없었다. 이제 `(not a) and b`다.
   `not a == b`는 여전히 `not (a == b)`다. 오류 없이 값이 바뀌므로 `not`을 `and` · `or`와 섞어 쓴 코드는 확인이
   필요하다(F-123, tars-agent M0 스파이크 02).
+- 타입 없는 목록 리터럴은 뒤 원소의 리터럴을 첫 원소의 타입으로 바꾸지 않는다. `{1, 'a'}`는 `{1, 97}`이 됐고(한 글자
+  문자열이 정수 자리에서 코드 포인트가 됨) `{1.5, 2}`는 `[]float`이 됐다. 이제 둘 다 컴파일 오류다: ``Expected type `int`,
+  got `str`. A list literal without a type takes the type of its first element and does not convert the others. Write the
+  element type: `[]T{...}`.`` 타입을 쓴 `[]int{1, 'a'}` · `[]float{1.5, 2}`와 `var b byte = 'a'`는 그대로다(사용자 결정
+  2026-11-14, F-135, tars-agent M0 요청서 7절).
 
 ## 문서

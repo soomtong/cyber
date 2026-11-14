@@ -98,6 +98,11 @@
   43419835825 13 job 성공 → annotated 태그 push → 릴리스 run 43421847016 성공(`build-856-3e6b02e`, 에셋 14개) →
   `gh release edit 0.4.10 --notes-file --latest` → `install.sh 0.4.10`을 임시 경로에 설치해 `Cyber 0.4.10 build-856-3e6b02e`,
   `cyber-lsp` 링크와 응답, `fiber_await_spawn.cy` 통과를 확인했다.
+- 0.4.11은 2026-11-14에 `097b831f`(버전 올림 커밋 그대로)로 찍었다. 내용은 tars-agent M0 스파이크의 결함 수정과 오류 문구,
+  `deny_spawn` · `cl_vm_reset_pending` · `build.zig.zon` 의존, `@deinit` 안의 fiber 취소 · payload 빌림 · 워커 spin 수정이다.
+  버전 올림 커밋에서 13단계 검증 rc=0 → master · annotated 태그 push → 릴리스 run 43597628878 성공(`build-883-097b831`,
+  에셋 15개, `api.json` · `api.html`이 늘었다) → `gh release edit 0.4.11 --notes-file --latest` → `install.sh 0.4.11`을 임시
+  경로에 설치해 `Cyber 0.4.11 build-883-097b831`, `cyber-lsp` 링크와 `initialize` 응답, `fiber_await_spawn.cy` 통과를 확인했다.
 - 번들의 `src/`는 타깃별로 다르다. `build.zig`의 `cli` 스텝이 공통 10개에 macOS(`os.macos.cy`,
   `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
   더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.

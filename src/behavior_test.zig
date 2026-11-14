@@ -66,6 +66,10 @@ fn test_syntax(run: *Runner) void {
     run.case("control_flow/for_range_no_start_error.cy");
     run.case("control_flow/for_in_error.cy");
     run.case("control_flow/for_comma_error.cy");
+    run.case("control_flow/for_capture_in_error.cy");
+    run.case("control_flow/for_range_capture_in_error.cy");
+    run.case("syntax/typed_decl_colon_error.cy");
+    run.case("syntax/typed_decl_no_var_error.cy");
     run.case("syntax/vector_no_elem_type_error.cy");
     run.case("control_flow/switch_range_open_error.cy");
     run.case("syntax/block_no_child_error.cy");
@@ -625,6 +629,11 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/result_unhandled_error.cy");
     run.case("control_flow/unwrap_not_result_error.cy");
     run.case("control_flow/unwrap_option_with_bang_error.cy");
+    run.case("control_flow/else_not_option_error.cy");
+    run.case("control_flow/else_block_not_option_error.cy");
+    run.case("types/none_compare_not_option_error.cy");
+    run.case("types/compare_str_int_error.cy");
+    run.case("types/str_plus_int_error.cy");
 }
 
 // TODO: This could be split into compiler only tests and backend tests.

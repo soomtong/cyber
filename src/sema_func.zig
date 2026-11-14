@@ -1437,7 +1437,60 @@ pub fn reportCallFuncMismatch(c: *cy.Chunk, pre_args: []const Argument, end_args
             return c.reportErrorFmt("{} must be `{}`, got `{}`.{}", &.{v(what_), v(paramt_name), v(argt_name), v(hint)}, err_node);
         }
     }
+    if (arg_idx == 1 and pre_args.len > 0 and sig.params_len == 2) {
+        if (binaryOpVerb(func_name)) |verb| {
+            // `a > b` calls `fn >(T, T)`. Name the operator, not the function.
+            const left_n = pre_args[0].node;
+            var left_t = sig.params()[0].get_type();
+            switch (left_t.kind()) {
+                .borrow => left_t = left_t.cast(.borrow).child_t,
+                .ex_borrow => left_t = left_t.cast(.ex_borrow).child_t,
+                else => {},
+            }
+            const left_name = try c.sema.allocTypeName(left_t);
+            defer c.alloc.free(left_name);
+            var hint: []const u8 = " Convert one side so that both have the same type.";
+            const left_src = c.ast.nodeString(left_n);
+            const right_src = c.ast.nodeString(err_node);
+            if (left_t.id() == bt.Str and isNumberType(match_err.arg_t) and isShortSrc(left_src) and isShortSrc(right_src)) {
+                if (std.mem.eql(u8, func_name, "+")) {
+                    hint = std.fmt.bufPrint(&op_hint_buf, " To join them, write `'%{{{s}}}%{{{s}}}'`.", .{left_src, right_src}) catch hint;
+                } else {
+                    hint = std.fmt.bufPrint(&op_hint_buf, " Convert one side: `{s}({s})` or `'%{{{s}}}'`.", .{argt_name, left_src, right_src}) catch hint;
+                }
+            }
+            if (verb == .compare) {
+                return c.reportErrorFmt("Can not compare `{}` with `{}`.{}", &.{v(left_name), v(argt_name), v(hint)}, err_node);
+            }
+            return c.reportErrorFmt("Can not apply `{}` to `{}` and `{}`.{}", &.{v(func_name), v(left_name), v(argt_name), v(hint)}, err_node);
+        }
+    }
     return c.reportErrorFmt("Expected argument `{}`, found `{}`, when calling `fn {}{}`.", &.{v(paramt_name), v(argt_name), v(func_name), v(sig_str)}, err_node);
+}
+
+var op_hint_buf: [256]u8 = undefined;
+
+const OpVerb = enum { compare, apply };
+
+/// The verb for a binary operator function, or null for any other function.
+fn binaryOpVerb(name: []const u8) ?OpVerb {
+    const compare = [_][]const u8{ "<", "<=", ">", ">=" };
+    for (compare) |op| {
+        if (std.mem.eql(u8, name, op)) return .compare;
+    }
+    const apply = [_][]const u8{ "+", "-", "*", "/", "%", "**", "&&", "||", "~", "<<", ">>" };
+    for (apply) |op| {
+        if (std.mem.eql(u8, name, op)) return .apply;
+    }
+    return null;
+}
+
+fn isNumberType(t: *cy.Type) bool {
+    return t.kind() == .int or t.kind() == .float;
+}
+
+fn isShortSrc(src: []const u8) bool {
+    return src.len > 0 and src.len <= 30 and std.mem.indexOfScalar(u8, src, '\n') == null;
 }
 
 fn expectTypeFromTemplate(c: *cy.Chunk, type_: *cy.Type, exp: *cy.sym.Template, node: *ast.Node) !*cy.Instance {

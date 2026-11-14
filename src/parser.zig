@@ -2393,6 +2393,79 @@ pub const Parser = struct {
         return self.reportError("Expected :.", &.{});
     }
 
+    fn isIdentText(self: *Parser, token: Token, text: []const u8) bool {
+        return token.tag() == .ident and std.mem.eql(u8, self.ast.src[token.pos()..token.data.end], text);
+    }
+
+    /// The token after `|x|` of a `for` is not `:`. `bar_pos` is the token index of the closing `|`.
+    fn reportForCaptureEndError(self: *Parser, token: Token, bar_pos: u32) anyerror {
+        if (!self.isIdentText(token, "in")) {
+            return self.reportError("Expected :.", &.{});
+        }
+        // `for p |s| in {'a', 'b'}:` from Python. Show the loop with the values that follow `in`.
+        var open_pos = bar_pos - 1;
+        while (open_pos > 0 and self.tokens[open_pos].tag() != .vert_bar) : (open_pos -= 1) {}
+        const capture = self.ast.src[self.tokens[open_pos].pos()..self.tokens[bar_pos].pos()+1];
+        var line_end: usize = token.data.end;
+        while (line_end < self.ast.src.len and self.ast.src[line_end] != '\n') : (line_end += 1) {}
+        var values = std.mem.trim(u8, self.ast.src[token.data.end..line_end], " \t\r");
+        if (values.len > 0 and values[values.len-1] == ':') {
+            values = std.mem.trimEnd(u8, values[0..values.len-1], " \t");
+        }
+        if (values.len == 0 or values.len > 40) {
+            values = "{a, b}";
+        }
+        return self.reportErrorAtSrc("A `for` loop has no `in`. The values come first and the name goes in `|x|`: `for {} {}:`.", &.{v(values), v(capture)}, token.pos());
+    }
+
+    /// The token index of the first `=` from `from` to the line end.
+    fn findEqualOnLine(self: *Parser, from: u32) ?u32 {
+        var i = from;
+        while (i < self.tokens.len) : (i += 1) {
+            switch (self.tokens[i].tag()) {
+                .equal => return i,
+                .new_line, .null => return null,
+                else => {},
+            }
+        }
+        return null;
+    }
+
+    /// A typed variable written without `var`: `name: T = v` or `name T = v`.
+    /// `name_pos` and `type_pos` are token indexes.
+    fn reportTypedDeclError(self: *Parser, name_pos: u32, type_pos: u32) anyerror {
+        const src = self.ast.src;
+        const name_tok = self.tokens[name_pos];
+        const name = src[name_tok.pos()..name_tok.data.end];
+        const eq_pos = self.findEqualOnLine(type_pos) orelse {
+            const type_tok = self.tokens[type_pos];
+            const type_name = src[type_tok.pos()..type_tok.data.end];
+            return self.reportErrorAtSrc("To declare a typed variable, write `var {} {} = value`.", &.{v(name), v(type_name)}, name_tok.pos());
+        };
+        const eq_src = self.tokens[eq_pos].pos();
+        const type_src = std.mem.trim(u8, src[self.tokens[type_pos].pos()..eq_src], " \t");
+        var line_end: usize = eq_src + 1;
+        while (line_end < src.len and src[line_end] != '\n') : (line_end += 1) {}
+        var value = std.mem.trim(u8, src[eq_src+1..line_end], " \t\r");
+        if (value.len == 0 or value.len > 40) {
+            value = "value";
+        }
+        if (type_src.len == 0 or type_src.len > 40) {
+            return self.reportErrorAtSrc("To declare a typed variable, write `var {} T = value`.", &.{v(name)}, name_tok.pos());
+        }
+        switch (self.tokens[eq_pos + 1].tag()) {
+            .dec, .float, .hex, .bin, .oct => {
+                if (self.tokens[eq_pos + 2].tag() == .new_line or self.tokens[eq_pos + 2].tag() == .null) {
+                    return self.reportErrorAtSrc("To declare a typed variable, write `var {} {} = {}` or `{} := {}({})`.", &.{
+                        v(name), v(type_src), v(value), v(name), v(type_src), v(value),
+                    }, name_tok.pos());
+                }
+            },
+            else => {},
+        }
+        return self.reportErrorAtSrc("To declare a typed variable, write `var {} {} = {}`.", &.{v(name), v(type_src), v(value)}, name_tok.pos());
+    }
+
     fn reportForSwapError(self: *Parser, token: Token) anyerror {
         return self.reportErrorAtSrc("Expected a variable name in `|x|`. The values come first and the name goes in `|x|`: `for {a, b} |x|:`.", &.{}, token.pos());
     }
@@ -2451,11 +2524,12 @@ pub const Parser = struct {
                 if (self.peek().tag() != .vert_bar) {
                     return self.reportError("Expected vertical bar.", &.{});
                 }
+                const capture_end = self.next_pos;
                 self.advance();
 
                 token = self.peek();
                 if (token.tag() != .colon) {
-                    return self.reportError("Expected :.", &.{});
+                    return self.reportForCaptureEndError(token, capture_end);
                 }
                 self.advance();
             } else {
@@ -2519,12 +2593,13 @@ pub const Parser = struct {
             if (self.peek().tag() != .vert_bar) {
                 return self.reportError("Expected vertical bar.", &.{});
             }
+            const capture_end = self.next_pos;
             self.advance();
 
             if (self.peek().tag() == .colon) {
                 self.advance();
             } else {
-                return self.reportError("Expected :.", &.{});
+                return self.reportForCaptureEndError(self.peek(), capture_end);
             }
         } else {
             return self.reportForHeadError(token);
@@ -2778,6 +2853,10 @@ pub const Parser = struct {
                 }
                 if (token2.tag() == .colon) {
                     // return try self.parseBlock();
+                    if (self.peekAhead(2).tag() == .ident) {
+                        // `q: byte = 0` from Python.
+                        return self.reportTypedDeclError(self.next_pos, self.next_pos + 2);
+                    }
                     return self.reportError("Unsupported block statement.", &.{});
                 } else {
                     if (try self.parseExprOrAssignStatement(config.allow_block)) |id| {
@@ -4777,6 +4856,12 @@ pub const Parser = struct {
         }
 
         if (!is_assign_stmt) {
+            if (expr.type() == .ident and self.peek().tag() == .ident) {
+                // `in_s str = ''` without `var`.
+                if (self.findEqualOnLine(self.next_pos) != null) {
+                    return self.reportTypedDeclError(start, self.next_pos);
+                }
+            }
             if (allow_block and self.peek().tag() == .colon) {
                 expr = try self.parseLambdaContExpr(expr);
             }

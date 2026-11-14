@@ -8834,7 +8834,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
         .unwrap_or => {
             const unwrap = node.cast(.unwrap_or);
 
-            var opt = try c.sema_expr_cstr_template(unwrap.opt, c.sema.option_tmpl);
+            var opt = try semaElseOption(c, unwrap.opt, unwrap.default);
             opt = try semaEnsureAddressable(c, opt, unwrap.opt);
 
             const payload_t = opt.type.cast(.option).child_t;
@@ -8870,7 +8870,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
         .unwrap_or_block => {
             const unwrap = node.cast(.unwrap_or_block);
 
-            var opt = try c.sema_expr_cstr_template(unwrap.opt, c.sema.option_tmpl);
+            var opt = try semaElseOption(c, unwrap.opt, null);
             opt = try semaEnsureAddressable(c, opt, unwrap.opt);
 
             const payload_t = opt.type.cast(.option).child_t;
@@ -10352,6 +10352,7 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: Cstr, left_n: *ast.Node, op: cy.BinaryExp
         },
         .bang_equal => {
             var left = try c.semaExpr(left_n, .{});
+            try checkNoneCompare(c, left.type, left_n, right_n);
             const right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = true, .fit_target = true });
             const res = try semaCompare(c, left_n, left, right_n, right, node);
             const not = try c.ir.newExpr(.unary_op, c.sema.bool_t, node, .{
@@ -10361,11 +10362,42 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: Cstr, left_n: *ast.Node, op: cy.BinaryExp
         },
         .equal_equal => {
             var left = try c.semaExpr(left_n, .{});
+            try checkNoneCompare(c, left.type, left_n, right_n);
             const right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = true, .fit_target = true });
             return semaCompare(c, left_n, left, right_n, right, node);
         },
         else => return c.reportErrorFmt("Unsupported binary op: {}", &.{v(op)}, node),
     }
+}
+
+/// `x == none` where `x` can not hold `none`. `semaNone` would only say that it expected `?T`.
+fn checkNoneCompare(c: *cy.Chunk, left_t: *cy.Type, left_n: *ast.Node, right_n: *ast.Node) !void {
+    if (right_n.type() != .noneLit) return;
+    if (noneFits(left_t)) return;
+    if (left_t.id() == bt.Never) return;
+    const type_name = try c.sema.allocTypeName(left_t);
+    defer c.alloc.free(type_name);
+    const left_src = c.ast.nodeString(left_n);
+    const short = left_src.len <= 40 and std.mem.indexOfScalar(u8, left_src, '\n') == null;
+    var example: []const u8 = "";
+    if (left_t.id() == bt.Str and short) {
+        example = std.fmt.bufPrint(&suggest_buf, ", for example `{s}.len() == 0`", .{left_src}) catch "";
+    }
+    if (short) {
+        return c.reportErrorFmt("`{}` is `{}`, which is never `none`. Compare with a value of the same type{}.", &.{v(left_src), v(type_name), v(example)}, right_n);
+    }
+    return c.reportErrorFmt("This value is `{}`, which is never `none`. Compare with a value of the same type{}.", &.{v(type_name), v(example)}, right_n);
+}
+
+/// Whether `semaNone` can make a `none` value of type `t`.
+fn noneFits(type_: *cy.Type) bool {
+    return switch (type_.kind()) {
+        .option => true,
+        .result => type_.cast(.result).child_t.kind() == .option,
+        .pointer => !type_.cast(.pointer).ref,
+        .func_ptr => type_.cast(.func_ptr).sig.extern_,
+        else => false,
+    };
 }
 
 /// Analyzes the right operand of a binary expression. `left` is evaluated before a statement that the right
@@ -12603,6 +12635,19 @@ fn checkElseDefaultPrec(c: *cy.Chunk, op: []const u8, default_n: *ast.Node, payl
 }
 
 pub fn sema_expr_cstr_template(c: *cy.Chunk, node: *ast.Node, template: *cy.sym.Template) !ExprResult {
+    return semaExprTemplate(c, node, template, null);
+}
+
+/// The left side of `?else`. `default_n` is the default value, or null for an `?else` block.
+fn semaElseOption(c: *cy.Chunk, node: *ast.Node, default_n: ?*ast.Node) !ExprResult {
+    return semaExprTemplate(c, node, c.sema.option_tmpl, .{ .default_n = default_n });
+}
+
+const ElseCtx = struct {
+    default_n: ?*ast.Node,
+};
+
+fn semaExprTemplate(c: *cy.Chunk, node: *ast.Node, template: *cy.sym.Template, else_ctx: ?ElseCtx) !ExprResult {
     const res = try c.semaExpr(node, .{});
     if (!res.type.isInstanceOf(template)) {
         const type_name = try c.sema.allocTypeName(res.type);
@@ -12617,6 +12662,16 @@ pub fn sema_expr_cstr_template(c: *cy.Chunk, node: *ast.Node, template: *cy.sym.
             }
         } else if (template == c.sema.option_tmpl and res.type.kind() == .result) {
             hint = std.fmt.bufPrint(&suggest_buf, " `.?` and `?else` handle a `?T`. For `{s}`, use `!` or `!else`.", .{type_name}) catch "";
+        } else if (else_ctx != null and res.type.id() != bt.Never) {
+            // `s.ends_with('a') ?else false`: the value can not be `none`, so the default is never used.
+            const default_src: []const u8 = if (else_ctx.?.default_n) |n| c.ast.nodeString(n) else "";
+            if (default_src.len > 0 and default_src.len <= 40 and std.mem.indexOfScalar(u8, default_src, '\n') == null) {
+                hint = std.fmt.bufPrint(&suggest_buf, " This value is `{s}`, not an option. Remove `?else {s}`.", .{type_name, default_src}) catch "";
+            } else if (else_ctx.?.default_n != null) {
+                hint = std.fmt.bufPrint(&suggest_buf, " This value is `{s}`, not an option. Remove the `?else` default.", .{type_name}) catch "";
+            } else {
+                hint = std.fmt.bufPrint(&suggest_buf, " This value is `{s}`, not an option. Remove the `?else` block.", .{type_name}) catch "";
+            }
         }
         return c.reportErrorFmt("Expected type instance of `{}`, found `{}`.{}", &.{v(template.head.name()), v(type_name), v(hint)}, node);
     }

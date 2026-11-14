@@ -7138,11 +7138,26 @@ fn seqOrderFree(expr: *ir.Expr) bool {
     };
 }
 
+/// Whether `expr` reads a local of the current proc that is dead: one that was moved from.
+fn isDeadLocalRead(c: *cy.Chunk, expr: *ir.Expr) bool {
+    if (expr.code != .local) return false;
+    const id = expr.cast(.local).id;
+    const b = c.procBlock();
+    for (c.varStack.items[b.varStart..]) |*local| {
+        if (local.type == .local and local.inner.local.id == id) return false;
+        if (local.type == .dead and local.inner.local.id == id) return true;
+    }
+    return false;
+}
+
 /// Registers the IR slot of an operand that is done. The caller pops with `seqPop` once the operands after it
 /// are analyzed, on every path (`defer`).
 pub fn seqPush(c: *cy.Chunk, slot: **ir.Expr, owned: bool, node: *ast.Node) !void {
     const expr = slot.*;
-    if (seqOrderFree(expr)) return;
+    // A moved local is read like a local, but the local is dead: until the consumer takes the value, nothing
+    // destructs it. Pending, a cancel pad of a later operand's call destructs it (`semaCancelHoist`).
+    const moved = owned and c.moved_locals.remove(expr) and isDeadLocalRead(c, expr);
+    if (!moved and seqOrderFree(expr)) return;
     const type_ = expr.type;
     // A borrow stays tied to its owner. It is not held in another local.
     if (type_.kind() == .borrow or type_.kind() == .ex_borrow or type_.info.borrow_only) return;
@@ -8964,9 +8979,12 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                 if (local.has_inactive_struct_fields) {
                     return c.reportError("Cannot move a partially moved value.", child);
                 }
-                res.owned = true;
                 local.type = .dead;
-                return res;
+                if (res.ir.code == .local) {
+                    try c.moved_locals.put(c.alloc, res.ir, {});
+                }
+                // A value like a call result, not a read of a local: the local is dead.
+                return ExprResult.initOwned(res.ir);
             }
 
             // move member.

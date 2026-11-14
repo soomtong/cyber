@@ -116,6 +116,9 @@ pub const Chunk = struct {
     /// See `sema.seqFlush`.
     seq_pending: std.ArrayList(cy.sema.SeqEntry) = .empty,
     seq_flushing: bool = false,
+    /// The IR of `move x`: a read of `x`, which is dead from then on. `sema.seqPush` keeps it pending so that a
+    /// cancel before the consumer takes it still destructs the value.
+    moved_locals: std.AutoHashMapUnmanaged(*cy.ir.Expr, void) = .empty,
 
     /// The `s.start(func, {args})` call of a `scope` block that is being analyzed, and its argument literal.
     /// `semaTupleInit` records the borrows of that literal in `scope_start_borrows`. See `sema.semaScopeStart`.
@@ -338,6 +341,7 @@ pub const Chunk = struct {
         self.blockJumpStack.deinit(self.alloc);
         self.varShadowStack.deinit(self.alloc);
         self.seq_pending.deinit(self.alloc);
+        self.moved_locals.deinit(self.alloc);
         self.scope_start_borrows.deinit(self.alloc);
         self.scope_borrows.deinit(self.alloc);
         self.scope_blocks.deinit(self.alloc);

@@ -464,7 +464,12 @@ panic 대신 취소. 목표는 0.5.
 - 오류가 나갈 길이 필요해서 함수 안의 `scope` 블록은 `!T` · `error` 반환이나 바깥 `try`를 요구한다(전용 컴파일 오류).
   `void` 자식만 쓰는 블록에도 요구한다. 규칙을 하나로 두려고 그렇게 했다.
 
-남은 것: `seq_pending` 밖의 임시 값.
+남은 것: `seq_pending` 밖의 임시 값. 2026-11-14 탐침(식 모양 35가지, `@deinit` 횟수와 Debug 누수 보고)에서 새는 것은
+`move x`뿐이었다. move는 지역을 바로 `.dead`로 두는데 IR은 지역 읽기라 `seqOrderFree`가 대기 목록에서 뺐다. 고침:
+move 결과를 `ExprResult.initOwned`(값, 자리 아님)로 돌려주고 그 IR을 `Chunk.moved_locals`에 적는다. `seqPush`는 거기 있고
+실제로 죽은 지역을 읽는 IR이면(`isDeadLocalRead`, 오래된 주소가 다른 IR과 겹쳐도 살아 있는 지역은 걸러진다) 대기 목록에
+넣는다. 덤으로 `take(move a)`(`^T`)의 정상 경로 누수도 사라졌다(전에는 `.value_local`이라 `ownOrManageArg`가 관리하지
+않았다). 테스트 `concurrency/fiber_cancel_move.cy`.
 
 제너레이터 본문 프레임의 취소(2026-11-12).
 
@@ -516,7 +521,9 @@ panic 대신 취소. 목표는 0.5.
   것은 `Scope.run` 자신의 호출(`cancel` · `Fiber.wait_ready`)에서 스택이 모자랄 때뿐이라 테스트로 재현하지 못했다.
   `SUSPEND` · `AWAIT` 지점의 레이아웃은 그 경우를 위한 것이고 실행으로 확인한 것은 진입 지점 경로다.
 - 남은 한계: 인자를 변수에 담은 `FnTuple`로는 빌림을 넘기지 못한다(리터럴만). choice · result payload 안의 스택
-  포인터는 여전히 표시되지 않는다(F-104 남은 것).
+  포인터는 여전히 표시되지 않는다(F-104 남은 것). 2026-11-14 고침: `mark_stack_ptr_regs`의 result(payload `reg + 1`) ·
+  choice(모든 경우의 payload) 분기. 같은 칸을 여러 경우가 표시하므로 새로 켠 칸만 센다(`gen_pop_locals`가 칸 수로 뺀다).
+  테스트 `functions/payload_borrow_stack_grow.cy`.
 
 전체 리뷰(2026-11-12, 0.4.9 태그 전).
 

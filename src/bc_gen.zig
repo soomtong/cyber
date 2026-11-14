@@ -2814,10 +2814,12 @@ fn reserve_reg(c: *Chunk, local_t: *cy.Type) !Reg {
 /// how many there are. Growing the stack can move it, and these registers are patched then (only when the
 /// value is an address inside the stack, so a register that holds another address is left alone).
 /// Besides `&T` and `Ptr[T]` that is an exclusive borrow (`&&T`, the receiver of a mutating method) and every
-/// such pointer inside a struct, an option or a vector: the `base` of a span over an array literal's elements
+/// such pointer inside a struct, an option, a result, a choice or a vector: the `base` of a span over an array literal's elements
 /// points into the frame that holds them.
 fn mark_stack_ptr_regs(c: *Chunk, type_: *cy.Type, reg: usize) usize {
     if (type_.is_stack_ptr() or type_.kind() == .ex_borrow) {
+        // The cases of a choice can mark the same register. Count it once: `gen_pop_locals` counts registers.
+        if (c.buf.ptr_layout_builder.items[reg]) return 0;
         c.buf.ptr_layout_builder.items[reg] = true;
         return 1;
     }
@@ -2836,6 +2838,17 @@ fn mark_stack_ptr_regs(c: *Chunk, type_: *cy.Type, reg: usize) usize {
             // A zero union is the payload itself. Otherwise the payload follows the tag.
             const payload_reg = if (option_t.zero_union) reg else reg + 1;
             count += mark_stack_ptr_regs(c, option_t.child_t, payload_reg);
+        },
+        .result => {
+            // The payload follows the tag. The error case holds no pointer.
+            count += mark_stack_ptr_regs(c, type_.cast(.result).child_t, reg + 1);
+        },
+        .choice => {
+            // The payload follows the tag. The registers of every case are marked: a register that holds
+            // something else in the current case is left alone unless its value is an address in the moved range.
+            for (type_.cast(.choice).cases()) |case| {
+                count += mark_stack_ptr_regs(c, case.payload_t, reg + 1);
+            }
         },
         .vector => {
             const vector_t = type_.cast(.vector);

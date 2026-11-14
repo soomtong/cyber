@@ -132,7 +132,9 @@ pub fn patch_frame_ptrs(stack: [*]cy.Value, fp: usize, layout: []bool, old_start
 
         // A marked register can hold something else than an address (the other case of an option, a pointer
         // field that was not set), so the value is compared as 64 bits before it is taken as an address.
-        const bits: u64 = stack[fp + i].val;
+        // A pointer of a 32-bit target is the low half of the register. The high half can be anything when the
+        // pointer is a payload that is narrower than the register (a result of `&T`).
+        const bits: u64 = if (@sizeOf(usize) == 4) stack[fp + i].val & 0xffffffff else stack[fp + i].val;
         if (bits >= old_start and bits < old_start + old_bytes) {
             const ptr: usize = @intCast(bits);
             const byte_off = ptr - old_start;

@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.10-dev 876-9bf8a8e</div>
+    <div class="sub-title">v0.4.10-dev 882-04e9a60</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -4179,12 +4179,13 @@ print(f.cancel())          --> closed 7
                            --> true
 print(f.status())          --> FiberStatus.done
 </code></pre>
-<p><code>cancel</code> returns whether the fiber is done afterwards. A fiber that was never resumed is ended without the call and its arguments are released. A fiber that is running is not cancelled: <code>cancel</code> returns <code>false</code> and the fiber stays as it is. The same holds for a fiber that is suspended inside the <code>@deinit</code> of a <code>^T</code> reference, or inside a <code>@deinit</code> that the end of a generator runs.</p>
+<p><code>cancel</code> returns whether the fiber is done afterwards. A fiber that was never resumed is ended without the call and its arguments are released. A fiber that is running is not cancelled: <code>cancel</code> returns <code>false</code> and the fiber stays as it is.</p>
+<p>A fiber that is suspended inside a <code>@deinit</code> is cancelled too. The <code>@deinit</code> does not run further, like any other function that the fiber is in, and the rest of the value is destructed: its fields, the other elements of the collection it is in, the object of the <code>^T</code> reference that held it, and the frame of a generator that was ended.</p>
 <p>A fiber that is suspended inside the body of a generator is cancelled like any other: the body's values are destructed, the generator is done, and the function that consumes it returns.</p>
 <p>A fiber that holds a <code>Scope</code>, or that waits in a <code>scope</code> block of its own, cancels the fibers of that scope when it is cancelled.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="destructing-a-fiber">Destructing a fiber. <a href="#destructing-a-fiber">#</a></h3>
-<p>A fiber that is destructed while it is in progress is cancelled first, and so is every fiber that its frames hold. A fiber that can not be cancelled panics when it is destructed:</p>
+<p>A fiber that is destructed while it is in progress is cancelled first, and so is every fiber that its frames hold. A <code>@deinit</code> that suspends again while its fiber is cancelled panics:</p>
 <pre><code class="language-cy">type Res:
     id int
 
@@ -4192,21 +4193,21 @@ fn (&Res) @deinit():
     suspend
 
 fn work():
-    r := ^Res{id = 1}
+    a := ^Res{id = 1}
+    b := ^Res{id = 2}
 
 fn start():
     f := fiber work()
-    _ = f.resume()
+    _ = f.resume()      -- Suspended in the `@deinit` of `b`.
 
-start()
---> panic: Fiber is still in progress.
+start()                 -- The cancel releases `a`, whose `@deinit` suspends.
+--> panic: A fiber was suspended while it was cancelled.
 </code></pre>
+<p>A fiber that can not be cancelled panics with <code>Fiber is still in progress.</code> when it is destructed.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="cancellation-limits">Cancellation limits. <a href="#cancellation-limits">#</a></h3>
 <ul>
-<li>A fiber that is suspended inside the <code>@deinit</code> of a <code>^T</code> reference, or inside a <code>@deinit</code> that the end of a generator runs, can not be cancelled. Do not use <code>suspend</code> or <code>await</code> in a <code>@deinit</code>.</li>
-<li>A <code>@deinit</code> that is cut short by a cancel does not release the fields of its value. A <code>@deinit</code> that suspends while its fiber is cancelled panics: <code>A fiber was suspended while it was cancelled.</code></li>
-<li>A value in the middle of an expression is destructed when it is an operand of an operator, an argument, or an element of a literal (<code>use(Res{}, wait())</code>, <code>'a' + wait()</code>). In other positions such a value is not released when the fiber is cancelled inside a later part of the same expression.</li>
+<li>A <code>@deinit</code> that suspends while its fiber is cancelled panics: <code>A fiber was suspended while it was cancelled.</code> A cancel runs the <code>@deinit</code> of every value that the fiber's frames own, so a <code>@deinit</code> that can suspend makes a cancel that reaches a second such value panic. Avoid <code>suspend</code> and <code>await</code> in a <code>@deinit</code>.</li>
 </ul>
 <a href="#concurrency">^topic</a>
 <h2 id="generators">Generators. <a href="#generators">#</a></h2>
@@ -5132,7 +5133,7 @@ for (size_t i = 0; i < count; i += 1) {
 </code></pre>
 <p>A range can end on a later line than it starts. A token or parse error reports a position: its range is the code point there, or empty at the end of a line.
 By default the compiler stops at its first error and the count is 0 or 1. <code>cl_vm_set_error_recovery(vm, true)</code> lets it go on: the main block, each function and each method is abandoned at its first error and the others are still checked, so every body reports at most one error. A syntax error or an error in a declaration (a type, a signature, a global) still ends the compile. The result is <code>CL_ERROR_COMPILE</code> either way and nothing is run. The summary and <code>cl_vm_compile_error</code> describe the first error.</p>
-<p>A compile error does not end a session. The next eval or validate compiles on top of what the evals before the failed one left: with <code>persist_main</code> their locals and declarations are still there, and nothing that the failed script declared is kept. A module that the failed compile loaded for the first time is loaded again by the next <code>use</code>. The template instances that it expanded from earlier modules (<code>[]str</code> with <code>sort</code>) are checked and generated by the next compile. If the body of such an instance does not compile (<code>Map[[]int, int]</code> behind an earlier error), the next compile drops the instance instead of reporting its error, and a later use of it reports that it could not be expanded. When the first compile of a VM fails, the next eval resets the VM.</p>
+<p>A compile error does not end a session. The next eval or validate compiles on top of what the evals before the failed one left: with <code>persist_main</code> their locals and declarations are still there, and nothing that the failed script declared is kept. A module that the failed compile loaded for the first time is loaded again by the next <code>use</code>. The template instances that it expanded from earlier modules (<code>[]str</code> with <code>sort</code>) are checked and generated by the next compile. If the body of such an instance does not compile (<code>Map[[]int, int]</code> behind an earlier error), the next compile drops the instance instead of reporting its error, and a later use of it reports that it could not be expanded. To drop it, that compile starts over (up to 8 times, one more dropped instance each time), so the module loader, the resolvers and the compile-time host functions can be called again for the same source within one eval or validate. Make them return the same result for the same request. When the first compile of a VM fails, the next eval resets the VM.</p>
 <a href="#libcyber">^topic</a>
 <h3 id="asking-what-a-name-is">Asking what a name is. <a href="#asking-what-a-name-is">#</a></h3>
 <p>For editor tooling, <code>cl_vm_set_symbol_info(vm, true)</code> makes the compiler record what the names in the main source refer to. After a compile, <code>cl_vm_symbol_at</code> describes what is at a byte offset:</p>

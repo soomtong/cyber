@@ -63,12 +63,18 @@ pub const Heap = struct {
 
     c: vmc.Heap,
 
+    /// Live pinned closures. Their captured values are borrows (`&T`) that can point into a stack of this
+    /// thread, so `Thread.growStackPrecise` patches them when the stack moves (`patchPinnedClosures`).
+    /// After `c`, which C reads at a fixed offset.
+    pinned_closures: std.AutoHashMapUnmanaged(*HeapObject, void),
+
     pub fn init(vm: *cy.VM, thread: ?*cy.Thread, alloc: std.mem.Allocator, sema: *cy.Sema) !Heap {
         var new = Heap{
             .alloc = alloc,
             .sema = sema,
             .heapPages = .empty,
             .buffers = .empty,
+            .pinned_closures = .empty,
             .heapFreeHead = null,
             .heapFreeTail = if (cy.Trace) null else undefined,
             .objectTraceMap = .empty,
@@ -113,6 +119,9 @@ pub const Heap = struct {
         }
         if (!reset) {
             self.buffers.deinit(self.alloc);
+            self.pinned_closures.deinit(self.alloc);
+        } else {
+            self.pinned_closures.clearRetainingCapacity();
         }
 
         if (reset) {
@@ -139,6 +148,26 @@ pub const Heap = struct {
             self.alloc.free(e.key_ptr.*[0..e.value_ptr.*]);
         }
         self.buffers.clearRetainingCapacity();
+        // The sweep that follows frees the pinned closures without the free path that unregisters them.
+        self.pinned_closures.clearRetainingCapacity();
+    }
+
+    /// The stack `[old_start, old_start + old_bytes)` moved to `new_start`. A pinned closure keeps its captured
+    /// values on the heap, out of reach of the frame pointer layouts, so the values that point into the old
+    /// stack are moved here. A captured value of a pinned closure is a reference (`^T` or `&T`), and nothing but
+    /// the stack lives in the old range, so the range check alone finds the stack borrows.
+    pub fn patchPinnedClosures(self: *Heap, old_start: usize, old_bytes: usize, new_start: usize) void {
+        var iter = self.pinned_closures.keyIterator();
+        while (iter.next()) |obj_ptr| {
+            const func = &obj_ptr.*.func;
+            const num_captured: usize = @intCast(func.data.closure.numCaptured);
+            for (func.getCapturedValuesPtr()[0..num_captured]) |*val| {
+                const addr = val.val;
+                if (addr >= old_start and addr < old_start + old_bytes) {
+                    val.val = addr - old_start + new_start;
+                }
+            }
+        }
     }
 
     /// Frees every live object and every registered raw buffer without following references, like
@@ -1345,6 +1374,9 @@ pub fn allocMapZero(self: *Heap, type_id: cy.TypeId) !Value {
 pub fn allocClosure(
     self: *Heap, fp: [*]Value, func_pc: [*]cy.Inst, union_t: cy.TypeId, captured: [*]const cy.Inst, num_captured: u16, pinned_closure: bool,
 ) !Value {
+    if (pinned_closure) {
+        try self.pinned_closures.ensureUnusedCapacity(self.alloc, 1);
+    }
     var obj: *HeapObject = undefined;
     if (num_captured <= 1) {
         obj = try allocPoolObject(self, union_t);
@@ -1366,6 +1398,9 @@ pub fn allocClosure(
             self.retain(fp[reg.val]);
         }
         dst[i] = fp[reg.val];
+    }
+    if (pinned_closure) {
+        self.pinned_closures.putAssumeCapacity(obj, {});
     }
     return Value.initPtr(obj);
 }

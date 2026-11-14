@@ -173,6 +173,7 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 | F-133 | 호스트 함수가 `cl_thread_ret` 전에 매개변수를 읽으면 `fp_end`가 null이라 Segmentation fault. 순서가 `cyber.h`에 없다 | `vm.c` `CALL_HOST`, `thread.zig` `param` | tars-agent M0 요청서(2026-11-14, 5절) | 중간 | 2026-11-14 수정. `CALL_HOST`가 호출 전에 `fp_end`를 첫 매개변수로 둔다. `cyber.h`에 읽는 순서 |
 | F-134 | 세션에서 틀린 곳으로 이끄는 문구 넷: `persist_main` 최상위 캡처 오류의 빌림 제안, `xs.len`의 `_len` 제안, `not`을 `?T`에 쓴 오류가 `!`를 말함, `to_upper`에 제안 없음 | `sema.zig` `lookupIdent2` · `suggestField` · `suggestMember` · `semaUnExpr` | tars-agent M0 요청서(2026-11-14, 6절) | 중간 | 2026-11-14 수정. `captureHintFmt`, 같은 이름의 메서드 제안, `not` 전용 문구, `to_` 접두사와 별칭 |
 | F-135 | 타입 없는 목록 `{1, 'a'}`가 `{1, 97}`이 된다(첫 원소 타입 추론과 한 글자 문자열의 코드 포인트 변환이 겹침). `{1.5, 2}`도 `[]float` | `sema.zig` `semaInferSliceLit` | tars-agent M0 요청서(2026-11-14, 7절) | 낮음 | 2026-11-14 수정(사용자 결정: 암시적 변환 불허). 문자열 리터럴은 `str` 원소에만, 정수 리터럴은 float 원소에 못 옴. 타입을 쓴 리터럴은 그대로 |
+| F-136 | `&T`를 캡처한 클로저(pinned closure)가 스택이 옮겨진 뒤 해제된 스택을 읽는다. main에서는 쓰레기 값, `sort` 비교 함수 안에서 스택이 자라면 Segmentation fault, fiber 스택도 같다. 캡처 값은 힙 객체에 있어 프레임 포인터 레이아웃의 보정 밖이었다 | `heap.zig` `allocClosure` · `patchPinnedClosures`, `thread.zig` `growStackPrecise` | 정렬 안 A 사전 조사(2026-11-14, 사용자 지시) | 높음 | 2026-11-14 수정. heap이 살아 있는 pinned closure를 등록하고 스택 이동 때 옛 스택 범위를 가리키는 캡처 값을 옮긴다 |
 
 ## 우선순위 한 장 요약
 

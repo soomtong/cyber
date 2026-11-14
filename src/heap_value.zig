@@ -778,6 +778,7 @@ pub fn destroyObject(self: *cy.Heap, obj: *cy.heap.HeapObject, comptime fatal: b
                             }
                         },
                         .pinned_closure => {
+                            _ = self.pinned_closures.remove(obj);
                             const num_captured: usize = @intCast(obj.func.data.closure.numCaptured);
                             if (num_captured <= 1) {
                                 self.freePoolObject(obj);

@@ -154,6 +154,7 @@ fn test_functions(run: *Runner) void {
     run.case("functions/func_union_type.cy");
     run.case("functions/func_union_type_error.cy");
     run.case("functions/stack_grow_ptr_patch.cy");
+    run.case("functions/closure_borrow_stack_grow.cy");
     run.case("functions/too_many_locals_error.cy");
     run.case("functions/lambda.cy");
     run.case("functions/lambda_incompat_arg_error.cy");

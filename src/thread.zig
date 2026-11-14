@@ -1278,6 +1278,7 @@ pub const Thread = struct {
             }
 
             self.patchFiberPtrs(old_start, old_bytes, @intFromPtr(newStack.ptr));
+            self.heap.patchPinnedClosures(old_start, old_bytes, @intFromPtr(newStack.ptr));
 
             // Free old stack.
             self.alloc.free(self.c.stack());

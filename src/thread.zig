@@ -143,8 +143,14 @@ pub fn patch_frame_ptrs(stack: [*]cy.Value, fp: usize, layout: []bool, old_start
     }
 }
 
+pub const CancelTarget = union(enum) {
+    /// The frame keeps running: it is a destruction routine (`sema.cancel_keep`).
+    keep,
+    pad: [*]cy.Inst,
+};
+
 /// The cancel pad of the site at `pc` (`bytecode.PcCancelPad`), or null when the site has none.
-pub fn get_cancel_pad(vm: *cy.VM, pc: [*]cy.Inst) ?[*]cy.Inst {
+pub fn get_cancel_pad(vm: *cy.VM, pc: [*]cy.Inst) ?CancelTarget {
     const table_idx = cy.debug.indexOfTableEntry(vm.debug_tables, pc) orelse return null;
     const entry = vm.debug_tables[table_idx];
     const table = entry.chunk.buf.cancel_table.items;
@@ -155,7 +161,8 @@ pub fn get_cancel_pad(vm: *cy.VM, pc: [*]cy.Inst) ?[*]cy.Inst {
         }
     };
     const idx = std.sort.binarySearch(cy.bytecode.PcCancelPad, table, pc_off, S.cmp) orelse return null;
-    return entry.ptr + table[idx].pad;
+    if (table[idx].pad == cy.bytecode.PcCancelPad.keep) return .keep;
+    return .{ .pad = entry.ptr + table[idx].pad };
 }
 
 pub fn get_ptr_layout(vm: *cy.VM, pc: [*]cy.Inst) ?[]bool {
@@ -462,16 +469,26 @@ pub const Thread = struct {
         }
 
         // Second pass: the top frame continues at its pad, and each frame returns to the pad of its caller.
+        // A frame of a destruction routine has no pad (`.keep`): it finishes destructing, then returns to the pad
+        // of its own caller.
         pc = top_pc;
         fp = top_fp;
-        fiber.pc = @ptrCast(get_cancel_pad(self.c.vm, pc).?);
+        switch (get_cancel_pad(self.c.vm, pc).?) {
+            .keep => {},
+            .pad => |pad| fiber.pc = @ptrCast(pad),
+        }
         while (fp != 0) {
             const frame = getFrame(self, fstack, fp, pc);
             const prev = frame.prev_context();
             const base = frame.base.?;
-            base[1] = Value{ .retPcPtr = @ptrCast(get_cancel_pad(self.c.vm, prev.pc.?).?) };
-            // The return address is no call site anymore.
-            base[0].call_info.call_inst_off = 0;
+            switch (get_cancel_pad(self.c.vm, prev.pc.?).?) {
+                .keep => {},
+                .pad => |pad| {
+                    base[1] = Value{ .retPcPtr = @ptrCast(pad) };
+                    // The return address is no call site anymore.
+                    base[0].call_info.call_inst_off = 0;
+                },
+            }
             pc = prev.pc.?;
             fp = getStackOffset(fstack_ptr, prev.fp);
         }

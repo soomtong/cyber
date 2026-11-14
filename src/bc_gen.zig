@@ -446,7 +446,7 @@ fn genStmt(c: *Chunk, stmt: *ir.Stmt) anyerror!void {
         .mainBlock          => return error.Unexpected,
         .nop_label          => try gen_nop_label(c, stmt.cast(.nop_label), node),
         .pop_locals         => try gen_pop_locals(c, stmt.cast(.pop_locals), node),
-        .release            => try gen_release(c, stmt.cast(.release), node),
+        .release            => try gen_release(c, stmt, node),
         .ret_expr           => try gen_ret_expr(c, stmt.cast(.ret_expr), node),
         .ret_gen            => try gen_ret_gen(c, stmt.cast(.ret_gen), node),
         .ret                => try gen_ret(c, stmt.cast(.ret), node),
@@ -620,9 +620,10 @@ fn genExpr(c: *Chunk, expr: *ir.Expr, cstr: Cstr) anyerror!GenValue {
     return res;
 }
 
-fn gen_release(c: *Chunk, stmt: *ir.Release, node: *ast.Node) !void {
+fn gen_release(c: *Chunk, stmt_: *ir.Stmt, node: *ast.Node) !void {
+    const stmt = stmt_.cast(.release);
     const reg = toLocalReg(c, @intCast(stmt.reg));
-    try pushRelease(c, reg, stmt.optional, stmt.deinit_obj, node);
+    try pushRelease(c, reg, stmt.optional, stmt.deinit_obj, @intFromPtr(stmt_), node);
 }
 
 fn gen_trap(c: *Chunk, node: *ast.Node) !void {
@@ -794,6 +795,8 @@ fn gen_gen_end(c: *Chunk, expr: *ir.GenEnd, cstr: Cstr, node: *ast.Node) !GenVal
     const pc = c.buf.ops.items.len;
     try c.pushFCode(.gen_end, &.{ret, @intCast(ret + next_t.reg_size()), gen.reg}, node);
     try push_site_ptr_layout(c, pc);
+    // The generator frame returns to this inst's pad when the fiber is cancelled in its deinit block.
+    try push_cancel_site(c, @intFromPtr(expr), pc);
     try pop_temp_value(c, gen, node);
     return GenValue.discard();
 }
@@ -1793,6 +1796,8 @@ pub const CancelSite = struct {
     /// The pad of the site, then the pad of each inlined call that the site is inside of, innermost first.
     parts: [inline_max_depth + 1]Part,
     num_parts: u8,
+    /// The frame keeps running when the fiber is cancelled (`sema.cancel_keep`). No pad is generated.
+    keep: bool = false,
 
     pub const Part = struct {
         head: *ir.Stmt,
@@ -1816,7 +1821,36 @@ const inline_max_reg_end = 160;
 /// Returns the cost of inlining `func` at the current site, or null when nesting limits are reached.
 /// A self call (recursion) is unrolled one level: the site is hot, and the copy's own calls stay calls
 /// because the inline context chain already holds the function.
+/// Whether the frame at this point of the generation is a destruction routine all the way, including the bodies
+/// that are inlined into it (`sema.isCancelKeepFunc`). A cancel lets such a frame finish.
+fn keep_chain(c: *Chunk) bool {
+    const proc_func = c.funcs_debug.items[c.cur_proc.id].func orelse return false;
+    if (!cy.sema.isCancelKeepFunc(c.compiler, proc_func)) return false;
+    var cur = c.inline_ctx;
+    while (cur) |cx| : (cur = cx.parent) {
+        if (!cy.sema.isCancelKeepFunc(c.compiler, cx.func)) return false;
+    }
+    return true;
+}
+
+/// A cancel site inside an inlined body needs every frame part of it to be like the site (`push_cancel_site`):
+/// all destruction routines, or none. Keeps the mix from where a fiber can stop: a destruction routine that can
+/// run a script's `@deinit` stays a call from other code, and a script's function stays a call from a
+/// destruction routine.
+fn inline_keeps_cancel(c: *Chunk, func: *cy.Func) bool {
+    const callee_keep = cy.sema.isCancelKeepFunc(c.compiler, func);
+    if (keep_chain(c)) {
+        if (callee_keep) return true;
+        const decl = func.decl orelse return true;
+        return c.compiler.chunks.items[decl.src()].is_builtin;
+    }
+    if (!callee_keep) return true;
+    const subject = cy.sema.cancelKeepSubject(c, func) orelse return false;
+    return !cy.sema.destructMayRunScript(c, subject, 0);
+}
+
 fn inline_cost_fits(c: *Chunk, func: *cy.Func) ?u32 {
+    if (!inline_keeps_cancel(c, func)) return null;
     const proc_func = c.funcs_debug.items[c.cur_proc.id].func;
     const self_call = proc_func == func;
     // `can_inline` cached the body's node count.
@@ -3615,7 +3649,7 @@ pub const GenValue = struct {
     }
 };
 
-fn pushRelease(c: *Chunk, slot_id: Reg, optional: bool, deinit_obj: *cy.Func, node: *ast.Node) !void {
+fn pushRelease(c: *Chunk, slot_id: Reg, optional: bool, deinit_obj: *cy.Func, key: ?usize, node: *ast.Node) !void {
     const pc = c.buf.ops.items.len;
     if (optional) {
         try c.pushCode(.release_opt, &.{slot_id, 0}, node);
@@ -3630,7 +3664,13 @@ fn pushRelease(c: *Chunk, slot_id: Reg, optional: bool, deinit_obj: *cy.Func, no
     const ret = c.cur_proc.reg_end;
     try push_mov(c, ret + 4, slot_id, 1, node);
     // const func = try ensureFunc(c.compiler, deinit_obj);
+    const call_pc = c.buf.ops.items.len;
     try pushCall(c, @intCast(ret), deinit_obj, node);
+    if (key) |key_| {
+        // The destructor runs under this frame (a `@deinit` can suspend a fiber).
+        try push_site_ptr_layout(c, call_pc);
+        try push_cancel_site(c, key_, call_pc);
+    }
 
     // Patch jump.
     c.buf.ops.items[pc + 2].val = @intCast(c.buf.ops.items.len - pc);
@@ -3736,12 +3776,21 @@ fn push_cancel_site(c: *cy.Chunk, key: usize, pc: usize) !void {
         .num_parts = 1,
     };
     site.parts[0] = .{ .head = pad, .local_base = c.inline_local_base };
+    var num_keep: usize = @intFromBool(pad == &cy.sema.cancel_keep);
     var opt_ctx = c.inline_ctx;
     while (opt_ctx) |ctx| : (opt_ctx = ctx.parent) {
         // The inlined call has no pad when its own proc needs none. Then this site has none either.
         const outer = find_cancel_pad(c, ctx.call_key) orelse return;
         site.parts[site.num_parts] = .{ .head = outer, .local_base = ctx.outer_local_base };
         site.num_parts += 1;
+        if (outer == &cy.sema.cancel_keep) num_keep += 1;
+    }
+    if (num_keep > 0) {
+        // A frame that keeps running continues after the call. Inside an inlined body that is only right when
+        // the whole frame is a destruction routine. `inline_cost_fits` keeps the other cases from happening
+        // where a fiber can stop; a site that is left over gets no entry, and a cancel there returns false.
+        if (num_keep != site.num_parts) return;
+        site.keep = true;
     }
     site.local_map = try c.alloc.dupe(LocalSlot, c.bc_local_map.items);
     errdefer c.alloc.free(site.local_map);
@@ -3789,6 +3838,10 @@ fn gen_cancel_pads(c: *cy.Chunk) !void {
     var prev: ?*const CancelSite = null;
     var prev_pad: u32 = 0;
     for (c.cancel_sites.items) |*site| {
+        if (site.keep) {
+            try c.buf.cancel_table.append(c.alloc, .{ .pc = site.pc, .pad = cy.bytecode.PcCancelPad.keep });
+            continue;
+        }
         var pad_pc = prev_pad;
         const shared = if (prev) |p| cancel_sites_share_pad(p, site) else false;
         if (!shared) {

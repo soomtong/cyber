@@ -3694,14 +3694,16 @@ print(f.cancel())          --> closed 7
                            --> true
 print(f.status())          --> FiberStatus.done
 ```
-`cancel` returns whether the fiber is done afterwards. A fiber that was never resumed is ended without the call and its arguments are released. A fiber that is running is not cancelled: `cancel` returns `false` and the fiber stays as it is. The same holds for a fiber that is suspended inside the `@deinit` of a `^T` reference, or inside a `@deinit` that the end of a generator runs.
+`cancel` returns whether the fiber is done afterwards. A fiber that was never resumed is ended without the call and its arguments are released. A fiber that is running is not cancelled: `cancel` returns `false` and the fiber stays as it is.
+
+A fiber that is suspended inside a `@deinit` is cancelled too. The `@deinit` does not run further, like any other function that the fiber is in, and the rest of the value is destructed: its fields, the other elements of the collection it is in, the object of the `^T` reference that held it, and the frame of a generator that was ended.
 
 A fiber that is suspended inside the body of a generator is cancelled like any other: the body's values are destructed, the generator is done, and the function that consumes it returns.
 
 A fiber that holds a `Scope`, or that waits in a `scope` block of its own, cancels the fibers of that scope when it is cancelled.
 
 ### Destructing a fiber.
-A fiber that is destructed while it is in progress is cancelled first, and so is every fiber that its frames hold. A fiber that can not be cancelled panics when it is destructed:
+A fiber that is destructed while it is in progress is cancelled first, and so is every fiber that its frames hold. A `@deinit` that suspends again while its fiber is cancelled panics:
 ```cy
 type Res:
     id int
@@ -3710,20 +3712,20 @@ fn (&Res) @deinit():
     suspend
 
 fn work():
-    r := ^Res{id = 1}
+    a := ^Res{id = 1}
+    b := ^Res{id = 2}
 
 fn start():
     f := fiber work()
-    _ = f.resume()
+    _ = f.resume()      -- Suspended in the `@deinit` of `b`.
 
-start()
---> panic: Fiber is still in progress.
+start()                 -- The cancel releases `a`, whose `@deinit` suspends.
+--> panic: A fiber was suspended while it was cancelled.
 ```
+A fiber that can not be cancelled panics with `Fiber is still in progress.` when it is destructed.
 
 ### Cancellation limits.
-* A fiber that is suspended inside the `@deinit` of a `^T` reference, or inside a `@deinit` that the end of a generator runs, can not be cancelled. Do not use `suspend` or `await` in a `@deinit`.
-* A `@deinit` that is cut short by a cancel does not release the fields of its value. A `@deinit` that suspends while its fiber is cancelled panics: `A fiber was suspended while it was cancelled.`
-* A value in the middle of an expression is destructed when it is an operand of an operator, an argument, or an element of a literal (`use(Res{}, wait())`, `'a' + wait()`). In other positions such a value is not released when the fiber is cancelled inside a later part of the same expression.
+* A `@deinit` that suspends while its fiber is cancelled panics: `A fiber was suspended while it was cancelled.` A cancel runs the `@deinit` of every value that the fiber's frames own, so a `@deinit` that can suspend makes a cancel that reaches a second such value panic. Avoid `suspend` and `await` in a `@deinit`.
 
 ## Generators.
 Generators are stackless coroutines that are intended to yield values incrementally.

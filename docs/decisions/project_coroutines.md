@@ -482,6 +482,7 @@ move 결과를 `ExprResult.initOwned`(값, 자리 아님)로 돌려주고 그 IR
   제너레이터 참조를 해제하면 `Generator.@deinit` → `GEN_END`는 `done`을 보고 지나간다.
 - `Thread.unwindFiber`의 첫 패스가 `.gen` 프레임을 받아들인다. 둘째 패스는 그대로다: 반환 주소가 `.vm` 프레임과 같은
   칸(`base[1]`)에 있다.
+- 2026-11-14 아래 둘을 풀고 필드 미해제도 고쳤다("`@deinit` 안의 취소" 절).
 - 남은 취소 불가: (1) `^T` 참조의 해제(`release` 문)가 부른 `@deinit` 안에서 멈춘 fiber. `release`는 호출 IR이 아니라
   패드가 없다. (2) `GEN_END`가 돌리는 `yield` 정리 블록의 `@deinit` 안에서 멈춘 fiber. `Generator.end`의 `GEN_END`
   지점에 패드를 달지 않았다. 둘 다 소멸은 `panic: Fiber is still in progress.`
@@ -575,6 +576,31 @@ move 결과를 `ExprResult.initOwned`(값, 자리 아님)로 돌려주고 그 IR
   (3) fiber 스택 위에서 도는 제너레이터 본문 프레임. (4) panic 경로는 힙을 통째로 버려 프레임별 해제가 없으니 재사용 불가.
   (5) 호스트 쪽 `destructValueAt`은 사용자 `@deinit`을 부르지 않으므로 표 + 호스트 해제 방식은 정리 의미가 달라진다.
 
+
+## `@deinit` 안의 취소 (2026-11-14)
+
+사용자 지시(0.4.11 전에 고칠 것). 0.4.9 알려진 문제 중 셋: `release` · `Generator.end`가 부른 `@deinit` 안의 fiber는 취소
+불가, 취소로 끊긴 `@deinit`의 값은 필드 미해제.
+
+- keep 지점: 소멸 루틴(`sema.isCancelKeepFunc`: builtin 모듈의 `@destruct` · `@partial_destruct` · `@deinitObject` ·
+  `@destructBox` 인스턴스와 builtin 모듈에 선언된 `@deinit`) 안의 지점은 패드 대신 표지 `sema.cancel_keep`을 받는다.
+  bc_gen은 패드를 만들지 않고 표에 `PcCancelPad.keep`을 적는다. `Thread.unwindFiber`는 그 프레임의 반환 주소를 바꾸지
+  않는다: 프레임은 소멸을 끝까지 하고 자기 호출자의 패드로 돌아간다. 사용자 `@deinit`의 프레임은 보통 패드(반환)라
+  사용자 코드는 더 돌지 않고, 그 아래 `@destruct`가 필드를 해제한다.
+- 인라인: 지점의 사슬(자기 패드와 바깥 인라인 호출들의 패드)이 모두 keep이거나 모두 아니어야 한다. 섞이면 지점을 적지
+  않는다(그 자리의 취소는 false). 섞임이 fiber가 멈출 수 있는 곳에 생기지 않도록 `bc_gen.inline_keeps_cancel`이
+  (1) 사용자 `@deinit`에 닿을 수 있는 타입(`sema.destructMayRunScript`: 필드, 옵션 · result · choice payload, 벡터 원소,
+  `^T`의 대상, builtin 컬렉션의 타입 인자를 따라간다. 함수 값 · trait 객체는 true)의 소멸 루틴을 일반 함수에 인라인하지
+  않고, (2) 소멸 루틴 사슬 안에 스크립트 함수를 인라인하지 않는다.
+- `release`: sema가 `.release` 문에 패드를 달고(`semaReleaseLocal`), bc_gen `pushRelease`가 `deinit_obj` 호출 pc에 지점과
+  포인터 레이아웃을 둔다(전에는 레이아웃도 없었다). `GEN_END`: `gen_end` builtin이 `gen_next`처럼 hoist · 패드를 달고
+  `gen_gen_end`가 지점을 둔다. `Generator.@deinit`은 keep이라 `self.end()` 뒤의 `self.deinit()`(프레임 버퍼 해제)까지 간다.
+- 같이 고친 것: 문장 끝 임시 값(`popLocals2`)과 단일 지역 소멸(`semaDestructLocal`: 재대입의 옛 값 등)의 소멸자 호출 지점
+  패드가 그 값을 다시 소멸했다(F-106의 다른 경로). 전에는 `@deinit`이 두 번 불렸고, keep으로 필드 해제가 이어지자 이중
+  해제(Debug `double free`)로 드러났다. `popLocals2`는 `semaDestructBlock3`처럼 `cancel_pad_var_end`를 두고,
+  `semaDestructLocal`은 `Chunk.cancel_pad_skip`으로 그 지역 하나를 패드에서 뺀다.
+- 남은 것: 취소 도중 `@deinit`이 다시 멈추면 panic(설계대로. 매뉴얼 예제를 이것으로 바꿨다).
+- 테스트 `concurrency/fiber_cancel_deinit.cy`(블록 끝, `release`, 목록 리터럴의 임시 값, `Generator.end`).
 
 ## `scope` 블록 규칙 사용자 확정 (2026-11-14)
 

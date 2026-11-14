@@ -416,10 +416,20 @@ fn popLocals2(c: *cy.Chunk, var_start: usize, destruct: bool, node: *ast.Node) !
     }
 
     // try semaTraceNopFmt(c, "pop locals destruct: {s}", .{@tagName(node.type())}, node);
+    const saved_end = c.cancel_pad_var_end;
+    const saved_proc = c.cancel_pad_var_proc;
+    defer {
+        c.cancel_pad_var_end = saved_end;
+        c.cancel_pad_var_proc = saved_proc;
+    }
     var i: usize = c.varStack.items.len;
     while (i > var_start) {
         i -= 1;
         const local = &c.varStack.items[i];
+        // Like `semaDestructBlock3`: a fiber cancelled inside this destructor does not destruct this local or the
+        // younger ones again.
+        c.cancel_pad_var_end = i;
+        c.cancel_pad_var_proc = c.semaProcs.items.len;
 
         // Release the borrow this local held.
         unbindBorrowLocal(c, local);
@@ -5920,11 +5930,13 @@ fn semaReleaseLocal(c: *cy.Chunk, local: *Local, optional: bool, type_: *cy.Type
     const deinit_obj = try getDeinitObjFunc(c, type_, node);
 
     try semaTraceNopFmt(c, "release: {s}", .{local.name()}, node);
-    _ = try c.ir.pushStmt(.release, node, .{
+    const stmt = try c.ir.pushStmt(.release, node, .{
         .reg = local.inner.local.id,
         .optional = optional,
         .deinit_obj = deinit_obj,
     });
+    // The last release calls the object's destructor in this frame. A fiber can be cancelled inside its `@deinit`.
+    try semaCancelPad(c, @intFromPtr(stmt), node);
 }
 
 /// `local` can be invalidated after this function returns.
@@ -5933,6 +5945,18 @@ pub fn semaDestructLocal(c: *cy.Chunk, local: *Local, node: *ast.Node) !void {
         return;
     }
     const proc = c.proc();
+    // A fiber cancelled inside this destructor must not destruct the local again.
+    const saved_skip = c.cancel_pad_skip;
+    const saved_skip_proc = c.cancel_pad_skip_proc;
+    defer {
+        c.cancel_pad_skip = saved_skip;
+        c.cancel_pad_skip_proc = saved_skip_proc;
+    }
+    const items = c.varStack.items;
+    if (@intFromPtr(local) >= @intFromPtr(items.ptr) and @intFromPtr(local) < @intFromPtr(items.ptr + items.len)) {
+        c.cancel_pad_skip = local - items.ptr;
+        c.cancel_pad_skip_proc = c.semaProcs.items.len;
+    }
 
     if (local.inner.local.isParam) {
         if (proc.func != null and !proc.func.?.info.generator) {
@@ -6032,9 +6056,11 @@ fn semaDestructBlock3(c: *cy.Chunk, b: *Block, var_end: usize) !void {
         c.cancel_pad_var_end = saved_end;
         c.cancel_pad_var_proc = saved_proc;
     }
+    const skip: ?usize = if (c.cancel_pad_skip_proc == c.semaProcs.items.len) c.cancel_pad_skip else null;
     var i: usize = var_end;
     while (i > b.varStart) {
         i -= 1;
+        if (skip == i) continue;
         // A fiber that is cancelled inside this destructor must not destruct the local again (F-106).
         c.cancel_pad_var_end = i;
         c.cancel_pad_var_proc = c.semaProcs.items.len;
@@ -7548,6 +7574,90 @@ pub fn sema_call_ir(c: *cy.Chunk, func: *cy.Func, args: []const *ir.Expr, node: 
 /// Whether the code that is analyzed can run in a frame of a fiber that is cancelled.
 /// The main block is never on a fiber's stack. A generator body can be: its frame runs on the stack of the
 /// fiber that consumes it, and its pad ends the generator (`semaCancelPad`).
+/// Marks a cancel site that has no pad: the frame keeps running when the fiber is cancelled (`Chunk.cancel_pads`).
+/// The sites of a destruction routine are like this. A fiber cancelled inside a `@deinit` that `@destruct` called
+/// returns from the `@deinit` to the rest of `@destruct`, which destructs the fields.
+pub var cancel_keep: ir.Stmt = undefined;
+
+/// Whether `func` destructs a value: `@destruct` and the other destructor templates of the builtin modules, and a
+/// `@deinit` declared there (`Generator.@deinit`, the collections). Their code only destructs, so a cancel lets a
+/// frame of theirs finish (`cancel_keep`). A `@deinit` of a script is not one: a cancel does not run more of it.
+pub fn isCancelKeepFunc(compiler: *cy.Compiler, func: *cy.Func) bool {
+    const decl = func.decl orelse return false;
+    const src = decl.src();
+    if (src >= compiler.chunks.items.len or !compiler.chunks.items[src].is_builtin) return false;
+    if (func.type == .userLambda) return false;
+    const name = func.name();
+    return std.mem.eql(u8, name, "@deinit") or std.mem.eql(u8, name, "@destruct") or
+        std.mem.eql(u8, name, "@partial_destruct") or std.mem.eql(u8, name, "@deinitObject") or
+        std.mem.eql(u8, name, "@destructBox");
+}
+
+/// Whether destructing a `type_` can run a `@deinit` of a script: code that can suspend a fiber.
+/// Errs on true for what it does not see through (function values, trait objects).
+pub fn destructMayRunScript(c: *cy.Chunk, type_: *cy.Type, depth: u32) bool {
+    if (depth > 8) return true;
+    if (!type_.isManaged()) return false;
+    if (type_.id() == bt.Str) return false;
+    switch (type_.kind()) {
+        .pointer => {
+            const ptr_t = type_.cast(.pointer);
+            return ptr_t.ref and destructMayRunScript(c, ptr_t.child_t, depth + 1);
+        },
+        .borrow, .ex_borrow => return false,
+        .option => return destructMayRunScript(c, type_.cast(.option).child_t, depth + 1),
+        .result => return destructMayRunScript(c, type_.cast(.result).child_t, depth + 1),
+        .choice => {
+            for (type_.cast(.choice).cases()) |case| {
+                if (destructMayRunScript(c, case.payload_t, depth + 1)) return true;
+            }
+            return false;
+        },
+        .vector => return destructMayRunScript(c, type_.cast(.vector).elem_t, depth + 1),
+        .partial_vector => return destructMayRunScript(c, type_.cast(.partial_vector).elem_t, depth + 1),
+        .struct_t => {
+            if (type_.sym().getMod().getSym("@deinit")) |deinit_sym| {
+                if (deinit_sym.type == .func) {
+                    if (deinit_sym.cast(.func).first.decl) |decl| {
+                        if (!c.compiler.chunks.items[decl.src()].is_builtin) return true;
+                    }
+                } else return true;
+            }
+            for (type_.cast(.struct_t).fields()) |field| {
+                if (destructMayRunScript(c, field.type, depth + 1)) return true;
+            }
+            // A collection of the builtin modules destructs its elements, which its fields do not show.
+            if (type_.sym().instance) |inst| {
+                for (inst.param_types, inst.params) |param_t, param| {
+                    if (param_t != c.sema.type_t) continue;
+                    if (destructMayRunScript(c, param.asPtr(*cy.Type), depth + 1)) return true;
+                }
+            }
+            return false;
+        },
+        else => return true,
+    }
+}
+
+/// The type that a destruction routine destructs (`isCancelKeepFunc`), or null when it is not known.
+pub fn cancelKeepSubject(c: *cy.Chunk, func: *cy.Func) ?*cy.Type {
+    if (func.instance) |inst| {
+        if (inst.param_types.len > 0 and inst.param_types[0] == c.sema.type_t) {
+            return inst.params[0].asPtr(*cy.Type);
+        }
+    }
+    if (func.isMethod() and func.sig.params_len > 0) {
+        const rec_t = func.sig.params()[0].get_type();
+        return switch (rec_t.kind()) {
+            .borrow => rec_t.cast(.borrow).child_t,
+            .ex_borrow => rec_t.cast(.ex_borrow).child_t,
+            .pointer => rec_t.cast(.pointer).child_t,
+            else => rec_t,
+        };
+    }
+    return null;
+}
+
 fn cancelPadApplies(c: *cy.Chunk) bool {
     if (c.cancel_pad_building) return false;
     return c.proc().func != null;
@@ -7573,9 +7683,13 @@ pub fn semaCancelHoist(c: *cy.Chunk) !void {
 /// `Fiber.cancel` sends every frame of a suspended fiber to the pad of the site it is at, so the frames
 /// release what they own from the top down and the fiber ends. Nothing runs on the normal path.
 /// Consecutive sites with the same live locals share a pad.
-pub fn semaCancelPad(c: *cy.Chunk, key: usize, node: *ast.Node) !void {
+pub fn semaCancelPad(c: *cy.Chunk, key: usize, node: *ast.Node) anyerror!void {
     if (!cancelPadApplies(c)) return;
     const proc = c.proc();
+    if (isCancelKeepFunc(c.compiler, proc.func.?)) {
+        try c.cancel_pads.put(c.alloc, key, &cancel_keep);
+        return;
+    }
 
     var hasher = std.hash.Wyhash.init(0);
     const b = c.procBlock();
@@ -7586,8 +7700,9 @@ pub fn semaCancelPad(c: *cy.Chunk, key: usize, node: *ast.Node) !void {
             var_end = end;
         }
     }
+    const skip: ?usize = if (c.cancel_pad_skip_proc == c.semaProcs.items.len) c.cancel_pad_skip else null;
     for (c.varStack.items[b.varStart..var_end], b.varStart..) |*local, i| {
-        if (local.type != .local) continue;
+        if (local.type != .local or skip == i) continue;
         std.hash.autoHash(&hasher, i);
         std.hash.autoHash(&hasher, @intFromPtr(local.decl_t));
         std.hash.autoHash(&hasher, local.inner.local.id);

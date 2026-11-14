@@ -2078,9 +2078,12 @@ pub fn gen_end(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !vo
     const ptr_t = try sema.getPtrType(c, gen.type);
     const addr = try sema.semaAddressOf(c, gen, ptr_t, ctx.args[0]);
 
+    // The deinit block of the generator body runs under this frame. A fiber can be cancelled in a `@deinit` there.
+    try sema.semaCancelHoist(c);
     const end = try c.ir.newExpr(.gen_end, c.sema.void_t, ctx.node, .{
         .gen = addr.ir,
     });
+    try sema.semaCancelPad(c, @intFromPtr(end), ctx.node);
     out.* = sema.ExprResult.init2(end);
 }
 

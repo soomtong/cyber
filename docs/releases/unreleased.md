@@ -42,6 +42,14 @@
 - result · choice의 payload에 든 빌림(`fn pick(p &int) -> !&int`의 결과, `case one &int`)이 스택이 옮겨진 뒤 해제된 스택을
   가리켰다. 깊은 호출 뒤 `r!.*`가 옛 값을 읽었다(0.4.9 알려진 문제, F-104의 남은 것). 이제 프레임의 포인터 표에 payload의
   포인터 칸도 들어간다. choice는 모든 경우의 칸을 표시하고, 값이 옮겨진 스택 범위 안일 때만 고친다(옵션과 같다).
+- `@deinit` 안에서 멈춘 fiber의 취소(0.4.9 알려진 문제 셋).
+  - `^T` 참조가 해제될 때(마지막 참조의 `release`) 도는 `@deinit`, 제너레이터를 끝낼 때(`Generator.end`) 도는 `@deinit`
+    안에서 멈춘 fiber는 `cancel`이 `false`였고 소멸은 `panic: Fiber is still in progress.`였다. 이제 취소된다.
+  - 취소로 끊긴 `@deinit`의 값은 필드가 해제되지 않았다. 이제 필드, 같은 컬렉션의 다른 원소, 그것을 가진 `^T` 객체가
+    해제된다. `@deinit` 자신은 다른 함수처럼 더 실행되지 않는다.
+  - 문장 끝의 임시 값(목록 리터럴이 복사하고 버리는 값 등)이나 다시 대입되는 값의 `@deinit` 안에서 취소하면 그 값의
+    `@deinit`이 한 번 더 불렸다(F-106과 같은 결함의 다른 경로). 이제 한 번이다.
+  - 남은 것: 취소 도중 다른 `@deinit`이 다시 멈추면 여전히 `panic: A fiber was suspended while it was cancelled.`다.
 - `move x`로 넘긴 값이 해제되지 않는 경우 둘.
   - fiber가 그 뒤의 피연산자에서 취소되면(`take(move x, f())`에서 `f` 안, 목록 · 구조체 리터럴, 람다 호출) 값이 해제되지
     않았다. `x`는 move 때 이미 죽은 지역이고 값은 아직 소비자에게 가지 않았기 때문이다. 이제 move한 값도 다른 임시 값처럼

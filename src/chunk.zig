@@ -143,6 +143,10 @@ pub const Chunk = struct {
     /// destructed or being destructed, so the pad of the destructor call only destructs the older ones.
     cancel_pad_var_end: ?usize = null,
     cancel_pad_var_proc: usize = 0,
+    /// The one local that is destructed now outside of that order (a temporary at the end of a statement, the old
+    /// value of an assignment), with its proc depth. The pad of the destructor call leaves it out.
+    cancel_pad_skip: ?usize = null,
+    cancel_pad_skip_proc: usize = 0,
     /// bc_gen: the sites of the function that is generated, and the state while their pads are generated.
     cancel_sites: std.ArrayList(bc.CancelSite) = .empty,
     cancel_replay: bool = false,

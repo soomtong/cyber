@@ -1,4 +1,5 @@
--- A fiber that is suspended in the destructor of a reference can not be cancelled.
+-- A fiber that is suspended in a destructor is cancelled when it is destructed. The cancel destructs the other
+-- values of the frame. A destructor that suspends again panics.
 type Res:
     id int
 
@@ -6,7 +7,8 @@ fn (&Res) @deinit():
     suspend
 
 fn work():
-    r := ^Res{id = 1}
+    a := ^Res{id = 1}
+    b := ^Res{id = 2}
 
 fn start():
     f := fiber work()
@@ -15,10 +17,10 @@ fn start():
 start()
 
 --cytest: panic
---panic: Fiber is still in progress.
+--panic: A fiber was suspended while it was cancelled.
 --
 --[trace]
---@MainPath():15:1 main:
+--@MainPath():17:1 main:
 --start()
 --^
 --

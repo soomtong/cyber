@@ -1699,6 +1699,8 @@ fn semaScopeStart(c: *cy.Chunk, rec: *ast.Node, rec_res: ExprResult, call: *ast.
     return res;
 }
 
+// `docs/gen-api-json.cy` reads this table as text: one `.{ "from", "to" }` pair per entry, ending at `};`.
+// If the format changes, the generator fails with `error.MissingAliases` or drops pairs.
 const member_aliases = [_][2][]const u8{
     .{ "startswith", "starts_with" }, .{ "startsWith", "starts_with" }, .{ "hasPrefix", "starts_with" },
     .{ "endswith", "ends_with" }, .{ "endsWith", "ends_with" }, .{ "hasSuffix", "ends_with" },

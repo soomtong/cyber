@@ -390,6 +390,7 @@ pub const VM = struct {
         compile_c.gen_all_debug_syms = cy.Trace;
         compile_c.persist_main = self.config.persist_main;
         compile_c.deny_raw_ptrs = self.config.deny_raw_ptrs;
+        compile_c.deny_spawn = self.config.deny_spawn;
         defer self.compiler.main_discarded = true;
         _ = try self.compiler.compile(srcUri, src, compile_c);
     }
@@ -610,6 +611,7 @@ pub const VM = struct {
         compile_c.backend = config.backend;
         compile_c.persist_main = config.persist_main;
         compile_c.deny_raw_ptrs = config.deny_raw_ptrs;
+        compile_c.deny_spawn = config.deny_spawn;
         const res = try self.compiler.compile(src_uri, src, compile_c);
         tt.endPrintVerbose("compile");
 

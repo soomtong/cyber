@@ -1706,6 +1706,8 @@ const member_aliases = [_][2][]const u8{
     .{ "rfind", "lastIndexOf" }, .{ "rindex", "lastIndexOf" }, .{ "last_index", "lastIndexOf" },
     .{ "strip", "trim" }, .{ "lstrip", "trim" }, .{ "rstrip", "trim" }, .{ "trimSpace", "trim" },
     .{ "toLowerCase", "lower" }, .{ "toUpperCase", "upper" },
+    .{ "toLower", "lower" }, .{ "toUpper", "upper" }, .{ "lowercase", "lower" }, .{ "uppercase", "upper" },
+    .{ "to_lowercase", "lower" }, .{ "to_uppercase", "upper" },
     .{ "push", "append" }, .{ "add", "append" },
     .{ "length", "len" }, .{ "size", "len" }, .{ "count", "len" },
     // `Map` has `size` instead of `len`.
@@ -1749,6 +1751,11 @@ pub fn suggestMember(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast
         }
     }
 
+    // `to_upper` for `upper`.
+    if (std.mem.startsWith(u8, name, "to_") and name.len > 3 and try hasMember(c, base_t, name[3..], node)) {
+        return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{name[3..]}) catch "";
+    }
+
     // camelCase to snake_case.
     var snake_buf: [128]u8 = undefined;
     var snake_len: usize = 0;
@@ -1787,6 +1794,8 @@ pub fn suggestMember(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast
             const cand = entry.key_ptr.*;
             if (cand.len == 0 or !(std.ascii.isAlphabetic(cand[0]) or cand[0] == '_')) continue;
             if (std.mem.eql(u8, cand, name)) continue;
+            // An internal member (`_len`) is only suggested for a name that is written like one.
+            if (cand[0] == '_' and name[0] != '_') continue;
             const d = editDistance(name, cand, best_dist) orelse continue;
             if (d < best_dist or (d == best_dist and best != null and std.mem.lessThan(u8, cand, best.?))) {
                 best = cand;
@@ -1802,6 +1811,14 @@ pub fn suggestMember(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast
 
 /// `suggestMember` for a field access `x.name`. A suggested method is written as a call: `len()`.
 pub fn suggestField(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast.Node) ![]const u8 {
+    if (name.len <= 64) {
+        const own_t = rec_t.getRefLikeChild() orelse rec_t;
+        if (try c.accessResolvedSym(own_t, name, node)) |sym| {
+            if (sym.type == .func) {
+                return std.fmt.bufPrint(&suggest_buf, " Did you mean the method `{s}()`?", .{name}) catch "";
+            }
+        }
+    }
     const hint = try suggestMember(c, rec_t, name, node);
     const prefix = " Did you mean `";
     if (!std.mem.startsWith(u8, hint, prefix) or !std.mem.endsWith(u8, hint, "`?")) {
@@ -2901,6 +2918,9 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
         if (sym.type != .field) {
             const type_name = try c.sema.allocTypeName(child_t);
             defer c.alloc.free(type_name);
+            if (sym.type == .func) {
+                return c.reportErrorFmt("Type `{}` does not have a field named `{}`. Did you mean the method `{}()`?", &.{v(type_name), v(name), v(name)}, field);
+            }
             return c.reportErrorFmt("Type `{}` does not have a field named `{}`.", &.{v(type_name), v(name)}, field);
         }
         const field_s = sym.cast(.field);
@@ -6190,7 +6210,7 @@ pub fn lookupSelf(self: *cy.Chunk, node: *ast.Node) !?LookupSelfResult {
         // TODO: Capture non-reference stack variables too.
         const decl_t = self.varStack.items[res.varId].decl_t;
         if (!decl_t.isObjectLike() and decl_t.kind() != .borrow) {
-            return self.reportErrorFmt("Can only capture variables declared with the reference types `^T` or `&T`. Declare it with `^T`, or borrow it before the lambda (`b := &{}`) and use `b` in the lambda.", &.{v("self")}, node);
+            return self.reportErrorFmt(captureHintFmt(self), &.{v("self")}, node);
         }
 
         // Create a local captured variable.
@@ -6265,7 +6285,7 @@ fn lookupIdent2(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdent
         // TODO: Capture non-reference stack variables too.
         const decl_t = self.varStack.items[res.varId].decl_t;
         if (!decl_t.isObjectLike() and decl_t.kind() != .borrow) {
-            return self.reportErrorFmt("Can only capture variables declared with the reference types `^T` or `&T`. Declare it with `^T`, or borrow it before the lambda (`b := &{}`) and use `b` in the lambda.", &.{v(name)}, node);
+            return self.reportErrorFmt(captureHintFmt(self), &.{v(name)}, node);
         }
 
         // Create a local captured variable.
@@ -6324,6 +6344,15 @@ const LookupParentLocalResult = struct {
     varId: LocalId,
     blockIdx: u32,
 };
+
+/// The message for a lambda that captures a local that is not a reference. With `persist_main` a top level
+/// borrow can not be kept across evals, so the borrow is only suggested for a function there.
+fn captureHintFmt(c: *cy.Chunk) []const u8 {
+    if (c.vm.config.persist_main and c.semaProcs.items.len >= 2 and c.semaProcs.items[c.semaProcs.items.len - 2].func == null) {
+        return "Can only capture variables declared with the reference types `^T` or `&T`. Declare it with `^T`. Inside a function, you can also borrow it before the lambda (`b := &{}`) and use `b` in the lambda.";
+    }
+    return "Can only capture variables declared with the reference types `^T` or `&T`. Declare it with `^T`, or borrow it before the lambda (`b := &{}`) and use `b` in the lambda.";
+}
 
 fn lookupParentLocal(c: *cy.Chunk, name: []const u8, node: *ast.Node) !?LookupParentLocalResult {
     // Only check one block above.
@@ -9247,7 +9276,10 @@ pub fn semaString(c: *cy.Chunk, lit: []const u8, node: *ast.Node) !ExprResult {
 }
 
 pub fn semaStringAs(c: *cy.Chunk, lit: []const u8, type_: *cy.Type, node: *ast.Node) !ExprResult {
-    const raw = try c.unescapeString(lit);
+    const raw = c.unescapeString(lit) catch |err| {
+        if (err == error.InvalidEscapeSeq) return reportEscapeError(c, lit, node);
+        return err;
+    };
     if (raw.ptr != lit.ptr) {
         // Dupe and track in ast.strs.
         const dupe = try c.alloc.dupe(u8, raw);
@@ -9637,7 +9669,16 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: Cstr) !ExprResult {
 
             // Look for sym under child type's module.
             const childTypeSym = child.type.sym();
-            const sym = try c.getResolvedSymOrFail(@ptrCast(childTypeSym), unary.op.name(), node);
+            const sym = (try c.getResolvedSym(@ptrCast(childTypeSym), unary.op.name(), node)) orelse {
+                const type_name = try c.sema.allocTypeName(child.type);
+                defer c.alloc.free(type_name);
+                const hint: []const u8 = switch (child.type.kind()) {
+                    .option => " For an option, compare with `none` (`x == none`), unwrap it with `if x |v|:`, or give a default with `?else`.",
+                    .result => " Unwrap the result with `!` first, or handle the error with `!else` or `try`.",
+                    else => "",
+                };
+                return c.reportErrorFmt("`not` takes a `bool`. Found `{}`.{}", &.{v(type_name), v(hint)}, node);
+            };
             const func_sym = try requireFuncSym(c, sym, node);
             return c.semaCallFuncSym1(func_sym, unary.child, child, node);
         },
@@ -11066,6 +11107,8 @@ pub const Sema = struct {
     scope_join_fn: *cy.Func = undefined,
     /// `Scope.start`.
     scope_start_sym: *cy.sym.FuncSym = undefined,
+    /// `spawn`, which `deny_spawn` rejects.
+    spawn_sym: *cy.sym.FuncSym = undefined,
     /// `print` and the functions like it, which do not take a `!T` (`checkPrintCall`).
     print_syms: [6]*cy.sym.FuncSym = undefined,
     to_print_string_fn: *cy.Func = undefined,
@@ -11387,9 +11430,30 @@ const CharAdvance = struct {
     }
 };
 
-pub fn unescapeSeq(seq: []const u8) !CharAdvance {
+/// Reports the first escape sequence in `lit` that `unescapeSeq` does not take.
+fn reportEscapeError(c: *cy.Chunk, lit: []const u8, node: *ast.Node) anyerror {
+    var i: usize = 0;
+    while (std.mem.findScalarPos(u8, lit, i, '\\')) |pos| {
+        const seq = lit[pos + 1 ..];
+        if (unescapeSeq(seq)) |res| {
+            i = pos + 1 + res.advance;
+            continue;
+        } else |_| {}
+        if (seq.len == 0) break;
+        if (seq[0] == 'x') {
+            const end = @min(seq.len, 3);
+            return c.reportErrorFmt("Invalid escape sequence `\\{}`. `\\x` takes two hex digits: `\\x41`. Write `\\\\` for a backslash.", &.{v(seq[0..end])}, node);
+        }
+        const len = std.unicode.utf8ByteSequenceLength(seq[0]) catch 1;
+        const end = @min(seq.len, len);
+        return c.reportErrorFmt("Invalid escape sequence `\\{}`. A backslash in a string is followed by one of: n t r 0 a b e \\ ' \" ` xHH. Write `\\\\{}` for a backslash.", &.{v(seq[0..end]), v(seq[0..end])}, node);
+    }
+    return c.reportErrorFmt("Invalid escape sequence. A string can not end with a single backslash. Write `\\\\` for a backslash.", &.{}, node);
+}
+
+pub fn unescapeSeq(seq: []const u8) error{InvalidEscapeSeq}!CharAdvance {
     if (seq.len == 0) {
-        return error.MissingEscapeSeq;
+        return error.InvalidEscapeSeq;
     }
     switch (seq[0]) {
         'a' => {
@@ -11420,7 +11484,7 @@ pub fn unescapeSeq(seq: []const u8) !CharAdvance {
             return CharAdvance.init('\'', 1);
         },
         '0' => {
-            return CharAdvance.init('"', 1);
+            return CharAdvance.init(0, 1);
         },
         '`' => {
             return CharAdvance.init('`', 1);
@@ -11429,7 +11493,7 @@ pub fn unescapeSeq(seq: []const u8) !CharAdvance {
             if (seq.len < 3) {
                 return error.InvalidEscapeSeq;
             }
-            const ch = try std.fmt.parseInt(u8, seq[1..3], 16);
+            const ch = std.fmt.parseInt(u8, seq[1..3], 16) catch return error.InvalidEscapeSeq;
             return CharAdvance.init(ch, 3);
         },
         else => {
@@ -11675,8 +11739,8 @@ pub fn semaTryStringLitCodepoint(c: *cy.Chunk, lit: []const u8, bits: u32, node:
         return null;
     }
     if (lit[0] == '\\') {
-        const res = unescapeSeq(lit[1..]) catch |err| {
-            return c.reportErrorFmt("Unescape error: {}", &.{v(err)}, node);
+        const res = unescapeSeq(lit[1..]) catch {
+            return reportEscapeError(c, lit, node);
         };
         if (lit.len > res.advance + 1) {
             return null;
@@ -11712,8 +11776,8 @@ pub fn semaStringLitCodepoint(c: *cy.Chunk, lit: []const u8, node: *ast.Node) !u
     }
     var val: u64 = undefined;
     if (lit[0] == '\\') {
-        const res = unescapeSeq(lit[1..]) catch |err| {
-            return c.reportErrorFmt("Unescape error: {}", &.{v(err)}, node);
+        const res = unescapeSeq(lit[1..]) catch {
+            return reportEscapeError(c, lit, node);
         };
         val = res.char;
         if (lit.len > res.advance + 1) {

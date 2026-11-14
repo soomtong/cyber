@@ -1711,6 +1711,10 @@ pub fn ref_addr(t: *cy.Thread) !C.Ret {
 
 pub fn new_thread(t: *cy.Thread) !C.Ret {
     const ret = t.ret(*cy.Thread);
+    if (t.c.vm.config.deny_spawn) {
+        // The compiler rejects `spawn` in a script (`deny_spawn`). This is for a call that got past it.
+        return t.ret_panic("`spawn` is not allowed. The host disabled threads (`deny_spawn`).");
+    }
     var thread = try t.alloc.create(cy.Thread);
     const id = t.c.vm.next_thread_id;
     try thread.init(id, t.alloc, t.c.vm);

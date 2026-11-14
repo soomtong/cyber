@@ -562,3 +562,103 @@ test "A template instance that a failed compile left behind and that does not co
         }
     }
 }
+
+test "An invalid escape sequence is a compile error that keeps the session." {
+    // F-131. The escape error used to leave the compiler as a bare Zig error, which was taken for an allocation
+    // failure: the next eval reset the VM and lost every local, function and `use` of the session.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(false, C.vm_reset_pending(vm));
+    try zt.eq(C.Success, C.vm_evalx(vm, "main",
+        \\use test
+        \\keep := 7
+        \\fn helper() -> int:
+        \\    return 11
+    , config, &res));
+
+    const bad = [_][]const u8{ "s := \"a\\|b\"", "s := 'a\\xZZb'", "s := 'a\\xb'", "var b byte = '\\q'" };
+    for (bad) |src| {
+        try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", src, config, &res));
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, "CompileError: Invalid escape sequence `\\") != null);
+        try zt.expect(std.mem.indexOf(u8, summary, "main:1:") != null);
+        try zt.eq(false, C.vm_reset_pending(vm));
+        try zt.eq(C.ErrorCompile, C.vm_validate(vm, src));
+        try zt.eq(false, C.vm_reset_pending(vm));
+    }
+    try zt.eq(C.Success, C.vm_evalx(vm, "main",
+        \\test.eq(keep, 7)
+        \\test.eq(helper(), 11)
+        \\test.eq('a\0b'[1], 0)
+    , config, &res));
+}
+
+test "cl_vm_reset_pending tells that the next eval starts from a reset VM." {
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    // A failed first compile: nothing of it is kept.
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "print(nope)", config, &res));
+    try zt.eq(true, C.vm_reset_pending(vm));
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "a := 1", config, &res));
+    try zt.eq(false, C.vm_reset_pending(vm));
+    // A later compile error or panic keeps the session.
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "print(nope)", config, &res));
+    try zt.eq(false, C.vm_reset_pending(vm));
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "if a != 1: panic('a')", config, &res));
+    // A panic drops the main locals of the session but not its declarations, and it is not a reset.
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "fn two() -> int:\n    return 2", config, &res));
+    try zt.eq(C.ErrorPanic, C.vm_evalx(vm, "main", "panic('x')", config, &res));
+    try zt.eq(false, C.vm_reset_pending(vm));
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "if two() != 2: panic('two')", config, &res));
+    C.vm_reset(vm);
+    try zt.eq(false, C.vm_reset_pending(vm));
+}
+
+test "persist_main: the capture error suggests the borrow for a function only." {
+    // A top level `b := &x` can not be kept across evals, so the hint must not lead there.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "names := []str{'a', 'b'}\ncounts := Map[str, int]{a=1, b=2}", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "names.sort(|a, b| counts[a] > counts[b])", config, &res));
+    {
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, "Declare it with `^T`. Inside a function, you can also borrow it before the lambda (`b := &counts`)") != null);
+    }
+    // Inside a function the borrow works, and the hint says so.
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main",
+        \\fn f():
+        \\    m := Map[str, int]{a=1, b=2}
+        \\    xs := []str{'a', 'b'}
+        \\    xs.sort(|a, b| m[a] > m[b])
+    , config, &res));
+    {
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, "Declare it with `^T`, or borrow it before the lambda (`b := &m`)") != null);
+    }
+    try zt.eq(C.Success, C.vm_evalx(vm, "main",
+        \\rc := ^Map[str, int]{a=1, b=2}
+        \\names.sort(|a, b| rc[a] > rc[b])
+        \\if names[0] != 'b': panic('sort')
+    , config, &res));
+}

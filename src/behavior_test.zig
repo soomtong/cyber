@@ -503,6 +503,12 @@ fn test_core(run: *Runner) void {
     run.case("core/field_suggest_method_error.cy");
     run.case("core/method_suggest_rfind_error.cy");
     run.case("core/method_suggest_unwrap_error.cy");
+    run.case("core/method_suggest_to_prefix_error.cy");
+    run.case("core/field_suggest_same_name_error.cy");
+    run.case("core/field_suggest_str_method_error.cy");
+    run.case("core/not_option_error.cy");
+    run.case("syntax/string_escape_error.cy");
+    run.case("syntax/string_escape_hex_error.cy");
 }
 
 fn test_vars(run: *Runner) void {

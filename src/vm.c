@@ -970,6 +970,8 @@ beginSwitch:
         stack[base+1] = (Value)pc;
         stack[base+2] = (Value)stack;
 
+        // The parameters start after the call info. `cl_thread_ret` sets the same.
+        t->c.fp_end = stack + base + 4;
         HostFn fn = (HostFn)READ_U48(2);
         Ret res = fn(t);
         if (res != 0) {

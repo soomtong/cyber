@@ -1697,3 +1697,51 @@ test "Error summaries are empty when there is no error." {
         \\if vm.panic_summary().len() != 0: panic('panic summary after eval')
     , &res));
 }
+
+test "deny_spawn rejects spawn in script chunks." {
+    if (is_wasm) return;
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    const src =
+        \\fn work(a int) -> int:
+        \\    return a * 2
+        \\f := spawn(work, {21})
+        \\if f.await() != 42: panic('spawn')
+        \\
+    ;
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        var config = C.defaultEvalConfig();
+        config.deny_spawn = true;
+        config.persist_main = true;
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_evalx(vm, "t", "a := 1\n", config, &res));
+        try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "t", src, config, &res));
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, "`spawn` is not allowed. The host disabled threads for this script (`deny_spawn`).") != null);
+        try zt.expect(std.mem.indexOf(u8, summary, "t:3:6") != null);
+        // Inside a function and a generic function too.
+        try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "t", "fn w() -> int:\n    return 1\nfn g(x %T) -> T:\n    f := spawn(w, {})\n    return x\ng(1)\n", config, &res));
+        try zt.eq(C.ErrorCompile, C.vm_validate(vm, src));
+        // Fibers are not threads.
+        try zt.eq(C.Success, C.vm_evalx(vm, "t",
+            \\fn w(out ^int):
+            \\    out.* = 2
+            \\out := ^0
+            \\fb := fiber w(out)
+            \\_ = fb.resume()
+            \\if out.* != 2: panic('fiber')
+            \\
+        , config, &res));
+    }
+    // The default keeps `spawn`.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_eval(vm, src, &res));
+    }
+}

@@ -654,8 +654,12 @@ The following escape sequences are supported in string literals:
 | `\r` | 0x0d | Carriage return |
 | `\t` | 0x09 | Horizontal tab |
 | `\"` | 0x22 | Double quote |
+| `\'` | 0x27 | Single quote |
+| `` \` `` | 0x60 | Backtick |
 | `\\` | 0x5c | Backslash |
 | `\x??` | -- | Hexidecimal number |
+
+Any other character after a backslash is a compile error. Write `\\` for a backslash: `'TODO\\|Todo'`.
 
 Example:
 ```cy
@@ -4905,6 +4909,16 @@ cfg.deny_raw_ptrs = true;
 cl_vm_evalx(vm, CL_BYTES("turn"), src, cfg, &res);
 ```
 
+### Denying threads.
+`spawn` runs a function on another thread, and a host function that the function calls runs on that thread too. A host whose functions only work on the thread of the eval sets `deny_spawn` in `CLEvalConfig` or `CLCompileConfig`. A call to `spawn` in a chunk that is not a standard module is then a compile error. Fibers and `scope` blocks stay available: they run on the thread of the eval.
+```c
+CLEvalConfig cfg = clDefaultEvalConfig();
+cfg.deny_spawn = true;
+```
+
+### Session reset.
+A session (`persist_main`) keeps its locals, functions and `use` imports across evals, and a compile error in one eval keeps them. A panic drops the main locals and keeps the functions and imports. Two failures drop everything: the first compile of a VM, and an allocation that fails in the compiler or while the main locals are carried over. The next `cl_vm_eval` or `cl_vm_validate` then starts from a reset VM, like `cl_vm_reset`. `cl_vm_reset_pending(vm)` returns true when that is the case, so a host asks it after an eval that did not return `CL_SUCCESS` and sets the session up again (and tells the writer of the scripts that the variables are gone).
+
 ### Allocation failure.
 A host can give the VM its own allocator (`cl_vm_init_mem`, `cl_vm_initx`). When that allocator fails during an eval, the eval returns an error and the VM can be used again:
 
@@ -4939,6 +4953,7 @@ CLRet add(CLThread* t) {
     return CL_RET_OK;
 }
 ```
+The parameters are read one by one in the order they are declared, each with the function of its type (`cl_thread_int`, `cl_thread_str`, ..., or `cl_thread_param` with a size). Each call moves on to the next parameter. `cl_thread_ret` may come before or after the parameters, but not in between: it starts the parameters over from the first.
 
 ### Suspending an eval.
 A host function that can not answer at once (it needs the user's approval, or a slow tool) returns a pending `Future` instead of blocking inside the call. When the script awaits it, the eval returns `CL_AWAIT`. The script is suspended with its stack, its locals and its remaining fuel intact. The host completes the future and calls `cl_vm_resume`:

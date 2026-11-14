@@ -48,6 +48,16 @@ if meta.is_vm_target():
     t.eq('097098099240159166138120121122240159144182', s.fmt_bytes(.dec))
     t.eq('616263f09fa68a78797af09f90b6', s.fmt_bytes(.hex))
 
+-- Escape sequences.
+esc := 'a\0b\x41\t\\|'
+t.eq(7, esc.len())
+t.eq(0, esc[1])
+t.eq(0x41, esc[3])
+t.eq(9, esc[4])
+t.eq(0x5c, esc[5])
+var nul byte = '\0'
+t.eq(0, nul)
+
 -- rune_at()
 invalid := "\xc3\x28"
 t.eq(2, invalid.len())

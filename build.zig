@@ -175,6 +175,11 @@ pub fn build(b: *std.Build) !void {
         const standalone_lib = try buildLib(b, standalone_lib_mod, opts);
         standalone_lib_artifact = b.addInstallArtifact(standalone_lib, .{});
         step.dependOn(&standalone_lib_artifact.step);
+
+        // A package that depends on this one takes the library and `cyber.h` from the install step:
+        // `b.dependency("cyber", .{ .static = true }).artifact("cyber")`.
+        standalone_lib.installHeader(b.path("src/include/cyber.h"), "cyber.h");
+        b.getInstallStep().dependOn(&standalone_lib_artifact.step);
     }
 
     {

@@ -231,6 +231,46 @@ test "Bind functions." {
     , &res);
 }
 
+test "A host function can read its parameters before it takes the return slot." {
+    // `cl_thread_str` before `cl_thread_ret` used to read from a null pointer.
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    const S = struct {
+        fn mod_test(t_: *C.Thread) callconv(.c) C.Ret {
+            const a = C.thread_int(t_);
+            var s = C.thread_str(t_);
+            const b = C.thread_int(t_);
+            const len: i64 = @intCast(C.str_bytes(s).len);
+            C.str_deinit(t_, &s);
+            const ret: *i64 = C.thread_ret(t_, i64);
+            ret.* = a * 100 + len * 10 + b;
+            return C.RetOk;
+        }
+        fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+            const name = C.from_bytes(uri);
+            if (std.mem.eql(u8, name, "mod")) {
+                C.mod_add_func(mod, "test", C.BIND_FUNC(&mod_test));
+                res[0].src = C.to_bytes("#[bind] fn test(a int, s str, b int) -> int");
+                return true;
+            } else {
+                return C.default_loader(vm_, mod, uri, res);
+            }
+        }
+    };
+    C.vm_set_loader(vm, @ptrCast(&S.loader));
+
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use mod
+        \\use test
+        \\test.eq(mod.test(1, 'abc', 2), 132)
+        \\fn call(n int) -> int:
+        \\    return mod.test(n, 'ab', n)
+        \\test.eq(call(3), 323)
+    , &res));
+}
+
 test "Host functions release their owned str params." {
     // Leak-checking allocator: a host function that skips `str_deinit` leaks the heap string.
     // The strings are longer than 32 bytes so they are big objects allocated outside the heap pages.

@@ -142,7 +142,7 @@ pub const Compiler = struct {
     /// The first compile of this VM (or since a reset) failed. The next `VM.eval` resets the VM before compiling.
     first_compile_failed: bool,
 
-    /// A compile ended on an allocation the host refused, or on an error that is not a compile error. What it
+    /// A compile ended on an allocation that failed. What it
     /// left behind (chunks, symbols, types, bytecode) can be half built in ways a compile error never leaves, so
     /// the next `VM.eval` or `VM.validate` resets the VM first, like after a failed first compile. Persisted
     /// locals and declarations of earlier evals are lost.
@@ -400,8 +400,10 @@ pub const Compiler = struct {
                 const err = self.host_error orelse err_;
                 self.last_compile_failed = true;
                 // A refused allocation can surface as any error, including a compile error reported by a comptime
-                // function (`error.OutOfMemory`), so the allocator is asked rather than the error.
-                if (err != error.CompileError or (acct != null and acct.?.failed.load(.monotonic) != failed_allocs)) {
+                // function (`error.OutOfMemory`), so the allocator is asked rather than the error. Another error
+                // that is not a compile error (an internal error of the compiler) unwinds like a compile error
+                // does and keeps the session.
+                if (err == error.OutOfMemory or err == error.WriteFailed or (acct != null and acct.?.failed.load(.monotonic) != failed_allocs)) {
                     self.alloc_failed = true;
                 }
                 // A failed first compile leaves core types, the core chunk and a main chunk half built while `cont`
@@ -1208,6 +1210,7 @@ fn loadBuiltinChunk(c: *cy.Chunk) !void {
     c.sema.scope_abort_fn = core.getSym("@scope_abort").?.cast(.func).first;
     c.sema.scope_join_fn = core.getSym("@scope_join").?.cast(.func).first;
     c.sema.scope_start_sym = core.getSym("Scope").?.getMod().?.getSym("start").?.cast(.func);
+    c.sema.spawn_sym = core.getSym("spawn").?.cast(.func);
     c.sema.print_syms = .{
         core.getSym("print").?.cast(.func),
         core.getSym("prints").?.cast(.func),

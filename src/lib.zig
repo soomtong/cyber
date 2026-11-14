@@ -253,11 +253,16 @@ export fn clDefaultEvalConfig() C.EvalConfig {
         .spawn_exe = false,
         .persist_main = false,
         .deny_raw_ptrs = false,
+        .deny_spawn = false,
     };
 }
 
 export fn cl_vm_reset(vm: *cy.VM) void {
     vm.resetVM() catch cy.fatal();
+}
+
+export fn cl_vm_reset_pending(vm: *cy.VM) bool {
+    return vm.compiler.first_compile_failed or vm.compiler.alloc_failed;
 }
 
 /// Maps an error of an eval to its result code. `anytype` keeps the switch on the error set of the caller (`anyerror` today).
@@ -448,6 +453,7 @@ export fn clDefaultCompileConfig() C.CompileConfig {
         .emit_source_map = false,
         .persist_main = false,
         .deny_raw_ptrs = false,
+        .deny_spawn = false,
     };
 }
 

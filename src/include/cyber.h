@@ -295,6 +295,10 @@ typedef struct CLEvalConfig {
     /// An expression of such a type is a compile error, so an untrusted script can not build or dereference
     /// an arbitrary address. The core library keeps using raw pointers internally. Default false.
     bool deny_raw_ptrs;
+
+    /// Reject `spawn` in every chunk that is not a standard module: a call is a compile error. A script then
+    /// runs on the thread of the eval only, and so does every host function it calls. Default false.
+    bool deny_spawn;
 } CLEvalConfig;
 
 typedef struct CLEvalResult {
@@ -321,6 +325,9 @@ typedef struct CLCompileConfig {
 
     /// See `CLEvalConfig.deny_raw_ptrs`.
     bool deny_raw_ptrs;
+
+    /// See `CLEvalConfig.deny_spawn`.
+    bool deny_spawn;
 } CLCompileConfig;
 
 typedef struct CLValidateConfig {
@@ -416,6 +423,13 @@ CLCompileConfig clDefaultCompileConfig(void);
 
 // Resets the compiler and runtime state.
 void cl_vm_reset(CLVM* vm);
+
+/// Whether the next `cl_vm_eval` or `cl_vm_validate` starts from a reset VM, like `cl_vm_reset`: persisted locals,
+/// declarations and `use` imports of earlier evals are then gone. True after the first compile of the VM (or the
+/// first since a reset) failed, and after an allocation failed in the compiler or while main locals were carried
+/// over. A compile error in a later eval keeps the session and leaves this false. Ask after an eval that did not
+/// return `CL_SUCCESS` to know whether the session has to be set up again.
+bool cl_vm_reset_pending(CLVM* vm);
 
 // Evalutes the source code and returns the result code.
 // Subsequent evals will reuse the same compiler and runtime state.
@@ -886,6 +900,11 @@ CLStackTrace cl_thread_panic_trace(CLThread* t);
 CLBytes cl_thread_panic_summary(CLThread* t);
 
 /// Return and parameters for host functions.
+/// The parameters are read one by one in the order they are declared, each with the function of its type
+/// (`cl_thread_str`, `cl_thread_int`, ..., or `cl_thread_param` with its size). Every call moves on to the next
+/// parameter, so reading out of order or with another type returns the bytes of another parameter.
+/// `cl_thread_ret` returns the slot for the return value and may be called before or after the parameters are
+/// read, but not in between: it starts the parameters over from the first.
 void* cl_thread_ret(CLThread* t, size_t size);
 CLRet cl_thread_ret_panic(CLThread* t, CLBytes msg);
 void* cl_thread_param(CLThread* t, size_t size);

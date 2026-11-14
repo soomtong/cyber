@@ -512,6 +512,21 @@ fn test_core(run: *Runner) void {
     run.case("core/list_infer_int_elem_error.cy");
     run.case("syntax/string_escape_error.cy");
     run.case("syntax/string_escape_hex_error.cy");
+    run.case("control_flow/elif_error.cy");
+    run.case("core/and_option_unwrap_error.cy");
+    run.case("core/list_infer_bool_elem_error.cy");
+    run.case("core/list_infer_str_first_error.cy");
+    run.case("core/method_suggest_trim_start_error.cy");
+    run.case("core/result_unwrap_block_reachable_loop_error.cy");
+    run.case("syntax/string_interp_backslash_error.cy");
+    run.case("syntax/string_interp_nested_error.cy");
+    run.case("syntax/comment_pound_error.cy");
+    run.case("syntax/comment_pound_line_end_error.cy");
+    run.case("control_flow/for_each_swapped_error.cy");
+    run.case("syntax/func_return_tuple_error.cy");
+    run.case("syntax/return_multiple_error.cy");
+    run.case("core/slice_bound_option_error.cy");
+    run.case("core/index_option_error.cy");
 }
 
 fn test_vars(run: *Runner) void {
@@ -823,9 +838,21 @@ fn case2(config: Config) !void {
         const end = seekCommentEnd(rest, idx);
         const exp = rest[start..end];
 
+        // Strip the `--` that starts each line. A `--` inside a line is part of the message.
         var buf: [1024]u8 = undefined;
-        const len = std.mem.replacementSize(u8, exp, "--", "");
-        _ = std.mem.replace(u8, exp, "--", "", &buf);
+        var len: usize = 0;
+        var lines = std.mem.splitScalar(u8, exp, '\n');
+        var first = true;
+        while (lines.next()) |line| {
+            if (!first) {
+                buf[len] = '\n';
+                len += 1;
+            }
+            first = false;
+            const body = if (std.mem.startsWith(u8, line, "--")) line[2..] else line;
+            @memcpy(buf[len..len+body.len], body);
+            len += body.len;
+        }
 
         const Context = struct {
             exp: []const u8,

@@ -107,6 +107,15 @@
   - 보간 안의 보간(`'%{'L%{n}'.len()}'`)은 ``Encountered new line in single line literal.`` 대신 "An interpolated string can not
     contain another interpolated string. Assign the inner string to a variable first."
   - `%{...}` 안의 백슬래시(`"%{s.ends_with(\"b\")}"`)는 ``unknown character: \ (92) at 37`` 대신 다른 따옴표를 쓰라고 한다.
+- 모델이 쓴 코드에서 나온 문구 둘째(tars-agent M0 요청서 `44aa24a` 2절):
+  - `#` 뒤에 공백이나 줄 끝이 오면 "A comment starts with `--`, not `#`."(전에는 줄 끝 `#`이 ``Expected end of line or file.
+    Got pound.``, 최상위 `# comment`가 ``Could not find the symbol `comment`.``).
+  - `for f |{'a', 'b'}|:`처럼 `|...|` 안에 이름이 아닌 것이 오면 값과 이름의 자리를 말한다(전에는 ``Expected ident.``).
+  - `fn f() -> (int, int):`와 `return 1, 2`는 함수가 값 하나를 돌려준다는 것과 튜플 타입(`type Pair(a int, b int)`)을 쓰라는
+    것을 말한다(전에는 ``Expected `)`.`` · ``Expected end of line or file. Got comma.``).
+  - 한 줄 문자열 안의 줄바꿈 오류가 `\n`이나 여러 줄 문자열(`'''...'''`, `"""..."""`)을 쓰라고 덧붙인다.
+  - `s[h..]` · `xs[h]`의 경계나 인덱스가 `?int`이면 내부 이름 `@slice` · `@index`를 보이던 인자 불일치 문구 대신 "A slice bound
+    must be `int`, got `?int`. Unwrap it first: ..."(`!int`면 `!` 안내).
 - `str`에 인자 없는 `trimLeft()` · `trimRight()`가 생겼다(한쪽 끝의 공백, 탭, 줄바꿈). `lstrip` · `trimStart` · `trim_start` ·
   `ltrim`은 `trimLeft`를, `rstrip` · `trimEnd` · `trim_end` · `rtrim`은 `trimRight`를 제안한다(전에는 `lstrip`이 `trim`을 제안했다).
 

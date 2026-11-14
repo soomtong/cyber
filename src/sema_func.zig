@@ -1402,6 +1402,23 @@ pub fn reportCallFuncMismatch(c: *cy.Chunk, pre_args: []const Argument, end_args
     defer c.alloc.free(paramt_name);
     const argt_name = try c.sema.allocTypeName(match_err.arg_t);
     defer c.alloc.free(argt_name);
+    if (arg_idx > 0) {
+        // `a[i]` and `a[i..j]` call `@index` and `@slice`. Name what the script wrote, not the hook.
+        const what: ?[]const u8 = if (std.mem.eql(u8, func_name, "@slice"))
+            "A slice bound"
+        else if (arg_idx == 1 and (std.mem.eql(u8, func_name, "@index") or std.mem.eql(u8, func_name, "@set_index") or std.mem.eql(u8, func_name, "@index_addr")))
+            "An index"
+        else
+            null;
+        if (what) |what_| {
+            const hint: []const u8 = switch (match_err.arg_t.kind()) {
+                .option => " Unwrap it first: `if s.index(x) |i|:` or `x.?`.",
+                .result => " Unwrap it with `!` first, or handle the error with `!else` or `try`.",
+                else => "",
+            };
+            return c.reportErrorFmt("{} must be `{}`, got `{}`.{}", &.{v(what_), v(paramt_name), v(argt_name), v(hint)}, err_node);
+        }
+    }
     return c.reportErrorFmt("Expected argument `{}`, found `{}`, when calling `fn {}{}`.", &.{v(paramt_name), v(argt_name), v(func_name), v(sig_str)}, err_node);
 }
 

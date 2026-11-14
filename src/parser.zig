@@ -745,6 +745,24 @@ pub const Parser = struct {
         scope_ret: bool,
     };
 
+    /// Whether the `(...)` at the next token has a comma at its own level, as in `(int, int)`.
+    fn isTupleAhead(self: *Parser) bool {
+        var depth: u32 = 0;
+        var i: u32 = 0;
+        while (true) : (i += 1) {
+            switch (self.peekAhead(i).tag()) {
+                .left_paren, .left_bracket, .left_brace => depth += 1,
+                .right_paren, .right_bracket, .right_brace => {
+                    depth -= 1;
+                    if (depth == 0) return false;
+                },
+                .comma => if (depth == 1) return true,
+                .new_line, .null => return false,
+                else => {},
+            }
+        }
+    }
+
     fn parseFuncReturn(self: *Parser) !?FuncReturn {
         var scope_ret = false;
         if (self.peek().tag() != .minus_right_angle) {
@@ -756,6 +774,9 @@ pub const Parser = struct {
         if (self.peek().tag() == .scope_k) {
             scope_ret = true;
             self.advance();
+        }
+        if (self.peek().tag() == .left_paren and self.isTupleAhead()) {
+            return self.reportError("A return type can not list several types. Declare a tuple type and return that: `type Pair(a int, b int)`, `fn f() -> Pair:`, `return {1, 2}`.", &.{});
         }
         const ret = (try self.parseOptTypeSpec()) orelse {
             return self.reportError("Expected return type.", &.{});
@@ -2372,6 +2393,22 @@ pub const Parser = struct {
         return self.reportError("Expected :.", &.{});
     }
 
+    fn reportForSwapError(self: *Parser, token: Token) anyerror {
+        return self.reportErrorAtSrc("Expected a variable name in `|x|`. The values come first and the name goes in `|x|`: `for {a, b} |x|:`.", &.{}, token.pos());
+    }
+
+    /// Whether the `{...}` at the next token holds only names, as in `|{a, b}|`.
+    fn isNameListAhead(self: *Parser) bool {
+        var i: u32 = 1;
+        while (true) : (i += 1) {
+            switch (self.peekAhead(i).tag()) {
+                .ident, .comma, .new_line, .indent => {},
+                .right_brace => return true,
+                else => return false,
+            }
+        }
+    }
+
     fn parseForStatement(self: *Parser, comptime ct: bool) !*ast.Node {
         const start = self.next_pos;
         // Assumes first token is the `for` keyword.
@@ -2457,11 +2494,17 @@ pub const Parser = struct {
             self.advance();
             token = self.peek();
             if (token.tag() == .left_brace) {
+                if (!self.isNameListAhead()) {
+                    return self.reportForSwapError(token);
+                }
                 each = @ptrCast(try self.parseSeqDestructure());
             } else {
                 each = (try self.parseExpr(.{})) orelse {
                     return self.reportError("Expected each clause.", &.{});
                 };
+                if (each.?.type() != .ident and each.?.type() != .borrow) {
+                    return self.reportForSwapError(token);
+                }
             }
 
             // Optional count var.
@@ -2743,6 +2786,7 @@ pub const Parser = struct {
                 }
             },
             .pound => {
+                try self.checkPoundComment(self.peek());
                 self.advance();
                 const token = self.peek();
                 if (token.tag() == .left_bracket) {
@@ -2924,6 +2968,18 @@ pub const Parser = struct {
         return self.reportFn(self, format, args, srcPos);
     }
 
+    /// `#` followed by a space or the line end is a comment written in another language's syntax.
+    fn checkPoundComment(self: *Parser, token: Token) !void {
+        const pos = token.pos() + 1;
+        if (pos < self.ast.src.len) {
+            switch (self.ast.src[pos]) {
+                ' ', '\t', '\n', '\r' => {},
+                else => return,
+            }
+        }
+        return self.reportErrorAtSrc("A comment starts with `--`, not `#`.", &.{}, token.pos());
+    }
+
     fn consumeNewLineOrEnd(self: *Parser) !void {
         const tag = self.peek().tag();
         if (tag == .new_line) {
@@ -2932,6 +2988,9 @@ pub const Parser = struct {
         }
         if (tag == .null) {
             return;
+        }
+        if (tag == .pound) {
+            try self.checkPoundComment(self.peek());
         }
         return self.reportError("Expected end of line or file. Got {}.", &.{v(tag)});
     }
@@ -3830,6 +3889,7 @@ pub const Parser = struct {
                 return @ptrCast(try self.parseStringTemplate(.stringt_multi));
             },
             .pound => {
+                try self.checkPoundComment(self.peek());
                 if (self.peekAhead(1).tag() == .left_bracket) {
                     self.advance();
                     self.advance();
@@ -4661,6 +4721,9 @@ pub const Parser = struct {
                 const right = (try self.parseExpr(.{ .first_expr = true })) orelse {
                     return self.reportError("Expected an expression after `return`.", &.{});
                 };
+                if (self.peek().tag() == .comma) {
+                    return self.reportError("A function returns one value. Declare a tuple type and return that: `type Pair(a int, b int)`, `fn f() -> Pair:`, `return {1, 2}`.", &.{});
+                }
                 return self.ast.newNodeErase(.returnExprStmt, .{
                     .child = right,
                     .pos = self.tokenPos(start),

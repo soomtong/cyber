@@ -176,6 +176,7 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 | F-136 | `&T`를 캡처한 클로저(pinned closure)가 스택이 옮겨진 뒤 해제된 스택을 읽는다. main에서는 쓰레기 값, `sort` 비교 함수 안에서 스택이 자라면 Segmentation fault, fiber 스택도 같다. 캡처 값은 힙 객체에 있어 프레임 포인터 레이아웃의 보정 밖이었다 | `heap.zig` `allocClosure` · `patchPinnedClosures`, `thread.zig` `growStackPrecise` | 정렬 안 A 사전 조사(2026-11-14, 사용자 지시) | 높음 | 2026-11-14 수정. heap이 살아 있는 pinned closure를 등록하고 스택 이동 때 옛 스택 범위를 가리키는 캡처 값을 옮긴다 |
 | F-137 | 호스트 함수를 값으로 부르는 경로(함수 포인터 값, `Func` union 값, `sort` 같은 표준 메서드가 부르는 함수, trait 호출)에서 매개변수를 `cl_thread_ret`보다 먼저 읽으면 오류 없이 다른 값을 읽는다(`sort`가 잘못 정렬). F-133은 직접 호출만 고쳤다 | `thread.zig` `callFunc2` · `callPtrInst` · `callUnionInst` · `callTraitSymInst` | tars-agent M0 요청서(2026-11-14 `cd7b218`, 1절) | 중간 | 2026-11-14 수정. 네 경로가 `enterHostFrame`으로 `fp_end`를 첫 매개변수에 둔다 |
 | F-138 | `#[bind]` 메서드로 trait를 구현하면 vtable을 채울 때 컴파일러가 panic(index out of bounds). 호스트 함수에 없는 바이트코드 주소를 읽었다 | `bc_gen.zig` `fillVtables` | F-137 테스트 작성 중(2026-11-14) | 중간 | 2026-11-14 수정. 호스트 함수는 함수 포인터에 상위 비트를 세운 값을 넣는다(`zCallTrait`가 그렇게 읽는다) |
+| F-139 | behavior 테스트는 `behavior_test.zig`에 `run.case`로 등록해야 도는데 `6a155275`가 더한 오류 테스트 여덟 개가 등록되지 않아 돌지 않았다(`elif_error.cy`의 기대 위치 표시 `^~~~`가 실제 `^`와 달랐다). 오류 테스트의 기대 문구에서 줄 머리뿐 아니라 모든 `--`를 지워 문구 안의 `--`를 쓸 수 없었다 | `behavior_test.zig` | tars-agent 요청서 `44aa24a` 2절 테스트 작성 중(2026-11-14) | 낮음 | 2026-11-14 수정. 여덟 개 등록, `elif_error.cy` 기대값 고침, 기대 문구는 줄 머리의 `--`만 지운다(panic 테스트와 같게) |
 
 ## 우선순위 한 장 요약
 

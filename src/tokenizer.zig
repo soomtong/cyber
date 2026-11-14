@@ -909,7 +909,11 @@ pub const Tokenizer = struct {
                             try t.pushToken(.err, start);
                             return .{ .stateT = .token };
                         } else {
-                            try t.reportErrorAt("Encountered new line in single line literal.", &.{}, t.nextPos);
+                            if (state.string_delim == .sq_single) {
+                                try t.reportErrorAt("Encountered new line in single line literal. Write `\\n` for a line break, or use a multi-line string: `\'\'\'...\'\'\'`.", &.{}, t.nextPos);
+                            } else {
+                                try t.reportErrorAt("Encountered new line in single line literal. Write `\\n` for a line break, or use a multi-line string: `\"\"\"...\"\"\"`.", &.{}, t.nextPos);
+                            }
                         }
                     }
                     advance(t);

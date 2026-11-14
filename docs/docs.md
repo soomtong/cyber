@@ -108,6 +108,7 @@ A single line comment starts with two hyphens and ends at the end of the line.
 
 a := 123   -- This is a comment on the same line as a statement.
 ```
+`#` does not start a comment. A `#` followed by a space or the end of the line is a parse error that says to use `--`.
 
 ## Blocks.
 Some statements can start a new block with a colon.
@@ -638,6 +639,7 @@ line "b"
 line %{title}
 """
 ```
+A single line literal can not contain a line break. Write `\n` for one, or use a multi-line literal.
 
 A string literal can hold at most 65535 bytes. Each literal piece of an interpolated string counts on its own. A longer literal is a compile error; split the text into several literals and join them at runtime.
 
@@ -2019,6 +2021,7 @@ arr := {1, 2, 3, 4, 5}
 for arr |n|:
     print(n)
 ```
+The values come first and the name goes in `|_|`. `for n |{1, 2}|:` is a parse error that says so.
 
 Iterating a `Map` yields `MapEntry` values:
 ```cy
@@ -2185,7 +2188,19 @@ fn foo():
     print(a)    --> error: Undeclared variable `a`.
 ```
 
-Functions can only return one value. However, the value can be destructured: *Planned Feature*
+Functions can only return one value. To return several, declare a [tuple](#tuples) type and return that:
+```cy
+type Pair(a int, b int)
+
+fn f() -> Pair:
+    return {1, 2}
+
+p := f()
+print(p.a + p.b)    --> 3
+```
+A return type that lists several types, `-> (int, int)`, and `return 1, 2` are parse errors that say so.
+
+The returned value can also be destructured: *Planned Feature*
 ```cy
 use math
 

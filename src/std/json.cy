@@ -41,12 +41,14 @@ type Entry:
 type Object:
     entries []Entry = {}
 
---| Where and why parsing failed. `line` and `col` start at 1, `col` counts bytes.
+--| Where and why parsing or a conversion failed. `line` and `col` start at 1, `col` counts bytes.
+--| `path` is set by `to` and `decode`: the place of the value that did not convert, such as `$.users[1].id`.
 type Diag:
     msg  str = ''
     line int = 0
     col  int = 0
     pos  int = 0
+    path str = ''
 
 --| Returns the number of entries.
 fn (&Object) len() -> int:
@@ -366,6 +368,279 @@ fn from(x %T) -> Value:
                                 return Value.str(#{meta.enum_case(Tag).name})
             #else:
                 meta.error('`json.from` does not support `' + type.name(T) + '`.')
+
+--| Parses a JSON text and converts it to `T`, see `to`.
+fn decode(%T type, src str) -> !T:
+    var diag Diag = {}
+    return decode(T, src, &diag)
+
+--| Parses a JSON text and converts it to `T`. On failure, `diag` tells where and why.
+fn decode(%T type, src str, diag &Diag) -> !T:
+    v := parse(src, diag)!
+    return to(T, v, diag)
+
+--| Converts a `Value` to `T`, the reverse of `from`:
+--| `bool`, integers (`error.Overflow` out of range, a float only when it is a whole number), floats (an `int` converts),
+--| `str`, `Value`, `Object`, slices, `Map` with `str` keys, structs, optionals (`null` is `none`),
+--| enums (the case name) and choices (`"case"` or `{"case": payload}`).
+--| A struct field must be present unless it is an optional. Members that are not fields are ignored.
+--| Returns `error.Type` for a value of another kind or an unknown case name and `error.MissingField` for a missing field.
+fn to(%T type, v Value) -> !T:
+    var diag Diag = {}
+    return to(T, v, &diag)
+
+--| Converts a `Value` to `T`. On failure, `diag.msg` tells why and `diag.path` where, such as `$.users[1].id`.
+fn to(%T type, v Value, diag &Diag) -> !T:
+    diag.path = ''
+    res := to_ref(T, &v, diag) !else |err|:
+        diag.path = '$' + diag.path
+        return err
+    return res
+
+-fn mismatch(diag &Diag, expected str, v &Value) -> error:
+    diag.msg = 'Expected %{expected}, found %{v.kind()}.'
+    return error.Type
+
+--| Returns a whole number as an `int`. A float must have no fraction and fit `int`.
+-fn to_whole(v &Value, diag &Diag) -> !int:
+    switch v.*:
+        case .int |i|:
+            return i
+        case .float |f|:
+            if f >= -9223372036854775808.0 and f < 9223372036854775808.0:
+                i := @floatToInt(float, f)
+                if float(i) == f:
+                    return i
+                diag.msg = 'Expected an integer, found `%{fmt_float(f)}`.'
+                return error.Type
+            if is_finite(f):
+                diag.msg = 'The number `%{fmt_float(f)}` does not fit `int`.'
+                return error.Overflow
+            return mismatch(diag, 'an integer', v)
+        else:
+            return mismatch(diag, 'an integer', v)
+
+-fn to_ref(%T type, v &Value, diag &Diag) -> !T:
+    #if T == Value:
+        return v.*
+    #else T == Object:
+        switch v.*:
+            case .object |o|:
+                return o
+            else:
+                return mismatch(diag, 'an object', v)
+    #else T == bool:
+        switch v.*:
+            case .bool |b|:
+                return b
+            else:
+                return mismatch(diag, 'a bool', v)
+    #else T == str:
+        switch v.*:
+            case .str |s|:
+                return s
+            else:
+                return mismatch(diag, 'a string', v)
+    #else T == float:
+        switch v.*:
+            case .int |i|:
+                return float(i)
+            case .float |f|:
+                return f
+            else:
+                return mismatch(diag, 'a number', v)
+    #else T == f32:
+        switch v.*:
+            case .int |i|:
+                return f32(float(i))
+            case .float |f|:
+                return f32(f)
+            else:
+                return mismatch(diag, 'a number', v)
+    #else type.is_instance_of(T, Slice):
+        switch v.*:
+            case .array |a|:
+                var res T = {}
+                #Elem := type.of(res[0])
+                for 0..a.len() |i|:
+                    elem := to_ref(Elem, &a[i], diag) !else |err|:
+                        diag.path = '[%{i}]' + diag.path
+                        return err
+                    res = res.append(elem)
+                return res
+            else:
+                return mismatch(diag, 'an array', v)
+    #else type.is_instance_of(T, Map):
+        switch v.*:
+            case .object |o|:
+                var res T = {}
+                #if type.of(res.keys()[0]) != str:
+                    meta.error('`json.to` supports a `Map` with `str` keys, found `' + type.name(T) + '`.')
+                #Elem := type.of(res[''])
+                for o.entries |e|:
+                    elem := to_ref(Elem, &e.value, diag) !else |err|:
+                        diag.path = key_path(e.key) + diag.path
+                        return err
+                    res[e.key] = elem
+                return res
+            else:
+                return mismatch(diag, 'an object', v)
+    #else:
+        #switch type.info(T):
+            #case .int |info|:
+                i := to_whole(v, diag)!
+                #if info.bits < 64:
+                    if i < -(1 << (info.bits - 1)) or i >= (1 << (info.bits - 1)):
+                        diag.msg = 'The number `%{i}` does not fit `%{type.name(T)}`.'
+                        return error.Overflow
+                return T(i)
+            #case .raw |info|:
+                i := to_whole(v, diag)!
+                #if info.bits < 64:
+                    if i < 0 or i >= (1 << info.bits):
+                        diag.msg = 'The number `%{i}` does not fit `%{type.name(T)}`.'
+                        return error.Overflow
+                #else:
+                    if i < 0:
+                        diag.msg = 'The number `%{i}` does not fit `%{type.name(T)}`.'
+                        return error.Overflow
+                return T(i)
+            #case .option |info|:
+                if v.is_null():
+                    return none
+                payload := to_ref(info.child, v, diag)!
+                return payload
+            #case .enum:
+                s := v.as_str() ?else:
+                    return mismatch(diag, 'a string', v)
+                #for 0..meta.enum_values(T).len() |i|:
+                    begin:
+                        #Case := meta.enum_values(T)[i]
+                        if s == #{meta.enum_case(Case).name}:
+                            return Case
+                diag.msg = '`%{s}` is not a case of `%{type.name(T)}`.'
+                return error.Type
+            #case .choice:
+                switch v.*:
+                    case .str |s|:
+                        #for 0..meta.enum_values(T.Tag).len() |i|:
+                            begin:
+                                #Tag := meta.enum_values(T.Tag)[i]
+                                #if meta.CasePayload[T, Tag] == void:
+                                    if s == #{meta.enum_case(Tag).name}:
+                                        return meta.access(T, meta.enum_name_eval(Tag))
+                        diag.msg = '`%{s}` is not a case of `%{type.name(T)}` without a payload.'
+                        return error.Type
+                    case .object |o|:
+                        if o.len() != 1:
+                            diag.msg = 'Expected an object with one member for `%{type.name(T)}`, found %{o.len()} members.'
+                            return error.Type
+                        key := o.entries[0].key
+                        #for 0..meta.enum_values(T.Tag).len() |i|:
+                            begin:
+                                #Tag := meta.enum_values(T.Tag)[i]
+                                #if meta.CasePayload[T, Tag] != void:
+                                    if key == #{meta.enum_case(Tag).name}:
+                                        payload := to_ref(meta.CasePayload[T, Tag], &o.entries[0].value, diag) !else |err|:
+                                            diag.path = key_path(key) + diag.path
+                                            return err
+                                        return meta.init_choice(T, Tag, payload)
+                        diag.msg = '`%{key}` is not a case of `%{type.name(T)}` with a payload.'
+                        return error.Type
+                    else:
+                        return mismatch(diag, 'a string or an object', v)
+            #case .struct |info|:
+                switch v.*:
+                    case .object |o|:
+                        -- Fields are initialized one by one. When one fails, it and the rest get zero values
+                        -- so that `res` is whole and is destructed as usual.
+                        var res T = undef
+                        #for 0..info.fields.len() |i|:
+                            begin:
+                                #field := info.fields[i]
+                                elem := field_to(field.type, &o, #{field.name}, diag) !else |err|:
+                                    #for i..info.fields.len() |j|:
+                                        #rest := info.fields[j]
+                                        @ptr_init(*meta.access(res, rest.name), zero(rest.type))
+                                    return err
+                                @ptr_init(*meta.access(res, field.name), elem)
+                        return res
+                    else:
+                        return mismatch(diag, 'an object', v)
+            #else:
+                meta.error('`json.to` does not support `' + type.name(T) + '`.')
+
+--| Returns a value of a type that `to` supports, to fill a struct that failed part way.
+-fn zero(%T type) -> T:
+    #if T == Value:
+        return Value.null
+    #else T == Object:
+        return Object{}
+    #else T == bool:
+        return false
+    #else T == str:
+        return ''
+    #else T == float:
+        return 0.0
+    #else T == f32:
+        return f32(0.0)
+    #else type.is_instance_of(T, Slice):
+        var res T = {}
+        return res
+    #else type.is_instance_of(T, Map):
+        var res T = {}
+        return res
+    #else:
+        #switch type.info(T):
+            #case .int:
+                return T(0)
+            #case .raw:
+                return T(0)
+            #case .option:
+                return none
+            #case .enum:
+                return #{meta.enum_values(T)[0]}
+            #case .choice:
+                #Tag := meta.enum_values(T.Tag)[0]
+                #if meta.CasePayload[T, Tag] == void:
+                    return meta.access(T, meta.enum_name_eval(Tag))
+                #else:
+                    return meta.init_choice(T, Tag, zero(meta.CasePayload[T, Tag]))
+            #case .struct |info|:
+                var res T = undef
+                #for 0..info.fields.len() |i|:
+                    #field := info.fields[i]
+                    @ptr_init(*meta.access(res, field.name), zero(field.type))
+                return res
+            #else:
+                meta.error('`json.to` does not support `' + type.name(T) + '`.')
+
+--| Converts the member `name` of `o` to the field type `T`. A missing member is `none` for an optional field.
+-fn field_to(%T type, o &Object, name str, diag &Diag) -> !T:
+    idx := o.index_of(name) ?else:
+        #if type.is_instance_of(T, Option):
+            return none
+        #else:
+            diag.msg = 'Missing the field `%{name}`.'
+            return error.MissingField
+    res := to_ref(T, &o.entries[idx].value, diag) !else |err|:
+        diag.path = key_path(name) + diag.path
+        return err
+    return res
+
+--| Returns `.key` for a plain key and `["key"]` for another one.
+-fn key_path(key str) -> str:
+    plain := key.len() > 0
+    for 0..key.len() |i|:
+        c := key[i]
+        if !(str.is_ascii_alpha(c) or c == '_' or (i > 0 and str.is_ascii_digit(c))):
+            plain = false
+            break
+    if plain:
+        return '.' + key
+    var buf []byte = {}
+    quote(&buf, key)
+    return '[' + str(buf) + ']'
 
 --| Formats a finite float in the shortest form that reads back as the same value.
 --| `1e-6 <= |x| < 1e21` and 0 use plain decimals without a trailing `.0` (`1.5`, `100`, `-0` becomes `0`).
@@ -777,18 +1052,6 @@ fn (&Parser) number() -> !Value:
 
 --| Parses `-?[0-9]+` as an `int`, or returns `none` when it does not fit.
 -fn parse_int(s str) -> ?int:
-    neg := s[0] == '-'
-    start := if (neg) 1 else 0
-    -- Accumulates as a negative number so that the minimum `int` fits.
-    res := 0
-    for start..s.len() |i|:
-        d := int(s[i] - '0')
-        if res < (-9223372036854775807 - 1 + d) / 10:
-            return none
-        res = res * 10 - d
-    if neg:
-        return res
-    if res == -9223372036854775807 - 1:
+    i := int.parse(s) !else:
         return none
-    pos := -res
-    return pos
+    return i

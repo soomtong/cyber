@@ -32,6 +32,10 @@
     필드 그룹 · 목록 형식, `EncodeOptions{indent, delim}`(`.comma` · `.tab` · `.pipe`), `DecodeOptions{indent, strict}`(비엄격
     복구 다섯 가지), 오류는 `error.Syntax`와 `json.Diag`. `toon.from_json` · `toon.to_json`. 공식 적합성 fixture 564개
     (`src/test/assets/toon-spec`, spec 커밋 `009074d`)를 모두 통과한다.
+  - `json.to(T, v)` · `json.decode(T, src)`(각각 `&diag`를 받는 꼴도 있음): `Value`를 Cyber 타입으로 바꾼다(`from`의 반대). struct ·
+    옵션 · enum · choice · 슬라이스 · `Map[str, V]` · 수 · `bool` · `str` · `Value` · `Object`. 옵션이 아닌 struct 필드가 없으면
+    `error.MissingField`, 다른 종류의 값이나 모르는 case 이름은 `error.Type`, 범위 밖 수는 `error.Overflow`. 정수 타입은 정수인
+    float(`3e2`)도 받는다. 필드가 아닌 멤버는 무시한다. `json.Diag`에 `path` 필드가 생겨 `$.users[1].id`처럼 실패한 자리를 적는다.
   - `?json.Value == none`처럼 `==`로 `Value`를 비교할 수는 없다(코어 `@eq`가 choice를 지원하지 않음). `?else` · `if ... |x|` ·
     `Value.eq`를 쓴다.
 
@@ -43,6 +47,16 @@
 - wasm32에서 `str.from_utf8` · `str.is_utf8` · `str(PtrSpan)`이 `panic: integer does not fit in destination type`으로 멈출 수
   있었다. 8바이트 칸의 위 32비트(쓰레기)까지 포인터로 바꿨다. 이제 아래 절반만 쓴다(F-143).
 
+- `int.parse` · `Int[N].parse`가 넘침을 검사하지 않았다: `int.parse('99999999999999999999')`가 오류 없이 `7766279631452241919`였다.
+  이제 `error.Overflow`를 돌려준다(`i8.parse('128')`도). 숫자가 아닌 글자는 넘침보다 먼저 `error.InvalidCharacter`. 문자열을 받는
+  `int('...')`는 실패하면 0이므로 넘침도 0이다(F-142).
+- `?T` · `!T`를 돌려주는 함수에서 `return -x`가 ``Can not find the symbol `-` in `!int`.``로 컴파일되지 않았고, `?i8`에서 `return -5`도
+  `i8`로 맞춰지지 않았다. 이제 옵션 · 결과의 자식 타입으로 부정하고 감싼다(F-144).
+- `x := f() !else ...`와 `!else |e|:` 블록이 호출이 돌려준 결과를 언랩할 때 페이로드를 복사해 `!Map[str, int]` 같은 복사할 수 없는
+  타입에 `Cannot copy`였다(`!`는 됐다). 이제 옮긴다. 변수에 담긴 결과는 그대로 복사한다(F-145).
+- `meta.access(T, name)`에 `%T type` 템플릿 인자를 넘기면 `Unsupported expansion of compile-time value of type: type`이었다. 이제 `T`의
+  멤버를 찾는다(F-146).
+
 ## 임베딩 API
 
 - `cl_mod_bind_json` · `cl_mod_bind_toon`(`cyber.h`). 기본 로더는 `use json` · `use toon`을 바로 푼다. 직접 로더를 쓰는 호스트는
@@ -50,5 +64,6 @@
 
 ## 알려진 한계
 
-- `int.parse` · `Int[N].parse`가 넘침을 검사하지 않는다: `int.parse('99999999999999999999')`가 오류 없이 `7766279631452241919`다
-  (F-142). `json`은 자체 검사를 쓴다.
+- `json`은 `int`에 맞지 않는 정수와 17자리를 넘는 소수를 `float`으로 근사한다(`9223372036854775808` → `9223372036854776000`).
+  무손실 경로는 검토 중(`docs/decisions/project_std_json_toon.md` "큰 수 · 고정밀 수").
+- `json.to`는 struct 필드의 기본값(`x int = 3`)을 쓰지 않는다. 없는 필드는 옵션 필드만 허용한다.

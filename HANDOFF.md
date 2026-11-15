@@ -3,13 +3,15 @@
 ## 지금 상태
 
 - 최신 릴리스 0.4.11(태그 `097b831f`, `build-883-097b831`, Latest). 노트 `docs/releases/0.4.11.md`.
-- `origin/master`는 `e25e7d76`. 로컬 master는 그 뒤 `260f48e0`(코드)와 HANDOFF 갱신 커밋이 더 있고 push하지 않았다.
+- `origin/master`와 로컬 master가 같다(이 세션 끝에 push).
 - 0.4.11 뒤 변경(모두 `docs/releases/unreleased.md`에 있다):
   - `e25e7d76`: tars-agent CodeAct 회차의 오류 문구 여섯(`for ... in`, `q: byte = 0`, `var` 없는 타입 선언, `none` 비교,
     옵션 아닌 값의 `?else`, 연산자 타입 불일치).
   - `260f48e0`: 표준 모듈 `json` · `toon`(TOON 사양 v4.4, 공식 fixture 564/564), `cl_mod_bind_json` · `cl_mod_bind_toon`,
-    F-141(`.?` · `!` 언랩 임시값 누수) · F-143(wasm32 `str.is_utf8` panic) 수정. 설계 `docs/decisions/project_std_json_toon.md`,
-    사용자 문서 `docs/docs.md` "JSON and TOON.".
+    F-141(`.?` · `!` 언랩 임시값 누수) · F-143(wasm32 `str.is_utf8` panic) 수정.
+  - 그다음 커밋: `json.to(T, v)` · `json.decode(T, src)`(`Diag.path`), F-142(`int.parse` 넘침 → `error.Overflow`),
+    F-144(`?T` · `!T` 함수의 `return -x`), F-145(`!else`가 `NoCopy` 결과를 옮김), F-146(`meta.access(T, ...)`에 템플릿 인자).
+  - 설계 `docs/decisions/project_std_json_toon.md`, 사용자 문서 `docs/docs.md` "JSON and TOON.".
 - tars-agent는 cyber 0.4.11에 고정(`78df31d`). `730813e`에서 `e25e7d76`의 회신을 기록했고 0.4.12에서 확인한다.
   요청서 `/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.11-codeact-messages.md`.
 
@@ -21,8 +23,9 @@
      안 3 inlay hint). `project_coroutines.md` 끝 절.
    - 정렬: 안 A(일반 지역을 빌림 캡처하는 pinned closure, F-136으로 스택 이동 걸림돌은 풀림), 키 정렬(람다 반환 타입으로
      제네릭 추론, 이름), 인자 없는 `sort()`의 원소 조건. `project_sort_closures.md` "결정할 것".
-   - `json` · `toon` 후속: `Value` → 타입 역변환(`json.to(T, v)`), 무손실 큰 수, core `@eq`의 choice 지원, F-142
-     (`Int.parse` 넘침 미검사) 수정. `project_std_json_toon.md` "남은 일".
+   - `json` 큰 수 · 고정밀 수: 안 1(그대로, 문서만) · 안 2(추천, `Value.number str` 원문 case + `ParseOptions{exact}`) ·
+     안 3(모든 수 원문). `Value`에 case를 더하려면 0.4.12 전이어야 한다. `project_std_json_toon.md` "큰 수 · 고정밀 수".
+   - core `@eq`의 choice 지원(`?json.Value == none`, `t.eq`로 choice 비교).
    - 0.5 범위. 사용자 목표는 "fiber 관련 동시성 동작을 모두 완성해 0.5".
 3. 기술 부채(급하지 않음):
    - carry 재시도 루프: 실패한 본문의 IR을 되돌리는 장치가 없어 사전 단계로 옮기지 못했다. 콜백 반복은 `cyber.h` · docs.md에 적음.
@@ -38,10 +41,12 @@
 - 최상위 `#x := ...` 컴파일 타임 변수는 뒤의 최상위 실행문에서 못 쓴다(선언 단계에서만 평가).
 - 보간 안의 보간은 지원하지 않는다(토크나이저 상태가 한 단계). 원인을 말하는 오류만 낸다.
 - `?json.Value == none`은 컴파일 오류(core `@eq`가 choice 미지원). `?else` · `Value.eq`를 쓴다.
-- `int.parse`는 넘침을 검사하지 않는다(F-142). `json`은 자체 검사를 쓴다.
+- `json`은 `int` 밖 정수와 17자리 넘는 소수를 `float`으로 근사한다. `json.to`는 struct 필드 기본값을 쓰지 않는다.
+- 하위 블록에서는 `move` · `meta.consume`을 못 쓴다(`else` 갈래의 consume은 뒤까지 죽은 상태로 남는다). 컴파일 타임
+  `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-143까지, 열린 것은 F-142).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-146까지, 열린 것 없음).
 
 ## 작업 방식
 
@@ -90,8 +95,11 @@
   호출 자리마다 달라지는 검사는 core의 `meta.error`가 아니라 sema 호출 경로에 둔다.
 - 검사를 엄격히 하는 수정은 core.cy · std의 숨은 불일치를 드러낸다. 전체 테스트로 확인한다.
 - core.cy는 `zig-out/bin/src/`에서 읽힌다. 고친 뒤 `zig build cli`를 다시 한다.
+- `@ptr_init` 같은 `@` 함수는 builtin 모듈(`markBuiltinModule`, std `json` · `toon` 포함)만 쓴다. 구조체를 필드별로 만들 때는
+  `var res T = undef` + `@ptr_init(*meta.access(res, name), v)`, `#for`로 펼친 본문은 `begin:` 블록으로 감싸 지역 이름이 겹치지 않게.
+- behavior 러너에는 파일 필터가 없다(`-Dtest-filter`는 zig test 이름). 파일 하나는 Debug CLI로 돌리고 누수 검사는 전체 실행에서 본다.
 - 언어 메모: 비트 OR은 `||`, AND는 `&&`. 전역은 `global g int = 5`. `var x = 0`은 문법 오류(`x := 0`). `os.parseArgs`는
-  `-name=value`만 받는다. `out.* += fut.await()`는 await 전에 `out.*`를 읽는다.
+  `-name=value`만 받는다. `Map`의 개수는 `size()`. `out.* += fut.await()`는 await 전에 `out.*`를 읽는다.
 - 벤치는 다른 프로세스가 CPU를 쓰는지 먼저 본다(tars-linux `services_test`, 종료 금지). 테스트와 동시에 돌리지 않는다.
 
 ## 참고 위치

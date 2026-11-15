@@ -8741,6 +8741,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
             const unwrap = node.cast(.unwrap_res_or);
 
             var res = try c.sema_expr_cstr_template(unwrap.res, c.sema.result_tmpl);
+            const owned = res.owned;
             res = try semaEnsureAddressable(c, res, unwrap.res);
 
             const payload_t = res.type.cast(.result).child_t;
@@ -8767,8 +8768,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                 });
 
                 // Else result branch.
-                var unwrap_res = try semaUnwrapResultNoCheck(c, res, node);
-                unwrap_res = try sema_copy(c, unwrap_res, node);
+                const unwrap_res = try semaMoveOrCopyResultPayload(c, res, owned, node);
                 _ = try c.ir.pushStmt(.set_local, unwrap.res, .{
                     .id = @intCast(dst_local.ir_id),
                     .right = unwrap_res.ir,
@@ -8787,6 +8787,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
             const unwrap = node.cast(.unwrap_res_or_block);
 
             var res = try c.sema_expr_cstr_template(unwrap.res, c.sema.result_tmpl);
+            const owned = res.owned;
             res = try semaEnsureAddressable(c, res, unwrap.res);
 
             const payload_t = res.type.cast(.result).child_t;
@@ -8823,8 +8824,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
             });
 
             // Push result branch.
-            var unwrap_res = try semaUnwrapResultNoCheck(c, res, node);
-            unwrap_res = try sema_copy(c, unwrap_res, node);
+            const unwrap_res = try semaMoveOrCopyResultPayload(c, res, owned, node);
             _ = try c.ir.pushStmt(.set_local, unwrap.res, .{
                 .id = @intCast(dst_local.ir_id),
                 .right = unwrap_res.ir,
@@ -9773,9 +9773,18 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: Cstr) !ExprResult {
     switch (unary.op) {
         .minus => {
             var child: ExprResult = undefined;
+            // `return -x` in a function that returns `?T` or `!T` negates a `T` and wraps it after.
+            var neg_target_t = expr.target_t;
+            if (neg_target_t) |target_t| {
+                switch (target_t.kind()) {
+                    .option => neg_target_t = target_t.cast(.option).child_t,
+                    .result => neg_target_t = target_t.cast(.result).child_t,
+                    else => {},
+                }
+            }
             if (unary.child.type() == .decLit) {
                 const literal = unary.child.cast(.decLit).value.slice();
-                if (expr.target_t) |target_t| {
+                if (neg_target_t) |target_t| {
                     if (target_t == c.sema.f64_t) {
                         const val = try std.fmt.parseFloat(f64, literal);
                         return c.semaConst(@bitCast(-val), c.sema.f64_t, node);
@@ -9824,7 +9833,7 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: Cstr) !ExprResult {
                 }
                 return c.semaConst(@bitCast(val), c.sema.i64_t, node);
             } else {
-                child = try c.semaExprTarget(unary.child, expr.target_t);
+                child = try c.semaExprTarget(unary.child, neg_target_t);
             }
 
             switch (child.type.id()) {
@@ -10562,6 +10571,20 @@ pub fn semaMetaAccess(c: *cy.Chunk, left_n: *ast.Node, right_name: []const u8, r
 }
 
 fn semaAccessExpr3(c: *cy.Chunk, left_n: *ast.Node, right_name: []const u8, right_n: *ast.Node, prefer_ct_sym: bool, target_t: ?*cy.Type, check_visible: bool) !ExprResult {
+    if (left_n.type() == .ident) {
+        // A type parameter such as `%T type` is a compile-time `type` value: `meta.access(T, name)`
+        // looks up `name` in the type like `T.name` does.
+        const ident = try lookupIdent(c, left_n.cast(.ident).name.slice(), left_n);
+        if (ident == .ct_value) {
+            const ct_value = ident.ct_value;
+            defer c.heap.destructValue(ct_value);
+            if (ct_value.type.id() == bt.Type) {
+                const sym: *Sym = @ptrCast(ct_value.value.asPtr(*cy.Type).sym());
+                const rightSym = try c.getResolvedSymOrFail(sym, right_name, right_n);
+                return sema.symbol2(c, rightSym, prefer_ct_sym, target_t, right_n);
+            }
+        }
+    }
     const rec = try c.semaExprSkipSym(left_n, .{});
     if (rec.resType == .sym) {
         const sym = rec.data.sym;
@@ -12045,6 +12068,20 @@ pub fn semaStringLitCodepoint(c: *cy.Chunk, lit: []const u8, node: *ast.Node) !u
         };
     }
     return val;
+}
+
+/// The payload of `res` for `!else` once the error branch has left. A result that was a new value (a call)
+/// gives up its payload like `!` does, so a `NoCopy` payload can be unwrapped. A place is copied.
+fn semaMoveOrCopyResultPayload(c: *cy.Chunk, res: ExprResult, owned: bool, node: *ast.Node) !ExprResult {
+    var payload = try semaUnwrapResultNoCheck(c, res, node);
+    if (owned) {
+        if (res.recParentLocal()) |owner| {
+            c.varStack.items[owner].type = .dead;
+            payload.owned = true;
+            return payload;
+        }
+    }
+    return sema_copy(c, payload, node);
 }
 
 pub fn semaUnwrapOrStmt(c: *cy.Chunk, opt: ExprResult, res_ir_id: u32, outer: usize, node: *ast.Node) !void {

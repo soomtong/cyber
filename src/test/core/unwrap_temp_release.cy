@@ -29,4 +29,47 @@ fn run() -> !void:
 
 run()!
 
+-- `!else` moves the payload out of a returned result like `!` does, so a `NoCopy` payload unwraps (F-145).
+-- A result held in a variable is still copied.
+fn res_map(fail bool) -> !Map[str, int]:
+    if fail:
+        return error.Fail
+    var m Map[str, int] = {}
+    m['a'] = 1
+    return m
+
+global deinits int = 0
+
+type Res:
+    n int
+
+fn (&Res) @deinit():
+    deinits += 1
+
+fn res_res(n int) -> !Res:
+    if n < 0:
+        return error.Neg
+    return Res{n=n}
+
+fn run_else() -> !void:
+    a := res_map(false) !else Map[str, int]{}
+    t.eq(1, a['a'])
+    b := res_map(true) !else Map[str, int]{}
+    t.eq(0, b.size())
+    c := res_map(false) !else |err|:
+        return err
+    t.eq(1, c['a'])
+    r := res_res(1) !else Res{n=9}
+    t.eq(1, r.n)
+    var held !int = 5
+    t.eq(5, held !else 0)
+    t.eq(5, held !else 0)
+    q := res_res(-1) !else |err|:
+        t.eq(error.Neg, err)
+        return
+    t.fail()
+
+run_else()!
+t.eq(1, deinits)
+
 --cytest: pass

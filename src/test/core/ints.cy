@@ -149,6 +149,21 @@ t.eq(error.InvalidCharacter, parse_err('+'))
 t.eq(error.InvalidCharacter, parse_err('abc'))
 t.eq(error.InvalidCharacter, parse_err('1-2'))
 t.eq(error.InvalidCharacter, parse_err('12a'))
+-- Overflow (F-142). A bad digit after an overflow is still `InvalidCharacter`.
+t.eq(-9223372036854775808, int.parse('-9223372036854775808') !else 99)
+t.eq(error.Overflow, parse_err('9223372036854775808'))
+t.eq(error.Overflow, parse_err('-9223372036854775809'))
+t.eq(error.Overflow, parse_err('99999999999999999999'))
+t.eq(error.Overflow, parse_err('00000000000000000000099999999999999999999'))
+t.eq(5, int.parse('0000000000000000000000000005') !else 99)
+t.eq(error.InvalidCharacter, parse_err('99999999999999999999x'))
+t.eq(127, i8.parse('127') !else 99)
+t.eq(99, i8.parse('128') !else 99)
+t.eq(99, i8.parse('-129') !else 99)
+t.eq(99, i8.parse('1000') !else 99)
+t.eq(-2147483648, i32.parse('-2147483648') !else 99)
+t.eq(99, i32.parse('2147483648') !else 99)
+t.eq(0, int('99999999999999999999'))
 t.eq(-7, int('-7'))
 t.eq(0, int(''))
 t.eq(0, int('abc'))
@@ -229,5 +244,19 @@ fn take_float(a float) -> float:
 t.eq(-4.0, take_float(~3))
 var not_opt ?int = ~not_x
 t.eq(-6, not_opt.?)
+
+-- Negation where the target is an option or a result (F-144).
+fn neg_res(x int) -> !int:
+    return -x
+fn neg_opt(x int) -> ?int:
+    return -x
+fn neg_lit_i8() -> ?i8:
+    return -5
+fn neg_float(x float) -> ?float:
+    return -x
+t.eq(-3, neg_res(3)!)
+t.eq(-3, neg_opt(3).?)
+t.eq(i8(-5), neg_lit_i8().?)
+t.eq(-1.5, neg_float(1.5).?)
 
 --cytest: pass

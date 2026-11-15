@@ -581,15 +581,26 @@ fn Int[] :: parse(s str) -> !Self:
     if start == slen:
         return error.InvalidCharacter
 
+    -- Accumulates as a negative number so that `Self.min` fits. Checks every digit before overflow.
+    for start..slen |i|:
+        if !str.is_ascii_digit(s[i]):
+            return error.InvalidCharacter
+    lim := Self.min / 10
     res := Self(0)
     for start..slen |i|:
-        ch := s[i]
-        if !str.is_ascii_digit(ch):
-            return error.InvalidCharacter
-        res = res * 10 + Self(ch - '0')
+        d := Self(s[i] - '0')
+        if res < lim:
+            return error.Overflow
+        res = res * 10
+        if res < Self.min + d:
+            return error.Overflow
+        res = res - d
     if neg:
-        res = -res
-    return res
+        return res
+    if res == Self.min:
+        return error.Overflow
+    pos := -res
+    return pos
 
 #[reserve] fn (Int[]) `~`() -> Self
 #[reserve] fn (Int[]) `-`() -> Self

@@ -4237,6 +4237,24 @@ print(json.stringify(toon.decode('tags[2]: a,b')!))   --> {"tags":["a","b"]}
 - Write: `json.stringify(v)` is compact and `json.stringify(v, 2)` puts each element on its own line. NaN and infinities become `null`. A float uses the shortest digits that read back as the same value, without a trailing `.0`, and an exponent below `1e-6` or from `1e21` (`1e+21`).
 - Convert: `json.encode(x)` and `json.from(x)` take a Cyber value: numbers, `bool`, `str`, slices, structs (fields in order), optionals (`none` is `null`), enums (the case name), choices (`{"case": payload}`) and `Map` with `str` keys (sorted). Pass a borrow for a value that can not be copied: `json.encode(&map)`.
 
+`json.to(T, v)` converts a `Value` back to a Cyber type, and `json.decode(T, src)` parses and converts in one step. It takes the same types as `from`, except `Array` and fixed size arrays. A struct field must be present unless it is an optional (a missing member is `none`), and members that are not fields are ignored. An integer type takes a whole float such as `3e2`, and a float type takes an integer. On failure it returns `error.Type` (another kind of value or an unknown case name), `error.MissingField` or `error.Overflow` (a number out of the type's range), and a `json.Diag` tells where through `path`:
+```cy
+type User:
+    id    int
+    name  str
+    email ?str
+
+u := json.decode(User, '{"id": 7, "name": "Ada"}')!
+print(u.name)       --> Ada
+
+var diag json.Diag = {}
+try:
+    _ = json.decode([]User, '[{"id": 1, "name": 2}]', &diag)!
+else |err|:
+    print('%{err} %{diag.path}: %{diag.msg}')
+--> error.Type $[0].name: Expected a string, found number.
+```
+
 Parsing returns `error.Syntax` for malformed text and `error.Unicode` for text that is not UTF-8. Arrays and objects can nest 256 levels. A `json.Diag` passed to `parse` tells where and why parsing failed:
 ```cy
 var diag json.Diag = {}

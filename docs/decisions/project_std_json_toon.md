@@ -37,8 +37,7 @@ https://github.com/toon-format/spec)를 따른다.
   같다(serde는 `1.0`을 남긴다. 여기서는 JS · TOON과 맞췄다).
 - 리플렉션 변환 `json.from(x)` · `json.encode(x)`는 serde `Serialize` 대신 `type.info` · `#for` · `meta.access`(core `dump_str`과
   같은 방식)를 쓴다. `Map`은 `NoCopy`라 빌림으로 받는다(`json.encode(&map)`), 키는 정해진 출력을 위해 정렬한다. choice는 serde의
-  외부 태그 꼴(`"case"`, `{"case": payload}`)이다. 반대 방향(`Value` → 타입)은 아직 없다. struct를 필드별로 만들 메타 수단이
-  필요하다.
+  외부 태그 꼴(`"case"`, `{"case": payload}`)이다. 반대 방향은 아래 "`Value` → 타입 역변환".
 - `Value`의 동등성: `==`는 연산자 메서드로 정의할 수 없고 core `@eq`가 choice를 지원하지 않는다. `Value.eq`를 두고(숫자는 값,
   객체는 키 순서 무관) 문서에 `== none` 대신 `?else` · `if |x|`를 쓰라고 적었다. core `@eq`에 choice를 더하는 것은 따로 판단한다
   (슬라이스 `==`의 의미가 먼저 정해져야 한다).
@@ -64,11 +63,52 @@ ReleaseFast에서 1.5 MB JSON(객체 1만 개) 파싱 약 0.15초, 직렬화 약
 
 - F-141(수정): `.?` · `!`로 임시 옵션 · 결과에서 꺼낸 관리 값을 `==`나 `for`가 빌리면 해제되지 않았다. `for v['a'].as_array().? |x|`가
   JSON 코드의 흔한 꼴이라 같이 고쳤다(`sema.zig` `.unwrap` · `.unwrap_res`에서 옮겨 온 결과를 `addressable = false`로).
-- F-142(열림): `Int.parse`가 넘침을 검사하지 않는다. `json`은 음수로 누적하는 자체 `parse_int`를 쓴다.
+- F-142(수정): `Int.parse`가 넘침을 검사하지 않았다. 이제 `json.parse_int`와 같이 음수로 누적하며 `error.Overflow`를 돌려준다.
 - F-143(수정): wasm32에서 `str.is_utf8`이 포인터 칸의 위 32비트를 읽어 panic. `json.parse`가 입력 검사로 부르면서 드러났다.
+
+## `Value` → 타입 역변환 (2026-11-15)
+
+`json.to(T, v)` · `json.to(T, v, &diag)`, `json.decode(T, src)` · `json.decode(T, src, &diag)`. serde `Deserialize`의 기본 동작을 따랐다.
+
+- 받는 타입은 `from`과 같다(`Array` · 고정 길이 배열 제외). struct 필드는 있어야 하고(옵션 필드만 없으면 `none`), 필드가 아닌 멤버는
+  무시한다(serde 기본, `deny_unknown_fields` 없음). 필드 기본값(`x int = 3`)은 메타로 읽을 수 없어 쓰지 않는다.
+- 수: 정수 타입은 정수 `float`(`3e2`)도 받는다(serde는 거부). 에이전트가 쓴 JSON에 흔하고, 우리 `stringify`가 `1.0`을 `1`로 쓰는
+  것과 짝이다. 범위 밖은 `error.Overflow`(`int.parse`와 같은 이름). 실수 타입은 정수도 받는다.
+- 오류: `error.Type`(다른 종류 · 모르는 case 이름), `error.MissingField`, `error.Overflow`. `Diag`에 `path` 필드를 더해 `$.users[1].id`
+  꼴로 적는다. 경로는 성공 경로에서 만들지 않고 실패가 올라오면서 앞에 붙인다. 식별자 꼴이 아닌 키는 `["a b"]`.
+- struct는 `var res T = undef`에 필드를 하나씩 `@ptr_init`한다. 중간에 실패하면 실패한 필드부터 끝까지 0 값(`zero(T)`, 받는 타입마다
+  정의)으로 채워 `res`를 온전하게 만든 뒤 보통처럼 해제한다. `meta.consume`로 버리는 길은 하위 블록에서 쓸 수 없어(옮김과 같은 규칙,
+  `else` 갈래의 consume이 뒤까지 죽은 상태로 남음) 택하지 않았다.
+- 같이 고친 컴파일러 제약: `!else`(식 · 블록 꼴)가 호출이 돌려준 결과에서도 페이로드를 복사해 `!Map[...]` 같은 `NoCopy` 결과를 쓸 수
+  없었다(`!`는 옮김). 이제 소유한 결과면 옮긴다(`sema.zig` `semaMoveOrCopyResultPayload`). `meta.access(T, name)`의 `T`가 `%T type`
+  템플릿 인자면 `Unsupported expansion of compile-time value of type: type`였다. 이제 타입 심볼로 찾는다(`semaAccessExpr3`).
+- 아직 컴파일 타임 `#for x |v|`(EvalBuffer 반복)는 `#case` 바로 아래 문장으로 못 쓴다(`for_iter_stmt`). `#for 0..n |i|`로 돈다.
+
+## 큰 수 · 고정밀 수 (검토, 사용자 결정 대기)
+
+지금: 소수부 · 지수 없는 수가 `int`에 맞으면 `int`, 나머지는 `float`(가장 가까운 값). 그래서 `9223372036854775808`은
+`9223372036854776000`, `12345678901234567890123`은 `1.2345678901234568e+22`, 17자리를 넘는 소수는 잘린다. 오류 없이 값이 바뀐다.
+읽고 다시 쓰면 원문과 다르다(TOON 인코드도 같다).
+
+다른 구현:
+- Go `encoding/json`: `Decoder.UseNumber()`면 수를 `json.Number`(원문 문자열 타입)로 두고 `Int64()` · `Float64()`로 바꾼다. 기본은 `float64`.
+- Rust `serde_json`: 기본은 `u64` · `i64` · `f64`. `arbitrary_precision` 기능을 켜면 `Number`가 원문 문자열을 들고 직렬화도 원문 그대로.
+- Zig `std.json`: `Value.number_string`. `int`에 안 맞는 정수와 `parse_numbers = false`일 때의 모든 수를 원문으로 둔다.
+- Python `json`: `parse_int` · `parse_float` 훅(`decimal.Decimal`). 기본 `int`는 임의 정밀도라 정수는 손실이 없다.
+- JavaScript `JSON.parse`: 모두 `number`(손실). TOON 참조 구현도 이것을 따른다.
+
+안:
+- 안 1: 그대로 두고 문서에 손실을 적는다. 비용 없음. 거래 ID · 해시 같은 큰 정수를 다루는 에이전트 코드가 조용히 틀린다.
+- 안 2(추천): `Value`에 `case number str`(원문 10진 텍스트)을 더한다. 파서는 `int`에 안 맞는 정수를 항상 `number`로 두고(손실 대신
+  보존, Zig와 같음), `ParseOptions{exact=true}`면 소수 · 지수가 있는 수도 원문으로 둔다(Go `UseNumber`). `stringify`는 원문을 쓰고,
+  TOON 인코더는 §2 정규형으로 바꿔 쓴다(지수 풀기 · 뒤 0 제거, 문자열 연산). `as_float`는 변환, `as_int`는 `none`, `eq`는 정규형 비교,
+  `json.to`는 `float`으로 근사하거나 `str` 필드로 원문을 받는다. 큰 정수 타입이 std에 없으므로 원문 문자열이 유일한 무손실 출구다.
+- 안 3: 모든 수를 원문으로(serde `arbitrary_precision`). 가장 정확하지만 `as_int` · 산술마다 파싱이 들어 느리고 쓰기 번거롭다.
+
+시점: `json`은 아직 릴리스 전(0.4.12에 처음 나감)이라 `Value`에 case를 더해도 호환성 문제가 없다. 릴리스 뒤에 더하면 `Value`를
+빠짐없이 `switch`하는 사용자 코드가 깨진다. 안 2를 하려면 0.4.12 전에 하는 것이 맞다.
 
 ## 남은 일
 
-- `Value` → Cyber 타입 역변환(`json.to(T, v)` 또는 `json.decode(T, src)`).
-- 큰 정수 · 고정밀 수의 무손실 경로(사양이 SHOULD로 권하는 옵션).
+- 큰 수: 위 안 중 결정.
 - core `@eq`의 choice 지원 여부.

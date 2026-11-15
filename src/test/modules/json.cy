@@ -113,4 +113,74 @@ var m Map[str, int] = {b=2, a=1}
 t.eq('{"a":1,"b":2}', json.encode(&m))
 t.eq('[1,2]', json.encode([]int{1, 2}))
 
+-- `to` and `decode`: the reverse of `from`.
+back := json.decode(User, json.encode(u))!
+t.eq(1, back.id)
+t.eq('Ada', back.name)
+t.eq(2, back.tags.len())
+t.eq('b', back.tags[1])
+t.eq(true, back.score == none)
+t.eq(Color.green, back.color)
+t.eq(2.5, back.shape.!circle)
+t.eq(7, back.b)
+t.eq(json.encode(u), json.encode(back))
+
+type Item:
+    name  str
+    qty   i32
+    note  ?str
+    sizes []Size
+
+type Size:
+    w int
+    h int
+
+-- A missing optional field is `none`, members that are not fields are ignored, a whole float converts to an integer.
+item := json.decode(Item, '{"name": "pen", "qty": 3e2, "extra": [1], "sizes": [{"w": 1, "h": 2}]}')!
+t.eq('pen', item.name)
+t.eq(300, item.qty)
+t.eq(true, item.note == none)
+t.eq(2, item.sizes[0].h)
+t.eq(1.0, json.to(float, json.Value.int(1))!)
+t.eq(true, json.to(?str, json.Value.null)! == none)
+t.eq('x', json.to(?str, json.Value.str('x'))!.?)
+t.eq('"point"', json.encode(json.to(Shape, json.Value.str('point'))!))
+t.eq(true, json.to(json.Value, json.Value.int(5))!.eq(json.Value.int(5)))
+mm := json.decode(Map[str, []int], '{"a": [1, 2], "b": []}')!
+t.eq(2, mm['a'][1])
+t.eq(0, mm['b'].len())
+
+-- Failures say where and why. A struct that fails part way releases the fields it has made.
+fn to_fails(src str, err error, path str, msg str):
+    var diag json.Diag = {}
+    _ = json.decode(Item, src, &diag) !else |e|:
+        t.eq(err, e)
+        t.eq(path, diag.path)
+        t.eq(msg, diag.msg)
+        return
+    t.fail()
+
+to_fails('{"qty": 1}', error.MissingField, '$', 'Missing the field `name`.')
+to_fails('[]', error.Type, '$', 'Expected an object, found array.')
+to_fails('{"name": "a", "qty": 1.5}', error.Type, '$.qty', 'Expected an integer, found `1.5`.')
+to_fails('{"name": "a", "qty": 3000000000}', error.Overflow, '$.qty', 'The number `3000000000` does not fit `i32`.')
+to_fails('{"name": "a", "qty": 1e300}', error.Overflow, '$.qty', 'The number `1e+300` does not fit `int`.')
+to_fails('{"name": "a", "qty": 1, "note": 5}', error.Type, '$.note', 'Expected a string, found number.')
+to_fails('{"name": "a", "qty": 1, "note": "n", "sizes": [{"w": 1, "h": 2}, {"w": 1}]}', error.MissingField,
+    '$.sizes[1]', 'Missing the field `h`.')
+to_fails('{"name": "a", "qty": 1, "sizes": [{"w": 1, "h": true}]}', error.Type, '$.sizes[0].h', 'Expected an integer, found bool.')
+to_fails('{"name": "a"', error.Syntax, '', 'Expected `,` or `}` in an object, found the end of input.')
+
+fn to_fails_v(v json.Value) -> str:
+    var diag json.Diag = {}
+    _ = json.to(Map[str, Shape], v, &diag) !else |e|:
+        return '%{e} %{diag.path} %{diag.msg}'
+    return 'ok'
+
+t.eq('error.Type $["a b"] `square` is not a case of `Shape` without a payload.', to_fails_v(json.parse('{"a b": "square"}')!))
+t.eq('error.Type $.a.circle Expected a number, found string.', to_fails_v(json.parse('{"a": {"circle": "x"}}')!))
+t.eq('error.Type $.a Expected an object with one member for `Shape`, found 2 members.', to_fails_v(json.parse('{"a": {"circle": 1, "point": 2}}')!))
+t.eq('error.Type $.a Expected a string or an object, found number.', to_fails_v(json.parse('{"a": 1}')!))
+t.eq('ok', to_fails_v(json.parse('{"a": {"circle": 1}, "b": "point"}')!))
+
 --cytest: pass

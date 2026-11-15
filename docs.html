@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.11-dev 896-d755dc5</div>
+    <div class="sub-title">v0.4.11-dev 900-40f3bc7</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -4582,6 +4582,7 @@ fn (&Box[]) dup() -> T:
 <li><a href="#main-function" title="">Main function.</a></li>
 <li><a href="#builtin-modules" title="">Builtin modules.</a><ul>
 <li><a href="#json-and-toon" title="">JSON and TOON.</a></li>
+<li><a href="#regular-expressions" title="">Regular expressions.</a></li>
 </ul>
 </li>
 <li><a href="#importing" title="">Importing.</a><ul>
@@ -4644,15 +4645,23 @@ print(toon.encode(v)!)
 -->   2,Bob
 print(json.stringify(toon.decode('tags[2]: a,b')!))   --> {"tags":["a","b"]}
 </code></pre>
-<p><code>json.Value</code> is a choice: <code>null</code>, <code>bool</code>, <code>int</code>, <code>float</code>, <code>str</code>, <code>array</code> (<code>[]Value</code>) and <code>object</code> (<code>json.Object</code>). A number without a fraction or an exponent that fits <code>int</code> parses as <code>int</code>, another number as <code>float</code>. An object keeps its keys in insertion order, and a duplicate key keeps its first position and takes the last value.</p>
+<p><code>json.Value</code> is a choice: <code>null</code>, <code>bool</code>, <code>int</code>, <code>float</code>, <code>number</code>, <code>str</code>, <code>array</code> (<code>[]Value</code>) and <code>object</code> (<code>json.Object</code>). A number without a fraction or an exponent that fits <code>int</code> parses as <code>int</code>, and another number as <code>float</code>. A number that neither holds without loss, an integer beyond <code>int</code> or a number beyond the <code>float</code> range, parses as <code>number</code>, which keeps its JSON text. <code>json.parse(src, json.ParseOptions{exact=true})</code> also keeps every number with a fraction or an exponent as <code>number</code>:</p>
+<pre><code class="language-cy">v := json.parse('[9223372036854775808, 0.1000000000000000055511151231257827]')!
+print(json.stringify(v))            --> [9223372036854775808,0.1]
+print(v[0].kind())                  --> number
+x := json.parse('[0.1000000000000000055511151231257827, 1.50]', json.ParseOptions{exact=true})!
+print(json.stringify(x))            --> [0.1000000000000000055511151231257827,1.50]
+print(x[1].number_text().?)         --> 1.5
+</code></pre>
+<p><code>number_text()</code> returns any number in one form (<code>1.50</code> and <code>1.5</code> give <code>1.5</code>, <code>1e2</code> gives <code>100</code>), and <code>json.fmt_number(text)</code> does the same for a token. <code>json.stringify</code> writes a <code>number</code> as it is, so its text must match the JSON number grammar. An object keeps its keys in insertion order, and a duplicate key keeps its first position and takes the last value.</p>
 <ul>
-<li>Read: <code>v['key']</code> and <code>v[idx]</code> return <code>Value.null</code> when the member is missing. <code>get(key)</code> and <code>at(idx)</code> return an option. <code>as_bool</code>, <code>as_int</code>, <code>as_float</code> (also converts an <code>int</code>), <code>as_str</code>, <code>as_array</code> and <code>as_object</code> return an option of the payload. <code>kind()</code> returns the JSON type name.</li>
-<li>Compare: <code>a.eq(b)</code> compares by the JSON model (<code>1</code> equals <code>1.0</code>, key order does not matter). <code>==</code> does not support <code>Value</code>, so test an option with <code>?else</code> or <code>if ... |x|</code> instead of <code>== none</code>.</li>
+<li>Read: <code>v['key']</code> and <code>v[idx]</code> return <code>Value.null</code> when the member is missing. <code>get(key)</code> and <code>at(idx)</code> return an option. <code>as_bool</code>, <code>as_int</code>, <code>as_float</code> (also converts an <code>int</code> and a <code>number</code>, <code>none</code> beyond the <code>float</code> range), <code>as_str</code>, <code>as_array</code> and <code>as_object</code> return an option of the payload. <code>kind()</code> returns the JSON type name.</li>
+<li>Compare: <code>a.eq(b)</code> compares by the JSON model (<code>1</code> equals <code>1.0</code>, key order does not matter). A <code>number</code> compares by <code>number_text()</code>. <code>==</code> does not support <code>Value</code>, so test an option with <code>?else</code> or <code>if ... |x|</code> instead of <code>== none</code>.</li>
 <li>Build: <code>json.Object</code> has <code>set</code>, <code>get</code>, <code>remove</code>, <code>contains</code>, <code>keys</code> and <code>len</code>. <code>json.object</code> and <code>json.array</code> make values from lists.</li>
 <li>Write: <code>json.stringify(v)</code> is compact and <code>json.stringify(v, 2)</code> puts each element on its own line. NaN and infinities become <code>null</code>. A float uses the shortest digits that read back as the same value, without a trailing <code>.0</code>, and an exponent below <code>1e-6</code> or from <code>1e21</code> (<code>1e+21</code>).</li>
 <li>Convert: <code>json.encode(x)</code> and <code>json.from(x)</code> take a Cyber value: numbers, <code>bool</code>, <code>str</code>, slices, structs (fields in order), optionals (<code>none</code> is <code>null</code>), enums (the case name), choices (<code>{"case": payload}</code>) and <code>Map</code> with <code>str</code> keys (sorted). Pass a borrow for a value that can not be copied: <code>json.encode(&map)</code>.</li>
 </ul>
-<p><code>json.to(T, v)</code> converts a <code>Value</code> back to a Cyber type, and <code>json.decode(T, src)</code> parses and converts in one step. It takes the same types as <code>from</code>, except <code>Array</code> and fixed size arrays. A struct field must be present unless it is an optional (a missing member is <code>none</code>), and members that are not fields are ignored. An integer type takes a whole float such as <code>3e2</code>, and a float type takes an integer. On failure it returns <code>error.Type</code> (another kind of value or an unknown case name), <code>error.MissingField</code> or <code>error.Overflow</code> (a number out of the type's range), and a <code>json.Diag</code> tells where through <code>path</code>:</p>
+<p><code>json.to(T, v)</code> converts a <code>Value</code> back to a Cyber type, and <code>json.decode(T, src)</code> parses and converts in one step. It takes the same types as <code>from</code>, except <code>Array</code> and fixed size arrays. A struct field must be present unless it is an optional (a missing member is <code>none</code>), and members that are not fields are ignored. An integer type takes a whole float such as <code>3e2</code>, a float type takes an integer, and <code>str</code> takes any number as its text, so a large ID can be read whole whatever its size. On failure it returns <code>error.Type</code> (another kind of value or an unknown case name), <code>error.MissingField</code> or <code>error.Overflow</code> (a number out of the type's range), and a <code>json.Diag</code> tells where through <code>path</code>:</p>
 <pre><code class="language-cy">type User:
     id    int
     name  str
@@ -4678,7 +4687,45 @@ else |err|:
 --> error.Syntax at 1:7: Expected a value, found `t`.
 </code></pre>
 <p><code>toon.encode(v)</code> follows the spec's forms: <code>key: value</code>, nested objects by indentation, inline primitive arrays (<code>tags[2]: a,b</code>), a table for an array of uniform objects (<code>users[2]{id,name}:</code>), a keyed table for an object whose values are uniform objects (<code>env[2:]{region}:</code>), and <code>- </code> items otherwise. <code>toon.EncodeOptions</code> sets <code>indent</code> (2) and <code>delim</code> (<code>.comma</code>, <code>.tab</code> or <code>.pipe</code>). It returns <code>error.Unicode</code> for a string that is not UTF-8.</p>
-<p><code>toon.decode(src)</code> checks declared lengths, table widths, indentation and duplicate keys. <code>toon.DecodeOptions{strict=false}</code> applies the spec's non-strict recoveries. Errors are <code>error.Syntax</code> with a <code>json.Diag</code> (line and column). An unquoted token that matches the JSON number grammar is a number, others are strings (<code>05</code> stays <code>"05"</code>); a number beyond the <code>float</code> range stays a string. <code>toon.from_json(src)</code> and <code>toon.to_json(src)</code> convert text directly. The implementation passes the spec's 564 conformance fixtures (<code>src/test/assets/toon-spec</code>).</p>
+<p><code>toon.decode(src)</code> checks declared lengths, table widths, indentation and duplicate keys. <code>toon.DecodeOptions{strict=false}</code> applies the spec's non-strict recoveries. Errors are <code>error.Syntax</code> with a <code>json.Diag</code> (line and column). An unquoted token that matches the JSON number grammar is a number, others are strings (<code>05</code> stays <code>"05"</code>); numbers decode as <code>json.parse</code> reads them, and <code>toon.DecodeOptions{exact=true}</code> keeps them as text like <code>json.ParseOptions</code>. A <code>number</code> encodes in the canonical form of <code>json.fmt_number</code>. <code>toon.from_json(src)</code> and <code>toon.to_json(src)</code> convert text directly. The implementation passes the spec's 564 conformance fixtures (<code>src/test/assets/toon-spec</code>).</p>
+<a href="#modules">^topic</a>
+<h3 id="regular-expressions">Regular expressions. <a href="#regular-expressions">#</a></h3>
+<p>The <code>regex</code> module searches text with regular expressions. Matching never backtracks: a search takes time linear in the length of the input, whatever the pattern. The syntax is a subset of the Rust <code>regex</code> crate's, which is the default syntax of <a href="https://github.com/BurntSushi/ripgrep" title="">ripgrep</a>. A pattern that compiles here matches what it matches there:</p>
+<pre><code class="language-cy">use regex
+
+re := regex.compile(`(?P<key>\w+)=(\d+)`)!
+line := 'retries=3 timeout=250'
+
+print(re.is_match(line))                --> true
+print(re.find(line).?.text)             --> retries=3
+for re.find_all(line) |m|:
+    print('%{m.start}..%{m.end} %{m.text}')
+--> 0..9 retries=3
+--> 10..21 timeout=250
+
+for re.captures_all(line) |c|:
+    print('%{c['key']} is %{c[2]}')
+--> retries is 3
+--> timeout is 250
+
+print(re.replace_all(line, '$2=$key'))  --> 3=retries 250=timeout
+print(regex.compile(`[,;]\s*`)!.split('a, b;c'))   --> {'a', 'b', 'c'}
+</code></pre>
+<p>Write patterns as raw strings (backticks) so that <code>\d</code> needs no second backslash.</p>
+<p><code>find</code> returns a <code>?regex.Match</code> with <code>start</code>, <code>end</code> (byte offsets) and <code>text</code>. <code>captures</code> returns a <code>?regex.Captures</code>: <code>c[0]</code> is the whole match, <code>c[1]</code> and <code>c['name']</code> are the text of a group, and <code>''</code> when the group did not take part in the match. <code>c.get(1)</code> and <code>c.get('name')</code> return a <code>?Match</code> and tell the two apart. Both take a second argument, the byte offset where the search starts. <code>find_all</code> and <code>captures_all</code> return every match from left to right. Matches do not overlap, and an empty match that touches the end of the match before it is left out (<code>a*</code> on <code>baaac</code> matches at 0, 1..4 and 5).</p>
+<p>In the replacement of <code>replace</code> (first match) and <code>replace_all</code>, <code>$1</code> and <code>${1}</code> stand for a group by number, <code>$name</code> and <code>${name}</code> by name, and <code>$$</code> for a dollar sign. A name takes the longest run of letters, digits and <code>_</code>, so write <code>${1}a</code>: <code>$1a</code> is the group named <code>1a</code>. A group that does not exist gives nothing. <code>split(s)</code> returns the pieces between the matches, <code>split(s, limit)</code> at most <code>limit</code> pieces. <code>regex.escape(s)</code> returns a pattern that matches <code>s</code> itself.</p>
+<p>The syntax:</p>
+<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>Characters</td><td><code>a</code>, <code>.</code> (any character but <code>\n</code>), <code>\n \t \r \a \f \v</code>, <code>\x7F</code>, <code>\x{1F600}</code>, <code>é</code>, <code>\u{E9}</code>, <code>\U0001F600</code>, <code>\.</code> and other escaped punctuation</td></tr><tr><td>Classes</td><td><code>[abc]</code>, <code>[^abc]</code>, <code>[a-z]</code>, nested <code>[a[^b]]</code>, <code>[a-z&&[^aeiou]]</code> (intersection), <code>[a-z--[aeiou]]</code> (difference), <code>[a-c~~b-d]</code> (in one but not both), <code>[[:alpha:]]</code>, <code>[[:^digit:]]</code></td></tr><tr><td>Perl classes</td><td><code>\d</code> (digit), <code>\s</code> (white space), <code>\w</code> (word character), <code>\D</code>, <code>\S</code>, <code>\W</code></td></tr><tr><td>Unicode classes</td><td><code>\pL</code>, <code>\p{Lu}</code>, <code>\p{Letter}</code>, <code>\p{Hangul}</code>, <code>\p{Greek}</code>, <code>\p{gc=Nd}</code>, <code>\p{sc=Latin}</code>, <code>\p{Alphabetic}</code>, <code>\p{Lowercase}</code>, <code>\p{Uppercase}</code>, <code>\p{White_Space}</code>, <code>\p{Any}</code>, <code>\p{ASCII}</code>, <code>\p{Assigned}</code>, and <code>\P{...}</code> for the rest</td></tr><tr><td>Repetition</td><td><code>*</code>, <code>+</code>, <code>?</code>, <code>{n}</code>, <code>{n,}</code>, <code>{n,m}</code>, and the lazy forms <code>*?</code>, <code>+?</code>, <code>??</code>, <code>{n,m}?</code></td></tr><tr><td>Assertions</td><td><code>^</code>, <code>$</code>, <code>\A</code>, <code>\z</code> (start and end of the input), <code>\b</code>, <code>\B</code>, <code>\b{start}</code> (<code>\<</code>), <code>\b{end}</code> (<code>\></code>), <code>\b{start-half}</code>, <code>\b{end-half}</code></td></tr><tr><td>Groups</td><td><code>(...)</code>, <code>(?:...)</code> (not captured), <code>(?P<name>...)</code>, <code>(?<name>...)</code>, <code>a\|b</code> (the first alternative that matches wins)</td></tr><tr><td>Flags</td><td><code>(?i)</code> ignore case, <code>(?m)</code> <code>^</code> and <code>$</code> match at line boundaries, <code>(?s)</code> <code>.</code> matches <code>\n</code>, <code>(?U)</code> swap greedy and lazy, <code>(?x)</code> ignore white space and <code>#</code> comments. <code>(?i:...)</code> for a group, <code>(?-i)</code> to turn off</td></tr></tbody></table><p>Matching is by Unicode code point. <code>\d</code>, <code>\s</code>, <code>\w</code>, <code>\b</code> and <code>(?i)</code> are Unicode aware (<code>\w+</code> matches <code>한글</code>, <code>(?i)k</code> matches the Kelvin sign), as in ripgrep. The tables are those of Unicode <code>regex.unicode_version()</code>. A byte of the input that is not UTF-8 matches no class, not even <code>.</code>, and the search goes on after it. <code>$</code> matches only at the end of the input unless <code>(?m)</code> is on. ripgrep searches line by line, this module the whole string: <code>\s</code> and <code>[^a]</code> match a line feed.</p>
+<p>Not supported, because they need backtracking or are rarely used: look-ahead and look-behind, backreferences (<code>\1</code>), possessive and atomic groups, <code>\Z</code>, octal escapes, the <code>R</code> flag, turning off <code>u</code>, and Unicode properties other than general categories, scripts and the ones listed. <code>regex.compile</code> returns <code>error.Syntax</code> for these and for a malformed pattern. Pass a <code>regex.Diag</code> to see why:</p>
+<pre><code class="language-cy">var diag regex.Diag = {}
+try:
+    re := regex.compile(`(\w+)\s+\1`, &diag)!
+    print(re.is_match('a a'))
+else |err|:
+    print('%{err} at %{diag.pos}: %{diag.msg}')
+--> error.Syntax at 8: Backreferences (`\1`) and octal escapes are not supported: matching never backtracks. Capture both parts and compare them in code. A character by number is `\x41` or `\x{1F600}`.
+</code></pre>
+<p>A counted repetition is expanded, so <code>\w{100}</code> is 100 steps of the program. A program over <code>regex.MaxInsts</code> (32768) instructions is <code>error.TooBig</code>, and groups, classes and repetitions nest at most <code>regex.MaxDepth</code> (250) deep. One search takes at most the size of the program times the length of the input. A compiled <code>Regex</code> does not change: compile once and use it for every search.</p>
 <a href="#modules">^topic</a>
 <h2 id="importing">Importing. <a href="#importing">#</a></h2>
 <p>The <code>use</code> statement can import modules. Builtin and std modules such as <code>math</code> can be imported without any configuration:</p>

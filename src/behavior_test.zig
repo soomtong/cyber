@@ -376,6 +376,7 @@ if (!aot) {
             run.case("modules/os.cy");
             // Reads the fixtures with `os.read_file`.
             run.case("modules/regex_spec.cy");
+            run.case("modules/time_zone.cy");
             run.case("modules/toon_spec.cy");
         }
     }

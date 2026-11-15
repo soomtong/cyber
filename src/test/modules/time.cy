@@ -306,4 +306,134 @@ for {'%Y-%m-%d %H:%M:%S.%9f %z', '%d/%b/%Y:%H:%M:%S %:z.%9f', '%A, %B %e %Y %I:%
     back := time.parse_format(dt.format(fmt)!, fmt)!
     t.eq(true, back == dt)
 
+-- Time zones from a POSIX rule. They need no time zone database.
+ny := time.zone_from_posix('EST5EDT,M3.2.0,M11.1.0')!
+t.eq('EST5EDT,M3.2.0,M11.1.0', ny.name())
+jul := time.parse('2026-07-04T12:00:00Z')!.time()
+jan := time.parse('2026-01-04T12:00:00Z')!.time()
+t.eq(-240, ny.offset_at(jul))
+t.eq(true, ny.is_dst(jul))
+t.eq('EDT', ny.abbreviation(jul))
+t.eq(-300, ny.offset_at(jan))
+t.eq(false, ny.is_dst(jan))
+t.eq('EST', ny.abbreviation(jan))
+t.eq('2026-07-04T08:00:00-04:00', jul.to_zone(ny).format())
+t.eq('2026-01-04 07:00:00 EST -0500', jan.to_zone(ny).format('%F %T %Z %z')!)
+t.eq('2026-07-04T08:00:00-04:00', time.parse('2026-07-04T21:00:00+09:00')!.to_zone(ny).format())
+-- The second of each transition.
+t.eq('2026-03-08T01:59:59-05:00', time.parse('2026-03-08T06:59:59Z')!.to_zone(ny).format())
+t.eq('2026-03-08T03:00:00-04:00', time.parse('2026-03-08T07:00:00Z')!.to_zone(ny).format())
+t.eq('2026-11-01T01:59:59-04:00', time.parse('2026-11-01T05:59:59Z')!.to_zone(ny).format())
+t.eq('2026-11-01T01:00:00-05:00', time.parse('2026-11-01T06:00:00Z')!.to_zone(ny).format())
+
+-- A time of day that is skipped, and one that comes twice.
+t.eq('2026-03-08T03:30:00-04:00', ny.datetime(2026, 3, 8, 2, 30, 0)!.format())
+t.eq('2026-03-08T03:30:00-04:00', ny.datetime(2026, 3, 8, 2, 30, 0, 0, .later)!.format())
+t.eq('2026-03-08T01:30:00-05:00', ny.datetime(2026, 3, 8, 2, 30, 0, 0, .earlier)!.format())
+t.eq(error.Skipped, ny.datetime(2026, 3, 8, 2, 30, 0, 0, .reject).unwrap_error())
+t.eq('2026-11-01T01:30:00-04:00', ny.datetime(2026, 11, 1, 1, 30, 0)!.format())
+t.eq('2026-11-01T01:30:00-04:00', ny.datetime(2026, 11, 1, 1, 30, 0, 0, .earlier)!.format())
+t.eq('2026-11-01T01:30:00.5-05:00', ny.datetime(2026, 11, 1, 1, 30, 0, 500000000, .later)!.format())
+t.eq(error.Ambiguous, ny.datetime(2026, 11, 1, 1, 30, 0, 0, .reject).unwrap_error())
+t.eq('2026-07-04T08:00:00-04:00', ny.datetime(2026, 7, 4, 8, 0, 0, 0, .reject)!.format())
+t.eq('2026-03-08T03:00:00-04:00', ny.datetime(2026, 3, 8, 3, 0, 0, 0, .reject)!.format())
+t.eq('2026-03-08T01:59:59-05:00', ny.datetime(2026, 3, 8, 1, 59, 59, 0, .reject)!.format())
+t.eq(error.Range, ny.datetime(2026, 2, 30, 0, 0, 0).unwrap_error())
+t.eq(error.Range, ny.datetime(2026, 3, 8, 24, 0, 0).unwrap_error())
+t.eq('2026-03-08T03:30:00-04:00', time.date(2026, 3, 8)!.at(2, 30, 0, ny)!.format())
+t.eq('2026-03-08T03:30:00-04:00', time.datetime(2026, 3, 8, 2, 30, 0)!.replace_zone(ny)!.format())
+t.eq('2026-11-15T10:22:01.123-05:00', time.parse('2026-11-15 10:22:01,123', 0)!.replace_zone(ny)!.format())
+
+-- In a zone, a day is not always 24 hours.
+noon := ny.datetime(2026, 3, 7, 12, 0, 0)!
+t.eq('2026-03-08T12:00:00-04:00', noon.add_days(1)!.format())
+t.eq('2026-03-08T13:00:00-04:00', (noon + time.hours(24)).format())
+t.eq('2026-03-08T13:00:00-04:00', noon.add(time.days(1))!.format())
+t.eq('2026-03-06T12:00:00-05:00', (noon - time.hours(24)).format())
+t.eq('2026-11-07T12:00:00-05:00', noon.add_months(8)!.format())
+t.eq('2027-03-07T12:00:00-05:00', noon.add_years(1)!.format())
+t.eq('2026-03-08T03:30:00-04:00', ny.datetime(2026, 3, 7, 2, 30, 0)!.add_days(1)!.format())
+t.eq('2026-03-09T02:30:00-04:00', ny.datetime(2026, 3, 7, 2, 30, 0)!.add_days(2)!.format())
+t.eq(23, (noon.add_days(1)!.time() - noon.time()).secs() / 3600)
+
+-- A value keeps its zone until it is given an offset.
+t.eq('EST5EDT,M3.2.0,M11.1.0', noon.zone().?.name())
+t.eq('EST5EDT,M3.2.0,M11.1.0', noon.add_days(1)!.zone().?.name())
+t.eq(true, noon.utc().zone() == none)
+t.eq(true, noon.to_offset(-300)!.zone() == none)
+t.eq(true, noon.replace_offset(-300)!.zone() == none)
+t.eq(true, time.unix(0)!.utc().zone() == none)
+t.eq(true, noon == ny.datetime(2026, 3, 7, 12, 0, 0)!)
+t.eq(true, noon == noon.time().to_zone(time.zone_from_posix('EST5EDT,M3.2.0,M11.1.0')!))
+t.eq(false, noon == noon.to_offset(-300)!)
+t.eq(false, noon == noon.to_zone(time.zone_from_posix('EST5')!))
+t.eq(true, noon.time() == noon.to_offset(-300)!.time())
+
+-- Other shapes of a rule.
+syd := time.zone_from_posix('AEST-10AEDT,M10.1.0,M4.1.0/3')!
+t.eq('2026-01-04 23:00:00 AEDT', jan.to_zone(syd).format('%F %T %Z')!)
+t.eq('2026-07-04 22:00:00 AEST', jul.to_zone(syd).format('%F %T %Z')!)
+t.eq('2026-04-05T02:59:59+11:00', time.parse('2026-04-04T15:59:59Z')!.to_zone(syd).format())
+t.eq('2026-04-05T02:00:00+10:00', time.parse('2026-04-04T16:00:00Z')!.to_zone(syd).format())
+t.eq('2026-10-04T03:00:00+11:00', time.parse('2026-10-03T16:00:00Z')!.to_zone(syd).format())
+lhi := time.zone_from_posix('<+1030>-10:30<+11>-11,M10.1.0,M4.1.0')!
+t.eq('2026-07-04 22:30:00 +1030 +1030', jul.to_zone(lhi).format('%F %T %Z %z')!)
+t.eq('2026-01-04 23:00:00 +11', jan.to_zone(lhi).format('%F %T %Z')!)
+kst := time.zone_from_posix('KST-9')!
+t.eq(540, kst.offset_at(jul))
+t.eq(false, kst.is_dst(jul))
+t.eq('2026-07-04 21:00:00 KST', jul.to_zone(kst).format('%F %T %Z')!)
+t.eq(345, time.zone_from_posix('<+0545>-5:45')!.offset_at(jul))
+t.eq(-210, time.zone_from_posix('NST3:30')!.offset_at(jul))
+-- Without days, the rule of the United States.
+t.eq(true, time.zone_from_posix('EST5EDT')!.is_dst(jul))
+t.eq(false, time.zone_from_posix('EST5EDT')!.is_dst(jan))
+-- `Jn` does not count February 29, `n` does. Both rules start on March 1 of 2024, a leap year.
+jz := time.zone_from_posix('AAA0BBB,J60/0,J305/0')!
+nz := time.zone_from_posix('AAA0BBB,60/0,304/0')!
+t.eq(false, jz.is_dst(time.parse('2024-02-29T23:59:59Z')!.time()))
+t.eq(true, jz.is_dst(time.parse('2024-03-01T00:00:00Z')!.time()))
+t.eq(false, nz.is_dst(time.parse('2024-02-29T23:59:59Z')!.time()))
+t.eq(true, nz.is_dst(time.parse('2024-03-01T00:00:00Z')!.time()))
+t.eq(true, jz.is_dst(time.parse('2023-03-01T00:00:00Z')!.time()))
+t.eq(false, jz.is_dst(time.parse('2023-02-28T23:59:59Z')!.time()))
+-- The last week of a month, and a negative time of day.
+cet := time.zone_from_posix('CET-1CEST,M3.5.0,M10.5.0/3')!
+t.eq('2026-03-29T03:00:00+02:00', time.parse('2026-03-29T01:00:00Z')!.to_zone(cet).format())
+t.eq('2026-03-29T01:59:59+01:00', time.parse('2026-03-29T00:59:59Z')!.to_zone(cet).format())
+t.eq('2026-10-25T02:00:00+01:00', time.parse('2026-10-25T01:00:00Z')!.to_zone(cet).format())
+god := time.zone_from_posix('<-02>2<-01>,M3.5.0/-1,M10.5.0/0')!
+t.eq('2026-03-29T00:00:00-01:00', time.parse('2026-03-29T01:00:00Z')!.to_zone(god).format())
+t.eq('2026-03-28T22:59:59-02:00', time.parse('2026-03-29T00:59:59Z')!.to_zone(god).format())
+t.eq(error.Syntax, time.zone_from_posix('').unwrap_error())
+t.eq(error.Syntax, time.zone_from_posix('X').unwrap_error())
+t.eq(error.Syntax, time.zone_from_posix('EST').unwrap_error())
+t.eq(error.Syntax, time.zone_from_posix('EST25').unwrap_error())
+t.eq(error.Syntax, time.zone_from_posix('EST5EDT,M13.1.0,M11.1.0').unwrap_error())
+t.eq(error.Syntax, time.zone_from_posix('EST5EDT,M3.2.0').unwrap_error())
+t.eq(error.Syntax, time.zone_from_posix('EST5EDT,M3.2.0,M11.1.0x').unwrap_error())
+t.eq(error.Syntax, time.zone_from_posix('EST5EDT,J366,J1').unwrap_error())
+t.eq(error.Syntax, time.zone_from_posix('<EST5').unwrap_error())
+
+-- `UTC` needs no database. A name that the system does not have, or that is not a zone name, is not found.
+utc := time.zone('UTC')!
+t.eq('UTC', utc.name())
+t.eq(0, utc.offset_at(jul))
+t.eq('2026-07-04 12:00:00 UTC +0000', jul.to_zone(utc).format('%F %T %Z %z')!)
+t.eq(error.NotFound, time.zone('Nope/Zone').unwrap_error())
+t.eq(error.NotFound, time.zone('').unwrap_error())
+t.eq(error.NotFound, time.zone('../../etc/passwd').unwrap_error())
+t.eq(error.NotFound, time.zone('/etc/localtime').unwrap_error())
+t.eq(error.Syntax, time.zone_from_tzif('x', []byte{1, 2, 3}).unwrap_error())
+var junk []byte = {}
+junk = junk.append('TZif2 and then nothing that a file of zone data would have in it'.span())
+t.eq(error.Syntax, time.zone_from_tzif('x', junk).unwrap_error())
+
+-- `%Z` of a value without a zone is `UTC` or the offset. It is not parsed.
+t.eq('UTC', dt.utc().format('%Z')!)
+t.eq('+05:30', dt.format('%Z')!)
+t.eq(error.Format, d.format('%Z').unwrap_error())
+t.eq(error.Format, time.parse_format('UTC', '%Z', &diag).unwrap_error())
+t.eq('`%Z` is for output only: an abbreviation such as `CST` names more than one zone. Parse the offset with `%z`, or read the text in a zone with `replace_zone`.', diag.msg)
+
 --cytest: pass

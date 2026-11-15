@@ -1,6 +1,8 @@
---| Instants, calendar dates and durations. Time zones are UTC and fixed offsets, given in minutes east of UTC.
---| A `Time` is an instant, a `DateTime` is an instant seen at an offset, a `Date` is a calendar day and
---| a `Duration` is a length of time. The calendar is the proleptic Gregorian one, years 1 to 9999, without leap seconds.
+--| Instants, calendar dates, durations and time zones.
+--| A `Time` is an instant, a `DateTime` is an instant seen at a UTC offset or in a time zone, a `Date` is a
+--| calendar day and a `Duration` is a length of time. An offset is in minutes east of UTC. A `Zone` is a time zone
+--| of the IANA database, read from the system. The calendar is the proleptic Gregorian one, years 1 to 9999,
+--| without leap seconds.
 --| Sample usage:
 --| ```cy
 --| use time
@@ -14,6 +16,9 @@
 --| start := time.now()
 --| print((time.now() - start) < time.seconds(1)) --> true
 --| print(start.to_offset(330)!.format())         --> the current time at +05:30
+--|
+--| ny := time.zone('America/New_York')!
+--| print(dt.to_zone(ny).format('%F %T %Z')!)     --> 2026-11-14 20:22:03 EST
 --| ```
 
 --| The least and the greatest UTC offset, in minutes: -23:59 and +23:59.
@@ -45,12 +50,13 @@ type Time:
     -sec  int
     -nsec int
 
---| An instant seen at a UTC offset. Two values of the same instant at different offsets are not `==`:
---| compare `a.time()` with `b.time()`.
+--| An instant seen at a UTC offset, or in a time zone. Two values of the same instant at different offsets or
+--| in different zones are not `==`: compare `a.time()` with `b.time()`.
 type DateTime:
     -sec  int
     -nsec int
     -off  int
+    -tz   Zone = {}
 
 --| A calendar day, 0001-01-01 to 9999-12-31.
 type Date:
@@ -60,6 +66,64 @@ type Date:
 type Duration:
     -sec  int
     -nsec int
+
+--| A time zone: the UTC offsets of a place over time, with its daylight saving time.
+--| `time.zone(name)` reads one from the time zone database of the system.
+type Zone:
+    -- 0: none (the value of a `DateTime` at a fixed offset), 1: a TZif file, 2: a rule only.
+    -kind    int = 0
+    -name_   str = ''
+    -- The TZif file. The transitions are read from it when they are asked for, so that two zones compare by
+    -- their bytes with `==`.
+    -data    str = ''
+    -- The bytes of a transition time, 4 or 8, and the places of the tables in `data`.
+    -wide    int = 8
+    -ntrans  int = 0
+    -ntypes  int = 0
+    -p_trans int = 0
+    -p_idx   int = 0
+    -p_types int = 0
+    -p_abbr  int = 0
+    -rule    Rule = {}
+
+-- The rule of a POSIX `TZ` string such as `EST5EDT,M3.2.0,M11.1.0`. A TZif file ends with one, for the time after
+-- its last transition. Offsets are in minutes east of UTC.
+-type Rule:
+    has      bool = false
+    std_off  int = 0
+    std_abbr str = ''
+    dst      bool = false
+    dst_off  int = 0
+    dst_abbr str = ''
+    start    RuleDay = {}
+    end      RuleDay = {}
+
+-- When daylight saving time starts or ends in a year. kind 0: `Mm.w.d`, the weekday `d` (0 is Sunday) of week `w`
+-- (5 is the last) of month `m`. kind 1: `Jn`, day `d` of the year from 1, without February 29.
+-- kind 2: `n`, day `d` of the year from 0. `secs` is the time of day in seconds, -167 to 167 hours.
+-type RuleDay:
+    kind int = 0
+    m    int = 0
+    w    int = 0
+    d    int = 0
+    secs int = 7200
+
+-- What a zone says about an instant.
+-type ZoneInfo:
+    off  int
+    dst  bool
+    abbr str
+
+--| What to do with a date and time of day that a zone has twice or not at all.
+--| When clocks go back, an hour comes twice: `earlier` and `compatible` take the first, `later` the second.
+--| When clocks go forward, an hour is skipped: `later` and `compatible` take the time that the clock would
+--| show had it not been set (02:30 becomes 03:30), `earlier` the time an hour before (01:30).
+--| `reject` returns `error.Ambiguous` or `error.Skipped`.
+type Disambiguation enum:
+    case compatible
+    case earlier
+    case later
+    case reject
 
 type Weekday enum:
     case monday
@@ -446,6 +510,10 @@ fn (&Time) to_offset(offset int) -> !DateTime:
         return error.Range
     return {sec=self.sec, nsec=self.nsec, off=offset}
 
+--| Returns the date and time of day in a time zone.
+fn (&Time) to_zone(zone Zone) -> DateTime:
+    return in_zone(self.sec, self.nsec, zone)
+
 --| Returns the time as RFC 3339 in UTC, such as `2026-11-15T01:22:03.5Z`.
 fn (&Time) format() -> str:
     return self.utc().format()
@@ -540,9 +608,27 @@ fn (&DateTime) to_offset(offset int) -> !DateTime:
 fn (&DateTime) replace_offset(offset int) -> !DateTime:
     return make_datetime(self.local_day(), self.hour(), self.minute(), self.second(), self.nsec, offset)
 
+--| Returns the time zone of a value that `to_zone` or a `Zone` made, or `none` for one at a fixed offset.
+fn (&DateTime) zone() -> ?Zone:
+    if self.tz.kind == 0:
+        return none
+    return self.tz
+
+--| Returns the same instant in a time zone: the date and the time of day change.
+fn (&DateTime) to_zone(zone Zone) -> DateTime:
+    return in_zone(self.sec, self.nsec, zone)
+
+--| Returns the same date and time of day in a time zone: the instant changes. A time that the zone has
+--| twice or not at all is read as `Disambiguation.compatible` says.
+fn (&DateTime) replace_zone(zone Zone) -> !DateTime:
+    return zone.at_local(self.local_sec(), self.nsec, .compatible)
+
 --| Returns the value moved by `d`, or `error.Range` when the result is out of range.
+--| In a time zone the offset is that of the new instant: one hour after 01:30 can be 03:30.
 fn (&DateTime) add(d Duration) -> !DateTime:
     t := self.time().add(d)!
+    if self.tz.kind != 0:
+        return in_zone(t.sec, t.nsec, self.tz)
     return {sec=t.sec, nsec=t.nsec, off=self.off}
 
 fn (&DateTime) `+`(d Duration) -> DateTime:
@@ -554,12 +640,16 @@ fn (&DateTime) `-`(d Duration) -> DateTime:
         panic('The time is out of range.')
 
 -fn (&DateTime) on_day(day int) -> !DateTime:
+    if self.tz.kind != 0:
+        return self.tz.at_local(day * SecsPerDay + self.day_sec(), self.nsec, .compatible)
     sec := day * SecsPerDay + self.day_sec() - self.off * 60
     if !valid_instant(sec):
         return error.Range
     return {sec=sec, nsec=self.nsec, off=self.off}
 
 --| Returns the value `n` days later, or earlier when `n` is negative. The time of day stays.
+--| In a time zone a day can be 23 or 25 hours, and a time of day that the new day does not have, or has twice,
+--| is read as `Disambiguation.compatible` says.
 fn (&DateTime) add_days(n int) -> !DateTime:
     return self.on_day(shift_days(self.local_day(), n)!)
 
@@ -600,11 +690,19 @@ fn (&DateTime) format() -> str:
 
 --| Returns the value in a `strftime` format.
 --| Date: `%Y %y %m %d %e %j %b %h %B %a %A %u %w %G %V`. Time of day: `%H %I %p %M %S %f %3f %6f %9f`.
---| Offset: `%z` (`+0900`), `%:z` (`+09:00`). Others: `%F` (`%Y-%m-%d`), `%T` (`%H:%M:%S`), `%R` (`%H:%M`),
+--| Offset: `%z` (`+0900`), `%:z` (`+09:00`), `%Z` (the abbreviation of the zone such as `KST`, or `UTC`, or
+--| the offset when the value has no zone). Others: `%F` (`%Y-%m-%d`), `%T` (`%H:%M:%S`), `%R` (`%H:%M`),
 --| `%D` (`%m/%d/%y`), `%s` (Unix seconds), `%n`, `%t`, `%%`. Names are in English.
 --| `error.Format` for another specifier.
 fn (&DateTime) format(fmt str) -> !str:
-    f := Formatter{day=self.local_day(), sod=self.day_sec(), nsec=self.nsec, off=self.off, unix=self.sec, date_only=false}
+    abbr := ''
+    if self.tz.kind != 0:
+        abbr = self.tz.info_at(self.sec).abbr
+    else self.off == 0:
+        abbr = 'UTC'
+    else:
+        abbr = str(put_offset({}, self.off, true))
+    f := Formatter{day=self.local_day(), sod=self.day_sec(), nsec=self.nsec, off=self.off, unix=self.sec, date_only=false, abbr=abbr}
     return str(f.run({}, fmt)!)
 
 -- Date.
@@ -675,6 +773,12 @@ fn (&Date) `>=`(o Date) -> bool:
 fn (&Date) at(hour int, minute int, second int) -> !DateTime:
     return make_datetime(self.days, hour, minute, second, 0, 0)
 
+--| Returns this day at a time of day in a time zone. See `Zone.datetime`.
+fn (&Date) at(hour int, minute int, second int, zone Zone) -> !DateTime:
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59 or second < 0 or second > 59:
+        return error.Range
+    return zone.at_local(self.days * SecsPerDay + hour * 3600 + minute * 60 + second, 0, .compatible)
+
 --| Returns this day at a time of day at `offset` minutes east of UTC.
 fn (&Date) at(hour int, minute int, second int, nsec int, offset int) -> !DateTime:
     return make_datetime(self.days, hour, minute, second, nsec, offset)
@@ -693,7 +797,7 @@ fn (&Date) format() -> str:
 --| Returns the date in a `strftime` format. See `DateTime.format`. A specifier of the time of day or
 --| of the offset is `error.Format`.
 fn (&Date) format(fmt str) -> !str:
-    f := Formatter{day=self.days, sod=0, nsec=0, off=0, unix=0, date_only=true}
+    f := Formatter{day=self.days, sod=0, nsec=0, off=0, unix=0, date_only=true, abbr=''}
     return str(f.run({}, fmt)!)
 
 -- Formatting.
@@ -782,6 +886,7 @@ fn (&Date) format(fmt str) -> !str:
     off       int
     unix      int
     date_only bool
+    abbr      str
 
 -fn (&Formatter) run(out []byte, fmt str) -> ![]byte:
     var buf []byte = out
@@ -814,7 +919,7 @@ fn (&Date) format(fmt str) -> !str:
             i += 1
         if self.date_only:
             switch f:
-                case 'H', 'I', 'p', 'M', 'S', 'f', 'z', 'T', 'R', 's':
+                case 'H', 'I', 'p', 'M', 'S', 'f', 'z', 'Z', 'T', 'R', 's':
                     return error.Format
                 else:
                     pass
@@ -875,6 +980,8 @@ fn (&Date) format(fmt str) -> !str:
                         buf = put_num(buf, self.nsec / 1000, 6)
             case 'z':
                 buf = put_offset(buf, self.off, colon)
+            case 'Z':
+                buf = buf.append(self.abbr.span())
             case 's':
                 buf = buf.append(str(self.unix).span())
             case 'F':
@@ -1230,6 +1337,9 @@ fn (&Date) format(fmt str) -> !str:
             case 'u', 'w', 'G', 'V':
                 self.fail(i - 2, '`%' + fmt[i - 1..i] + '` is for output only. Parse the date with `%Y`, `%m` and `%d`, or with `%j`.')
                 return error.Format
+            case 'Z':
+                self.fail(i - 2, '`%Z` is for output only: an abbreviation such as `CST` names more than one zone. Parse the offset with `%z`, or read the text in a zone with `replace_zone`.')
+                return error.Format
             else:
                 self.fail(i - 2, 'Unknown specifier `%' + fmt[i - 1..i] + '`. See `DateTime.format` for the list.')
                 return error.Format
@@ -1354,3 +1464,387 @@ fn format_offset(offset int) -> str:
     if !valid_offset(offset):
         panic('A UTC offset is -1439 to 1439 minutes.')
     return str(put_offset({}, offset, true))
+
+-- Time zones.
+
+#[bind]
+-fn tz_read_(name str) -> str
+
+#[bind]
+-fn tz_local_() -> str
+
+#[bind]
+-fn tz_local_data_() -> str
+
+-fn utc_zone() -> Zone:
+    return {kind=2, name_='UTC', rule={has=true, std_abbr='UTC'}}
+
+--| Returns the time zone of an IANA name such as `Asia/Seoul` or `America/New_York`, read from the time zone
+--| database of the system: the directory in `TZDIR`, then `/usr/share/zoneinfo` and the like.
+--| `UTC` is always there. `error.NotFound` when the system has no zone by that name, or no database
+--| (Windows, wasm): give the data with `zone_from_tzif` there.
+fn zone(name str) -> !Zone:
+    if name == 'UTC':
+        return utc_zone()
+    data := tz_read_(name)
+    if data.len() == 0:
+        return error.NotFound
+    return tzif_zone(name, data)
+
+--| Returns the time zone of the system: what `TZ` says (a zone name, the path of a TZif file or a POSIX rule),
+--| or else `/etc/localtime`. `error.NotFound` when the system does not say, or says something that can not be read.
+fn local() -> !Zone:
+    spec := tz_local_()
+    if spec.len() == 0:
+        return error.NotFound
+    arg := spec[1..]
+    switch spec[0]:
+        case 'U':
+            return utc_zone()
+        case 'T':
+            if arg == 'UTC':
+                return utc_zone()
+            data := tz_read_(arg)
+            if data.len() > 0:
+                return tzif_zone(arg, data)
+            return zone_from_posix(arg) !else:
+                return error.NotFound
+        else:
+            data := tz_local_data_()
+            if data.len() == 0:
+                return error.NotFound
+            if arg.len() == 0:
+                return tzif_zone('Local', data)
+            return tzif_zone(arg, data)
+
+--| Returns the time zone of a TZif file (RFC 9636), the format of the files in a zoneinfo directory.
+--| `error.Syntax` when the data is not a TZif file.
+fn zone_from_tzif(name str, data []byte) -> !Zone:
+    return tzif_zone(name, str(data))
+
+--| Returns the time zone of a POSIX `TZ` rule such as `KST-9` or `EST5EDT,M3.2.0,M11.1.0`.
+--| The offset in a rule is positive west of UTC.
+fn zone_from_posix(tz str) -> !Zone:
+    return {kind=2, name_=tz, rule=parse_rule(tz)!}
+
+--| Returns the name that the zone was made with.
+fn (&Zone) name() -> str:
+    return self.name_
+
+--| Returns the UTC offset of the zone at an instant, in minutes east of UTC. An offset of the database that is
+--| not a whole minute (local mean time, mostly before 1920) is rounded to the minute.
+fn (&Zone) offset_at(t Time) -> int:
+    return self.info_at(t.sec).off
+
+--| Whether daylight saving time is on at an instant.
+fn (&Zone) is_dst(t Time) -> bool:
+    return self.info_at(t.sec).dst
+
+--| Returns the abbreviation of the zone at an instant, such as `KST`, `EST` or `EDT`.
+fn (&Zone) abbreviation(t Time) -> str:
+    return self.info_at(t.sec).abbr
+
+--| Returns a date and time of day in the zone. A time that the zone has twice or not at all is read as
+--| `Disambiguation.compatible` says. `error.Range` when a field is out of range or the day does not exist.
+fn (&Zone) datetime(year int, month int, day int, hour int, minute int, second int) -> !DateTime:
+    return self.datetime(year, month, day, hour, minute, second, 0, .compatible)
+
+fn (&Zone) datetime(year int, month int, day int, hour int, minute int, second int, nsec int, how Disambiguation) -> !DateTime:
+    d := date(year, month, day)!
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59 or second < 0 or second > 59:
+        return error.Range
+    if nsec < 0 or nsec >= NsPerSec:
+        return error.Range
+    return self.at_local(d.days * SecsPerDay + hour * 3600 + minute * 60 + second, nsec, how)
+
+-fn in_zone(sec int, nsec int, zone Zone) -> DateTime:
+    if zone.kind == 0:
+        return {sec=sec, nsec=nsec, off=0}
+    return {sec=sec, nsec=nsec, off=zone.info_at(sec).off, tz=zone}
+
+-- The value of a date and time of day in the zone. `local` is the seconds from 1970-01-01T00:00:00 of that
+-- clock reading.
+-fn (&Zone) at_local(local int, nsec int, how Disambiguation) -> !DateTime:
+    if self.kind == 0:
+        return error.Range
+    -- The offsets a day before and a day after are those on each side of a transition near `local`.
+    before := self.info_at(local - SecsPerDay).off
+    after := self.info_at(local + SecsPerDay).off
+    first := local - before * 60
+    second := local - after * 60
+    sec := first
+    if before != after:
+        ok1 := self.info_at(first).off == before
+        ok2 := self.info_at(second).off == after
+        if ok1 and ok2:
+            -- The clock was set back: the time comes twice.
+            switch how:
+                case .reject:
+                    return error.Ambiguous
+                case .later:
+                    if second > first:
+                        sec = second
+                else:
+                    if second < first:
+                        sec = second
+        else ok2 and !ok1:
+            sec = second
+        else !ok1:
+            -- The clock was set forward: the time is skipped.
+            switch how:
+                case .reject:
+                    return error.Skipped
+                case .earlier:
+                    sec = second
+                else:
+                    sec = first
+    if !valid_instant(sec):
+        return error.Range
+    return {sec=sec, nsec=nsec, off=self.info_at(sec).off, tz=self.*}
+
+-fn (&Zone) info_at(sec int) -> ZoneInfo:
+    if self.kind != 1:
+        return self.rule.info_at(sec)
+    n := self.ntrans
+    if n == 0 or sec < self.trans(0):
+        if n == 0 and self.rule.has:
+            return self.rule.info_at(sec)
+        -- Before the first transition: the first type of the file.
+        return self.type_info(0)
+    if self.rule.has and sec >= self.trans(n - 1):
+        return self.rule.info_at(sec)
+    -- The last transition at or before `sec`.
+    lo := 0
+    hi := n - 1
+    while lo < hi:
+        mid := (lo + hi + 1) / 2
+        if self.trans(mid) <= sec:
+            lo = mid
+        else:
+            hi = mid - 1
+    return self.type_info(int(self.data[self.p_idx + lo]))
+
+-fn (&Zone) trans(i int) -> int:
+    return read_be(self.data, self.p_trans + i * self.wide, self.wide)
+
+-fn (&Zone) type_info(i int) -> ZoneInfo:
+    p := self.p_types + i * 6
+    start := self.p_abbr + int(self.data[p + 5])
+    end := start
+    while int(self.data[end]) != 0:
+        end += 1
+    return {off=floor_div(read_be(self.data, p, 4) + 30, 60), dst=int(self.data[p + 4]) != 0, abbr=self.data[start..end]}
+
+-- Reads a big endian signed integer of `n` bytes, 4 or 8.
+-fn read_be(data str, pos int, n int) -> int:
+    v := 0
+    for 0..n |i|:
+        v = (v << 8) || int(data[pos + i])
+    if n == 4 and v >= 2147483648:
+        v -= 4294967296
+    return v
+
+-fn tzif_magic(data str, pos int) -> bool:
+    return pos + 44 <= data.len() and data[pos..pos + 4] == 'TZif'
+
+-fn tzif_zone(name str, data str) -> !Zone:
+    if !tzif_magic(data, 0):
+        return error.Syntax
+    version := int(data[4])
+    pos := 0
+    wide := 4
+    if version != 0:
+        -- Version 2 and later: the first block has 32 bit times. Skip it for the block of 64 bit times.
+        timecnt := read_be(data, 32, 4)
+        typecnt := read_be(data, 36, 4)
+        charcnt := read_be(data, 40, 4)
+        leapcnt := read_be(data, 28, 4)
+        if timecnt < 0 or typecnt < 0 or charcnt < 0 or leapcnt < 0 or timecnt + typecnt + charcnt + leapcnt > data.len():
+            return error.Syntax
+        isut := read_be(data, 20, 4)
+        isstd := read_be(data, 24, 4)
+        if isut < 0 or isstd < 0 or isut + isstd > data.len():
+            return error.Syntax
+        pos = 44 + timecnt * 5 + typecnt * 6 + charcnt + leapcnt * 8 + isstd + isut
+        wide = 8
+        if !tzif_magic(data, pos):
+            return error.Syntax
+    isut := read_be(data, pos + 20, 4)
+    isstd := read_be(data, pos + 24, 4)
+    leapcnt := read_be(data, pos + 28, 4)
+    timecnt := read_be(data, pos + 32, 4)
+    typecnt := read_be(data, pos + 36, 4)
+    charcnt := read_be(data, pos + 40, 4)
+    if isut < 0 or isstd < 0 or leapcnt < 0 or timecnt < 0 or typecnt < 1 or typecnt > 256 or charcnt < 1:
+        return error.Syntax
+    if isut + isstd + leapcnt + timecnt + charcnt > data.len():
+        return error.Syntax
+    z := Zone{kind=1, name_=name, data=data, wide=wide, ntrans=timecnt, ntypes=typecnt}
+    z.p_trans = pos + 44
+    z.p_idx = z.p_trans + timecnt * wide
+    z.p_types = z.p_idx + timecnt
+    z.p_abbr = z.p_types + typecnt * 6
+    end := z.p_abbr + charcnt + leapcnt * (wide + 4) + isstd + isut
+    if end > data.len():
+        return error.Syntax
+    -- Every abbreviation ends inside the table.
+    if int(data[z.p_abbr + charcnt - 1]) != 0:
+        return error.Syntax
+    for 0..typecnt |i|:
+        p := z.p_types + i * 6
+        off := floor_div(read_be(data, p, 4) + 30, 60)
+        if !valid_offset(off) or int(data[p + 5]) >= charcnt:
+            return error.Syntax
+    last := 0
+    for 0..timecnt |i|:
+        at := z.trans(i)
+        if (i > 0 and at <= last) or int(data[z.p_idx + i]) >= typecnt:
+            return error.Syntax
+        last = at
+    if version != 0:
+        -- The footer: a line with the rule for the time after the last transition, or an empty line.
+        if end >= data.len() or data[end] != '\n':
+            return error.Syntax
+        stop := end + 1
+        while stop < data.len() and data[stop] != '\n':
+            stop += 1
+        if stop >= data.len():
+            return error.Syntax
+        if stop > end + 1:
+            z.rule = parse_rule(data[end + 1..stop])!
+    return z
+
+-fn (&Rule) info_at(sec int) -> ZoneInfo:
+    if !self.dst:
+        return {off=self.std_off, dst=false, abbr=self.std_abbr}
+    year := civil_from_days(floor_div(sec + self.std_off * 60, SecsPerDay)).y
+    -- The start is a reading of the clock in standard time, the end one in daylight saving time.
+    start := rule_local(year, &self.start) - self.std_off * 60
+    end := rule_local(year, &self.end) - self.dst_off * 60
+    on := false
+    if start < end:
+        on = sec >= start and sec < end
+    else:
+        on = !(sec >= end and sec < start)
+    if on:
+        return {off=self.dst_off, dst=true, abbr=self.dst_abbr}
+    return {off=self.std_off, dst=false, abbr=self.std_abbr}
+
+-- The clock reading of a rule day in a year, in seconds from 1970-01-01T00:00:00.
+-fn rule_local(year int, r &RuleDay) -> int:
+    jan1 := days_from_civil(year, 1, 1)
+    day := jan1 + r.d
+    switch r.kind:
+        case 0:
+            first := days_from_civil(year, r.m, 1)
+            -- Sunday is 0 in a rule.
+            wd := (weekday_num(first) + 1) % 7
+            day = first + floor_mod(r.d - wd, 7) + (r.w - 1) * 7
+            if day >= first + days_in_month(year, r.m):
+                day -= 7
+        case 1:
+            day = jan1 + r.d - 1
+            if r.d >= 60 and is_leap_year(year):
+                day += 1
+        else:
+            pass
+    return day * SecsPerDay + r.secs
+
+-- Parses a POSIX `TZ` string: `std offset [dst [offset] [,start[/time],end[/time]]]`.
+-fn parse_rule(tz str) -> !Rule:
+    sc := Scan{src=tz}
+    var r Rule = {has=true}
+    r.std_abbr = sc.tz_abbr()!
+    r.std_off = -floor_div(sc.tz_secs(24)! + 30, 60)
+    if sc.at_end():
+        if !valid_offset(r.std_off):
+            return error.Syntax
+        return r
+    r.dst = true
+    r.dst_abbr = sc.tz_abbr()!
+    r.dst_off = r.std_off + 60
+    if !sc.at_end() and sc.peek() != ',':
+        r.dst_off = -floor_div(sc.tz_secs(24)! + 30, 60)
+    if !valid_offset(r.std_off) or !valid_offset(r.dst_off):
+        return error.Syntax
+    if sc.at_end():
+        -- No days: the rule of the United States, as the C libraries read it.
+        r.start = {kind=0, m=3, w=2, d=0}
+        r.end = {kind=0, m=11, w=1, d=0}
+        return r
+    sc.literal(',', '`,`')!
+    r.start = sc.tz_day()!
+    sc.literal(',', '`,`')!
+    r.end = sc.tz_day()!
+    if !sc.at_end():
+        return error.Syntax
+    return r
+
+-- An abbreviation: three or more letters, or anything but `>` in `<...>`.
+-fn (&Scan) tz_abbr() -> !str:
+    start := self.pos
+    if !self.at_end() and self.peek() == '<':
+        while !self.at_end() and self.peek() != '>':
+            self.pos += 1
+        if self.at_end() or self.pos - start < 2:
+            return error.Syntax
+        self.pos += 1
+        return self.src[start + 1..self.pos - 1]
+    while !self.at_end() and (str.is_ascii_lower(self.peek()) or str.is_ascii_upper(self.peek())):
+        self.pos += 1
+    if self.pos - start < 3:
+        return error.Syntax
+    return self.src[start..self.pos]
+
+-- `[+-]hh[:mm[:ss]]` in seconds, with at most `max_hours` hours.
+-fn (&Scan) tz_secs(max_hours int) -> !int:
+    neg := false
+    if !self.at_end() and (self.peek() == '+' or self.peek() == '-'):
+        neg = self.peek() == '-'
+        self.pos += 1
+    h := self.digits(1, 3, 'hours')!
+    m := 0
+    s := 0
+    if !self.at_end() and self.peek() == ':':
+        self.pos += 1
+        m = self.digits(1, 2, 'minutes')!
+        if !self.at_end() and self.peek() == ':':
+            self.pos += 1
+            s = self.digits(1, 2, 'seconds')!
+    if h > max_hours or m > 59 or s > 59:
+        return error.Syntax
+    v := h * 3600 + m * 60 + s
+    if neg:
+        return -v
+    return v
+
+-fn (&Scan) tz_day() -> !RuleDay:
+    var r RuleDay = {}
+    if self.at_end():
+        return error.Syntax
+    c := self.peek()
+    if c == 'M':
+        self.pos += 1
+        r.kind = 0
+        r.m = self.digits(1, 2, 'a month')!
+        self.literal('.', '`.`')!
+        r.w = self.digits(1, 1, 'a week')!
+        self.literal('.', '`.`')!
+        r.d = self.digits(1, 1, 'a weekday')!
+        if r.m < 1 or r.m > 12 or r.w < 1 or r.w > 5 or r.d > 6:
+            return error.Syntax
+    else c == 'J':
+        self.pos += 1
+        r.kind = 1
+        r.d = self.digits(1, 3, 'a day of the year')!
+        if r.d < 1 or r.d > 365:
+            return error.Syntax
+    else:
+        r.kind = 2
+        r.d = self.digits(1, 3, 'a day of the year')!
+        if r.d > 365:
+            return error.Syntax
+    if !self.at_end() and self.peek() == '/':
+        self.pos += 1
+        r.secs = self.tz_secs(167)!
+    return r

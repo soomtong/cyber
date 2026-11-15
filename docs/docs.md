@@ -4425,7 +4425,7 @@ Matching is by Unicode code point: `.` and `[가-힣]` take a whole character, a
 A grammar backtracks, so there is no bound on the time of a match as there is for `regex`: a grammar can take time that grows fast with the length of the input. A match keeps a stack of open rule calls and choices. When the stack is over `peg.MaxStack` (100000) entries, for input that nests very deep, `parse` returns `error.TooDeep`, and for a match with more than `peg.MaxCaptures` (1000000) captures it returns `error.TooBig`. The functions that return an option panic in these cases. A call at the end of the last choice of a rule takes no stack: `tail <- !. / . tail` runs over any length of input. A grammar over `peg.MaxInsts` (65536) instructions is `error.TooBig` (`p^100` takes 100 times the instructions of `p`), and patterns nest at most `peg.MaxDepth` (250) deep. A compiled `Peg` does not change: compile once and use it for every match.
 
 ### Dates and times.
-The `time` module has four types. A `Time` is an instant, a `DateTime` is an instant seen at a UTC offset, a `Date` is a calendar day and a `Duration` is a length of time. Time zones are UTC and fixed offsets. An offset is an `int`: the minutes east of UTC, so `+09:00` is `540` and `-03:30` is `-210`:
+The `time` module has four types. A `Time` is an instant, a `DateTime` is an instant seen at a UTC offset or in a time zone, a `Date` is a calendar day and a `Duration` is a length of time. An offset is an `int`: the minutes east of UTC, so `+09:00` is `540` and `-03:30` is `-210`:
 ```cy
 use time
 
@@ -4438,7 +4438,7 @@ print(dt.offset())                       --> 540
 print(dt.to_offset(330)!.format())       --> 2026-11-15T06:52:03.5+05:30
 print(dt.add_months(3)!.format())        --> 2027-02-15T10:22:03.5+09:00
 ```
-There is no local time zone and no date and time without an offset: a value always says which instant it is. The calendar is the proleptic Gregorian one, with years 1 to 9999. Leap seconds are not counted, as in Unix time, and a `:60` in a text reads as `:59`.
+There is no date and time without an offset, and nothing uses the time zone of the system unless the script asks for it with `time.local()`: a value always says which instant it is. The calendar is the proleptic Gregorian one, with years 1 to 9999. Leap seconds are not counted, as in Unix time, and a `:60` in a text reads as `:59`.
 
 `time.now()` returns the `Time` of the system clock. Instants compare with `<`, `<=`, `>`, `>=` and `==`, and their difference is a `Duration`. `os.FileInfo` gives the times of a file as `Time`:
 ```cy
@@ -4500,9 +4500,10 @@ print(time.parse_format('Nov  5 10:22:01', '%b %e %T')!.format())
 | Date | `%Y` (four digits), `%y` (two digits: 69 to 99 are 1969 to 1999), `%m`, `%d`, `%e` (day padded with a space), `%j` (day of the year), `%b` `%h` (`Nov`), `%B` (`November`), `%a` (`Sun`), `%A` (`Sunday`) |
 | Time of day | `%H`, `%I` (12 hour clock), `%p` (`AM`, `PM`), `%M`, `%S`, `%f` (six digits), `%3f`, `%6f`, `%9f` |
 | Offset | `%z` (`+0900`), `%:z` (`+09:00`) |
+| Zone | `%Z`: the abbreviation of the time zone (`KST`, `EDT`). `UTC` or the offset for a value without a zone. Output only |
 | Short forms | `%F` (`%Y-%m-%d`), `%T` (`%H:%M:%S`), `%R` (`%H:%M`), `%D` (`%m/%d/%y`) |
 | Others | `%s` (Unix seconds), `%n`, `%t`, `%%` |
-| Output only | `%u` (Monday is 1, Sunday is 7), `%w` (Sunday is 0), `%G` and `%V` (ISO 8601 year and week) |
+| Output only | `%u` (Monday is 1, Sunday is 7), `%w` (Sunday is 0), `%G` and `%V` (ISO 8601 year and week), `%Z` |
 
 Names are in English. When parsing, a number takes one or two digits (`%Y` four, `%j` up to three, every `%f` one or more), a space in the format takes one or more, a name can be short or full in any case, and both offset specifiers take `Z`, `+0900`, `+09:00` and `+09`. A `Date` formats with the date specifiers only.
 
@@ -4516,6 +4517,36 @@ else |err|:
 --> error.Range: February 2026 has no day 30.
 ```
 `time.is_leap_year(y)`, `time.days_in_month(y, m)`, `time.parse_offset('+05:30')` (330) and `time.format_offset(330)` are there for code that works on the fields.
+
+A `Zone` is a time zone with its daylight saving time. `time.zone(name)` reads one by its IANA name from the time zone database of the system, and `t.to_zone(z)` or `dt.to_zone(z)` gives the date and time of day there:
+```cy
+ny := time.zone('America/New_York')!
+t := time.parse('2026-07-04T12:00:00Z')!.time()
+dt := t.to_zone(ny)
+print(dt.format())               --> 2026-07-04T08:00:00-04:00
+print(dt.format('%H:%M %Z')!)    --> 08:00 EDT
+print(ny.offset_at(t))           --> -240
+print(ny.is_dst(t))              --> true
+```
+`z.datetime(y, mo, d, h, mi, s)` makes a value from a clock reading in the zone, and so do `d.at(h, mi, s, z)` and `dt.replace_zone(z)`, which keeps the date and time of day of `dt`. When the clock is set forward, an hour of readings does not exist, and when it is set back, an hour comes twice. Such a reading is taken the way most calendars do: the skipped time moves forward by the gap, and the repeated time is the first of the two. A last argument says otherwise: `.earlier`, `.later`, or `.reject`, which returns `error.Skipped` or `error.Ambiguous`:
+```cy
+print(ny.datetime(2026, 3, 8, 2, 30, 0)!.format())               --> 2026-03-08T03:30:00-04:00
+print(ny.datetime(2026, 11, 1, 1, 30, 0)!.format())              --> 2026-11-01T01:30:00-04:00
+print(ny.datetime(2026, 11, 1, 1, 30, 0, 0, .later)!.format())   --> 2026-11-01T01:30:00-05:00
+print(ny.datetime(2026, 3, 8, 2, 30, 0, 0, .reject).unwrap_error())   --> error.Skipped
+
+-- a record without an offset, written by a machine in New York
+print(time.parse('2026-11-15 10:22:01', 0)!.replace_zone(ny)!.format())   --> 2026-11-15T10:22:01-05:00
+```
+A value in a zone keeps the zone (`dt.zone()` returns it, or `none`). `add_days`, `add_months` and `add_years` keep the time of day and read it in the zone again, so a day can be 23 or 25 hours long. `+`, `-` and `add` with a `Duration` move the instant by that much. `utc()`, `to_offset` and `replace_offset` give a value at a fixed offset, without the zone:
+```cy
+noon := ny.datetime(2026, 3, 7, 12, 0, 0)!       -- the day before the clock is set forward
+print(noon.add_days(1)!.format())                --> 2026-03-08T12:00:00-04:00
+print((noon + time.hours(24)).format())          --> 2026-03-08T13:00:00-04:00
+```
+The database is the zoneinfo directory of the system: the one in `TZDIR`, or `/usr/share/zoneinfo` and the like. `time.zone` returns `error.NotFound` for a name that is not there. Windows and wasm have no such directory, so only `time.zone('UTC')` is found there. A zone can also be made from data: `time.zone_from_tzif(name, bytes)` takes the bytes of a TZif file (the format of the files in that directory), and `time.zone_from_posix('EST5EDT,M3.2.0,M11.1.0')` or `time.zone_from_posix('KST-9')` takes a POSIX `TZ` rule. `time.local()` returns the zone of the system: what the `TZ` environment variable says, or else `/etc/localtime`. It returns `error.NotFound` when the system does not say (Windows, wasm).
+
+An offset of the database that is not a whole minute is rounded to the minute. These are the local mean times from before standard time, mostly before 1920. Two zones are `==` when their name and their data are the same.
 
 ## Importing.
 The `use` statement can import modules. Builtin and std modules such as `math` can be imported without any configuration:

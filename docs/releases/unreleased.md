@@ -103,6 +103,17 @@
     연산자 `+` · `-`는 범위를 넘으면 panic, 이름 있는 메서드는 `error.Range`.
   - `os.FileInfo`에 `mtime()` · `atime()` · `ctime()` → `!time.Time`. 정수 칸(`mtime_sec` ...)은 그대로다.
   - Python `datetime`과의 차분 시험 78,000건(달력 분해 · 요일 · ISO 주 · `strftime` · 파싱 왕복 · 월 덧셈)에서 차이가 없었다.
+  - 시간대(DST): `time.zone('Asia/Seoul')` → `!Zone`이 시스템의 zoneinfo 폴더(`TZDIR`, `/usr/share/zoneinfo` 등)에서 IANA 시간대를
+    읽는다. 없는 이름은 `error.NotFound`. Windows · wasm에는 그 폴더가 없어 `UTC`만 찾는다. 데이터로 만드는 길은
+    `time.zone_from_tzif(name, bytes)`(TZif 파일)와 `time.zone_from_posix('EST5EDT,M3.2.0,M11.1.0')`(POSIX 규칙).
+    `time.local()` → `!Zone`은 `TZ` 환경 변수, 없으면 `/etc/localtime`.
+  - `t.to_zone(z)` · `dt.to_zone(z)`(같은 순간), `dt.replace_zone(z)` · `z.datetime(y, mo, d, h, mi, s)` · `d.at(h, mi, s, z)`(같은 시계 값),
+    `z.offset_at(t)` · `z.is_dst(t)` · `z.abbreviation(t)` · `z.name()`, `dt.zone()` → `?Zone`, 형식 지정자 `%Z`(약어, 출력 전용).
+  - 시계를 돌리는 날: 건너뛴 시각(02:30)은 그만큼 뒤로(03:30), 두 번 오는 시각은 앞쪽으로 읽는다. 마지막 인자
+    `time.Disambiguation`(`.compatible` · `.earlier` · `.later` · `.reject`)으로 바꾸고, `.reject`는 `error.Skipped` · `error.Ambiguous`.
+  - zone 안의 값은 `add_days` · `add_months` · `add_years`가 시계 값을 유지하고(하루가 23 · 25시간일 수 있다), `+ Duration` · `add`는
+    경과 시간을 더한다. `utc()` · `to_offset` · `replace_offset`은 zone을 뗀다.
+  - DB의 초 단위 오프셋(LMT, 대개 1920년 이전)은 분으로 반올림한다. Python `zoneinfo`와의 차분 시험 40,000건에서 차이가 없었다.
 
 ## 버그 수정
 
@@ -128,6 +139,8 @@
 - 괄호 묶음이 식 중간에서 왼쪽 피연산자일 때 그 뒤의 연산자를 모두 가져갔다. `a - (b) / 2 + 1`이 `a - ((b) / 2 + 1)`로,
   `-(2) + 5`가 `-((2) + 5)`로 계산됐다(타입이 맞으면 오류 없이 다른 값). 이제 묶음 앞 연산자의 우선순위대로 묶인다(F-154).
   식의 맨 앞 묶음(`(a) + b`)과 괄호 없는 식은 전부터 맞았다. 이 꼴에 기대던 코드는 값이 달라진다.
+- `bool` · enum · `error` · raw 정수(`byte` · `r64` ...) 필드가 있는 구조체를 `==` · `!=`로 비교하면 ``Unsupported: bool``처럼 타입
+  이름만 말하는 컴파일 오류였다. 이제 그 필드들도 값으로 비교한다(F-155). choice 필드는 아직 비교하지 못한다.
 - 줄바꿈 없이 끝나는 파일의 마지막 줄이 `x: int = 5` · `x int = 5` · `x: int =`이면 타입 선언 안내 대신 컴파일러가
   `panic: index out of bounds`로 멈췄다. 이제 안내를 보여 준다(F-149).
 - `json.encode` · `json.from`이 2^63 이상인 `r64`를 음수로 썼다(`r64.ones` → `-1`). 이제 `18446744073709551615`처럼
@@ -139,8 +152,6 @@
 
 ## 임베딩 API
 
-- `bool` · enum · `error` · raw 정수(`byte` · `r64` ...) 필드가 있는 구조체를 `==` · `!=`로 비교하면 ``Unsupported: bool``처럼 타입
-  이름만 말하는 컴파일 오류였다. 이제 그 필드들도 값으로 비교한다(F-155). choice 필드는 아직 비교하지 못한다.
 - `cl_mod_bind_json` · `cl_mod_bind_toon` · `cl_mod_bind_regex` · `cl_mod_bind_peg` · `cl_mod_bind_time`(`cyber.h`). 기본 로더는 `use json` · `use toon` · `use regex` · `use peg` · `use time`을 바로 푼다. 직접 로더를 쓰는 호스트는
   다른 표준 모듈처럼 이 함수로 묶는다.
 

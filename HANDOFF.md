@@ -22,6 +22,11 @@
     코드 생성은 `src/std/peg.cy`, 매칭 루프는 `src/std/peg.zig`. `cl_mod_bind_peg`. LPeg 1.1.0과 차분 퍼징 180,000건 차이 없음.
     설계와 Janet · LPeg · Rust · Zig · Nim · Python 비교는 `docs/decisions/project_std_peg.md`, 사용자 문서 `docs/docs.md`
     "Parsing expression grammars.".
+  - 그다음 커밋: F-154(괄호 묶음 뒤 연산자 우선순위: `a - (b) / 2 + 1`이 `a - ((b) / 2 + 1)`로 파싱됐다) 수정.
+  - 그다음 커밋: 표준 모듈 `time`(`Time` · `DateTime` · `Date` · `Duration`, UTC와 분 단위 고정 오프셋, RFC 3339 · strftime 부분집합).
+    달력 · 파서 · 포매터는 순수 Cyber `src/std/time.cy`, 시계 둘만 `src/std/time.zig`. `cl_mod_bind_time`. `os.FileInfo.mtime()` 등.
+    Python `datetime`과 차분 시험 78,000건 차이 없음. 설계와 Rust · Zig · Nim · Python 비교는
+    `docs/decisions/project_std_time.md`, 사용자 문서 `docs/docs.md` "Dates and times.".
 - tars-agent는 cyber 0.4.11에 고정(`78df31d`). `730813e`에서 `e25e7d76`의 회신을 기록했고 0.4.12에서 확인한다.
   요청서 `/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.11-codeact-messages.md`.
 
@@ -56,11 +61,13 @@
   오류). 반복자 없이 슬라이스를 돌려주고, 치환에 함수를 받지 않는다.
 - `peg`: 시간 보장이 없다(역추적). 함수를 부르는 캡처 · 오류 표지와 복구 · cut · left recursion · 대소문자 무시 리터럴 · Unicode
   속성 클래스가 없다. `find`는 위치마다 다시 맞춰 본다(첫 글자 건너뛰기 없음).
+- `time`: IANA 시간대 · DST · 로컬 시간대 · 윤초 · 로캘이 없다. 오프셋은 분 단위(±23:59). `DateTime`에 순서 연산자가 없다
+  (`a.time() < b.time()`). `parse_format`은 `%Z` · `%U` · `%W` · `%c`를 받지 않고 `%f`가 숫자를 끝까지 먹는다.
 - 하위 블록에서는 `move` · `meta.consume`을 못 쓴다(`else` 갈래의 consume은 뒤까지 죽은 상태로 남는다). 컴파일 타임
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-148까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-154까지, 열린 것 없음).
 
 ## 작업 방식
 
@@ -102,6 +109,8 @@
 - `peg.cy`의 문법을 고치면 LPeg 차분 퍼징을 다시 돌린다(`lua`에 `lpeg` · `re`가 있어야 한다):
   `python3 src/tools/peg_fuzz_gen.py <seed> 4000 <out.json>` 뒤 `cyber src/tools/peg_fuzz_run.cy <out.json>`. `0 differ`여야 한다
   (`rejected only here`는 LPeg가 보지 않는 닿지 않는 규칙 · 대안의 검사).
+- `time.cy`의 달력 · 형식을 고치면 Python 차분 시험을 다시 돌린다: `python3 src/tools/time_fuzz_gen.py <seed> 15000 <out.json>` 뒤
+  `cyber src/tools/time_fuzz_run.cy <out.json>`. `0 differ`여야 한다.
 - 실패한 `t.eq`를 한 번에 다 보려면 테스트 파일의 `t.eq(`를 줄 번호를 받는 지역 함수로 바꾼 사본을 돌린다(첫 실패에서 멈추지 않게).
 
 ## 구현 함정
@@ -129,7 +138,7 @@
 ## 참고 위치
 
 - 동시성 전체(제너레이터 · fiber · 단계 1 · 3 · 취소 · `scope` · `@deinit` 취소): `docs/decisions/project_coroutines.md`.
-- JSON · TOON: `project_std_json_toon.md`. 정규식: `project_std_regex.md`. PEG: `project_std_peg.md`. 정렬 클로저: `project_sort_closures.md`.
+- JSON · TOON: `project_std_json_toon.md`. 정규식: `project_std_regex.md`. PEG: `project_std_peg.md`. 시간: `project_std_time.md`. 정렬 클로저: `project_sort_closures.md`.
 - 임베딩 · tars-agent: `project_embedding_agent_loop.md` · `project_tars_agent_runtime_review.md`, C API `src/include/cyber.h`.
 - 컴파일러 한계: `project_compiler_limits.md`. 평가 순서: `project_eval_order.md`. 스택 포인터 보정: `project_stack_ptr_patch.md`.
 - 방향(네이티브 · LLVM · JIT는 범위 밖): `project_direction.md`.

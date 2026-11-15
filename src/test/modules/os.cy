@@ -1,4 +1,5 @@
 use os
+use time
 use io
 use meta
 use t 'test'
@@ -170,6 +171,19 @@ t.eq(os.FileKind.file, entries[2].kind)
 --     t.eq('dir2/file.txt', entries[1].path)
 -- t.eq('file.txt', entries[2].path)
 -- t.eq('file2.txt', entries[3].path)
+
+-- File times as `time.Time`.
+os.write_file('src/test/assets/write.txt', 'x')!
+info := os.fileInfo('src/test/assets/write.txt')!
+mt := info.mtime()!
+t.eq(info.mtime_sec, mt.unix())
+t.eq(info.mtime_nsec, mt.subsec_nanos())
+age := time.now() - mt
+t.eq(true, age < time.minutes(10))
+t.eq(true, age > time.minutes(-10))
+t.eq(true, os.fileInfo('src/test/assets/file.txt')!.mtime()! <= mt)
+t.eq(info.atime_sec, info.atime()!.unix())
+t.eq(info.ctime_sec, info.ctime()!.unix())
 
 -- writeFile(str)
 if meta.cpu() != 'wasm32':

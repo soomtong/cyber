@@ -991,6 +991,7 @@ CLBytes cl_mod_bind_io(CLVM* vm, CLSym* mod);
 CLBytes cl_mod_bind_meta(CLVM* vm, CLSym* mod);
 CLBytes cl_mod_bind_math(CLVM* vm, CLSym* mod);
 CLBytes cl_mod_bind_test(CLVM* vm, CLSym* mod);
+CLBytes cl_mod_bind_time(CLVM* vm, CLSym* mod);
 CLBytes cl_mod_bind_json(CLVM* vm, CLSym* mod);
 CLBytes cl_mod_bind_peg(CLVM* vm, CLSym* mod);
 CLBytes cl_mod_bind_regex(CLVM* vm, CLSym* mod);

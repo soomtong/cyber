@@ -734,6 +734,7 @@ fn gen_api_docs(version str) -> !void:
         {path='../src/std/os.cy', section='os'},
         {path='../src/std/peg.cy', section='peg'},
         {path='../src/std/regex.cy', section='regex'},
+        {path='../src/std/time.cy', section='time'},
         {path='../src/std/test.cy', section='test'},
         {path='../src/std/toon.cy', section='toon'},
     }

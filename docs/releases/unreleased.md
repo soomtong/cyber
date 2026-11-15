@@ -82,6 +82,28 @@
     마지막으로 닫힌 그 이름의 캡처이고, 그 안에 같은 이름의 캡처가 있어도 바깥 것이다(`{:n: 'a' {:n: 'b' :} :} =n`은 `abab`에 맞는다).
   - UTF-8이 아닌 바이트는 매칭에서도 `find_all` · `split` · `replace_all`의 빈 매치 뒤 이동에서도 한 단위다.
 
+- 새 표준 모듈 `time`(`docs/decisions/project_std_time.md`, 매뉴얼 "Dates and times."):
+  - 타입 넷: `Time`(순간) · `DateTime`(순간 + UTC 오프셋) · `Date`(달력 날짜) · `Duration`(길이). 시간대는 UTC와 고정 오프셋이고
+    오프셋은 UTC 동쪽이 양수인 분 단위 `int`다(`+09:00`은 540, `-03:30`은 -210, 범위 ±23:59). 로컬 시간대와 오프셋 없는
+    datetime은 없다. 달력은 proleptic Gregorian, 연도 1..9999, 윤초는 세지 않는다(글의 `:60`은 `:59`로 읽는다).
+  - 시계: `time.now()` → `Time`, `time.monotonic()` → `Duration`(단조, 차이만 뜻이 있다).
+  - `Time`: `time.unix(sec[, nsec])` · `unix_millis(ms)`, `t.unix()` · `unix_millis()` · `subsec_nanos()`, `t + d` · `t - d` · `t - u`(→ `Duration`),
+    비교 연산자, `t.add(d)` → `!Time`, `t.utc()` · `t.to_offset(m)` → `DateTime`, `t.format([fmt])`.
+  - `DateTime`: `time.datetime(y, mo, d, h, mi, s[, nsec, offset])`, 접근 메서드(`year()` ... `offset()` · `weekday()` · `day_of_year()` ·
+    `date()` · `time()`), `to_offset(m)`(같은 순간) · `replace_offset(m)`(같은 시계 값), `add(d)` · `add_days(n)` · `add_months(n)` ·
+    `add_years(n)`, `format([fmt])`. `==`는 오프셋까지 비교하고 순서 연산자는 없다(`a.time() < b.time()`).
+  - `Date`: `time.date(y, m, d)`, `d - e`(일수), 비교, `add_days` · `add_months` · `add_years`, `weekday()` · `iso_weekday()` ·
+    `iso_week()` · `day_of_year()`, `at(h, mi, s[, nsec, offset])`. 월 · 년 덧셈은 말일로 clamp한다(01-31 + 1개월 = 02-29).
+  - `Duration`: `time.nanos` · `micros` · `millis` · `seconds` · `minutes` · `hours` · `days`, `+ - *` · 단항 `-` · 비교, `secs()` · `millis()` ·
+    `subsec_nanos()` · `to_float()` · `abs()` · `format()`(`1h2m3.5s`).
+  - 파싱: `time.parse(s)`는 RFC 3339(오프셋 필수. 공백 구분자 · `,` 소수점 · `Z` · `+09:00` · `+0900` · `+09`), `time.parse(s, offset)`은
+    오프셋 없는 글을 그 오프셋으로, `time.parse_format(s, fmt[, offset])`은 strptime 형식으로, `time.parse_date(s)`는 `YYYY-MM-DD`.
+    형식 지정자는 strftime의 부분집합(`%Y %y %m %d %e %j %b %B %a %A %H %I %p %M %S %f %3f %6f %9f %z %:z %F %T %R %D %s` ...).
+  - 오류: `error.Syntax`(글이 다름) · `error.Range`(값이 범위 밖) · `error.Format`(형식 문자열), 문구와 위치는 `time.Diag{msg, pos}`.
+    연산자 `+` · `-`는 범위를 넘으면 panic, 이름 있는 메서드는 `error.Range`.
+  - `os.FileInfo`에 `mtime()` · `atime()` · `ctime()` → `!time.Time`. 정수 칸(`mtime_sec` ...)은 그대로다.
+  - Python `datetime`과의 차분 시험 78,000건(달력 분해 · 요일 · ISO 주 · `strftime` · 파싱 왕복 · 월 덧셈)에서 차이가 없었다.
+
 ## 버그 수정
 
 - `.?` · `!`로 임시 옵션 · 결과에서 꺼낸 관리 값(`str`, `[]T` 등)을 `==` · `!=`의 피연산자나 `for`의 대상으로 쓰면 해제되지
@@ -103,6 +125,9 @@
   (Release 빌드에서는 오류 없이, Debug · ReleaseSafe에서는 `panic: integer does not fit in destination type`). 이제 개수 제한 없이 맞다(F-147).
 - private choice(`-type Shape enum`)를 복사하거나 해제하면 ``Can not access the private symbol `Tag` in `Shape`.``로 컴파일되지
   않았다. 이제 된다(F-148).
+- 괄호 묶음이 식 중간에서 왼쪽 피연산자일 때 그 뒤의 연산자를 모두 가져갔다. `a - (b) / 2 + 1`이 `a - ((b) / 2 + 1)`로,
+  `-(2) + 5`가 `-((2) + 5)`로 계산됐다(타입이 맞으면 오류 없이 다른 값). 이제 묶음 앞 연산자의 우선순위대로 묶인다(F-154).
+  식의 맨 앞 묶음(`(a) + b`)과 괄호 없는 식은 전부터 맞았다. 이 꼴에 기대던 코드는 값이 달라진다.
 - 줄바꿈 없이 끝나는 파일의 마지막 줄이 `x: int = 5` · `x int = 5` · `x: int =`이면 타입 선언 안내 대신 컴파일러가
   `panic: index out of bounds`로 멈췄다. 이제 안내를 보여 준다(F-149).
 - `json.encode` · `json.from`이 2^63 이상인 `r64`를 음수로 썼다(`r64.ones` → `-1`). 이제 `18446744073709551615`처럼
@@ -114,13 +139,10 @@
 
 ## 임베딩 API
 
-- `cl_mod_bind_json` · `cl_mod_bind_toon` · `cl_mod_bind_regex` · `cl_mod_bind_peg`(`cyber.h`). 기본 로더는 `use json` · `use toon` · `use regex` · `use peg`를 바로 푼다. 직접 로더를 쓰는 호스트는
+- `cl_mod_bind_json` · `cl_mod_bind_toon` · `cl_mod_bind_regex` · `cl_mod_bind_peg` · `cl_mod_bind_time`(`cyber.h`). 기본 로더는 `use json` · `use toon` · `use regex` · `use peg` · `use time`을 바로 푼다. 직접 로더를 쓰는 호스트는
   다른 표준 모듈처럼 이 함수로 묶는다.
 
 ## 알려진 한계
 
 - 기본 파싱(`exact` 없음)에서 17자리를 넘는 소수는 `float`으로 근사한다. 잃지 않으려면 `ParseOptions{exact=true}`.
 - `json.to`는 struct 필드의 기본값(`x int = 3`)을 쓰지 않는다. 없는 필드는 옵션 필드만 허용한다.
-- 괄호 묶음이 식 중간에서 왼쪽 피연산자일 때 그 뒤의 연산자를 모두 가져갔다. `a - (b) / 2 + 1`이 `a - ((b) / 2 + 1)`로,
-  `-(2) + 5`가 `-((2) + 5)`로 계산됐다(타입이 맞으면 오류 없이 다른 값). 이제 묶음 앞 연산자의 우선순위대로 묶인다(F-154).
-  식의 맨 앞 묶음(`(a) + b`)과 괄호 없는 식은 전부터 맞았다. 이 꼴에 기대던 코드는 값이 달라진다.

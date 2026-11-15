@@ -47,6 +47,7 @@ pub const mod_bind_meta = c.cl_mod_bind_meta;
 pub const mod_bind_math = c.cl_mod_bind_math;
 pub const mod_bind_io = c.cl_mod_bind_io;
 pub const mod_bind_test = c.cl_mod_bind_test;
+pub const mod_bind_time = c.cl_mod_bind_time;
 pub const mod_bind_json = c.cl_mod_bind_json;
 pub const mod_bind_peg = c.cl_mod_bind_peg;
 pub const mod_bind_regex = c.cl_mod_bind_regex;

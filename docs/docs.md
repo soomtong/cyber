@@ -4163,6 +4163,7 @@ fn (&Box[]) dup() -> T:
   * [JSON and TOON.](#json-and-toon)
   * [Regular expressions.](#regular-expressions)
   * [Parsing expression grammars.](#parsing-expression-grammars)
+  * [Dates and times.](#dates-and-times)
 * [Importing.](#importing)
   * [Import file.](#import-file)
   * [Import URL.](#import-url)
@@ -4422,6 +4423,99 @@ else |err|:
 Matching is by Unicode code point: `.` and `[가-힣]` take a whole character, and offsets are in bytes. A byte of the input that is not UTF-8 is one character for `.` and for a negated class. The syntax is a subset of LPeg's `re` with the same meaning, with these differences: strings and classes have escapes, a named capture is a node of the result, `=name` matches the whole text of the capture, and what calls a Lua function (`p -> name`, `p => name`) or builds a table (`{| p |}`) is not supported. In a class, a `%` name goes on to the last letter, as in `re`: write `[_%w]`, not `[%w_]`.
 
 A grammar backtracks, so there is no bound on the time of a match as there is for `regex`: a grammar can take time that grows fast with the length of the input. A match keeps a stack of open rule calls and choices. When the stack is over `peg.MaxStack` (100000) entries, for input that nests very deep, `parse` returns `error.TooDeep`, and for a match with more than `peg.MaxCaptures` (1000000) captures it returns `error.TooBig`. The functions that return an option panic in these cases. A call at the end of the last choice of a rule takes no stack: `tail <- !. / . tail` runs over any length of input. A grammar over `peg.MaxInsts` (65536) instructions is `error.TooBig` (`p^100` takes 100 times the instructions of `p`), and patterns nest at most `peg.MaxDepth` (250) deep. A compiled `Peg` does not change: compile once and use it for every match.
+
+### Dates and times.
+The `time` module has four types. A `Time` is an instant, a `DateTime` is an instant seen at a UTC offset, a `Date` is a calendar day and a `Duration` is a length of time. Time zones are UTC and fixed offsets. An offset is an `int`: the minutes east of UTC, so `+09:00` is `540` and `-03:30` is `-210`:
+```cy
+use time
+
+dt := time.parse('2026-11-15T10:22:03.5+09:00')!
+print(dt.utc().format())                 --> 2026-11-15T01:22:03.5Z
+print(dt.format('%d %b %Y %H:%M')!)      --> 15 Nov 2026 10:22
+print(dt.year())                         --> 2026
+print(dt.weekday())                      --> Weekday.sunday
+print(dt.offset())                       --> 540
+print(dt.to_offset(330)!.format())       --> 2026-11-15T06:52:03.5+05:30
+print(dt.add_months(3)!.format())        --> 2027-02-15T10:22:03.5+09:00
+```
+There is no local time zone and no date and time without an offset: a value always says which instant it is. The calendar is the proleptic Gregorian one, with years 1 to 9999. Leap seconds are not counted, as in Unix time, and a `:60` in a text reads as `:59`.
+
+`time.now()` returns the `Time` of the system clock. Instants compare with `<`, `<=`, `>`, `>=` and `==`, and their difference is a `Duration`. `os.FileInfo` gives the times of a file as `Time`:
+```cy
+use os
+use time
+
+a := os.fileInfo('build.zig')!.mtime()!
+b := os.fileInfo('zig-out/bin/cyber')!.mtime()!
+if a > b:
+    print('the build is out of date')
+if time.now() - b > time.hours(24):
+    print('built more than a day ago')
+```
+The system clock can be set, so it can go back. To measure how long something takes, use `time.monotonic()`, a `Duration` that only grows and that has a meaning only as the difference of two readings:
+```cy
+start := time.monotonic()
+work()
+print((time.monotonic() - start).format())   --> 1.204s
+```
+A `Duration` is made with `time.nanos(n)`, `micros`, `millis`, `seconds`, `minutes`, `hours` and `days` (24 hours). It adds, subtracts, negates, multiplies by an `int` and compares. `d.secs()` and `d.millis()` return it as a whole number rounded toward zero, `d.to_float()` in seconds, and `d.format()` as text such as `1h2m3.5s`.
+
+A `Time` has no calendar fields. `t.utc()` and `t.to_offset(minutes)` return a `DateTime`, which has `year()`, `month()` (1 to 12), `day()`, `hour()`, `minute()`, `second()`, `nanosecond()`, `offset()`, `weekday()`, `day_of_year()` and `date()`. `dt.time()` returns the instant, and `time.unix(sec)`, `time.unix(sec, nsec)`, `time.unix_millis(ms)`, `t.unix()` and `t.unix_millis()` convert between a `Time` and Unix time. `dt.to_offset(m)` is the same instant at another offset, `dt.replace_offset(m)` the same date and time of day at another offset. Two `DateTime` values are `==` only when the offset is the same too, and they have no `<`. Compare the instants:
+```cy
+a := time.parse('2026-11-15T10:22:03+09:00')!
+b := time.parse('2026-11-15T01:22:03Z')!
+print(a == b)                   --> false
+print(a.time() == b.time())     --> true
+```
+A `Date` is for calendar arithmetic. The difference of two dates is a number of days. `add_months` and `add_years` keep the day of the month, or take the last day when the month is shorter. `DateTime` has the same three methods, and they keep the time of day:
+```cy
+d := time.date(2024, 1, 31)!
+print(d.add_months(1)!.format())        --> 2024-02-29
+print(d.add_days(30)!.format())         --> 2024-03-01
+print(time.date(2024, 12, 25)! - d)     --> 329
+print(d.weekday())                      --> Weekday.wednesday
+print(d.iso_week())                     --> IsoWeek{year=2024, week=5}
+print(d.at(9, 30, 0)!.format())         --> 2024-01-31T09:30:00Z
+```
+`time.date(y, m, d)` and `time.datetime(y, mo, d, h, mi, s)` (UTC) or `time.datetime(y, mo, d, h, mi, s, nsec, offset)` return `error.Range` for a date that does not exist. So do the methods that move a value out of the years 1 to 9999. The operators `+` and `-` with a `Duration` panic instead: use `add(d)` when the input is not trusted.
+
+`time.parse(s)` reads RFC 3339. The text must have an offset. A space can stand for the `T`, a `,` for the `.`, and the offset is `Z`, `+09:00`, `+0900` or `+09`. A record without an offset is read with `time.parse(s, offset)`, which takes the offset to read it at. `time.parse_format(s, fmt)` reads other shapes by a `strptime` format, and reads a text without `%z` as UTC, or at the offset in a third argument. `time.parse_date(s)` reads `2026-11-15` as a `Date`:
+```cy
+-- Python logging, log4j
+print(time.parse('2026-11-15 10:22:01,123', 540)!.format())
+--> 2026-11-15T10:22:01.123+09:00
+
+-- Common Log Format
+print(time.parse_format('15/Nov/2026:10:22:01 +0900', '%d/%b/%Y:%H:%M:%S %z')!.format())
+--> 2026-11-15T10:22:01+09:00
+
+-- syslog has no year: a field that the format does not have is that of 1970-01-01T00:00:00
+print(time.parse_format('Nov  5 10:22:01', '%b %e %T')!.format())
+--> 1970-11-05T10:22:01Z
+```
+`format()` writes RFC 3339 (`Z` for UTC, and the fraction of the second only when it is not zero). `format(fmt)` takes a `strftime` format and returns `error.Format` for a specifier that is not in this table:
+
+| | |
+|---|---|
+| Date | `%Y` (four digits), `%y` (two digits: 69 to 99 are 1969 to 1999), `%m`, `%d`, `%e` (day padded with a space), `%j` (day of the year), `%b` `%h` (`Nov`), `%B` (`November`), `%a` (`Sun`), `%A` (`Sunday`) |
+| Time of day | `%H`, `%I` (12 hour clock), `%p` (`AM`, `PM`), `%M`, `%S`, `%f` (six digits), `%3f`, `%6f`, `%9f` |
+| Offset | `%z` (`+0900`), `%:z` (`+09:00`) |
+| Short forms | `%F` (`%Y-%m-%d`), `%T` (`%H:%M:%S`), `%R` (`%H:%M`), `%D` (`%m/%d/%y`) |
+| Others | `%s` (Unix seconds), `%n`, `%t`, `%%` |
+| Output only | `%u` (Monday is 1, Sunday is 7), `%w` (Sunday is 0), `%G` and `%V` (ISO 8601 year and week) |
+
+Names are in English. When parsing, a number takes one or two digits (`%Y` four, `%j` up to three, every `%f` one or more), a space in the format takes one or more, a name can be short or full in any case, and both offset specifiers take `Z`, `+0900`, `+09:00` and `+09`. A `Date` formats with the date specifiers only.
+
+The parse functions return `error.Syntax` when the text has another shape, `error.Range` when a field is out of range and `error.Format` when the format is wrong. Each takes a `time.Diag` as its last argument to see why:
+```cy
+var diag time.Diag = {}
+try:
+    _ = time.parse('2026-02-30T10:22:01Z', &diag)!
+else |err|:
+    print('%{err}: %{diag.msg}')
+--> error.Range: February 2026 has no day 30.
+```
+`time.is_leap_year(y)`, `time.days_in_month(y, m)`, `time.parse_offset('+05:30')` (330) and `time.format_offset(330)` are there for code that works on the fields.
 
 ## Importing.
 The `use` statement can import modules. Builtin and std modules such as `math` can be imported without any configuration:

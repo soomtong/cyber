@@ -365,6 +365,7 @@ if (!aot) {
     run.case("modules/json.cy");
     run.case("modules/peg.cy");
     run.case("modules/regex.cy");
+    run.case("modules/time.cy");
     run.case("modules/toon.cy");
     if (!is_wasm) {
         // Both call libc through extern functions, which need FFI.

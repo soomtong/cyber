@@ -53,6 +53,7 @@ const named_std_mods = [_]StdEntry{
     .{ "c", .{ .bind_fn = C.mod_bind_c } },
     .{ "io", .{ .bind_fn = C.mod_bind_io } },
     .{ "test", .{ .bind_fn = C.mod_bind_test } },
+    .{ "time", .{ .bind_fn = C.mod_bind_time } },
     .{ "json", .{ .bind_fn = C.mod_bind_json } },
     .{ "peg", .{ .bind_fn = C.mod_bind_peg } },
     .{ "regex", .{ .bind_fn = C.mod_bind_regex } },

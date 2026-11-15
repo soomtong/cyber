@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.11-dev 900-40f3bc7</div>
+    <div class="sub-title">v0.4.11-dev 905-10c0bd8</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -4659,7 +4659,7 @@ print(x[1].number_text().?)         --> 1.5
 <li>Compare: <code>a.eq(b)</code> compares by the JSON model (<code>1</code> equals <code>1.0</code>, key order does not matter). A <code>number</code> compares by <code>number_text()</code>. <code>==</code> does not support <code>Value</code>, so test an option with <code>?else</code> or <code>if ... |x|</code> instead of <code>== none</code>.</li>
 <li>Build: <code>json.Object</code> has <code>set</code>, <code>get</code>, <code>remove</code>, <code>contains</code>, <code>keys</code> and <code>len</code>. <code>json.object</code> and <code>json.array</code> make values from lists.</li>
 <li>Write: <code>json.stringify(v)</code> is compact and <code>json.stringify(v, 2)</code> puts each element on its own line. NaN and infinities become <code>null</code>. A float uses the shortest digits that read back as the same value, without a trailing <code>.0</code>, and an exponent below <code>1e-6</code> or from <code>1e21</code> (<code>1e+21</code>).</li>
-<li>Convert: <code>json.encode(x)</code> and <code>json.from(x)</code> take a Cyber value: numbers, <code>bool</code>, <code>str</code>, slices, structs (fields in order), optionals (<code>none</code> is <code>null</code>), enums (the case name), choices (<code>{"case": payload}</code>) and <code>Map</code> with <code>str</code> keys (sorted). Pass a borrow for a value that can not be copied: <code>json.encode(&map)</code>.</li>
+<li>Convert: <code>json.encode(x)</code> and <code>json.from(x)</code> take a Cyber value: numbers, <code>bool</code>, <code>str</code>, slices, structs (fields in order), optionals (<code>none</code> is <code>null</code>), enums (the case name), choices (<code>{"case": payload}</code>) and <code>Map</code> with <code>str</code> keys (sorted). An <code>r64</code> from 2^63, which does not fit <code>int</code>, becomes a <code>number</code> with its unsigned digits (<code>18446744073709551615</code>). Pass a borrow for a value that can not be copied: <code>json.encode(&map)</code>.</li>
 </ul>
 <p><code>json.to(T, v)</code> converts a <code>Value</code> back to a Cyber type, and <code>json.decode(T, src)</code> parses and converts in one step. It takes the same types as <code>from</code>, except <code>Array</code> and fixed size arrays. A struct field must be present unless it is an optional (a missing member is <code>none</code>), and members that are not fields are ignored. An integer type takes a whole float such as <code>3e2</code>, a float type takes an integer, and <code>str</code> takes any number as its text, so a large ID can be read whole whatever its size. On failure it returns <code>error.Type</code> (another kind of value or an unknown case name), <code>error.MissingField</code> or <code>error.Overflow</code> (a number out of the type's range), and a <code>json.Diag</code> tells where through <code>path</code>:</p>
 <pre><code class="language-cy">type User:

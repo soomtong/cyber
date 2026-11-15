@@ -22,12 +22,16 @@ use meta
 const MaxDepth = 256
 
 --| A JSON value.
---| A number without a fraction or an exponent that fits `int` is parsed as `int`. Other numbers are `float`.
+--| A number without a fraction or an exponent that fits `int` is parsed as `int`, another integer as `number`.
+--| A number with a fraction or an exponent is `float`, or `number` when it is beyond the `float` range
+--| or the parse asks for `ParseOptions{exact=true}`.
 type Value enum:
     case null
     case bool   bool
     case int    int
     case float  float
+    --| A number kept as its JSON text, without loss. The text must match the JSON number grammar.
+    case number str
     case str    str
     case array  []Value
     case object Object
@@ -40,6 +44,11 @@ type Entry:
 --| A JSON object. Entries keep their insertion order and keys are unique.
 type Object:
     entries []Entry = {}
+
+--| Options of `parse`.
+type ParseOptions:
+    --| Keeps every number with a fraction or an exponent as `Value.number` instead of `float`.
+    exact bool = false
 
 --| Where and why parsing or a conversion failed. `line` and `col` start at 1, `col` counts bytes.
 --| `path` is set by `to` and `decode`: the place of the value that did not convert, such as `$.users[1].id`.
@@ -137,6 +146,13 @@ fn (&Value) len() -> int:
         else:
             return 0
 
+-fn (&Value) is_number_text() -> bool:
+    switch self.*:
+        case .number:
+            return true
+        else:
+            return false
+
 fn (&Value) is_null() -> bool:
     switch self.*:
         case .null:
@@ -159,13 +175,33 @@ fn (&Value) as_int() -> ?int:
         else:
             return none
 
---| Returns a number as a `float`, converting an `int`.
+--| Returns a number as a `float`, converting an `int` and a `number` to the nearest value.
+--| A `number` beyond the `float` range returns `none`.
 fn (&Value) as_float() -> ?float:
     switch self.*:
         case .int |i|:
             return float(i)
         case .float |f|:
             return f
+        case .number |s|:
+            f := float(s)
+            if is_finite(f):
+                return f
+            return none
+        else:
+            return none
+
+--| Returns the text of a number in the form of `fmt_number`: `int`, finite `float` and `number`.
+fn (&Value) number_text() -> ?str:
+    switch self.*:
+        case .int |i|:
+            return i.fmt()
+        case .float |f|:
+            if is_finite(f):
+                return fmt_float(f)
+            return none
+        case .number |s|:
+            return fmt_number(s)
         else:
             return none
 
@@ -197,13 +233,21 @@ fn (&Value) kind() -> str:
         case .bool: return 'bool'
         case .int: return 'number'
         case .float: return 'number'
+        case .number: return 'number'
         case .str: return 'string'
         case .array: return 'array'
         case .object: return 'object'
 
 --| Returns whether two values are equal in the JSON model: numbers compare by value (`1 == 1.0`),
 --| objects by their key sets and values regardless of key order, arrays element by element.
+--| When one side is a `number`, both compare by `number_text` (`1e2` equals `100`).
 fn (&Value) eq(other Value) -> bool:
+    if self.is_number_text() or other.is_number_text():
+        a := self.number_text() ?else:
+            return false
+        b := other.number_text() ?else:
+            return false
+        return a == b
     switch self.*:
         case .null:
             return other.is_null()
@@ -220,6 +264,8 @@ fn (&Value) eq(other Value) -> bool:
         case .float |f|:
             if other.as_float() |o|:
                 return f == o
+            return false
+        case .number:
             return false
         case .str |s|:
             if other.as_str() |o|:
@@ -266,10 +312,18 @@ fn parse(src str) -> !Value:
 
 --| Parses a JSON text. On failure, `diag` tells where and why.
 fn parse(src str, diag &Diag) -> !Value:
+    return parse(src, ParseOptions{}, diag)
+
+--| Parses a JSON text with options, such as `ParseOptions{exact=true}` to keep every number without loss.
+fn parse(src str, opts ParseOptions) -> !Value:
+    var diag Diag = {}
+    return parse(src, opts, &diag)
+
+fn parse(src str, opts ParseOptions, diag &Diag) -> !Value:
     if !str.is_utf8(src.span()):
         diag.msg = 'The input is not valid UTF-8.'
         return error.Unicode
-    p := Parser{src=src}
+    p := Parser{src=src, exact=opts.exact}
     p.skip_ws()
     res := p.value() !else |err|:
         p.report(diag)
@@ -381,7 +435,7 @@ fn decode(%T type, src str, diag &Diag) -> !T:
 
 --| Converts a `Value` to `T`, the reverse of `from`:
 --| `bool`, integers (`error.Overflow` out of range, a float only when it is a whole number), floats (an `int` converts),
---| `str`, `Value`, `Object`, slices, `Map` with `str` keys, structs, optionals (`null` is `none`),
+--| `str` (a number converts to its text, so a large ID reads whole), `Value`, `Object`, slices, `Map` with `str` keys, structs, optionals (`null` is `none`),
 --| enums (the case name) and choices (`"case"` or `{"case": payload}`).
 --| A struct field must be present unless it is an optional. Members that are not fields are ignored.
 --| Returns `error.Type` for a value of another kind or an unknown case name and `error.MissingField` for a missing field.
@@ -397,6 +451,13 @@ fn to(%T type, v Value, diag &Diag) -> !T:
         return err
     return res
 
+-fn to_float(s str, diag &Diag) -> !float:
+    f := float(s)
+    if !is_finite(f):
+        diag.msg = 'The number `%{s}` does not fit `float`.'
+        return error.Overflow
+    return f
+
 -fn mismatch(diag &Diag, expected str, v &Value) -> error:
     diag.msg = 'Expected %{expected}, found %{v.kind()}.'
     return error.Type
@@ -405,6 +466,19 @@ fn to(%T type, v Value, diag &Diag) -> !T:
 -fn to_whole(v &Value, diag &Diag) -> !int:
     switch v.*:
         case .int |i|:
+            return i
+        case .number |s|:
+            -- `fmt_number` writes an exponent only below 1e-6, which has a fraction, or from 1e21, which is beyond `int`.
+            t := fmt_number(s)
+            is_small := t.contains('e-')
+            has_exp := t.contains('e')
+            has_frac := t.contains('.')
+            if is_small or (has_frac and !has_exp):
+                diag.msg = 'Expected an integer, found `%{s}`.'
+                return error.Type
+            i := int.parse(t) !else:
+                diag.msg = 'The number `%{s}` does not fit `int`.'
+                return error.Overflow
             return i
         case .float |f|:
             if f >= -9223372036854775808.0 and f < 9223372036854775808.0:
@@ -439,14 +513,20 @@ fn to(%T type, v Value, diag &Diag) -> !T:
         switch v.*:
             case .str |s|:
                 return s
+            case .number |s|:
+                return s
             else:
-                return mismatch(diag, 'a string', v)
+                -- A number converts to its text, so that a large ID can be read as `str` whatever its size.
+                return v.number_text() ?else:
+                    return mismatch(diag, 'a string', v)
     #else T == float:
         switch v.*:
             case .int |i|:
                 return float(i)
             case .float |f|:
                 return f
+            case .number |s|:
+                return to_float(s, diag)
             else:
                 return mismatch(diag, 'a number', v)
     #else T == f32:
@@ -455,6 +535,8 @@ fn to(%T type, v Value, diag &Diag) -> !T:
                 return f32(float(i))
             case .float |f|:
                 return f32(f)
+            case .number |s|:
+                return f32(to_float(s, diag)!)
             else:
                 return mismatch(diag, 'a number', v)
     #else type.is_instance_of(T, Slice):
@@ -672,14 +754,64 @@ fn fmt_float(x float) -> str:
     out += if (exp < 0) 'e-%{-exp}' else 'e+%{exp}'
     return out
 
+--| Rewrites a token of the JSON number grammar in the form of `fmt_float`, with all of its digits:
+--| plain decimals for `1e-6 <= |x| < 1e21` and 0, without leading or trailing zeros (`1.50` is `1.5`, `1e2` is `100`, `-0` is `0`),
+--| and `d.ddde+N` outside. An exponent that does not fit `int` keeps the text as it is.
+fn fmt_number(text str) -> str:
+    n := text.len()
+    neg := n > 0 and text[0] == '-'
+    i := if (neg) 1 else 0
+    int_start := i
+    while i < n and str.is_ascii_digit(text[i]):
+        i += 1
+    int_part := text[int_start..i]
+    var frac_part str = ''
+    if i < n and text[i] == '.':
+        i += 1
+        frac_start := i
+        while i < n and str.is_ascii_digit(text[i]):
+            i += 1
+        frac_part = text[frac_start..i]
+    exp := 0
+    if i < n and (text[i] == 'e' or text[i] == 'E'):
+        exp = int.parse(text[i+1..]) !else:
+            return text
+        if exp > 1000000000000 or exp < -1000000000000:
+            return text
+    all := int_part + frac_part
+    lead := all.len() - all.trimLeft('0').len()
+    digits := all[lead..].trimRight('0')
+    if digits.len() == 0:
+        return '0'
+    -- The value is `d.ddd * 10^e`.
+    e := int_part.len() - lead - 1 + exp
+    var out str = if (neg) '-' else ''
+    if e >= -6 and e < 21:
+        if e >= 0:
+            if digits.len() <= e + 1:
+                out += digits + '0'.repeat(e + 1 - digits.len())
+            else:
+                out += digits[0..e+1] + '.' + digits[e+1..]
+        else:
+            out += '0.' + '0'.repeat(-e - 1) + digits
+        return out
+    out += digits[0..1]
+    if digits.len() > 1:
+        out += '.' + digits[1..]
+    out += if (e < 0) 'e-%{-e}' else 'e+%{e}'
+    return out
+
 --| Returns whether `x` is neither NaN nor infinite.
 fn is_finite(x float) -> bool:
     return x == x and x - x == 0
 
---| Parses a token that matches the JSON number grammar. Returns `none` for another token
---| or a number beyond the `float` range.
+--| Parses a token that matches the JSON number grammar as `parse` does. Returns `none` for another token.
 fn parse_number(text str) -> ?Value:
-    p := Parser{src=text}
+    return parse_number(text, false)
+
+--| Parses a number token. `exact` keeps a number with a fraction or an exponent as `Value.number`.
+fn parse_number(text str, exact bool) -> ?Value:
+    p := Parser{src=text, exact=exact}
     v := p.number() !else:
         return none
     if p.pos != text.len():
@@ -745,6 +877,8 @@ fn (&Writer) value(v Value, depth int):
                 self.put(fmt_float(f))
             else:
                 self.put('null')
+        case .number |s|:
+            self.put(s)
         case .str |s|:
             quote(&self.buf, s)
         case .array |a|:
@@ -780,6 +914,7 @@ fn (&Writer) value(v Value, depth int):
 
 -type Parser:
     src   str
+    exact bool = false
     pos   int = 0
     depth int = 0
     msg   str = ''
@@ -1044,10 +1179,12 @@ fn (&Parser) number() -> !Value:
     if is_int:
         if parse_int(text) |i|:
             return Value.int(i)
+        return Value.number(text)
+    if self.exact:
+        return Value.number(text)
     f := float(text)
     if !is_finite(f):
-        self.pos = start
-        return self.fail('The number `%{text}` is out of range.')
+        return Value.number(text)
     return Value.float(f)
 
 --| Parses `-?[0-9]+` as an `int`, or returns `none` when it does not fit.

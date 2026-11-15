@@ -11,6 +11,7 @@
     F-141(`.?` · `!` 언랩 임시값 누수) · F-143(wasm32 `str.is_utf8` panic) 수정.
   - 그다음 커밋: `json.to(T, v)` · `json.decode(T, src)`(`Diag.path`), F-142(`int.parse` 넘침 → `error.Overflow`),
     F-144(`?T` · `!T` 함수의 `return -x`), F-145(`!else`가 `NoCopy` 결과를 옮김), F-146(`meta.access(T, ...)`에 템플릿 인자).
+  - 그다음 커밋: `json.Value.number`(원문 텍스트, 큰 수 무손실), `ParseOptions{exact}` · `toon.DecodeOptions{exact}`, `fmt_number`.
   - 설계 `docs/decisions/project_std_json_toon.md`, 사용자 문서 `docs/docs.md` "JSON and TOON.".
 - tars-agent는 cyber 0.4.11에 고정(`78df31d`). `730813e`에서 `e25e7d76`의 회신을 기록했고 0.4.12에서 확인한다.
   요청서 `/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.11-codeact-messages.md`.
@@ -23,8 +24,6 @@
      안 3 inlay hint). `project_coroutines.md` 끝 절.
    - 정렬: 안 A(일반 지역을 빌림 캡처하는 pinned closure, F-136으로 스택 이동 걸림돌은 풀림), 키 정렬(람다 반환 타입으로
      제네릭 추론, 이름), 인자 없는 `sort()`의 원소 조건. `project_sort_closures.md` "결정할 것".
-   - `json` 큰 수 · 고정밀 수: 안 1(그대로, 문서만) · 안 2(추천, `Value.number str` 원문 case + `ParseOptions{exact}`) ·
-     안 3(모든 수 원문). `Value`에 case를 더하려면 0.4.12 전이어야 한다. `project_std_json_toon.md` "큰 수 · 고정밀 수".
    - core `@eq`의 choice 지원(`?json.Value == none`, `t.eq`로 choice 비교).
    - 0.5 범위. 사용자 목표는 "fiber 관련 동시성 동작을 모두 완성해 0.5".
 3. 기술 부채(급하지 않음):
@@ -41,7 +40,7 @@
 - 최상위 `#x := ...` 컴파일 타임 변수는 뒤의 최상위 실행문에서 못 쓴다(선언 단계에서만 평가).
 - 보간 안의 보간은 지원하지 않는다(토크나이저 상태가 한 단계). 원인을 말하는 오류만 낸다.
 - `?json.Value == none`은 컴파일 오류(core `@eq`가 choice 미지원). `?else` · `Value.eq`를 쓴다.
-- `json`은 `int` 밖 정수와 17자리 넘는 소수를 `float`으로 근사한다. `json.to`는 struct 필드 기본값을 쓰지 않는다.
+- `json` 기본 파싱은 17자리 넘는 소수를 `float`으로 근사한다(`exact`면 원문). `json.to`는 struct 필드 기본값을 쓰지 않는다.
 - 하위 블록에서는 `move` · `meta.consume`을 못 쓴다(`else` 갈래의 consume은 뒤까지 죽은 상태로 남는다). 컴파일 타임
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).

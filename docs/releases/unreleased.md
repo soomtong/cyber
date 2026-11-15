@@ -36,6 +36,11 @@
     옵션 · enum · choice · 슬라이스 · `Map[str, V]` · 수 · `bool` · `str` · `Value` · `Object`. 옵션이 아닌 struct 필드가 없으면
     `error.MissingField`, 다른 종류의 값이나 모르는 case 이름은 `error.Type`, 범위 밖 수는 `error.Overflow`. 정수 타입은 정수인
     float(`3e2`)도 받는다. 필드가 아닌 멤버는 무시한다. `json.Diag`에 `path` 필드가 생겨 `$.users[1].id`처럼 실패한 자리를 적는다.
+  - 큰 수 · 고정밀 수: `json.Value`에 `number`(JSON 원문 텍스트) case가 있다. `int`에 맞지 않는 정수와 `float` 범위 밖 수(`1e999`)는
+    `number`로 읽어 손실 없이 다시 쓴다. `json.parse(src, json.ParseOptions{exact=true})`(`toon.DecodeOptions{exact=true}`)이면 소수 ·
+    지수가 있는 수도 원문으로 둔다. `number_text()` · `json.fmt_number(text)`는 수를 한 꼴(`1.50` → `1.5`, `1e2` → `100`)로 쓰고,
+    `eq`는 이 꼴로 비교한다. `as_float`는 가장 가까운 값(범위 밖은 `none`), `json.to`의 `str` 필드는 모든 수를 텍스트로 받는다.
+    TOON 인코더는 `number`를 정규형으로 쓴다. TOON 참조 구현은 `float` 범위 밖 수를 문자열로 읽는데 여기서는 수다.
   - `?json.Value == none`처럼 `==`로 `Value`를 비교할 수는 없다(코어 `@eq`가 choice를 지원하지 않음). `?else` · `if ... |x|` ·
     `Value.eq`를 쓴다.
 
@@ -64,6 +69,5 @@
 
 ## 알려진 한계
 
-- `json`은 `int`에 맞지 않는 정수와 17자리를 넘는 소수를 `float`으로 근사한다(`9223372036854775808` → `9223372036854776000`).
-  무손실 경로는 검토 중(`docs/decisions/project_std_json_toon.md` "큰 수 · 고정밀 수").
+- 기본 파싱(`exact` 없음)에서 17자리를 넘는 소수는 `float`으로 근사한다. 잃지 않으려면 `ParseOptions{exact=true}`.
 - `json.to`는 struct 필드의 기본값(`x int = 3`)을 쓰지 않는다. 없는 필드는 옵션 필드만 허용한다.

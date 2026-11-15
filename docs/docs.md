@@ -4229,15 +4229,24 @@ print(toon.encode(v)!)
 print(json.stringify(toon.decode('tags[2]: a,b')!))   --> {"tags":["a","b"]}
 ```
 
-`json.Value` is a choice: `null`, `bool`, `int`, `float`, `str`, `array` (`[]Value`) and `object` (`json.Object`). A number without a fraction or an exponent that fits `int` parses as `int`, another number as `float`. An object keeps its keys in insertion order, and a duplicate key keeps its first position and takes the last value.
+`json.Value` is a choice: `null`, `bool`, `int`, `float`, `number`, `str`, `array` (`[]Value`) and `object` (`json.Object`). A number without a fraction or an exponent that fits `int` parses as `int`, and another number as `float`. A number that neither holds without loss, an integer beyond `int` or a number beyond the `float` range, parses as `number`, which keeps its JSON text. `json.parse(src, json.ParseOptions{exact=true})` also keeps every number with a fraction or an exponent as `number`:
+```cy
+v := json.parse('[9223372036854775808, 0.1000000000000000055511151231257827]')!
+print(json.stringify(v))            --> [9223372036854775808,0.1]
+print(v[0].kind())                  --> number
+x := json.parse('[0.1000000000000000055511151231257827, 1.50]', json.ParseOptions{exact=true})!
+print(json.stringify(x))            --> [0.1000000000000000055511151231257827,1.50]
+print(x[1].number_text().?)         --> 1.5
+```
+`number_text()` returns any number in one form (`1.50` and `1.5` give `1.5`, `1e2` gives `100`), and `json.fmt_number(text)` does the same for a token. `json.stringify` writes a `number` as it is, so its text must match the JSON number grammar. An object keeps its keys in insertion order, and a duplicate key keeps its first position and takes the last value.
 
-- Read: `v['key']` and `v[idx]` return `Value.null` when the member is missing. `get(key)` and `at(idx)` return an option. `as_bool`, `as_int`, `as_float` (also converts an `int`), `as_str`, `as_array` and `as_object` return an option of the payload. `kind()` returns the JSON type name.
-- Compare: `a.eq(b)` compares by the JSON model (`1` equals `1.0`, key order does not matter). `==` does not support `Value`, so test an option with `?else` or `if ... |x|` instead of `== none`.
+- Read: `v['key']` and `v[idx]` return `Value.null` when the member is missing. `get(key)` and `at(idx)` return an option. `as_bool`, `as_int`, `as_float` (also converts an `int` and a `number`, `none` beyond the `float` range), `as_str`, `as_array` and `as_object` return an option of the payload. `kind()` returns the JSON type name.
+- Compare: `a.eq(b)` compares by the JSON model (`1` equals `1.0`, key order does not matter). A `number` compares by `number_text()`. `==` does not support `Value`, so test an option with `?else` or `if ... |x|` instead of `== none`.
 - Build: `json.Object` has `set`, `get`, `remove`, `contains`, `keys` and `len`. `json.object` and `json.array` make values from lists.
 - Write: `json.stringify(v)` is compact and `json.stringify(v, 2)` puts each element on its own line. NaN and infinities become `null`. A float uses the shortest digits that read back as the same value, without a trailing `.0`, and an exponent below `1e-6` or from `1e21` (`1e+21`).
 - Convert: `json.encode(x)` and `json.from(x)` take a Cyber value: numbers, `bool`, `str`, slices, structs (fields in order), optionals (`none` is `null`), enums (the case name), choices (`{"case": payload}`) and `Map` with `str` keys (sorted). Pass a borrow for a value that can not be copied: `json.encode(&map)`.
 
-`json.to(T, v)` converts a `Value` back to a Cyber type, and `json.decode(T, src)` parses and converts in one step. It takes the same types as `from`, except `Array` and fixed size arrays. A struct field must be present unless it is an optional (a missing member is `none`), and members that are not fields are ignored. An integer type takes a whole float such as `3e2`, and a float type takes an integer. On failure it returns `error.Type` (another kind of value or an unknown case name), `error.MissingField` or `error.Overflow` (a number out of the type's range), and a `json.Diag` tells where through `path`:
+`json.to(T, v)` converts a `Value` back to a Cyber type, and `json.decode(T, src)` parses and converts in one step. It takes the same types as `from`, except `Array` and fixed size arrays. A struct field must be present unless it is an optional (a missing member is `none`), and members that are not fields are ignored. An integer type takes a whole float such as `3e2`, a float type takes an integer, and `str` takes any number as its text, so a large ID can be read whole whatever its size. On failure it returns `error.Type` (another kind of value or an unknown case name), `error.MissingField` or `error.Overflow` (a number out of the type's range), and a `json.Diag` tells where through `path`:
 ```cy
 type User:
     id    int
@@ -4268,7 +4277,7 @@ else |err|:
 
 `toon.encode(v)` follows the spec's forms: `key: value`, nested objects by indentation, inline primitive arrays (`tags[2]: a,b`), a table for an array of uniform objects (`users[2]{id,name}:`), a keyed table for an object whose values are uniform objects (`env[2:]{region}:`), and `- ` items otherwise. `toon.EncodeOptions` sets `indent` (2) and `delim` (`.comma`, `.tab` or `.pipe`). It returns `error.Unicode` for a string that is not UTF-8.
 
-`toon.decode(src)` checks declared lengths, table widths, indentation and duplicate keys. `toon.DecodeOptions{strict=false}` applies the spec's non-strict recoveries. Errors are `error.Syntax` with a `json.Diag` (line and column). An unquoted token that matches the JSON number grammar is a number, others are strings (`05` stays `"05"`); a number beyond the `float` range stays a string. `toon.from_json(src)` and `toon.to_json(src)` convert text directly. The implementation passes the spec's 564 conformance fixtures (`src/test/assets/toon-spec`).
+`toon.decode(src)` checks declared lengths, table widths, indentation and duplicate keys. `toon.DecodeOptions{strict=false}` applies the spec's non-strict recoveries. Errors are `error.Syntax` with a `json.Diag` (line and column). An unquoted token that matches the JSON number grammar is a number, others are strings (`05` stays `"05"`); numbers decode as `json.parse` reads them, and `toon.DecodeOptions{exact=true}` keeps them as text like `json.ParseOptions`. A `number` encodes in the canonical form of `json.fmt_number`. `toon.from_json(src)` and `toon.to_json(src)` convert text directly. The implementation passes the spec's 564 conformance fixtures (`src/test/assets/toon-spec`).
 
 ## Importing.
 The `use` statement can import modules. Builtin and std modules such as `math` can be imported without any configuration:

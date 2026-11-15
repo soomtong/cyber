@@ -17,8 +17,9 @@ use json
 --| back := toon.decode('tags[2]: a,b')!
 --| print(json.stringify(back))     --> {"tags":["a","b"]}
 --| ```
---| Numbers: an integer token that fits `int` decodes to `json.Value.int`, another number to `json.Value.float`.
---| A number token beyond the `float` range decodes to a string, like the reference implementation.
+--| Numbers decode as `json.parse` reads them: an integer token that fits `int` to `json.Value.int`, another integer and
+--| a number beyond the `float` range to `json.Value.number` (its text, without loss), others to `json.Value.float`.
+--| The reference implementation decodes a number beyond the `float` range to a string instead.
 
 --| The delimiter of inline arrays and table rows.
 type Delim enum:
@@ -37,6 +38,8 @@ type DecodeOptions:
     --| When `false`, the decoder accepts count mismatches, duplicate keys (the last wins), tab indentation,
     --| blank lines inside arrays and deeper first lines of a nested scope, as the spec's non-strict mode.
     strict bool = true
+    --| Keeps every number with a fraction or an exponent as `json.Value.number`, as `json.ParseOptions`.
+    exact  bool = false
 
 --| Encodes a value as TOON text. Returns `error.Unicode` when a string or key is not valid UTF-8.
 fn encode(v json.Value) -> !str:
@@ -62,7 +65,7 @@ fn decode(src str, opts DecodeOptions, diag &json.Diag) -> !json.Value:
     if !str.is_utf8(src.span()):
         diag.msg = 'The input is not valid UTF-8.'
         return error.Unicode
-    d := Decoder{strict=opts.strict, indent=opts.indent}
+    d := Decoder{strict=opts.strict, indent=opts.indent, exact=opts.exact}
     res := d.run(src) !else |err|:
         diag.msg = d.msg
         diag.line = d.err_line
@@ -299,6 +302,8 @@ fn (&Encoder) prim(v json.Value, root bool) -> str:
             if json.is_finite(f):
                 return json.fmt_float(f)
             return 'null'
+        case .number |s|:
+            return json.fmt_number(s)
         case .str |s|:
             self.check_utf8(s)
             if self.needs_quote(s, root):
@@ -520,6 +525,7 @@ fn (&Encoder) item(v json.Value, depth int):
     pos      int = 0
     strict   bool
     indent   int
+    exact    bool
     msg      str = ''
     err_line int = 0
     err_col  int = 0
@@ -754,8 +760,7 @@ fn (&Decoder) prim(l Line, tok str) -> !json.Value:
     if t == 'null':
         return json.Value.null
     if is_json_number(t):
-        -- A number beyond the `float` range stays a string.
-        return json.parse_number(t) ?else json.Value.str(t)
+        return json.parse_number(t, self.exact) ?else json.Value.str(t)
     return json.Value.str(t)
 
 --| Returns whether `s` matches `-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`.

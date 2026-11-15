@@ -54,7 +54,7 @@ t.eq('{"id":123,"name":"Ada","active":true}', dec('id: 123\nname: Ada\nactive: t
 t.eq('{"items":[{"sku":"A1","qty":2,"price":9.99},{"sku":"B2","qty":1,"price":14.5}]}', dec('items[2]{sku,qty,price}:\n  A1,2,9.99\n  B2,1,14.5'))
 t.eq('{"env":{"prod":{"r":6},"dev":{"r":1}}}', dec('env[2:]{r}:\n  prod: 6\n  dev: 1'))
 t.eq('{"a":["x",{"b":1,"c":2},[1,2],{}]}', dec('a[4]:\n  - x\n  - b: 1\n    c: 2\n  - [2]: 1,2\n  -'))
-t.eq('{"n":[1,1.5,"05","1e400",-1000]}', dec('n[5]: 1,1.5000,05,1e400,-1E+03'))
+t.eq('{"n":[1,1.5,"05",1e400,-1000]}', dec('n[5]: 1,1.5000,05,1e400,-1E+03'))
 t.eq('{"s":"a:b","k":"-x"}', dec('# comment\ns: "a:b"\n\nk: -x\n'))
 t.eq('"hello"', dec('hello'))
 t.eq('{}', dec(''))
@@ -88,5 +88,9 @@ t.eq(true, fails('a\nb', {}, &diag))
 t.eq(true, fails('[1]: x\nb: 1', {}, &diag))
 t.eq(error.Unicode, toon.decode(str([]byte{0x61, 0x3a, 0x20, 0xff})).unwrap_error())
 t.eq(error.Unicode, toon.encode(json.Value.str(str([]byte{0xff}))).unwrap_error())
+
+-- A `number` encodes in canonical form, and `exact` keeps decoded numbers as text.
+t.eq('[3]: 9223372036854775808,1e+999,0.1', enc('[9223372036854775808, 1e999, 0.1000000000000000055511151231257827]'))
+t.eq('{"a":[1.50,2]}', json.stringify(toon.decode('a[2]: 1.50,2', toon.DecodeOptions{exact=true}, &diag)!))
 
 --cytest: pass

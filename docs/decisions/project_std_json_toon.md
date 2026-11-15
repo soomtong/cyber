@@ -84,7 +84,7 @@ ReleaseFast에서 1.5 MB JSON(객체 1만 개) 파싱 약 0.15초, 직렬화 약
   템플릿 인자면 `Unsupported expansion of compile-time value of type: type`였다. 이제 타입 심볼로 찾는다(`semaAccessExpr3`).
 - 아직 컴파일 타임 `#for x |v|`(EvalBuffer 반복)는 `#case` 바로 아래 문장으로 못 쓴다(`for_iter_stmt`). `#for 0..n |i|`로 돈다.
 
-## 큰 수 · 고정밀 수 (검토, 사용자 결정 대기)
+## 큰 수 · 고정밀 수 (2026-11-15, 사용자 결정: 안 2)
 
 지금: 소수부 · 지수 없는 수가 `int`에 맞으면 `int`, 나머지는 `float`(가장 가까운 값). 그래서 `9223372036854775808`은
 `9223372036854776000`, `12345678901234567890123`은 `1.2345678901234568e+22`, 17자리를 넘는 소수는 잘린다. 오류 없이 값이 바뀐다.
@@ -108,7 +108,22 @@ ReleaseFast에서 1.5 MB JSON(객체 1만 개) 파싱 약 0.15초, 직렬화 약
 시점: `json`은 아직 릴리스 전(0.4.12에 처음 나감)이라 `Value`에 case를 더해도 호환성 문제가 없다. 릴리스 뒤에 더하면 `Value`를
 빠짐없이 `switch`하는 사용자 코드가 깨진다. 안 2를 하려면 0.4.12 전에 하는 것이 맞다.
 
+### 구현 (안 2)
+
+- `Value.number str`. 원문 텍스트를 그대로 들고 `stringify`도 그대로 쓴다. 사용자가 직접 만들면 JSON 수 문법을 지켜야 한다(검사하지 않음).
+- 파서: 소수부 · 지수 없는 정수가 `int`에 안 맞으면 언제나 `number`(전에는 `float`으로 근사). 소수 · 지수가 있는 수는 `float`이고,
+  `float` 범위 밖(`1e999`, 전에는 `error.Syntax`)은 `number`. `ParseOptions{exact=true}`면 소수 · 지수가 있는 수는 모두 `number`.
+  `int`에 맞는 정수는 `exact`여도 `int`(`as_int`가 그대로 쓰이게).
+- `fmt_number(text)`: 원문을 `fmt_float`과 같은 꼴(1e-6 <= |x| < 1e21은 지수 없는 소수, 밖은 `d.ddde+N`)로 모든 자릿수와 함께 쓴다.
+  문자열 연산만 쓴다. `int`에 안 맞는 지수(`1e99999999999999999999`)는 원문 그대로. TOON 인코더와 `number_text()`가 쓰고,
+  `eq`는 한쪽이 `number`면 양쪽의 `number_text()`를 비교한다(`float` 0.1은 `0.1`, 그 값의 정확한 십진 전개가 아니다).
+- 접근자: `as_int`는 `none`(`float`처럼 바꾸지 않음), `as_float`는 가장 가까운 값, 범위 밖이면 `none`. `kind()`는 `number`.
+- `json.to`: 정수 타입은 `number_text()`가 지수 없는 정수일 때만(`3.0e2`는 300), 넘치면 `error.Overflow`. 실수 타입은 근사, 범위 밖은
+  `error.Overflow`. `str` 타입은 `number`의 원문과 `int` · `float`의 텍스트를 받는다. ID가 작으면 `int`, 크면 `number`로 읽히므로
+  `str` 필드가 크기와 관계없이 받을 수 있어야 한다.
+- TOON 디코더는 `json.parse_number(t, exact)`를 써서 같은 규칙. `DecodeOptions{exact}`. 참조 구현과 달리 `1e400`은 문자열이 아니라 수다
+  (사양은 이 정책을 문서화하라고 한다. `toon.cy` 머리 주석과 docs.md에 적음). 공식 fixture는 그대로 564/564.
+
 ## 남은 일
 
-- 큰 수: 위 안 중 결정.
 - core `@eq`의 choice 지원 여부.

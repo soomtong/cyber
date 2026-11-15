@@ -21,6 +21,9 @@ zig build test
 # Runs just the tracing tests.
 zig build trace-test
 
+# A test that leaks memory fails. A behavior case that leaks prints `leaked N blocks in <path>`
+# and the allocator prints where each block was allocated.
+
 # Test WASM/WASI target.
 zig build build-test -Doptimize=ReleaseSafe -Dtarget=wasm32-wasi
 wasm3 zig-out/bin/cli_test.wasm

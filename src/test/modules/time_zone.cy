@@ -110,8 +110,10 @@ try:
 else |err|:
     t.eq(error.NotFound, err)
 
--- A zone from a file is written with the name it was given.
-t.eq('2026-10-31T12:00:00-04:00[America/New_York]', d.format_zoned())
-t.eq('2026-11-01T01:30:00-05:00[America/New_York]', ny.datetime(2026, 11, 1, 1, 30, 0, 0, .later)!.format_zoned())
+-- A zone from data has a name that `parse_zoned` can not look up: it is written without brackets.
+t.eq('2026-10-31T12:00:00-04:00', d.format_zoned())
+t.eq('2026-11-01T01:30:00-05:00', ny.datetime(2026, 11, 1, 1, 30, 0, 0, .later)!.format_zoned())
+office := load('Office', 'Asia_Seoul')!
+t.eq('2026-11-15T09:00:00+09:00', time.parse('2026-11-15T00:00:00Z')!.to_zone(office).format_zoned())
 
 --cytest: pass

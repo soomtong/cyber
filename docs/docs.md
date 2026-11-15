@@ -4505,7 +4505,7 @@ print(time.parse_format('Nov  5 10:22:01', '%b %e %T')!.format())
 | Others | `%s` (Unix seconds), `%n`, `%t`, `%%` |
 | Output only | `%u` (Monday is 1, Sunday is 7), `%w` (Sunday is 0), `%G` and `%V` (ISO 8601 year and week), `%Z` |
 
-Names are in English. When parsing, a number takes one or two digits (`%Y` four, `%j` up to three, every `%f` one or more), a space in the format takes one or more, a name can be short or full in any case, and both offset specifiers take `Z`, `+0900`, `+09:00` and `+09`. A `Date` formats with the date specifiers only.
+Names are in English. When parsing, a number takes one or two digits (`%Y` four, `%j` up to three, every `%f` one or more), `%j` can not be used with `%m`, `%d`, `%e` or `%b`, a space in the format takes one or more, a name can be short or full in any case, and both offset specifiers take `Z`, `+0900`, `+09:00` and `+09`. A `Date` formats with the date specifiers only.
 
 The parse functions return `error.Syntax` when the text has another shape, `error.Range` when a field is out of range and `error.Format` when the format is wrong. Each takes a `time.Diag` as its last argument to see why:
 ```cy
@@ -4544,7 +4544,7 @@ noon := ny.datetime(2026, 3, 7, 12, 0, 0)!       -- the day before the clock is 
 print(noon.add_days(1)!.format())                --> 2026-03-08T12:00:00-04:00
 print((noon + time.hours(24)).format())          --> 2026-03-08T13:00:00-04:00
 ```
-The database is the zoneinfo directory of the system: the one in `TZDIR`, or `/usr/share/zoneinfo` and the like. `time.zone` returns `error.NotFound` for a name that is not there. Windows and wasm have no such directory, so only `time.zone('UTC')` is found there. A zone can also be made from data: `time.zone_from_tzif(name, bytes)` takes the bytes of a TZif file (the format of the files in that directory), and `time.zone_from_posix('EST5EDT,M3.2.0,M11.1.0')` or `time.zone_from_posix('KST-9')` takes a POSIX `TZ` rule. `time.local()` returns the zone of the system: what the `TZ` environment variable says, or else `/etc/localtime`. It returns `error.NotFound` when the system does not say (Windows, wasm).
+The database is the zoneinfo directory of the system: the one in `TZDIR`, or `/usr/share/zoneinfo` and the like. `time.zone` returns `error.NotFound` for a name that is not there. Windows and wasm have no such directory, so only `time.zone('UTC')` is found there. A zone can also be made from data: `time.zone_from_tzif(name, bytes)` takes the bytes of a TZif file (the format of the files in that directory), and `time.zone_from_posix('EST5EDT,M3.2.0,M11.1.0')` or `time.zone_from_posix('KST-9')` takes a POSIX `TZ` rule. `time.local()` returns the zone of the system: what the `TZ` environment variable says, or else `/etc/localtime`. It returns `error.NotFound` when the system does not say (Windows, wasm), or says something that can not be read.
 
 `dt.format()` writes the offset and not the zone. To keep the zone in text, `dt.format_zoned()` writes RFC 9557, which is RFC 3339 with the name of the zone in brackets, and `time.parse_zoned(s)` reads it back:
 ```cy
@@ -4554,9 +4554,9 @@ b := time.parse_zoned('2026-11-01T01:30:00-05:00[America/New_York]')!
 print(b == a)                                               --> true
 print(b.add_days(1)!.format_zoned())                        --> 2026-11-02T01:30:00-05:00[America/New_York]
 ```
-The offset in the text says which of two readings it is. `parse_zoned` returns `error.Conflict` when it is not the offset of the zone at that time (the rules of a zone can change after a text is written) and `error.NotFound` when the system does not have the zone. With `Z` in the place of the offset the instant is kept and the zone gives the offset, and without an offset the text is a clock reading in the zone. A text without brackets is read as `time.parse` reads it, and a value without a zone is written as `format()` writes it.
+The offset in the text says which of two readings it is. `parse_zoned` returns `error.Conflict` when it is not the offset of the zone at that time (the rules of a zone can change after a text is written) and `error.NotFound` when the system does not have the zone. With `Z` in the place of the offset the instant is kept and the zone gives the offset, and without an offset the text is a clock reading in the zone. A text without brackets is read as `time.parse` reads it, and a value without a zone is written as `format()` writes it. So is a value in a zone made from data with `zone_from_tzif` or `zone_from_posix`: `parse_zoned` could not look its name up.
 
-An offset of the database that is not a whole minute is rounded to the minute. These are the local mean times from before standard time, mostly before 1920. Two zones are `==` when their name and their data are the same.
+An offset of the database that is not a whole minute is rounded to the minute. These are the local mean times from before standard time, mostly before 1920. Two zones are `==` when their name and their data are the same, and both or neither came from the database (`time.zone`, `time.local`).
 
 ## Importing.
 The `use` statement can import modules. Builtin and std modules such as `math` can be imported without any configuration:

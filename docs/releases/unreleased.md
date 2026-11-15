@@ -83,9 +83,9 @@
   - UTF-8이 아닌 바이트는 매칭에서도 `find_all` · `split` · `replace_all`의 빈 매치 뒤 이동에서도 한 단위다.
 
 - 새 표준 모듈 `time`(`docs/decisions/project_std_time.md`, 매뉴얼 "Dates and times."):
-  - 타입 넷: `Time`(순간) · `DateTime`(순간 + UTC 오프셋) · `Date`(달력 날짜) · `Duration`(길이). 시간대는 UTC와 고정 오프셋이고
-    오프셋은 UTC 동쪽이 양수인 분 단위 `int`다(`+09:00`은 540, `-03:30`은 -210, 범위 ±23:59). 로컬 시간대와 오프셋 없는
-    datetime은 없다. 달력은 proleptic Gregorian, 연도 1..9999, 윤초는 세지 않는다(글의 `:60`은 `:59`로 읽는다).
+  - 타입 넷: `Time`(순간) · `DateTime`(순간 + UTC 오프셋, 선택적으로 시간대) · `Date`(달력 날짜) · `Duration`(길이). 시간대는
+    UTC · 고정 오프셋 · IANA zone(`time.zone`) · 시스템 zone(`time.local()`, 스크립트가 부를 때만)이다(아래 "시간대" 항목). 오프셋은
+    UTC 동쪽이 양수인 분 단위 `int`다(`+09:00`은 540, `-03:30`은 -210, 범위 ±23:59). 오프셋 없는 datetime은 없다. 달력은 proleptic Gregorian, 연도 1..9999, 윤초는 세지 않는다(글의 `:60`은 `:59`로 읽는다).
   - 시계: `time.now()` → `Time`, `time.monotonic()` → `Duration`(단조, 차이만 뜻이 있다).
   - `Time`: `time.unix(sec[, nsec])` · `unix_millis(ms)`, `t.unix()` · `unix_millis()` · `subsec_nanos()`, `t + d` · `t - d` · `t - u`(→ `Duration`),
     비교 연산자, `t.add(d)` → `!Time`, `t.utc()` · `t.to_offset(m)` → `DateTime`, `t.format([fmt])`.
@@ -95,10 +95,11 @@
   - `Date`: `time.date(y, m, d)`, `d - e`(일수), 비교, `add_days` · `add_months` · `add_years`, `weekday()` · `iso_weekday()` ·
     `iso_week()` · `day_of_year()`, `at(h, mi, s[, nsec, offset])`. 월 · 년 덧셈은 말일로 clamp한다(01-31 + 1개월 = 02-29).
   - `Duration`: `time.nanos` · `micros` · `millis` · `seconds` · `minutes` · `hours` · `days`, `+ - *` · 단항 `-` · 비교, `secs()` · `millis()` ·
-    `subsec_nanos()` · `to_float()` · `abs()` · `format()`(`1h2m3.5s`).
+    `subsec_nanos()` · `to_float()` · `abs()` · `format()`(`1h2m3.5s`, `-1h30m`). 범위는 ±315,537,897,600초로 대칭이라 단항 `-`는 늘 범위 안이다.
   - 파싱: `time.parse(s)`는 RFC 3339(오프셋 필수. 공백 구분자 · `,` 소수점 · `Z` · `+09:00` · `+0900` · `+09`), `time.parse(s, offset)`은
     오프셋 없는 글을 그 오프셋으로, `time.parse_format(s, fmt[, offset])`은 strptime 형식으로, `time.parse_date(s)`는 `YYYY-MM-DD`.
     형식 지정자는 strftime의 부분집합(`%Y %y %m %d %e %j %b %B %a %A %H %I %p %M %S %f %3f %6f %9f %z %:z %F %T %R %D %s` ...).
+    `%j`는 `%m` · `%d` · `%e` · `%b`와 함께 쓸 수 없고(`error.Format`), 월 `00`은 `error.Range`다.
   - 오류: `error.Syntax`(글이 다름) · `error.Range`(값이 범위 밖) · `error.Format`(형식 문자열), 문구와 위치는 `time.Diag{msg, pos}`.
     연산자 `+` · `-`는 범위를 넘으면 panic, 이름 있는 메서드는 `error.Range`.
   - `os.FileInfo`에 `mtime()` · `atime()` · `ctime()` → `!time.Time`. 정수 칸(`mtime_sec` ...)은 그대로다.
@@ -106,7 +107,7 @@
   - 시간대(DST): `time.zone('Asia/Seoul')` → `!Zone`이 시스템의 zoneinfo 폴더(`TZDIR`, `/usr/share/zoneinfo` 등)에서 IANA 시간대를
     읽는다. 없는 이름은 `error.NotFound`. Windows · wasm에는 그 폴더가 없어 `UTC`만 찾는다. 데이터로 만드는 길은
     `time.zone_from_tzif(name, bytes)`(TZif 파일)와 `time.zone_from_posix('EST5EDT,M3.2.0,M11.1.0')`(POSIX 규칙).
-    `time.local()` → `!Zone`은 `TZ` 환경 변수, 없으면 `/etc/localtime`.
+    `time.local()` → `!Zone`은 `TZ` 환경 변수, 없으면 `/etc/localtime`. 읽을 수 없으면 모두 `error.NotFound`.
   - `t.to_zone(z)` · `dt.to_zone(z)`(같은 순간), `dt.replace_zone(z)` · `z.datetime(y, mo, d, h, mi, s)` · `d.at(h, mi, s, z)`(같은 시계 값),
     `z.offset_at(t)` · `z.is_dst(t)` · `z.abbreviation(t)` · `z.name()`, `dt.zone()` → `?Zone`, 형식 지정자 `%Z`(약어, 출력 전용).
   - 시계를 돌리는 날: 건너뛴 시각(02:30)은 그만큼 뒤로(03:30), 두 번 오는 시각은 앞쪽으로 읽는다. 마지막 인자
@@ -114,7 +115,8 @@
   - zone 안의 값은 `add_days` · `add_months` · `add_years`가 시계 값을 유지하고(하루가 23 · 25시간일 수 있다), `+ Duration` · `add`는
     경과 시간을 더한다. `utc()` · `to_offset` · `replace_offset`은 zone을 뗀다.
   - zone을 글로: `dt.format_zoned()`는 RFC 9557(`2026-07-04T08:00:00-04:00[America/New_York]`), `time.parse_zoned(s)`가 zone과 함께
-    다시 읽는다. 글의 오프셋이 zone의 그 순간 오프셋과 다르면 `error.Conflict`, zone이 없으면 `error.NotFound`. `format()` ·
+    다시 읽는다. 글의 오프셋이 zone의 그 순간 오프셋과 다르면 `error.Conflict`, zone이 없으면 `error.NotFound`. `zone_from_tzif` ·
+    `zone_from_posix`로 만든 zone은 `parse_zoned`가 이름으로 찾을 수 없어 괄호 없이 쓴다. `format()` ·
     `parse()`는 RFC 3339 그대로다(`parse`는 괄호를 만나면 `parse_zoned`를 쓰라는 `error.Syntax`).
   - DB의 초 단위 오프셋(LMT, 대개 1920년 이전)은 분으로 반올림한다. Python `zoneinfo`와의 차분 시험 40,000건에서 차이가 없었다.
 

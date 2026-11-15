@@ -85,6 +85,8 @@ type Zone:
     -p_types int = 0
     -p_abbr  int = 0
     -rule    Rule = {}
+    -- Whether `name_` is a name of the time zone database: the zone came from `time.zone` or `time.local`.
+    -db      bool = false
 
 -- The rule of a POSIX `TZ` string such as `EST5EDT,M3.2.0,M11.1.0`. A TZif file ends with one, for the time after
 -- its last transition. Offsets are in minutes east of UTC.
@@ -286,7 +288,8 @@ fn days_in_month(year int, month int) -> int:
 -- Duration.
 
 -fn dur(sec int, nsec int) -> Duration:
-    if sec < -MaxDurSec or sec > MaxDurSec:
+    -- The range is the same on both sides, -MaxDurSec to MaxDurSec seconds, so that `-d` is always in it.
+    if sec < -MaxDurSec or sec > MaxDurSec or (sec == MaxDurSec and nsec > 0):
         panic('The duration is out of range.')
     return {sec=sec, nsec=nsec}
 
@@ -393,7 +396,7 @@ fn (&Duration) `>`(o Duration) -> bool:
 fn (&Duration) `>=`(o Duration) -> bool:
     return self.sec > o.sec or (self.sec == o.sec and self.nsec >= o.nsec)
 
---| Returns the duration as hours, minutes and seconds, such as `1h2m3.5s`, `-90m` or `0s`.
+--| Returns the duration as hours, minutes and seconds, such as `1h2m3.5s`, `-1h30m` or `0s`.
 fn (&Duration) format() -> str:
     a := self.abs()
     var buf []byte = {}
@@ -1018,6 +1021,9 @@ fn (&Date) format(fmt str) -> !str:
     pm      int = -1
     unix    int = 0
     has_unix bool = false
+    -- The day of the year of `%j`, 0 when the format has none, and whether the format has a month or a day.
+    yday    int = 0
+    has_md  bool = false
 
 -type Scan:
     src     str
@@ -1281,23 +1287,26 @@ fn (&Date) format(fmt str) -> !str:
                     p.year = 2000 + y
             case 'm':
                 p.month = self.digits(1, 2, 'a month')!
+                p.has_md = true
             case 'd':
                 p.day = self.digits(1, 2, 'a day of the month')!
+                p.has_md = true
             case 'e':
                 while !self.at_end() and self.peek() == ' ':
                     self.pos += 1
                 p.day = self.digits(1, 2, 'a day of the month')!
+                p.has_md = true
             case 'j':
                 start := self.pos
                 doy := self.digits(1, 3, 'a day of the year')!
                 if doy < 1 or doy > 366:
                     self.fail(start, 'A day of the year is 1 to 366.')
                     return error.Range
-                -- The year can come later in the format: keep the day of the year in `day` with month 0.
-                p.month = 0
-                p.day = doy
+                -- The year can come later in the format: the month and the day are found at the end.
+                p.yday = doy
             case 'b', 'h', 'B':
                 p.month = self.month()!
+                p.has_md = true
             case 'a', 'A':
                 self.weekday()!
             case 'H', 'I':
@@ -1359,15 +1368,18 @@ fn (&Date) format(fmt str) -> !str:
     self.by_format(fmt, &p)!
     if !self.at_end():
         return self.expected('the end of the text after the format')
-    if p.month == 0:
+    if p.yday > 0:
         -- `%j`: turn the day of the year into a month and a day.
+        if p.has_md:
+            self.fail(0, '`%j` gives the month and the day: the format can not also have `%m`, `%d`, `%e` or `%b`.')
+            return error.Format
         if p.year < 1 or p.year > 9999:
             self.fail(0, 'A year is 1 to 9999, found ' + str(p.year) + '.')
             return error.Range
-        if p.day == 366 and !is_leap_year(p.year):
+        if p.yday == 366 and !is_leap_year(p.year):
             self.fail(0, str(p.year) + ' has no day 366.')
             return error.Range
-        c := civil_from_days(days_from_civil(p.year, 1, 1) + p.day - 1)
+        c := civil_from_days(days_from_civil(p.year, 1, 1) + p.yday - 1)
         p.month = c.m
         p.day = c.d
     return self.finish(&p, default_off)
@@ -1499,7 +1511,12 @@ fn zone(name str) -> !Zone:
     data := tz_read_(name)
     if data.len() == 0:
         return error.NotFound
-    return tzif_zone(name, data)
+    return db_zone(name, data)
+
+-fn db_zone(name str, data str) -> !Zone:
+    z := tzif_zone(name, data)!
+    z.db = true
+    return z
 
 --| Returns the time zone of the system: what `TZ` says (a zone name, the path of a TZif file or a POSIX rule),
 --| or else `/etc/localtime`. `error.NotFound` when the system does not say, or says something that can not be read.
@@ -1516,7 +1533,8 @@ fn local() -> !Zone:
                 return utc_zone()
             data := tz_read_(arg)
             if data.len() > 0:
-                return tzif_zone(arg, data)
+                return db_zone(arg, data) !else:
+                    return error.NotFound
             return zone_from_posix(arg) !else:
                 return error.NotFound
         else:
@@ -1524,8 +1542,10 @@ fn local() -> !Zone:
             if data.len() == 0:
                 return error.NotFound
             if arg.len() == 0:
-                return tzif_zone('Local', data)
-            return tzif_zone(arg, data)
+                return tzif_zone('Local', data) !else:
+                    return error.NotFound
+            return db_zone(arg, data) !else:
+                return error.NotFound
 
 --| Returns the time zone of a TZif file (RFC 9636), the format of the files in a zoneinfo directory.
 --| `error.Syntax` when the data is not a TZif file.
@@ -1863,10 +1883,11 @@ fn (&Zone) datetime(year int, month int, day int, hour int, minute int, second i
 
 --| Returns the value as RFC 9557: RFC 3339 with the name of the time zone in brackets, such as
 --| `2026-07-04T08:00:00-04:00[America/New_York]`. `time.parse_zoned` reads it back with its zone.
---| A value without a zone, or in a zone that has no name of the time zone database (one of a POSIX rule,
---| or the zone of the system when its name is not known), is written as `format()` writes it.
+--| A value without a zone, or in a zone that was not read from the time zone database by `time.zone` or
+--| `time.local` (one of `zone_from_tzif` or `zone_from_posix`, or the zone of the system when its name is not
+--| known), is written as `format()` writes it: `parse_zoned` could not find the zone by its name.
 fn (&DateTime) format_zoned() -> str:
-    named := (self.tz.kind == 1 and is_zone_name(self.tz.name_) and self.tz.name_ != 'Local') or self.tz.name_ == 'UTC'
+    named := (self.tz.db and is_zone_name(self.tz.name_)) or (self.tz.kind == 2 and self.tz.name_ == 'UTC')
     if !named:
         return self.format()
     text := self.format()

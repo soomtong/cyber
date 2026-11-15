@@ -113,11 +113,17 @@ pub const VMrunner = struct {
     cli: bool,
     main_path: []const u8 = "",
 
+    /// The allocator of this VM alone, so that a leak is reported with the case that made it.
+    gpa: *std.heap.SafeAllocator,
+
     pub fn init(enable_cli: bool) !VMrunner {
-        const vm = c.vm_initx(t.alloc);
+        const gpa = try t.alloc.create(std.heap.SafeAllocator);
+        errdefer t.alloc.destroy(gpa);
+        gpa.* = .init(std.heap.page_allocator, .{});
+        const vm = c.vm_initx(gpa.allocator());
         test_vm = vm;
         if (enable_cli) {
-            try cli.init_cli(vm, t.alloc);
+            try cli.init_cli(vm, gpa.allocator());
         } else {
             c.vm_set_logger(vm, vm_logger);
             c.set_logger(logger);
@@ -125,16 +131,21 @@ pub const VMrunner = struct {
         return .{
             .vm = @ptrCast(vm),
             .cli = enable_cli,
+            .gpa = gpa,
         };
     }
 
-    pub fn deinit(self: *VMrunner) void {
+    /// Returns the number of blocks that the VM did not free. The allocator prints each of them.
+    pub fn deinit(self: *VMrunner) usize {
         if (self.cli) {
             cli.deinit_cli(self.vm);
         }
         // std.debug.print("total ops: {}\n", .{self.main_trace().totalOpCounts});
         c.vm_deinit(self.vm);
         test_vm = null;
+        const leaks = self.gpa.deinit();
+        t.alloc.destroy(self.gpa);
+        return leaks;
     }
 
     // pub fn main_trace(self: *VMrunner) *vmc.TraceInfo {
@@ -347,8 +358,22 @@ pub const VMrunner = struct {
 
 pub fn compile(config: Config, opt_src: ?[]const u8) !void {
     var run = try VMrunner.init(config.cli);
-    defer run.deinit();
-    
+    compileInner(&run, config, opt_src) catch |err| {
+        _ = run.deinit();
+        return err;
+    };
+    try checkLeaks(run.deinit(), config.uri);
+}
+
+/// Fails a case whose VM did not free all of its memory.
+fn checkLeaks(leaks: usize, uri: []const u8) !void {
+    if (leaks > 0) {
+        std.debug.print("leaked {} blocks in {s}\n", .{leaks, uri});
+        return error.Leaked;
+    }
+}
+
+fn compileInner(run: *VMrunner, config: Config, opt_src: ?[]const u8) !void {
     defer {
         if (config.silent) {
             c.setSilent(false);
@@ -400,18 +425,23 @@ pub const EvalResult = struct {
 pub fn eval(config: Config, src: ?[]const u8, optCb: ?*const fn (*VMrunner, EvalResult) anyerror!void) !void {
     var run = try VMrunner.init(config.cli);
     run.main_path = config.uri;
+    run.eval(config, src, optCb) catch |err| {
+        _ = finishEval(&run, config);
+        return err;
+    };
+    try checkLeaks(finishEval(&run, config), config.uri);
+}
+
+fn finishEval(run: *VMrunner, config: Config) usize {
+    if (config.debug) {
+        c.setVerbose(true);
+    }
     defer {
         if (config.debug) {
-            c.setVerbose(true);
+            c.setVerbose(false);
         }
-        defer {
-            if (config.debug) {
-                c.setVerbose(false);
-            }
-        }
-        run.deinit();
     }
-    try run.eval(config, src, optCb);
+    return run.deinit();
 }
 
 pub fn errReport(vm: *c.VM, code: c.ResultCode) void {

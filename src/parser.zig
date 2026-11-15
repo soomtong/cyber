@@ -4349,7 +4349,9 @@ pub const Parser = struct {
                     .end = self.tokenPos(end) + 1,
                 });
                 const term = try self.parseTightTermWithLeft(group, .{});
-                return self.parseExprWithLeft(start, term, .{});
+                // A group is a term. The caller goes on with the operators after it, so that the precedence of the
+                // operator before the group holds: `a - (b) / 2 + 1` is `(a - ((b) / 2)) + 1`.
+                return term;
             },
             .vert_bar => {
                 // Parse infer lambda.

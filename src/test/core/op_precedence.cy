@@ -100,4 +100,14 @@ t.eq(0 == 2 * 3 - 2 * 3, true)
 t.eq(1 + 2 * 3 * 4 - 5, 20)
 t.eq(30 == 2 * 3 + 4 * 5 + 2 * 2, true)
 
+-- A group as the left operand, after a lower operator.
+-- The group took the rest of the expression: `10 - (4) / 2 + 1` became `10 - ((4) / 2 + 1)`.
+g := 10
+t.eq(g - (4) / 2 + 1, 9)
+t.eq(-(2) + 5, 3)
+t.eq(g - (2) - 3, 5)
+t.eq(1 + (2) * 3 - 4, 3)
+t.eq(g - (2 + 2) < 3 and true, false)
+t.eq(g - (g - 4) / 2 + 1, 8)
+
 --cytest: pass

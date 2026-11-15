@@ -4160,6 +4160,7 @@ fn (&Box[]) dup() -> T:
 * [Main module.](#main-module)
 * [Main function.](#main-function)
 * [Builtin modules.](#builtin-modules)
+  * [JSON and TOON.](#json-and-toon)
 * [Importing.](#importing)
   * [Import file.](#import-file)
   * [Import URL.](#import-url)
@@ -4211,6 +4212,45 @@ fn main() -> !void:
 
 ## Builtin modules.
 Builtin and std modules come with Cyber. See the [API docs](api.html).
+
+### JSON and TOON.
+The `json` module parses and writes JSON (RFC 8259). The `toon` module encodes and decodes [TOON](https://github.com/toon-format/spec) (spec v4.4), a line-based form of the same data that takes fewer tokens in an LLM prompt. Both use `json.Value`:
+```cy
+use json
+use toon
+
+v := json.parse('{"users": [{"id": 1, "name": "Ada"}, {"id": 2, "name": "Bob"}]}')!
+print(v['users'][1]['name'].as_str().?)   --> Bob
+print(json.stringify(v))                  --> {"users":[{"id":1,"name":"Ada"},{"id":2,"name":"Bob"}]}
+print(toon.encode(v)!)
+--> users[2]{id,name}:
+-->   1,Ada
+-->   2,Bob
+print(json.stringify(toon.decode('tags[2]: a,b')!))   --> {"tags":["a","b"]}
+```
+
+`json.Value` is a choice: `null`, `bool`, `int`, `float`, `str`, `array` (`[]Value`) and `object` (`json.Object`). A number without a fraction or an exponent that fits `int` parses as `int`, another number as `float`. An object keeps its keys in insertion order, and a duplicate key keeps its first position and takes the last value.
+
+- Read: `v['key']` and `v[idx]` return `Value.null` when the member is missing. `get(key)` and `at(idx)` return an option. `as_bool`, `as_int`, `as_float` (also converts an `int`), `as_str`, `as_array` and `as_object` return an option of the payload. `kind()` returns the JSON type name.
+- Compare: `a.eq(b)` compares by the JSON model (`1` equals `1.0`, key order does not matter). `==` does not support `Value`, so test an option with `?else` or `if ... |x|` instead of `== none`.
+- Build: `json.Object` has `set`, `get`, `remove`, `contains`, `keys` and `len`. `json.object` and `json.array` make values from lists.
+- Write: `json.stringify(v)` is compact and `json.stringify(v, 2)` puts each element on its own line. NaN and infinities become `null`. A float uses the shortest digits that read back as the same value, without a trailing `.0`, and an exponent below `1e-6` or from `1e21` (`1e+21`).
+- Convert: `json.encode(x)` and `json.from(x)` take a Cyber value: numbers, `bool`, `str`, slices, structs (fields in order), optionals (`none` is `null`), enums (the case name), choices (`{"case": payload}`) and `Map` with `str` keys (sorted). Pass a borrow for a value that can not be copied: `json.encode(&map)`.
+
+Parsing returns `error.Syntax` for malformed text and `error.Unicode` for text that is not UTF-8. Arrays and objects can nest 256 levels. A `json.Diag` passed to `parse` tells where and why parsing failed:
+```cy
+var diag json.Diag = {}
+try:
+    v := json.parse('{"a": tru}', &diag)!
+    print(v)
+else |err|:
+    print('%{err} at %{diag.line}:%{diag.col}: %{diag.msg}')
+--> error.Syntax at 1:7: Expected a value, found `t`.
+```
+
+`toon.encode(v)` follows the spec's forms: `key: value`, nested objects by indentation, inline primitive arrays (`tags[2]: a,b`), a table for an array of uniform objects (`users[2]{id,name}:`), a keyed table for an object whose values are uniform objects (`env[2:]{region}:`), and `- ` items otherwise. `toon.EncodeOptions` sets `indent` (2) and `delim` (`.comma`, `.tab` or `.pipe`). It returns `error.Unicode` for a string that is not UTF-8.
+
+`toon.decode(src)` checks declared lengths, table widths, indentation and duplicate keys. `toon.DecodeOptions{strict=false}` applies the spec's non-strict recoveries. Errors are `error.Syntax` with a `json.Diag` (line and column). An unquoted token that matches the JSON number grammar is a number, others are strings (`05` stays `"05"`); a number beyond the `float` range stays a string. `toon.from_json(src)` and `toon.to_json(src)` convert text directly. The implementation passes the spec's 564 conformance fixtures (`src/test/assets/toon-spec`).
 
 ## Importing.
 The `use` statement can import modules. Builtin and std modules such as `math` can be imported without any configuration:

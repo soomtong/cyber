@@ -8695,6 +8695,8 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                     const owner = res.data.value.parent_local.?;
                     c.varStack.items[owner].type = .dead;
                     res.owned = true;
+                    // The payload is a new value, not a place: a borrow (`==`, `for`) must give it a temp to release.
+                    res.addressable = false;
                 }
                 return res;
             }
@@ -8730,6 +8732,8 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                 const owner = unwrap.data.value_field.parent_local.?;
                 c.varStack.items[owner].type = .dead;
                 unwrap.owned = true;
+                // The payload is a new value, not a place: a borrow (`==`, `for`) must give it a temp to release.
+                unwrap.addressable = false;
             }
             return unwrap;
         },

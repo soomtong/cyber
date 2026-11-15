@@ -237,9 +237,11 @@ core_mods := []ModulePair{
 std_mods := []ModulePair{
     {path='../src/std/cli.cy', section='cli'},
     {path='../src/std/io.cy', section='io'},
+    {path='../src/std/json.cy', section='json'},
     {path='../src/std/math.cy', section='math'},
     {path='../src/std/os.cy', section='os'},
     {path='../src/std/test.cy', section='test'},
+    {path='../src/std/toon.cy', section='toon'},
 }
 
 types := []TypeEntry{}

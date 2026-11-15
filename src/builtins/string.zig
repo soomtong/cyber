@@ -17,7 +17,8 @@ pub fn initPtrSpan(t: *cy.Thread) !Ret {
         ret.* = try t.heap.init_str("");
         return RetOk;
     } else {
-        const addr: usize = @intCast(span.ptr);
+        // The upper half of the 8-byte slot is not cleared on 32-bit targets (wasm32).
+        const addr: usize = @truncate(span.ptr);
         const ptr: [*]const u8 = @ptrFromInt(addr);
         ret.* = try t.heap.init_str(ptr[0..@intCast(span.len)]);
         return RetOk;
@@ -31,7 +32,8 @@ pub fn isUtf8(t: *cy.Thread) callconv(.c) Ret {
         ret.* = true;
         return RetOk;
     }
-    const addr: usize = @intCast(span.ptr);
+    // The upper half of the 8-byte slot is not cleared on 32-bit targets (wasm32).
+    const addr: usize = @truncate(span.ptr);
     const ptr: [*]const u8 = @ptrFromInt(addr);
     ret.* = cy.string.validateUtf8(ptr[0..@intCast(span.len)]) != null;
     return RetOk;

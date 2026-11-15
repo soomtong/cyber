@@ -6,6 +6,8 @@
 - `origin/master` = 로컬 = `e25e7d76`. 작업 트리는 미추적 `HANDOFF.md`만.
 - 0.4.11 뒤 커밋은 `e25e7d76` 하나: tars-agent CodeAct 회차의 오류 문구 여섯(`for ... in`, `q: byte = 0`, `var` 없는 타입 선언,
   `none` 비교, 옵션 아닌 값의 `?else`, 연산자 타입 불일치). 내용은 `docs/releases/unreleased.md`.
+- 2026-11-15: 표준 모듈 `json` · `toon`(TOON 사양 v4.4, 공식 fixture 564/564)과 F-141(`.?` · `!` 언랩 임시값 누수) 수정.
+  설계는 `docs/decisions/project_std_json_toon.md`, 사용자 문서는 `docs/docs.md` "JSON and TOON.".
 - tars-agent는 cyber 0.4.11에 고정했고(`78df31d`), `730813e`에서 `e25e7d76`의 회신을 기록하고 0.4.12에서 확인하겠다고 했다.
   요청서 `/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.11-codeact-messages.md`.
 
@@ -18,7 +20,9 @@
    - 정렬 안 A(일반 지역을 빌림 캡처하는 pinned closure. F-136으로 스택 이동 걸림돌은 풀림)와 `sort_by_key`(람다 반환 타입으로
      제네릭 `%K` 추론이 필요). `docs/decisions/project_sort_closures.md`.
    - 0.5에서 무엇을 더 풀지. 사용자 목표는 "fiber 관련 동시성 동작을 모두 완성해 0.5".
-3. 남은 기술 부채(급하지 않음):
+3. `json` · `toon` 후속(사용자 결정 대기): `Value` → 타입 역변환(`json.to(T, v)`), 무손실 큰 수, core `@eq`의 choice 지원,
+   F-142(`Int.parse` 넘침 미검사) 수정. `project_std_json_toon.md` 끝 절.
+4. 남은 기술 부채(급하지 않음):
    - carry 재시도 루프: 실패한 본문의 IR을 되돌리는 장치가 없어 사전 단계로 옮기지 못했다. 콜백 반복은 `cyber.h` · docs.md에 적음.
    - `@destruct_span`은 쓰이지 않아 취소 keep 지점이 아니다. 쓰게 되면 더한다(`project_coroutines.md`).
 
@@ -34,7 +38,9 @@
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
 - Windows `FallbackReadLine`은 실제 실행으로 확인하지 않았다.
-- 전체 발견 이슈 표는 `docs/study/10-findings-register.md`(현재 F-140까지).
+- `?json.Value == none`은 컴파일 오류(`Unsupported: Value`, core `@eq`가 choice 미지원). `?else` · `Value.eq`를 쓴다.
+- `int.parse`는 넘침을 검사하지 않는다(F-142).
+- 전체 발견 이슈 표는 `docs/study/10-findings-register.md`(현재 F-143까지).
 
 ## 작업 방식
 
@@ -88,6 +94,7 @@
 
 ## 참고 위치
 
+- JSON · TOON: `project_std_json_toon.md`. TOON fixture 갱신은 `src/test/assets/toon-spec/README.md`.
 - 동시성 전체(제너레이터 · fiber · 단계 1 · 3 · 취소 · `scope` · `@deinit` 취소): `docs/decisions/project_coroutines.md`.
 - 임베딩 · tars-agent 쪽: `project_embedding_agent_loop.md` · `project_tars_agent_runtime_review.md`, C API `src/include/cyber.h`.
 - 컴파일러 한계 표: `project_compiler_limits.md`. 평가 순서: `project_eval_order.md`. 스택 포인터 보정: `project_stack_ptr_patch.md`.

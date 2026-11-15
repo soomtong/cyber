@@ -729,9 +729,11 @@ fn gen_api_docs(version str) -> !void:
         {path='../src/std/cli.cy', section='cli'},
         {path='../src/std/libc.cy', section='libc'},
         {path='../src/std/io.cy', section='io'},
+        {path='../src/std/json.cy', section='json'},
         {path='../src/std/math.cy', section='math'},
         {path='../src/std/os.cy', section='os'},
         {path='../src/std/test.cy', section='test'},
+        {path='../src/std/toon.cy', section='toon'},
     }
 
     cur_dir := os.dirname(meta.mod_uri()).?

@@ -47,6 +47,8 @@ pub const mod_bind_meta = c.cl_mod_bind_meta;
 pub const mod_bind_math = c.cl_mod_bind_math;
 pub const mod_bind_io = c.cl_mod_bind_io;
 pub const mod_bind_test = c.cl_mod_bind_test;
+pub const mod_bind_json = c.cl_mod_bind_json;
+pub const mod_bind_toon = c.cl_mod_bind_toon;
 pub const mod_set_fallback_func = c.cl_mod_set_fallback_func;
 pub fn mod_add_func(mod: *Sym, name: []const u8, binding: BindFunc) void {
     c.cl_mod_add_func(mod, to_bytes(name), binding);

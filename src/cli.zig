@@ -53,6 +53,8 @@ const named_std_mods = [_]StdEntry{
     .{ "c", .{ .bind_fn = C.mod_bind_c } },
     .{ "io", .{ .bind_fn = C.mod_bind_io } },
     .{ "test", .{ .bind_fn = C.mod_bind_test } },
+    .{ "json", .{ .bind_fn = C.mod_bind_json } },
+    .{ "toon", .{ .bind_fn = C.mod_bind_toon } },
     .{ "libc", .{ .src = @embedFile("std/libc.cy") } },
     .{ "os", .{ .src = os_mod.Src, .bind_fn = &os_mod.bind } },
     .{ "cli", .{ .src = Src, .bind_fn = &bind } },

@@ -18,6 +18,10 @@
     매칭 루프와 Unicode 표는 `src/std/regex.zig` · `regex_unicode.zig`. `cl_mod_bind_regex`. Rust `regex` 테스트 데이터 820개 통과,
     ripgrep 차분 퍼징 23,000건 차이 없음. 설계와 Rust · Zig · Nim · Python 비교는 `docs/decisions/project_std_regex.md`,
     사용자 문서 `docs/docs.md` "Regular expressions.".
+  - 그다음 커밋: 표준 모듈 `peg`(LPeg `re` 문법의 부분집합, LPeg식 parsing machine, 결과는 `peg.Capture` 트리). 파서 · 검사 ·
+    코드 생성은 `src/std/peg.cy`, 매칭 루프는 `src/std/peg.zig`. `cl_mod_bind_peg`. LPeg 1.1.0과 차분 퍼징 180,000건 차이 없음.
+    설계와 Janet · LPeg · Rust · Zig · Nim · Python 비교는 `docs/decisions/project_std_peg.md`, 사용자 문서 `docs/docs.md`
+    "Parsing expression grammars.".
 - tars-agent는 cyber 0.4.11에 고정(`78df31d`). `730813e`에서 `e25e7d76`의 회신을 기록했고 0.4.12에서 확인한다.
   요청서 `/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.11-codeact-messages.md`.
 
@@ -50,6 +54,8 @@
 - `json` 기본 파싱은 17자리 넘는 소수를 `float`으로 근사한다(`exact`면 원문). `json.to`는 struct 필드 기본값을 쓰지 않는다.
 - `regex`: look-around · backreference · `(?-u)` · `(?R)` · 일반 범주와 스크립트 밖의 `\p{..}` 속성(`Emoji` 등)은 받지 않는다(컴파일
   오류). 반복자 없이 슬라이스를 돌려주고, 치환에 함수를 받지 않는다.
+- `peg`: 시간 보장이 없다(역추적). 함수를 부르는 캡처 · 오류 표지와 복구 · cut · left recursion · 대소문자 무시 리터럴 · Unicode
+  속성 클래스가 없다. `find`는 위치마다 다시 맞춰 본다(첫 글자 건너뛰기 없음).
 - 하위 블록에서는 `move` · `meta.consume`을 못 쓴다(`else` 갈래의 consume은 뒤까지 죽은 상태로 남는다). 컴파일 타임
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
@@ -93,6 +99,9 @@
 - regex fixture 갱신은 `src/test/assets/regex-spec/README.md`(`convert.py`). Unicode 표는 UCD 파일을 받아
   `cyber src/tools/gen_regex_unicode.cy <ucd 폴더> src/std/regex_unicode.zig`. `regex.cy`의 문법을 고치면 ripgrep 차분 퍼징을
   다시 돌린다: `python3 src/tools/regex_fuzz_gen.py <seed> 5000 <out.json>` 뒤 `cyber src/tools/regex_fuzz_run.cy <out.json>`.
+- `peg.cy`의 문법을 고치면 LPeg 차분 퍼징을 다시 돌린다(`lua`에 `lpeg` · `re`가 있어야 한다):
+  `python3 src/tools/peg_fuzz_gen.py <seed> 4000 <out.json>` 뒤 `cyber src/tools/peg_fuzz_run.cy <out.json>`. `0 differ`여야 한다
+  (`rejected only here`는 LPeg가 보지 않는 닿지 않는 규칙 · 대안의 검사).
 - 실패한 `t.eq`를 한 번에 다 보려면 테스트 파일의 `t.eq(`를 줄 번호를 받는 지역 함수로 바꾼 사본을 돌린다(첫 실패에서 멈추지 않게).
 
 ## 구현 함정
@@ -120,7 +129,7 @@
 ## 참고 위치
 
 - 동시성 전체(제너레이터 · fiber · 단계 1 · 3 · 취소 · `scope` · `@deinit` 취소): `docs/decisions/project_coroutines.md`.
-- JSON · TOON: `project_std_json_toon.md`. 정규식: `project_std_regex.md`. 정렬 클로저: `project_sort_closures.md`.
+- JSON · TOON: `project_std_json_toon.md`. 정규식: `project_std_regex.md`. PEG: `project_std_peg.md`. 정렬 클로저: `project_sort_closures.md`.
 - 임베딩 · tars-agent: `project_embedding_agent_loop.md` · `project_tars_agent_runtime_review.md`, C API `src/include/cyber.h`.
 - 컴파일러 한계: `project_compiler_limits.md`. 평가 순서: `project_eval_order.md`. 스택 포인터 보정: `project_stack_ptr_patch.md`.
 - 방향(네이티브 · LLVM · JIT는 범위 밖): `project_direction.md`.

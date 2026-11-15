@@ -363,6 +363,7 @@ if (!aot) {
     run.case("modules/test_eq_panic.cy");
     run.case("modules/test.cy");
     run.case("modules/json.cy");
+    run.case("modules/peg.cy");
     run.case("modules/regex.cy");
     run.case("modules/toon.cy");
     if (!is_wasm) {

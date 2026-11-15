@@ -48,6 +48,7 @@ pub const mod_bind_math = c.cl_mod_bind_math;
 pub const mod_bind_io = c.cl_mod_bind_io;
 pub const mod_bind_test = c.cl_mod_bind_test;
 pub const mod_bind_json = c.cl_mod_bind_json;
+pub const mod_bind_peg = c.cl_mod_bind_peg;
 pub const mod_bind_regex = c.cl_mod_bind_regex;
 pub const mod_bind_toon = c.cl_mod_bind_toon;
 pub const mod_set_fallback_func = c.cl_mod_set_fallback_func;

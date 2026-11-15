@@ -4162,6 +4162,7 @@ fn (&Box[]) dup() -> T:
 * [Builtin modules.](#builtin-modules)
   * [JSON and TOON.](#json-and-toon)
   * [Regular expressions.](#regular-expressions)
+  * [Parsing expression grammars.](#parsing-expression-grammars)
 * [Importing.](#importing)
   * [Import file.](#import-file)
   * [Import URL.](#import-url)
@@ -4335,6 +4336,92 @@ else |err|:
 --> error.Syntax at 8: Backreferences (`\1`) and octal escapes are not supported: matching never backtracks. Capture both parts and compare them in code. A character by number is `\x41` or `\x{1F600}`.
 ```
 A counted repetition is expanded, so `\w{100}` is 100 steps of the program. A program over `regex.MaxInsts` (32768) instructions is `error.TooBig`, and groups, classes and repetitions nest at most `regex.MaxDepth` (250) deep. One search takes at most the size of the program times the length of the input. A compiled `Regex` does not change: compile once and use it for every search.
+
+### Parsing expression grammars.
+The `peg` module matches text with a parsing expression grammar (PEG): patterns with rules that call each other. It is for input that a regular expression can not describe, such as nested brackets, and for a format with several parts that is easier to read as rules. The syntax is that of the `re` module of [LPeg](https://www.inf.puc-rio.br/~roberto/lpeg/re.html):
+```cy
+use peg
+
+p := peg.compile("""
+    list <- '(' item (',' item)* ')'
+    item <- {:list: list :} / {:num: %d+ :}
+""")!
+c := p.parse('(1,(22,3),4)')!
+
+print(c.len())                  --> 3
+print(c[0])                     --> 1
+print(c['list'])                --> (22,3)
+for c.all('num') |n|:
+    print('%{n.start}..%{n.end} %{n.text}')
+--> 1..2 1
+--> 4..6 22
+--> 7..8 3
+--> 10..11 4
+```
+A grammar is a list of rules `name <- pattern`, and matching starts at the first rule. A pattern without rules is a grammar too. Two things differ from a regular expression. A choice `a / b` is ordered: when `a` matches, `b` is not tried, so `'a' / 'ab'` never matches `ab`. And a repetition takes all it can and gives nothing back: `'a'* 'a'` never matches. To stop a repetition before something, say so with `!`: `(!'"' .)*` takes characters up to a quote.
+
+| | |
+|---|---|
+| `'text'` `"text"` | The text. The escapes are `\n \r \t \\ \' \" \[ \] \- \^ \xHH \u{H..}` |
+| `[a-z_]` `[^"]` | One character of the class, or one that is not in it. A class can hold `%d` and the like: `[_%w]` |
+| `.` | Any one character |
+| `%a %c %d %g %l %p %s %u %w %x` | Letter, control, digit, printable but space, lower case, punctuation, white space, upper case, letter or digit, hex digit. ASCII only. The upper case form is the opposite: `%S` |
+| `%nl` | A line feed |
+| `name` | The rule `name` |
+| `( p )` | A group |
+| `p?` `p*` `p+` | Zero or one, zero or more, one or more |
+| `p^3` `p^+3` `p^-3` | Exactly 3, at least 3, at most 3 |
+| `&p` `!p` | Succeeds when `p` matches, or does not match, here. Takes no input and keeps no captures |
+| `p1 p2` | `p1`, then `p2` |
+| `p1 / p2` | `p1`, or else `p2` |
+| `{ p }` | A capture |
+| `{:name: p :}` | A capture with a name |
+| `{}` | An empty capture, for its position |
+| `=name` | The same text that the last capture named `name` matched |
+| `p -> 'text'` | A capture with the text `text`. In it, `%0` is what `p` matched, `%1` to `%9` are the captures in `p` and `%%` is a percent sign |
+| `{~ p ~}` | A capture with the text that `p` matched, where each capture directly inside it is replaced by its text |
+| `-- ...` `# ...` | A comment to the end of the line |
+
+A match is a `peg.Capture`: `start` and `end` (byte offsets), `text`, `name` and `kids`, the captures inside it. Captures nest as they are written in the grammar, so the result is a tree. `c[0]` is the text of the first capture directly inside `c`, and `c['name']` the text of the first capture with that name at any depth, `''` when there is none. `c.get('name')` returns a `?Capture`, `c.all('name')` every capture with that name in the order of the input, and `c.len()` the number of captures directly inside.
+
+`parse(s)` matches all of `s`. `match(s)` matches at the start of `s` and does not have to reach the end, and `match(s, start)` matches at a byte offset. `find(s)` returns the first place where the grammar matches, `find_all(s)` every match from left to right, without overlaps. `replace`, `replace_all` and `split` work as in `regex`: in the replacement, `$0` is the match, `$1` its first capture and `$name` or `${name}` the first capture with that name.
+```cy
+kv := peg.compile(`{:key: [_%w]+ :} '=' {:val: %d+ :}`)!
+line := 'set retries=3 timeout=250'
+
+print(kv.match(line) == none)             --> true
+print(kv.find(line).?['key'])             --> retries
+for kv.find_all(line) |m|:
+    print('%{m['key']} is %{m['val']}')
+--> retries is 3
+--> timeout is 250
+print(kv.replace_all(line, '$val=$key'))  --> set 3=retries 250=timeout
+
+-- The quote that closes is the quote that opened.
+quoted := peg.compile(`{:q: ['"] :} { (!=q .)* } =q`)!
+print(quoted.match(`'it is "so"' he said`).?[1])   --> it is "so"
+
+-- A substitution capture rewrites what it matches.
+csv := peg.compile("""
+    row   <- {~ field (',' -> ';' field)* ~}
+    field <- '"' [^"]* '"' / [^,]*
+""")!
+print(csv.match('a,"b,c",d').?[0])        --> a;"b,c";d
+```
+When `parse` fails it returns `error.NoMatch`. Pass a `peg.Diag` to see the farthest place that the match reached and what the grammar could have matched there:
+```cy
+var diag peg.Diag = {}
+try:
+    _ = p.parse('(1,(22,),4)', &diag)!
+else |err|:
+    print('%{err} at %{diag.pos}: %{diag.msg}')
+--> error.NoMatch at 7: Expected `'('` or `%d` at line 1, column 8, found `)`.
+```
+`diag.line` and `diag.col` start at 1, and `diag.expected` has the expected patterns as they are written in the grammar. `peg.compile(grammar, &diag)` fills the same `Diag` for a grammar that does not compile (`error.Syntax`). A grammar is checked when it is compiled: a rule that is not defined, a repetition of something that can match nothing (`('a'?)*`), and a rule that is left recursive, that is, calls itself before it takes any input (`expr <- expr '+' num`), are errors. Write a left recursive rule as a loop: `expr <- num ('+' num)*`.
+
+Matching is by Unicode code point: `.` and `[가-힣]` take a whole character, and offsets are in bytes. A byte of the input that is not UTF-8 is one character for `.` and for a negated class. The syntax is a subset of LPeg's `re` with the same meaning, with these differences: strings and classes have escapes, a named capture is a node of the result, `=name` matches the whole text of the capture, and what calls a Lua function (`p -> name`, `p => name`) or builds a table (`{| p |}`) is not supported. In a class, a `%` name goes on to the last letter, as in `re`: write `[_%w]`, not `[%w_]`.
+
+A grammar backtracks, so there is no bound on the time of a match as there is for `regex`: a grammar can take time that grows fast with the length of the input. A match keeps a stack of open rule calls and choices. When the stack is over `peg.MaxStack` (100000) entries, for input that nests very deep, `parse` returns `error.TooDeep`, and for a match with more than `peg.MaxCaptures` (1000000) captures it returns `error.TooBig`. The functions that return an option panic in these cases. A call at the end of the last choice of a rule takes no stack: `tail <- !. / . tail` runs over any length of input. A grammar over `peg.MaxInsts` (65536) instructions is `error.TooBig` (`p^100` takes 100 times the instructions of `p`), and patterns nest at most `peg.MaxDepth` (250) deep. A compiled `Peg` does not change: compile once and use it for every match.
 
 ## Importing.
 The `use` statement can import modules. Builtin and std modules such as `math` can be imported without any configuration:

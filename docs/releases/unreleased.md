@@ -59,6 +59,26 @@
   - `find_all` · `captures_all` · `replace_all` · `split`은 검색 버퍼를 한 번만 만들고, `replace_all`은 결과를 한 버퍼에 쌓아
     매치 수에 선형이다(`'ab1 '` 10만 번에 `[a-z]+\d` 치환 1.3초 → 0.3초).
 
+- 새 표준 모듈 `peg`(`docs/decisions/project_std_peg.md`, 매뉴얼 "Parsing expression grammars."):
+  - 규칙이 서로를 부르는 패턴(PEG)으로 겹친 괄호 같은 재귀 구조를 맞춘다. 문법은 LPeg `re` 모듈의 부분집합이고 받는 문법은
+    거기서와 같은 뜻이다(LPeg 1.1.0과의 차분 퍼징 180,000건에서 차이 없음). 엔진은 LPeg식 parsing machine이라 VM 스택을
+    쓰지 않는다. 선택 `a / b`는 순서가 있고 반복은 되돌아가지 않는다.
+  - `peg.compile(grammar)` → `!Peg`. `parse(s)` → `!Capture`(입력 전체), `match(s[, start])` → `?Capture`(그 위치에서, 앞부분만
+    맞아도 됨), `find(s[, start])`, `find_all(s)`, `replace(s, repl)` · `replace_all(s, repl)`(`$0` · `$1` · `${name}` · `$$`), `split(s)`.
+  - 결과는 `peg.Capture{name, start, end, text, kids}`의 트리다. 캡처는 문법에서 감싼 모양대로 겹친다. `c[0]`은 자식의 텍스트,
+    `c['name']`은 그 이름의 첫 자손의 텍스트(없으면 `''`), `c.get(name)` → `?Capture`, `c.all(name)` → `[]Capture`.
+  - 받는 문법: `'text'`, `[a-z]` · `[^..]`, `.`, `%a %d %s %w ..`(ASCII)와 `%nl`, `p? p* p+`, `p^n` · `p^+n` · `p^-n`, `&p` · `!p`,
+    `p1 / p2`, `name <- p`, 캡처 `{ p }` · `{:name: p :}` · `{}` · `{~ p ~}`(치환) · `p -> 'text %1'`(문자열), 역참조 `=name`,
+    주석 `--` · `#`. 매칭 단위는 코드포인트, 오프셋은 바이트.
+  - 컴파일 오류(`error.Syntax`, `peg.Diag{msg, pos, line, col}`): left recursion, 빈 문자열에 맞을 수 있는 것의 반복, 정의 없는 규칙,
+    그리고 `re`에서 Lua 함수나 표가 필요한 것(`p -> name` · `p => name` · `{| p |}`).
+  - `parse`가 실패하면 `error.NoMatch`이고 `Diag`가 가장 멀리 간 실패 위치와 그 자리에서 기대한 것을 말한다
+    (``Expected `'('` or `%d` at line 1, column 8, found `)`.``, `diag.expected`).
+  - `regex`와 달리 시간 보장이 없다(역추적). 한도: 매칭 스택 100000 항목(`error.TooDeep`), 캡처 100만 개 · 프로그램 65536 명령
+    (`error.TooBig`), 문법 중첩 250단계. `match` · `find` 계열은 실행 중 한도를 넘으면 panic이다.
+  - `re`와 다른 점: 리터럴과 클래스에 이스케이프가 있다, `{:name: p :}`가 결과의 노드다, `=name`은 그 캡처가 맞은 텍스트 전체와
+    비교한다(`re`는 그 안의 첫 캡처 값), 닿지 않는 규칙과 대안의 left recursion도 거부한다.
+
 ## 버그 수정
 
 - `.?` · `!`로 임시 옵션 · 결과에서 꺼낸 관리 값(`str`, `[]T` 등)을 `==` · `!=`의 피연산자나 `for`의 대상으로 쓰면 해제되지
@@ -91,7 +111,7 @@
 
 ## 임베딩 API
 
-- `cl_mod_bind_json` · `cl_mod_bind_toon` · `cl_mod_bind_regex`(`cyber.h`). 기본 로더는 `use json` · `use toon` · `use regex`를 바로 푼다. 직접 로더를 쓰는 호스트는
+- `cl_mod_bind_json` · `cl_mod_bind_toon` · `cl_mod_bind_regex` · `cl_mod_bind_peg`(`cyber.h`). 기본 로더는 `use json` · `use toon` · `use regex` · `use peg`를 바로 푼다. 직접 로더를 쓰는 호스트는
   다른 표준 모듈처럼 이 함수로 묶는다.
 
 ## 알려진 한계

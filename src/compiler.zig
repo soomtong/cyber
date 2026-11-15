@@ -21,6 +21,7 @@ const c_mod = @import("builtins/c.zig");
 const io_mod = @import("std/io.zig");
 const test_mod = @import("std/test.zig");
 const json_mod = @import("std/json.zig");
+const peg_mod = @import("std/peg.zig");
 const regex_mod = @import("std/regex.zig");
 const toon_mod = @import("std/toon.zig");
 const cgen = cy.cgen;
@@ -1750,6 +1751,7 @@ const mods = std.StaticStringMap(ModuleEntry).initComptime(.{
     .{"io",   ModuleEntry{.bind = &io_mod.bind}},
     .{"test", ModuleEntry{.bind = &test_mod.bind}},
     .{"json", ModuleEntry{.bind = &json_mod.bind}},
+    .{"peg", ModuleEntry{.bind = &peg_mod.bind}},
     .{"regex", ModuleEntry{.bind = &regex_mod.bind}},
     .{"toon", ModuleEntry{.bind = &toon_mod.bind}},
 });

@@ -23,6 +23,7 @@ const zErrFunc = cy.core.zErrFunc;
 
 const funcs = [_]struct { []const u8, C.BindFunc }{
     .{ "exec", zErrFunc(exec) },
+    .{ "unit_len", zErrFunc(unitLen) },
 };
 
 // Header words.
@@ -178,25 +179,23 @@ const Caps = struct {
     }
 
     /// Returns the input range of the capture named `name` that was closed last, among the first `n` entries.
+    /// As LPeg does, it walks back over whole captures: a capture that is closed hides the captures inside it,
+    /// and a capture that is still open is passed so that the captures before it are seen.
     fn lastNamed(self: *const Caps, n: usize, name: i64) ?[2]usize {
         var i = n;
         while (i > 0) {
             i -= 1;
-            const e = self.buf[i * CapLen ..][0..CapLen];
-            if (e[0] != CapNamed or e[1] != name) continue;
-            // The entry that closes it, if it is closed.
+            if (self.buf[i * CapLen] != 0) continue;
+            // `i` closes a capture. Find the entry that opens it.
+            const close = i;
             var depth: usize = 1;
-            var j = i + 1;
-            while (j < n) : (j += 1) {
-                const kind = self.buf[j * CapLen];
-                if (kind == 0) {
-                    depth -= 1;
-                    if (depth == 0) {
-                        return .{ @intCast(e[2]), @intCast(self.buf[j * CapLen + 2]) };
-                    }
-                } else {
-                    depth += 1;
-                }
+            while (depth > 0) {
+                i -= 1;
+                if (self.buf[i * CapLen] == 0) depth += 1 else depth -= 1;
+            }
+            const e = self.buf[i * CapLen ..][0..CapLen];
+            if (e[0] == CapNamed and e[1] == name) {
+                return .{ @intCast(e[2]), @intCast(self.buf[close * CapLen + 2]) };
             }
         }
         return null;
@@ -230,6 +229,21 @@ const Track = struct {
 fn spanWords(span: cy.heap.Span) []i64 {
     if (span.len == 0) return &.{};
     return span.items(i64);
+}
+
+/// `fn unit_len(hay str, i int) -> int`
+///
+/// Returns the number of bytes in the unit of input at byte `i`, as the matcher counts it: a code point, or one byte
+/// that is not part of valid UTF-8. The result is 1 at or after the end so that a search moves on.
+fn unitLen(t: *cy.Thread) anyerror!C.Ret {
+    const ret = t.ret(i64);
+    const hay_str = t.param(cy.heap.Str);
+    defer t.heap.destructStr(&hay_str);
+    const i = t.param(i64);
+    const hay = hay_str.slice();
+    ret.* = 1;
+    if (i >= 0 and i < hay.len) ret.* = decode(hay, @intCast(i)).len;
+    return C.RetOk;
 }
 
 /// `fn exec(prog [&]int, hay str, start int, mode int, out [&]int, caps [&]int) -> int`

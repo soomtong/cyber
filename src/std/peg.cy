@@ -145,6 +145,9 @@ const NBackref = 11  -- a: name
 #[bind]
 -fn exec(prog [&]int, hay str, start int, mode int, out [&]int, caps [&]int) -> int
 
+#[bind]
+-fn unit_len(hay str, i int) -> int
+
 --| Compiles a grammar. Returns `error.Syntax` for a grammar that is malformed, calls a rule that is not defined,
 --| is left recursive or repeats something that can match nothing, and `error.TooBig` for one that is over `MaxInsts`.
 fn compile(grammar str) -> !Peg:
@@ -373,21 +376,9 @@ fn (&Peg) split(s str) -> []str:
         last = c.end
     return res.append(s[last..])
 
--- The length of the code point at byte `i`, 1 at the end so that a search moves on.
+-- The length of the unit of input at byte `i` as the matcher counts it, 1 at the end so that a search moves on.
 -fn step(s str, i int) -> int:
-    if i >= s.len():
-        return 1
-    c := int(s[i])
-    n := 1
-    if c >= 0xf0:
-        n = 4
-    else c >= 0xe0:
-        n = 3
-    else c >= 0xc0:
-        n = 2
-    if i + n > s.len():
-        return 1
-    return n
+    return unit_len(s, i)
 
 -- Builds the tree of captures from the log of a match.
 -fn (&Peg) tree(s str, r &Run) -> Capture:

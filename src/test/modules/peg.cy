@@ -209,6 +209,12 @@ t.eq('x=1&y=2', peg.compile("""
 -- Back references.
 t.eq(5, ends(`{:q: ['"] :} (!=q .)* =q`, '"a\'b"'))
 t.eq(-1, ends(`{:q: ['"] :} (!=q .)* =q`, '"ab\''))
+-- A back reference sees the outer capture of a name, not one inside it, as in LPeg.
+t.eq(4, ends(`{:n: 'a' {:n: 'b' :} :} =n`, 'abab'))
+t.eq(-1, ends(`{:n: 'a' {:n: 'b' :} :} =n`, 'abb'))
+-- A capture that is still open is passed: the captures before it and inside it are seen.
+t.eq(3, ends(`{:n: 'a' :} {:n: 'b' =n :}`, 'aba'))
+t.eq(3, ends(`{:n: 'x' :} {:m: {:n: 'a' :} =n :}`, 'xaa'))
 t.eq(5, ends(`{:w: %a+ :} ' ' =w`, 'ab abc'))
 t.eq(-1, ends(`{:w: %a+ :} ' ' =w`, 'ab cd'))
 -- The capture that was closed last counts, and one that was backtracked over does not.
@@ -287,6 +293,12 @@ t.eq(3, digits.find_all('a12b').len())
 t.eq('12', digits.find_all('a12b')[1].text)
 t.eq(2, digits.find_all('가').len())
 t.eq(1, digits.find_all('').len())
+-- A byte that is not part of valid UTF-8 is one unit, so an empty match does not skip what follows it.
+opt_a := peg.compile(`'a'?`)!
+t.eq(3, opt_a.find_all('\xf8aba').len())
+t.eq(1, opt_a.find_all('\xf8aba')[1].start)
+t.eq(3, opt_a.find_all('\xf8aba')[2].start)
+t.eq(4, peg.compile(`''`)!.find_all('\xc0ab').len())
 
 -- Replacing and splitting.
 t.eq('1:a 2:b', kv.replace_all('a=1 b=2', '$val:$key'))

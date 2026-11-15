@@ -11,7 +11,9 @@ LITS = ['a', 'b', 'ab', 'ba', 'x', '(', ')', ',', '=', '1', ' ', 'aa', '']
 CLASSES = ['[ab]', '[a-c]', '[^a]', '[%d]', '[_%a]', '[^,%s]', '[x1]', '[^()]', '[%l%d]', '[(),]']
 PERCENT = ['%d', '%a', '%s', '%w', '%x', '%l', '%u', '%p', '%D', '%S', '%A', '%W', '%nl']
 NAMES = ['n', 'm']
-ALPHABET = 'aabbx(),=1 A_'
+# The last five are bytes that are not part of valid UTF-8 in any order: no byte here starts a sequence. LPeg counts
+# bytes and the module counts code points, and both count such a byte as one unit, so the answers still compare.
+ALPHABET = b'aabbx(),=1 A_\x80\xbf\xc0\xf8\xff'
 
 # `caps` is what captures the expression may hold: 'all', 'none', or 'string' (inside a substitution capture,
 # where only string captures and named captures keep the comparison simple).
@@ -38,8 +40,13 @@ def expr(depth, rules, caps):
         return rnd.choice(rules)
     if r < 0.89:
         return '=' + rnd.choice(NAMES)
-    if r < 0.92:
+    if r < 0.905:
         return '{:' + rnd.choice(NAMES) + ': ' + expr(depth + 1, rules, 'none') + ' :}'
+    if r < 0.92:
+        # A capture with the name of a capture inside it, then a back reference: it must see the outer one.
+        n = rnd.choice(NAMES)
+        return ('{:' + n + ': ' + expr(depth + 1, rules, 'none') + ' {:' + n + ': ' + expr(depth + 1, rules, 'none')
+                + ' :} :} =' + n)
     if caps == 'none':
         return "'" + rnd.choice(LITS) + "'"
     if r < 0.95:
@@ -64,17 +71,42 @@ def grammar():
     return g, 'Z <- ' + ' / '.join(rules) + '\n' + g
 
 def hay():
-    return ''.join(rnd.choice(ALPHABET) for _ in range(rnd.randint(0, 10)))
+    return bytes(rnd.choice(ALPHABET) for _ in range(rnd.randint(0, 10)))
 
 LUA = r'''
+local lpeg = require "lpeg"
 local re = require "re"
 local cases = dofile(arg[1])
+
+-- Every match from left to right as `find_all` gives them: an empty match that touches the end of the match
+-- before it is left out. Every unit of the input is one byte here. "!" when LPeg raises an error.
+local function find_all(c)
+  local ok, p = pcall(re.compile, c[1])
+  if not ok then return "!" end
+  local search = lpeg.P{ lpeg.Cp() * (p / 0) * lpeg.Cp() + 1 * lpeg.V(1) }
+  local s, out, at, last = c[2], {}, 0, -1
+  while at <= #s do
+    local ok, a, b = pcall(search.match, search, s, at + 1)
+    if not ok then return "!" end
+    if not a then break end
+    local start, stop = a - 1, b - 1
+    if start == stop and stop == last then
+      at = stop + 1
+    else
+      at = start == stop and stop + 1 or stop
+      last = stop
+      out[#out + 1] = start .. "-" .. stop
+    end
+  end
+  return table.concat(out, ",")
+end
+
 for _, c in ipairs(cases) do
   local ok, p = pcall(re.compile, "(" .. c[1] .. ") {}")
   -- LPeg does not check a rule that the first rule does not reach. `c[3]` is the grammar with a first rule
   -- that calls every rule.
   local strict = c[3] == "" or pcall(re.compile, c[3])
-  io.write(strict and "S" or "L", "\t")
+  io.write(strict and "S" or "L", "\t", find_all(c), "\t")
   if not ok then
     io.write("E\t", (tostring(p):gsub("[\t\n]", " ")), "\n")
   else
@@ -97,6 +129,8 @@ end
 '''
 
 def lua_str(s):
+    if isinstance(s, bytes):
+        return '"' + ''.join('\\%d' % b for b in s) + '"'
     return '"' + s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n') + '"'
 
 cases = []
@@ -115,21 +149,24 @@ with tempfile.TemporaryDirectory() as tmp:
         f.write('}\n')
     with open(prog, 'w') as f:
         f.write(LUA)
-    lines = subprocess.run(['lua', prog, data], capture_output=True, text=True, check=True).stdout.split('\n')
+    # A capture may hold bytes that are not UTF-8, so the answers are read as bytes and kept as lists of bytes.
+    lines = subprocess.run(['lua', prog, data], capture_output=True, check=True).stdout.split(b'\n')
 
 res = []
 for (g, h, _), line in zip(cases, lines):
-    parts = line.split('\t')
-    strict = parts.pop(0) == 'S'
-    c = {'peg': g, 'hay': h, 'kind': parts[0], 'strict': strict}
-    if parts[0] in 'ER':
-        c['err'] = parts[1]
-    if parts[0] == 'M':
+    parts = line.split(b'\t')
+    strict = parts.pop(0) == b'S'
+    found = parts.pop(0).decode()
+    kind = parts[0].decode()
+    c = {'peg': g, 'hay': list(h), 'kind': kind, 'strict': strict, 'all': found}
+    if kind in 'ER':
+        c['err'] = parts[1].decode(errors='replace')
+    if kind == 'M':
         c['end'] = int(parts[1])
-        c['caps'] = parts[2:]
+        c['caps'] = [list(v) for v in parts[2:]]
     res.append(c)
 with open(out, 'w') as f:
-    json.dump(res, f, ensure_ascii=False, indent=0)
+    json.dump(res, f, ensure_ascii=False, separators=(',', ':'))
 print(len(res), 'cases:', sum(1 for c in res if c['kind'] == 'M'), 'match,',
       sum(1 for c in res if c['kind'] == 'N'), 'no match,', sum(1 for c in res if c['kind'] == 'E'), 'rejected,',
       sum(1 for c in res if c['kind'] == 'R'), 'runtime errors')

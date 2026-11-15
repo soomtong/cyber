@@ -4377,7 +4377,7 @@ A grammar is a list of rules `name <- pattern`, and matching starts at the first
 | `{ p }` | A capture |
 | `{:name: p :}` | A capture with a name |
 | `{}` | An empty capture, for its position |
-| `=name` | The same text that the last capture named `name` matched |
+| `=name` | The same text that the last closed capture named `name` matched. A capture inside it with the same name is not seen, as in `re` |
 | `p -> 'text'` | A capture with the text `text`. In it, `%0` is what `p` matched, `%1` to `%9` are the captures in `p` and `%%` is a percent sign |
 | `{~ p ~}` | A capture with the text that `p` matched, where each capture directly inside it is replaced by its text |
 | `-- ...` `# ...` | A comment to the end of the line |

@@ -17,6 +17,22 @@ fn values(hay str, c &peg.Capture, out &[]str):
         if k.text == hay[k.start..k.end]:
             values(hay, &k, out)
 
+-- A list of bytes in the cases as a string: the input and the captures may hold bytes that are not UTF-8.
+fn bytes_str(v json.Value) -> str:
+    var buf []byte = {}
+    for v.as_array().? |b|:
+        buf = buf.append(byte(b.as_int().?))
+    return str(buf)
+
+-- Every match of `find_all` as `start-end`, joined with commas.
+fn show_all(p &peg.Peg, hay str) -> str:
+    out := ''
+    for p.find_all(hay) |m|:
+        if out.len() > 0:
+            out += ','
+        out += '%{m.start}-%{m.end}'
+    return out
+
 doc := json.parse(os.read_file_str(os.args()[1])!)!
 count := 0
 bad := 0
@@ -24,7 +40,7 @@ skipped := 0
 stricter := 0
 for doc.as_array().? |c|:
     src := c['peg'].as_str().?
-    hay := c['hay'].as_str().?
+    hay := bytes_str(c['hay'])
     kind := c['kind'].as_str().?
     count += 1
     var diag peg.Diag = {}
@@ -57,6 +73,12 @@ for doc.as_array().? |c|:
         -- The value of a position capture is a number in LPeg and has no text here, which shows in `%1`.
         skipped += 1
         continue
+    all := c['all'].as_str().?
+    if all != '!':
+        got_all := show_all(&p.?, hay)
+        if got_all != all:
+            bad += 1
+            print('DIFF find_all `%{src}` on `%{hay}`: got %{got_all}, LPeg %{all}')
     m := p.?.match(hay)
     if kind == 'N':
         if m != none:
@@ -75,7 +97,7 @@ for doc.as_array().? |c|:
         got += '|' + v
     want := '%{c['end'].as_int().?}'
     for c['caps'].as_array().? |v|:
-        want += '|' + v.as_str().?
+        want += '|' + bytes_str(v)
     if got != want:
         bad += 1
         print('DIFF `%{src}` on `%{hay}`: got %{got}, LPeg %{want}')

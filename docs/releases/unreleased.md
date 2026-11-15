@@ -61,6 +61,10 @@
   타입에 `Cannot copy`였다(`!`는 됐다). 이제 옮긴다. 변수에 담긴 결과는 그대로 복사한다(F-145).
 - `meta.access(T, name)`에 `%T type` 템플릿 인자를 넘기면 `Unsupported expansion of compile-time value of type: type`이었다. 이제 `T`의
   멤버를 찾는다(F-146).
+- 원소가 256개 이상인 리터럴(`[]int{...}`, `[_]int{...}`, `Array[T]{...}`, `Map[K, V]{...}`)의 256번째부터의 원소가 틀린 값이었다
+  (Release 빌드에서는 오류 없이, Debug · ReleaseSafe에서는 `panic: integer does not fit in destination type`). 이제 개수 제한 없이 맞다(F-147).
+- private choice(`-type Shape enum`)를 복사하거나 해제하면 ``Can not access the private symbol `Tag` in `Shape`.``로 컴파일되지
+  않았다. 이제 된다(F-148).
 
 ## 임베딩 API
 

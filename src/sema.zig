@@ -7338,7 +7338,7 @@ pub fn semaTupleInit(c: *cy.Chunk, type_: *cy.Type, fields: []const cy.types.Fie
     }
 
     const init = try c.ir.newExpr(.init, type_, @ptrCast(lit), .{
-        .nargs = @as(u8, @intCast(fields.len)), .args = args.ptr,
+        .nargs = @as(u32, @intCast(fields.len)), .args = args.ptr,
     });
     return ExprResult.initOwned(init);
 }
@@ -7451,7 +7451,7 @@ pub fn semaInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, initializer: *as
     seqPop(c, seq_start);
 
     const loc = try c.ir.newExpr(.init, @ptrCast(struct_t), node, .{
-        .nargs = @as(u8, @intCast(struct_t.fields_len)),
+        .nargs = @as(u32, @intCast(struct_t.fields_len)),
         .args = ir_args.ptr,
     });
     return ExprResult.initOwned(loc);
@@ -11802,7 +11802,7 @@ pub const InitBuilder = struct {
         b.type = type_;
         b.irArgs = try b.c.ir.allocArray(*ir.Expr, numFields);
         b.ir = try b.c.ir.newExpr(.init, type_, node, .{
-            .nargs = @as(u8, @intCast(numFields)), .args = b.irArgs.ptr,
+            .nargs = @as(u32, @intCast(numFields)), .args = b.irArgs.ptr,
         });
         b.argIdx = 0;
         b.fields = type_.fields().?;
@@ -12419,7 +12419,7 @@ pub fn semaCZero(c: *cy.Chunk, type_: *cy.Type, node: *ast.Node) !ExprResult {
                         ir_args[i] = arg.ir;
                     }
                     const loc = try c.ir.newExpr(.init, @ptrCast(struct_t), node, .{
-                        .nargs = @as(u8, @intCast(struct_t.fields_len)),
+                        .nargs = @as(u32, @intCast(struct_t.fields_len)),
                         .args = ir_args.ptr,
                     });
                     return ExprResult.initOwned(loc);

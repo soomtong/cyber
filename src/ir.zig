@@ -412,7 +412,7 @@ pub const SetField = extern struct {
 pub const Init = extern struct {
     base: Expr = undefined,
     args: [*]*Expr,
-    nargs: u8,
+    nargs: u32,
 };
 
 pub const InitZero = extern struct {

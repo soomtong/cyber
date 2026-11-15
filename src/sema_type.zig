@@ -362,7 +362,10 @@ pub fn reserve_choice(c: *cy.Chunk, decl: *ast.EnumDecl) !*cy.sym.TypeSym {
     const new_t = try c.sema.createTypeWithId(.choice, type_id, .{ .tag_t = tag_t });
     const sym = try c.reserveTypeSym(@ptrCast(c.sym), name, new_t, @ptrCast(decl));
 
-    _ = try c.reserveTypeSym(&sym.head, "Tag", tag_t, @ptrCast(decl));
+    // `Tag` is a member of the choice. A `-` choice is private as a whole, so `T.Tag` stays reachable to core
+    // templates expanded for it (`@destruct`, `@copy`).
+    const tag_sym = try c.reserveTypeSym(&sym.head, "Tag", tag_t, @ptrCast(decl));
+    tag_sym.head.getMetadata().private = false;
     return sym;
 }
 
@@ -607,7 +610,10 @@ pub fn reserve_template_instance(c: *cy.Chunk, template: *cy.sym.Template, opt_h
                 const new_t = try c.sema.createType(.choice, .{ .tag_t = tag_t });
                 sym = try c.createTypeSym(@ptrCast(template), name, new_t, @ptrCast(decl));
 
-                _ = try c.reserveTypeSym(&sym.head, "Tag", tag_t, @ptrCast(decl));
+                // `Tag` is a member of the choice. A `-` choice is private as a whole, so `T.Tag` stays reachable to core
+                // templates expanded for it (`@destruct`, `@copy`).
+                const tag_sym = try c.reserveTypeSym(&sym.head, "Tag", tag_t, @ptrCast(decl));
+                tag_sym.head.getMetadata().private = false;
             } else {
                 const new_t = try c.sema.createType(.enum_t, .{});
                 sym = try c.createTypeSym(@ptrCast(template), name, new_t, @ptrCast(decl));

@@ -173,7 +173,7 @@ pub fn value(c: *cy.Chunk, val_: cy.TypeValue, target_opt: ?*cy.Type, node: *ast
                     }
 
                     const res = try c.ir.newExpr(.init, @ptrCast(struct_t), node, .{
-                        .nargs = @as(u8, @intCast(struct_t.fields_len)),
+                        .nargs = @as(u32, @intCast(struct_t.fields_len)),
                         .args = ir_args.ptr,
                     });
                     return sema.ExprResult.init2(res);

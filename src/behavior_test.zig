@@ -337,6 +337,7 @@ fn test_modules(run: *Runner) void {
         run.case("modules/visibility.cy");
         run.case("modules/visibility_import_all.cy");
         run.case("modules/private_field_meta.cy");
+        run.case("modules/private_choice.cy");
         run.case("modules/private_func_error.cy");
         run.case("modules/private_method_error.cy");
         run.case("modules/private_field_error.cy");
@@ -456,6 +457,7 @@ fn test_core(run: *Runner) void {
     run.case("core/ints.cy");
     run.case("core/int_unsupported_notation_error.cy");
     run.case("core/int_literal_overflow_error.cy");
+    run.case("core/literal_many_elems.cy");
     run.case("core/logic_ops.cy");
     run.case("core/map_index_panic.cy");
     run.case("core/Map.cy");

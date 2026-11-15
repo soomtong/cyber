@@ -184,6 +184,8 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 | F-144 | `?T` · `!T`를 돌려주는 함수의 `return -x`가 ``Can not find the symbol `-` in `!int`.``, `?i8`의 `return -5`는 `i8`로 맞추지 못한다. 단항 `-`가 대상 타입을 옵션 · 결과 그대로 피연산자에 넘겼다 | `sema.zig` `semaUnExpr` | F-142 수정 중(2026-11-15) | 낮음 | 2026-11-15 수정. 대상이 옵션 · 결과면 자식 타입으로 피연산자를 검사하고 결과를 감싼다 |
 | F-145 | `x := f() !else ...` · `!else |e|:` 블록이 호출이 돌려준 결과에서도 페이로드를 복사해 `!Map[...]` 같은 `NoCopy` 결과에 `Cannot copy`. `x := f()!`는 옮긴다 | `sema.zig` `.unwrap_res_or` · `.unwrap_res_or_block` | `json.to` 작성 중(2026-11-15) | 중간 | 2026-11-15 수정. 소유한 결과면 컨테이너를 죽은 것으로 두고 옮긴다(`semaMoveOrCopyResultPayload`). 자리(변수)는 여전히 복사 |
 | F-146 | `meta.access(T, name)`의 `T`가 `%T type` 템플릿 인자면 `Unsupported expansion of compile-time value of type: type`. 페이로드 없는 choice case를 제네릭으로 만들 수 없었다 | `sema.zig` `semaAccessExpr3` | `json.to` 작성 중(2026-11-15) | 낮음 | 2026-11-15 수정. 왼쪽이 컴파일 타임 `type` 값인 식별자면 그 타입의 심볼에서 찾는다 |
+| F-147 | 원소가 256개 이상인 리터럴(`[]int{...}`, `[_]int{...}`, `Array[int]{...}`, `Map[str, int]{...}`)의 뒤쪽 원소가 틀린 값이다. Release 빌드에서 조용히 쓰레기 값(`a[256]`이 0), Debug · ReleaseSafe에서 `panic: integer does not fit in destination type`. IR `Init.nargs`가 `u8`이라 개수의 아래 8비트만 남았다 | `ir.zig` `Init`, `sema.zig` `sema_call_init_span` | `regex` Unicode 표 작성 중(2026-11-15) | 중간. 큰 표를 리터럴로 쓸 수 없었다 | 2026-11-15 수정. `nargs`를 `u32`로. behavior `core/literal_many_elems.cy` |
+| F-148 | `-type T enum`(private choice)을 복사 · 해제하면 ``Can not access the private symbol `Tag` in `T`.``(`core` `@destruct` · `@copy`가 `T.Tag`를 읽는다). 선언한 모듈 안에서도 났다 | `sema_type.zig` `reserve_choice` · `reserve_template_instance` | `regex` 모듈 작성 중(2026-11-15) | 중간. 모듈 내부용 choice를 private으로 둘 수 없었다 | 2026-11-15 수정. `Tag`는 choice의 멤버라 private을 물려받지 않는다. behavior `modules/private_choice.cy` |
 
 ## 우선순위 한 장 요약
 

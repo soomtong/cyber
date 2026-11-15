@@ -2848,6 +2848,18 @@ fn @eq(a &%T, b &T) -> bool:
         #case .int:
             return a.* == b.*
 
+        #case .bool:
+            return a.* == b.*
+
+        #case .enum:
+            return a.* == b.*
+
+        #case .error:
+            return a.* == b.*
+
+        #case .raw:
+            return a.* == b.*
+
         #case .float:
             return a.* == b.*
 

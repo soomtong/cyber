@@ -65,4 +65,33 @@ test.eq(na.b, 2)
 test.eq(nb.a, 3)
 test.eq(nb.b, 4)
 
+-- `==` compares the fields. A `bool`, an enum, an `error` or a raw integer field was a compile error
+-- (`Unsupported: bool`).
+type EqKind enum:
+    case a
+    case b
+
+type EqFields:
+    flag bool
+    kind EqKind
+    err  error
+    raw  byte
+    opt  ?bool
+    n    int
+
+type EqOuter:
+    inner EqFields
+    name  str
+
+eq1 := EqFields{flag=true, kind=.a, err=error.A, raw=3, opt=true, n=1}
+test.eq(true, eq1 == EqFields{flag=true, kind=.a, err=error.A, raw=3, opt=true, n=1})
+test.eq(false, eq1 == EqFields{flag=false, kind=.a, err=error.A, raw=3, opt=true, n=1})
+test.eq(false, eq1 == EqFields{flag=true, kind=.b, err=error.A, raw=3, opt=true, n=1})
+test.eq(false, eq1 == EqFields{flag=true, kind=.a, err=error.B, raw=3, opt=true, n=1})
+test.eq(false, eq1 == EqFields{flag=true, kind=.a, err=error.A, raw=4, opt=true, n=1})
+test.eq(false, eq1 == EqFields{flag=true, kind=.a, err=error.A, raw=3, opt=none, n=1})
+test.eq(true, eq1 != EqFields{flag=true, kind=.a, err=error.A, raw=3, opt=true, n=2})
+test.eq(true, EqOuter{inner=eq1, name='x'} == EqOuter{inner=eq1, name='x'})
+test.eq(false, EqOuter{inner=eq1, name='x'} == EqOuter{inner=eq1, name='y'})
+
 --cytest: pass

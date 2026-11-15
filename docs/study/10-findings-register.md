@@ -192,6 +192,7 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 | F-152 | wasm32에서 `io`의 줄 읽기(`indexOfNewLine`)가 F-143과 같은 `panic: integer does not fit in destination type`. F-143은 두 호출 지점만 고쳤다 | `std/io.zig` `indexOfNewLine` | 0.4.11..HEAD 코드 리뷰(2026-11-15) | 중간 | 2026-11-15 수정. `PtrSpan.items`를 두고(`Span.items`와 같이 `@truncate`) `string.zig` · `io.zig`가 함께 쓴다 |
 | F-153 | 컴파일 타임 인자의 타입이 맞지 않으면(`type.size('s')`) 평가한 값(`EvalStr`)을 해제하지 않고 버렸다. behavior 테스트 끝에 `error(SafeAllocator): leaked`가 1건 남았다 | `sema_func.zig` `matchArgCt` · `matchPreArgCt` | leak 보고 추적(2026-11-15) | 낮음. 컴파일 오류인 경로에서만 | 2026-11-15 수정. 불일치면 타입만 남기고 값을 해제한다. behavior `meta/type_size_str_arg_error.cy` |
 | F-154 | 괄호 묶음이 식 중간의 왼쪽 피연산자면 그 뒤의 연산자를 모두 가져갔다: `a - (b) / 2 + 1`이 `a - ((b) / 2 + 1)`, `-(2) + 5`가 `-((2) + 5)`. 타입이 맞으면 오류 없이 다른 값이 나온다 | `parser.zig` `parseTermExpr`의 `.left_paren`이 `parseExprWithLeft`를 불렀다 | `time` 모듈의 달력 변환이 이틀 어긋나서(2026-11-15) | 높음. 조용히 틀린 산술 | 2026-11-15 수정. 묶음은 term으로 돌려주고 연산자는 부른 쪽이 잇는다. behavior `core/op_precedence.cy` |
+| F-155 | `bool` · enum · `error` · raw 정수(`byte` · `r64`) 필드가 있는 구조체를 `==` · `!=`로 비교하면 ``Unsupported: bool``(타입 이름) 컴파일 오류. 오류 위치가 `core:2858`이라 어느 비교인지도 알 수 없었다 | `core.cy` `@eq`의 `#switch type.info(T)`에 그 갈래가 없었다 | `time` 모듈의 `DateTime`에 시간대(bool 필드)를 넣다가(2026-11-15) | 중간. 흔한 필드 타입인데 구조체 비교가 막혔다 | 2026-11-15 수정. 네 갈래 추가. behavior `types/structs.cy` |
 
 ## 우선순위 한 장 요약
 

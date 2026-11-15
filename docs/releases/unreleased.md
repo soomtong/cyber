@@ -139,6 +139,8 @@
 
 ## 임베딩 API
 
+- `bool` · enum · `error` · raw 정수(`byte` · `r64` ...) 필드가 있는 구조체를 `==` · `!=`로 비교하면 ``Unsupported: bool``처럼 타입
+  이름만 말하는 컴파일 오류였다. 이제 그 필드들도 값으로 비교한다(F-155). choice 필드는 아직 비교하지 못한다.
 - `cl_mod_bind_json` · `cl_mod_bind_toon` · `cl_mod_bind_regex` · `cl_mod_bind_peg` · `cl_mod_bind_time`(`cyber.h`). 기본 로더는 `use json` · `use toon` · `use regex` · `use peg` · `use time`을 바로 푼다. 직접 로더를 쓰는 호스트는
   다른 표준 모듈처럼 이 함수로 묶는다.
 

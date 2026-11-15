@@ -43,6 +43,19 @@
     TOON 인코더는 `number`를 정규형으로 쓴다. TOON 참조 구현은 `float` 범위 밖 수를 문자열로 읽는데 여기서는 수다.
   - `?json.Value == none`처럼 `==`로 `Value`를 비교할 수는 없다(코어 `@eq`가 choice를 지원하지 않음). `?else` · `if ... |x|` ·
     `Value.eq`를 쓴다.
+- 새 표준 모듈 `regex`(`docs/decisions/project_std_regex.md`, 매뉴얼 "Regular expressions."):
+  - 역추적 없는 엔진(Pike VM)이라 검색 한 번이 입력 길이에 선형이다(`(a*)*b` 같은 패턴도). 문법은 ripgrep 기본 문법(Rust `regex`
+    크레이트)의 부분집합이고, 컴파일되는 패턴은 거기서와 같은 것에 맞는다. Rust `regex`의 테스트 데이터 820개
+    (`src/test/assets/regex-spec`)를 통과하고 ripgrep 15.2와의 차분 퍼징 23,000건에서 차이가 없었다.
+  - `regex.compile(pat)` → `!Regex`. `is_match(s)`, `find(s[, start])` → `?Match{start, end, text}`, `find_all(s)`,
+    `captures(s[, start])` → `?Captures`(`c[1]` · `c['name']`은 텍스트, `c.get(1)`은 `?Match`), `captures_all(s)`,
+    `replace(s, repl)` · `replace_all(s, repl)`(`$1` · `${name}` · `$$`), `split(s[, limit])`, `regex.escape(s)`.
+  - 받는 문법: 클래스(`[a-z]` · 중첩 · `&&` · `--` · `~~` · `[[:alpha:]]`), `\d \s \w`, `\p{L}` · `\p{Hangul}`(일반 범주 · 스크립트 ·
+    `Alphabetic` 등), 반복과 lazy 꼴, `^ $ \A \z \b \B \b{start}` 등, 그룹과 이름 그룹, 플래그 `i m s U x`.
+    `\w` · `\b` · `(?i)`는 Unicode 18.0 기준이라 `\w+`가 한글에 맞는다. 오프셋은 바이트, 매칭 단위는 코드포인트.
+  - 받지 않는 것은 컴파일 오류(`error.Syntax`)이고 `regex.Diag{msg, pos}`가 대신 쓸 것을 말한다: look-around, backreference,
+    `\Z`, `(?-u)` · `(?R)`, 그 밖의 `\p{..}` 속성. 프로그램이 32768 명령을 넘으면 `error.TooBig`, 중첩은 250단계까지.
+  - ripgrep CLI와 다른 점: 줄 단위가 아니라 문자열 전체를 본다. `$`는 `(?m)`이 있어야 줄 끝이고 `\s` · `[^a]`가 줄바꿈에도 맞는다.
 
 ## 버그 수정
 
@@ -68,7 +81,7 @@
 
 ## 임베딩 API
 
-- `cl_mod_bind_json` · `cl_mod_bind_toon`(`cyber.h`). 기본 로더는 `use json` · `use toon`을 바로 푼다. 직접 로더를 쓰는 호스트는
+- `cl_mod_bind_json` · `cl_mod_bind_toon` · `cl_mod_bind_regex`(`cyber.h`). 기본 로더는 `use json` · `use toon` · `use regex`를 바로 푼다. 직접 로더를 쓰는 호스트는
   다른 표준 모듈처럼 이 함수로 묶는다.
 
 ## 알려진 한계

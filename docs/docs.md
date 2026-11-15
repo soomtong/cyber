@@ -4161,6 +4161,7 @@ fn (&Box[]) dup() -> T:
 * [Main function.](#main-function)
 * [Builtin modules.](#builtin-modules)
   * [JSON and TOON.](#json-and-toon)
+  * [Regular expressions.](#regular-expressions)
 * [Importing.](#importing)
   * [Import file.](#import-file)
   * [Import URL.](#import-url)
@@ -4278,6 +4279,62 @@ else |err|:
 `toon.encode(v)` follows the spec's forms: `key: value`, nested objects by indentation, inline primitive arrays (`tags[2]: a,b`), a table for an array of uniform objects (`users[2]{id,name}:`), a keyed table for an object whose values are uniform objects (`env[2:]{region}:`), and `- ` items otherwise. `toon.EncodeOptions` sets `indent` (2) and `delim` (`.comma`, `.tab` or `.pipe`). It returns `error.Unicode` for a string that is not UTF-8.
 
 `toon.decode(src)` checks declared lengths, table widths, indentation and duplicate keys. `toon.DecodeOptions{strict=false}` applies the spec's non-strict recoveries. Errors are `error.Syntax` with a `json.Diag` (line and column). An unquoted token that matches the JSON number grammar is a number, others are strings (`05` stays `"05"`); numbers decode as `json.parse` reads them, and `toon.DecodeOptions{exact=true}` keeps them as text like `json.ParseOptions`. A `number` encodes in the canonical form of `json.fmt_number`. `toon.from_json(src)` and `toon.to_json(src)` convert text directly. The implementation passes the spec's 564 conformance fixtures (`src/test/assets/toon-spec`).
+
+### Regular expressions.
+The `regex` module searches text with regular expressions. Matching never backtracks: a search takes time linear in the length of the input, whatever the pattern. The syntax is a subset of the Rust `regex` crate's, which is the default syntax of [ripgrep](https://github.com/BurntSushi/ripgrep). A pattern that compiles here matches what it matches there:
+```cy
+use regex
+
+re := regex.compile(`(?P<key>\w+)=(\d+)`)!
+line := 'retries=3 timeout=250'
+
+print(re.is_match(line))                --> true
+print(re.find(line).?.text)             --> retries=3
+for re.find_all(line) |m|:
+    print('%{m.start}..%{m.end} %{m.text}')
+--> 0..9 retries=3
+--> 10..21 timeout=250
+
+for re.captures_all(line) |c|:
+    print('%{c['key']} is %{c[2]}')
+--> retries is 3
+--> timeout is 250
+
+print(re.replace_all(line, '$2=$key'))  --> 3=retries 250=timeout
+print(regex.compile(`[,;]\s*`)!.split('a, b;c'))   --> {'a', 'b', 'c'}
+```
+Write patterns as raw strings (backticks) so that `\d` needs no second backslash.
+
+`find` returns a `?regex.Match` with `start`, `end` (byte offsets) and `text`. `captures` returns a `?regex.Captures`: `c[0]` is the whole match, `c[1]` and `c['name']` are the text of a group, and `''` when the group did not take part in the match. `c.get(1)` and `c.get('name')` return a `?Match` and tell the two apart. Both take a second argument, the byte offset where the search starts. `find_all` and `captures_all` return every match from left to right. Matches do not overlap, and an empty match that touches the end of the match before it is left out (`a*` on `baaac` matches at 0, 1..4 and 5).
+
+In the replacement of `replace` (first match) and `replace_all`, `$1` and `${1}` stand for a group by number, `$name` and `${name}` by name, and `$$` for a dollar sign. A name takes the longest run of letters, digits and `_`, so write `${1}a`: `$1a` is the group named `1a`. A group that does not exist gives nothing. `split(s)` returns the pieces between the matches, `split(s, limit)` at most `limit` pieces. `regex.escape(s)` returns a pattern that matches `s` itself.
+
+The syntax:
+
+| | |
+|---|---|
+| Characters | `a`, `.` (any character but `\n`), `\n \t \r \a \f \v`, `\x7F`, `\x{1F600}`, `é`, `\u{E9}`, `\U0001F600`, `\.` and other escaped punctuation |
+| Classes | `[abc]`, `[^abc]`, `[a-z]`, nested `[a[^b]]`, `[a-z&&[^aeiou]]` (intersection), `[a-z--[aeiou]]` (difference), `[a-c~~b-d]` (in one but not both), `[[:alpha:]]`, `[[:^digit:]]` |
+| Perl classes | `\d` (digit), `\s` (white space), `\w` (word character), `\D`, `\S`, `\W` |
+| Unicode classes | `\pL`, `\p{Lu}`, `\p{Letter}`, `\p{Hangul}`, `\p{Greek}`, `\p{gc=Nd}`, `\p{sc=Latin}`, `\p{Alphabetic}`, `\p{Lowercase}`, `\p{Uppercase}`, `\p{White_Space}`, `\p{Any}`, `\p{ASCII}`, `\p{Assigned}`, and `\P{...}` for the rest |
+| Repetition | `*`, `+`, `?`, `{n}`, `{n,}`, `{n,m}`, and the lazy forms `*?`, `+?`, `??`, `{n,m}?` |
+| Assertions | `^`, `$`, `\A`, `\z` (start and end of the input), `\b`, `\B`, `\b{start}` (`\<`), `\b{end}` (`\>`), `\b{start-half}`, `\b{end-half}` |
+| Groups | `(...)`, `(?:...)` (not captured), `(?P<name>...)`, `(?<name>...)`, `a\|b` (the first alternative that matches wins) |
+| Flags | `(?i)` ignore case, `(?m)` `^` and `$` match at line boundaries, `(?s)` `.` matches `\n`, `(?U)` swap greedy and lazy, `(?x)` ignore white space and `#` comments. `(?i:...)` for a group, `(?-i)` to turn off |
+
+Matching is by Unicode code point. `\d`, `\s`, `\w`, `\b` and `(?i)` are Unicode aware (`\w+` matches `한글`, `(?i)k` matches the Kelvin sign), as in ripgrep. The tables are those of Unicode `regex.unicode_version()`. A byte of the input that is not UTF-8 matches no class, not even `.`, and the search goes on after it. `$` matches only at the end of the input unless `(?m)` is on. ripgrep searches line by line, this module the whole string: `\s` and `[^a]` match a line feed.
+
+Not supported, because they need backtracking or are rarely used: look-ahead and look-behind, backreferences (`\1`), possessive and atomic groups, `\Z`, octal escapes, the `R` flag, turning off `u`, and Unicode properties other than general categories, scripts and the ones listed. `regex.compile` returns `error.Syntax` for these and for a malformed pattern. Pass a `regex.Diag` to see why:
+```cy
+var diag regex.Diag = {}
+try:
+    re := regex.compile(`(\w+)\s+\1`, &diag)!
+    print(re.is_match('a a'))
+else |err|:
+    print('%{err} at %{diag.pos}: %{diag.msg}')
+--> error.Syntax at 8: Backreferences (`\1`) and octal escapes are not supported: matching never backtracks. Capture both parts and compare them in code. A character by number is `\x41` or `\x{1F600}`.
+```
+A counted repetition is expanded, so `\w{100}` is 100 steps of the program. A program over `regex.MaxInsts` (32768) instructions is `error.TooBig`, and groups, classes and repetitions nest at most `regex.MaxDepth` (250) deep. One search takes at most the size of the program times the length of the input. A compiled `Regex` does not change: compile once and use it for every search.
 
 ## Importing.
 The `use` statement can import modules. Builtin and std modules such as `math` can be imported without any configuration:

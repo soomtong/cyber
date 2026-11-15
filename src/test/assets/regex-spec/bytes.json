@@ -1,0 +1,6 @@
+[
+{"name":"bytes/case-one-ascii","regex":"(?i)a","hay":"41","matches":[[[0,1]]]},
+{"name":"bytes/case-one-unicode","regex":"(?i)a","hay":"41","matches":[[[0,1]]]},
+{"name":"bytes/case-class-simple-ascii","regex":"(?i)[a-z]+","hay":"4161416141","matches":[[[0,5]]]},
+{"name":"bytes/null-bytes","regex":"(?P<cstr>[^\\x00]+)\\x00","hay":"666f6f00","matches":[[[0,4],[0,3]]],"caps":true}
+]

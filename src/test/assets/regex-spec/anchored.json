@@ -1,0 +1,7 @@
+[
+{"name":"anchored/greedy","regex":"\\A(?:(abc)+)","hay":"616263616263616263","matches":[[[0,9],[6,9]]],"caps":true,"limit":1},
+{"name":"anchored/word-boundary-unicode-01","regex":"\\A(?:\\b\\w+\\b)","hay":"ceb2ceb2ceb2e29883","matches":[[[0,6]]],"limit":1},
+{"name":"anchored/no-match-at-start","regex":"\\A(?:.c)","hay":"616263","matches":[],"limit":1},
+{"name":"anchored/no-match-at-start-reverse-inner","regex":"\\A(?:.c[a-z])","hay":"6162637a","matches":[],"limit":1},
+{"name":"anchored/no-match-at-start-reverse-anchored","regex":"\\A(?:.c[a-z]$)","hay":"6162637a","matches":[],"limit":1}
+]

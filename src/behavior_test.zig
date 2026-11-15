@@ -363,6 +363,7 @@ if (!aot) {
     run.case("modules/test_eq_panic.cy");
     run.case("modules/test.cy");
     run.case("modules/json.cy");
+    run.case("modules/regex.cy");
     run.case("modules/toon.cy");
     if (!is_wasm) {
         // Both call libc through extern functions, which need FFI.
@@ -372,6 +373,7 @@ if (!aot) {
         if (test_config.ffi and builtin.target.abi != .msvc) {
             run.case("modules/os.cy");
             // Reads the fixtures with `os.read_file`.
+            run.case("modules/regex_spec.cy");
             run.case("modules/toon_spec.cy");
         }
     }

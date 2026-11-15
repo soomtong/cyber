@@ -1,0 +1,11 @@
+[
+{"name":"no-unicode/case1","regex":"(?i)a","hay":"41","matches":[[[0,1]]]},
+{"name":"no-unicode/case2","regex":"(?i)[a-z]+","hay":"4161416141","matches":[[[0,5]]]},
+{"name":"no-unicode/case3","regex":"(?i)[a-z]+","hay":"6141e284aa6141","matches":[[[0,7]]]},
+{"name":"no-unicode/negate1","regex":"[^a]","hay":"ceb4","matches":[[[0,2]]]},
+{"name":"no-unicode/null-bytes1","regex":"[^\\x00]+\\x00","hay":"666f6f00","matches":[[[0,4]]]},
+{"name":"no-unicode/word-unicode","regex":"\\w+","hay":"61ceb4","matches":[[[0,3]]]},
+{"name":"no-unicode/decimal-unicode","regex":"\\d+","hay":"31e0a5a8e0a5a939","matches":[[[0,8]]]},
+{"name":"no-unicode/space-unicode","regex":"\\s+","hay":"20e19a80","matches":[[[0,4]]]},
+{"name":"no-unicode/iter1-utf8","regex":"","hay":"e29883","matches":[[[0,0]],[[3,3]]]}
+]

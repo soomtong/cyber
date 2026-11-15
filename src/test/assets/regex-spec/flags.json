@@ -1,0 +1,13 @@
+[
+{"name":"flags/1","regex":"(?i)abc","hay":"414243","matches":[[[0,3]]]},
+{"name":"flags/2","regex":"(?i)a(?-i)bc","hay":"416263","matches":[[[0,3]]]},
+{"name":"flags/3","regex":"(?i)a(?-i)bc","hay":"414243","matches":[]},
+{"name":"flags/4","regex":"(?is)a.","hay":"410a","matches":[[[0,2]]]},
+{"name":"flags/5","regex":"(?is)a.(?-is)a.","hay":"410a6162","matches":[[[0,4]]]},
+{"name":"flags/6","regex":"(?is)a.(?-is)a.","hay":"410a610a","matches":[]},
+{"name":"flags/7","regex":"(?is)a.(?-is:a.)?","hay":"410a610a","matches":[[[0,2]]],"limit":1},
+{"name":"flags/8","regex":"(?U)a+","hay":"6161","matches":[[[0,1]]],"limit":1},
+{"name":"flags/9","regex":"(?U)a+?","hay":"6161","matches":[[[0,2]]]},
+{"name":"flags/10","regex":"(?U)(?-U)a+","hay":"6161","matches":[[[0,2]]]},
+{"name":"flags/11","regex":"(?m)(?:^\\d+$\\n?)+","hay":"3132330a3435360a373839","matches":[[[0,11]]]}
+]

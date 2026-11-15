@@ -3,7 +3,7 @@
 ## 지금 상태
 
 - 최신 릴리스 0.4.11(태그 `097b831f`, `build-883-097b831`, Latest). 노트 `docs/releases/0.4.11.md`.
-- 로컬 master는 `origin/master`(PR #7 병합 `d755dc53`)보다 한 커밋(`json.Value.number`) 앞서 있다. push는 사용자 지시 때.
+- 로컬 master는 `origin/master`(`58d0bbb2`)보다 두 커밋(`7a0c9015` F-147 · F-148 수정, 그다음 `regex` 모듈) 앞서 있다. push는 사용자 지시 때.
 - 0.4.11 뒤 변경(모두 `docs/releases/unreleased.md`에 있다):
   - `e25e7d76`: tars-agent CodeAct 회차의 오류 문구 여섯(`for ... in`, `q: byte = 0`, `var` 없는 타입 선언, `none` 비교,
     옵션 아닌 값의 `?else`, 연산자 타입 불일치).
@@ -13,6 +13,11 @@
     F-144(`?T` · `!T` 함수의 `return -x`), F-145(`!else`가 `NoCopy` 결과를 옮김), F-146(`meta.access(T, ...)`에 템플릿 인자).
   - 그다음 커밋: `json.Value.number`(원문 텍스트, 큰 수 무손실), `ParseOptions{exact}` · `toon.DecodeOptions{exact}`, `fmt_number`.
   - 설계 `docs/decisions/project_std_json_toon.md`, 사용자 문서 `docs/docs.md` "JSON and TOON.".
+  - `7a0c9015`: F-147(원소 256개 이상 리터럴) · F-148(private choice 복사) 수정.
+  - 그다음 커밋: 표준 모듈 `regex`(Pike VM, 선형 시간, ripgrep 문법의 부분집합, Unicode 18.0). 파서 · 컴파일러는 `src/std/regex.cy`,
+    매칭 루프와 Unicode 표는 `src/std/regex.zig` · `regex_unicode.zig`. `cl_mod_bind_regex`. Rust `regex` 테스트 데이터 820개 통과,
+    ripgrep 차분 퍼징 23,000건 차이 없음. 설계와 Rust · Zig · Nim · Python 비교는 `docs/decisions/project_std_regex.md`,
+    사용자 문서 `docs/docs.md` "Regular expressions.".
 - tars-agent는 cyber 0.4.11에 고정(`78df31d`). `730813e`에서 `e25e7d76`의 회신을 기록했고 0.4.12에서 확인한다.
   요청서 `/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.11-codeact-messages.md`.
 
@@ -43,6 +48,8 @@
 - 보간 안의 보간은 지원하지 않는다(토크나이저 상태가 한 단계). 원인을 말하는 오류만 낸다.
 - `?json.Value == none`은 컴파일 오류(core `@eq`가 choice 미지원). `?else` · `Value.eq`를 쓴다.
 - `json` 기본 파싱은 17자리 넘는 소수를 `float`으로 근사한다(`exact`면 원문). `json.to`는 struct 필드 기본값을 쓰지 않는다.
+- `regex`: look-around · backreference · `(?-u)` · `(?R)` · 일반 범주와 스크립트 밖의 `\p{..}` 속성(`Emoji` 등)은 받지 않는다(컴파일
+  오류). 반복자 없이 슬라이스를 돌려주고, 치환에 함수를 받지 않는다.
 - 하위 블록에서는 `move` · `meta.consume`을 못 쓴다(`else` 갈래의 consume은 뒤까지 죽은 상태로 남는다). 컴파일 타임
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
@@ -83,6 +90,10 @@
 - 끝나지 않는 테스트는 결함일 수 있다. 탐침은 백그라운드로 띄우고 몇 초 뒤 `pgrep`으로 판정한다(포그라운드 `sleep`은 막혀 있다).
 - 취소 탐침은 정상 경로의 `@deinit` 횟수와 비교한다(목록 리터럴은 임시 복사본을 만들고 버린다).
 - TOON fixture 갱신은 `src/test/assets/toon-spec/README.md`.
+- regex fixture 갱신은 `src/test/assets/regex-spec/README.md`(`convert.py`). Unicode 표는 UCD 파일을 받아
+  `cyber src/tools/gen_regex_unicode.cy <ucd 폴더> src/std/regex_unicode.zig`. `regex.cy`의 문법을 고치면 ripgrep 차분 퍼징을
+  다시 돌린다: `python3 src/tools/regex_fuzz_gen.py <seed> 5000 <out.json>` 뒤 `cyber src/tools/regex_fuzz_run.cy <out.json>`.
+- 실패한 `t.eq`를 한 번에 다 보려면 테스트 파일의 `t.eq(`를 줄 번호를 받는 지역 함수로 바꾼 사본을 돌린다(첫 실패에서 멈추지 않게).
 
 ## 구현 함정
 
@@ -107,7 +118,7 @@
 ## 참고 위치
 
 - 동시성 전체(제너레이터 · fiber · 단계 1 · 3 · 취소 · `scope` · `@deinit` 취소): `docs/decisions/project_coroutines.md`.
-- JSON · TOON: `project_std_json_toon.md`. 정렬 클로저: `project_sort_closures.md`.
+- JSON · TOON: `project_std_json_toon.md`. 정규식: `project_std_regex.md`. 정렬 클로저: `project_sort_closures.md`.
 - 임베딩 · tars-agent: `project_embedding_agent_loop.md` · `project_tars_agent_runtime_review.md`, C API `src/include/cyber.h`.
 - 컴파일러 한계: `project_compiler_limits.md`. 평가 순서: `project_eval_order.md`. 스택 포인터 보정: `project_stack_ptr_patch.md`.
 - 방향(네이티브 · LLVM · JIT는 범위 밖): `project_direction.md`.

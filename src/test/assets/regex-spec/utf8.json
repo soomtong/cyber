@@ -1,0 +1,5 @@
+[
+{"name":"utf8/empty-utf8yes","regex":"","hay":"e29883","matches":[[[0,0]],[[3,3]]]},
+{"name":"utf8/empty-utf8yes-anchored","regex":"\\A(?:)","hay":"f09d9b83","matches":[[[0,0]]],"limit":1},
+{"name":"utf8/empty-utf8yes-startbound","regex":"","hay":"f09d9b83","matches":[[[4,4]]],"start":1}
+]

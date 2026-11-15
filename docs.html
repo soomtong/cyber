@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.11-dev 907-83f8305</div>
+    <div class="sub-title">v0.4.11-dev 911-4b4e230</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -4583,6 +4583,7 @@ fn (&Box[]) dup() -> T:
 <li><a href="#builtin-modules" title="">Builtin modules.</a><ul>
 <li><a href="#json-and-toon" title="">JSON and TOON.</a></li>
 <li><a href="#regular-expressions" title="">Regular expressions.</a></li>
+<li><a href="#parsing-expression-grammars" title="">Parsing expression grammars.</a></li>
 </ul>
 </li>
 <li><a href="#importing" title="">Importing.</a><ul>
@@ -4726,6 +4727,63 @@ else |err|:
 --> error.Syntax at 8: Backreferences (`\1`) and octal escapes are not supported: matching never backtracks. Capture both parts and compare them in code. A character by number is `\x41` or `\x{1F600}`.
 </code></pre>
 <p>A counted repetition is expanded, so <code>\w{100}</code> is 100 steps of the program. A program over <code>regex.MaxInsts</code> (32768) instructions is <code>error.TooBig</code>, and groups, classes and repetitions nest at most <code>regex.MaxDepth</code> (250) deep. One search takes at most the size of the program times the length of the input. A compiled <code>Regex</code> does not change: compile once and use it for every search.</p>
+<a href="#modules">^topic</a>
+<h3 id="parsing-expression-grammars">Parsing expression grammars. <a href="#parsing-expression-grammars">#</a></h3>
+<p>The <code>peg</code> module matches text with a parsing expression grammar (PEG): patterns with rules that call each other. It is for input that a regular expression can not describe, such as nested brackets, and for a format with several parts that is easier to read as rules. The syntax is that of the <code>re</code> module of <a href="https://www.inf.puc-rio.br/~roberto/lpeg/re.html" title="">LPeg</a>:</p>
+<pre><code class="language-cy">use peg
+
+p := peg.compile("""
+    list <- '(' item (',' item)* ')'
+    item <- {:list: list :} / {:num: %d+ :}
+""")!
+c := p.parse('(1,(22,3),4)')!
+
+print(c.len())                  --> 3
+print(c[0])                     --> 1
+print(c['list'])                --> (22,3)
+for c.all('num') |n|:
+    print('%{n.start}..%{n.end} %{n.text}')
+--> 1..2 1
+--> 4..6 22
+--> 7..8 3
+--> 10..11 4
+</code></pre>
+<p>A grammar is a list of rules <code>name <- pattern</code>, and matching starts at the first rule. A pattern without rules is a grammar too. Two things differ from a regular expression. A choice <code>a / b</code> is ordered: when <code>a</code> matches, <code>b</code> is not tried, so <code>'a' / 'ab'</code> never matches <code>ab</code>. And a repetition takes all it can and gives nothing back: <code>'a'* 'a'</code> never matches. To stop a repetition before something, say so with <code>!</code>: <code>(!'"' .)*</code> takes characters up to a quote.</p>
+<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><code>'text'</code> <code>"text"</code></td><td>The text. The escapes are <code>\n \r \t \\ \' \" \[ \] \- \^ \xHH \u{H..}</code></td></tr><tr><td><code>[a-z_]</code> <code>[^"]</code></td><td>One character of the class, or one that is not in it. A class can hold <code>%d</code> and the like: <code>[_%w]</code></td></tr><tr><td><code>.</code></td><td>Any one character</td></tr><tr><td><code>%a %c %d %g %l %p %s %u %w %x</code></td><td>Letter, control, digit, printable but space, lower case, punctuation, white space, upper case, letter or digit, hex digit. ASCII only. The upper case form is the opposite: <code>%S</code></td></tr><tr><td><code>%nl</code></td><td>A line feed</td></tr><tr><td><code>name</code></td><td>The rule <code>name</code></td></tr><tr><td><code>( p )</code></td><td>A group</td></tr><tr><td><code>p?</code> <code>p*</code> <code>p+</code></td><td>Zero or one, zero or more, one or more</td></tr><tr><td><code>p^3</code> <code>p^+3</code> <code>p^-3</code></td><td>Exactly 3, at least 3, at most 3</td></tr><tr><td><code>&p</code> <code>!p</code></td><td>Succeeds when <code>p</code> matches, or does not match, here. Takes no input and keeps no captures</td></tr><tr><td><code>p1 p2</code></td><td><code>p1</code>, then <code>p2</code></td></tr><tr><td><code>p1 / p2</code></td><td><code>p1</code>, or else <code>p2</code></td></tr><tr><td><code>{ p }</code></td><td>A capture</td></tr><tr><td><code>{:name: p :}</code></td><td>A capture with a name</td></tr><tr><td><code>{}</code></td><td>An empty capture, for its position</td></tr><tr><td><code>=name</code></td><td>The same text that the last closed capture named <code>name</code> matched. A capture inside it with the same name is not seen, as in <code>re</code></td></tr><tr><td><code>p -> 'text'</code></td><td>A capture with the text <code>text</code>. In it, <code>%0</code> is what <code>p</code> matched, <code>%1</code> to <code>%9</code> are the captures in <code>p</code> and <code>%%</code> is a percent sign</td></tr><tr><td><code>{~ p ~}</code></td><td>A capture with the text that <code>p</code> matched, where each capture directly inside it is replaced by its text</td></tr><tr><td><code>-- ...</code> <code># ...</code></td><td>A comment to the end of the line</td></tr></tbody></table><p>A match is a <code>peg.Capture</code>: <code>start</code> and <code>end</code> (byte offsets), <code>text</code>, <code>name</code> and <code>kids</code>, the captures inside it. Captures nest as they are written in the grammar, so the result is a tree. <code>c[0]</code> is the text of the first capture directly inside <code>c</code>, and <code>c['name']</code> the text of the first capture with that name at any depth, <code>''</code> when there is none. <code>c.get('name')</code> returns a <code>?Capture</code>, <code>c.all('name')</code> every capture with that name in the order of the input, and <code>c.len()</code> the number of captures directly inside.</p>
+<p><code>parse(s)</code> matches all of <code>s</code>. <code>match(s)</code> matches at the start of <code>s</code> and does not have to reach the end, and <code>match(s, start)</code> matches at a byte offset. <code>find(s)</code> returns the first place where the grammar matches, <code>find_all(s)</code> every match from left to right, without overlaps. <code>replace</code>, <code>replace_all</code> and <code>split</code> work as in <code>regex</code>: in the replacement, <code>$0</code> is the match, <code>$1</code> its first capture and <code>$name</code> or <code>${name}</code> the first capture with that name.</p>
+<pre><code class="language-cy">kv := peg.compile(`{:key: [_%w]+ :} '=' {:val: %d+ :}`)!
+line := 'set retries=3 timeout=250'
+
+print(kv.match(line) == none)             --> true
+print(kv.find(line).?['key'])             --> retries
+for kv.find_all(line) |m|:
+    print('%{m['key']} is %{m['val']}')
+--> retries is 3
+--> timeout is 250
+print(kv.replace_all(line, '$val=$key'))  --> set 3=retries 250=timeout
+
+-- The quote that closes is the quote that opened.
+quoted := peg.compile(`{:q: ['"] :} { (!=q .)* } =q`)!
+print(quoted.match(`'it is "so"' he said`).?[1])   --> it is "so"
+
+-- A substitution capture rewrites what it matches.
+csv := peg.compile("""
+    row   <- {~ field (',' -> ';' field)* ~}
+    field <- '"' [^"]* '"' / [^,]*
+""")!
+print(csv.match('a,"b,c",d').?[0])        --> a;"b,c";d
+</code></pre>
+<p>When <code>parse</code> fails it returns <code>error.NoMatch</code>. Pass a <code>peg.Diag</code> to see the farthest place that the match reached and what the grammar could have matched there:</p>
+<pre><code class="language-cy">var diag peg.Diag = {}
+try:
+    _ = p.parse('(1,(22,),4)', &diag)!
+else |err|:
+    print('%{err} at %{diag.pos}: %{diag.msg}')
+--> error.NoMatch at 7: Expected `'('` or `%d` at line 1, column 8, found `)`.
+</code></pre>
+<p><code>diag.line</code> and <code>diag.col</code> start at 1, and <code>diag.expected</code> has the expected patterns as they are written in the grammar. <code>peg.compile(grammar, &diag)</code> fills the same <code>Diag</code> for a grammar that does not compile (<code>error.Syntax</code>). A grammar is checked when it is compiled: a rule that is not defined, a repetition of something that can match nothing (<code>('a'?)*</code>), and a rule that is left recursive, that is, calls itself before it takes any input (<code>expr <- expr '+' num</code>), are errors. Write a left recursive rule as a loop: <code>expr <- num ('+' num)*</code>.</p>
+<p>Matching is by Unicode code point: <code>.</code> and <code>[가-힣]</code> take a whole character, and offsets are in bytes. A byte of the input that is not UTF-8 is one character for <code>.</code> and for a negated class. The syntax is a subset of LPeg's <code>re</code> with the same meaning, with these differences: strings and classes have escapes, a named capture is a node of the result, <code>=name</code> matches the whole text of the capture, and what calls a Lua function (<code>p -> name</code>, <code>p => name</code>) or builds a table (<code>{| p |}</code>) is not supported. In a class, a <code>%</code> name goes on to the last letter, as in <code>re</code>: write <code>[_%w]</code>, not <code>[%w_]</code>.</p>
+<p>A grammar backtracks, so there is no bound on the time of a match as there is for <code>regex</code>: a grammar can take time that grows fast with the length of the input. A match keeps a stack of open rule calls and choices. When the stack is over <code>peg.MaxStack</code> (100000) entries, for input that nests very deep, <code>parse</code> returns <code>error.TooDeep</code>, and for a match with more than <code>peg.MaxCaptures</code> (1000000) captures it returns <code>error.TooBig</code>. The functions that return an option panic in these cases. A call at the end of the last choice of a rule takes no stack: <code>tail <- !. / . tail</code> runs over any length of input. A grammar over <code>peg.MaxInsts</code> (65536) instructions is <code>error.TooBig</code> (<code>p^100</code> takes 100 times the instructions of <code>p</code>), and patterns nest at most <code>peg.MaxDepth</code> (250) deep. A compiled <code>Peg</code> does not change: compile once and use it for every match.</p>
 <a href="#modules">^topic</a>
 <h2 id="importing">Importing. <a href="#importing">#</a></h2>
 <p>The <code>use</code> statement can import modules. Builtin and std modules such as <code>math</code> can be imported without any configuration:</p>

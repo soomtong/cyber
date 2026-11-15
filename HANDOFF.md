@@ -3,7 +3,7 @@
 ## 지금 상태
 
 - 최신 릴리스 0.4.11(태그 `097b831f`, `build-883-097b831`, Latest). 노트 `docs/releases/0.4.11.md`.
-- `origin/master`와 로컬 master가 같다(이 세션 끝에 push).
+- 로컬 master는 `origin/master`(PR #7 병합 `d755dc53`)보다 한 커밋(`json.Value.number`) 앞서 있다. push는 사용자 지시 때.
 - 0.4.11 뒤 변경(모두 `docs/releases/unreleased.md`에 있다):
   - `e25e7d76`: tars-agent CodeAct 회차의 오류 문구 여섯(`for ... in`, `q: byte = 0`, `var` 없는 타입 선언, `none` 비교,
     옵션 아닌 값의 `?else`, 연산자 타입 불일치).
@@ -25,6 +25,8 @@
    - 정렬: 안 A(일반 지역을 빌림 캡처하는 pinned closure, F-136으로 스택 이동 걸림돌은 풀림), 키 정렬(람다 반환 타입으로
      제네릭 추론, 이름), 인자 없는 `sort()`의 원소 조건. `project_sort_closures.md` "결정할 것".
    - core `@eq`의 choice 지원(`?json.Value == none`, `t.eq`로 choice 비교).
+   - 설계 원칙 검토(PR #7, `docs/study/11-design-principles-review.md`) 1.7 · 2.7의 결정 항목: 표준 오류 어휘, 순환 가능성 정적
+     판정, 제네릭 본문 정의 시점 검사, 구조적 병렬 루프, 마지막 사용 분석(빌림 NLL · `Slice` 값 의미 · 암시적 이동 · 분기 안 이동).
    - 0.5 범위. 사용자 목표는 "fiber 관련 동시성 동작을 모두 완성해 0.5".
 3. 기술 부채(급하지 않음):
    - carry 재시도 루프: 실패한 본문의 IR을 되돌리는 장치가 없어 사전 단계로 옮기지 못했다. 콜백 반복은 `cyber.h` · docs.md에 적음.
@@ -90,7 +92,8 @@
 - opcode 추가: `vm.h` enum과 `vm.c` `JENTRY` 표 같은 위치, `bytecode.zig`의 enum · 길이 · 덤프 · opcode 수 테스트.
 - 새 AST 노드: `ast.zig`의 enum · 타입 맵 · `src` · `pos` · `end` 다섯 곳 + 노드 수 테스트 + `cy.cy` 미러 + tree-sitter 코퍼스.
 - IR 지역 id는 선언 문장 순서와 같아야 한다(`Expected next IR local to be N, got M.`). 람다 인자는 `pushProc`이 먼저.
-- 템플릿 타입의 메서드는 쓰지 않아도 인스턴스마다 본문이 검사된다. 원소 타입에 따라 안 되는 메서드는 `#[cond=...]`로 막는다.
+- 템플릿 타입의 메서드는 쓰지 않아도 인스턴스마다 본문이 검사되는 경우가 있다(core 타입에서 겪음). 사용자 템플릿 타입의 쓰지 않는
+  메서드는 검사되지 않았다(2026-11-15 `Box[Array[int]]`로 확인). 원소 타입에 따라 안 되는 메서드는 `#[cond=...]`로 막는다.
   호출 자리마다 달라지는 검사는 core의 `meta.error`가 아니라 sema 호출 경로에 둔다.
 - 검사를 엄격히 하는 수정은 core.cy · std의 숨은 불일치를 드러낸다. 전체 테스트로 확인한다.
 - core.cy는 `zig-out/bin/src/`에서 읽힌다. 고친 뒤 `zig build cli`를 다시 한다.

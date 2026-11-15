@@ -1305,6 +1305,8 @@ fn matchPreArgCt(c: *cy.Chunk, arg: Argument, param: sema.FuncParam, req_value: 
         if (req_value) {
             const res = try cte.evalTarget(c, arg.node, param_t);
             if (param_t.id() != res.type.id()) {
+                // The value is not passed on, so it is released here.
+                c.heap.destructValue(res);
                 out_match.* = false;
                 return cy.TypeValue.init(param_t, undefined);
             }
@@ -1338,8 +1340,11 @@ fn matchArgCt(c: *cy.Chunk, arg: *ast.Node, param: sema.FuncParam, req_value: bo
     } else {
         ct_value = try cte.evalTarget(c, arg, param_t);
         if (ct_value.type != param_t) {
+            // Only the type is kept for the error message. The value is released here.
+            const arg_t = ct_value.type;
+            c.heap.destructValue(ct_value);
             out_match.* = false;
-            return cy.TypeValue.init(ct_value.type, undefined);
+            return cy.TypeValue.init(arg_t, undefined);
         }
     }
     out_match.* = true;

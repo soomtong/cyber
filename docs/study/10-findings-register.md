@@ -190,6 +190,7 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 | F-150 | `json.encode` · `json.from`이 `int` 범위 밖 `r64`(2^63 이상)를 음수로 썼고(`r64.ones` → `-1`), `json.to(r64, ...)`는 2^63 이상을 `error.Overflow`로 거부해 왕복이 깨졌다 | `std/json.cy` `from_ref` · `to_ref` | 0.4.11..HEAD 코드 리뷰(2026-11-15) | 중간 | 2026-11-15 수정. 2^63 이상은 `number` 텍스트로 쓰고 `to_big_r64`가 읽는다. `modules/json.cy` |
 | F-151 | `exact` 파싱에서 대문자 지수 `1E-99999999999999999999`를 `json.to(int, v)`하면 `error.Type` 대신 `error.Overflow`. `fmt_number`가 `int`에 맞지 않는 지수는 원문을 그대로 돌려주는데 `to_whole`이 소문자 `e`만 찾았다 | `std/json.cy` `to_whole` | 0.4.11..HEAD 코드 리뷰(2026-11-15) | 낮음 | 2026-11-15 수정. `E`도 찾는다. `modules/json.cy` |
 | F-152 | wasm32에서 `io`의 줄 읽기(`indexOfNewLine`)가 F-143과 같은 `panic: integer does not fit in destination type`. F-143은 두 호출 지점만 고쳤다 | `std/io.zig` `indexOfNewLine` | 0.4.11..HEAD 코드 리뷰(2026-11-15) | 중간 | 2026-11-15 수정. `PtrSpan.items`를 두고(`Span.items`와 같이 `@truncate`) `string.zig` · `io.zig`가 함께 쓴다 |
+| F-153 | 컴파일 타임 인자의 타입이 맞지 않으면(`type.size('s')`) 평가한 값(`EvalStr`)을 해제하지 않고 버렸다. behavior 테스트 끝에 `error(SafeAllocator): leaked`가 1건 남았다 | `sema_func.zig` `matchArgCt` · `matchPreArgCt` | leak 보고 추적(2026-11-15) | 낮음. 컴파일 오류인 경로에서만 | 2026-11-15 수정. 불일치면 타입만 남기고 값을 해제한다. behavior `meta/type_size_str_arg_error.cy` |
 
 ## 우선순위 한 장 요약
 

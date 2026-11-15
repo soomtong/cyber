@@ -86,6 +86,7 @@
   부호 없는 수(`number`)로 쓰고, `json.to(r64, v)`도 2^63 이상을 읽는다(F-150).
 - `ParseOptions{exact=true}`로 읽은 `1E-99999999999999999999`를 `json.to(int, v)`하면 `error.Type`이 아니라 `error.Overflow`였다.
   대문자 `E` 지수도 소문자와 같이 다룬다(F-151).
+- 컴파일 타임 인자의 타입이 맞지 않아 컴파일 오류가 날 때(`type.size('s')`) 그 인자 값이 해제되지 않았다(F-153).
 - wasm32에서 `io`의 줄 읽기가 F-143과 같은 이유로 `panic: integer does not fit in destination type`으로 멈출 수 있었다(F-152).
 
 ## 임베딩 API

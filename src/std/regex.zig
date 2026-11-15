@@ -23,7 +23,7 @@ pub fn bind(_: *C.VM, mod: *C.Sym) callconv(.c) C.Bytes {
 const zErrFunc = cy.core.zErrFunc;
 
 const funcs = [_]struct { []const u8, C.BindFunc }{
-    .{ "exec", zErrFunc(exec) },
+    .{ "exec_", zErrFunc(exec) },
     .{ "work_len", zErrFunc(workLen) },
     .{ "set_ascii", zErrFunc(setAscii) },
     .{ "uni_table", zErrFunc(uniTable) },
@@ -414,6 +414,11 @@ fn spanWords(span: cy.heap.Span) []i64 {
 /// How often the search looks at the interrupt request of the VM, in steps.
 const InterruptEvery = 1 << 14;
 
+/// The results of `exec`. An interrupt is not a failed search: the caller loops so that its checkpoint stops the VM.
+const RES_MATCH: i64 = 1;
+const RES_NONE: i64 = 0;
+const RES_INTERRUPT: i64 = -1;
+
 /// The words of `int` that `exec` takes as `work` for a program of `ninst` instructions and `nslots` slots.
 fn execWords(ninst: usize, nslots: usize) usize {
     return 2 * Threads.words(ninst, nslots) + nslots;
@@ -432,15 +437,16 @@ fn workLen(t: *cy.Thread) anyerror!C.Ret {
     return C.RetOk;
 }
 
-/// `fn exec(prog [&]int, hay str, start int, skip bool, slots [&]int, work [&]int) -> bool`
+/// `fn exec_(prog [&]int, hay str, start int, skip bool, slots [&]int, work [&]int) -> int`
 ///
 /// Finds the leftmost match that starts at or after `start`, or with `skip`, after the code point at `start`
 /// (the step of a repeated search past an empty match). `slots` gets the byte offsets of the first
 /// `slots.len() / 2` groups (-1 for a group that did not take part). With no slots, the search stops at the first
 /// match it sees. `work` is scratch memory of `work_len(prog, slots.len())` words, so that a repeated search does
 /// not allocate each time. A shorter `work`, such as an empty one, makes the search allocate its own.
+/// Returns `RES_MATCH`, `RES_NONE`, or `RES_INTERRUPT` when the host asked the VM to stop.
 fn exec(t: *cy.Thread) anyerror!C.Ret {
-    const ret = t.ret(bool);
+    const ret = t.ret(i64);
     const prog: []const i64 = spanWords(t.param(cy.heap.Span));
     const hay_str = t.param(cy.heap.Str);
     defer t.heap.destructStr(&hay_str);
@@ -450,7 +456,7 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
     const work_arg = spanWords(t.param(cy.heap.Span));
     const hay = hay_str.slice();
 
-    ret.* = false;
+    ret.* = RES_NONE;
     if (prog.len < H_LEN or prog[H_MAGIC] != Magic) return error.BadProgram;
     if (start_arg < 0 or start_arg > hay.len) return C.RetOk;
     var at: usize = alignStart(hay, @intCast(start_arg));
@@ -526,7 +532,7 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
             const hit = switch (@as(Op, @enumFromInt(in[0]))) {
                 .match => {
                     if (nslots == 0) {
-                        ret.* = true;
+                        ret.* = RES_MATCH;
                         return C.RetOk;
                     }
                     @memcpy(out, curr.row(pc));
@@ -551,12 +557,12 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
 
         steps += 1;
         if (steps % InterruptEvery == 0 and @atomicLoad(u8, t.c.interrupt, .acquire) != 0) {
-            // The host asked the VM to stop. The search ends without a match and the VM stops at its next check.
-            ret.* = false;
+            // The host asked the VM to stop. The search ends without a result and the caller loops to its checkpoint.
+            ret.* = RES_INTERRUPT;
             return C.RetOk;
         }
     }
-    ret.* = matched;
+    ret.* = if (matched) RES_MATCH else RES_NONE;
     return C.RetOk;
 }
 

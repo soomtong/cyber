@@ -120,7 +120,15 @@ const NGroup = 8     -- a: child, b: group number
     empty bool = false
 
 #[bind]
--fn exec(prog [&]int, hay str, start int, skip bool, slots [&]int, work [&]int) -> bool
+-fn exec_(prog [&]int, hay str, start int, skip bool, slots [&]int, work [&]int) -> int
+
+-- Whether the search finds a match. When the host asks the VM to stop, the search ends without a result, and the
+-- checkpoint of this loop stops the VM before it runs again: it is never taken for a failed search.
+-fn exec(prog [&]int, hay str, start int, skip bool, slots [&]int, work [&]int) -> bool:
+    while:
+        res := exec_(prog, hay, start, skip, slots, work)
+        if res >= 0:
+            return res == 1
 
 --| The length of the scratch buffer that `exec` uses for `nslots` slots. A repeated search makes it once.
 #[bind]

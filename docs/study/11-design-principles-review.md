@@ -1,9 +1,18 @@
-# Nimony 설계 원칙 검토: 사이버랭이 가져올 것과 두고 갈 것
+# 다른 언어의 설계 원칙 검토: 사이버랭이 가져올 것과 두고 갈 것
 
-2026-11-15 작성. 0.5를 앞두고 Nim 3.0(Nimony)의 설계 원칙을 사이버랭의 현재 설계와 맞대 본 검토다. 결정 문서가 아니다.
+다른 언어의 설계 원칙을 사이버랭의 현재 설계와 맞대 보는 검토를 모은다. 결정 문서가 아니다.
 채택할 항목은 각각 `docs/decisions/`에 결정을 먼저 적은 뒤 구현한다(`project_direction.md`).
 
-## 0. 출처와 범위
+언어마다 절 하나를 두고, 절 안은 같은 순서로 쓴다: 출처와 범위, 개요, 핵심 디자인과 사이버의 현재 위치, 가져올 만한 것,
+장단점, 영향과 현재 상황, 결정할 것. 다른 절을 가리킬 때는 절 번호를 쓴다(예: 1.4 A).
+
+| 절 | 언어 | 작성 | 계기 |
+| --- | --- | --- | --- |
+| 1 | Nim 3.0 (Nimony) | 2026-11-15 | 0.5를 앞두고 Araq의 설계 원칙 글 검토 |
+
+## 1. Nim 3.0 (Nimony)
+
+### 1.1 출처와 범위
 
 - 원문: Araq, "Nimony: Design principles", https://nim-lang.org/araq/nimony.html (2025-05-03, 2025-05-10 수정).
   "a new compiler for a variant of Nim which will become Nim 3.0, eventually"라고 스스로 소개한다.
@@ -12,7 +21,7 @@
 - 사이버 쪽 근거는 `docs/docs.md`, `docs/history/*`, `docs/decisions/*`, `src/std/os.cy`다.
   이번 검토에서는 빌드 도구가 없어 코드를 실행해 확인하지 못했다. 실행 확인이 필요한 주장은 그렇다고 적었다.
 
-## 1. 개요
+### 1.2 개요
 
 Nimony의 목표 문장은 하나다. "hard real-time and embedded systems with a (mostly) memory safe language."
 임베디드에서 잘 돌면 어디서든 잘 돈다는 논리이고, 여기서 WCET(최악 실행 시간) 예측 가능성이 나온다.
@@ -30,11 +39,11 @@ Nimony의 목표 문장은 하나다. "hard real-time and embedded systems with 
 | 메타프로그래밍 | 매크로 대신 플러그인. 기계어로 컴파일된 외부 프로그램이 타입 검사 뒤의 NIF를 읽고 씀 | 속도, 증분 · 병렬 컴파일 |
 | 표준 컨테이너 | `seq`는 순수 라이브러리, `string`의 컴파일러 마법 최소화 | 언어 핵심 축소 |
 
-## 2. 핵심 디자인과 사이버의 현재 위치
+### 1.3 핵심 디자인과 사이버의 현재 위치
 
 각 항목은 "Nimony / 사이버 지금 / 판정" 순서다.
 
-### 2.1 메모리: 단일 모드와 비순환 기본
+#### 1.3.1 메모리: 단일 모드와 비순환 기본
 
 - Nimony: "Nim 2's way of doing it is basically perfect and we simply reimplemented it." 바뀐 것은 둘이다.
   mm 스위치를 모두 걷어내고 `atomicArc` 하나만 남겼다. 순환 수거기는 "unclear if or when it will be ready"이고, 대신
@@ -45,9 +54,9 @@ Nimony의 목표 문장은 하나다. "hard real-time and embedded systems with 
   못박았다. 두 언어 모두 tracing GC를 버리고 결정적 소멸을 택했다.
 - 다른 점 하나: Nimony는 `atomicArc`로 통일했고 사이버의 `^T`는 원자적이지 않다. 사이버는 `^T`가 `Sendable`이 아니라서
   스레드 사이로 넘어가지 않으므로 원자 연산이 필요 없다. 스레드 경계를 타입으로 막았기 때문에 얻은 이득이고, 유지할 이유가 된다.
-- 가져올 것: 비순환을 정적으로 판정하는 것(3장 B).
+- 가져올 것: 비순환을 정적으로 판정하는 것(1.4 B).
 
-### 2.2 오류: 예외 + `.raises`, 그리고 `ErrorCode`
+#### 1.3.2 오류: 예외 + `.raises`, 그리고 `ErrorCode`
 
 - Nimony: Araq는 "I personally dislike both exceptions and its emulation via sum types."라고 쓴다. 합 타입 쪽에 대한 불만은
   조기 반환과 `?`가 식 전체에 번지는 것이다. 그가 든 가상 예는 `?fib(n -? 1) +? ?fib(n -? 2)`다.
@@ -59,7 +68,7 @@ Nimony의 목표 문장은 하나다. "hard real-time and embedded systems with 
   블록이다(`project_try_block.md`). `error`는 이름만 담는 값이고 payload · error set 타입은 Planned다.
 - 판정: 전파 모델은 사이버가 낫다. `{.raises.}`는 "이 함수는 실패할 수 있다"만 알려 주고 호출 지점은 여전히 숨은 제어 흐름이다.
   사이버의 `!`는 전파 지점 하나하나를 보이게 한다. Araq가 싫어한 `?` 소음은 사이버에서 `try` 블록이 줄인다.
-- 그러나 `ErrorCode`는 사이버에 없는 것이고, 지금 실제로 필요한 것이다(3장 A).
+- 그러나 `ErrorCode`는 사이버에 없는 것이고, 지금 실제로 필요한 것이다(1.4 A).
 
 ~~~cy
 -- Araq가 싫어한 모양. 사이버로 쓰면 이렇다.
@@ -75,7 +84,7 @@ else |err|:
     print('Failed with %{err}.')
 ~~~
 
-### 2.3 OOM과 nil
+#### 1.3.3 OOM과 nil
 
 - Nimony: 할당 실패는 교체 가능한 `oomHandler`가 받는다. 기본 핸들러는 "remembers the size of the failing request and then
   execution continues"이고 `threadOutOfMem()`으로 묻는다. `.raises` 루틴 안에서는 nil 대신 `OutOfMemError`가 나서 `ref T`가
@@ -84,9 +93,9 @@ else |err|:
   지점에서 검사하고, 넘으면 `panic: OutOfMemory`, eval은 `CL_ERROR_PANIC`을 돌려주며 VM은 다시 쓸 수 있다.
 - 판정: nil은 사이버가 이미 앞섰다. OOM에서 "기억하고 계속 실행"은 사이버의 용도와 맞지 않는다. 임베딩 호스트(tars-agent)에게는
   깨끗한 panic과 VM 재사용이 더 예측 가능하다. 할당 지점 수백 곳을 실패 가능하게 만드는 비용도 퍼즈로 이미 확인했다.
-  다만 "`!T` 함수 안에서는 OOM을 `error.OutOfMemory` 값으로 돌려준다"는 발상은 3장 A가 정착한 뒤의 장기 후보로 남긴다.
+  다만 "`!T` 함수 안에서는 OOM을 `error.OutOfMemory` 값으로 돌려준다"는 발상은 1.4 A가 정착한 뒤의 장기 후보로 남긴다.
 
-### 2.4 제네릭: 본문 자체의 타입 검사
+#### 1.3.4 제네릭: 본문 자체의 타입 검사
 
 - Nimony: "performing complete type checking on generic code, not merely on generic instantiations." 본문에 쓰는 연산은
   concept으로 선언해야 하고, 제약 없는 `proc fib[T](a: T)`는 거절된다.
@@ -109,9 +118,9 @@ proc fib[T: Fibable](a: T): T =
   원소 타입에 따라 안 되는 메서드는 `#[cond=type.is_copyable(T)]`처럼 조건으로 막는다. trait는 이미 "generic type"으로 제약에 쓰인다.
 - Nimony가 타협한 지점을 사이버는 언어 규칙으로 풀었다. `move`는 복사 가능 여부와 독립이라, 제네릭 코드가 복사 가능 타입과
   `NoCopy` 타입을 같은 문장으로 다룬다(`Array.append`의 `move val`). 본문 검사 시점에 복사 · 이동을 정할 필요가 없다.
-- 판정: 가져올 가치가 가장 큰 항목이다. 그러나 가장 비싸다(3장 C).
+- 판정: 가져올 가치가 가장 큰 항목이다. 그러나 가장 비싸다(1.4 C).
 
-### 2.5 동시성: `spawn` 하나와 구조적 병렬
+#### 1.3.5 동시성: `spawn` 하나와 구조적 병렬
 
 - Nimony: `spawn` 하나로 async와 스레드를 다룬다. 스레드 안전 규칙은 둘 다에 똑같이 적용한다. 구현은 CPS 변환이다.
   병렬은 `||` 반복자의 for로 쓴다. 유도 변수가 서로 다른 위치를 보장하고, 루프가 끝나면 모든 병렬이 끝나며, 마지막 반복은
@@ -129,9 +138,9 @@ for i in 0 || 1:
 - 판정: 통합 `spawn`은 가져오지 않는다. Nimony는 async에도 스레드 규칙을 씌워 단순하게 만들었고, 그 대가로 async에서 빌림을 잃는다.
   사이버는 fiber에서 빌림을 허용하고, 스택이 옮겨질 때 빌림을 보정하는 장치까지 이미 만들었다(`project_stack_ptr_patch.md`).
   이것이 사이버 동시성의 표현력이고 0.5의 목표("fiber 관련 동시성 동작을 모두 완성")와도 이어진다.
-  구조적 병렬 for는 따로 볼 만하다(3장 D).
+  구조적 병렬 for는 따로 볼 만하다(1.4 D).
 
-### 2.6 메타프로그래밍: 플러그인과 NIF
+#### 1.3.6 메타프로그래밍: 플러그인과 NIF
 
 - Nimony: 매크로를 플러그인으로 대체한다. 플러그인은 기계어로 컴파일되고, 보통 타입 검사 뒤에 돌며, 증분 · 병렬로 돈다.
   템플릿 · 반복자 · 타입 · 모듈 전체에 붙는다. 타입에 붙인 플러그인(`Matrix {.plugin: "avoidtemps".}`)은 `a*b + c - d`를 제자리
@@ -142,17 +151,17 @@ for i in 0 || 1:
   스크립트를 바로 돌리는 CLI이자 임베딩 라이브러리라(`project_direction.md`) 외부 프로세스와 직렬화 IR을 끼울 이유가 없다.
   "타입 검사 뒤에, 타입 정보를 가진 채로 돈다"는 원칙은 사이버 comptime이 이미 따른다.
 
-### 2.7 단일 모드와 라이브러리 컨테이너
+#### 1.3.7 단일 모드와 라이브러리 컨테이너
 
 - Nimony는 mm 스위치를 없앴다. 사이버에서 의미를 바꾸는 스위치는 `single_run`(종료 시 `@deinit` 없이 힙 스윕) 하나다.
   문서에 계약으로 적어 두었으니 됐지만, 같은 종류의 스위치를 더 늘리지 않는다는 기준으로 삼을 만하다.
 - `seq`를 라이브러리로 내린 것은 사이버의 `Array` · `Map` · `Slice`가 `core.cy`에 있는 것과 같은 방향이다.
 
-## 3. 가져올 만한 것
+### 1.4 가져올 만한 것
 
 우선순위는 0.5까지 남은 일(fiber 동시성 완성)을 밀어내지 않는 순서로 매겼다.
 
-### A. 표준 오류 어휘 (Nimony `ErrorCode`) — 0.5 전후, 작음
+#### A. 표준 오류 어휘 (Nimony `ErrorCode`) — 0.5 전후, 작음
 
 문제는 지금 코드에 있다. `src/std/os.cy`의 `fromErrno`는 errno 여섯 개만 이름을 붙이고, 나머지는 stderr에 찍은 뒤
 `error.Unknown`을 돌려준다. Windows에서는 panic한다.
@@ -210,7 +219,7 @@ data := os.read_file(path) !else |err|:
 장점: 작다. 언어 규칙을 바꾸지 않는다. 에이전트용 오류 문구 작업(0.4.11 CodeAct 회차)의 연장선이다.
 단점: 이름 변경은 호환성 문제이고, Windows 매핑은 실제 Windows 실행 확인이 필요하다.
 
-### B. 순환 가능성의 정적 판정 (Nimony `.acyclic` 기본) — 0.5 이후, 중간
+#### B. 순환 가능성의 정적 판정 (Nimony `.acyclic` 기본) — 0.5 이후, 중간
 
 사이버는 순환을 오류로 보고 스레드 끝에 런타임에서 찾는다. 그런데 순환이 생길 수 있는 타입은 타입 그래프에서 정해진다.
 어떤 타입 `T`의 필드를 따라가다 `^U` 경로로 `T` 자신에게 돌아올 수 없으면, `T` 객체는 순환에 낄 수 없다.
@@ -227,7 +236,7 @@ data := os.read_file(path) !else |err|:
 장점: 규칙이 바뀌지 않는다. 오류를 더 일찍 알려 준다.
 단점: 탐지 비용이 실제로 문제인지 재 본 적이 없다. 측정 전에는 3번(진단)만 가치가 확실하다.
 
-### C. 제네릭 본문의 정의 시점 검사 (Nimony 핵심 변경) — 0.5 이후, 큼
+#### C. 제네릭 본문의 정의 시점 검사 (Nimony 핵심 변경) — 0.5 이후, 큼
 
 지금 사이버에서 템플릿 본문의 오류는 특수화될 때, 구체 타입이 들어간 상태로 나온다. 그래서 오류가 정의가 아니라 사용
 쪽 이야기처럼 읽히고, 2026-11-12 LSP 설계(`docs/specs/2026-11-12-lsp-design.md`)에서 제네릭 본문 안의 보완 · hover는
@@ -255,7 +264,7 @@ fn describe(s Shape) -> str:
 필요한 것: 연산자를 trait로 표현하는 방법(지금 연산자는 메서드라 trait 메서드로 적을 수는 있다), `#[cond]` 메서드가 정의 시점
 검사와 어떻게 만나는지의 규칙. 큰 작업이고 sema 구조를 건드리므로 0.5 뒤에 결정 문서부터 쓴다.
 
-### D. 구조적 병렬 루프 (Nimony `||`) — 0.5 이후, 중간
+#### D. 구조적 병렬 루프 (Nimony `||`) — 0.5 이후, 중간
 
 사이버의 `scope` 블록은 fiber에 대해 이미 "블록이 끝나면 모두 끝난다"를 보장하고, 그 덕에 지역 값을 빌려 준다. Nimony의 병렬
 for는 같은 보장을 스레드에 준다. 사이버로 옮기면 "스레드용 scope"가 되는데, 걸림돌은 `Sendable`이 `&T`를 막는다는 점이다.
@@ -264,7 +273,7 @@ for는 같은 보장을 스레드에 준다. 사이버로 옮기면 "스레드�
 문법을 새로 만들기보다 표준 라이브러리 함수(`par.chunks(&&xs, n, fn)` 같은 모양)로 먼저 시도하고, 블록이 끝날 때 모든 스레드를
 기다린다는 계약을 `scope`와 같게 한다. fiber 완성(0.5) 뒤가 맞다.
 
-## 4. Pros vs Cons: Nimony 접근 자체
+### 1.5 Pros vs Cons: Nimony 접근 자체
 
 장점
 
@@ -281,7 +290,7 @@ for는 같은 보장을 스레드에 준다. 사이버로 옮기면 "스레드�
 - 플러그인 API가 없고 컴파일러 내부를 import해야 한다. 생태계가 기댈 표면이 아직 없다.
 - 통합 `spawn`은 async에서 빌림을 잃는다.
 
-## 5. 영향과 현재 상황
+### 1.6 영향과 현재 상황
 
 - Nimony의 메모리 모델은 새것이 아니라 Nim 2의 ARC/ORC를 다듬은 것이다. 그 계보는 C++ RAII와 move, Rust의 소유권, Swift의
   ARC다. 사이버 0.4의 구조(값 소유권 + 빌림 + `^T` ARC)도 같은 계보에 있고(`docs/history/ownership_memory.md`), 두 언어가 같은
@@ -293,7 +302,7 @@ for는 같은 보장을 스레드에 준다. 사이버로 옮기면 "스레드�
 - 현재 상황: 원문 기준 출시 목표는 2025년 가을이었다. 이 검토에서는 그 뒤의 진행을 확인하지 않았다. 채택 결정을 할 때 A · C는
   nim-lang/nimony 저장소의 지금 구현(특히 `ErrorCode` 목록과 매핑, concept 검사 규칙)을 한 번 더 읽는 것이 좋다.
 
-## 6. 결정할 것
+### 1.7 결정할 것
 
 1. A(표준 오류 어휘)를 0.4.12 또는 0.5에 넣을지. 넣는다면 옛 이름을 언어 별칭으로 둘지, 호환성 절로만 처리할지.
 2. B는 3번(LSP 진단)만 먼저 할지, 측정을 먼저 할지.

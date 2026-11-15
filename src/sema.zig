@@ -10571,9 +10571,10 @@ pub fn semaMetaAccess(c: *cy.Chunk, left_n: *ast.Node, right_name: []const u8, r
 }
 
 fn semaAccessExpr3(c: *cy.Chunk, left_n: *ast.Node, right_name: []const u8, right_n: *ast.Node, prefer_ct_sym: bool, target_t: ?*cy.Type, check_visible: bool) !ExprResult {
-    if (left_n.type() == .ident) {
+    if (!check_visible and left_n.type() == .ident) {
         // A type parameter such as `%T type` is a compile-time `type` value: `meta.access(T, name)`
-        // looks up `name` in the type like `T.name` does.
+        // looks up `name` in the type like `T.name` does. Only `meta.access` checks this, so that
+        // `rec.name` looks up `rec` once.
         const ident = try lookupIdent(c, left_n.cast(.ident).name.slice(), left_n);
         if (ident == .ct_value) {
             const ct_value = ident.ct_value;

@@ -120,7 +120,11 @@ const NGroup = 8     -- a: child, b: group number
     empty bool = false
 
 #[bind]
--fn exec(prog [&]int, hay str, start int, skip bool, slots [&]int) -> bool
+-fn exec(prog [&]int, hay str, start int, skip bool, slots [&]int, work [&]int) -> bool
+
+--| The length of the scratch buffer that `exec` uses for `nslots` slots. A repeated search makes it once.
+#[bind]
+-fn work_len(prog [&]int, nslots int) -> int
 
 #[bind]
 -fn set_ascii(sets [&]int, off int, half int) -> int
@@ -193,7 +197,8 @@ fn (&Regex) capture_names() -> []str:
 --| Returns whether the pattern matches anywhere in `s`.
 fn (&Regex) is_match(s str) -> bool:
     var slots []int = {}
-    return exec(self.prog.span(), s, 0, false, slots.span())
+    var work []int = {}
+    return exec(self.prog.span(), s, 0, false, slots.span(), work.span())
 
 --| Returns the leftmost match in `s`.
 fn (&Regex) find(s str) -> ?Match:
@@ -202,7 +207,8 @@ fn (&Regex) find(s str) -> ?Match:
 --| Returns the leftmost match that starts at byte `start` or later. `^`, `\b` and the like still see all of `s`.
 fn (&Regex) find(s str, start int) -> ?Match:
     slots := []int(2, -1)
-    if !exec(self.prog.span(), s, start, false, slots.span()):
+    var work []int = {}
+    if !exec(self.prog.span(), s, start, false, slots.span(), work.span()):
         return none
     return Match{start=slots[0], end=slots[1], text=s[slots[0]..slots[1]]}
 
@@ -211,10 +217,11 @@ fn (&Regex) find(s str, start int) -> ?Match:
 fn (&Regex) find_all(s str) -> []Match:
     var res []Match = {}
     slots := []int(2, -1)
+    work := []int(work_len(self.prog.span(), 2), 0)
     at := 0
     last_end := -1
     skip := false
-    while exec(self.prog.span(), s, at, skip, slots.span()):
+    while exec(self.prog.span(), s, at, skip, slots.span(), work.span()):
         skip = false
         if slots[0] == slots[1] and slots[1] == last_end:
             -- Search again past the next code point.
@@ -232,19 +239,21 @@ fn (&Regex) captures(s str) -> ?Captures:
 --| Returns the groups of the leftmost match that starts at byte `start` or later.
 fn (&Regex) captures(s str, start int) -> ?Captures:
     slots := []int(self.names.len() * 2, -1)
-    if !exec(self.prog.span(), s, start, false, slots.span()):
+    var work []int = {}
+    if !exec(self.prog.span(), s, start, false, slots.span(), work.span()):
         return none
     return Captures{hay=s, slots=slots, names=self.names}
 
 --| Returns the groups of every match in `s`, see `find_all`.
 fn (&Regex) captures_all(s str) -> []Captures:
     var res []Captures = {}
+    work := []int(work_len(self.prog.span(), self.names.len() * 2), 0)
     at := 0
     last_end := -1
     skip := false
     while:
         slots := []int(self.names.len() * 2, -1)
-        if !exec(self.prog.span(), s, at, skip, slots.span()):
+        if !exec(self.prog.span(), s, at, skip, slots.span(), work.span()):
             break
         skip = false
         if slots[0] == slots[1] and slots[1] == last_end:
@@ -267,27 +276,34 @@ fn (&Regex) replace_all(s str, repl str) -> str:
     return self.replace_n(s, repl, 0)
 
 -fn (&Regex) replace_n(s str, repl str, limit int) -> str:
-    res := ''
-    last := 0
     if repl.index('$') == none:
         if limit == 1:
             if self.find(s) |m|:
                 return s[0..m.start] + repl + s[m.end..]
             return s
+        -- One buffer for the result, so that the copying stays linear in the number of matches.
+        var buf []byte = {}
+        last := 0
         for self.find_all(s) |m|:
-            res += s[last..m.start] + repl
+            buf = buf.append(s[last..m.start].span())
+            buf = buf.append(repl.span())
             last = m.end
-        return res + s[last..]
+        buf = buf.append(s[last..].span())
+        return str(buf)
     if limit == 1:
         if self.captures(s) |c|:
             m := c.get(0).?
             return s[0..m.start] + c.expand(repl) + s[m.end..]
         return s
+    var buf []byte = {}
+    last := 0
     for self.captures_all(s) |c|:
         m := c.get(0).?
-        res += s[last..m.start] + c.expand(repl)
+        buf = buf.append(s[last..m.start].span())
+        buf = buf.append(c.expand(repl).span())
         last = m.end
-    return res + s[last..]
+    buf = buf.append(s[last..].span())
+    return str(buf)
 
 --| Returns the pieces of `s` between the matches. Groups are not part of the result.
 fn (&Regex) split(s str) -> []str:

@@ -56,6 +56,8 @@
   - 받지 않는 것은 컴파일 오류(`error.Syntax`)이고 `regex.Diag{msg, pos}`가 대신 쓸 것을 말한다: look-around, backreference,
     `\Z`, `(?-u)` · `(?R)`, 그 밖의 `\p{..}` 속성. 프로그램이 32768 명령을 넘으면 `error.TooBig`, 중첩은 250단계까지.
   - ripgrep CLI와 다른 점: 줄 단위가 아니라 문자열 전체를 본다. `$`는 `(?m)`이 있어야 줄 끝이고 `\s` · `[^a]`가 줄바꿈에도 맞는다.
+  - `find_all` · `captures_all` · `replace_all` · `split`은 검색 버퍼를 한 번만 만들고, `replace_all`은 결과를 한 버퍼에 쌓아
+    매치 수에 선형이다(`'ab1 '` 10만 번에 `[a-z]+\d` 치환 1.3초 → 0.3초).
 
 ## 버그 수정
 

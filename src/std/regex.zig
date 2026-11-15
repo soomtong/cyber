@@ -24,6 +24,7 @@ const zErrFunc = cy.core.zErrFunc;
 
 const funcs = [_]struct { []const u8, C.BindFunc }{
     .{ "exec", zErrFunc(exec) },
+    .{ "work_len", zErrFunc(workLen) },
     .{ "set_ascii", zErrFunc(setAscii) },
     .{ "uni_table", zErrFunc(uniTable) },
     .{ "unicode_version", zErrFunc(uniVersion) },
@@ -266,20 +267,23 @@ const Threads = struct {
     slots: []i64,
     nslots: usize,
 
-    fn init(alloc: std.mem.Allocator, ninst: usize, nslots: usize) !Threads {
-        const dense = try alloc.alloc(u32, ninst);
-        errdefer alloc.free(dense);
-        const sparse = try alloc.alloc(u32, ninst);
-        errdefer alloc.free(sparse);
-        @memset(sparse, 0);
-        const slots = try alloc.alloc(i64, ninst * nslots);
-        return .{ .dense = dense, .sparse = sparse, .len = 0, .slots = slots, .nslots = nslots };
+    /// The words of `int` that one list takes: `dense` and `sparse` as `u32` pairs, then the slots.
+    fn words(ninst: usize, nslots: usize) usize {
+        return 2 * ((ninst + 1) / 2) + ninst * nslots;
     }
 
-    fn deinit(self: *Threads, alloc: std.mem.Allocator) void {
-        alloc.free(self.dense);
-        alloc.free(self.sparse);
-        alloc.free(self.slots);
+    /// A list in `buf`, which has `words(ninst, nslots)` words. `sparse` is not cleared: `contains` checks each entry
+    /// against `dense`, so any value in it is safe.
+    fn fromWords(buf: []i64, ninst: usize, nslots: usize) Threads {
+        const half = (ninst + 1) / 2;
+        const ids: [*]u32 = @ptrCast(buf.ptr);
+        return .{
+            .dense = ids[0..ninst],
+            .sparse = ids[2 * half ..][0..ninst],
+            .len = 0,
+            .slots = buf[2 * half ..][0 .. ninst * nslots],
+            .nslots = nslots,
+        };
     }
 
     inline fn contains(self: *const Threads, pc: u32) bool {
@@ -410,12 +414,31 @@ fn spanWords(span: cy.heap.Span) []i64 {
 /// How often the search looks at the interrupt request of the VM, in steps.
 const InterruptEvery = 1 << 14;
 
-/// `fn exec(prog [&]int, hay str, start int, skip bool, slots [&]int) -> bool`
+/// The words of `int` that `exec` takes as `work` for a program of `ninst` instructions and `nslots` slots.
+fn execWords(ninst: usize, nslots: usize) usize {
+    return 2 * Threads.words(ninst, nslots) + nslots;
+}
+
+/// `fn work_len(prog [&]int, nslots int) -> int`
+///
+/// Returns the length of the `work` buffer that `exec` uses for `prog` with `nslots` slots.
+fn workLen(t: *cy.Thread) anyerror!C.Ret {
+    const ret = t.ret(i64);
+    const prog: []const i64 = spanWords(t.param(cy.heap.Span));
+    const nslots = t.param(i64);
+    if (prog.len < H_LEN or prog[H_MAGIC] != Magic or prog[H_NINST] <= 0) return error.BadProgram;
+    if (nslots < 0 or nslots > prog[H_NSLOTS]) return error.BadProgram;
+    ret.* = @intCast(execWords(@intCast(prog[H_NINST]), @intCast(nslots)));
+    return C.RetOk;
+}
+
+/// `fn exec(prog [&]int, hay str, start int, skip bool, slots [&]int, work [&]int) -> bool`
 ///
 /// Finds the leftmost match that starts at or after `start`, or with `skip`, after the code point at `start`
 /// (the step of a repeated search past an empty match). `slots` gets the byte offsets of the first
 /// `slots.len() / 2` groups (-1 for a group that did not take part). With no slots, the search stops at the first
-/// match it sees.
+/// match it sees. `work` is scratch memory of `work_len(prog, slots.len())` words, so that a repeated search does
+/// not allocate each time. A shorter `work`, such as an empty one, makes the search allocate its own.
 fn exec(t: *cy.Thread) anyerror!C.Ret {
     const ret = t.ret(bool);
     const prog: []const i64 = spanWords(t.param(cy.heap.Span));
@@ -424,6 +447,7 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
     const start_arg = t.param(i64);
     const skip = t.param(bool);
     const out = spanWords(t.param(cy.heap.Span));
+    const work_arg = spanWords(t.param(cy.heap.Span));
     const hay = hay_str.slice();
 
     ret.* = false;
@@ -456,12 +480,19 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
     }
 
     const alloc = t.alloc;
-    var curr = try Threads.init(alloc, ninst, nslots);
-    defer curr.deinit(alloc);
-    var next = try Threads.init(alloc, ninst, nslots);
-    defer next.deinit(alloc);
-    const scratch = try alloc.alloc(i64, nslots);
-    defer alloc.free(scratch);
+    const nwork = execWords(ninst, nslots);
+    var owned: []i64 = &.{};
+    defer alloc.free(owned);
+    const work: []i64 = if (work_arg.len >= nwork) work_arg[0..nwork] else blk: {
+        owned = try alloc.alloc(i64, nwork);
+        // Defined values for `sparse`. Any values are safe, see `Threads.fromWords`.
+        @memset(owned, 0);
+        break :blk owned;
+    };
+    const tw = Threads.words(ninst, nslots);
+    var curr = Threads.fromWords(work[0..tw], ninst, nslots);
+    var next = Threads.fromWords(work[tw..][0..tw], ninst, nslots);
+    const scratch = work[2 * tw ..][0..nslots];
     var vm = Vm{ .insts = insts, .prog = prog, .hay = hay, .stack = .empty, .alloc = alloc };
     defer vm.stack.deinit(alloc);
 

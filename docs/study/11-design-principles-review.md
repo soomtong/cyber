@@ -20,7 +20,8 @@
 - 원문은 사양이 아니라 원칙 글이다. 출시 목표는 2025년 가을이었고, 이 검토는 그 글 한 편만 읽었다.
   nim-lang/nimony 저장소의 지금 상태나 그 뒤의 글은 확인하지 않았다. 아래 "Nimony"는 이 글의 Nimony다.
 - 사이버 쪽 근거는 `docs/docs.md`, `docs/history/*`, `docs/decisions/*`, `src/std/os.cy`다.
-  이번 검토에서는 빌드 도구가 없어 코드를 실행해 확인하지 못했다. 실행 확인이 필요한 주장은 그렇다고 적었다.
+  처음 쓸 때는 빌드 도구가 없어 코드를 실행하지 못했다. 같은 날 로컬 Debug CLI(master `ab63ffd4`)로 사이버 쪽 주장과 예제를
+  다시 확인했고, 확인한 결과를 해당 자리에 적었다. Nimony 원문의 인용은 다시 확인하지 않았다.
 
 ### 1.2 개요
 
@@ -115,7 +116,9 @@ proc fib[T: Fibable](a: T): T =
 - Nimony가 인정한 타협: 제네릭 값의 대입(`let x = y`)은 허용한다. move 분석이 더 뒤에 돌기 때문에, 복사인지 이동인지를 본문
   검사 시점에 알 수 없어서다.
 - 사이버 지금: 템플릿(`type C[T Any]`, `fn add[T Any]`)과 제네릭 함수(`%T`, trait 매개변수)는 특수화될 때 구체 타입으로 본문을
-  검사한다(문서와 HANDOFF "템플릿 타입의 메서드는 쓰지 않아도 인스턴스마다 본문이 검사된다" 기준, 이번에 실행 확인은 못 함).
+  검사한다. 실행 확인: trait 매개변수 함수 `fn describe2(s Shape)`의 본문에 없는 메서드(`s.perimeter()`)를 써도 부르기 전에는
+  통과하고, `describe2(Circle{r=1})`를 부르면 ``Can not find the symbol `perimeter` in `Circle`.``가 본문 위치에 난다. 호출 위치는
+  나오지 않는다. 사용자 템플릿 타입의 쓰지 않는 메서드(`Box[Array[int]]`의 복사하는 메서드)도 오류 없이 통과했다.
   원소 타입에 따라 안 되는 메서드는 `#[cond=type.is_copyable(T)]`처럼 조건으로 막는다. trait는 이미 "generic type"으로 제약에 쓰인다.
 - Nimony가 타협한 지점을 사이버는 언어 규칙으로 풀었다. `move`는 복사 가능 여부와 독립이라, 제네릭 코드가 복사 가능 타입과
   `NoCopy` 타입을 같은 문장으로 다룬다(`Array.append`의 `move val`). 본문 검사 시점에 복사 · 이동을 정할 필요가 없다.
@@ -185,8 +188,9 @@ fn fromErrno() -> error:
 ~~~
 
 std 전체를 훑으면 이름도 겹친다. 거부를 뜻하는 것만 `AccessDenied` · `OperationDenied` · `NotAllowed` 셋이고, 모름은
-`Unknown` · `UnknownError` · `Unexpected` 셋이다(`src/std` · `src/builtins`의 `error.X`, Zig 쪽 오류 포함이라 스크립트에 모두
-보이는지는 따로 확인해야 한다).
+`Unknown` · `UnknownError` · `Unexpected` 셋이다. 앞의 넷과 `Unknown`은 `.cy`(`os.cy` · `os.windows.cy`)에 있고,
+`UnknownError`(`os.zig`) · `Unexpected`(`os_ffi.zig` · `builtins/core.zig`)는 Zig 쪽이라 스크립트에 그대로 보이는지는 따로
+확인해야 한다. Windows 경로는 `fromErrno` 대신 `os.windows.cy`가 자체 매핑(`AccessDenied` · `Unknown`)을 쓴다.
 
 에이전트 루프(tars-agent)에서는 이것이 곧 품질 문제다. 모델이 쓴 스크립트가 오류 이름으로 분기하는데, 같은 실패가 함수마다
 다른 이름이면 분기가 틀린다. `EEXIST` · `ENOTDIR` · `ENOSPC` · `ETIMEDOUT`처럼 흔한 실패가 모두 `Unknown`이 되는 것도 같다.
@@ -256,7 +260,7 @@ fn describe(s Shape) -> str:
 단계 제안:
 
 1. 먼저 싸고 바로 이득인 것: 특수화 중 난 오류에 인스턴스화 경로를 붙인다. "`describe[Circle]`을 `main.cy:12`에서 특수화하는
-   중". `src/sema*.zig`에서 이런 문구를 찾지 못했다(grep 기준).
+   중". `src/sema*.zig`에서 이런 문구를 찾지 못했고, 위 1.3.4의 실행 확인에서도 오류는 본문 위치만 짚었다.
 2. trait로 제약한 매개변수(`s Shape`, `[T Shape]`)를 가진 본문은 정의 시점에 한 번 검사한다. 본문에서 `T`의 값에 쓸 수 있는 것은
    trait의 메서드와 모든 타입에 공통인 연산(move, 대입, 빌림)뿐이다.
 3. `Any`는 지금처럼 특수화 시점 검사로 남긴다. Nimony는 제약을 강제했지만 사이버는 `#if` · `#switch type.info(T)`로 타입별 분기를
@@ -326,7 +330,7 @@ for는 같은 보장을 스레드에 준다. 사이버로 옮기면 "스레드�
   읽지 않았다. `project_slice_append_aliasing.md`의 2026-11-01 조사와 일반 지식에 기댄다.
 - Rust · Swift · Mojo에 대한 서술은 일반 지식이다.
 - 사이버 쪽 근거는 `docs/docs.md` Moving 절, `src/sema.zig`, `src/builtins/core.cy`, `project_slice_append_aliasing.md`,
-  `project_borrow_model.md`, `docs/history/ownership_memory.md`다. 코드를 실행해 확인하지는 못했다.
+  `project_borrow_model.md`, `docs/history/ownership_memory.md`다. 2.2 · 2.3.3 · 2.4 B · C의 예제는 같은 날 Debug CLI로 돌려 확인했다.
 
 ### 2.2 개요
 
@@ -346,6 +350,8 @@ fn total(xs Array[int]) -> int: ...
 xs := Array[int]{1, 2, 3}
 print(total(move xs))   -- `Array`는 `NoCopy`라 `move`를 적어야 한다
 ~~~
+
+`move` 없이 `total(xs)`라 쓰면 ``Cannot copy `Array[int]`, type implements `NoCopy`.``다(실행 확인).
 
 Rust는 값으로 넘기면 저절로 이동하므로, 이 자리에서는 사이버가 Rust보다 더 명시적이다.
 
@@ -402,14 +408,16 @@ Rust는 값으로 넘기면 저절로 이동하므로, 이 자리에서는 사�
 - 세 번째 단계 층은 이미 있다. `str`, `[]T`(`Slice`), 멤버가 모두 복사 가능한 struct는 암시적으로 복사되고, `str` · `Slice`의
   버퍼는 참조 카운트라 복사가 싸다. 네 번째 단계 층은 `Array[T]` · `NoCopy` · `&&T` · `Ptr[T]`다.
 - 추론된 이동은 반환 하나뿐이다(fork `eb060d5`, `?R` · `!R` 감싸기 포함).
-- 이동은 같은 블록에서 선언한 변수에만 쓸 수 있다(`src/sema.zig:9108`, "Can only move variable declared in the same block.").
+- 이동은 같은 블록에서 선언한 변수에만 쓸 수 있다(`src/sema.zig` `semaExprNoCheck`의 `.move_expr`, "Can only move variable declared in the same block.").
   이유는 부분 이동 절이 적은 것과 같다. "the state at the end of the block is known without runtime flags". Rust의 drop flag도,
   Nim의 `=wasMoved` 상태도 쓰지 않는 설계다.
 - sema에는 마지막 사용 분석이 없다(`last use` · `liveness` 같은 이름을 grep으로 찾지 못함).
 - 그 결과 세 군데에 구멍이 있다.
   1. `Slice` 별칭: `Slice.clone_on_resize`(`src/builtins/core.cy`)는 빌린 `&Slice` 수신자에서 `@isUniqueRef`가 참이면 버퍼를
      그대로 돌려준다. 2026-11-01 결정은 해제 정확성만 버퍼 헤더로 고쳤고, 값 의미는 마지막 사용 분석이 필요해 남겼다(후보 2).
-  2. 빌림의 비어휘적 수명: 매뉴얼은 `elem := &a[2]; a << 4`가 된다고 약속하지만 빌림 수명은 어휘적이다(`project_borrow_model.md`).
+  2. 빌림의 비어휘적 수명: 빌림 수명은 어휘적이다. 매뉴얼은 한때 `elem := &a[2]; a << 4`가 된다고 약속했지만, F-25를 닫으며
+     구현에 맞춰 "The compiler does not shorten a borrow to its last use."로 고쳤다(`project_borrow_model.md`, `33ba575e`).
+     지금은 `elem`을 안쪽 블록에 두라고 안내한다.
   3. `NoCopy` 값 전달: 마지막 사용이어도 `move`를 적어야 하고, 하위 블록에서는 적을 수도 없다.
 
 ### 2.4 가져올 만한 것
@@ -433,7 +441,7 @@ Rust는 값으로 넘기면 저절로 이동하므로, 이 자리에서는 사�
 ~~~cy
 a := []str{'x', 'y'}
 b := a.size_down(0)
-print(a[0])       -- 지금: `a`와 `b`가 버퍼를 나눠 써서 해제된 칸을 읽는다(06장 미완 지점, 이번에 재실행은 못 함)
+print(a[0])       -- 지금: `a`와 `b`가 버퍼를 나눠 써서 해제된 칸을 읽는다(06장 미완 지점)
                   -- 제안: `a`가 뒤에서 쓰이므로 `size_down` 전에 복사, 'x'
 
 xs := []int{}
@@ -441,20 +449,25 @@ for 0..1000 |i|:
     xs = xs.append(i)   -- `xs`는 대입 직전 마지막 사용이라 지금처럼 제자리
 ~~~
 
+실행 확인: 원소를 힙 문자열(`'x'.repeat(40)`)로 바꾸면 Debug CLI가 `print(a[0])`에서 `retain dangling ptr`를 낸다. 짧은
+문자열은 힙 객체가 아니라 그대로 `x`가 찍혀 증상이 숨는다.
+
 장점: 이미 알려진 미결을 닫는다. 문서와 테스트가 쓰는 `xs = xs.append(x)` 모양은 속도가 그대로다.
 단점: 받는 쪽을 남기는 코드는 복사 비용이 생긴다. 지금은 그 코드가 틀린 결과를 내므로 받아들일 만하다.
 
 #### C. 빌림의 비어휘적 수명 — 첫 소비자 후보 2
 
-빌림 지역의 수명을 블록 끝이 아니라 마지막 사용까지로 줄인다. Rust 2018의 NLL과 같은 변화이고, 매뉴얼이 이미 약속한 동작이라
-언어 규칙을 새로 정하지 않는다. `project_borrow_model.md`의 계수(`active_borrows` · `active_ex_borrows`)를 블록 끝이 아니라
-마지막 사용 뒤에 내리면 된다.
+빌림 지역의 수명을 블록 끝이 아니라 마지막 사용까지로 줄인다. Rust 2018의 NLL과 같은 변화다. 매뉴얼은 지금 어휘적 수명을
+규칙으로 적고 있으므로 이 절은 규칙을 넓히는 변경이고, 매뉴얼의 Borrows 절과 `project_borrow_model.md`의 결정을 함께 고친다.
+다만 지금 거절하는 코드를 허용하는 쪽이라 기존 코드는 깨지지 않는다. `project_borrow_model.md`의 계수(`active_borrows` ·
+`active_ex_borrows`)를 블록 끝이 아니라 마지막 사용 뒤에 내리면 된다. 그 문서도 "필요해지면 선행 패스로 각 빌림 지역의 마지막
+사용 문장을 구한다"고 남겨 두었다.
 
 ~~~cy
 a := Array[int]{1, 2, 3}
 elem := &a[2]
 print(elem.*)
-a << 4            -- 지금: `Expected exclusive access.` / 제안: `elem`이 끝났으므로 허용
+a << 4            -- 지금: ``Expected exclusive access. There is another active borrow to `a`.``(실행 확인) / 제안: `elem`이 끝났으므로 허용
 ~~~
 
 #### D. `NoCopy` 값의 암시적 이동
@@ -513,7 +526,7 @@ Nim의 cursor 추론(바뀌지 않는 원본에서 읽은 값을 복사하지 �
   있는 타입에서 보인다. Rust · Nim도 같은 성질이지만, 지금의 "블록 끝에서 역순 소멸"보다 설명이 길어진다.
 - 뒤에 줄 하나를 더하면 앞의 이동이 오류(D)나 복사(B)로 바뀐다. 오류 문구가 두 자리를 함께 짚어야 하고, LSP hover로
   "여기서 이동됨"을 보여 줄 필요가 있다(1.4 C, LSP 설계와 연결).
-- sema(`sema.zig` 약 10K줄)에 새 분석 단계가 들어간다. 생성기 · fiber의 멈춤 지점, `scope` 블록의 빌림, `try` 블록의 `else` 경로가
+- sema(`sema.zig` 약 12.7K줄)에 새 분석 단계가 들어간다. 생성기 · fiber의 멈춤 지점, `scope` 블록의 빌림, `try` 블록의 `else` 경로가
   모두 제어 흐름 그래프에 정확히 들어가야 한다.
 - 지금 문서의 "`move`는 명시적 연산"이라는 설명을 고쳐야 한다.
 
@@ -538,7 +551,8 @@ Nim의 cursor 추론(바뀌지 않는 원본에서 읽은 값을 복사하지 �
 1. 사이버의 정체성을 "세 번째 단계 언어이고, 네 번째 단계 도구는 선택"으로 `project_direction.md`에 적을지. 2.4 D · E의
    판단 기준이 된다.
 2. A(마지막 사용 분석)를 0.5 뒤 첫 설계 과제로 둘지. 그렇다면 결정 문서 `project_last_use.md`부터 쓴다.
-3. 첫 소비자를 B(`Slice` 값 의미, 알려진 틀린 결과)와 C(빌림 NLL, 매뉴얼이 약속한 동작) 중 무엇으로 할지.
-   추천은 C다. 규칙을 새로 정하지 않아 분석의 정확성만 검증하면 되고, 틀려도 거절하던 코드를 허용하는 쪽이라 위험이 작다.
+3. 첫 소비자를 B(`Slice` 값 의미, 알려진 틀린 결과)와 C(빌림 NLL, 어휘적 수명 규칙을 넓힘) 중 무엇으로 할지.
+   추천은 C다. 거절하던 코드를 허용하는 쪽이라 기존 코드가 깨지지 않고, 틀려도 피해가 "허용하지 말았어야 할 빌림"에 한정되어
+   검증 범위가 작다. 매뉴얼의 어휘적 수명 규칙은 함께 고쳐야 한다(2.4 C).
 4. D(암시적 이동)를 넣을지, 넣는다면 명시적 `move`를 단언으로 다시 정의할지.
 5. E(분기 안 이동)에서 `@deinit`을 갈래 끝으로 앞당기는 것을 받아들일지.

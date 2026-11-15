@@ -3,21 +3,31 @@ const builtin = @import("builtin");
 
 /// Template for a custom test runner.
 pub fn main(init: std.process.Init.Minimal) !void {
-    // Zig 0.17 leaves the testing allocator and Io to the test runner.
-    std.testing.allocator_instance = .init(std.heap.page_allocator, .{});
-    std.testing.io_instance = .init(std.testing.allocator, .{});
-
     test_init(&init.args);
 
     var passed: usize = 0;
     for (builtin.test_functions) |t| {
-        t.func() catch |err| {
+        // Zig 0.17 leaves the testing allocator and Io to the test runner. Each test gets its own, so that a leak
+        // fails the test that made it.
+        std.testing.allocator_instance = .init(std.heap.page_allocator, .{});
+        std.testing.io_instance = .init(std.testing.allocator, .{});
+
+        const res = t.func();
+        std.testing.io_instance.deinit();
+        const leaks = std.testing.allocator_instance.deinit();
+
+        res catch |err| {
             std.debug.print("{s} fail: {}\n", .{t.name, err});
             if (@errorReturnTrace()) |trace| {
                 std.debug.dumpErrorReturnTrace(trace);
             }
             continue;
         };
+        if (leaks > 0) {
+            // The allocator printed each leaked block and where it was allocated.
+            std.debug.print("{s} fail: leaked {} blocks\n", .{t.name, leaks});
+            continue;
+        }
         passed += 1;
         std.debug.print("{s} passed\n", .{t.name});
     }
@@ -28,10 +38,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
     } else {
         std.debug.print("Ok. {} tests passed\n", .{passed});
     }
-
-    // Deinit test allocator to surface leaks.
-    std.testing.io_instance.deinit();
-    _ = std.testing.allocator_instance.deinit();
 }
 
 /// `args` points to a `std.process.Args`.

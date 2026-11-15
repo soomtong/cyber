@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.11-dev 911-4b4e230</div>
+    <div class="sub-title">v0.4.11-dev 918-0130197</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -4584,6 +4584,7 @@ fn (&Box[]) dup() -> T:
 <li><a href="#json-and-toon" title="">JSON and TOON.</a></li>
 <li><a href="#regular-expressions" title="">Regular expressions.</a></li>
 <li><a href="#parsing-expression-grammars" title="">Parsing expression grammars.</a></li>
+<li><a href="#dates-and-times" title="">Dates and times.</a></li>
 </ul>
 </li>
 <li><a href="#importing" title="">Importing.</a><ul>
@@ -4784,6 +4785,115 @@ else |err|:
 <p><code>diag.line</code> and <code>diag.col</code> start at 1, and <code>diag.expected</code> has the expected patterns as they are written in the grammar. <code>peg.compile(grammar, &diag)</code> fills the same <code>Diag</code> for a grammar that does not compile (<code>error.Syntax</code>). A grammar is checked when it is compiled: a rule that is not defined, a repetition of something that can match nothing (<code>('a'?)*</code>), and a rule that is left recursive, that is, calls itself before it takes any input (<code>expr <- expr '+' num</code>), are errors. Write a left recursive rule as a loop: <code>expr <- num ('+' num)*</code>.</p>
 <p>Matching is by Unicode code point: <code>.</code> and <code>[가-힣]</code> take a whole character, and offsets are in bytes. A byte of the input that is not UTF-8 is one character for <code>.</code> and for a negated class. The syntax is a subset of LPeg's <code>re</code> with the same meaning, with these differences: strings and classes have escapes, a named capture is a node of the result, <code>=name</code> matches the whole text of the capture, and what calls a Lua function (<code>p -> name</code>, <code>p => name</code>) or builds a table (<code>{| p |}</code>) is not supported. In a class, a <code>%</code> name goes on to the last letter, as in <code>re</code>: write <code>[_%w]</code>, not <code>[%w_]</code>.</p>
 <p>A grammar backtracks, so there is no bound on the time of a match as there is for <code>regex</code>: a grammar can take time that grows fast with the length of the input. A match keeps a stack of open rule calls and choices. When the stack is over <code>peg.MaxStack</code> (100000) entries, for input that nests very deep, <code>parse</code> returns <code>error.TooDeep</code>, and for a match with more than <code>peg.MaxCaptures</code> (1000000) captures it returns <code>error.TooBig</code>. The functions that return an option panic in these cases. A call at the end of the last choice of a rule takes no stack: <code>tail <- !. / . tail</code> runs over any length of input. A grammar over <code>peg.MaxInsts</code> (65536) instructions is <code>error.TooBig</code> (<code>p^100</code> takes 100 times the instructions of <code>p</code>), and patterns nest at most <code>peg.MaxDepth</code> (250) deep. A compiled <code>Peg</code> does not change: compile once and use it for every match.</p>
+<a href="#modules">^topic</a>
+<h3 id="dates-and-times">Dates and times. <a href="#dates-and-times">#</a></h3>
+<p>The <code>time</code> module has four types. A <code>Time</code> is an instant, a <code>DateTime</code> is an instant seen at a UTC offset or in a time zone, a <code>Date</code> is a calendar day and a <code>Duration</code> is a length of time. An offset is an <code>int</code>: the minutes east of UTC, so <code>+09:00</code> is <code>540</code> and <code>-03:30</code> is <code>-210</code>:</p>
+<pre><code class="language-cy">use time
+
+dt := time.parse('2026-11-15T10:22:03.5+09:00')!
+print(dt.utc().format())                 --> 2026-11-15T01:22:03.5Z
+print(dt.format('%d %b %Y %H:%M')!)      --> 15 Nov 2026 10:22
+print(dt.year())                         --> 2026
+print(dt.weekday())                      --> Weekday.sunday
+print(dt.offset())                       --> 540
+print(dt.to_offset(330)!.format())       --> 2026-11-15T06:52:03.5+05:30
+print(dt.add_months(3)!.format())        --> 2027-02-15T10:22:03.5+09:00
+</code></pre>
+<p>There is no date and time without an offset, and nothing uses the time zone of the system unless the script asks for it with <code>time.local()</code>: a value always says which instant it is. The calendar is the proleptic Gregorian one, with years 1 to 9999. Leap seconds are not counted, as in Unix time, and a <code>:60</code> in a text reads as <code>:59</code>.</p>
+<p><code>time.now()</code> returns the <code>Time</code> of the system clock. Instants compare with <code><</code>, <code><=</code>, <code>></code>, <code>>=</code> and <code>==</code>, and their difference is a <code>Duration</code>. The times of a file in <code>os.FileInfo</code> are Unix seconds and nanoseconds, and <code>time.unix</code> turns them into a <code>Time</code>:</p>
+<pre><code class="language-cy">use os
+use time
+
+fn mtime(path str) -> !time.Time:
+    info := os.fileInfo(path)!
+    return time.unix(info.mtime_sec, info.mtime_nsec)
+
+a := mtime('build.zig')!
+b := mtime('zig-out/bin/cyber')!
+if a > b:
+    print('the build is out of date')
+if time.now() - b > time.hours(24):
+    print('built more than a day ago')
+</code></pre>
+<p>The system clock can be set, so it can go back. To measure how long something takes, use <code>time.monotonic()</code>, a <code>Duration</code> that only grows and that has a meaning only as the difference of two readings:</p>
+<pre><code class="language-cy">start := time.monotonic()
+work()
+print((time.monotonic() - start).format())   --> 1.204s
+</code></pre>
+<p>A <code>Duration</code> is made with <code>time.nanos(n)</code>, <code>micros</code>, <code>millis</code>, <code>seconds</code>, <code>minutes</code>, <code>hours</code> and <code>days</code> (24 hours). It adds, subtracts, negates, multiplies by an <code>int</code> and compares. <code>d.secs()</code> and <code>d.millis()</code> return it as a whole number rounded toward zero, <code>d.to_float()</code> in seconds, and <code>d.format()</code> as text such as <code>1h2m3.5s</code>.</p>
+<p>A <code>Time</code> has no calendar fields. <code>t.utc()</code> and <code>t.to_offset(minutes)</code> return a <code>DateTime</code>, which has <code>year()</code>, <code>month()</code> (1 to 12), <code>day()</code>, <code>hour()</code>, <code>minute()</code>, <code>second()</code>, <code>nanosecond()</code>, <code>offset()</code>, <code>weekday()</code>, <code>day_of_year()</code> and <code>date()</code>. <code>dt.time()</code> returns the instant, and <code>time.unix(sec)</code>, <code>time.unix(sec, nsec)</code>, <code>time.unix_millis(ms)</code>, <code>t.unix()</code> and <code>t.unix_millis()</code> convert between a <code>Time</code> and Unix time. <code>dt.to_offset(m)</code> is the same instant at another offset, <code>dt.replace_offset(m)</code> the same date and time of day at another offset. Two <code>DateTime</code> values are <code>==</code> only when the offset is the same too, and they have no <code><</code>. Compare the instants:</p>
+<pre><code class="language-cy">a := time.parse('2026-11-15T10:22:03+09:00')!
+b := time.parse('2026-11-15T01:22:03Z')!
+print(a == b)                   --> false
+print(a.time() == b.time())     --> true
+</code></pre>
+<p>A <code>Date</code> is for calendar arithmetic. The difference of two dates is a number of days. <code>add_months</code> and <code>add_years</code> keep the day of the month, or take the last day when the month is shorter. <code>DateTime</code> has the same three methods, and they keep the time of day:</p>
+<pre><code class="language-cy">d := time.date(2024, 1, 31)!
+print(d.add_months(1)!.format())        --> 2024-02-29
+print(d.add_days(30)!.format())         --> 2024-03-01
+print(time.date(2024, 12, 25)! - d)     --> 329
+print(d.weekday())                      --> Weekday.wednesday
+print(d.iso_week())                     --> IsoWeek{year=2024, week=5}
+print(d.at(9, 30, 0)!.format())         --> 2024-01-31T09:30:00Z
+</code></pre>
+<p><code>time.date(y, m, d)</code> and <code>time.datetime(y, mo, d, h, mi, s)</code> (UTC) or <code>time.datetime(y, mo, d, h, mi, s, nsec, offset)</code> return <code>error.Range</code> for a date that does not exist. So do the methods that move a value out of the years 1 to 9999. The operators <code>+</code> and <code>-</code> with a <code>Duration</code> panic instead: use <code>add(d)</code> when the input is not trusted.</p>
+<p><code>time.parse(s)</code> reads RFC 3339. The text must have an offset. A space can stand for the <code>T</code>, a <code>,</code> for the <code>.</code>, and the offset is <code>Z</code>, <code>+09:00</code>, <code>+0900</code> or <code>+09</code>. A record without an offset is read with <code>time.parse(s, offset)</code>, which takes the offset to read it at. <code>time.parse_format(s, fmt)</code> reads other shapes by a <code>strptime</code> format, and reads a text without <code>%z</code> as UTC, or at the offset in a third argument. <code>time.parse_date(s)</code> reads <code>2026-11-15</code> as a <code>Date</code>:</p>
+<pre><code class="language-cy">-- Python logging, log4j
+print(time.parse('2026-11-15 10:22:01,123', 540)!.format())
+--> 2026-11-15T10:22:01.123+09:00
+
+-- Common Log Format
+print(time.parse_format('15/Nov/2026:10:22:01 +0900', '%d/%b/%Y:%H:%M:%S %z')!.format())
+--> 2026-11-15T10:22:01+09:00
+
+-- syslog has no year: a field that the format does not have is that of 1970-01-01T00:00:00
+print(time.parse_format('Nov  5 10:22:01', '%b %e %T')!.format())
+--> 1970-11-05T10:22:01Z
+</code></pre>
+<p><code>format()</code> writes RFC 3339 (<code>Z</code> for UTC, and the fraction of the second only when it is not zero). <code>format(fmt)</code> takes a <code>strftime</code> format and returns <code>error.Format</code> for a specifier that is not in this table:</p>
+<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>Date</td><td><code>%Y</code> (four digits), <code>%y</code> (two digits: 69 to 99 are 1969 to 1999), <code>%m</code>, <code>%d</code>, <code>%e</code> (day padded with a space), <code>%j</code> (day of the year), <code>%b</code> <code>%h</code> (<code>Nov</code>), <code>%B</code> (<code>November</code>), <code>%a</code> (<code>Sun</code>), <code>%A</code> (<code>Sunday</code>)</td></tr><tr><td>Time of day</td><td><code>%H</code>, <code>%I</code> (12 hour clock), <code>%p</code> (<code>AM</code>, <code>PM</code>), <code>%M</code>, <code>%S</code>, <code>%f</code> (six digits), <code>%3f</code>, <code>%6f</code>, <code>%9f</code></td></tr><tr><td>Offset</td><td><code>%z</code> (<code>+0900</code>), <code>%:z</code> (<code>+09:00</code>)</td></tr><tr><td>Zone</td><td><code>%Z</code>: the abbreviation of the time zone (<code>KST</code>, <code>EDT</code>). <code>UTC</code> or the offset for a value without a zone. Output only</td></tr><tr><td>Short forms</td><td><code>%F</code> (<code>%Y-%m-%d</code>), <code>%T</code> (<code>%H:%M:%S</code>), <code>%R</code> (<code>%H:%M</code>), <code>%D</code> (<code>%m/%d/%y</code>)</td></tr><tr><td>Others</td><td><code>%s</code> (Unix seconds), <code>%n</code>, <code>%t</code>, <code>%%</code></td></tr><tr><td>Output only</td><td><code>%u</code> (Monday is 1, Sunday is 7), <code>%w</code> (Sunday is 0), <code>%G</code> and <code>%V</code> (ISO 8601 year and week), <code>%Z</code></td></tr></tbody></table><p>Names are in English. When parsing, a number takes one or two digits (<code>%Y</code> four, <code>%j</code> up to three, every <code>%f</code> one or more), <code>%j</code> can not be used with <code>%m</code>, <code>%d</code>, <code>%e</code> or <code>%b</code>, a space in the format takes one or more, a name can be short or full in any case, and both offset specifiers take <code>Z</code>, <code>+0900</code>, <code>+09:00</code> and <code>+09</code>. A <code>Date</code> formats with the date specifiers only.</p>
+<p>The parse functions return <code>error.Syntax</code> when the text has another shape, <code>error.Range</code> when a field is out of range and <code>error.Format</code> when the format is wrong. Each takes a <code>time.Diag</code> as its last argument to see why:</p>
+<pre><code class="language-cy">var diag time.Diag = {}
+try:
+    _ = time.parse('2026-02-30T10:22:01Z', &diag)!
+else |err|:
+    print('%{err}: %{diag.msg}')
+--> error.Range: February 2026 has no day 30.
+</code></pre>
+<p><code>time.is_leap_year(y)</code>, <code>time.days_in_month(y, m)</code>, <code>time.parse_offset('+05:30')</code> (330) and <code>time.format_offset(330)</code> are there for code that works on the fields.</p>
+<p>A <code>Zone</code> is a time zone with its daylight saving time. <code>time.zone(name)</code> reads one by its IANA name from the time zone database of the system, and <code>t.to_zone(z)</code> or <code>dt.to_zone(z)</code> gives the date and time of day there:</p>
+<pre><code class="language-cy">ny := time.zone('America/New_York')!
+t := time.parse('2026-07-04T12:00:00Z')!.time()
+dt := t.to_zone(ny)
+print(dt.format())               --> 2026-07-04T08:00:00-04:00
+print(dt.format('%H:%M %Z')!)    --> 08:00 EDT
+print(ny.offset_at(t))           --> -240
+print(ny.is_dst(t))              --> true
+</code></pre>
+<p><code>z.datetime(y, mo, d, h, mi, s)</code> makes a value from a clock reading in the zone, and so do <code>d.at(h, mi, s, z)</code> and <code>dt.replace_zone(z)</code>, which keeps the date and time of day of <code>dt</code>. When the clock is set forward, an hour of readings does not exist, and when it is set back, an hour comes twice. Such a reading is taken the way most calendars do: the skipped time moves forward by the gap, and the repeated time is the first of the two. A last argument says otherwise: <code>.earlier</code>, <code>.later</code>, or <code>.reject</code>, which returns <code>error.Skipped</code> or <code>error.Ambiguous</code>:</p>
+<pre><code class="language-cy">print(ny.datetime(2026, 3, 8, 2, 30, 0)!.format())               --> 2026-03-08T03:30:00-04:00
+print(ny.datetime(2026, 11, 1, 1, 30, 0)!.format())              --> 2026-11-01T01:30:00-04:00
+print(ny.datetime(2026, 11, 1, 1, 30, 0, 0, .later)!.format())   --> 2026-11-01T01:30:00-05:00
+print(ny.datetime(2026, 3, 8, 2, 30, 0, 0, .reject).unwrap_error())   --> error.Skipped
+
+-- a record without an offset, written by a machine in New York
+print(time.parse('2026-11-15 10:22:01', 0)!.replace_zone(ny)!.format())   --> 2026-11-15T10:22:01-05:00
+</code></pre>
+<p>A value in a zone keeps the zone (<code>dt.zone()</code> returns it, or <code>none</code>). <code>add_days</code>, <code>add_months</code> and <code>add_years</code> keep the time of day and read it in the zone again, so a day can be 23 or 25 hours long. <code>+</code>, <code>-</code> and <code>add</code> with a <code>Duration</code> move the instant by that much. <code>utc()</code>, <code>to_offset</code> and <code>replace_offset</code> give a value at a fixed offset, without the zone:</p>
+<pre><code class="language-cy">noon := ny.datetime(2026, 3, 7, 12, 0, 0)!       -- the day before the clock is set forward
+print(noon.add_days(1)!.format())                --> 2026-03-08T12:00:00-04:00
+print((noon + time.hours(24)).format())          --> 2026-03-08T13:00:00-04:00
+</code></pre>
+<p>The database is the zoneinfo directory of the system: the one in <code>TZDIR</code>, or <code>/usr/share/zoneinfo</code> and the like. <code>time.zone</code> returns <code>error.NotFound</code> for a name that is not there. Windows and wasm have no such directory, so only <code>time.zone('UTC')</code> is found there. A zone can also be made from data: <code>time.zone_from_tzif(name, bytes)</code> takes the bytes of a TZif file (the format of the files in that directory), and <code>time.zone_from_posix('EST5EDT,M3.2.0,M11.1.0')</code> or <code>time.zone_from_posix('KST-9')</code> takes a POSIX <code>TZ</code> rule. <code>time.local()</code> returns the zone of the system: what the <code>TZ</code> environment variable says, or else <code>/etc/localtime</code>. It returns <code>error.NotFound</code> when the system does not say (Windows, wasm), or says something that can not be read.</p>
+<p><code>dt.format()</code> writes the offset and not the zone. To keep the zone in text, <code>dt.format_zoned()</code> writes RFC 9557, which is RFC 3339 with the name of the zone in brackets, and <code>time.parse_zoned(s)</code> reads it back:</p>
+<pre><code class="language-cy">a := ny.datetime(2026, 11, 1, 1, 30, 0, 0, .later)!
+print(a.format_zoned())                                     --> 2026-11-01T01:30:00-05:00[America/New_York]
+b := time.parse_zoned('2026-11-01T01:30:00-05:00[America/New_York]')!
+print(b == a)                                               --> true
+print(b.add_days(1)!.format_zoned())                        --> 2026-11-02T01:30:00-05:00[America/New_York]
+</code></pre>
+<p>The offset in the text says which of two readings it is. <code>parse_zoned</code> returns <code>error.Conflict</code> when it is not the offset of the zone at that time (the rules of a zone can change after a text is written) and <code>error.NotFound</code> when the system does not have the zone. With <code>Z</code> in the place of the offset the instant is kept and the zone gives the offset, and without an offset the text is a clock reading in the zone. A text without brackets is read as <code>time.parse</code> reads it, and a value without a zone is written as <code>format()</code> writes it. So is a value in a zone made from data with <code>zone_from_tzif</code> or <code>zone_from_posix</code>: <code>parse_zoned</code> could not look its name up.</p>
+<p>An offset of the database that is not a whole minute is rounded to the minute. These are the local mean times from before standard time, mostly before 1920. Two zones are <code>==</code> when their name and their data are the same, and both or neither came from the database (<code>time.zone</code>, <code>time.local</code>).</p>
 <a href="#modules">^topic</a>
 <h2 id="importing">Importing. <a href="#importing">#</a></h2>
 <p>The <code>use</code> statement can import modules. Builtin and std modules such as <code>math</code> can be imported without any configuration:</p>

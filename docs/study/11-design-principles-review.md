@@ -3,12 +3,13 @@
 다른 언어의 설계 원칙을 사이버랭의 현재 설계와 맞대 보는 검토를 모은다. 결정 문서가 아니다.
 채택할 항목은 각각 `docs/decisions/`에 결정을 먼저 적은 뒤 구현한다(`project_direction.md`).
 
-언어마다 절 하나를 두고, 절 안은 같은 순서로 쓴다: 출처와 범위, 개요, 핵심 디자인과 사이버의 현재 위치, 가져올 만한 것,
-장단점, 영향과 현재 상황, 결정할 것. 다른 절을 가리킬 때는 절 번호를 쓴다(예: 1.4 A).
+언어 하나, 또는 같은 기법을 공유하는 언어 묶음마다 절 하나를 둔다. 절 안은 같은 순서로 쓴다: 출처와 범위, 개요, 핵심 디자인과
+사이버의 현재 위치, 가져올 만한 것, 장단점, 영향과 현재 상황, 결정할 것. 다른 절을 가리킬 때는 절 번호를 쓴다(예: 1.4 A).
 
 | 절 | 언어 | 작성 | 계기 |
 | --- | --- | --- | --- |
 | 1 | Nim 3.0 (Nimony) | 2026-11-15 | 0.5를 앞두고 Araq의 설계 원칙 글 검토 |
+| 2 | Nim 2 · Lean 4 · Koka: 마지막 사용 분석 | 2026-11-15 | 개발 과정에서 사이버가 맡을 단계 논의 |
 
 ## 1. Nim 3.0 (Nimony)
 
@@ -311,3 +312,233 @@ for는 같은 보장을 스레드에 준다. 사이버로 옮기면 "스레드�
 
 가져오지 않기로 한 것: 통합 `spawn`(fiber 빌림을 지킨다), 플러그인 · NIF(실행 파일 하나라는 방향), OOM 계속 실행 핸들러
 (깨끗한 panic + VM 재사용 유지), 예외 + `.raises`(`!T`가 이미 더 명시적).
+
+## 2. Nim 2 · Lean 4 · Koka: 마지막 사용 분석
+
+### 2.1 출처와 범위
+
+- 계기: 개발 과정을 "자연어 → 의사 코드 → 타입 있는 자동 메모리 언어 → 저수준 시스템 언어"로 보는 관점. Rust와 Zig는 마지막 단계에
+  맞는 도구이고, 앞 단계에서는 알고리즘과 메모리 관리를 따로 생각하고 싶다는 것이다. `project_direction.md`가 사이버를 Python ·
+  Perl · Shell의 대용으로 두고 바이너리가 필요한 일을 Zig · Odin에 맡긴 것과 같은 구도라, 사이버는 세 번째 단계를 맡는다.
+  이 절은 사이버가 그 단계에서 메모리를 얼마나 드러내는지, 그리고 어떻게 덜 드러낼 수 있는지를 본다.
+- Nim: "Nim Destructors and Move Semantics", https://nim-lang.org/docs/destructors.html (페이지 버전 2.4.2, 2026-11-15에 전체를 읽음).
+- Lean 4 · Koka: Ullrich · de Moura, "Counting Immutable Beans"(IFL 2019), Reinking 외, "Perceus"(PLDI 2021). 이번에 다시
+  읽지 않았다. `project_slice_append_aliasing.md`의 2026-11-01 조사와 일반 지식에 기댄다.
+- Rust · Swift · Mojo에 대한 서술은 일반 지식이다.
+- 사이버 쪽 근거는 `docs/docs.md` Moving 절, `src/sema.zig`, `src/builtins/core.cy`, `project_slice_append_aliasing.md`,
+  `project_borrow_model.md`, `docs/history/ownership_memory.md`다. 코드를 실행해 확인하지는 못했다.
+
+### 2.2 개요
+
+같은 `scores` 예제는 사이버에서 Python과 거의 같다.
+
+~~~cy
+scores := Map[str, int]{alice=100, bob=85}
+scores['charlie'] = 92
+~~~
+
+할당자도, 할당 실패 처리도, 키의 소유자도 보이지 않는다. 할당 축에서는 사이버가 이미 세 번째 단계 언어다.
+메모리가 드러나는 곳은 소유권 축이다.
+
+~~~cy
+fn total(xs Array[int]) -> int: ...
+
+xs := Array[int]{1, 2, 3}
+print(total(move xs))   -- `Array`는 `NoCopy`라 `move`를 적어야 한다
+~~~
+
+Rust는 값으로 넘기면 저절로 이동하므로, 이 자리에서는 사이버가 Rust보다 더 명시적이다.
+
+여기서 다루는 언어들은 사이버와 같은 기반(소멸자 또는 참조 카운트, move)을 쓰면서 이동인지 복사인지를 컴파일러가 마지막 사용으로
+정한다. 사용자는 값 의미로 쓰고, 소유권은 컴파일러가 해결하는 최적화가 된다.
+
+| | 기본 의미 | 마지막 사용에서 | 뒤에서 다시 쓰면 | 이동된 자리 |
+| --- | --- | --- | --- | --- |
+| Nim 2 | 복사 | 이동(`=sink` + `=wasMoved`) | 조용히 복사. `=copy`에 `{.error.}`를 붙인 타입만 컴파일 오류 | 값 자체를 "파괴할 것 없음" 상태로 둠 |
+| Lean 4 · Koka | 공유(참조 카운트) | 소유권을 넘김. 카운트가 1이면 제자리 재사용 | 컴파일러가 카운트를 올림(`dup`) | 해당 없음 |
+| Rust | 이동 | 이동(마지막 사용과 무관) | 컴파일 오류 | 조건부 이동이면 스택의 drop flag |
+| 사이버 지금 | 복사 가능 타입은 복사, `NoCopy`는 명시적 `move` | 반환만 암시적 이동 | 컴파일 오류 | 같은 블록에서 선언한 변수만 이동 가능, 플래그 없음 |
+
+### 2.3 핵심 디자인과 사이버의 현재 위치
+
+#### 2.3.1 Nim 2: `lastReadOf`와 재작성 규칙
+
+- 마지막 사용은 제어 흐름 분석으로 정한다. 문서의 표기는 "lastReadOf(x) to describe that x is not used afterward"이고,
+  "computed by a static control flow analysis"라고 적는다.
+- 재작성 규칙은 넷이 핵심이다.
+
+| 원래 식 | 바뀐 식 | 이름 |
+| --- | --- | --- |
+| `x = lastReadOf z` | `=sink(x, z)` 다음 `=wasMoved(z)` | move-optimization |
+| `x = y` | `=copy(x, y)` | copy |
+| `f_sink(lastReadOf y)` | `f_sink(y)` 다음 `=wasMoved(y)` | move-to-sink |
+| `f_sink(notLastReadOf y)` | `let tmp = =dup(y)` 다음 `f_sink(tmp)` | copy-to-sink |
+
+- 증명하지 못하면 복사한다. "If it cannot be proven to be the last usage of the location, a copy is done instead".
+  그래서 Nim 사용자는 이동이 일어났는지 몰라도 프로그램이 맞다. 성능만 달라진다.
+- `=wasMoved`는 "sets the object to a state that signifies to the destructor there is nothing to destroy"이다.
+  이동 여부를 변수 밖의 플래그가 아니라 값 안(예: 포인터 필드를 nil로)에 적는다. 그래서 분기 한쪽에서만 이동해도 블록 끝의
+  소멸자는 그대로 부르면 된다. 대가는 런타임 검사 한 번과, 모든 타입에 "비어 있음" 상태가 있어야 한다는 전제다.
+  "=wasMoved(x) followed by a =destroy(x) operation cancel each other out"이라 직선 코드에서는 비용이 사라진다.
+- 분석 범위는 좁다. "only concerned with local variables; however, object and tuple fields are treated as separate entities".
+  사이버의 "Can only move a local or local member."와 같은 범위다.
+- sink 매개변수 추론은 기본으로 꺼져 있다(`--sinkInference:on`). 문서는 "The details of the inference algorithm are currently
+  undocumented."라고 적는다. 이동 자체(마지막 읽기에서 `=sink`)는 기본으로 켜져 있고, 꺼져 있는 것은 어떤 매개변수를 `sink`로
+  볼지의 추론이다.
+- `ensureMove x`는 런타임 동작이 없는 단언이다. "leads to a static error if the compiler cannot prove that a move would be safe".
+- cursor 추론은 "a compile-time copy-on-write analysis"다. 원본도 사본도 뒤에서 바뀌지 않으면 복사하지 않고 빌린다.
+  예: `let v = tab["key"]`는 `tab`이 바뀌지 않으므로 복사도 소멸도 없다.
+
+#### 2.3.2 Lean 4 · Koka: Perceus (일반 지식)
+
+- 모든 힙 값이 참조 카운트를 가진다. 컴파일러가 마지막 사용 뒤에 `drop`을, 다시 쓰이는 값에 `dup`을 정확히 넣는다.
+- 인자는 기본적으로 소유로 넘긴다. 받는 쪽에서 카운트가 1이면 그 칸을 제자리에서 고친다(reuse). 그래서
+  `Array.push : Array α → α → Array α` 같은 함수형 시그니처가 명령형 코드와 같은 속도로 돈다(FBIP, functional but in-place).
+- 저자들이 경고하는 점: 빌린 참조는 카운트가 1이어도 제자리 갱신이 안전하지 않다. `project_slice_append_aliasing.md`가 사이버의
+  `clone_on_resize`에서 바로 이 경우를 찾았다.
+
+#### 2.3.3 사이버 지금
+
+- 세 번째 단계 층은 이미 있다. `str`, `[]T`(`Slice`), 멤버가 모두 복사 가능한 struct는 암시적으로 복사되고, `str` · `Slice`의
+  버퍼는 참조 카운트라 복사가 싸다. 네 번째 단계 층은 `Array[T]` · `NoCopy` · `&&T` · `Ptr[T]`다.
+- 추론된 이동은 반환 하나뿐이다(fork `eb060d5`, `?R` · `!R` 감싸기 포함).
+- 이동은 같은 블록에서 선언한 변수에만 쓸 수 있다(`src/sema.zig:9108`, "Can only move variable declared in the same block.").
+  이유는 부분 이동 절이 적은 것과 같다. "the state at the end of the block is known without runtime flags". Rust의 drop flag도,
+  Nim의 `=wasMoved` 상태도 쓰지 않는 설계다.
+- sema에는 마지막 사용 분석이 없다(`last use` · `liveness` 같은 이름을 grep으로 찾지 못함).
+- 그 결과 세 군데에 구멍이 있다.
+  1. `Slice` 별칭: `Slice.clone_on_resize`(`src/builtins/core.cy`)는 빌린 `&Slice` 수신자에서 `@isUniqueRef`가 참이면 버퍼를
+     그대로 돌려준다. 2026-11-01 결정은 해제 정확성만 버퍼 헤더로 고쳤고, 값 의미는 마지막 사용 분석이 필요해 남겼다(후보 2).
+  2. 빌림의 비어휘적 수명: 매뉴얼은 `elem := &a[2]; a << 4`가 된다고 약속하지만 빌림 수명은 어휘적이다(`project_borrow_model.md`).
+  3. `NoCopy` 값 전달: 마지막 사용이어도 `move`를 적어야 하고, 하위 블록에서는 적을 수도 없다.
+
+### 2.4 가져올 만한 것
+
+하나의 분석이 세 구멍을 함께 막는다. A가 기반이고 B · C · D · E가 그 소비자다.
+
+#### A. 마지막 사용 분석 — 기반
+
+- Proc마다 지역과 지역 멤버 경로(`f.b`)에 대해 "이 사용 뒤로 어느 경로에서도 읽히지 않는다"를 계산한다. 범위는 Nim과 같게
+  지역과 멤버로 한정한다. 사이버의 이동 규칙이 이미 이 범위다.
+- 두는 자리는 IR이다. sema가 소유권 연산(retain · release · destruct)을 이미 IR에 넣고 bc_gen은 번역만 하므로, IR 위에서
+  역방향 활성 분석(backward liveness)을 한 번 돌리고 그 결과로 IR을 고친다.
+- 조건: 지역 id가 선언 순서와 같아야 한다는 IR 불변식(HANDOFF "구현 함정")을 깨지 않는다. 분석은 지역을 새로 만들지 않고
+  사용 지점에 표시만 단다.
+
+#### B. `Slice`의 값 의미 — 첫 소비자 후보 1
+
+`append` · `+` · `insert`처럼 `clone_on_resize`를 거치는 연산에서, 수신자가 마지막 사용이면 소유로 넘겨 제자리 갱신을 허용하고,
+아니면 갱신 전에 복사한다. 슬라이스 문서의 후보 2이고 Lean 4 · Koka의 소유 인자와 같은 규칙이다.
+
+~~~cy
+a := []str{'x', 'y'}
+b := a.size_down(0)
+print(a[0])       -- 지금: `a`와 `b`가 버퍼를 나눠 써서 해제된 칸을 읽는다(06장 미완 지점, 이번에 재실행은 못 함)
+                  -- 제안: `a`가 뒤에서 쓰이므로 `size_down` 전에 복사, 'x'
+
+xs := []int{}
+for 0..1000 |i|:
+    xs = xs.append(i)   -- `xs`는 대입 직전 마지막 사용이라 지금처럼 제자리
+~~~
+
+장점: 이미 알려진 미결을 닫는다. 문서와 테스트가 쓰는 `xs = xs.append(x)` 모양은 속도가 그대로다.
+단점: 받는 쪽을 남기는 코드는 복사 비용이 생긴다. 지금은 그 코드가 틀린 결과를 내므로 받아들일 만하다.
+
+#### C. 빌림의 비어휘적 수명 — 첫 소비자 후보 2
+
+빌림 지역의 수명을 블록 끝이 아니라 마지막 사용까지로 줄인다. Rust 2018의 NLL과 같은 변화이고, 매뉴얼이 이미 약속한 동작이라
+언어 규칙을 새로 정하지 않는다. `project_borrow_model.md`의 계수(`active_borrows` · `active_ex_borrows`)를 블록 끝이 아니라
+마지막 사용 뒤에 내리면 된다.
+
+~~~cy
+a := Array[int]{1, 2, 3}
+elem := &a[2]
+print(elem.*)
+a << 4            -- 지금: `Expected exclusive access.` / 제안: `elem`이 끝났으므로 허용
+~~~
+
+#### D. `NoCopy` 값의 암시적 이동
+
+값 매개변수에 넘기는 자리가 마지막 사용이면 `move`를 적지 않아도 이동한다(Nim move-to-sink).
+뒤에서 다시 쓰면 Nim은 복사하지만 `NoCopy`는 복사할 수 없으므로 지금처럼 오류를 내되, 두 자리를 함께 짚는다.
+
+~~~cy
+xs := Array[int]{1, 2, 3}
+print(total(xs))      -- 제안: 마지막 사용이므로 이동
+print(xs.len())
+--> error: `xs` was moved into `total` at line 2. Borrow it with `&xs` or clone it to use it here.
+~~~
+
+명시적 `move`는 남는다. 뜻은 "여기서 끝낸다"는 단언(Nim `ensureMove`)이 되고, 마지막 사용이 아닌 자리의 `move`는 지금처럼
+뒤의 사용을 오류로 만든다. 복사 가능 타입에는 적용하지 않는다. 복사가 싸므로 이동으로 바꿀 이득이 작고, `@deinit`이 있는
+복사 가능 타입은 이동 여부에 따라 소멸 횟수가 달라진다.
+
+#### E. 분기 안의 이동 — 런타임 플래그 없이
+
+지금은 바깥 블록의 변수를 `if` 갈래 안에서 옮길 수 없다. 마지막 사용 분석이 있으면 플래그 없이 풀 수 있다. 합류 지점 뒤에서
+그 변수를 쓰지 않는다면, 옮기지 않은 갈래의 끝에 `@deinit`을 넣는다. 그러면 합류 지점에서 변수는 어느 경로로 와도 죽어 있고,
+블록 끝 상태가 컴파일 시점에 정해진다는 지금의 원칙이 지켜진다. Nim처럼 값 안에 "비어 있음"을 두지도, Rust처럼 스택 플래그를
+두지도 않는다.
+
+~~~cy
+f := open_log()!
+if verbose:
+    archive(f)        -- 마지막 사용, 이동
+-- 제안: else 갈래 끝에 `f.@deinit()`이 들어간다
+print('done')
+~~~
+
+반복문은 보수적으로 둔다. 바깥 변수를 반복 본문에서 옮기는 것은 바로 뒤에 `break` · `return`이 오거나, 다음 반복 전에 다시
+대입될 때만 허용한다.
+
+#### 참고만: cursor 추론
+
+Nim의 cursor 추론(바뀌지 않는 원본에서 읽은 값을 복사하지 않고 빌림)은 사이버에서 이득이 작다. 사이버는 빌림을 `&`로 드러내고,
+암시적으로 복사되는 `str` · `Slice`는 참조 카운트 하나만 올린다. 측정해서 필요해지면 다시 본다.
+
+### 2.5 Pros vs Cons
+
+장점
+
+- 세 번째 단계에서 알고리즘만 생각할 수 있다. `move` · `&&` · `NoCopy`는 성능을 다듬을 때 꺼내는 도구가 된다.
+- 분석 하나로 미결 셋(`Slice` 별칭, 빌림 NLL, 하위 블록 이동)을 함께 닫는다.
+- 호환성을 깨지 않는다. 지금 통과하는 코드는 모두 그대로 통과하고, 지금 오류인 코드 일부가 통과하게 된다(B는 예외. 받는 쪽을
+  남기는 코드의 결과가 바뀌지만 지금 결과가 틀렸다).
+- tars-agent처럼 LLM이 사이버를 쓸 때, 모델이 의사 코드에 가깝게 써도 컴파일된다.
+- Nim과 달리 조용한 복사가 없다. `NoCopy`인 비싼 타입은 이동 아니면 오류이므로 성능 절벽이 숨지 않는다.
+
+단점
+
+- `@deinit` 시점이 코드 모양에 따라 달라진다. D는 호출된 함수 안으로, E는 갈래 끝으로 소멸을 앞당긴다. 파일 닫기처럼 부작용이
+  있는 타입에서 보인다. Rust · Nim도 같은 성질이지만, 지금의 "블록 끝에서 역순 소멸"보다 설명이 길어진다.
+- 뒤에 줄 하나를 더하면 앞의 이동이 오류(D)나 복사(B)로 바뀐다. 오류 문구가 두 자리를 함께 짚어야 하고, LSP hover로
+  "여기서 이동됨"을 보여 줄 필요가 있다(1.4 C, LSP 설계와 연결).
+- sema(`sema.zig` 약 10K줄)에 새 분석 단계가 들어간다. 생성기 · fiber의 멈춤 지점, `scope` 블록의 빌림, `try` 블록의 `else` 경로가
+  모두 제어 흐름 그래프에 정확히 들어가야 한다.
+- 지금 문서의 "`move`는 명시적 연산"이라는 설명을 고쳐야 한다.
+
+### 2.6 영향과 현재 상황
+
+- Nim: 2020년 Nim 1.2의 `--gc:arc`로 들어왔고, 같은 해 1.4에서 순환 수거를 더한 ORC가 나와 Nim 2.0(2023)의 기본이 됐다(일반 지식). 이번에 읽은 문서는 2.4.2판이고
+  sink 추론은 여전히 기본으로 꺼져 있으며 알고리즘은 문서화되지 않았다. Nimony(1절)는 이 모델을 그대로 가져갔다.
+- Lean 4는 Perceus 계열의 참조 카운트와 재사용을 기본 컴파일 모델로 쓰고, Koka는 Perceus 논문의 언어다. "FBIP"라는 말이 이
+  흐름에서 나왔다(일반 지식).
+- Swift는 값 의미 + CoW(`isUniquelyReferenced`)로 같은 문제를 런타임 검사로 풀었고, 5.9에서 `consume` 연산자와
+  `borrowing` · `consuming` 매개변수를 더해 사용자가 이동을 드러낼 수 있게 했다. 암시적인 쪽에서 출발해 명시적인 도구를 더한
+  셈이다(일반 지식).
+- Mojo는 한 걸음 더 가서 값을 마지막 사용 바로 뒤에 소멸시킨다(ASAP destruction). 블록 끝 소멸을 버린 설계다(일반 지식).
+  E의 "갈래 끝 소멸"은 그 방향의 작은 한 걸음이다.
+- Rust 2018의 NLL은 빌림에만 마지막 사용을 적용했고 이동은 여전히 마지막 사용과 무관하다. 사이버가 C만 하면 Rust의 자리, D까지
+  하면 Nim의 자리에 선다.
+- 정리하면, 명시적 쪽(Rust, 사이버 지금)에서 출발한 언어는 추론을 더하고(NLL), 암시적 쪽(Swift, Nim)에서 출발한 언어는 단언을
+  더하는(`consume`, `ensureMove`) 방향으로 서로 가까워지고 있다.
+
+### 2.7 결정할 것
+
+1. 사이버의 정체성을 "세 번째 단계 언어이고, 네 번째 단계 도구는 선택"으로 `project_direction.md`에 적을지. 2.4 D · E의
+   판단 기준이 된다.
+2. A(마지막 사용 분석)를 0.5 뒤 첫 설계 과제로 둘지. 그렇다면 결정 문서 `project_last_use.md`부터 쓴다.
+3. 첫 소비자를 B(`Slice` 값 의미, 알려진 틀린 결과)와 C(빌림 NLL, 매뉴얼이 약속한 동작) 중 무엇으로 할지.
+   추천은 C다. 규칙을 새로 정하지 않아 분석의 정확성만 검증하면 되고, 틀려도 거절하던 코드를 허용하는 쪽이라 위험이 작다.
+4. D(암시적 이동)를 넣을지, 넣는다면 명시적 `move`를 단언으로 다시 정의할지.
+5. E(분기 안 이동)에서 `@deinit`을 갈래 끝으로 앞당기는 것을 받아들일지.

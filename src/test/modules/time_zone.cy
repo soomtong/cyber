@@ -101,7 +101,17 @@ try:
     sys := time.zone('Asia/Seoul')!
     t.eq(540, sys.offset_at(time.now()))
     t.eq('KST', sys.abbreviation(time.now()))
+    -- RFC 9557 reads the zone from the database by its name.
+    z := time.parse_zoned('1988-07-01T10:00:00+10:00[Asia/Seoul]')!
+    t.eq('1988-07-01T10:00:00+10:00[Asia/Seoul]', z.format_zoned())
+    t.eq('1988-12-01T10:00:00+09:00[Asia/Seoul]', z.add_months(5)!.format_zoned())
+    t.eq(error.Conflict, time.parse_zoned('1988-07-01T10:00:00+09:00[Asia/Seoul]').unwrap_error())
+    t.eq('2026-11-15T09:00:00+09:00[Asia/Seoul]', time.parse_zoned('2026-11-15T00:00:00Z[Asia/Seoul]')!.format_zoned())
 else |err|:
     t.eq(error.NotFound, err)
+
+-- A zone from a file is written with the name it was given.
+t.eq('2026-10-31T12:00:00-04:00[America/New_York]', d.format_zoned())
+t.eq('2026-11-01T01:30:00-05:00[America/New_York]', ny.datetime(2026, 11, 1, 1, 30, 0, 0, .later)!.format_zoned())
 
 --cytest: pass

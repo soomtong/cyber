@@ -4546,6 +4546,16 @@ print((noon + time.hours(24)).format())          --> 2026-03-08T13:00:00-04:00
 ```
 The database is the zoneinfo directory of the system: the one in `TZDIR`, or `/usr/share/zoneinfo` and the like. `time.zone` returns `error.NotFound` for a name that is not there. Windows and wasm have no such directory, so only `time.zone('UTC')` is found there. A zone can also be made from data: `time.zone_from_tzif(name, bytes)` takes the bytes of a TZif file (the format of the files in that directory), and `time.zone_from_posix('EST5EDT,M3.2.0,M11.1.0')` or `time.zone_from_posix('KST-9')` takes a POSIX `TZ` rule. `time.local()` returns the zone of the system: what the `TZ` environment variable says, or else `/etc/localtime`. It returns `error.NotFound` when the system does not say (Windows, wasm).
 
+`dt.format()` writes the offset and not the zone. To keep the zone in text, `dt.format_zoned()` writes RFC 9557, which is RFC 3339 with the name of the zone in brackets, and `time.parse_zoned(s)` reads it back:
+```cy
+a := ny.datetime(2026, 11, 1, 1, 30, 0, 0, .later)!
+print(a.format_zoned())                                     --> 2026-11-01T01:30:00-05:00[America/New_York]
+b := time.parse_zoned('2026-11-01T01:30:00-05:00[America/New_York]')!
+print(b == a)                                               --> true
+print(b.add_days(1)!.format_zoned())                        --> 2026-11-02T01:30:00-05:00[America/New_York]
+```
+The offset in the text says which of two readings it is. `parse_zoned` returns `error.Conflict` when it is not the offset of the zone at that time (the rules of a zone can change after a text is written) and `error.NotFound` when the system does not have the zone. With `Z` in the place of the offset the instant is kept and the zone gives the offset, and without an offset the text is a clock reading in the zone. A text without brackets is read as `time.parse` reads it, and a value without a zone is written as `format()` writes it.
+
 An offset of the database that is not a whole minute is rounded to the minute. These are the local mean times from before standard time, mostly before 1920. Two zones are `==` when their name and their data are the same.
 
 ## Importing.

@@ -113,6 +113,9 @@
     `time.Disambiguation`(`.compatible` · `.earlier` · `.later` · `.reject`)으로 바꾸고, `.reject`는 `error.Skipped` · `error.Ambiguous`.
   - zone 안의 값은 `add_days` · `add_months` · `add_years`가 시계 값을 유지하고(하루가 23 · 25시간일 수 있다), `+ Duration` · `add`는
     경과 시간을 더한다. `utc()` · `to_offset` · `replace_offset`은 zone을 뗀다.
+  - zone을 글로: `dt.format_zoned()`는 RFC 9557(`2026-07-04T08:00:00-04:00[America/New_York]`), `time.parse_zoned(s)`가 zone과 함께
+    다시 읽는다. 글의 오프셋이 zone의 그 순간 오프셋과 다르면 `error.Conflict`, zone이 없으면 `error.NotFound`. `format()` ·
+    `parse()`는 RFC 3339 그대로다(`parse`는 괄호를 만나면 `parse_zoned`를 쓰라는 `error.Syntax`).
   - DB의 초 단위 오프셋(LMT, 대개 1920년 이전)은 분으로 반올림한다. Python `zoneinfo`와의 차분 시험 40,000건에서 차이가 없었다.
 
 ## 버그 수정

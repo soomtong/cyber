@@ -32,6 +32,7 @@
     `zone_from_tzif` · `zone_from_posix`, `DateTime`이 zone을 품음, 겹침 · 건너뜀은 `Disambiguation`. TZif 읽기와 POSIX 규칙은
     `time.cy`, 파일 · `TZ` · `/etc/localtime` 읽기는 `time.zig`. Python `zoneinfo`와 차분 시험 40,000건 차이 없음.
     `project_std_time.md` "둘째 단계".
+  - 그다음 커밋: RFC 9557(`dt.format_zoned()` · `time.parse_zoned(s)`, 오프셋 불일치는 `error.Conflict`). 결정 28.
 - tars-agent는 cyber 0.4.11에 고정(`78df31d`). `730813e`에서 `e25e7d76`의 회신을 기록했고 0.4.12에서 확인한다.
   요청서 `/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.11-codeact-messages.md`.
 
@@ -69,7 +70,7 @@
 - `time`: 윤초 · 로캘이 없다. 오프셋은 분 단위(±23:59, DB의 초 단위 LMT는 반올림). `DateTime`에 순서 연산자가 없다
   (`a.time() < b.time()`). `parse_format`은 `%Z` · `%U` · `%W` · `%c`를 받지 않고 `%f`가 숫자를 끝까지 먹는다.
   시간대 DB를 내장하지 않아 Windows · wasm에서는 `time.zone(name)` · `time.local()`이 `error.NotFound`다(`UTC`와
-  `zone_from_tzif` · `zone_from_posix`는 된다). RFC 9557 꼬리(`[Asia/Seoul]`)를 쓰지도 읽지도 않는다.
+  `zone_from_tzif` · `zone_from_posix`는 된다). RFC 9557은 `format_zoned` · `parse_zoned`만 다룬다(`format` · `parse`는 RFC 3339).
 - 하위 블록에서는 `move` · `meta.consume`을 못 쓴다(`else` 갈래의 consume은 뒤까지 죽은 상태로 남는다). 컴파일 타임
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).

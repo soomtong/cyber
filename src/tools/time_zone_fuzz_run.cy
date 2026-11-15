@@ -29,6 +29,11 @@ for doc.as_array().? |c|:
     if dt.offset() != z.offset_at(t) or dt.format('%Z')! != abbr or dt.zone().?.name() != name:
         bad += 1
         print('VALUE %{name} %{sec}: %{dt.format()} %{dt.format('%Z')!}')
+    -- The value as text with its zone, and back.
+    back := time.parse_zoned(dt.format_zoned())!
+    if back != dt or back.zone().?.name() != name:
+        bad += 1
+        print('ZONED %{name} %{sec}: %{dt.format_zoned()} gives %{back.format_zoned()}')
     -- A clock reading, read each way.
     l := c['local']
     f0 := c['fold0'].as_int().?
@@ -66,6 +71,13 @@ for doc.as_array().? |c|:
         bad += 1
         print('LOCAL %{id}: reject %{rejected}, python %{f0} %{f1}')
     -- The same reading through the other ways in.
+    if time.parse_zoned(r.format_zoned())! != r or time.parse_zoned(e.format_zoned())! != e:
+        bad += 1
+        print('ZONED %{id}: %{r.format_zoned()} or %{e.format_zoned()} does not read back')
+    -- Without an offset, the text is the clock reading.
+    if time.parse_zoned(a.format('%Y-%m-%dT%H:%M:%S')! + '[' + name + ']')! != a:
+        bad += 1
+        print('ZONED %{id}: the reading without an offset differs')
     if time.date(y, mo, d)!.at(h, mi, s, z)! != a or time.datetime(y, mo, d, h, mi, s)!.replace_zone(z)! != a:
         bad += 1
         print('LOCAL %{id}: `Date.at` or `replace_zone` differs')

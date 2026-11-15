@@ -300,6 +300,18 @@ time.format_offset(330)             --> str             +05:30
 27. 규칙 계산은 Go `tzset`처럼 그 순간의 해에서 시작 · 끝 시각을 구해 비교한다. `Mm.w.d` · `Jn` · `n`, 시각은 -167..167시간(v3).
     날 없이 DST만 있는 규칙(`EST5EDT`)은 C 라이브러리들처럼 미국 규칙으로 읽는다.
 
+28. RFC 9557(`2026-07-04T08:00:00-04:00[America/New_York]`)은 `format()` · `parse()`와 따로 `dt.format_zoned()` ·
+    `time.parse_zoned(s)`로 둔다(결정 26의 "`format()`은 RFC 3339 그대로"는 유지: 로그와 JSON에 들어가는 기본 출력에 괄호가 붙으면
+    RFC 3339만 읽는 쪽이 깨진다). jiff의 `Zoned` 출력 · 파싱과 같은 규칙이다.
+    - 출력: zone이 DB 이름을 가질 때만 괄호를 붙인다(POSIX 규칙의 zone과 이름을 모르는 로컬 zone은 `format()`과 같다).
+      괄호가 붙으면 UTC도 `Z`가 아니라 `+00:00`으로 쓴다(RFC 9557에서 `Z`는 "그 장소의 오프셋을 모름").
+    - 파싱: 오프셋은 겹친 시각의 어느 쪽인지를 정한다. 글의 오프셋이 zone의 그 순간 오프셋과 다르면 `error.Conflict`
+      (jiff `OffsetConflict::Reject`: 글이 쓰인 뒤 zone의 규칙이 바뀐 것이라 조용히 한쪽을 고르지 않는다). `Z`면 순간을 지키고
+      zone이 오프셋을 준다. 오프셋이 없으면 zone 안의 시계 값(`compatible`). `[+09:00]`은 고정 오프셋. `[u-ca=gregory]` 같은
+      다른 꼬리는 건너뛰고 `!`가 붙은 모르는 꼬리는 오류(RFC 9557의 critical flag). zone은 `time.zone(name)`으로 읽으므로
+      DB가 없으면 `error.NotFound`.
+    - `time.parse`는 괄호를 읽지 않고, 어디로 가라는 문구로 `error.Syntax`.
+
 ### API(추가)
 
 ```cy
@@ -313,6 +325,8 @@ z.datetime(y, mo, d, h, mi, s, ns, .reject)      --> !DateTime
 t.to_zone(z)  dt.to_zone(z)             --> DateTime        같은 순간
 dt.replace_zone(z)                      --> !DateTime       같은 시계 값
 dt.zone()                               --> ?Zone
+dt.format_zoned()                       --> str             2026-07-04T08:00:00-04:00[America/New_York]
+time.parse_zoned(s)                     --> !DateTime       error.Conflict · error.NotFound
 d.at(h, mi, s, z)                       --> !DateTime
 ```
 
@@ -322,7 +336,8 @@ d.at(h, mi, s, z)                       --> !DateTime
 - `modules/time_zone.cy`: `src/test/assets/time-zone`의 TZif 넷(tzdata 2026f)을 읽어 Python `zoneinfo`가 같은 파일에서 낸 값과
   비교, 잘린 파일은 `error.Syntax`. `os.read_file`을 쓰므로 `regex_spec.cy`와 같은 조건에서 돈다.
 - Python `zoneinfo`와 차분 시험(`src/tools/time_zone_fuzz_gen.py` · `time_zone_fuzz_run.cy`): 시스템 DB의 모든 zone에서 고른
-  순간(절반은 전이 근처)의 오프셋 · 약어 · DST와, 시계 값을 `fold` 0 · 1로 읽은 순간을 네 방식과 비교. 40,000건 차이 없음(Debug 28,000 · ReleaseSafe 12,000). 13단계 검증 통과.
+  순간(절반은 전이 근처)의 오프셋 · 약어 · DST와, 시계 값을 `fold` 0 · 1로 읽은 순간을 네 방식과 비교하고, `format_zoned` → `parse_zoned` 왕복을 본다. 40,000건 차이 없음(Debug 28,000 · ReleaseSafe 12,000),
+  왕복 검사를 넣은 뒤 16,000건 더. 13단계 검증 통과.
 - `time.zig`의 이름 검증 단위 테스트는 `lib-test`에서 돈다.
 
 ### 작업 중 찾은 결함(추가)
@@ -333,6 +348,6 @@ d.at(h, mi, s, z)                       --> !DateTime
 ## 남은 일
 
 - 내장 tzdata(Windows · wasm에서 이름으로 찾기)와 Windows의 로컬 시간대. 크기(200~700 kB)와 갱신 주기를 보고 정한다.
-- RFC 9557 꼬리(`[Asia/Seoul]`)의 출력과 파싱, `Date`의 주 날짜 파싱, 기간 표기(`PT1H`).
+- `Date`의 주 날짜 파싱, 기간 표기(`PT1H`).
 - 한 전이 앞뒤 하루 안에 전이가 또 있으면 `at_local`이 가까운 쪽 하나만 본다(tzdata 2026f에는 그런 zone이 차분 시험에서
   드러나지 않았다).

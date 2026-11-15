@@ -1203,7 +1203,27 @@ fn (&Date) format(fmt str) -> !str:
 
 -fn (&Scan) rfc3339(default_off int) -> !DateTime:
     var p Parts = {}
-    self.date_part(&p)!
+    self.clock_part(&p)!
+    if self.at_end():
+        if default_off == NoOffset:
+            self.fail(self.pos, 'The text has no UTC offset such as `Z` or `+09:00`. To read it at an offset, pass the offset in minutes: `time.parse(s, 0)` reads it as UTC.')
+            return error.Syntax
+    else:
+        if self.peek() == '[':
+            self.fail(self.pos, 'A time zone in brackets is read by `time.parse_zoned`.')
+            return error.Syntax
+        p.off = self.offset()!
+        p.has_off = true
+        if !self.at_end():
+            if self.peek() == '[':
+                self.fail(self.pos, 'A time zone in brackets is read by `time.parse_zoned`.')
+                return error.Syntax
+            return self.expected('the end of the text after the UTC offset')
+    return self.finish(&p, default_off)
+
+-- Reads the date, the separator and the time of day of an RFC 3339 timestamp.
+-fn (&Scan) clock_part(p &Parts) -> !void:
+    self.date_part(p)!
     sep := self.peek()
     if self.at_end() or (sep != 'T' and sep != 't' and sep != ' '):
         return self.expected('`T` or a space between the date and the time of day')
@@ -1217,16 +1237,6 @@ fn (&Date) format(fmt str) -> !str:
     if !self.at_end() and (c == '.' or c == ','):
         self.pos += 1
         p.nsec = self.fraction()!
-    if self.at_end():
-        if default_off == NoOffset:
-            self.fail(self.pos, 'The text has no UTC offset such as `Z` or `+09:00`. To read it at an offset, pass the offset in minutes: `time.parse(s, 0)` reads it as UTC.')
-            return error.Syntax
-    else:
-        p.off = self.offset()!
-        p.has_off = true
-        if !self.at_end():
-            return self.expected('the end of the text after the UTC offset')
-    return self.finish(&p, default_off)
 
 -- Reads the text by a `strptime` format.
 -fn (&Scan) by_format(fmt str, p &Parts) -> !void:
@@ -1848,3 +1858,131 @@ fn (&Zone) datetime(year int, month int, day int, hour int, minute int, second i
         self.pos += 1
         r.secs = self.tz_secs(167)!
     return r
+
+-- RFC 9557: an RFC 3339 timestamp with the time zone in brackets.
+
+--| Returns the value as RFC 9557: RFC 3339 with the name of the time zone in brackets, such as
+--| `2026-07-04T08:00:00-04:00[America/New_York]`. `time.parse_zoned` reads it back with its zone.
+--| A value without a zone, or in a zone that has no name of the time zone database (one of a POSIX rule,
+--| or the zone of the system when its name is not known), is written as `format()` writes it.
+fn (&DateTime) format_zoned() -> str:
+    named := (self.tz.kind == 1 and is_zone_name(self.tz.name_) and self.tz.name_ != 'Local') or self.tz.name_ == 'UTC'
+    if !named:
+        return self.format()
+    text := self.format()
+    if self.off == 0:
+        -- `Z` says that the offset of the place is not known, so the offset is written out.
+        text = text[0..text.len() - 1] + '+00:00'
+    return text + '[' + self.tz.name_ + ']'
+
+-- Whether `name` has the shape of a name of the time zone database. The same rule as in `time.zig`.
+-fn is_zone_name(name str) -> bool:
+    if name.len() == 0 or name.len() > 255:
+        return false
+    prev := byte('/')
+    for 0..name.len() |i|:
+        c := name[i]
+        if c == '/':
+            if prev == '/':
+                return false
+        else !(is_digit(c) or str.is_ascii_lower(c) or str.is_ascii_upper(c) or c == '+' or c == '-' or c == '_'):
+            return false
+        prev = c
+    return prev != '/'
+
+--| Parses an RFC 9557 timestamp: RFC 3339 with a time zone in brackets, such as
+--| `2026-07-04T08:00:00-04:00[America/New_York]`. The zone is read with `time.zone`, and the value is in it.
+--| The offset says which of two readings it is when the clock was set back. With `Z` in the place of the
+--| offset, or without one, the zone gives the offset. A text without brackets is read as `time.parse` reads it,
+--| and `[+09:00]` is a fixed offset. Other tags in brackets such as `[u-ca=gregory]` are skipped.
+--| `error.NotFound` when the system does not have the zone, and `error.Conflict` when the offset in the text
+--| is not the offset of the zone at that time: the rules of the zone changed after the text was written.
+fn parse_zoned(s str) -> !DateTime:
+    var diag Diag = {}
+    return parse_zoned(s, &diag)
+
+fn parse_zoned(s str, diag &Diag) -> !DateTime:
+    diag.msg = ''
+    diag.pos = 0
+    sc := Scan{src=s}
+    return sc.rfc9557() !else |err|:
+        report(&sc, diag)
+        return err
+
+-fn (&Scan) rfc9557() -> !DateTime:
+    var p Parts = {}
+    self.clock_part(&p)!
+    zulu := false
+    if !self.at_end() and self.peek() != '[':
+        zulu = self.peek() == 'Z' or self.peek() == 'z'
+        p.off = self.offset()!
+        p.has_off = true
+    -- The tags. The first one without `=` is the time zone.
+    name := ''
+    name_pos := 0
+    while !self.at_end() and self.peek() == '[':
+        open := self.pos
+        self.pos += 1
+        critical := false
+        if !self.at_end() and self.peek() == '!':
+            critical = true
+            self.pos += 1
+        start := self.pos
+        while !self.at_end() and self.peek() != ']':
+            self.pos += 1
+        if self.at_end():
+            self.fail(open, 'This `[` is not closed.')
+            return error.Syntax
+        tag := self.src[start..self.pos]
+        self.pos += 1
+        if tag.index('=') != none:
+            if critical:
+                self.fail(open, 'The tag `' + tag + '` is marked as required with `!`, and it is not known here.')
+                return error.Syntax
+            continue
+        if name.len() > 0 or tag.len() == 0:
+            self.fail(open, 'Expected one time zone in brackets, such as `[Asia/Seoul]`.')
+            return error.Syntax
+        name = tag
+        name_pos = start
+    if !self.at_end():
+        return self.expected('the end of the text, or a time zone in brackets')
+    if name.len() == 0:
+        if !p.has_off:
+            self.fail(self.pos, 'The text has no UTC offset and no time zone in brackets.')
+            return error.Syntax
+        return self.finish(&p, 0)
+    if name[0] == '+' or name[0] == '-':
+        -- A fixed offset in the brackets.
+        sub := Scan{src=name}
+        fixed := sub.offset() !else |err|:
+            self.fail(name_pos, 'Expected an offset such as `+09:00` in the brackets.')
+            return err
+        if !sub.at_end():
+            self.fail(name_pos, 'Expected an offset such as `+09:00` in the brackets.')
+            return error.Syntax
+        if p.has_off and !zulu and p.off != fixed:
+            self.fail(name_pos, 'The offset of the text is ' + format_offset(p.off) + ' and the offset in the brackets is ' + format_offset(fixed) + '.')
+            return error.Conflict
+        if p.has_off:
+            dt := self.finish(&p, 0)!
+            return dt.to_offset(fixed)
+        return self.finish(&p, fixed)
+    z := zone(name) !else |err|:
+        if err == error.NotFound:
+            self.fail(name_pos, 'The system has no time zone `' + name + '`.')
+        else:
+            self.fail(name_pos, 'The data of the time zone `' + name + '` can not be read.')
+        return err
+    dt := self.finish(&p, 0)!
+    if !p.has_off:
+        -- A clock reading in the zone.
+        return dt.replace_zone(z) !else |err|:
+            self.fail(0, 'The time is out of range: years 1 to 9999.')
+            return err
+    res := dt.to_zone(z)
+    if !zulu and res.off != p.off:
+        self.fail(name_pos, 'The offset of the text is ' + format_offset(p.off) + ', and `' + name + '` is at ' + format_offset(res.off) + ' at that time.')
+        return error.Conflict
+    return res
+

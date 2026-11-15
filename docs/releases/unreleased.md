@@ -102,7 +102,7 @@
     `%j`는 `%m` · `%d` · `%e` · `%b`와 함께 쓸 수 없고(`error.Format`), 월 `00`은 `error.Range`다.
   - 오류: `error.Syntax`(글이 다름) · `error.Range`(값이 범위 밖) · `error.Format`(형식 문자열), 문구와 위치는 `time.Diag{msg, pos}`.
     연산자 `+` · `-`는 범위를 넘으면 panic, 이름 있는 메서드는 `error.Range`.
-  - `os.FileInfo`에 `mtime()` · `atime()` · `ctime()` → `!time.Time`. 정수 칸(`mtime_sec` ...)은 그대로다.
+  - 파일 시각은 `time.unix(info.mtime_sec, info.mtime_nsec)`로 `Time`이 된다. `os`는 `time`을 가져오지 않는다.
   - Python `datetime`과의 차분 시험 78,000건(달력 분해 · 요일 · ISO 주 · `strftime` · 파싱 왕복 · 월 덧셈)에서 차이가 없었다.
   - 시간대(DST): `time.zone('Asia/Seoul')` → `!Zone`이 시스템의 zoneinfo 폴더(`TZDIR`, `/usr/share/zoneinfo` 등)에서 IANA 시간대를
     읽는다. 없는 이름은 `error.NotFound`. Windows · wasm에는 그 폴더가 없어 `UTC`만 찾는다. 데이터로 만드는 길은

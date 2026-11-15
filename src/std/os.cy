@@ -1,7 +1,6 @@
 ﻿use io
 use meta
 use c
-use time
 
 #[cond=meta.system() == .macos]
 use macos 'os.macos.cy'
@@ -915,18 +914,6 @@ type FileInfo:
     -- Last status/metadata change time since UNIX epoch. 
     ctime_sec  int
     ctime_nsec int
-
---| Returns the time of the last modification.
-fn (&FileInfo) mtime() -> !time.Time:
-    return time.unix(self.mtime_sec, self.mtime_nsec)
-
---| Returns the time of the last access.
-fn (&FileInfo) atime() -> !time.Time:
-    return time.unix(self.atime_sec, self.atime_nsec)
-
---| Returns the time of the last change of the status of the file (its metadata).
-fn (&FileInfo) ctime() -> !time.Time:
-    return time.unix(self.ctime_sec, self.ctime_nsec)
 
 type FileKind enum:
     case block_device

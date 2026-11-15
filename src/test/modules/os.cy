@@ -175,15 +175,14 @@ t.eq(os.FileKind.file, entries[2].kind)
 -- File times as `time.Time`.
 os.write_file('src/test/assets/write.txt', 'x')!
 info := os.fileInfo('src/test/assets/write.txt')!
-mt := info.mtime()!
+mt := time.unix(info.mtime_sec, info.mtime_nsec)!
 t.eq(info.mtime_sec, mt.unix())
 t.eq(info.mtime_nsec, mt.subsec_nanos())
 age := time.now() - mt
 t.eq(true, age < time.minutes(10))
 t.eq(true, age > time.minutes(-10))
-t.eq(true, os.fileInfo('src/test/assets/file.txt')!.mtime()! <= mt)
-t.eq(info.atime_sec, info.atime()!.unix())
-t.eq(info.ctime_sec, info.ctime()!.unix())
+old := os.fileInfo('src/test/assets/file.txt')!
+t.eq(true, time.unix(old.mtime_sec, old.mtime_nsec)! <= mt)
 
 -- writeFile(str)
 if meta.cpu() != 'wasm32':

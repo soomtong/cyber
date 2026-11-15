@@ -699,14 +699,31 @@ fn (&DateTime) format() -> str:
 --| `error.Format` for another specifier.
 fn (&DateTime) format(fmt str) -> !str:
     abbr := ''
-    if self.tz.kind != 0:
-        abbr = self.tz.info_at(self.sec).abbr
-    else self.off == 0:
-        abbr = 'UTC'
-    else:
-        abbr = str(put_offset({}, self.off, true))
+    if has_zone_spec(fmt):
+        -- The abbreviation is found only for `%Z`.
+        abbr = self.abbr()
     f := Formatter{day=self.local_day(), sod=self.day_sec(), nsec=self.nsec, off=self.off, unix=self.sec, date_only=false, abbr=abbr}
     return str(f.run({}, fmt)!)
+
+-fn (&DateTime) abbr() -> str:
+    if self.tz.kind != 0:
+        return self.tz.info_at(self.sec).abbr
+    if self.off == 0:
+        return 'UTC'
+    return str(put_offset({}, self.off, true))
+
+-- Whether a format has `%Z`. `%%` is a percent sign, and the letter after it is not a specifier.
+-fn has_zone_spec(fmt str) -> bool:
+    i := 0
+    n := fmt.len()
+    while i + 1 < n:
+        if fmt[i] == '%':
+            if fmt[i + 1] == 'Z':
+                return true
+            i += 2
+            continue
+        i += 1
+    return false
 
 -- Date.
 
@@ -1061,10 +1078,10 @@ fn (&Date) format(fmt str) -> !str:
     start := self.pos
     v := 0
     while self.pos < self.src.len() and self.pos - start < max:
-        c := int(self.src[self.pos])
-        if c < 48 or c > 57:
+        c := self.src[self.pos]
+        if !str.is_ascii_digit(c):
             break
-        v = v * 10 + (c - 48)
+        v = v * 10 + int(c - '0')
         self.pos += 1
     if self.pos - start < min:
         return self.expected(what)
@@ -1080,11 +1097,11 @@ fn (&Date) format(fmt str) -> !str:
     start := self.pos
     v := 0
     while self.pos < self.src.len():
-        c := int(self.src[self.pos])
-        if c < 48 or c > 57:
+        c := self.src[self.pos]
+        if !str.is_ascii_digit(c):
             break
         if self.pos - start < 9:
-            v = v * 10 + (c - 48)
+            v = v * 10 + int(c - '0')
         self.pos += 1
     count := self.pos - start
     if count == 0:
@@ -1109,7 +1126,7 @@ fn (&Date) format(fmt str) -> !str:
     if !self.at_end() and self.peek() == ':':
         self.pos += 1
         m = self.digits(2, 2, 'the two digits of the offset minutes')!
-    else !self.at_end() and is_digit(self.peek()):
+    else !self.at_end() and str.is_ascii_digit(self.peek()):
         m = self.digits(2, 2, 'the two digits of the offset minutes')!
     if h > 23 or m > 59:
         self.fail(start, 'A UTC offset is at most 23:59.')
@@ -1117,9 +1134,6 @@ fn (&Date) format(fmt str) -> !str:
     if c == '-':
         return -(h * 60 + m)
     return h * 60 + m
-
--fn is_digit(c byte) -> bool:
-    return c >= '0' and c <= '9'
 
 -fn is_space(c byte) -> bool:
     return c == ' ' or c == '\t' or c == '\n' or c == '\r'
@@ -1906,7 +1920,7 @@ fn (&DateTime) format_zoned() -> str:
         if c == '/':
             if prev == '/':
                 return false
-        else !(is_digit(c) or str.is_ascii_lower(c) or str.is_ascii_upper(c) or c == '+' or c == '-' or c == '_'):
+        else !(str.is_ascii_digit(c) or str.is_ascii_alpha(c) or c == '+' or c == '-' or c == '_'):
             return false
         prev = c
     return prev != '/'

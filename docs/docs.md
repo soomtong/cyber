@@ -4440,13 +4440,17 @@ print(dt.add_months(3)!.format())        --> 2027-02-15T10:22:03.5+09:00
 ```
 There is no date and time without an offset, and nothing uses the time zone of the system unless the script asks for it with `time.local()`: a value always says which instant it is. The calendar is the proleptic Gregorian one, with years 1 to 9999. Leap seconds are not counted, as in Unix time, and a `:60` in a text reads as `:59`.
 
-`time.now()` returns the `Time` of the system clock. Instants compare with `<`, `<=`, `>`, `>=` and `==`, and their difference is a `Duration`. `os.FileInfo` gives the times of a file as `Time`:
+`time.now()` returns the `Time` of the system clock. Instants compare with `<`, `<=`, `>`, `>=` and `==`, and their difference is a `Duration`. The times of a file in `os.FileInfo` are Unix seconds and nanoseconds, and `time.unix` turns them into a `Time`:
 ```cy
 use os
 use time
 
-a := os.fileInfo('build.zig')!.mtime()!
-b := os.fileInfo('zig-out/bin/cyber')!.mtime()!
+fn mtime(path str) -> !time.Time:
+    info := os.fileInfo(path)!
+    return time.unix(info.mtime_sec, info.mtime_nsec)
+
+a := mtime('build.zig')!
+b := mtime('zig-out/bin/cyber')!
 if a > b:
     print('the build is out of date')
 if time.now() - b > time.hours(24):

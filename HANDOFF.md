@@ -1,9 +1,16 @@
-# HANDOFF (2026-11-15)
+# HANDOFF (2026-11-16)
 
 ## 지금 상태
 
 - 최신 릴리스 0.4.11(태그 `097b831f`, `build-883-097b831`, Latest). 노트 `docs/releases/0.4.11.md`.
-- 로컬 master는 `origin/master`(`58d0bbb2`)보다 두 커밋(`7a0c9015` F-147 · F-148 수정, 그다음 `regex` 모듈) 앞서 있다. push는 사용자 지시 때.
+- 2026-11-16: `time` 코드 리뷰(`/code-review 4b4e2306..HEAD`, 10건) 반영을 마쳤다.
+  - 커밋 `0a123f4a`: 1 `%j`와 월 0 혼동(`Parts.yday` · `has_md`), 2 `Duration` 범위 비대칭(`dur()`), 3 `local()`의 `error.Syntax`
+    누출 → `NotFound`, 4 `format_zoned`가 사용자 이름을 괄호에 씀(`Zone.db`), 9 `Duration.format` 문서, 10 릴리스 노트 첫 bullet.
+  - 그다음 커밋: 5 `%Z`가 없으면 약어를 구하지 않음(`has_zone_spec`), 7 `os`에서 `use time`과 `FileInfo.mtime()` ·
+    `atime()` · `ctime()` 제거(`time.unix(info.mtime_sec, info.mtime_nsec)`로 안내), 8 `is_digit` 등을 core `str.is_ascii_*`로.
+    6(`DateTime` 안 `Zone` 크기)은 사용자 결정으로 보류, 이유는 `project_std_time.md` "보류: `DateTime` 안의 `Zone` 크기".
+    두 커밋 모두 13단계 검증 rc=0.
+- 로컬 master와 `origin/master`가 같다(2026-11-16 사용자 지시로 push). 그 뒤 push도 사용자 지시 때만.
 - 0.4.11 뒤 변경(모두 `docs/releases/unreleased.md`에 있다):
   - `e25e7d76`: tars-agent CodeAct 회차의 오류 문구 여섯(`for ... in`, `q: byte = 0`, `var` 없는 타입 선언, `none` 비교,
     옵션 아닌 값의 `?else`, 연산자 타입 불일치).
@@ -24,7 +31,7 @@
     "Parsing expression grammars.".
   - 그다음 커밋: F-154(괄호 묶음 뒤 연산자 우선순위: `a - (b) / 2 + 1`이 `a - ((b) / 2 + 1)`로 파싱됐다) 수정.
   - 그다음 커밋: 표준 모듈 `time`(`Time` · `DateTime` · `Date` · `Duration`, UTC와 분 단위 고정 오프셋, RFC 3339 · strftime 부분집합).
-    달력 · 파서 · 포매터는 순수 Cyber `src/std/time.cy`, 시계 둘만 `src/std/time.zig`. `cl_mod_bind_time`. `os.FileInfo.mtime()` 등.
+    달력 · 파서 · 포매터는 순수 Cyber `src/std/time.cy`, 시계 둘만 `src/std/time.zig`. `cl_mod_bind_time`. 파일 시각은 `time.unix(info.mtime_sec, info.mtime_nsec)`.
     Python `datetime`과 차분 시험 78,000건 차이 없음. 설계와 Rust · Zig · Nim · Python 비교는
     `docs/decisions/project_std_time.md`, 사용자 문서 `docs/docs.md` "Dates and times.".
   - 그다음 커밋: F-155(`bool` · enum · `error` · raw 필드가 있는 구조체의 `==`가 컴파일 오류) 수정.
@@ -71,6 +78,9 @@
   (`a.time() < b.time()`). `parse_format`은 `%Z` · `%U` · `%W` · `%c`를 받지 않고 `%f`가 숫자를 끝까지 먹는다.
   시간대 DB를 내장하지 않아 Windows · wasm에서는 `time.zone(name)` · `time.local()`이 `error.NotFound`다(`UTC`와
   `zone_from_tzif` · `zone_from_posix`는 된다). RFC 9557은 `format_zoned` · `parse_zoned`만 다룬다(`format` · `parse`는 RFC 3339).
+  `format_zoned`는 `time.zone` · `time.local`로 읽은 zone만 괄호를 붙인다(데이터로 만든 zone은 오프셋만). 같은 바이트라도 DB에서
+  읽은 zone과 `zone_from_tzif`의 zone은 `==`에서 다르다. `parse_format`에서 `%j`는 `%m` · `%d` · `%e` · `%b`와 함께 쓸 수 없다.
+  모든 `DateTime`이 `Zone` 값을 통째로 품는다(30칸 가까이). `==` 오버로드가 없어 공유 참조로 못 줄였다.
 - 하위 블록에서는 `move` · `meta.consume`을 못 쓴다(`else` 갈래의 consume은 뒤까지 죽은 상태로 남는다). 컴파일 타임
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).

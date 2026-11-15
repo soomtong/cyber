@@ -135,8 +135,10 @@
     둘을 가른다. 벽시계는 뒤로 갈 수 있으므로 걸린 시간은 `monotonic()`으로 잰다. Zig 바인딩 `real_ns_` · `mono_ns_`
     (`Io.Timestamp.now(io, .real | .awake)`)만 네이티브고 나머지는 순수 Cyber다. 달력 계산은 문자열 하나에 수십 번의 정수 연산이라
     `regex` · `peg`처럼 Zig로 옮길 이유가 없다.
-14. 파일 시각: `os.FileInfo`에 `mtime()` · `atime()` · `ctime()` → `!time.Time`(Rust `modified()`, Nim `getLastModificationTime`).
-    정수 칸(`mtime_sec` · `mtime_nsec`)은 그대로 둔다. 범위 밖의 값이면 `error.Range`.
+14. 파일 시각: `os.FileInfo`는 정수 칸(`mtime_sec` · `mtime_nsec` ...)만 두고, `time.unix(info.mtime_sec, info.mtime_nsec)`로
+    `Time`을 만든다(범위 밖이면 `error.Range`). 처음에는 `FileInfo.mtime()` · `atime()` · `ctime()` → `!time.Time`(Rust `modified()`,
+    Nim `getLastModificationTime`)을 두었으나 뺐다(2026-11-16): 그 세 메서드 때문에 `os`가 `use time`을 하게 되어, `use os`를 쓰는
+    모든 프로그램이 약 2,000줄인 `time.cy`를 컴파일했다. 변환은 `time` 쪽 함수 하나로 충분하다.
 15. 요일은 enum `Weekday`(월요일이 0: Nim · Python `weekday()`), `iso_weekday()`는 1..7. 월 · 일 · 연중 일은 1부터(Nim의 0부터 `yearday`를
     따르지 않는다). ISO 주는 `iso_week()` → `IsoWeek{year, week}`.
 16. 달력 변환은 Howard Hinnant의 `days_from_civil` · `civil_from_days`(루프 없는 정수 산술, era 400년). Neri-Schneider가 더 빠르지만
@@ -303,7 +305,10 @@ time.format_offset(330)             --> str             +05:30
 28. RFC 9557(`2026-07-04T08:00:00-04:00[America/New_York]`)은 `format()` · `parse()`와 따로 `dt.format_zoned()` ·
     `time.parse_zoned(s)`로 둔다(결정 26의 "`format()`은 RFC 3339 그대로"는 유지: 로그와 JSON에 들어가는 기본 출력에 괄호가 붙으면
     RFC 3339만 읽는 쪽이 깨진다). jiff의 `Zoned` 출력 · 파싱과 같은 규칙이다.
-    - 출력: zone이 DB 이름을 가질 때만 괄호를 붙인다(POSIX 규칙의 zone과 이름을 모르는 로컬 zone은 `format()`과 같다).
+    - 출력: zone이 DB에서 읽은 것(`time.zone` · `time.local`, `Zone.db`)이고 이름이 DB 이름 모양일 때만 괄호를 붙인다.
+      `zone_from_tzif` · `zone_from_posix`의 zone과 이름을 모르는 로컬 zone은 `format()`과 같다. 처음에는 `zone_from_tzif`에
+      준 이름도 그대로 썼으나, `[Office]`처럼 `parse_zoned`가 찾지 못하는 글이 나와 바꿨다(2026-11-16). 그 대가로 같은 바이트라도
+      DB에서 읽은 zone과 데이터로 만든 zone은 `==`에서 다르다.
       괄호가 붙으면 UTC도 `Z`가 아니라 `+00:00`으로 쓴다(RFC 9557에서 `Z`는 "그 장소의 오프셋을 모름").
     - 파싱: 오프셋은 겹친 시각의 어느 쪽인지를 정한다. 글의 오프셋이 zone의 그 순간 오프셋과 다르면 `error.Conflict`
       (jiff `OffsetConflict::Reject`: 글이 쓰인 뒤 zone의 규칙이 바뀐 것이라 조용히 한쪽을 고르지 않는다). `Z`면 순간을 지키고
@@ -344,6 +349,21 @@ d.at(h, mi, s, z)                       --> !DateTime
 
 - F-155: `bool` · enum · `error` · raw 정수 필드가 있는 구조체의 `==`가 컴파일 오류였다(core `@eq`). `Zone`에 `bool` 필드를
   두다가 찾았고 먼저 고쳤다.
+
+### 보류: `DateTime` 안의 `Zone` 크기 (2026-11-16)
+
+`DateTime`은 `Zone` 값 전체(int 10여 칸, `str` 둘, `Rule` 안의 `str` 둘과 `RuleDay` 둘)를 품는다. 고정 오프셋 값도 빈 `Zone`을
+품어서 3칸이면 될 값이 30칸 가까이 된다. 리뷰에서 `?Zone`이나 공유 참조를 제안받았으나 지금은 바꾸지 않는다.
+
+- `^ZoneData` 같은 공유 참조는 `==`가 identity 비교다(core `@eq`: "Comparing references returns true if they refer to the same
+  instance"). `==`는 오버로드할 수 없으므로, `time.zone('Asia/Seoul')`을 두 번 부르면 다른 zone이 되고
+  `parse_zoned(s) == dt.to_zone(z)` 같은 비교가 깨진다. 결정 21이 피하려던 Python의 객체 동일성 문제를 다시 들이게 된다.
+  같게 만들려면 이름 · 바이트로 zone을 모으는 캐시가 필요한데, 그것은 `global`(안전하지 않은 전역 상태)이다.
+- `?Zone`은 payload를 inline으로 두므로 크기가 줄지 않는다.
+- 실제 비용은 생각보다 작다. `str` 복사는 refcount만 올리고, `str` 비교(`@memByteEqs`)는 같은 버퍼면 포인터 비교로 끝난다.
+  한 zone에서 나온 값끼리의 `==`는 3.5 kB를 읽지 않는다. 남는 것은 struct 칸 복사와 retain 네 번이다.
+- 다시 볼 때: `==` 오버로드나 값 의미의 공유 참조가 생기면 `Zone`을 `^` 한 칸으로 줄인다. `p_*` 칸은 TZif 헤더에서 다시 구할 수
+  있어 줄일 수 있으나, 그만큼 `info_at`마다 헤더를 읽는다.
 
 ## 남은 일
 

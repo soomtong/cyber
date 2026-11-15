@@ -486,6 +486,63 @@ test "cl_vm_interrupt stops a running eval." {
     thread.join();
 }
 
+test "cl_vm_interrupt stops a peg match without a failed match." {
+    if (is_wasm) return;
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    const S = struct {
+        var started = std.atomic.Value(bool).init(false);
+        var failed = false;
+        fn mod_started(t_: *C.Thread) callconv(.c) C.Ret {
+            _ = C.thread_ret(t_, void);
+            started.store(true, .release);
+            return C.RetOk;
+        }
+        fn mod_failed(t_: *C.Thread) callconv(.c) C.Ret {
+            _ = C.thread_ret(t_, void);
+            failed = true;
+            return C.RetOk;
+        }
+        fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+            const name = C.from_bytes(uri);
+            if (std.mem.eql(u8, name, "mod")) {
+                C.mod_add_func(mod, "started", C.BIND_FUNC(&mod_started));
+                C.mod_add_func(mod, "failed", C.BIND_FUNC(&mod_failed));
+                res[0].src = C.to_bytes("#[bind] fn started()\n#[bind] fn failed()");
+                return true;
+            } else {
+                return C.default_loader(vm_, mod, uri, res);
+            }
+        }
+        fn interrupter(vm_: *C.VM) void {
+            while (!started.load(.acquire)) {
+                std.atomic.spinLoopHint();
+            }
+            C.vm_interrupt(vm_);
+        }
+    };
+    C.vm_set_loader(vm, @ptrCast(&S.loader));
+
+    // The match backtracks for a very long time. The interrupt stops the eval: the script never sees it as a failed
+    // match. The matcher returns its own result for it and `peg.cy` loops to the checkpoint.
+    const thread = try std.Thread.spawn(.{}, S.interrupter, .{vm});
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.ErrorInterrupt, C.vm_eval(vm,
+        \\use mod
+        \\use peg
+        \\p := peg.compile("s <- 'a' s 'x' / 'a' s 'y' / 'a'")!
+        \\s := 'a'.repeat(40) + 'z'
+        \\mod.started()
+        \\if p.match(s) == none:
+        \\    mod.failed()
+    , &res));
+    thread.join();
+    try zt.eq(false, S.failed);
+}
+
 test "Spawned threads stop with the eval and do not abort the host." {
     if (is_wasm) return;
     const vm = C.vm_init();

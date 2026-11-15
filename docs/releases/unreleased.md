@@ -73,7 +73,8 @@
   - 컴파일 오류(`error.Syntax`, `peg.Diag{msg, pos, line, col}`): left recursion, 빈 문자열에 맞을 수 있는 것의 반복, 정의 없는 규칙,
     그리고 `re`에서 Lua 함수나 표가 필요한 것(`p -> name` · `p => name` · `{| p |}`).
   - `parse`가 실패하면 `error.NoMatch`이고 `Diag`가 가장 멀리 간 실패 위치와 그 자리에서 기대한 것을 말한다
-    (``Expected `'('` or `%d` at line 1, column 8, found `)`.``, `diag.expected`).
+    (``Expected `'('` or `%d` at line 1, column 8, found `)`.``, `diag.expected`). 반복은 표기와 상관없이 멈춘 자리에서 그 대상을
+    기대 목록에 넣는다(`[a-z]+`와 `('a')*`가 같다).
   - `regex`와 달리 시간 보장이 없다(역추적). 한도: 매칭 스택 100000 항목(`error.TooDeep`), 캡처 100만 개 · 프로그램 65536 명령
     (`error.TooBig`), 문법 중첩 250단계. `match` · `find` 계열은 실행 중 한도를 넘으면 panic이다.
   - `re`와 다른 점: 리터럴과 클래스에 이스케이프가 있다, `{:name: p :}`가 결과의 노드다, `=name`은 그 캡처가 맞은 텍스트 전체와

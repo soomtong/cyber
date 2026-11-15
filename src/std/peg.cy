@@ -105,18 +105,19 @@ const CapPos = 5
 -- `exec` modes and results.
 const ModeSearch = 1
 const ModeTrack = 2
-const OutLen = 24
+const OutLen = 25
 const OutStart = 0
 const OutEnd = 1
 const OutCaps = 2
 const OutFar = 3
 const OutFails = 4
 const OutPcs = 5
+const OutRes = 24
 const ResMatch = 1
 const ResNone = 0
 const ResStack = -1
 const ResCaps = -2
-const ResGrow = -3
+const ResInterrupt = -4
 
 -- Node kinds.
 const NEmpty = 0
@@ -143,8 +144,9 @@ const NBackref = 11  -- a: name
     depth int = 0
 
 #[bind]
--fn exec(prog [&]int, hay str, start int, mode int, out [&]int, caps [&]int) -> int
+-fn exec(prog [&]int, hay str, start int, mode int, out [&]int, caps [&]int, buffer_t int) -> []int
 
+-- The length of the unit of input at byte `i` as the matcher counts it, 1 at the end so that a search moves on.
 #[bind]
 -fn unit_len(hay str, i int) -> int
 
@@ -156,11 +158,7 @@ fn compile(grammar str) -> !Peg:
 
 --| Compiles a grammar. On failure, `diag` tells where and why.
 fn compile(grammar str, diag &Diag) -> !Peg:
-    diag.msg = ''
-    diag.pos = 0
-    diag.line = 0
-    diag.col = 0
-    diag.expected = {}
+    diag.* = Diag{}
     if !str.is_utf8(grammar.span()):
         diag.msg = 'The grammar is not valid UTF-8.'
         return error.Syntax
@@ -193,13 +191,16 @@ fn (&Peg) source() -> str:
 -fn new_run() -> Run:
     return Run{out=[]int(OutLen, 0), caps=[]int(192, 0)}
 
--- Runs the program. The capture log grows until the match fits.
+-- Runs the program. A capture log that does not fit in `r.caps` comes back in a bigger slice, which is kept.
 -fn (&Peg) run(s str, start int, mode int, r &Run) -> int:
     while:
-        res := exec(self.prog.span(), s, start, mode, r.out.span(), r.caps.span())
-        if res != ResGrow:
+        grown := exec(self.prog.span(), s, start, mode, r.out.span(), r.caps.span(), type.id(RawBuffer[byte]))
+        if grown.len() > 0:
+            r.caps = grown
+        res := r.out[OutRes]
+        if res != ResInterrupt:
             return res
-        r.caps = []int(r.out[OutCaps] * 3, 0)
+        -- The host asked the VM to stop: the checkpoint of this loop stops it before the match runs again.
 
 -fn check(res int) -> bool:
     if res == ResStack:
@@ -230,11 +231,7 @@ fn (&Peg) parse(s str) -> !Capture:
 --| Matches all of `s`. On failure, `diag` tells the farthest place that the match reached and what the grammar
 --| expected there.
 fn (&Peg) parse(s str, diag &Diag) -> !Capture:
-    diag.msg = ''
-    diag.pos = 0
-    diag.line = 0
-    diag.col = 0
-    diag.expected = {}
+    diag.* = Diag{}
     r := new_run()
     res := self.run(s, 0, ModeTrack, &r)
     if res == ResStack:
@@ -297,7 +294,7 @@ fn (&Peg) parse(s str, diag &Diag) -> !Capture:
         return 'a line feed'
     if c < 32 or c == 127:
         return 'the control character %{c}'
-    n := step(s, pos)
+    n := unit_len(s, pos)
     if !str.is_utf8(s[pos..pos + n].span()):
         return 'the byte %{c}'
     return '`' + s[pos..pos + n] + '`'
@@ -324,7 +321,14 @@ fn (&Peg) find(s str, start int) -> ?Capture:
 --| Returns every match in `s` from left to right. The matches do not overlap. An empty match that touches the end
 --| of the match before it is left out.
 fn (&Peg) find_all(s str) -> []Capture:
+    var ranges []int = {}
     var res []Capture = {}
+    self.scan(s, &ranges, &res, true)
+    return res
+
+-- Finds the matches of `find_all`: the start and the end of each in `ranges`, and its tree in `trees` when
+-- `want_trees`. The trees are left out when only the places are needed, as they cost a string for each capture.
+-fn (&Peg) scan(s str, ranges &[]int, trees &[]Capture, want_trees bool):
     r := new_run()
     at := 0
     last_end := -1
@@ -335,14 +339,16 @@ fn (&Peg) find_all(s str) -> []Capture:
         end := r.out[OutEnd]
         if start == end:
             if end == last_end:
-                at = end + step(s, end)
+                at = end + unit_len(s, end)
                 continue
-            at = end + step(s, end)
+            at = end + unit_len(s, end)
         else:
             at = end
         last_end = end
-        res = res.append(self.tree(s, &r))
-    return res
+        ranges.* = ranges.*.append(start)
+        ranges.* = ranges.*.append(end)
+        if want_trees:
+            trees.* = trees.*.append(self.tree(s, &r))
 
 --| Returns `s` with the leftmost match replaced by `repl`, see `replace_all`.
 fn (&Peg) replace(s str, repl str) -> str:
@@ -354,31 +360,33 @@ fn (&Peg) replace(s str, repl str) -> str:
 --| In `repl`, `$0` stands for the match, `$1` and `${1}` for its first capture, `$name` and `${name}` for the first
 --| capture with that name, and `$$` for a `$`. A capture that does not exist gives nothing.
 fn (&Peg) replace_all(s str, repl str) -> str:
+    plain := repl.index('$') == none
+    var ranges []int = {}
+    var trees []Capture = {}
+    self.scan(s, &ranges, &trees, !plain)
     var buf []byte = {}
     last := 0
-    plain := repl.index('$') == none
-    for self.find_all(s) |c|:
-        buf = buf.append(s[last..c.start].span())
+    for 0..ranges.len() / 2 |i|:
+        buf = buf.append(s[last..ranges[i * 2]].span())
         if plain:
             buf = buf.append(repl.span())
         else:
-            buf = buf.append(c.expand(repl).span())
-        last = c.end
+            buf = buf.append(trees[i].expand(repl).span())
+        last = ranges[i * 2 + 1]
     buf = buf.append(s[last..].span())
     return str(buf)
 
 --| Returns the pieces of `s` between the matches.
 fn (&Peg) split(s str) -> []str:
+    var ranges []int = {}
+    var trees []Capture = {}
+    self.scan(s, &ranges, &trees, false)
     var res []str = {}
     last := 0
-    for self.find_all(s) |c|:
-        res = res.append(s[last..c.start])
-        last = c.end
+    for 0..ranges.len() / 2 |i|:
+        res = res.append(s[last..ranges[i * 2]])
+        last = ranges[i * 2 + 1]
     return res.append(s[last..])
-
--- The length of the unit of input at byte `i` as the matcher counts it, 1 at the end so that a search moves on.
--fn step(s str, i int) -> int:
-    return unit_len(s, i)
 
 -- Builds the tree of captures from the log of a match.
 -fn (&Peg) tree(s str, r &Run) -> Capture:
@@ -1210,10 +1218,9 @@ fn (&Builder) resolve() -> !void:
             continue
         name := self.calls[self.nodes[i].a]
         found := -1
-        if self.rules.len() > 0:
-            for 0..self.rules.len() |r|:
-                if self.rules[r] == name:
-                    found = r
+        for 0..self.rules.len() |r|:
+            if self.rules[r] == name:
+                found = r
         if found == -1:
             if self.rules.len() == 0:
                 return self.fail_at(self.nodes[i].from, 'There is no rule `%{name}`. Text goes in quotes: `\'%{name}\'`. A rule is defined as `%{name} <- ...`.')
@@ -1351,7 +1358,7 @@ fn (&Builder) text_of(n int) -> str:
     if txt.len() > 40 or txt.index('\n') != none:
         end := 0
         while end < txt.len() and end < 37 and txt[end] != '\n':
-            end += step(txt, end)
+            end += unit_len(txt, end)
         return txt[0..end] + '...'
     return txt
 
@@ -1393,7 +1400,9 @@ fn (&Builder) gen(n int) -> !void:
                 self.gen(node.a)!
             if node.c == -1:
                 if self.nodes[node.a].kind == NSet:
-                    _ = self.emit(OpSpan, HeaderLen + self.lits.len() + self.nodes[node.a].a, 0)!
+                    span := self.emit(OpSpan, HeaderLen + self.lits.len() + self.nodes[node.a].a, 0)!
+                    -- Where it stops, the set was expected, as in the loop that it stands for.
+                    self.expects(span, self.text_of(node.a))
                 else:
                     choice := self.emit(OpChoice, 0, 0)!
                     top := self.here()

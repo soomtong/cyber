@@ -399,7 +399,11 @@ t.eq(true, err_of(stars).index('nests deeper than 250 levels') != none)
 
 -- `parse` tells the farthest failure and what was expected there.
 t.eq("error.NoMatch 3: Expected `'('` or `%d` at line 1, column 4, found `)`.", parse_err("list <- '(' item (',' item)* ')'\nitem <- list / %d+", '(1,)'))
-t.eq("error.NoMatch 2: Expected `','` or `')'` at line 1, column 3, found the end of the input.", parse_err("list <- '(' item (',' item)* ')'\nitem <- list / %d+", '(1'))
+t.eq("error.NoMatch 2: Expected `%d`, `','` or `')'` at line 1, column 3, found the end of the input.", parse_err("list <- '(' item (',' item)* ')'\nitem <- list / %d+", '(1'))
+-- A repeated set tells the same as any other repetition where it stops.
+t.eq("error.NoMatch 3: Expected the end of the input, `[a-z]` or `' '` at line 1, column 4, found `1`.", parse_err(`[a-z]+ ' '?`, 'abc1'))
+t.eq("error.NoMatch 3: Expected the end of the input, `[a-z]` or `' '` at line 1, column 4, found `1`.", parse_err(`[a-z]* ' '?`, 'abc1'))
+t.eq("error.NoMatch 2: Expected the end of the input, `'a'` or `' '` at line 1, column 3, found `1`.", parse_err(`('a')* ' '?`, 'aa1'))
 t.eq("error.NoMatch 1: Expected the end of the input at line 1, column 2, found `b`.", parse_err("'a'", 'ab'))
 t.eq("error.NoMatch 2: Expected the end of the input or `'a'` at line 1, column 3, found `b`.", parse_err("'a'*", 'aab'))
 t.eq("error.NoMatch 0: Expected `'a'` at line 1, column 1, found the end of the input.", parse_err("'a'", ''))
@@ -420,9 +424,10 @@ else:
 t.eq(3, pd.line)
 t.eq(1, pd.col)
 t.eq(7, pd.pos)
-t.eq(2, pd.expected.len())
-t.eq("'('", pd.expected[0])
-t.eq('%d', pd.expected[1])
+t.eq(3, pd.expected.len())
+t.eq('%s', pd.expected[0])
+t.eq("'('", pd.expected[1])
+t.eq('%d', pd.expected[2])
 t.eq('ok', parse_err("'a'*", 'aaa'))
 
 -- Limits of a match.

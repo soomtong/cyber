@@ -79,14 +79,15 @@ const OUT_CAPS = 2;
 const OUT_FAR = 3;
 const OUT_FAILS = 4;
 const OUT_PCS = 5;
-const OUT_LEN = 24;
-const MaxFails = OUT_LEN - OUT_PCS;
+const OUT_RES = 24;
+const OUT_LEN = 25;
+const MaxFails = OUT_RES - OUT_PCS;
 
 const RES_MATCH: i64 = 1;
 const RES_NONE: i64 = 0;
 const RES_STACK: i64 = -1;
 const RES_CAPS: i64 = -2;
-const RES_GROW: i64 = -3;
+const RES_INTERRUPT: i64 = -4;
 
 /// The same values as `MaxStack` and `MaxCaptures` in `peg.cy`.
 const MaxStack = 100000;
@@ -150,14 +151,22 @@ const Entry = struct {
 };
 
 /// The capture log: the buffer of the caller while it fits, then memory of its own.
+/// Two links for each entry, which only the matcher uses, make a back reference and a close take one step for
+/// each capture that they pass, not for each entry: `links[2i]` is the entry that closes the named capture that a
+/// back reference after entry `i` sees first, and `links[2i + 1]` is the entry that opens the capture that is open
+/// after entry `i`. `None` is for none.
 const Caps = struct {
     buf: []i64,
     len: usize,
     owned: bool,
+    links: []u32 = &.{},
     alloc: std.mem.Allocator,
+
+    const None = std.math.maxInt(u32);
 
     fn deinit(self: *Caps) void {
         if (self.owned) self.alloc.free(self.buf);
+        self.alloc.free(self.links);
     }
 
     fn push(self: *Caps, kind: i64, aux: i64, at: usize) !void {
@@ -171,6 +180,13 @@ const Caps = struct {
             self.buf = new;
             self.owned = true;
         }
+        if ((self.len + 1) * 2 > self.links.len) {
+            const cap = @max(@as(usize, 64), self.len * 2) * 2;
+            const new = try self.alloc.alloc(u32, cap);
+            @memcpy(new[0 .. self.len * 2], self.links[0 .. self.len * 2]);
+            self.alloc.free(self.links);
+            self.links = new;
+        }
         const e = self.buf[self.len * CapLen ..][0..CapLen];
         e[0] = kind;
         e[1] = aux;
@@ -178,25 +194,41 @@ const Caps = struct {
         self.len += 1;
     }
 
+    /// The link `k` after the first `n` entries.
+    inline fn link(self: *const Caps, n: usize, k: usize) u32 {
+        return if (n == 0) None else self.links[(n - 1) * 2 + k];
+    }
+
+    fn open(self: *Caps, kind: i64, aux: i64, at: usize) !void {
+        const i = self.len;
+        try self.push(kind, aux, at);
+        self.links[i * 2] = self.link(i, 0);
+        self.links[i * 2 + 1] = @intCast(i);
+    }
+
+    /// Closes the capture that is open. The entry keeps the index of the entry that opened it in `aux`.
+    fn close(self: *Caps, at: usize) !void {
+        const i = self.len;
+        const o = self.link(i, 1);
+        if (o == None) return error.BadProgram;
+        try self.push(0, o, at);
+        const e = self.buf[o * CapLen ..][0..CapLen];
+        // The captures inside are hidden now.
+        self.links[i * 2] = if (e[0] == CapNamed) @intCast(i) else self.link(o, 0);
+        self.links[i * 2 + 1] = self.link(o, 1);
+    }
+
     /// Returns the input range of the capture named `name` that was closed last, among the first `n` entries.
-    /// As LPeg does, it walks back over whole captures: a capture that is closed hides the captures inside it,
-    /// and a capture that is still open is passed so that the captures before it are seen.
+    /// As LPeg does, a capture that is closed hides the captures inside it, and a capture that is still open does
+    /// not hide the captures before it and inside it.
     fn lastNamed(self: *const Caps, n: usize, name: i64) ?[2]usize {
-        var i = n;
-        while (i > 0) {
-            i -= 1;
-            if (self.buf[i * CapLen] != 0) continue;
-            // `i` closes a capture. Find the entry that opens it.
-            const close = i;
-            var depth: usize = 1;
-            while (depth > 0) {
-                i -= 1;
-                if (self.buf[i * CapLen] == 0) depth += 1 else depth -= 1;
+        var c = self.link(n, 0);
+        while (c != None) {
+            const o: usize = @intCast(self.buf[c * CapLen + 1]);
+            if (self.buf[o * CapLen + 1] == name) {
+                return .{ @intCast(self.buf[o * CapLen + 2]), @intCast(self.buf[c * CapLen + 2]) };
             }
-            const e = self.buf[i * CapLen ..][0..CapLen];
-            if (e[0] == CapNamed and e[1] == name) {
-                return .{ @intCast(e[2]), @intCast(self.buf[close * CapLen + 2]) };
-            }
+            c = self.link(o, 0);
         }
         return null;
     }
@@ -246,17 +278,22 @@ fn unitLen(t: *cy.Thread) anyerror!C.Ret {
     return C.RetOk;
 }
 
-/// `fn exec(prog [&]int, hay str, start int, mode int, out [&]int, caps [&]int) -> int`
+/// `fn exec(prog [&]int, hay str, start int, mode int, out [&]int, caps [&]int, buffer_t int) -> []int`
 ///
 /// Matches `prog` at byte `start` of `hay`. With `MODE_SEARCH`, a failed match is tried again one code point later
-/// until the end of the input. Returns 1 for a match and 0 for none. `out` gets the start and the end of the match
-/// and the number of entries in the capture log, which is in `caps`: three words an entry, `kind, aux, position`,
-/// where kind 0 closes the capture that is open. When `caps` is too short, the result is -3 and `out` has the number
-/// of entries that it needs. With `MODE_TRACK`, `out` also gets the farthest place where the match failed outside
-/// a predicate and the instructions that failed there. The result is -1 when the stack is over `MaxStack` and -2
-/// when the log is over `MaxCaptures`.
+/// until the end of the input. `out[OUT_RES]` gets 1 for a match and 0 for none. `out` also gets the start and the
+/// end of the match and the number of entries in the capture log, which is in `caps`: three words an entry,
+/// `kind, aux, position`, where kind 0 closes the capture that is open and its `aux` is the index of the entry that
+/// opened it. When the log does not fit in `caps`, it is returned in a new slice (`buffer_t` is the type of its
+/// buffer) that the caller keeps for the next match; otherwise the result is empty and has no buffer. With
+/// `MODE_TRACK`, `out` also gets the farthest place where the match failed outside a predicate and the
+/// instructions that failed there. `out[OUT_RES]` is -1 when the stack is over `MaxStack`, -2 when the log is over
+/// `MaxCaptures` and -4 when the host asked the VM to stop.
 fn exec(t: *cy.Thread) anyerror!C.Ret {
-    const ret = t.ret(i64);
+    const ret = t.ret(cy.heap.Slice);
+    // An empty slice without a buffer, as `[]int{}` is.
+    const words: *[4]u64 = @ptrCast(ret);
+    words.* = .{ 0, 0, 0, 1 << 63 };
     const prog: []const i64 = spanWords(t.param(cy.heap.Span));
     const hay_str = t.param(cy.heap.Str);
     defer t.heap.destructStr(&hay_str);
@@ -264,9 +301,9 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
     const mode = t.param(i64);
     const out = spanWords(t.param(cy.heap.Span));
     const caps_arg = spanWords(t.param(cy.heap.Span));
+    const buffer_t: cy.TypeId = @intCast(t.param(i64));
     const hay = hay_str.slice();
 
-    ret.* = RES_NONE;
     if (prog.len < H_LEN or prog[H_MAGIC] != Magic or out.len < OUT_LEN) return error.BadProgram;
     const ninst_w = prog[H_NINST];
     const inst_off = prog[H_INST_OFF];
@@ -309,7 +346,9 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
             }
             steps += 1;
             if (steps % InterruptEvery == 0 and @atomicLoad(u8, t.c.interrupt, .acquire) != 0) {
-                // The host asked the VM to stop. The match ends without a result and the VM stops at its next check.
+                // The host asked the VM to stop. The match ends without a result, and the caller loops so that its
+                // checkpoint stops the VM: the result must not be taken for a failed match.
+                out[OUT_RES] = RES_INTERRUPT;
                 return C.RetOk;
             }
             if (pc >= ninst) return error.BadProgram;
@@ -372,11 +411,13 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
                         if (!setMatch(set, d.cp)) break;
                         at += d.len;
                     }
+                    // The loop that this stands for fails on the set where it stops.
+                    if (track.on and npred == 0) track.fail(at, pc);
                     pc += 1;
                 },
                 .choice => {
                     if (stack.items.len >= MaxStack) {
-                        ret.* = RES_STACK;
+                        out[OUT_RES] = RES_STACK;
                         return C.RetOk;
                     }
                     const pred = in[2] != 0;
@@ -426,7 +467,7 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
                 },
                 .call => {
                     if (stack.items.len >= MaxStack) {
-                        ret.* = RES_STACK;
+                        out[OUT_RES] = RES_STACK;
                         return C.RetOk;
                     }
                     try stack.append(alloc, .{ .pc = pc + 1, .kind = .call, .at = 0, .ncap = 0 });
@@ -439,9 +480,9 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
                 },
                 .jmp => pc = try target(in[1]),
                 .open => {
-                    caps.push(in[1], in[2], at) catch |err| switch (err) {
+                    caps.open(in[1], in[2], at) catch |err| switch (err) {
                         error.TooManyCaptures => {
-                            ret.* = RES_CAPS;
+                            out[OUT_RES] = RES_CAPS;
                             return C.RetOk;
                         },
                         else => return err,
@@ -449,9 +490,9 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
                     pc += 1;
                 },
                 .close => {
-                    caps.push(0, 0, at) catch |err| switch (err) {
+                    caps.close(at) catch |err| switch (err) {
                         error.TooManyCaptures => {
-                            ret.* = RES_CAPS;
+                            out[OUT_RES] = RES_CAPS;
                             return C.RetOk;
                         },
                         else => return err,
@@ -493,13 +534,19 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
     if (!matched) return C.RetOk;
     out[OUT_CAPS] = @intCast(caps.len);
     if (caps.owned) {
-        if (caps.len * CapLen > caps_arg.len) {
-            ret.* = RES_GROW;
-            return C.RetOk;
+        const n = caps.len * CapLen;
+        if (n > caps_arg.len) {
+            // The whole buffer, so that the next match of the caller has room to grow.
+            const slice = try t.heap.init_slice_undef(buffer_t, caps.buf.len, @sizeOf(i64));
+            const dst = slice.items(i64);
+            @memcpy(dst[0..n], caps.buf[0..n]);
+            @memset(dst[n..], 0);
+            ret.* = slice;
+        } else {
+            @memcpy(caps_arg[0..n], caps.buf[0..n]);
         }
-        @memcpy(caps_arg[0 .. caps.len * CapLen], caps.buf[0 .. caps.len * CapLen]);
     }
-    ret.* = RES_MATCH;
+    out[OUT_RES] = RES_MATCH;
     return C.RetOk;
 }
 

@@ -230,6 +230,17 @@ t.eq(error.Overflow, json.to(int, nums[1]).unwrap_error())
 t.eq(error.Overflow, json.to(int, json.Value.number('1.5e30')).unwrap_error())
 t.eq(error.Type, json.to(int, json.Value.number('1.5')).unwrap_error())
 t.eq(error.Type, json.to(int, json.Value.number('1e-7')).unwrap_error())
+t.eq(error.Type, json.to(int, json.Value.number('1E-99999999999999999999')).unwrap_error())
+t.eq(error.Overflow, json.to(int, json.Value.number('1E+99999999999999999999')).unwrap_error())
+-- An `r64` from 2^63 does not fit `int` and is kept as number text.
+r64_max := r64.ones
+t.eq('18446744073709551615', json.encode(r64_max))
+t.eq('7', json.encode(r64(7)))
+t.eq(r64_max, json.to(r64, json.from(r64_max))!)
+t.eq(r64(9223372036854775807) + r64(1), json.to(r64, json.parse('9223372036854775808')!)!)
+t.eq(r64(5), json.to(r64, json.parse('5')!)!)
+t.eq(error.Overflow, json.to(r64, json.parse('18446744073709551616')!).unwrap_error())
+t.eq(error.Overflow, json.to(r64, json.parse('-1')!).unwrap_error())
 t.eq(error.Overflow, json.to(float, nums[4]).unwrap_error())
 t.eq(error.Type, json.to(str, json.Value.bool(true)).unwrap_error())
 

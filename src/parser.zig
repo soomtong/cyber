@@ -2453,9 +2453,10 @@ pub const Parser = struct {
         if (type_src.len == 0 or type_src.len > 40) {
             return self.reportErrorAtSrc("To declare a typed variable, write `var {} T = value`.", &.{v(name)}, name_tok.pos());
         }
-        switch (self.tokens[eq_pos + 1].tag()) {
+        switch (self.tokenAt(eq_pos + 1).tag()) {
             .dec, .float, .hex, .bin, .oct => {
-                if (self.tokens[eq_pos + 2].tag() == .new_line or self.tokens[eq_pos + 2].tag() == .null) {
+                const after = self.tokenAt(eq_pos + 2).tag();
+                if (after == .new_line or after == .null) {
                     return self.reportErrorAtSrc("To declare a typed variable, write `var {} {} = {}` or `{} := {}({})`.", &.{
                         v(name), v(type_src), v(value), v(name), v(type_src), v(value),
                     }, name_tok.pos());
@@ -4953,6 +4954,15 @@ pub const Parser = struct {
     }
 
     /// When n=0, this is equivalent to peek.
+    /// The token at `pos`, or a `.null` token past the end of the list.
+    inline fn tokenAt(self: Parser, pos: u32) Token {
+        if (pos < self.tokens.len) {
+            return self.tokens[pos];
+        } else {
+            return Token.init(.null, pos, 0);
+        }
+    }
+
     inline fn peekAhead(self: Parser, n: u32) Token {
         if (self.next_pos + n < self.tokens.len) {
             return self.tokens[self.next_pos + n];

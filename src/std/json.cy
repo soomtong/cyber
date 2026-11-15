@@ -395,6 +395,9 @@ fn from(x %T) -> Value:
             #case .int:
                 return Value.int(int(x.*))
             #case .raw:
+                -- `r64` from 2^63 does not fit `int`, so it is kept as number text.
+                if int(x.*) < 0:
+                    return Value.number(r64(x.*).fmt(.dec))
                 return Value.int(int(x.*))
             #case .struct |info|:
                 var obj Object = {}
@@ -470,8 +473,8 @@ fn to(%T type, v Value, diag &Diag) -> !T:
         case .number |s|:
             -- `fmt_number` writes an exponent only below 1e-6, which has a fraction, or from 1e21, which is beyond `int`.
             t := fmt_number(s)
-            is_small := t.contains('e-')
-            has_exp := t.contains('e')
+            is_small := t.contains('e-') or t.contains('E-')
+            has_exp := t.contains('e') or t.contains('E')
             has_frac := t.contains('.')
             if is_small or (has_frac and !has_exp):
                 diag.msg = 'Expected an integer, found `%{s}`.'
@@ -493,6 +496,31 @@ fn to(%T type, v Value, diag &Diag) -> !T:
             return mismatch(diag, 'an integer', v)
         else:
             return mismatch(diag, 'an integer', v)
+
+--| Returns an `r64` from 2^63, which `to_whole` cannot return as an `int`. Other values give `none`.
+-fn to_big_r64(v &Value, diag &Diag) -> !?r64:
+    switch v.*:
+        case .number |s|:
+            t := fmt_number(s)
+            if t.len() < 19 or t[0] == '-' or t.contains('.') or t.contains('e') or t.contains('E'):
+                return none
+            max_div := r64.ones / r64(10)
+            var acc r64 = 0
+            for 0..t.len() |i|:
+                d := r64(t[i] - '0')
+                if acc > max_div or (acc == max_div and d > r64(5)):
+                    diag.msg = 'The number `%{s}` does not fit `r64`.'
+                    return error.Overflow
+                acc = acc * r64(10) + d
+            if int(acc) < 0:
+                return acc
+            return none
+        case .float |f|:
+            if f >= 9223372036854775808.0 and f < 18446744073709551616.0:
+                return r64(f)
+            return none
+        else:
+            return none
 
 -fn to_ref(%T type, v &Value, diag &Diag) -> !T:
     #if T == Value:
@@ -577,6 +605,9 @@ fn to(%T type, v Value, diag &Diag) -> !T:
                         return error.Overflow
                 return T(i)
             #case .raw |info|:
+                #if info.bits == 64:
+                    if to_big_r64(v, diag)! |r|:
+                        return r
                 i := to_whole(v, diag)!
                 #if info.bits < 64:
                     if i < 0 or i >= (1 << info.bits):

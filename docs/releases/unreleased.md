@@ -78,6 +78,13 @@
   (Release 빌드에서는 오류 없이, Debug · ReleaseSafe에서는 `panic: integer does not fit in destination type`). 이제 개수 제한 없이 맞다(F-147).
 - private choice(`-type Shape enum`)를 복사하거나 해제하면 ``Can not access the private symbol `Tag` in `Shape`.``로 컴파일되지
   않았다. 이제 된다(F-148).
+- 줄바꿈 없이 끝나는 파일의 마지막 줄이 `x: int = 5` · `x int = 5` · `x: int =`이면 타입 선언 안내 대신 컴파일러가
+  `panic: index out of bounds`로 멈췄다. 이제 안내를 보여 준다(F-149).
+- `json.encode` · `json.from`이 2^63 이상인 `r64`를 음수로 썼다(`r64.ones` → `-1`). 이제 `18446744073709551615`처럼
+  부호 없는 수(`number`)로 쓰고, `json.to(r64, v)`도 2^63 이상을 읽는다(F-150).
+- `ParseOptions{exact=true}`로 읽은 `1E-99999999999999999999`를 `json.to(int, v)`하면 `error.Type`이 아니라 `error.Overflow`였다.
+  대문자 `E` 지수도 소문자와 같이 다룬다(F-151).
+- wasm32에서 `io`의 줄 읽기가 F-143과 같은 이유로 `panic: integer does not fit in destination type`으로 멈출 수 있었다(F-152).
 
 ## 임베딩 API
 

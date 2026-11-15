@@ -841,6 +841,13 @@ pub const MapIterator = extern struct {
 pub const PtrSpan = extern struct {
     ptr: u64,
     len: u64,
+
+    pub fn items(self: *const PtrSpan, comptime T: type) []T {
+        // On wasm32 the pointer only fills the low 4 bytes and the rest is padding.
+        const addr: usize = @truncate(self.ptr);
+        var buf: [*]T = @ptrFromInt(addr);
+        return buf[0..@intCast(self.len)];
+    }
 };
 
 pub const EvalStr = extern struct {

@@ -761,6 +761,32 @@ test "windows new lines" {
     }}.func);
 }
 
+test "typed declaration error at the end of the source" {
+    // No new line follows the last token.
+    try eval(.{ .silent = true }, "x: int = 5",
+    struct { fn func(run: *VMrunner, res: EvalResult) !void {
+        try run.expectErrorReport(res, c.ErrorCompile,
+            \\ParseError: To declare a typed variable, write `var x int = 5` or `x := int(5)`.
+            \\
+            \\@MainPath():1:1:
+            \\x: int = 5
+            \\^
+            \\
+        );
+    }}.func);
+    try eval(.{ .silent = true }, "x: int =",
+    struct { fn func(run: *VMrunner, res: EvalResult) !void {
+        try run.expectErrorReport(res, c.ErrorCompile,
+            \\ParseError: To declare a typed variable, write `var x int = value`.
+            \\
+            \\@MainPath():1:1:
+            \\x: int =
+            \\^
+            \\
+        );
+    }}.func);
+}
+
 // test "Function named parameters call." {
 //     const run = VMrunner.create();
 //     defer run.destroy();

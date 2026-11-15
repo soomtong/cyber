@@ -1,0 +1,304 @@
+# Nimony 설계 원칙 검토: 사이버랭이 가져올 것과 두고 갈 것
+
+2026-11-15 작성. 0.5를 앞두고 Nim 3.0(Nimony)의 설계 원칙을 사이버랭의 현재 설계와 맞대 본 검토다. 결정 문서가 아니다.
+채택할 항목은 각각 `docs/decisions/`에 결정을 먼저 적은 뒤 구현한다(`project_direction.md`).
+
+## 0. 출처와 범위
+
+- 원문: Araq, "Nimony: Design principles", https://nim-lang.org/araq/nimony.html (2025-05-03, 2025-05-10 수정).
+  "a new compiler for a variant of Nim which will become Nim 3.0, eventually"라고 스스로 소개한다.
+- 원문은 사양이 아니라 원칙 글이다. 출시 목표는 2025년 가을이었고, 이 검토는 그 글 한 편만 읽었다.
+  nim-lang/nimony 저장소의 지금 상태나 그 뒤의 글은 확인하지 않았다. 아래 "Nimony"는 이 글의 Nimony다.
+- 사이버 쪽 근거는 `docs/docs.md`, `docs/history/*`, `docs/decisions/*`, `src/std/os.cy`다.
+  이번 검토에서는 빌드 도구가 없어 코드를 실행해 확인하지 못했다. 실행 확인이 필요한 주장은 그렇다고 적었다.
+
+## 1. 개요
+
+Nimony의 목표 문장은 하나다. "hard real-time and embedded systems with a (mostly) memory safe language."
+임베디드에서 잘 돌면 어디서든 잘 돈다는 논리이고, 여기서 WCET(최악 실행 시간) 예측 가능성이 나온다.
+"This rules out just-in-time compilers and tracing garbage collectors."
+
+이 목표가 나머지 결정을 끌고 간다.
+
+| 영역 | Nimony의 선택 | 동기 |
+| --- | --- | --- |
+| 메모리 | 소멸자 + move의 스코프 기반 관리. `mm:atomicArc` 하나만 남김. `.acyclic`이 기본, 순환 가능 타입은 `.cyclic` | 예측 가능성, 소멸자의 합성 |
+| 오류 | 예외 유지, 단 예외를 낼 수 있는 루틴은 `{.raises.}` 필수. 표준 `ErrorCode` enum(errno · Windows · HTTP 매핑) | 숨은 제어 흐름 표시, 라이브러리 사이 공통 어휘, 할당 없는 오류 |
+| OOM · nil | 컨테이너는 교체 가능한 `oomHandler` 호출. `.raises` 루틴에서 `ref T`는 nil이 아니고 할당 실패는 `OutOfMemError` | nil 버그 제거 |
+| 제네릭 | 인스턴스가 아니라 제네릭 본문 자체를 완전히 타입 검사. 본문에는 concept 제약 필수 | 이른 오류, 좋은 메시지, IDE 보완 |
+| 동시성 | `spawn` 하나. 같은 스레드인지 다른 스레드인지는 스케줄러가 런타임에 정함. 병렬 for(`||`) | async와 스레드는 같은 함정을 가진다 |
+| 메타프로그래밍 | 매크로 대신 플러그인. 기계어로 컴파일된 외부 프로그램이 타입 검사 뒤의 NIF를 읽고 씀 | 속도, 증분 · 병렬 컴파일 |
+| 표준 컨테이너 | `seq`는 순수 라이브러리, `string`의 컴파일러 마법 최소화 | 언어 핵심 축소 |
+
+## 2. 핵심 디자인과 사이버의 현재 위치
+
+각 항목은 "Nimony / 사이버 지금 / 판정" 순서다.
+
+### 2.1 메모리: 단일 모드와 비순환 기본
+
+- Nimony: "Nim 2's way of doing it is basically perfect and we simply reimplemented it." 바뀐 것은 둘이다.
+  mm 스위치를 모두 걷어내고 `atomicArc` 하나만 남겼다. 순환 수거기는 "unclear if or when it will be ready"이고, 대신
+  `.acyclic`이 기본이며 순환에 낄 수 있는 객체만 `.cyclic`을 붙인다.
+- 사이버 지금: 값 소유권 + 빌림(`&T` · `&&T`) + `@deinit`이 기본이고 `^T`만 ARC다. 순환은 아예 버그로 본다.
+  "reference cycles is a sign of a bug in the program and is reported"이고, 스레드 끝에 탐지해 panic한다. 약한 참조는 없다.
+- 판정: 방향이 같다. 사이버는 Nimony보다 한 걸음 더 갔다. Nimony는 "순환은 드물다"를 기본값으로 삼았고, 사이버는 "순환은 오류"로
+  못박았다. 두 언어 모두 tracing GC를 버리고 결정적 소멸을 택했다.
+- 다른 점 하나: Nimony는 `atomicArc`로 통일했고 사이버의 `^T`는 원자적이지 않다. 사이버는 `^T`가 `Sendable`이 아니라서
+  스레드 사이로 넘어가지 않으므로 원자 연산이 필요 없다. 스레드 경계를 타입으로 막았기 때문에 얻은 이득이고, 유지할 이유가 된다.
+- 가져올 것: 비순환을 정적으로 판정하는 것(3장 B).
+
+### 2.2 오류: 예외 + `.raises`, 그리고 `ErrorCode`
+
+- Nimony: Araq는 "I personally dislike both exceptions and its emulation via sum types."라고 쓴다. 합 타입 쪽에 대한 불만은
+  조기 반환과 `?`가 식 전체에 번지는 것이다. 그가 든 가상 예는 `?fib(n -? 1) +? ?fib(n -? 2)`다.
+  선호하는 방식은 오류 상태를 객체 안에 두는 것(스트림의 오류 상태, NaN, `low(int)`)이다. 그래도 예외는 남기되 예외를 낼 수 있는
+  루틴에 `{.raises.}`를 반드시 붙인다. 구체적인 예외 집합은 적지 않는다.
+- `ErrorCode`: 상속 기반 예외와 나란히 던질 수 있는 enum이다. "How ErrorCode is mapped from and to POSIX errno values,
+  Windows API errors and HTTP status codes was a core consideration." 힙 할당이 없어 OOM도 미리 만들어 둔 예외 객체 없이 전파된다.
+- 사이버 지금: 0.4에서 예외를 버리고 `!T` Result 값으로 갔다. 전파는 `!`, 기본값은 `!else`, 한곳 처리는 `try:` … `else |err|:`
+  블록이다(`project_try_block.md`). `error`는 이름만 담는 값이고 payload · error set 타입은 Planned다.
+- 판정: 전파 모델은 사이버가 낫다. `{.raises.}`는 "이 함수는 실패할 수 있다"만 알려 주고 호출 지점은 여전히 숨은 제어 흐름이다.
+  사이버의 `!`는 전파 지점 하나하나를 보이게 한다. Araq가 싫어한 `?` 소음은 사이버에서 `try` 블록이 줄인다.
+- 그러나 `ErrorCode`는 사이버에 없는 것이고, 지금 실제로 필요한 것이다(3장 A).
+
+~~~cy
+-- Araq가 싫어한 모양. 사이버로 쓰면 이렇다.
+fn fib2(n int) -> !int:
+    return fib(n - 1)! + fib(n - 2)!
+
+-- 여러 `!`를 한곳에서 처리하는 사이버의 답.
+try:
+    a := parse(x)!
+    b := parse(y)!
+    print(a + b)
+else |err|:
+    print('Failed with %{err}.')
+~~~
+
+### 2.3 OOM과 nil
+
+- Nimony: 할당 실패는 교체 가능한 `oomHandler`가 받는다. 기본 핸들러는 "remembers the size of the failing request and then
+  execution continues"이고 `threadOutOfMem()`으로 묻는다. `.raises` 루틴 안에서는 nil 대신 `OutOfMemError`가 나서 `ref T`가
+  nil이 아니게 된다. Araq 스스로 실험적이라고 적었다.
+- 사이버 지금: nil이 없다(`?T`). 메모리는 `project_memory_limit.md`에서 정했다. 한도는 할당자가 아니라 힙 · 스택이 자라는
+  지점에서 검사하고, 넘으면 `panic: OutOfMemory`, eval은 `CL_ERROR_PANIC`을 돌려주며 VM은 다시 쓸 수 있다.
+- 판정: nil은 사이버가 이미 앞섰다. OOM에서 "기억하고 계속 실행"은 사이버의 용도와 맞지 않는다. 임베딩 호스트(tars-agent)에게는
+  깨끗한 panic과 VM 재사용이 더 예측 가능하다. 할당 지점 수백 곳을 실패 가능하게 만드는 비용도 퍼즈로 이미 확인했다.
+  다만 "`!T` 함수 안에서는 OOM을 `error.OutOfMemory` 값으로 돌려준다"는 발상은 3장 A가 정착한 뒤의 장기 후보로 남긴다.
+
+### 2.4 제네릭: 본문 자체의 타입 검사
+
+- Nimony: "performing complete type checking on generic code, not merely on generic instantiations." 본문에 쓰는 연산은
+  concept으로 선언해야 하고, 제약 없는 `proc fib[T](a: T)`는 거절된다.
+
+~~~nim
+type Fibable = concept
+  proc `<=`(a, b: Self): bool
+  proc `+`(x, y: Self): Self
+  proc `-`(x, y: Self): Self
+
+proc fib[T: Fibable](a: T): T =
+  if a <= 2: result = 1
+  else: result = fib(a-1) + fib(a-2)
+~~~
+
+- Nimony가 인정한 타협: 제네릭 값의 대입(`let x = y`)은 허용한다. move 분석이 더 뒤에 돌기 때문에, 복사인지 이동인지를 본문
+  검사 시점에 알 수 없어서다.
+- 사이버 지금: 템플릿(`type C[T Any]`, `fn add[T Any]`)과 제네릭 함수(`%T`, trait 매개변수)는 특수화될 때 구체 타입으로 본문을
+  검사한다(문서와 HANDOFF "템플릿 타입의 메서드는 쓰지 않아도 인스턴스마다 본문이 검사된다" 기준, 이번에 실행 확인은 못 함).
+  원소 타입에 따라 안 되는 메서드는 `#[cond=type.is_copyable(T)]`처럼 조건으로 막는다. trait는 이미 "generic type"으로 제약에 쓰인다.
+- Nimony가 타협한 지점을 사이버는 언어 규칙으로 풀었다. `move`는 복사 가능 여부와 독립이라, 제네릭 코드가 복사 가능 타입과
+  `NoCopy` 타입을 같은 문장으로 다룬다(`Array.append`의 `move val`). 본문 검사 시점에 복사 · 이동을 정할 필요가 없다.
+- 판정: 가져올 가치가 가장 큰 항목이다. 그러나 가장 비싸다(3장 C).
+
+### 2.5 동시성: `spawn` 하나와 구조적 병렬
+
+- Nimony: `spawn` 하나로 async와 스레드를 다룬다. 스레드 안전 규칙은 둘 다에 똑같이 적용한다. 구현은 CPS 변환이다.
+  병렬은 `||` 반복자의 for로 쓴다. 유도 변수가 서로 다른 위치를 보장하고, 루프가 끝나면 모든 병렬이 끝나며, 마지막 반복은
+  호출 스레드가 직접 돌 수 있다. FlowVar를 없애 `Matrix[FlowVar[float]]` 대신 `Matrix[float]`를 쓰게 하려는 것이다.
+
+~~~nim
+var a: array[2, int]
+for i in 0 || 1:
+  a[i] = fib(n-i-1)
+~~~
+
+- 사이버 지금: fiber(협력형, 같은 스레드)와 스레드(`spawn`, `Sendable`)를 일부러 나눴다. fiber는 `scope` 블록 안에서 지역 값을
+  빌릴 수 있다(Scope borrows). 스레드로는 `^T` · `&T`가 넘어가지 않는다. 기다리는 스레드가 대기열의 스레드를 직접 도는 것은
+  "마지막 반복은 호출 스레드가"와 같은 발상이다.
+- 판정: 통합 `spawn`은 가져오지 않는다. Nimony는 async에도 스레드 규칙을 씌워 단순하게 만들었고, 그 대가로 async에서 빌림을 잃는다.
+  사이버는 fiber에서 빌림을 허용하고, 스택이 옮겨질 때 빌림을 보정하는 장치까지 이미 만들었다(`project_stack_ptr_patch.md`).
+  이것이 사이버 동시성의 표현력이고 0.5의 목표("fiber 관련 동시성 동작을 모두 완성")와도 이어진다.
+  구조적 병렬 for는 따로 볼 만하다(3장 D).
+
+### 2.6 메타프로그래밍: 플러그인과 NIF
+
+- Nimony: 매크로를 플러그인으로 대체한다. 플러그인은 기계어로 컴파일되고, 보통 타입 검사 뒤에 돌며, 증분 · 병렬로 돈다.
+  템플릿 · 반복자 · 타입 · 모듈 전체에 붙는다. 타입에 붙인 플러그인(`Matrix {.plugin: "avoidtemps".}`)은 `a*b + c - d`를 제자리
+  `*=` · `+=` · `-=`로 바꿔 임시값을 없앤다(term rewriting macro 대체). 플러그인 API는 아직 없다고 적었다.
+- 사이버 지금: Zig식 컴파일 타임 실행(`#if` · `#for` · `#switch`, `type.info`, `meta` 모듈, `const` 템플릿 매개변수,
+  `type X const:` 타입 평가)이다. 같은 언어, 같은 프로세스 안에서 타입 정보를 보며 돈다.
+- 판정: 가져오지 않는다. 외부 프로그램 플러그인은 대형 컴파일러의 증분 · 병렬 빌드를 위한 것이다. 사이버는 실행 파일 하나로
+  스크립트를 바로 돌리는 CLI이자 임베딩 라이브러리라(`project_direction.md`) 외부 프로세스와 직렬화 IR을 끼울 이유가 없다.
+  "타입 검사 뒤에, 타입 정보를 가진 채로 돈다"는 원칙은 사이버 comptime이 이미 따른다.
+
+### 2.7 단일 모드와 라이브러리 컨테이너
+
+- Nimony는 mm 스위치를 없앴다. 사이버에서 의미를 바꾸는 스위치는 `single_run`(종료 시 `@deinit` 없이 힙 스윕) 하나다.
+  문서에 계약으로 적어 두었으니 됐지만, 같은 종류의 스위치를 더 늘리지 않는다는 기준으로 삼을 만하다.
+- `seq`를 라이브러리로 내린 것은 사이버의 `Array` · `Map` · `Slice`가 `core.cy`에 있는 것과 같은 방향이다.
+
+## 3. 가져올 만한 것
+
+우선순위는 0.5까지 남은 일(fiber 동시성 완성)을 밀어내지 않는 순서로 매겼다.
+
+### A. 표준 오류 어휘 (Nimony `ErrorCode`) — 0.5 전후, 작음
+
+문제는 지금 코드에 있다. `src/std/os.cy`의 `fromErrno`는 errno 여섯 개만 이름을 붙이고, 나머지는 stderr에 찍은 뒤
+`error.Unknown`을 돌려준다. Windows에서는 panic한다.
+
+~~~cy
+fn fromErrno() -> error:
+    #if meta.system() == .windows:
+        panic('unsupported')
+    #else:
+        switch lc.errno:
+            case lc.EPERM : return error.OperationDenied
+            case lc.ENOENT: return error.FileNotFound
+            case lc.EFAULT: return error.BadAddress
+            case lc.EBADF : return error.BadFile
+            case lc.EACCES: return error.AccessDenied
+            case lc.EINVAL: return error.InvalidArgument
+            else:
+                eprint("errno: %{lc.errno}")
+                return error.Unknown
+~~~
+
+std 전체를 훑으면 이름도 겹친다. 거부를 뜻하는 것만 `AccessDenied` · `OperationDenied` · `NotAllowed` 셋이고, 모름은
+`Unknown` · `UnknownError` · `Unexpected` 셋이다(`src/std` · `src/builtins`의 `error.X`, Zig 쪽 오류 포함이라 스크립트에 모두
+보이는지는 따로 확인해야 한다).
+
+에이전트 루프(tars-agent)에서는 이것이 곧 품질 문제다. 모델이 쓴 스크립트가 오류 이름으로 분기하는데, 같은 실패가 함수마다
+다른 이름이면 분기가 틀린다. `EEXIST` · `ENOTDIR` · `ENOSPC` · `ETIMEDOUT`처럼 흔한 실패가 모두 `Unknown`이 되는 것도 같다.
+
+제안:
+
+1. 표준 이름 집합을 정한다. 기준은 Nimony처럼 errno · Windows 오류 · HTTP 상태를 양방향으로 옮길 수 있는가다.
+   예: `NotFound` · `PermissionDenied` · `AlreadyExists` · `NotADirectory` · `IsADirectory` · `NoSpace` · `TimedOut` ·
+   `Interrupted` · `WouldBlock` · `BrokenPipe` · `ConnectionRefused` · `InvalidArgument` · `OutOfMemory` · `Unsupported` · `Unknown`.
+2. 매핑을 한곳에 둔다. 표준 모듈(가칭 `errors`)에 `from_errno(code int) -> error`, Windows용 `from_win32`,
+   `to_http_status(err error) -> int`. `os.fromErrno`는 그것을 부르고, `eprint` 부작용은 뺀다.
+3. 옛 이름은 한 릴리스 동안 문서상 별칭으로 남긴다. `error`는 이름 값이라 `== error.FileNotFound`로 비교하는 스크립트가 깨진다.
+   별칭을 언어로 지원할지(같은 값으로 취급), 릴리스 노트의 호환성 절로 처리할지는 결정이 필요하다.
+4. Planned인 `error` set 타입이 들어오면 이 집합이 첫 사용처가 된다. 그때 `switch`의 완전성 검사가 생긴다.
+
+~~~cy
+-- 제안 모양(가상, 아직 없는 API).
+use errors
+
+data := os.read_file(path) !else |err|:
+    switch err:
+        case error.NotFound:
+            return default_config()
+        case error.PermissionDenied:
+            eprint('No permission: %{path}')
+            return err
+        else:
+            return err
+~~~
+
+장점: 작다. 언어 규칙을 바꾸지 않는다. 에이전트용 오류 문구 작업(0.4.11 CodeAct 회차)의 연장선이다.
+단점: 이름 변경은 호환성 문제이고, Windows 매핑은 실제 Windows 실행 확인이 필요하다.
+
+### B. 순환 가능성의 정적 판정 (Nimony `.acyclic` 기본) — 0.5 이후, 중간
+
+사이버는 순환을 오류로 보고 스레드 끝에 런타임에서 찾는다. 그런데 순환이 생길 수 있는 타입은 타입 그래프에서 정해진다.
+어떤 타입 `T`의 필드를 따라가다 `^U` 경로로 `T` 자신에게 돌아올 수 없으면, `T` 객체는 순환에 낄 수 없다.
+
+제안:
+
+1. sema가 타입마다 "순환 가능" 비트를 계산한다(`^T` 간선만 따라가는 강결합 요소). 사용자 주석은 필요 없다.
+   Nimony는 `.cyclic`을 사람이 붙이게 했지만, 사이버는 trait 객체(`^Dyn[T]`)를 빼면 타입 그래프가 닫혀 있어 컴파일러가 셀 수 있다.
+   `^Dyn[T]`는 보수적으로 순환 가능으로 본다.
+2. 순환 탐지는 그 비트가 선 객체만 훑는다. 프로그램에 순환 가능 타입이 하나도 없으면 스레드 끝 탐지를 건너뛴다.
+3. LSP에서 순환 가능 타입에 Information 진단을 단다. "이 타입은 `^T`로 자기에게 돌아온다. 부모를 가리키려면 인덱스나 키를 쓴다."
+   지금 문서가 Weak references 절에서 권하는 우회와 같은 말이다.
+
+장점: 규칙이 바뀌지 않는다. 오류를 더 일찍 알려 준다.
+단점: 탐지 비용이 실제로 문제인지 재 본 적이 없다. 측정 전에는 3번(진단)만 가치가 확실하다.
+
+### C. 제네릭 본문의 정의 시점 검사 (Nimony 핵심 변경) — 0.5 이후, 큼
+
+지금 사이버에서 템플릿 본문의 오류는 특수화될 때, 구체 타입이 들어간 상태로 나온다. 그래서 오류가 정의가 아니라 사용
+쪽 이야기처럼 읽히고, 2026-11-12 LSP 설계(`docs/specs/2026-11-12-lsp-design.md`)에서 제네릭 본문 안의 보완 · hover는
+`T`에 대해 할 말이 없다. 에이전트가 쓴 제네릭 코드의 오류 문구도 같은 이유로 덜 정확하다.
+
+~~~cy
+type Shape trait:
+    fn area() -> float
+
+fn describe(s Shape) -> str:
+    return 'area %{s.area()}'     -- Shape에 area가 있으니 정의 시점에 통과할 수 있다.
+    -- s.perimeter()              -- 지금: 특수화될 때 구체 타입으로 검사된다.
+                                  -- 제안: 정의 시점에 "Shape에 perimeter가 없다".
+~~~
+
+단계 제안:
+
+1. 먼저 싸고 바로 이득인 것: 특수화 중 난 오류에 인스턴스화 경로를 붙인다. "`describe[Circle]`을 `main.cy:12`에서 특수화하는
+   중". `src/sema*.zig`에서 이런 문구를 찾지 못했다(grep 기준).
+2. trait로 제약한 매개변수(`s Shape`, `[T Shape]`)를 가진 본문은 정의 시점에 한 번 검사한다. 본문에서 `T`의 값에 쓸 수 있는 것은
+   trait의 메서드와 모든 타입에 공통인 연산(move, 대입, 빌림)뿐이다.
+3. `Any`는 지금처럼 특수화 시점 검사로 남긴다. Nimony는 제약을 강제했지만 사이버는 `#if` · `#switch type.info(T)`로 타입별 분기를
+   하는 comptime 코드가 많아, `Any`를 탈출구로 두는 것이 맞다. C++20 concepts가 제약 없는 템플릿을 남긴 것과 같은 타협이다.
+
+필요한 것: 연산자를 trait로 표현하는 방법(지금 연산자는 메서드라 trait 메서드로 적을 수는 있다), `#[cond]` 메서드가 정의 시점
+검사와 어떻게 만나는지의 규칙. 큰 작업이고 sema 구조를 건드리므로 0.5 뒤에 결정 문서부터 쓴다.
+
+### D. 구조적 병렬 루프 (Nimony `||`) — 0.5 이후, 중간
+
+사이버의 `scope` 블록은 fiber에 대해 이미 "블록이 끝나면 모두 끝난다"를 보장하고, 그 덕에 지역 값을 빌려 준다. Nimony의 병렬
+for는 같은 보장을 스레드에 준다. 사이버로 옮기면 "스레드용 scope"가 되는데, 걸림돌은 `Sendable`이 `&T`를 막는다는 점이다.
+
+필요한 것은 슬라이스를 겹치지 않는 조각으로 나눈 배타 빌림(Rust `chunks_mut`, Nimony의 "유도 변수가 서로 다른 위치")이다.
+문법을 새로 만들기보다 표준 라이브러리 함수(`par.chunks(&&xs, n, fn)` 같은 모양)로 먼저 시도하고, 블록이 끝날 때 모든 스레드를
+기다린다는 계약을 `scope`와 같게 한다. fiber 완성(0.5) 뒤가 맞다.
+
+## 4. Pros vs Cons: Nimony 접근 자체
+
+장점
+
+- 목표 하나(WCET)에서 결정을 끌어내 일관성이 있다. GC · JIT를 버린 이유가 분명하다.
+- 제네릭 본문 검사는 Nim 사용자가 오래 겪은 "인스턴스에서야 터지는 오류"를 정면으로 고친다.
+- `ErrorCode`는 언어 기능이 아니라 어휘의 표준화다. 작고, 라이브러리 생태계 전체에 효과가 있다.
+- mm 스위치 정리는 "모드가 많을수록 버그와 문서가 늘어난다"는 Nim 2의 경험에서 나온 교정이다.
+
+단점
+
+- 오류 처리가 세 갈래다(객체 안 오류 상태, 스레드 지역 오류 변수, `.raises` 예외 + `ErrorCode`). Araq 스스로 경험이 판단할
+  것이라고 적었다. 사이버는 `!T` 하나라 더 단순하다.
+- 순환 수거기가 미정인 채 `.acyclic` 기본으로 갔다. 틀린 주석은 누수가 된다. 사이버는 순환을 오류로 탐지하므로 이 위험이 없다.
+- 플러그인 API가 없고 컴파일러 내부를 import해야 한다. 생태계가 기댈 표면이 아직 없다.
+- 통합 `spawn`은 async에서 빌림을 잃는다.
+
+## 5. 영향과 현재 상황
+
+- Nimony의 메모리 모델은 새것이 아니라 Nim 2의 ARC/ORC를 다듬은 것이다. 그 계보는 C++ RAII와 move, Rust의 소유권, Swift의
+  ARC다. 사이버 0.4의 구조(값 소유권 + 빌림 + `^T` ARC)도 같은 계보에 있고(`docs/history/ownership_memory.md`), 두 언어가 같은
+  결론에 따로 도착했다는 점이 이 설계 공간의 수렴을 보여 준다.
+- 제네릭 본문 검사는 ML · Haskell의 타입 클래스, Rust의 trait bound, C++20 concepts, Swift의 프로토콜 제약이 걸어 온 길이다.
+  Nim은 C++ 템플릿 쪽에서 출발해 그쪽으로 옮겨 가는 중이다. 사이버도 같은 출발점(템플릿)에 있다.
+- 매크로 → 컴파일된 플러그인은 Rust의 proc-macro(별도 크레이트, 컴파일된 코드)와 닮았다. 다만 Rust는 토큰을, Nimony는 타입
+  검사된 NIF를 다룬다.
+- 현재 상황: 원문 기준 출시 목표는 2025년 가을이었다. 이 검토에서는 그 뒤의 진행을 확인하지 않았다. 채택 결정을 할 때 A · C는
+  nim-lang/nimony 저장소의 지금 구현(특히 `ErrorCode` 목록과 매핑, concept 검사 규칙)을 한 번 더 읽는 것이 좋다.
+
+## 6. 결정할 것
+
+1. A(표준 오류 어휘)를 0.4.12 또는 0.5에 넣을지. 넣는다면 옛 이름을 언어 별칭으로 둘지, 호환성 절로만 처리할지.
+2. B는 3번(LSP 진단)만 먼저 할지, 측정을 먼저 할지.
+3. C의 1단계(인스턴스화 경로 오류 문구)를 0.5 전에 할지. 2 · 3단계는 0.5 뒤 결정 문서로.
+4. D는 0.5 범위 밖으로 두는 데 동의하는지.
+
+가져오지 않기로 한 것: 통합 `spawn`(fiber 빌림을 지킨다), 플러그인 · NIF(실행 파일 하나라는 방향), OOM 계속 실행 핸들러
+(깨끗한 panic + VM 재사용 유지), 예외 + `.raises`(`!T`가 이미 더 명시적).

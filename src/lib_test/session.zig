@@ -662,3 +662,28 @@ test "persist_main: the capture error suggests the borrow for a function only." 
         \\if names[0] != 'b': panic('sort')
     , config, &res));
 }
+
+test "persist_main: a dropped Slice resize result on the last line is a compile error." {
+    // As the eval result, `out.remove(1)` would read as an update of `out` that did not happen.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "out := []int{1, 2}\nout.remove(1)", config, &res));
+    {
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, "The result of `remove` is the new list, and `out` keeps the old one. Write `out = out.remove(1)`.") != null);
+    }
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "out := []int{1, 2}", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "out.clear()", config, &res));
+    // Other values on the last line are still the eval result.
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "out.len()", config, &res));
+    try zt.eq(2, @as(*i64, @ptrCast(res.res)).*);
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "out = out.remove(1)\nout", config, &res));
+    try zt.eq(false, res.res_t == @as(C.TypeId, @intCast(C.TypeVoid)));
+}

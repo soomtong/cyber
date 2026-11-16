@@ -75,6 +75,7 @@ fn test_syntax(run: *Runner) void {
     run.case("syntax/foreign_decl_in_func_error.cy");
     run.case("syntax/foreign_decl_mut_error.cy");
     run.case("syntax/foreign_decl_no_value_error.cy");
+    run.case("syntax/foreign_decl_infer_error.cy");
     run.case("syntax/foreign_decl_name_ok.cy");
     run.case("syntax/vector_no_elem_type_error.cy");
     run.case("control_flow/switch_range_open_error.cy");

@@ -2460,6 +2460,16 @@ pub const Parser = struct {
         }
         const name = src[name_tok.pos()..name_tok.data.end];
 
+        if (self.tokenAt(i + 1).tag() == .colon_equal) {
+            // `let x := 1`: only the keyword is extra.
+            const op_end = self.tokens[i + 1].pos() + 2;
+            var line_end: usize = op_end;
+            while (line_end < src.len and src[line_end] != '\n') : (line_end += 1) {}
+            var value = std.mem.trim(u8, src[op_end..line_end], " \t\r");
+            if (value.len == 0 or value.len > 40) value = "value";
+            return self.reportErrorAtSrc("Cyber has no `{}`. Declare with `{} := {}`.", &.{v(kw), v(name), v(value)}, kw_tok.pos());
+        }
+
         var value: []const u8 = "value";
         var value_t: []const u8 = "T";
         var type_src: ?[]const u8 = null;

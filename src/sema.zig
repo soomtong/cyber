@@ -4572,6 +4572,8 @@ fn semaMainResultStmt(c: *cy.Chunk, node: *ast.Node) !void {
     var var_start = c.varStack.items.len;
     var init_after_aux = false;
     var right = try c.semaExpr(child, .{ .assign_to_local = true });
+    // A dropped `Slice` resize result is an error here too, or the last line would read as an update.
+    try checkDroppedSliceResult(c, right.type, child);
     const no_value = right.type.id() == bt.Void or right.type.id() == bt.Never or right.type.kind() == .result or
         (right.resType == .ct_value and right.data.ct_value.type.id() == bt.Void);
     if (no_value) {

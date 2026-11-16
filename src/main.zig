@@ -10,10 +10,12 @@ const cli = @import("cli.zig");
 const os_mod = @import("std/os.zig");
 const fmt = @import("fmt.zig");
 const format_cli = @import("format_cli.zig");
+const doc_cli = @import("doc_cli.zig");
 const is_wasi = builtin.target.os.tag == .wasi;
 
 test {
     std.testing.refAllDecls(cli);
+    _ = doc_cli;
 }
 
 var verbose = false;
@@ -91,6 +93,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
                     cmd = .fmt;
                     i += 1;
                     break;
+                } else if (std.mem.eql(u8, arg, "doc")) {
+                    // The rest of the arguments belong to `cyber doc`.
+                    cmd = .doc;
+                    i += 1;
+                    break;
                 } else if (std.mem.eql(u8, arg, "version")) {
                     cmd = .version;
                 } else if (std.mem.eql(u8, arg, "help")) {
@@ -127,6 +134,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
                 exit(code);
             }
         },
+        .doc => {
+            const code = try doc_cli.main(alloc, args[@min(i, args.len)..], c.version());
+            if (code != 0) {
+                exit(code);
+            }
+        },
         .help => {
             help();
         },
@@ -150,6 +163,7 @@ const Command = enum {
     eval,
     compile,
     fmt,
+    doc,
     help,
     version,
     repl,
@@ -372,6 +386,7 @@ fn help() void {
         \\  cyber [source]          Compile and run.
         \\  cyber compile [source]  Compile and dump the code.
         \\  cyber fmt [path...]     Reformat source files in place. See `cyber fmt --help`.
+        \\  cyber doc [topic]       Print the manual. `cyber doc --for-agents` prints a guide for agents.
         \\  cyber help              Print usage.
         \\  cyber version           Print version number.
         \\

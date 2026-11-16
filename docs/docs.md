@@ -5432,6 +5432,7 @@ typedef struct MyNode {
 * [Help.](#help)
 * [REPL.](#repl)
 * [Format source.](#format-source)
+* [Documentation.](#documentation)
 * [JIT compiler.](#jit-compiler)
 * [C backend.](#c-backend)
 
@@ -5569,6 +5570,24 @@ A directory search skips directories whose name starts with `.` (such as `.git` 
 A file is rewritten in place, it is not replaced by a new file. A symbolic link stays a link and its target is rewritten, hard links stay linked, the permission bits are kept, and a read-only file is reported as an error.
 
 Hosts that embed `libcyber` call the same formatter with `cl_vm_format`. It returns `CL_FORMAT_OK`, `CL_FORMAT_SYNTAX_ERROR` (the source needs a fix, the message is `line:col: message`), `CL_FORMAT_INTERNAL_ERROR` (the formatter refused its own output, the source is fine and should be kept) or `CL_FORMAT_NO_MEMORY`.
+
+## Documentation.
+`cyber doc` prints this manual from the executable, so the text matches the `cyber` that prints it. It works offline and needs no files next to the executable:
+```bash
+cyber doc                 # Print the usage and the chapters with their section ids.
+cyber doc optionals       # Print one section with its subsections.
+cyber doc unwrap-or-panic
+cyber doc --list          # Print every section id, indented by level.
+cyber doc --for-agents    # Print a short guide for coding agents and the topic index.
+```
+
+A section id is the anchor of the section on the docs site: the heading text in lower case, with spaces replaced by `-` and `.`, `/`, `$`, `[`, `]` and `#` removed. A repeated heading gets `-1`, `-2` and so on. The heading text also works (`cyber doc 'Optionals.'`). A part of an id works when only one section contains it. Otherwise the matching ids are listed and the exit code is 1.
+
+`cyber doc --for-agents` prints `docs/agents.md` of the source tree: the differences from Python, the common methods, the modules, examples, and the compile errors whose message does not say the fix. It ends with the chapters and their section ids. A project that is written in Cyber can point its agent instructions (`AGENTS.md`, `CLAUDE.md`) at this command instead of keeping a copy of the guide.
+
+The module API is not in `cyber doc`. It is in `api.html` on the docs site and in `api.json` of each release.
+
+Since `doc` is a command, a script file named `doc` without an extension is run as `cyber ./doc`.
 
 ## JIT compiler.
 The JIT compiler is not supported. Passing `-jit` (or `CL_JIT` through the embedding API) fails with a compile error. Use the default bytecode VM, or the C backend (`-tcc`, `-cc`) for native performance.

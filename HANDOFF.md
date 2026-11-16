@@ -6,7 +6,13 @@
   내용은 표준 모듈 `json` · `toon` · `regex` · `peg` · `time`, CodeAct 오류 문구 여섯, F-141 ~ F-155 수정.
   `unreleased.md`는 머리말만 남았다. 릴리스 run이 동시 push 취소와 runner 끊김으로 세 번 돌았다(`project_fork_release_ci.md`).
 - 릴리스 뒤 `cyber doc [topic]` · `cyber doc --for-agents`를 더했다(`751d9222`, `unreleased.md` CLI 절). 별도 바이너리로 나누지
-  않은 이유는 `078d0641`. 로컬 master와 `origin/master`가 `078d0641`로 같다. push는 사용자 지시 때만.
+  않은 이유는 `078d0641`. `origin/master`는 `078d0641`. push는 사용자 지시 때만.
+- 0.5 fiber 작업(2026-11-16, 사용자 위임으로 진행, 모두 13단계 검증 rc=0, push 안 함):
+  - `fa72869e` 취소 도중 다시 멈춘 `@deinit`도 그 자리에서 끝낸다(전에는 panic). 패드 안 호출 지점을 keep으로 두고 다시 unwind.
+  - `2cac860f` 중첩 `scope`의 `Fiber.waiting()` 답을 Future 완료까지 기억(그룹 400개 2.8초 → 0.24초).
+  - `54b19355` F-156: wasm32에서 4바이트 포인터 둘이 든 칸의 스택 이동 보정(`PtrSlot.ptr_hi`). 오늘 전부터 있던 결함이고, 스택
+    이동 탐침을 테스트로 넣다가 드러났다. 같은 커밋에 "시작 후 멈춘 자식의 스택 이동은 지금 구조에서 안 생김" 확인 기록과
+    변수 `FnTuple` 빌림을 하지 않기로 한 이유(`project_coroutines.md` 끝 세 절).
 - tars-agent는 cyber 0.4.11에 고정(`78df31d`). `730813e`에서 `e25e7d76`의 회신을 기록했고 0.4.12에서 확인한다.
   요청서 `/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.11-codeact-messages.md`.
 
@@ -22,7 +28,9 @@
    - core `@eq`의 choice 지원(`?json.Value == none`, `t.eq`로 choice 비교).
    - 설계 원칙 검토(PR #7, `docs/study/11-design-principles-review.md`) 1.7 · 2.7의 결정 항목: 표준 오류 어휘, 순환 가능성 정적
      판정, 제네릭 본문 정의 시점 검사, 구조적 병렬 루프, 마지막 사용 분석(빌림 NLL · `Slice` 값 의미 · 암시적 이동 · 분기 안 이동).
-   - 0.5 범위. 사용자 목표는 "fiber 관련 동시성 동작을 모두 완성해 0.5".
+   - 0.5 범위. 사용자 목표는 "fiber 관련 동시성 동작을 모두 완성해 0.5". HANDOFF에 있던 fiber 한계는 모두 처리했다.
+     남은 후보(결정 필요): 스펙 6절 4단계의 "(선택)" `spawn f(args)` 호출식 꼴(스레드 문법, tree-sitter · tars-agent 프롬프트 영향),
+     임베딩 `CL_YIELD`(요청자 없음). 이것들을 빼면 0.5 릴리스 준비(버전 · 노트)로 갈 수 있다.
 3. 기술 부채(급하지 않음):
    - carry 재시도 루프: 실패한 본문의 IR을 되돌리는 장치가 없어 사전 단계로 옮기지 못했다. 콜백 반복은 `cyber.h` · docs.md에 적음.
    - `@destruct_span`은 쓰이지 않아 취소 keep 지점이 아니다. 쓰게 되면 더한다.

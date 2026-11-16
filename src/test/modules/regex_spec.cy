@@ -49,7 +49,7 @@ fn expected(m json.Value, groups int) -> str:
 count := 0
 failed := 0
 for files |f|:
-    doc := json.parse(str(os.read_file('src/test/assets/regex-spec/' + f + '.json')!))!
+    doc := json.parse(os.read_file('src/test/assets/regex-spec/' + f + '.json')!)!
     for doc.as_array().? |test|:
         name := test['name'].as_str().?
         pat := test['regex'].as_str().?

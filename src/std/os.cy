@@ -456,13 +456,15 @@ fn parseArgs(opts []str) -> ArgsResult:
         rest = rest,
     }
 
---| Reads the file contents from `path`.
-fn read_file(path str) -> ![]byte:
+--| Reads the file at `path` as text. Returns `error.Unicode` when the contents are not valid UTF-8.
+--| Read bytes with `read_file_bytes`.
+fn read_file(path str) -> !str:
+    return str.from_utf8(read_file_bytes(path)!)
+
+--| Reads the file contents from `path` as bytes.
+fn read_file_bytes(path str) -> ![]byte:
     file := open_file(path)!
     return file.read_all()
-
-fn read_file_str(path str) -> !str:
-    return str(read_file(path)!)
 
 --| Removes an empty directory at `path`.
 fn removeDir(path str) -> !void:
@@ -583,12 +585,13 @@ fn unset_env(key str) -> !void:
         if lc.unsetenv(ckey.ptr) != 0:
             return fromErrno()
 
---| Writes `contents` as a string or bytes to a file.
+--| Writes the text `contents` to a file. Write bytes with `write_file_bytes`.
 fn write_file(path str, contents str) -> !void:
     file := createFile(path)!
     file.write_all(contents)!
 
-fn write_file(path str, contents []byte) -> !void:
+--| Writes the bytes `contents` to a file.
+fn write_file_bytes(path str, contents []byte) -> !void:
     file := createFile(path)!
     file.write_all(contents)!
 

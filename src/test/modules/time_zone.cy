@@ -5,7 +5,7 @@ use time
 use t 'test'
 
 fn load(name str, file str) -> !time.Zone:
-    data := os.read_file('src/test/assets/time-zone/' + file + '.tzif')!
+    data := os.read_file_bytes('src/test/assets/time-zone/' + file + '.tzif')!
     return time.zone_from_tzif(name, data)!
 
 fn at(z &time.Zone, utc str, want str) -> !void:
@@ -85,7 +85,7 @@ t.eq(false, d == d.to_zone(seoul))
 t.eq(true, d.time() == d.to_zone(seoul).time())
 
 -- A file that is cut short, or changed, is not a zone.
-bytes := os.read_file('src/test/assets/time-zone/Asia_Seoul.tzif')!
+bytes := os.read_file_bytes('src/test/assets/time-zone/Asia_Seoul.tzif')!
 for {0, 3, 43, 44, 100, 300, bytes.len() - 6, bytes.len() - 1} |n|:
     t.eq(error.Syntax, time.zone_from_tzif('cut', bytes[0..n]).unwrap_error())
 t.eq(617, bytes.len())

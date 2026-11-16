@@ -6,7 +6,7 @@ use json
 use regex
 use os
 
-doc := json.parse(os.read_file_str(os.args()[1])!)!
+doc := json.parse(os.read_file(os.args()[1])!)!
 count := 0
 bad := 0
 ours_only := 0

@@ -105,7 +105,7 @@ fn (&Tables) get(name str) -> []int:
 
 -- Reads a `range ; value` file. `only` keeps the listed values, or all of them when it is empty.
 fn read_props(path str, only []str) -> !Tables:
-    src := os.read_file_str(path)!
+    src := os.read_file(path)!
     var res Tables = {}
     for src.split('\n') |line|:
         f := fields(line)
@@ -150,7 +150,7 @@ core := read_props(dir + '/DerivedCoreProperties.txt', {'Alphabetic', 'Lowercase
 prop := read_props(dir + '/PropList.txt', {'White_Space', 'Join_Control'})!
 
 -- The UCD version, from the first line: `# DerivedGeneralCategory-18.0.0.txt`.
-head := os.read_file_str(dir + '/DerivedGeneralCategory.txt')!
+head := os.read_file(dir + '/DerivedGeneralCategory.txt')!
 first := head[0..head.index('\n').?]
 version := first[first.index('-').? + 1..first.index('.txt').?]
 
@@ -217,7 +217,7 @@ for 0..bin_names.len() |i|:
     names = names.append(Name{name=loose(bin_aliases[i]), kind=2, table=table_id(tables, sc_end, tables.len(), bin_names[i]).?})
 names = names.append(Name{name='wspace', kind=2, table=table_id(tables, sc_end, tables.len(), 'White_Space').?})
 
-aliases := os.read_file_str(dir + '/PropertyValueAliases.txt')!
+aliases := os.read_file(dir + '/PropertyValueAliases.txt')!
 for aliases.split('\n') |line|:
     f := fields(line)
     if f.len() < 3:
@@ -245,7 +245,7 @@ for aliases.split('\n') |line|:
 
 -- Simple case folding (statuses C and S). Each code point of an orbit points to the next larger one, the largest to
 -- the smallest (as Go's `unicode.SimpleFold`).
-fold_src := os.read_file_str(dir + '/CaseFolding.txt')!
+fold_src := os.read_file(dir + '/CaseFolding.txt')!
 var pairs []int = {}      -- target << 32 || code point
 for fold_src.split('\n') |line|:
     f := fields(line)

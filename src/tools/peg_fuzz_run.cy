@@ -33,7 +33,7 @@ fn show_all(p &peg.Peg, hay str) -> str:
         out += '%{m.start}-%{m.end}'
     return out
 
-doc := json.parse(os.read_file_str(os.args()[1])!)!
+doc := json.parse(os.read_file(os.args()[1])!)!
 count := 0
 bad := 0
 skipped := 0

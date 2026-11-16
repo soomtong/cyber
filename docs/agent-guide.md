@@ -146,6 +146,7 @@ list comprehensions, the `lambda` keyword (a lambda is written `|a, b| a + b` an
 
 - `math`, `test`, `io`
 - `os`: files, directories, environment, processes, `os.args()`. `cli` reads lines and runs the REPL.
+  Text files: `os.read_file(p)!` returns `str`, `os.write_file(p, s)!`. Bytes: `os.read_file_bytes`, `os.write_file_bytes`.
 - `json`, `toon`: parse and stringify, with a value tree.
 - `regex`: a regular expression engine without backtracking (linear time). `peg`: parsing expression grammars.
 - `time`: clocks, durations, dates and IANA time zones.

@@ -673,7 +673,7 @@ print('\xF0\x9F\x90\xB6')    --> 🐶
 `str.from_utf8(bytes)` checks that the bytes are valid UTF-8 and returns `error.Unicode` otherwise,
 so it is the one to use for bytes that come from outside the program:
 ```cy
-data := os.read_file('notes.txt')!
+data := os.read_file_bytes('notes.txt')!
 text := str.from_utf8(data) !else ''
 if str.is_utf8(data.span()):
     print('valid')
@@ -4208,7 +4208,7 @@ The main function can return a result type. `expr!` in its body then returns the
 use os
 
 fn main() -> !void:
-    src := os.read_file_str('missing.txt')!
+    src := os.read_file('missing.txt')!
     print(src)
 
 --> panic: Unwrapped error `error.FileNotFound`.

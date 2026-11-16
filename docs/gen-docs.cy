@@ -21,17 +21,17 @@ skip_api := args.contains('skip-api')
 import_style := args.get('import-style') != none
 
 curDir := os.dirname(meta.mod_uri()).?
-hljs_css := str(os.read_file('%{curDir}/github-dark.min.css')!)
-simple_css = str(os.read_file('%{curDir}/simple.css')!)
+hljs_css := os.read_file('%{curDir}/github-dark.min.css')!
+simple_css = os.read_file('%{curDir}/simple.css')!
 user_css = '<link rel="stylesheet" href="./style.css">'
 if !import_style:
-    css := str(os.read_file('%{curDir}/style.css')!)
+    css := os.read_file('%{curDir}/style.css')!
     user_css = '<style>%{css}</style>'
 
 if !skip_api:
     gen_api_docs(version)!
 
-src := str(os.read_file('%{curDir}/docs.md')!)
+src := os.read_file('%{curDir}/docs.md')!
 csrc := str.initz(src)
 
 parser := md.PARSER{
@@ -52,7 +52,7 @@ tocLinksHtml := []str{}
 for tocLinks |link|:
     tocLinksHtml = tocLinksHtml + '<li><a href="%{link.href}">%{link.text}</a></li>'
 
-hljsJS := str(os.read_file('%{curDir}/highlight.min.js')!)
+hljsJS := os.read_file('%{curDir}/highlight.min.js')!
 
 toc_links := tocLinksHtml.join('\n')
 html := """<html lang="en">
@@ -543,7 +543,7 @@ fn gen_mods_content(cur_dir str, mods []ModulePair) -> !str:
     res := ''
     for mods |m|:
         eprint('gen docs for: %{m.path}')
-        src := str(os.read_file('%{cur_dir}/%{m.path}')!)
+        src := os.read_file('%{cur_dir}/%{m.path}')!
 
         parse_res := cy.parse(src)
         stmts := parse_res.root.?.!root.stmts
@@ -740,7 +740,7 @@ fn gen_api_docs(version str) -> !void:
     }
 
     cur_dir := os.dirname(meta.mod_uri()).?
-    template := str(os.read_file('%{cur_dir}/api_template.html')!)
+    template := os.read_file('%{cur_dir}/api_template.html')!
 
     nav := ''
     content := ''

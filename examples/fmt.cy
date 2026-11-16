@@ -34,7 +34,7 @@ fn main():
         eprint('Usage: cyber examples/fmt.cy [--check] <file.cy>')
         os.exit(2)
 
-    src := os.read_file_str(path) !else |err|:
+    src := os.read_file(path) !else |err|:
         eprint('error: can not read `%{path}`: %{err}')
         os.exit(1)
 

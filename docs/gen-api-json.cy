@@ -169,7 +169,7 @@ fn type_decl_info(stmt ^cy.Node) -> ?TypeEntry:
 
 -- Reads the pairs of `member_aliases` from `sema.zig`: `.{ "startswith", "starts_with" }`.
 fn read_aliases(path str) -> ![]Alias:
-    src := str(os.read_file(path)!)
+    src := os.read_file(path)!
     start := src.index('const member_aliases') ?else:
         return error.MissingAliases
     end := src[start..].index('};') ?else:
@@ -254,7 +254,7 @@ type_idx := Map[str, int]{}
 
 for {core_mods, std_mods} |mods|:
     for mods |m|:
-        src := str(os.read_file('%{cur_dir}/%{m.path}')!)
+        src := os.read_file('%{cur_dir}/%{m.path}')!
         res := cy.parse(src)
         root := res.root ?else:
             panic('parse error: %{m.path}')

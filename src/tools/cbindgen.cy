@@ -40,7 +40,7 @@ user_imports := Map[str, bool]{}
 -- Determine where in the output file to emit generated bindings.
 -- Also collect existing symbols that should be skipped.
 -- Build skip map.
-existing = os.read_file_str(out_path) !else ''
+existing = os.read_file(out_path) !else ''
 if existing != '':
     markerPos = existing.index('\n-- CBINDGEN MARKER') ?else existing.len()
 
@@ -68,7 +68,7 @@ if args.rest.len() <= 1:
 
 headerPath := args.rest[1]
 
-headerSrc := os.read_file_str(headerPath)!
+headerSrc := os.read_file(headerPath)!
 headerSrc = POST_HEADER + headerSrc
 
 log(headerSrc)

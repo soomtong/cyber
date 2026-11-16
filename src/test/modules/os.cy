@@ -40,15 +40,29 @@ t.eq(os.FileKind.directory, dir.info()!.kind)
 rm_res := os.removeFile('src/test/assets/write.txt')
 file := os.createFile('src/test/assets/write.txt')!
 _ = file.write('foobar')!
-t.eq('foobar', str(os.read_file('src/test/assets/write.txt')!))
+t.eq('foobar', os.read_file('src/test/assets/write.txt')!)
 
 -- createFile() no truncate.
 file = os.createFile('src/test/assets/write.txt', false)!
-t.eq('foobar', str(os.read_file('src/test/assets/write.txt')!))
+t.eq('foobar', os.read_file('src/test/assets/write.txt')!)
 
 -- createFile() truncate.
 file = os.createFile('src/test/assets/write.txt', true)!
-t.eq('', str(os.read_file('src/test/assets/write.txt')!))
+t.eq('', os.read_file('src/test/assets/write.txt')!)
+
+-- Text and bytes.
+os.write_file_bytes('src/test/assets/write.txt', []byte{0x68, 0x69})!
+t.eq('hi', os.read_file('src/test/assets/write.txt')!)
+t.eq(2, os.read_file_bytes('src/test/assets/write.txt')!.len())
+t.eq(0x69, os.read_file_bytes('src/test/assets/write.txt')![1])
+os.write_file_bytes('src/test/assets/write.txt', []byte{0xff, 0xfe})!
+read_err := 'none'
+try:
+    _ = os.read_file('src/test/assets/write.txt')!
+else |err|:
+    read_err = '%{err}'
+t.eq('error.Unicode', read_err)
+t.eq(2, os.read_file_bytes('src/test/assets/write.txt')!.len())
 
 -- dirname()
 t.eq(?str(none), os.dirname('.'))
@@ -126,20 +140,20 @@ t.eq('bar', str(file.read(3)!))
 -- File.write(str) from create
 file = os.createFile('src/test/assets/write.txt', true)!
 _ = file.write('foobar')!
-t.eq('foobar', str(os.read_file('src/test/assets/write.txt')!))
+t.eq('foobar', os.read_file('src/test/assets/write.txt')!)
 
 -- File.write(str) from open
 file = os.open_file('src/test/assets/write.txt', .write)!
 file.seekFromEnd(0)!
 _ = file.write('abcxyz')!
-t.eq('foobarabcxyz', str(os.read_file('src/test/assets/write.txt')!))
+t.eq('foobarabcxyz', os.read_file('src/test/assets/write.txt')!)
 
 -- File.write([&]byte) through `Dyn[io.Writer]`. Before F-22 the trait check accepted `write(str)` for this method.
 fn emit(w ^Dyn[io.Writer], bytes [&]byte) -> !int:
     return w.write(bytes)
 bytes := []byte{49, 50, 51}
 t.eq(3, emit(^os.open_file('src/test/assets/write.txt', .write)!, bytes.span())!)
-t.eq('123barabcxyz', str(os.read_file('src/test/assets/write.txt')!))
+t.eq('123barabcxyz', os.read_file('src/test/assets/write.txt')!)
 
 -- Dir.iterator()
 dir = os.open_dir('src/test/assets/dir', true)!

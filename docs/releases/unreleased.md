@@ -16,6 +16,14 @@
   버리던 것을 고쳤다: 모르는 옵션, 옵션과 토픽의 혼용, 옵션 둘은 종료 코드 2다. 글자가 남지 않는 토픽(`""` · `.`)은 모든 절에
   맞는 대신 일치 없음(종료 코드 1)이다.
 
+## 표준 라이브러리
+
+- 깨지는 변경: `os`의 파일 함수 이름을 텍스트 · 바이트 짝으로 맞췄다. `os.read_file(p)`는 `!str`를 돌려주고 UTF-8이 아니면
+  `error.Unicode`다(전에는 `![]byte`). 바이트는 `os.read_file_bytes(p)`, 쓰기는 `os.write_file(p, s)`(텍스트)와
+  `os.write_file_bytes(p, bytes)`다. `os.read_file_str`은 없어졌고 `os.write_file`은 `[]byte`를 받지 않는다. 옮기는 법:
+  `os.read_file_str(p)` · `str(os.read_file(p)!)` → `os.read_file(p)`, 바이트로 쓰던 `os.read_file(p)` → `os.read_file_bytes(p)`,
+  `os.write_file(p, bytes)` → `os.write_file_bytes(p, bytes)`. 결정 `docs/decisions/project_os_file_text_bytes.md`.
+
 ## 동시성
 
 - 취소 도중 `@deinit`이 다시 멈춰도(`suspend` · `await`) panic하지 않는다. 그 `@deinit`은 fiber가 있던 다른 함수처럼 멈춘

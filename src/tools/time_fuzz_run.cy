@@ -6,7 +6,7 @@ use json
 use os
 use time
 
-doc := json.parse(os.read_file_str(os.args()[1])!)!
+doc := json.parse(os.read_file(os.args()[1])!)!
 count := 0
 bad := 0
 for doc.as_array().? |c|:

@@ -9,7 +9,7 @@ args := os.parseArgs({'src', 'dst'})
 dst := args.at('dst')
 src := args.at('src')
 
-contents := os.read_file_str("%{dst}/vendor_files.txt")!
+contents := os.read_file("%{dst}/vendor_files.txt")!
 reader := io.Reader(contents)
 scanner := io.Scanner(&reader)
 while scanner.next_line()! |path|:

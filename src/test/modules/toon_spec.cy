@@ -36,7 +36,7 @@ fn same(a json.Value, b json.Value) -> bool:
 count := 0
 failed := 0
 for files |f|:
-    doc := json.parse(str(os.read_file('src/test/assets/toon-spec/' + f + '.json')!))!
+    doc := json.parse(os.read_file('src/test/assets/toon-spec/' + f + '.json')!)!
     for doc['tests'].as_array().? |i, test|:
         opts := test['options']
         should_err := test['shouldError'].as_bool() ?else false

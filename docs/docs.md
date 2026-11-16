@@ -5584,7 +5584,7 @@ cyber doc --for-agents    # Print a short guide for coding agents and the topic 
 
 A section id is the anchor of the section on the docs site: the heading text in lower case, with spaces replaced by `-` and `.`, `/`, `$`, `[`, `]` and `#` removed. A repeated heading gets `-1`, `-2` and so on. The heading text also works (`cyber doc 'Optionals.'`). A part of an id works when only one section contains it. Otherwise the matching ids are listed and the exit code is 1.
 
-`cyber doc --for-agents` prints `docs/agents.md` of the source tree: the differences from Python, the common methods, the modules, examples, and the compile errors whose message does not say the fix. It ends with the chapters and their section ids. A project that is written in Cyber can point its agent instructions (`AGENTS.md`, `CLAUDE.md`) at this command instead of keeping a copy of the guide.
+`cyber doc --for-agents` prints `docs/agent-guide.md` of the source tree: the differences from Python, the common methods, the modules, examples, and the compile errors whose message does not say the fix. It ends with the chapters and their section ids. A project that is written in Cyber can point its agent instructions (`AGENTS.md`, `CLAUDE.md`) at this command instead of keeping a copy of the guide.
 
 The module API is not in `cyber doc`. It is in `api.html` on the docs site and in `api.json` of each release.
 

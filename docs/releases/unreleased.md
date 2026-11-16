@@ -8,10 +8,13 @@
 
 - `cyber doc [topic]`: 실행 파일에 넣은 매뉴얼(`docs/docs.md`)을 출력한다. 토픽은 문서 사이트의 anchor와 같은 id(`optionals`,
   `for-range`)이고, 제목 글자나 id의 일부로도 찾는다(여럿이 맞으면 후보를 보이고 종료 코드 1). `--list`는 id 전체를 수준별 들여쓰기로 낸다.
-- `cyber doc --for-agents`: 코딩 에이전트용 안내 `docs/agents.md`(Python과 다른 점, 흔한 메서드, 모듈, 예제 11개, 고치는 법을
+- `cyber doc --for-agents`: 코딩 에이전트용 안내 `docs/agent-guide.md`(Python과 다른 점, 흔한 메서드, 모듈, 예제 11개, 고치는 법을
   말하지 않는 오류)와 장 · 절 id 목록을 낸다. 바이너리에 들어 있어 `cyber version`과 항상 맞는다. 안내의 예제는 `cli-test`가 모두
   실행해 낡지 않게 한다. tars-agent `prompt/cyber-subset.en.md`에서 호스트 전용 내용을 뺀 것이 바탕이다.
 - `doc`이 명령이 되어 확장자 없는 스크립트 `doc`은 `cyber ./doc`으로 실행한다.
+- `cyber doc`은 인자를 모두 검사한다. `cyber doc --for-agents --bogus`가 오류 없이 끝나고 `cyber doc optionals --list`가 토픽을
+  버리던 것을 고쳤다: 모르는 옵션, 옵션과 토픽의 혼용, 옵션 둘은 종료 코드 2다. 글자가 남지 않는 토픽(`""` · `.`)은 모든 절에
+  맞는 대신 일치 없음(종료 코드 1)이다.
 
 ## 동시성
 

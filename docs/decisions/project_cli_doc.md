@@ -9,13 +9,13 @@ tars-agent는 Cyber 안내(`prompt/cyber-subset.en.md`)를 자기 저장소에 �
 ## 결정
 
 - 명령 이름은 `cyber doc`이다. `spec`은 형식 명세로 읽히지만 내용은 사용 매뉴얼이다.
-- `docs/docs.md`와 `docs/agents.md`를 `@embedFile`로 실행 파일에 넣는다(`src`밖이라 `build.zig`가 anonymous import로 넘긴다).
+- `docs/docs.md`와 `docs/agent-guide.md`를 `@embedFile`로 실행 파일에 넣는다(`src`밖이라 `build.zig`가 anonymous import로 넘긴다).
   실행 파일이 약 230KB 커진다. 문서와 `cyber version`이 항상 맞고 오프라인에서 된다.
 - 통째로 출력하지 않는다. `docs.md`는 214KB라 에이전트 컨텍스트를 낭비한다. `--for-agents`는 안내(약 21KB)와 장 · 절 id 목록만,
   나머지는 `cyber doc <id>`로 절 단위로 찾는다.
 - 절 id는 `docs/gen-docs.cy`의 anchor 규칙을 그대로 쓴다(공백은 `-`, `./$[]#` 제거, 소문자, 중복은 `-1`). 사이트 링크와 같은 id다.
   id 목록은 실행 때 `docs.md`의 heading에서 만들므로 손으로 고칠 목록이 없다.
-- 손으로 쓰는 부분은 `docs/agents.md` 하나다. tars-agent의 안내에서 호스트 전용 내용(능력 함수, 실리지 않는 모듈, 세션 검증 절차)을
+- 손으로 쓰는 부분은 `docs/agent-guide.md` 하나다. tars-agent의 안내에서 호스트 전용 내용(능력 함수, 실리지 않는 모듈, 세션 검증 절차)을
   뺐다. 예제는 `cli-test`의 `doc: every example of the guide for agents runs.`가 모두 실행한다. 오류 문구 목록과 메서드 목록은
   2026-11-16 master에서 하나씩 확인했다(자동 검사는 예제만).
 
@@ -37,3 +37,13 @@ tars-agent는 Cyber 안내(`prompt/cyber-subset.en.md`)를 자기 저장소에 �
 - 분리할 실질적 이유는 모듈 API 내장 하나다(`cyber` 뒤에 빌드하면 생성한 `api.json`을 넣을 수 있다). 대신 `api.json`을 커밋하고 생성
   결과와 같은지 테스트로 검사하는 방식을 먼저 검토한다. 그 밖의 길은 두 단계 빌드(빌드 시간 증가)와 내장 모듈 소스에서 실행 때 선언을
   뽑는 것이다.
+
+## 보완 (2026-11-16, 코드 리뷰)
+
+- 안내 파일 이름을 `docs/agents.md`에서 `docs/agent-guide.md`로 바꿨다. 대소문자를 구분하지 않는 파일 시스템(macOS · Windows)에서
+  `docs/AGENTS.md`와 같은 파일이라, 에이전트 하네스가 "Cyber 스크립트 작성자용" 안내 21KB를 `docs/` 디렉터리의 작업 지침으로 읽었다.
+  `build.zig`의 import 이름(`agents_md`)과 `--for-agents` 출력은 그대로다.
+- 인자는 끝까지 읽고 검사한 뒤 동작을 고른다(`parseArgs`). 전에는 `--for-agents` · `--list` · `--help`를 만나면 바로 끝내 뒤의 틀린
+  인자를 지나쳤다(`cyber doc --for-agents --bogus`가 종료 코드 0, `cyber doc optionals --list`는 토픽을 버림). 옵션과 토픽, 옵션 둘을
+  함께 쓰면 종료 코드 2다. `--help`는 다른 오류보다 먼저다(모르는 옵션은 예외).
+- 정규화하면 빈 문자열이 되는 토픽(`""` · `.` · `` ` ``)은 모든 id에 부분 일치해 276줄을 냈다. 이제 일치 없음(종료 코드 1)이다.

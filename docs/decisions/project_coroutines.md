@@ -708,7 +708,7 @@ https://git.openjdk.org/loom/commit/ef84eca96d7ac8929b0dd5ba9d9d56f7722fd274
 
 0.5 작업의 셋째 후보. `scope` 블록의 `s.start`는 리터럴 `{...}`의 빌림만 받는다. 변수에 담은 `FnTuple`을 받게 하려면
 `FnTuple`을 빌림 컨테이너로 표시해야 하고(`reifyStructType`), 그 타입을 같이 쓰는 `spawn` · `@new_fiber` · `@call`의 검사가
-모두 바뀐다. 사용자 코드에는 `FnTuple`이 나오지 않는다(테스트 · 매뉴얼 · `agents.md`에 없음, 타입 인자인 함수 시그니처를 쓰는
+모두 바뀐다. 사용자 코드에는 `FnTuple`이 나오지 않는다(테스트 · 매뉴얼 · `agent-guide.md`에 없음, 타입 인자인 함수 시그니처를 쓰는
 문법도 사용자 쪽에 없다). 그래서 사용자가 닿는 경로는 리터럴뿐이고 이미 된다. 비용에 비해 얻는 것이 없어 하지 않는다.
 변수로 넘기면 나오는 오류는 리터럴을 쓰라고 말한다(`checkScopeStartCall`).
 

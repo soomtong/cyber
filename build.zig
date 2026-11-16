@@ -662,7 +662,7 @@ fn create_cli_module(b: *std.Build, vmc: *std.Build.Module, lib: *std.Build.Step
     try link_cli_deps(b, mod, vmc, config);
     // `cyber doc` prints these. They are outside `src`, so they are imported as modules.
     mod.addAnonymousImport("docs_md", .{ .root_source_file = b.path("docs/docs.md") });
-    mod.addAnonymousImport("agents_md", .{ .root_source_file = b.path("docs/agents.md") });
+    mod.addAnonymousImport("agents_md", .{ .root_source_file = b.path("docs/agent-guide.md") });
     mod.linkLibrary(lib);
     return mod;
 }

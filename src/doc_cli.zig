@@ -1,4 +1,4 @@
-//! `cyber doc`. Prints the manual (`docs/docs.md`) and the guide for agents (`docs/agents.md`) that are embedded
+//! `cyber doc`. Prints the manual (`docs/docs.md`) and the guide for agents (`docs/agent-guide.md`) that are embedded
 //! in the executable, so the text always matches the `cyber` that prints it.
 
 const std = @import("std");
@@ -147,6 +147,8 @@ const Lookup = union(enum) {
 fn lookup(alloc: std.mem.Allocator, toc: *const Toc, query: []const u8) !Lookup {
     const norm = try headingId(alloc, query);
     defer alloc.free(norm);
+    // Nothing is left of `.` or of an empty topic, and every id contains that.
+    if (norm.len == 0) return .none;
     if (toc.find(norm)) |h| return .{ .found = h };
 
     var matches: std.ArrayList(*const Heading) = .empty;
@@ -233,32 +235,35 @@ pub fn main(alloc: std.mem.Allocator, args: []const []const u8, version: []const
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
 
-    var topic: ?[]const u8 = null;
-    for (args) |arg| {
-        if (std.mem.eql(u8, arg, "--for-agents")) {
+    const query = switch (parseArgs(args)) {
+        .help => return write(usage),
+        .for_agents => {
             try forAgents(alloc, &out, version, &toc);
             return write(out.items);
-        } else if (std.mem.eql(u8, arg, "--list")) {
+        },
+        .list => {
             try writeList(alloc, &out, &toc);
             return write(out.items);
-        } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
-            return write(usage);
-        } else if (std.mem.startsWith(u8, arg, "-")) {
+        },
+        .index => {
+            try out.appendSlice(alloc, usage);
+            try out.appendSlice(alloc, "\nTopics:\n");
+            try writeIndex(alloc, &out, &toc);
+            return write(out.items);
+        },
+        .topic => |topic| topic,
+        .unknown_option => |arg| {
             std.debug.print("error: unknown option `{s}`\n\n{s}", .{ arg, usage });
             return 2;
-        } else if (topic != null) {
-            std.debug.print("error: expected one topic, found `{s}` after `{s}`\n\n{s}", .{ arg, topic.?, usage });
+        },
+        .two_topics => |pair| {
+            std.debug.print("error: expected one topic, found `{s}` after `{s}`\n\n{s}", .{ pair[1], pair[0], usage });
             return 2;
-        } else {
-            topic = arg;
-        }
-    }
-
-    const query = topic orelse {
-        try out.appendSlice(alloc, usage);
-        try out.appendSlice(alloc, "\nTopics:\n");
-        try writeIndex(alloc, &out, &toc);
-        return write(out.items);
+        },
+        .conflict => |pair| {
+            std.debug.print("error: `{s}` can not be used with `{s}`\n\n{s}", .{ pair[1], pair[0], usage });
+            return 2;
+        },
     };
     switch (try lookup(alloc, &toc, query)) {
         .found => |h| {
@@ -278,6 +283,58 @@ pub fn main(alloc: std.mem.Allocator, args: []const []const u8, version: []const
             return 1;
         },
     }
+}
+
+const Command = union(enum) {
+    help,
+    for_agents,
+    list,
+    /// No argument: the usage and the topic index.
+    index,
+    topic: []const u8,
+    unknown_option: []const u8,
+    two_topics: [2][]const u8,
+    /// An option together with a topic or with another option, in the order they were given.
+    conflict: [2][]const u8,
+};
+
+/// Every argument is read before one is acted on, so a wrong argument after `--list` is an error too.
+/// `--help` goes before the other errors, an unknown option before a conflict.
+fn parseArgs(args: []const []const u8) Command {
+    var help = false;
+    // The topic or the option that says what to print, with the argument that gave it.
+    var cmd: ?Command = null;
+    var cmd_arg: []const u8 = "";
+    var err: ?Command = null;
+    for (args) |arg| {
+        var next: Command = undefined;
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            help = true;
+            continue;
+        } else if (std.mem.eql(u8, arg, "--for-agents")) {
+            next = .for_agents;
+        } else if (std.mem.eql(u8, arg, "--list")) {
+            next = .list;
+        } else if (arg.len > 0 and arg[0] == '-') {
+            return .{ .unknown_option = arg };
+        } else {
+            next = .{ .topic = arg };
+        }
+        if (cmd) |cur| {
+            if (err == null) {
+                err = if (cur == .topic and next == .topic)
+                    .{ .two_topics = .{ cmd_arg, arg } }
+                else
+                    .{ .conflict = .{ cmd_arg, arg } };
+            }
+            continue;
+        }
+        cmd = next;
+        cmd_arg = arg;
+    }
+    if (help) return .help;
+    if (err) |e| return e;
+    return cmd orelse .index;
 }
 
 fn write(bytes: []const u8) !u8 {
@@ -350,6 +407,31 @@ test "doc: lookup by id, by title and by a unique part." {
         else => return error.TestUnexpectedResult,
     }
     try t.expect(try lookup(t.allocator, &toc, "no-such-topic-xyz") == .none);
+    // A topic that has no id character matches nothing, not every section.
+    try t.expect(try lookup(t.allocator, &toc, "") == .none);
+    try t.expect(try lookup(t.allocator, &toc, ".") == .none);
+    try t.expect(try lookup(t.allocator, &toc, "`") == .none);
+}
+
+test "doc: every argument is checked." {
+    try t.expect(parseArgs(&.{}) == .index);
+    try t.expect(parseArgs(&.{"--list"}) == .list);
+    try t.expect(parseArgs(&.{"--for-agents"}) == .for_agents);
+    try t.expectEqualStrings("optionals", parseArgs(&.{"optionals"}).topic);
+    // An empty topic is a topic: it matches no section.
+    try t.expectEqualStrings("", parseArgs(&.{""}).topic);
+
+    // A wrong argument after an option is not skipped.
+    try t.expectEqualStrings("--bogus", parseArgs(&.{ "--for-agents", "--bogus" }).unknown_option);
+    try t.expectEqualStrings("--bogus", parseArgs(&.{ "--bogus", "--for-agents" }).unknown_option);
+    try t.expectEqualStrings("--list", parseArgs(&.{ "optionals", "--list" }).conflict[1]);
+    try t.expectEqualStrings("optionals", parseArgs(&.{ "--list", "optionals" }).conflict[1]);
+    try t.expect(parseArgs(&.{ "--list", "--for-agents" }) == .conflict);
+    try t.expect(parseArgs(&.{ "--list", "--list" }) == .conflict);
+    try t.expectEqualStrings("b", parseArgs(&.{ "a", "b" }).two_topics[1]);
+
+    try t.expect(parseArgs(&.{ "optionals", "--list", "--help" }) == .help);
+    try t.expectEqualStrings("--bogus", parseArgs(&.{ "--help", "--bogus" }).unknown_option);
 }
 
 test "doc: the guide for agents lists the topics." {
@@ -397,7 +479,7 @@ test "doc: every example of the guide for agents runs." {
                     else
                         C.thread_panic_summary(C.vm_main_thread(vm));
                     defer C.vm_freeb(vm, report);
-                    std.debug.print("docs/agents.md example {} failed:\n{s}\n", .{ num, report });
+                    std.debug.print("docs/agent-guide.md example {} failed:\n{s}\n", .{ num, report });
                 }
             }
         } else if (std.mem.eql(u8, line, "~~~cy")) {

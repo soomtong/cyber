@@ -1,5 +1,5 @@
 {
-  "version": "v0.4.11-dev 918-0130197",
+  "version": "v0.4.12-dev 919-67a2735",
   "types": [
     {"module": "core", "name": "void", "syntax": "void", "kind": "builtin",
       "methods": [],

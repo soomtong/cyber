@@ -1,14 +1,13 @@
-# HANDOFF (2026-11-16 밤): tars-agent 요청 반영, 0.4.13 릴리스 보류
+# HANDOFF (2026-11-17): 0.4.13 릴리스 완료, 사용자 결정 대기
 
 ## 목표
 
-- tars-agent가 보낸 요청(0.4.12 스파이크 결함 넷, 0.4.13-DEV 발견 둘)을 고치고 회신한다.
-- 0.4.13 패치 릴리스. 오늘 밤은 하지 않기로 했다(사용자 지시). 태그는 이미 push돼 있다.
+- tars-agent가 보낸 요청(0.4.12 스파이크 결함 넷, 0.4.13-DEV 발견 둘)을 고치고 회신한다. 완료.
+- 0.4.13 패치 릴리스. 완료(`1dee6514`, `build-945-1dee651`).
 
 ## 현재 브랜치
 
-`master`. `origin/master`는 `8a892310`(Release 0.4.13). 로컬에 push 안 한 커밋 둘(+ 이 HANDOFF 커밋):
-`79925211`(릴리스 보류 기록), `3acc0797`(0.4.13-DEV 발견 두 건 수정).
+`master`. 0.4.13 태그 커밋 `1dee6514` 뒤에 릴리스 기록 커밋이 있다.
 
 ## 완료된 작업
 
@@ -22,34 +21,30 @@
   - `40ae5b5a` (a) `Slice` resize의 받는 변수 보존: `size_down` · `clear` · 끝 `remove`는 제자리에서 해제를 미루고, 끝이 아닌
     `remove` · `insert`는 `clone_copy`로 복사(`src/builtins/core.cy`). 버린 결과는 컴파일 오류(`src/sema.zig`
     `checkDroppedSliceResult`). `project_slice_append_aliasing.md` "결정 2".
-- [x] 0.4.13 릴리스 준비: `8a892310`(버전 세 곳, `docs/releases/0.4.13.md`, 검증 rc=0) push, Latest Build 성공 뒤 annotated 태그
-  `0.4.13` push. 릴리스 run 43868153020은 Release job skipped(아래 실패한 접근).
+- [x] 0.4.13 릴리스(2026-11-17 새벽 완료): 태그 `0.4.13`을 `1dee6514`로 다시 찍어 push, 릴리스 run 43886010148이 arm64 lib
+  재시도 일곱째에 성공. `build-945-1dee651`, 에셋 15개, Latest. 노트는 `docs/releases/0.4.13.md`. `install.sh 0.4.13` 설치 확인
+  (버전, `cyber-lsp` initialize, hello, `let x := 1` 문구). 기록은 `project_fork_release_ci.md`.
 - [x] 0.4.13-DEV 요청(`/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.13-dev-findings.md`) 두 건, `3acc0797`:
   - (a) `let x := 1` → ``Cyber has no `let`. Declare with `x := 1`.``(`reportForeignDeclError`의 `colon_equal` 분기).
     테스트 `syntax/foreign_decl_infer_error.cy`.
   - (b) 세션(`persist_main`)의 마지막 줄 `out.remove(1)`도 버린 결과 오류(`semaMainResultStmt`에서 `checkDroppedSliceResult`).
     테스트 `src/lib_test/session.zig` 끝 "a dropped Slice resize result on the last line"(필터로 실제로 도는 것 확인).
-  - 13단계 검증을 백그라운드로 돌리던 중 세션을 정리했다. 로그 `/private/tmp/claude-501/-Users-dp-Repository-cyberscript/
-    866045c6-fdd3-4e2f-ae8c-4da5dcd94361/scratchpad/verify-dev.log`(끝 줄 `DONE all steps rc=0`이면 통과). 로그가 없거나
-    끝나지 않았으면 `src/tools/verify.sh`를 다시 돌린다.
+  - 13단계 검증 rc=0.
 - [x] 회신: 두 요청서 끝의 "cyber 회신" 절. tars-agent 저장소에 미커밋으로 둠(0.4.13-DEV 요청서만 지금 미커밋, 0.4.12 쪽은
   tars-agent가 이미 반영). tars-agent 커밋은 그쪽 세션 몫.
 
 ## 시도했으나 실패한 접근
 
-- 0.4.13 릴리스 run 43868153020의 `gh run rerun --failed` 세 번: `macos-26` arm64 job이 매번 15분 안에 러너를 받지 못해 취소
-  (attempt 3에서 cli는 성공, lib는 attempt 1~4 모두 취소). 무료 arm64 풀의 문제라 재시도 외 CI 쪽 해결책이 없다.
+- `macos-26` arm64 job은 자주 15분 안에 러너를 받지 못해 취소된다(0.4.13 첫 태그 run 43868153020은 네 번 모두 취소). 해결은
+  `gh run rerun --failed`를 되풀이하는 것뿐이었다(재태그 run은 일곱째에 성공). 무료 arm64 풀의 문제다.
 - `zig fetch .`로 패키지 내용을 보려 했으나 전역 캐시 `p/`에 남지 않았다. `.paths` 확인은 `git ls-files <paths>`를 임시 디렉터리에
   풀어 그 안에서 `zig build cli` · `lib`로 했다.
 - `docs/gen-docs.cy`는 이 머신에 `libmd4c`가 없어 실행이 안 된다(변경 전에도 같음). `task docs:gen` 경로가 라이브러리 위치를 준다.
 
 ## 남은 작업
 
-- [ ] `3acc0797` 검증 결과 확인(위 로그). 실패면 고치고 커밋.
-- [ ] 0.4.13 릴리스(사용자 지시 때). 먼저 결정: 태그 `0.4.13`이 `8a892310`을 가리키므로 `3acc0797`이 빠진다. 다시 찍을지
-  (`project_fork_release_ci.md`의 재태깅 절차: `gh release delete 0.4.13 --cleanup-tag` 또는 릴리스가 없으면 태그만 지우고 새로 찍기,
-  dev 프리릴리스 `v0.4.13-DEV`와 별개), 아니면 그대로 두고 다음 패치로 넘길지. 다시 찍으면 `docs/releases/0.4.13.md`에
-  `unreleased.md`의 두 항목을 옮긴다. 그 뒤 HANDOFF "릴리스" 절 4~6단계.
+- [ ] tars-agent에 0.4.13 릴리스를 알린다(요청서 회신 절은 "push 전" 시점 문구다. tars-agent 세션이 `latest`/0.4.13으로
+  다시 받아 확인하고 닫는다). tars-agent 저장소에는 쓰기 전에 `git status`.
 - [ ] tars-agent가 회신을 확인하면 받는다. 결정 대기: `Slice`를 `&&Slice` 제자리 API로 바꾸는 안, 모듈 API를 `cyber doc`에
   넣는 안, `read_file_str` · `write_file(p, bytes)` 오류에 고칠 이름을 말하는 문구, REPL에서 `xs.append(4)` 미리보기가 오류가 된 점.
 - [ ] 사용자 결정 대기(이전부터):
@@ -68,13 +63,13 @@
 - `src/sema.zig` `checkDroppedSliceResult`(호출: `semaExprStmtEnd`, `localDecl`의 `_ =`, `semaMainResultStmt`).
 - `src/parser.zig` `isForeignDeclKeyword` · `reportForeignDeclError` · `reportTypedDeclError`.
 - `src/std/os.cy` `read_file` · `read_file_bytes` · `write_file` · `write_file_bytes`.
-- `docs/releases/0.4.13.md`(머리의 "(태그 후 기록)"은 릴리스 뒤 채운다), `docs/releases/unreleased.md`(0.4.13 뒤 두 항목).
+- `docs/releases/0.4.13.md`, `docs/releases/unreleased.md`(머리만 있음).
 - `docs/decisions/project_fork_release_ci.md`(러너 미배정 · 재태깅 · 로컬 arm64 빌드 절차).
 
 ## 다음 에이전트에게
 
-1. 위 검증 로그부터 본다. 통과면 할 일은 사용자 결정 대기뿐이다.
-2. 릴리스는 사용자가 다시 지시할 때만. 지시가 오면 먼저 "태그를 다시 찍어 `3acc0797`을 넣을지"를 묻는다.
+1. 0.4.13은 릴리스됐다. 남은 것은 사용자 결정 대기와 tars-agent 확인이다.
+2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 
 ## 알려진 한계

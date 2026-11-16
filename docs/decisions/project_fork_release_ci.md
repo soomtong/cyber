@@ -111,6 +111,13 @@
   → `gh release edit 0.4.12 --notes-file --latest` → `install.sh 0.4.12`를 임시 경로에 설치해 `Cyber 0.4.12 build-919-67a2735`,
   `cyber-lsp` `initialize` 응답, `fiber_await_spawn.cy` · `use time` · `use json` 스크립트를 확인했다.
   다음부터는 master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
+- 0.4.13은 2026-11-16에 처음 `8a892310`(버전 올림 커밋)에 태그를 찍었으나 릴리스 run 43868153020에서 `macos-26` arm64 lib job이
+  네 번 모두 러너를 받지 못해 취소됐고 Release는 skipped였다. 그 사이 tars-agent 0.4.13-DEV 발견 두 건(`3acc0797`)을 고쳐
+  노트에 옮긴 `1dee6514`로 태그를 다시 찍었다(릴리스가 없었으므로 원격 · 로컬 태그만 지우고 새 annotated 태그 push). 릴리스 run
+  43886010148은 arm64 lib 취소 때마다 `gh run rerun --failed`를 되풀이하는 스크립트로 돌렸고 일곱째 시도에서 성공했다
+  (`build-945-1dee651`, 에셋 15개, 약 2시간 20분). → `gh release edit 0.4.13 --notes-file --latest` → `install.sh 0.4.13`을 임시
+  경로에 설치해 `Cyber 0.4.13 build-945-1dee651`, `cyber-lsp` `initialize` 응답, `examples/hello.cy`, `let x := 1`의 새 문구를
+  확인했다. arm64 러너 미배정은 재시도만으로 풀렸으므로 로컬 빌드 대체는 쓰지 않았다.
 - 번들의 `src/`는 타깃별로 다르다. `build.zig`의 `cli` 스텝이 공통 10개에 macOS(`os.macos.cy`,
   `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
   더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.

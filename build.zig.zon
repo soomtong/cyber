@@ -14,5 +14,8 @@
         "build.zig.zon",
         "src",
         "lib",
+        // `cyber doc` embeds these two (build.zig `create_cli_module`).
+        "docs/docs.md",
+        "docs/agent-guide.md",
     },
 }

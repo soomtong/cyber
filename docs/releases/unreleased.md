@@ -15,6 +15,8 @@
 - `cyber doc`은 인자를 모두 검사한다. `cyber doc --for-agents --bogus`가 오류 없이 끝나고 `cyber doc optionals --list`가 토픽을
   버리던 것을 고쳤다: 모르는 옵션, 옵션과 토픽의 혼용, 옵션 둘은 종료 코드 2다. 글자가 남지 않는 토픽(`""` · `.`)은 모든 절에
   맞는 대신 일치 없음(종료 코드 1)이다.
+- 패키지(`build.zig.zon`의 `.paths`)에 `docs/docs.md`와 `docs/agent-guide.md`를 넣었다. `zig fetch`로 받은 패키지에서 cli를
+  빌드하면 `cyber doc`이 넣는 두 파일이 없어 실패했다. 의존 쪽은 안내 문서를 빌드 때 읽을 수 있다. 패키지 해시가 바뀐다.
 
 ## 표준 라이브러리
 

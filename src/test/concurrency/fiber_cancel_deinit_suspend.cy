@@ -132,4 +132,26 @@ fn start():
 start()
 test.eq(num_res, 2)
 
+-- A value in every frame of a deep call stops in its `@deinit`. The fiber is unwound once per stop, and each unwind
+-- walks only the frames above the ones that already return to their pad.
+global num_frames int = 0
+type F:
+    id int
+fn (&F) @deinit():
+    num_frames += 1
+    suspend
+    num_frames += 100000
+fn nest(k int):
+    e := F{id = k}
+    if k == 0:
+        suspend
+        return
+    nest(k - 1)
+fn cancel_nest():
+    f := fiber nest(2000)
+    _ = f.resume()
+    test.eq(f.cancel(), true)
+cancel_nest()
+test.eq(num_frames, 2001)
+
 --cytest: pass

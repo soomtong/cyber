@@ -673,9 +673,15 @@ https://git.openjdk.org/loom/commit/ef84eca96d7ac8929b0dd5ba9d9d56f7722fd274
   자신의 스택 이동을 빠뜨렸다: 패드가 부른 `@deinit`이 스택을 키우면(fiber 스택은 64칸에서 시작) 그 프레임과 아래 프레임이
   옮겨지고, 뒤에 도는 `@deinit`이 빌림을 읽는다. 이제 패드는 지점의 레이아웃으로 생성하고 패드 시작 pc에도 레이아웃을 기록한다
   (`project_stack_ptr_patch.md` "취소 패드").
+- (2026-11-16 보완) 다시 unwind는 프레임을 처음부터 다시 걷지 않는다. 반환 주소가 패드 시작인 프레임(`.unwound`)을 만나면
+  그 아래는 앞선 unwind가 모두 돌려 둔 것이라 거기서 끝낸다. 표의 선형 탐색(패드 시작인지)은 unwind 한 번에 한 번이다.
+  전에는 멈춘 횟수 × 깊이 × 표 크기였다(깊이 4000에서 0.51초 → 0.01초 미만).
 - 탐침: 깊은 호출 안의 `suspend`, 필드 Future의 `await`, 목록 원소, `release`, `Generator.end`, fiber 소멸, 실패한
   `scope`의 형제. Debug(누수 보고 없음) · ReleaseSafe 통과. 테스트 `concurrency/fiber_cancel_deinit_suspend.cy`.
   `fiber_in_progress_panic.cy`(이 panic의 테스트)는 지웠고 매뉴얼 예제는 새 동작으로 바꿨다.
+- (2026-11-16 보완) 취소하지 못하는 fiber의 테스트를 다시 넣었다: `concurrency/fiber_in_progress_panic.cy`는 실행 중인 fiber가
+  자기 마지막 참조를 버리는 경우다(`Fiber is still in progress.`, 매뉴얼의 문장). `A fiber that was cancelled stopped where it
+  can not be cancelled.`은 스크립트로 닿는 경로를 찾지 못해 테스트가 없다(패드 없는 지점에서 `@deinit`이 다시 멈춰야 한다).
 
 ## 중첩 `scope`의 `Fiber.waiting` 비용 (2026-11-16)
 

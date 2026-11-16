@@ -696,6 +696,7 @@ https://git.openjdk.org/loom/commit/ef84eca96d7ac8929b0dd5ba9d9d56f7722fd274
   `vm.futureEpoch()`와 함께 둔다. 이 값은 프로세스의 Future가 끝날 때마다 오른다: `FutureResolver.complete`
   (`notifyFutureComplete`), `cl_future_complete` · `cl_future_complete_error`, 워커의 작업 끝(성공 · 실패). fiber는 끝나지 않은
   Future에서만 멈추므로 Future가 끝나지 않는 한 "없다"는 그대로다. epoch는 Future를 보기 전에 읽는다.
+- (2026-11-16 대체) 이 캐시는 지웠다. 아래 "fiber의 소유 링크" 절.
 - 풀의 progress epoch를 쓰지 않은 이유: single-threaded 빌드(wasm)에서 `notifyProgress`가 아무것도 하지 않는데 거기서도 루트가
   spawn 작업을 직접 돌려 Future를 끝낸다.
 - 낡은 "없다"의 결과는 무한 루프다(`Scope.run`이 진행 없음 → `wait_ready`가 곧바로 1 → 다시 진행 없음). `notifyFutureComplete`의
@@ -729,3 +730,42 @@ https://git.openjdk.org/loom/commit/ef84eca96d7ac8929b0dd5ba9d9d56f7722fd274
 - 테스트 `concurrency/scope_block_borrow_cancel.cy`: 취소 쪽 탐침을 줄인 것(n 60 × j 6). 시작 전 자식 경로를 지나며, 위의 첫
   변종 빌드에서 129건 실패한다. 이 테스트가 wasm32의 F-156(4바이트 포인터 둘이 든 칸의 보정)을 드러냈다
   (`project_stack_ptr_patch.md`).
+
+## fiber의 소유 링크: `wait_ready`가 기다리는 범위 (2026-11-16)
+
+`0.4.12..HEAD` 코드 리뷰 6번에서 시작했다. 사용자 결정으로 진행.
+
+- 문제: 안쪽 `scope`에서 기다리는 그룹 fiber(`await_fibers`)에 바깥 `Scope.run`이 묻는 것은 "네 자손 중 깨울 것이 있는가"인데,
+  답은 "스레드 어디든 끝난 Future를 기다리는 fiber가 있는가"였다. epoch 캐시는 이 질문의 훑기 비용만 줄였다. 남은 비용은 헛깨움:
+  Future 하나가 끝나면 답이 모든 그룹에 "있다"가 되어 주인 그룹보다 앞의 그룹이 전부 resume되고, 깨어난 그룹은 자식을 한 바퀴
+  돌고 다시 멈추면서 스레드의 fiber를 모두 훑었다(`fibers_wait`).
+- 측정(그룹 M개 × fiber 5개, 바퀴마다 Future 하나, ReleaseFast). 첫 그룹부터 완료: M=100 14ms, 200 60ms, 400 236ms.
+  마지막 그룹부터 완료: 36ms, 349ms, 2728ms(M의 세제곱). 앞 절의 "0.24초"는 헛깨움이 없는 순서의 값이었다.
+- 검토한 세 방식.
+  - 스레드 전체 + epoch 캐시(전 구현): 답은 맞지만 헛깨움이 남고, epoch가 프로세스 전역이라 다른 VM · 워커의 완료에도 무효화된다.
+  - 소유 링크 + 자손만 확인(택함): 기다리는 쪽이 자기 하위 트리의 Future를 읽는다(pull). 동기화가 필요 없다.
+  - futex식 대기 표(미룸). futex의 설계를 참고했다: (1) 상태는 사용자 공간의 원자 값이고 경합이 없으면 커널을 부르지 않는다.
+    (2) `FUTEX_WAIT(addr, expected)`는 값이 기대와 같을 때만 잠든다(확인과 잠들기가 원자적이라 깨움을 놓치지 않는다).
+    (3) 대기 큐는 주소를 키로 한 해시 표이고 기다리는 스레드가 있을 때만 항목이 있다. (4) `FUTEX_WAKE(addr, n)`는 그 키의
+    대기자만 깨운다. (5) 헛깨움은 허용하고 깨어난 쪽이 다시 확인한다. (6) `FUTEX_CMP_REQUEUE`로 떼 깨움을 피한다.
+    우리에게 옮기면 Future 주소를 키로 한 스레드별 대기 표에 `await`에서 멈출 때만 등록하고, 완료 때 그 fiber와 조상만 준비
+    상태로 표시하는 구조다(push). 워커 풀의 `progressEpoch` → 확인 → `waitProgress(seen)`은 이미 (2)의 패턴이다.
+    미룬 이유: 워커 스레드와 호스트(`cl_future_complete`)의 완료가 주인 스레드의 표를 건드릴 수 없어 완료 목록과 동기화가
+    필요하고, `Scope.run`이 바퀴마다 자식 전부에게 `waiting()`을 묻는 동안은 바퀴 비용의 바닥이 어차피 fiber 수다. `run`을
+    준비 큐로 바꿀 때 같이 해야 이득이 난다. fiber 수에 비례하는 바퀴 비용이 문제가 되면 이쪽으로 간다.
+- 구현. `vmc.Fiber`에 `owner` · `owned_head` · `owned_prev` · `owned_next`(끝에 더함). 소유자는 그 fiber를 마지막으로 resume했거나
+  (`FIBER_RESUME`, `zFiberSetOwner`) 멈춘 fiber에 `waiting()`을 마지막으로 물은(`fiber_waiting`) fiber다. 루트 컨텍스트는 null.
+  - `fiber_waiting`의 `await_fibers` 갈래는 그 fiber의 하위 트리만 본다(`ownedFiberFutureReady`, `thread.nextOwnedFiber`).
+  - fiber 안의 `fibers_wait`는 자기 하위 트리에서 기다리는 Future를 센다. 없으면 0(`false`)을 돌려준다. 루트는 전처럼 스레드 전체.
+  - `freeFiber`는 자기를 소유 목록에서 빼고 자기가 소유한 fiber를 소유자 없음으로 돌린다(매달린 포인터 없음).
+  - `Thread.fiber_ready_hint` · `fiber_none_ready`, `vm.futureEpoch` · `noteFutureCompleted`와 호출 넷을 지웠다.
+- 트리가 유지되는 이유: 소유자를 바꾸는 쪽은 지금 도는 fiber이고 그 fiber의 소유자 사슬은 도는 fiber들(`prev_fiber`)이다. 바뀌는
+  fiber는 돌고 있지 않으므로(resume 직전, 또는 `waiting()`은 멈춘 fiber만) 사슬에 없다.
+- `waiting()`도 소유를 옮기는 이유: `Scope.run`은 기다리는 자식을 resume하지 않는다. 다른 컨텍스트에서 자식을 돌리던 `Scope`나
+  `Fiber`를 넘겨받은 fiber는 resume 없이 `waiting()`만 묻고 `wait_ready`로 가므로, resume만으로 정하면 넘겨받은 fiber가 기다릴
+  것이 없다고 보고 `Scope.run`이 쉬지 않고 돈다.
+- 바뀐 계약: fiber 안의 `Fiber.wait_ready()`는 "스레드의 다른 fiber"가 아니라 "자기가 돌리는 fiber"를 기다린다. 넘겨받은 fiber를
+  resume도 `waiting()`도 하지 않고 `wait_ready`부터 부르면 곧바로 `false`다(전에는 기다렸다). 스케줄러 루프는 둘 중 하나를 먼저 하므로
+  걸리지 않는다. 매뉴얼과 `core.cy` 문서 주석에 적었다.
+- 결과: 마지막 그룹부터 완료하는 M=400이 2728ms → 227ms, 첫 그룹부터는 236ms → 224ms. 테스트 `concurrency/fiber_wait_owner.cy`
+  (수정 전에는 다른 그룹의 Future에 `waiting()`이 `false`가 됐다).

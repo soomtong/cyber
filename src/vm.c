@@ -1525,6 +1525,9 @@ beginSwitch:
         f->prev_pc = pc + 3;
         f->prev_dst = pc[1];
         f->prev_fiber = t->c.cur_fiber;
+        if (f->owner != t->c.cur_fiber) {
+            zFiberSetOwner(f, t->c.cur_fiber);
+        }
         f->host_depth = t->c.host_depth;
         f->state = FIBER_RUNNING;
         f->started = true;

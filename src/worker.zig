@@ -249,7 +249,6 @@ pub const Pool = struct {
                     }
                     thread.deinit(false);
                     pool.alloc.destroy(thread);
-                    cy.vm.noteFutureCompleted();
                     pool.notifyProgress();
                     return;
                 };
@@ -267,7 +266,6 @@ pub const Pool = struct {
                 }
 
                 @atomicStore(u8, &sync_state.state, 2, .release);
-                cy.vm.noteFutureCompleted();
                 pool.notifyProgress();
 
                 if (cy.Trace) {

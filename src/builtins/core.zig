@@ -1618,7 +1618,6 @@ pub fn notifyFutureComplete(t: *cy.Thread) anyerror!C.Ret {
     _ = t.ret(void);
     const future = t.param(*cy.heap.FutureValue);
 
-    cy.vm.noteFutureCompleted();
     try completeFuture(t, .{ .inner = future });
     return C.RetOk;
 }
@@ -2165,19 +2164,26 @@ pub fn fibers_wait(t: *cy.Thread) anyerror!C.Ret {
         var num_awaiting: usize = 0;
         var has_shared = false;
         var opt_fiber = t.c.fibers;
-        // In a fiber a future that is done is no reason to return: the fiber that awaits it can be one that
-        // only the resumer of this fiber runs (a sibling of a nested `scope` block). Returning would spin
-        // here forever. So a fiber always gives control back once, and its resumer decides (`Fiber.waiting`).
-        const in_fiber = t.c.cur_fiber != null;
-        while (opt_fiber) |fiber| : (opt_fiber = fiber.list_next) {
-            if (fiber.state != vmc.FIBER_SUSPENDED) continue;
-            for (fiberFutures(fiber)) |future| {
-                num_awaiting += 1;
-                if (!in_fiber and cy.vm.futureDone(future)) {
-                    ret.* = 1;
-                    return C.RetOk;
+        if (t.c.cur_fiber) |cur| {
+            // A fiber waits for the fibers that it runs, and the ones that they run (`vmc.Fiber.owner`). It
+            // gives control back once even when one of their futures is done: its resumer decides when it
+            // goes on (`Fiber.waiting`), also for a fiber that this one does not run anymore.
+            var it = cur;
+            while (cy.thread.nextOwnedFiber(cur, it)) |fiber| : (it = fiber) {
+                if (fiber.state != vmc.FIBER_SUSPENDED) continue;
+                num_awaiting += fiberFutures(fiber).len;
+            }
+        } else {
+            while (opt_fiber) |fiber| : (opt_fiber = fiber.list_next) {
+                if (fiber.state != vmc.FIBER_SUSPENDED) continue;
+                for (fiberFutures(fiber)) |future| {
+                    num_awaiting += 1;
+                    if (cy.vm.futureDone(future)) {
+                        ret.* = 1;
+                        return C.RetOk;
+                    }
+                    if (future.shared_state != null) has_shared = true;
                 }
-                if (future.shared_state != null) has_shared = true;
             }
         }
         if (num_awaiting == 0) {
@@ -2239,33 +2245,24 @@ fn fiber_waiting(t: *cy.Thread) callconv(.c) C.Ret {
     const fiber = t.param(*vmc.Fiber);
     ret.* = false;
     if (fiber.state == vmc.FIBER_SUSPENDED) {
+        // The one that asks is the one that runs the fiber: a scheduler loop asks before it waits itself.
+        cy.thread.setFiberOwner(fiber, t.c.cur_fiber);
         if (fiber.await_len > 0) {
             ret.* = !fiberFutureReady(fiber);
         } else if (fiber.await_fibers) {
-            ret.* = !anyFiberFutureReady(t);
+            ret.* = !ownedFiberFutureReady(fiber);
         }
     }
     return C.RetOk;
 }
 
-/// Whether a suspended fiber of the thread awaits a future that is done. A `scope` loop asks this for each of its
-/// fibers that waits in a nested scope, every round, so the answer is kept: a fiber that was found is checked
-/// first, and a scan that found none holds until a future is completed.
-fn anyFiberFutureReady(t: *cy.Thread) bool {
-    if (t.fiber_ready_hint) |hint| {
-        if (hint.state == vmc.FIBER_SUSPENDED and fiberFutureReady(hint)) return true;
-        t.fiber_ready_hint = null;
+/// Whether a suspended fiber that `root` runs, directly or through the fibers that it runs, awaits a future that
+/// is done. Only those wake a fiber in `Fiber.wait_ready`: a future of another group does not.
+fn ownedFiberFutureReady(root: *vmc.Fiber) bool {
+    var it = root;
+    while (cy.thread.nextOwnedFiber(root, it)) |fiber| : (it = fiber) {
+        if (fiber.state == vmc.FIBER_SUSPENDED and fiberFutureReady(fiber)) return true;
     }
-    const key = cy.vm.futureEpoch();
-    if (t.fiber_none_ready == key) return false;
-    var opt_other = t.c.fibers;
-    while (opt_other) |other| : (opt_other = other.list_next) {
-        if (other.state == vmc.FIBER_SUSPENDED and fiberFutureReady(other)) {
-            t.fiber_ready_hint = other;
-            return true;
-        }
-    }
-    t.fiber_none_ready = key;
     return false;
 }
 

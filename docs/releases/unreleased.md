@@ -25,6 +25,12 @@
 - 중첩 `scope`의 대기가 빨라졌다. 안쪽 `scope`에서 Future를 기다리는 fiber에 바깥 `scope`가 바퀴마다 `Fiber.waiting()`을 물을 때
   매번 스레드의 fiber를 전부 훑었다(바퀴 수 × 그룹 수 × fiber 수). 이제 답을 Future가 완료될 때까지 기억한다. 안쪽 그룹
   400개 · fiber 2401개 · 한 바퀴에 Future 하나를 완료하는 경우가 2.8초에서 0.24초(ReleaseFast). 테스트 `concurrency/scope_nested_wait.cy`.
+- 위 수정을 다시 고쳤다: fiber 안의 `Fiber.wait_ready()`(안쪽 `scope`의 대기)는 스레드의 모든 fiber가 아니라 자기가 돌리는
+  fiber(마지막으로 resume했거나 `waiting()`을 물은 fiber와 그 fiber가 돌리는 fiber)의 Future만 기다린다. 전에는 Future 하나가
+  끝나면 기다리던 그룹이 모두 한 바퀴씩 깨어났다. 위 측정은 깨울 그룹이 목록 앞에 있을 때의 값이었고, 마지막 그룹부터
+  완료하면 그룹 400개가 2.7초였다. 이제 순서와 관계없이 0.23초다. 바뀐 점: fiber 안에서 부른 `Fiber.wait_ready()`는 자기가
+  돌리는 fiber 중 Future를 기다리는 것이 없으면 곧바로 `false`를 돌려준다(전에는 스레드의 다른 fiber를 기다렸다). 루트
+  컨텍스트의 `Fiber.wait_ready()`는 그대로 스레드 전체를 본다. 테스트 `concurrency/fiber_wait_owner.cy`.
 - `@deinit`이 여러 번 다시 멈추는 fiber의 취소가 빨라졌다. 멈출 때마다 fiber의 프레임을 처음부터 다시 걷고 프레임마다 취소
   표를 선형으로 훑어, 프레임마다 `@deinit`이 멈추는 깊이 4000의 취소가 0.51초였다(깊이의 제곱). 이제 이미 패드로 돌려진
   프레임에서 걷기를 멈춘다: 깊이 4000이 0.01초 미만, 20000이 0.01초(ReleaseSafe).

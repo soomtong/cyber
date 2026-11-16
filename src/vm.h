@@ -563,10 +563,19 @@ typedef struct Fiber {
     void** await_ptr;
     size_t await_len;
     bool await_owned;
-    // Suspended in `Fiber.wait_ready`: it waits for the futures of the thread's other fibers.
+    // Suspended in `Fiber.wait_ready`: it waits for the futures of the fibers that it owns (`owner`).
     bool await_fibers;
     // `Fiber.wait_ready` gave control back from this fiber. The call returns when the fiber is resumed.
     bool await_yielded;
+
+    // The fiber that runs this one: it resumed it last, or asked last whether it waits (`Fiber.waiting`).
+    // NULL for the root context. A fiber in `Fiber.wait_ready` waits for the futures of the fibers that it
+    // owns and of the ones that they own, not for every fiber of the thread (`Thread.setFiberOwner`).
+    struct Fiber* owner;
+    // The fibers that this one owns, linked through `owned_prev` and `owned_next`.
+    struct Fiber* owned_head;
+    struct Fiber* owned_prev;
+    struct Fiber* owned_next;
 } Fiber;
 
 // Unused members are declared for debugging.
@@ -972,6 +981,7 @@ void zFreeBigObject(ZThread* t, HeapObject* obj, size_t size);
 ResultCode z_ret_generator(ZThread* t, TypeId type_id, u16 ret_size, Value* fp, size_t frame_len, Inst* resume_pc, Inst* deinit_pc);
 ResultCode zAwait(ZThread* t, Value value);
 bool zFiberAwaitReady(ZThread* t, Value value);
+void zFiberSetOwner(Fiber* fiber, Fiber* owner);
 
 // The return address of a fiber's entry frame. One `FIBER_END` inst.
 extern Inst fiber_end_code[1];

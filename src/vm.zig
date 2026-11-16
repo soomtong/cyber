@@ -1110,19 +1110,6 @@ pub fn canSuspendEval(t: *cy.Thread) bool {
     return true;
 }
 
-/// Moves after any future of the process is done: `FutureResolver.complete`, `cl_future_complete`, the end of a
-/// spawned thread. Read it before looking at the futures. Unlike the pool's progress epoch it also moves in a
-/// single threaded build, where the root context runs the spawned threads.
-var future_epoch = std.atomic.Value(u32).init(0);
-
-pub fn noteFutureCompleted() void {
-    _ = future_epoch.fetchAdd(1, .release);
-}
-
-pub fn futureEpoch() u32 {
-    return future_epoch.load(.acquire);
-}
-
 /// Whether a future no longer waits: it is completed, or its spawned thread ended (the `await` reports how).
 pub fn futureDone(future: *const cy.heap.FutureValue) bool {
     if (future.shared_state) |shared_state| {
@@ -1134,6 +1121,10 @@ pub fn futureDone(future: *const cy.heap.FutureValue) bool {
 /// An `await` inside a fiber: whether it can go on. The fiber is suspended otherwise.
 /// It does not run queued thread tasks like the blocking wait does: the task would run to its end inside this
 /// fiber while the other fibers stand still. `Fiber.wait_ready` runs them when every fiber waits.
+fn zFiberSetOwner(fiber: *vmc.Fiber, owner: ?*vmc.Fiber) callconv(.c) void {
+    cy.thread.setFiberOwner(fiber, owner);
+}
+
 fn zFiberAwaitReady(_: *cy.Thread, fut_value_bits: u64) callconv(.c) bool {
     const fut_value_ptr: Value = .{ .val = fut_value_bits };
     return futureDone(fut_value_ptr.asPtr(*cy.heap.FutureValue));
@@ -1361,6 +1352,7 @@ comptime {
 
     @export(&zAwait, .{ .name = "zAwait", .linkage = .strong });
     @export(&zFiberAwaitReady, .{ .name = "zFiberAwaitReady", .linkage = .strong });
+    @export(&zFiberSetOwner, .{ .name = "zFiberSetOwner", .linkage = .strong });
     @export(&z_panic_unexpected_choice, .{ .name = "z_panic_unexpected_choice", .linkage = .strong });
     @export(&zAllocBigObject, .{ .name = "zAllocBigObject", .linkage = .strong });
     @export(&zAllocPoolObject, .{ .name = "zAllocPoolObject", .linkage = .strong });

@@ -430,6 +430,7 @@ if (!aot) {
     run.case("concurrency/scope_reentry_panic.cy");
     run.case("concurrency/scope_block_exit.cy");
     run.case("concurrency/scope_nested_wait.cy");
+    run.case("concurrency/fiber_wait_owner.cy");
     run.case("concurrency/fiber_method_entry_error.cy");
     run.case("concurrency/fiber_borrow_receiver_error.cy");
     run.case("concurrency/fiber_no_call_error.cy");

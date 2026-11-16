@@ -191,6 +191,40 @@ inline fn patch_addr(addr: u64, old_start: usize, old_bytes: usize, new_start: u
     return addr;
 }
 
+/// Makes `owner` the fiber that runs `fiber` (`vmc.Fiber.owner`), or the root context with null. `fiber` is not
+/// running, and `owner` is the fiber that runs now: its owners are the running fibers, so the links stay a tree.
+pub fn setFiberOwner(fiber: *vmc.Fiber, owner: ?*vmc.Fiber) void {
+    if (fiber.owner == owner) return;
+    if (fiber.owner) |old| {
+        if (fiber.owned_prev) |prev| {
+            prev.*.owned_next = fiber.owned_next;
+        } else {
+            old.*.owned_head = fiber.owned_next;
+        }
+        if (fiber.owned_next) |next| next.*.owned_prev = fiber.owned_prev;
+    }
+    fiber.owner = owner;
+    fiber.owned_prev = null;
+    fiber.owned_next = null;
+    if (owner) |new| {
+        fiber.owned_next = new.owned_head;
+        if (new.owned_head) |head| head.*.owned_prev = fiber;
+        new.owned_head = fiber;
+    }
+}
+
+/// The fiber after `cur` in a walk over the fibers that `root` owns and the ones that they own. Start with
+/// `cur = root`. Null at the end.
+pub fn nextOwnedFiber(root: *vmc.Fiber, cur: *vmc.Fiber) ?*vmc.Fiber {
+    if (cur.owned_head) |first| return first;
+    var fiber = cur;
+    while (fiber != root) {
+        if (fiber.owned_next) |next| return next;
+        fiber = fiber.owner.?;
+    }
+    return null;
+}
+
 pub const CancelTarget = union(enum) {
     /// The frame keeps running: it is a destruction routine (`sema.CancelPad.keep`).
     keep,
@@ -396,13 +430,6 @@ pub const Thread = struct {
 
     stack_trace: cy.StackTrace,
 
-    /// `Fiber.waiting` of a fiber in `Fiber.wait_ready` asks whether any suspended fiber of the thread awaits a
-    /// future that is done. A fiber that was found to be one is checked first.
-    fiber_ready_hint: ?*vmc.Fiber,
-    /// The `cy.vm.futureEpoch` at a scan that found no such fiber. Without a completed future since then, the
-    /// answer stays the same: a fiber is only suspended at a future that is not done.
-    fiber_none_ready: ?u32,
-
     pub fn init(self: *Thread, id: usize, alloc: std.mem.Allocator, vm: *cy.VM) !void {
         self.* = .{
             .heap = try cy.Heap.init(self.c.vm, self, alloc, vm.sema),
@@ -435,8 +462,6 @@ pub const Thread = struct {
 
             .compact_trace = .empty,
             .stack_trace = .{},
-            .fiber_ready_hint = null,
-            .fiber_none_ready = null,
         };
 
         // Spawned threads share the main thread's flag (`new_thread`).
@@ -519,6 +544,10 @@ pub const Thread = struct {
             .await_owned = false,
             .await_fibers = false,
             .await_yielded = false,
+            .owner = null,
+            .owned_head = null,
+            .owned_prev = null,
+            .owned_next = null,
         };
         if (self.c.fibers) |head| {
             head.list_prev = fiber;
@@ -589,7 +618,9 @@ pub const Thread = struct {
 
     /// Frees a fiber that is not running.
     pub fn freeFiber(self: *Thread, fiber: *vmc.Fiber) void {
-        if (self.fiber_ready_hint == fiber) self.fiber_ready_hint = null;
+        // The fibers that it owned have no owner until one resumes them.
+        setFiberOwner(fiber, null);
+        while (fiber.owned_head) |owned| setFiberOwner(owned, null);
         if (fiber.list_prev) |prev| {
             prev.*.list_next = fiber.list_next;
         } else {

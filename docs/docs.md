@@ -3537,7 +3537,7 @@ while a.status() != .done or b.status() != .done:
     if a.waiting() and b.waiting():
         _ = Fiber.wait_ready()
 ```
-Both computations are started before either result is taken. A loop that resumes fibers needs `Fiber.wait_ready()`: without it the loop spins while the fibers wait, and it does not end when nothing else completes the futures. That is the case on a machine without spare worker threads, where the waiting root context runs the spawned tasks itself, and for futures that only the host can complete. For those, `Fiber.wait_ready()` suspends the program and the host sees the futures of all fibers (see [Suspending an eval](#suspending-an-eval)). Called inside a fiber, `Fiber.wait_ready()` suspends that fiber until a future of another fiber is done.
+Both computations are started before either result is taken. A loop that resumes fibers needs `Fiber.wait_ready()`: without it the loop spins while the fibers wait, and it does not end when nothing else completes the futures. That is the case on a machine without spare worker threads, where the waiting root context runs the spawned tasks itself, and for futures that only the host can complete. For those, `Fiber.wait_ready()` suspends the program and the host sees the futures of all fibers (see [Suspending an eval](#suspending-an-eval)). Called inside a fiber, `Fiber.wait_ready()` suspends that fiber until a future is done that one of its own fibers awaits: a fiber that it resumed last or asked `waiting()` about last, or a fiber of one of those. A future of a fiber that another fiber runs does not end the wait, and the call returns `false` at once when none of its own fibers awaits a future.
 
 A [`scope` block](#scope-block) does this loop itself.
 

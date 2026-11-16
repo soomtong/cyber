@@ -16,6 +16,8 @@
 - `0.4.12..HEAD` 코드 리뷰 수정(2026-11-16, 모두 13단계 검증 rc=0, push 안 함): F-157(choice의 벡터 payload 보정),
   F-158(취소 패드가 스택을 옮길 때의 빌림), F-159(wasm32 절반별 case), 다시 unwind의 제곱 비용, `cyber doc` 인자 검사,
   `docs/agents.md` → `docs/agent-guide.md`(대소문자 무시 파일 시스템에서 `AGENTS.md`로 읽혔다), `fiber_in_progress_panic.cy` 복원.
+  리뷰 6번은 fiber의 소유 링크로 고쳤다: fiber 안의 `Fiber.wait_ready()`는 자기가 돌리는 fiber의 Future만 기다린다(헛깨움 제거,
+  그룹 400개 2.7초 → 0.23초, epoch 캐시 삭제).
 - tars-agent는 cyber 0.4.11에 고정(`78df31d`). `730813e`에서 `e25e7d76`의 회신을 기록했고 0.4.12에서 확인한다.
   요청서 `/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.11-codeact-messages.md`.
 
@@ -37,9 +39,8 @@
 3. 기술 부채(급하지 않음):
    - carry 재시도 루프: 실패한 본문의 IR을 되돌리는 장치가 없어 사전 단계로 옮기지 못했다. 콜백 반복은 `cyber.h` · docs.md에 적음.
    - `@destruct_span`은 쓰이지 않아 취소 keep 지점이 아니다. 쓰게 되면 더한다.
-   - `anyFiberFutureReady`의 epoch 캐시(코드 리뷰 6번, 고치지 않음): epoch가 프로세스 전역이라 다른 VM · 워커의 완료도 "없다"
-     캐시를 무효화하고, Future가 계속 끝나는 부하에서는 다시 바퀴 × 그룹 × fiber 훑기가 된다. 답은 맞다. 풀려면 scope가 자기
-     자손의 끝난 Future를 추적해야 한다(`Scope` 구조 변경, 사용자 결정).
+   - `Scope.run`은 바퀴마다 자식 전부에게 `waiting()`을 묻는다(바퀴당 fiber 수에 비례). 문제가 되면 futex식 대기 표와 준비 큐로
+     간다(`project_coroutines.md` "fiber의 소유 링크" 절에 검토 기록).
    - `A fiber that was cancelled stopped where it can not be cancelled.` panic은 스크립트로 닿는 경로를 못 찾아 테스트가 없다.
 
 ## 알려진 한계

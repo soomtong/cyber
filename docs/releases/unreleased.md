@@ -33,3 +33,6 @@
   둘째 원소부터 보정되지 않아 옛 스택을 읽었다(F-157). `case Pair` 뒤의 `case [3]Pair`도 같다. 0.4.12 전부터 있던 결함이다.
   포인터가 없는 원소의 벡터(`[N]i32` 등)는 wasm32에서 지역을 잡을 때마다 원소 수만큼 돌던 것도 없앴다. 테스트
   `functions/payload_borrow_stack_grow.cy`.
+- fiber를 취소하거나 버릴 때 `@deinit`이 fiber의 스택을 키우면(깊은 호출), 그 뒤에 도는 `@deinit`이 읽는 빌림(`&T` ·
+  `Ptr[T]` 필드)이 해제된 옛 스택을 가리켰다(F-158). 빌림이 같은 함수에 있든 아래 함수에 있든 같다. fiber 스택이 64칸에서
+  시작해 `@deinit`이 조금만 깊어도 걸렸다. 0.4.12 전부터 있던 결함이다. 테스트 `concurrency/fiber_cancel_stack_grow.cy`.

@@ -418,6 +418,7 @@ if (!aot) {
     run.case("concurrency/fiber_cancel_move.cy");
     run.case("concurrency/fiber_cancel_deinit.cy");
     run.case("concurrency/fiber_cancel_deinit_suspend.cy");
+    run.case("concurrency/fiber_cancel_stack_grow.cy");
     run.case("concurrency/scope.cy");
     run.case("concurrency/scope_block.cy");
     run.case("concurrency/scope_block_no_result_error.cy");

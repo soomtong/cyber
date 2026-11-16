@@ -349,7 +349,10 @@ pub const Chunk = struct {
         self.scope_borrows.deinit(self.alloc);
         self.scope_blocks.deinit(self.alloc);
         self.cancel_pads.deinit(self.alloc);
-        for (self.cancel_sites.items) |site| self.alloc.free(site.local_map);
+        for (self.cancel_sites.items) |site| {
+            self.alloc.free(site.local_map);
+            self.alloc.free(site.ptr_layout);
+        }
         self.cancel_sites.deinit(self.alloc);
         self.cancel_replay_keeps.deinit(self.alloc);
         self.varStack.deinit(self.alloc);

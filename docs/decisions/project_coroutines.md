@@ -669,8 +669,10 @@ https://git.openjdk.org/loom/commit/ef84eca96d7ac8929b0dd5ba9d9d56f7722fd274
   `Chunk.cancel_replay_keeps`에 모으고 `gen_cancel_pads`가 몸체 지점 뒤에 `keep`으로 붙인다(패드는 몸체 뒤에 생성되므로 표의
   정렬이 유지된다). (2) 첫 unwind가 반환 주소를 패드 시작으로 바꾼 프레임. `thread.get_unwind_target`이 표에 없는 pc가
   어떤 지점의 패드 시작이면 `keep`으로 본다(그 프레임은 어차피 패드로 돌아간다).
-- 패드의 호출 지점에는 여전히 포인터 레이아웃이 없다. 패드 안에서 멈춘 동안 그 fiber가 빌린 스택이 옮겨지는 경우는
-  `fiber_cancel`이 곧바로 다시 resume하므로 생기지 않는다.
+- (2026-11-16 정정, F-158) "패드의 호출 지점에는 포인터 레이아웃이 필요 없다"는 틀렸다. 빌린 스택의 이동만 따졌고 fiber
+  자신의 스택 이동을 빠뜨렸다: 패드가 부른 `@deinit`이 스택을 키우면(fiber 스택은 64칸에서 시작) 그 프레임과 아래 프레임이
+  옮겨지고, 뒤에 도는 `@deinit`이 빌림을 읽는다. 이제 패드는 지점의 레이아웃으로 생성하고 패드 시작 pc에도 레이아웃을 기록한다
+  (`project_stack_ptr_patch.md` "취소 패드").
 - 탐침: 깊은 호출 안의 `suspend`, 필드 Future의 `await`, 목록 원소, `release`, `Generator.end`, fiber 소멸, 실패한
   `scope`의 형제. Debug(누수 보고 없음) · ReleaseSafe 통과. 테스트 `concurrency/fiber_cancel_deinit_suspend.cy`.
   `fiber_in_progress_panic.cy`(이 panic의 테스트)는 지웠고 매뉴얼 예제는 새 동작으로 바꿨다.

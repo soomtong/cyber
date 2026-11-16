@@ -44,6 +44,17 @@ VM 스택은 `Value[]` 하나이고 `growStackAuto`가 1.5배로 재할당한다
 - 검증: native는 포인터가 8바이트라 변화가 없다. 수정 전 wasm은 `functions/packed_borrow_stack_grow.cy`에서 `Expected 78, found 120`,
   `concurrency/scope_block_borrow_cancel.cy`에서 trap.
 
+## 취소 패드 (2026-11-16, F-158)
+
+- 취소된 fiber의 패드는 위 프레임부터 돈다. 패드가 부른 `@deinit`이 스택을 옮기면 자기 패드를 기다리는 아래 프레임도 보정돼야
+  한다(그 패드의 `@deinit`이 빌림을 읽는다). 두 곳이 빠져 있었다.
+  - `unwindFiber`가 반환 주소를 패드 시작으로 바꾼 프레임은 `ptr_table`에 없는 pc로 찾아졌다. 패드 시작 pc에 지점의 레이아웃을
+    기록한다(`gen_cancel_pads`의 `push_site_ptr_layout(c, pad_pc)`). 멈춘 fiber의 맨 위 프레임(`Fiber.pc`가 패드 시작)도 같다.
+  - 패드 안 호출 지점은 `num_ptr_locals = 0`에서 시작해 임시 레지스터가 포인터일 때만, 그것도 몸체 끝에 남은 builder 내용으로
+    기록됐다. `CancelSite`가 지점의 builder와 `num_ptr_locals`를 복사해 두고 패드 생성 전에 되살린다.
+- 패드를 같이 쓰는 조건(`cancel_sites_share_pad`)에 레이아웃이 같을 것을 더했다. 패드 시작의 레이아웃이 하나여야 한다.
+- 검증: 수정 전 ReleaseSafe는 `concurrency/fiber_cancel_stack_grow.cy`에서 `0xAAAA…`(해제된 옛 스택)를 읽었다.
+
 ## 남은 것
 
 - 호스트 함수 안에서 VM을 다시 부르는 경로가 생기면 `.host` 프레임의 pc가 null이라 그 아래 프레임의 레이아웃 조회가 빠진다.

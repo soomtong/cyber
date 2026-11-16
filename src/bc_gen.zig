@@ -1793,6 +1793,11 @@ pub const CancelSite = struct {
     reg_end: Reg,
     /// Copy of `Chunk.bc_local_map` at the site.
     local_map: []LocalSlot,
+    /// Copy of `ByteCodeBuffer.ptr_layout_builder` at the site, and `Proc.num_ptr_locals` there. The pad is
+    /// generated from this state: its frame is patched like any other when the stack moves while the pad runs
+    /// (a `@deinit` that the pad calls can grow the stack, and a later `@deinit` can read a borrow).
+    ptr_layout: []cy.bytecode.PtrSlot = &.{},
+    num_ptr_locals: usize = 0,
     /// The pad of the site, then the pad of each inlined call that the site is inside of, innermost first.
     parts: [inline_max_depth + 1]Part,
     num_parts: u8,
@@ -3927,6 +3932,9 @@ fn push_cancel_site(c: *cy.Chunk, key: usize, pc: usize) !void {
     }
     site.local_map = try c.alloc.dupe(LocalSlot, c.bc_local_map.items);
     errdefer c.alloc.free(site.local_map);
+    site.ptr_layout = try c.alloc.dupe(cy.bytecode.PtrSlot, c.buf.ptr_layout_builder.items);
+    errdefer c.alloc.free(site.ptr_layout);
+    site.num_ptr_locals = c.cur_proc.num_ptr_locals;
     try c.cancel_sites.append(c.alloc, site);
 }
 
@@ -3935,14 +3943,19 @@ fn cancel_sites_share_pad(a: *const CancelSite, b: *const CancelSite) bool {
     for (a.parts[0..a.num_parts], b.parts[0..b.num_parts]) |pa, pb| {
         if (pa.head != pb.head or pa.local_base != pb.local_base) return false;
     }
-    return std.mem.eql(u8, std.mem.sliceAsBytes(a.local_map), std.mem.sliceAsBytes(b.local_map));
+    if (!std.mem.eql(u8, std.mem.sliceAsBytes(a.local_map), std.mem.sliceAsBytes(b.local_map))) return false;
+    // The pad's start has one pointer layout (`gen_cancel_pads`).
+    return cy.bytecode.PtrLayoutContext.eql(.{}, a.ptr_layout, b.ptr_layout);
 }
 
 /// Emits the cancel pads of the function that was generated, after its body, and adds its sites to
 /// `ByteCodeBuffer.cancel_table`. A pad is generated with the locals and the register end of its site.
 fn gen_cancel_pads(c: *cy.Chunk) !void {
     defer {
-        for (c.cancel_sites.items) |site| c.alloc.free(site.local_map);
+        for (c.cancel_sites.items) |site| {
+            c.alloc.free(site.local_map);
+            c.alloc.free(site.ptr_layout);
+        }
         c.cancel_sites.clearRetainingCapacity();
         c.cancel_replay_keeps.clearRetainingCapacity();
     }
@@ -3953,7 +3966,13 @@ fn gen_cancel_pads(c: *cy.Chunk) !void {
     const saved_reg_end = c.cur_proc.reg_end;
     const saved_local_base = c.inline_local_base;
     const saved_num_ptr_locals = c.cur_proc.num_ptr_locals;
+    const saved_layout = try c.alloc.dupe(cy.bytecode.PtrSlot, c.buf.ptr_layout_builder.items);
+    defer c.alloc.free(saved_layout);
+    // Reserved first: the deferred restore can not fail.
+    try c.buf.ptr_layout_builder.ensureTotalCapacity(c.alloc, saved_layout.len);
     defer {
+        c.buf.ptr_layout_builder.items.len = 0;
+        c.buf.ptr_layout_builder.appendSliceAssumeCapacity(saved_layout);
         c.bc_local_map.items.len = 0;
         c.bc_local_map.appendSliceAssumeCapacity(saved_map);
         c.cur_proc.reg_end = saved_reg_end;
@@ -3965,9 +3984,6 @@ fn gen_cancel_pads(c: *cy.Chunk) !void {
     // The destructor calls of a pad stay calls.
     c.cold_depth += 1;
     c.cancel_replay = true;
-    // A pad only destructs and returns: its frame's stack pointers are not read again, so its call sites
-    // record no pointer layout.
-    c.cur_proc.num_ptr_locals = 0;
 
     var prev: ?*const CancelSite = null;
     var prev_pad: u32 = 0;
@@ -3983,7 +3999,14 @@ fn gen_cancel_pads(c: *cy.Chunk) !void {
             c.bc_local_map.items.len = 0;
             try c.bc_local_map.appendSlice(c.alloc, site.local_map);
             c.cur_proc.reg_end = site.reg_end;
-            try c.buf.ptr_layout_builder.resize(c.alloc, @max(c.buf.ptr_layout_builder.items.len, site.reg_end));
+            // The pointer layout of the site: the builder holds what the end of the body left (a register that
+            // a later local reused), and the calls of the pad record it.
+            c.buf.ptr_layout_builder.items.len = 0;
+            try c.buf.ptr_layout_builder.appendSlice(c.alloc, site.ptr_layout);
+            c.cur_proc.num_ptr_locals = site.num_ptr_locals;
+            // A frame that a cancel sent here is found with the start of the pad, as its return address or as
+            // `Fiber.pc` (`Thread.unwindFiber`). It waits there while the pads of the frames above it run.
+            try push_site_ptr_layout(c, pad_pc);
             for (site.parts[0..site.num_parts], 0..) |part, i| {
                 c.inline_local_base = part.local_base;
                 c.cancel_replay_last = i + 1 == site.num_parts;

@@ -4729,6 +4729,8 @@ fn (&Fiber) cancel() -> bool:
         -- A `@deinit` that the unwinding called stopped. It ends where it is, like the calls before it, and
         -- the unwinding goes on.
         if !@fiber_unwind(state):
+            -- A site without a cancel pad. No script is known to get here: every site that a fiber can stop
+            -- at has a pad (`concurrency/fiber_cancel_deinit_suspend.cy` goes through them).
             panic('A fiber that was cancelled stopped where it can not be cancelled.')
     return true
 

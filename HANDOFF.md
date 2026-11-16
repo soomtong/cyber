@@ -41,7 +41,8 @@
    - `@destruct_span`은 쓰이지 않아 취소 keep 지점이 아니다. 쓰게 되면 더한다.
    - `Scope.run`은 바퀴마다 자식 전부에게 `waiting()`을 묻는다(바퀴당 fiber 수에 비례). 문제가 되면 futex식 대기 표와 준비 큐로
      간다(`project_coroutines.md` "fiber의 소유 링크" 절에 검토 기록).
-   - `A fiber that was cancelled stopped where it can not be cancelled.` panic은 스크립트로 닿는 경로를 못 찾아 테스트가 없다.
+   - `A fiber that was cancelled stopped where it can not be cancelled.` panic은 불변식 보호다. 닿는 스크립트가 없음을 여덟 경로로
+     확인했다(`project_coroutines.md` "취소 도중 다시 멈춘 `@deinit`" 절). 닿는 경로가 나오면 그 지점에 패드가 빠진 결함이다.
 
 ## 알려진 한계
 

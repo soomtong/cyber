@@ -682,6 +682,10 @@ https://git.openjdk.org/loom/commit/ef84eca96d7ac8929b0dd5ba9d9d56f7722fd274
 - (2026-11-16 보완) 취소하지 못하는 fiber의 테스트를 다시 넣었다: `concurrency/fiber_in_progress_panic.cy`는 실행 중인 fiber가
   자기 마지막 참조를 버리는 경우다(`Fiber is still in progress.`, 매뉴얼의 문장). `A fiber that was cancelled stopped where it
   can not be cancelled.`은 스크립트로 닿는 경로를 찾지 못해 테스트가 없다(패드 없는 지점에서 `@deinit`이 다시 멈춰야 한다).
+  찾아 본 경로(모두 정상 취소): 타입 템플릿의 `@deinit`에서 부른 함수 템플릿, 함수 포인터, 람다, trait 메서드, `@deinit`이 소비하는
+  제너레이터의 본문, `Future.wait_any`, `Fiber.wait_ready`, `@deinit` 자신의 `scope` 블록. 패드 생성 중에 처음 인스턴스화되는
+  템플릿의 지점에도 패드가 있다. 호스트 프레임 너머는 `Cannot suspend across a host call.`이 먼저 막는다. 이 panic은 패드 없는 지점이
+  생겼을 때의 불변식 보호로 둔다. 위 경로들은 `fiber_cancel_deinit_suspend.cy`에 테스트로 넣었다.
 
 ## 중첩 `scope`의 `Fiber.waiting` 비용 (2026-11-16)
 

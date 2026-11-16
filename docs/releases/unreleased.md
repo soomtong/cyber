@@ -19,3 +19,6 @@
   자리에서 끝나고, 값의 나머지(필드 등)와 다른 값의 해제가 이어진다. 전에는 `panic: A fiber was suspended while it was
   cancelled.`이었다. `Fiber.cancel()` · fiber 소멸 · `scope`의 취소에 모두 해당한다. 바뀐 점: 취소될 때 `@deinit`의 `suspend` ·
   `await` 뒤 코드는 돌지 않는다. 테스트 `concurrency/fiber_cancel_deinit_suspend.cy`.
+- 중첩 `scope`의 대기가 빨라졌다. 안쪽 `scope`에서 Future를 기다리는 fiber에 바깥 `scope`가 바퀴마다 `Fiber.waiting()`을 물을 때
+  매번 스레드의 fiber를 전부 훑었다(바퀴 수 × 그룹 수 × fiber 수). 이제 답을 Future가 완료될 때까지 기억한다. 안쪽 그룹
+  400개 · fiber 2401개 · 한 바퀴에 Future 하나를 완료하는 경우가 2.8초에서 0.24초(ReleaseFast). 테스트 `concurrency/scope_nested_wait.cy`.

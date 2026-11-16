@@ -674,3 +674,24 @@ https://git.openjdk.org/loom/commit/ef84eca96d7ac8929b0dd5ba9d9d56f7722fd274
 - 탐침: 깊은 호출 안의 `suspend`, 필드 Future의 `await`, 목록 원소, `release`, `Generator.end`, fiber 소멸, 실패한
   `scope`의 형제. Debug(누수 보고 없음) · ReleaseSafe 통과. 테스트 `concurrency/fiber_cancel_deinit_suspend.cy`.
   `fiber_in_progress_panic.cy`(이 panic의 테스트)는 지웠고 매뉴얼 예제는 새 동작으로 바꿨다.
+
+## 중첩 `scope`의 `Fiber.waiting` 비용 (2026-11-16)
+
+0.5 작업의 둘째 항목. 2026-11-12 리뷰의 "고치지 않은 관찰 (2)".
+
+- 문제: `fiber_waiting`은 `wait_ready`로 멈춘 fiber(`await_fibers`, 안쪽 `scope`가 모두 기다리는 그룹)에 대해 "스레드의
+  멈춘 fiber 중 끝난 Future를 기다리는 것이 있는가"를 스레드 전체를 훑어 답했다. 바깥 `Scope.run`이 바퀴마다 그룹마다
+  물으므로 바퀴당 그룹 수 × fiber 수. 탐침(그룹 M개 × fiber 5개, 한 바퀴에 Future 하나를 완료하는 드라이버 fiber,
+  ReleaseFast): M=50 5ms, 100 28ms, 200 336ms, 400 2833ms.
+- 고침(`core.zig` `anyFiberFutureReady`, `Thread.fiber_ready_hint` · `fiber_none_ready`): (1) "있다"는 찾은 fiber를 힌트로
+  두고 다음에 그 fiber만 먼저 본다(멈춤 상태와 Future를 다시 확인하므로 낡은 답이 없다). (2) "없다"는 그때의
+  `vm.futureEpoch()`와 함께 둔다. 이 값은 프로세스의 Future가 끝날 때마다 오른다: `FutureResolver.complete`
+  (`notifyFutureComplete`), `cl_future_complete` · `cl_future_complete_error`, 워커의 작업 끝(성공 · 실패). fiber는 끝나지 않은
+  Future에서만 멈추므로 Future가 끝나지 않는 한 "없다"는 그대로다. epoch는 Future를 보기 전에 읽는다.
+- 풀의 progress epoch를 쓰지 않은 이유: single-threaded 빌드(wasm)에서 `notifyProgress`가 아무것도 하지 않는데 거기서도 루트가
+  spawn 작업을 직접 돌려 Future를 끝낸다.
+- 낡은 "없다"의 결과는 무한 루프다(`Scope.run`이 진행 없음 → `wait_ready`가 곧바로 1 → 다시 진행 없음). `notifyFutureComplete`의
+  증가를 뺀 변종은 새 테스트에서 시간 초과로 멈췄다. 힌트는 `freeFiber`가 지운다.
+- 결과: M=50 4ms, 100 15ms, 200 63ms, 400 240ms. 남은 비용은 바퀴마다 자식 전부를 도는 `Scope.run` 자체와 Future가 끝난 바퀴의
+  한 번 훑기다(바퀴 수 × (M + N)).
+- 테스트 `concurrency/scope_nested_wait.cy`(드라이버 fiber가 뒤 그룹부터 완료, 루트가 쥔 `Scope`와 양보만 하는 fiber).

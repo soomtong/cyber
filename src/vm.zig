@@ -1110,6 +1110,19 @@ pub fn canSuspendEval(t: *cy.Thread) bool {
     return true;
 }
 
+/// Moves after any future of the process is done: `FutureResolver.complete`, `cl_future_complete`, the end of a
+/// spawned thread. Read it before looking at the futures. Unlike the pool's progress epoch it also moves in a
+/// single threaded build, where the root context runs the spawned threads.
+var future_epoch = std.atomic.Value(u32).init(0);
+
+pub fn noteFutureCompleted() void {
+    _ = future_epoch.fetchAdd(1, .release);
+}
+
+pub fn futureEpoch() u32 {
+    return future_epoch.load(.acquire);
+}
+
 /// Whether a future no longer waits: it is completed, or its spawned thread ended (the `await` reports how).
 pub fn futureDone(future: *const cy.heap.FutureValue) bool {
     if (future.shared_state) |shared_state| {

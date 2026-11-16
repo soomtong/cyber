@@ -396,6 +396,7 @@ export fn cl_future_complete(vm: *cy.VM, future: *cy.heap.FutureValue, value: ?*
     }
     if (slot.some_tag) |tag| tag.* = 1;
     future.completed = true;
+    cy.vm.noteFutureCompleted();
     return true;
 }
 
@@ -407,6 +408,7 @@ export fn cl_future_complete_error(vm: *cy.VM, future: *cy.heap.FutureValue, err
     @as(*i64, @ptrCast(@alignCast(slot.ptr + 8))).* = err;
     if (slot.some_tag) |tag| tag.* = 1;
     future.completed = true;
+    cy.vm.noteFutureCompleted();
     return true;
 }
 

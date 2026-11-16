@@ -29,8 +29,7 @@
 
 ## 알려진 한계
 
-- `Fiber.waiting()`은 `wait_ready`로 멈춘 fiber에 대해 스레드의 fiber를 전부 훑는다. 양보만 하는 fiber와 Future를 기다리는
-  fiber가 섞이면 `Scope.run`이 쉬지 않고 돈다.
+- 양보만 하는 fiber와 Future를 기다리는 fiber가 섞이면 `Scope.run`이 쉬지 않고 돈다(설계대로).
 - 실행으로 확인하지 못한 경로: 시작한 자식이 `suspend` · `await`에서 멈춘 동안 부모 스택이 옮겨지는 경우, Windows `FallbackReadLine`.
 - 변수에 담은 `FnTuple`로는 빌림을 넘기지 못한다.
 - 최상위 `#x := ...` 컴파일 타임 변수는 뒤의 최상위 실행문에서 못 쓴다(선언 단계에서만 평가).

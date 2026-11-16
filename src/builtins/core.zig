@@ -1618,6 +1618,7 @@ pub fn notifyFutureComplete(t: *cy.Thread) anyerror!C.Ret {
     _ = t.ret(void);
     const future = t.param(*cy.heap.FutureValue);
 
+    cy.vm.noteFutureCompleted();
     try completeFuture(t, .{ .inner = future });
     return C.RetOk;
 }
@@ -2241,17 +2242,31 @@ fn fiber_waiting(t: *cy.Thread) callconv(.c) C.Ret {
         if (fiber.await_len > 0) {
             ret.* = !fiberFutureReady(fiber);
         } else if (fiber.await_fibers) {
-            ret.* = true;
-            var opt_other = t.c.fibers;
-            while (opt_other) |other| : (opt_other = other.list_next) {
-                if (other.state == vmc.FIBER_SUSPENDED and fiberFutureReady(other)) {
-                    ret.* = false;
-                    break;
-                }
-            }
+            ret.* = !anyFiberFutureReady(t);
         }
     }
     return C.RetOk;
+}
+
+/// Whether a suspended fiber of the thread awaits a future that is done. A `scope` loop asks this for each of its
+/// fibers that waits in a nested scope, every round, so the answer is kept: a fiber that was found is checked
+/// first, and a scan that found none holds until a future is completed.
+fn anyFiberFutureReady(t: *cy.Thread) bool {
+    if (t.fiber_ready_hint) |hint| {
+        if (hint.state == vmc.FIBER_SUSPENDED and fiberFutureReady(hint)) return true;
+        t.fiber_ready_hint = null;
+    }
+    const key = cy.vm.futureEpoch();
+    if (t.fiber_none_ready == key) return false;
+    var opt_other = t.c.fibers;
+    while (opt_other) |other| : (opt_other = other.list_next) {
+        if (other.state == vmc.FIBER_SUSPENDED and fiberFutureReady(other)) {
+            t.fiber_ready_hint = other;
+            return true;
+        }
+    }
+    t.fiber_none_ready = key;
+    return false;
 }
 
 /// Marks a fiber that was never resumed as cancelled. Returns whether it did.

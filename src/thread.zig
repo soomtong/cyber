@@ -356,6 +356,13 @@ pub const Thread = struct {
 
     stack_trace: cy.StackTrace,
 
+    /// `Fiber.waiting` of a fiber in `Fiber.wait_ready` asks whether any suspended fiber of the thread awaits a
+    /// future that is done. A fiber that was found to be one is checked first.
+    fiber_ready_hint: ?*vmc.Fiber,
+    /// The `cy.vm.futureEpoch` at a scan that found no such fiber. Without a completed future since then, the
+    /// answer stays the same: a fiber is only suspended at a future that is not done.
+    fiber_none_ready: ?u32,
+
     pub fn init(self: *Thread, id: usize, alloc: std.mem.Allocator, vm: *cy.VM) !void {
         self.* = .{
             .heap = try cy.Heap.init(self.c.vm, self, alloc, vm.sema),
@@ -388,6 +395,8 @@ pub const Thread = struct {
 
             .compact_trace = .empty,
             .stack_trace = .{},
+            .fiber_ready_hint = null,
+            .fiber_none_ready = null,
         };
 
         // Spawned threads share the main thread's flag (`new_thread`).
@@ -536,6 +545,7 @@ pub const Thread = struct {
 
     /// Frees a fiber that is not running.
     pub fn freeFiber(self: *Thread, fiber: *vmc.Fiber) void {
+        if (self.fiber_ready_hint == fiber) self.fiber_ready_hint = null;
         if (fiber.list_prev) |prev| {
             prev.*.list_next = fiber.list_next;
         } else {

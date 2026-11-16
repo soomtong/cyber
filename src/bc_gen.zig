@@ -2897,6 +2897,28 @@ const PtrConds = struct {
 fn merge_ptr_slots(a: cy.bytecode.PtrSlot, b: cy.bytecode.PtrSlot) cy.bytecode.PtrSlot {
     // Two halves of a register on a 32-bit target, or two cases of a choice.
     var res = cy.bytecode.PtrSlot{ .ptr = a.ptr or b.ptr, .ptr_hi = a.ptr_hi or b.ptr_hi };
+    if (a.split or b.split or a.ptr != b.ptr or a.ptr_hi != b.ptr_hi) {
+        // They mark different halves (32-bit only).
+        if (!a.split and !b.split and a.back0 == b.back0 and a.tags0 == b.tags0 and a.back1 == b.back1 and a.tags1 == b.tags1) {
+            // Under the same checks: two fields of one struct.
+            res.back0 = a.back0;
+            res.tags0 = a.tags0;
+            res.back1 = a.back1;
+            res.tags1 = a.tags1;
+            return res;
+        }
+        // Different cases: each half keeps the tags of the cases that mark it (`PtrSlot.split`). Otherwise an
+        // `i32` of one case would be patched in the half that is a pointer in another case. A second check is
+        // left out, and so are all checks when the two are not under the same tag.
+        if (a.back0 == 0 or a.back0 != b.back0) return res;
+        res.split = true;
+        res.back0 = a.back0;
+        for ([2]cy.bytecode.PtrSlot{ a, b }) |s| {
+            if (s.ptr) res.tags0 |= s.tags0;
+            if (s.ptr_hi) res.tags1 |= if (s.split) s.tags1 else s.tags0;
+        }
+        return res;
+    }
     if (a.back0 == 0 or a.back0 != b.back0) return res;
     if (a.back1 == b.back1 and a.tags1 == b.tags1) {
         // Only the first check differs.

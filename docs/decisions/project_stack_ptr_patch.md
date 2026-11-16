@@ -44,6 +44,16 @@ VM 스택은 `Value[]` 하나이고 `growStackAuto`가 1.5배로 재할당한다
 - 검증: native는 포인터가 8바이트라 변화가 없다. 수정 전 wasm은 `functions/packed_borrow_stack_grow.cy`에서 `Expected 78, found 120`,
   `concurrency/scope_block_borrow_cancel.cy`에서 trap.
 
+## wasm32에서 절반마다 다른 case (2026-11-16, F-159)
+
+- 칸의 아래 절반이 한 case의 포인터, 위 절반이 다른 case의 포인터일 수 있다(`case one &int`, `case mix Mix{n i32, p Ptr[int]}`).
+  조건을 칸 단위로 합치면 `mix`에서 `n`이 보정된다. `PtrSlot`은 조건 한 벌(검사 둘)뿐이라 절반별 조건을 못 담았다.
+- `PtrSlot.split`(`back0`에서 1비트를 가져옴, `max_back`은 14비트): `back0`의 태그 하나만 보고 아래 절반은 `tags0`, 위 절반은
+  `tags1`의 case에서 포인터다. 둘째 조건(`back1`)은 버린다(더 많은 경우에 보정하는 쪽, 값의 범위 검사는 그대로).
+- `merge_ptr_slots`: 표시한 절반이 같으면 전과 같다(64비트는 늘 이쪽). 절반이 다르고 조건이 같으면 한 구조체의 두 필드라
+  표시만 합친다. 조건이 다르면 `split`. 같은 태그 아래가 아니면 조건 없이 합친다(전과 같은 대체 경로).
+- 검증: wasm CLI(`zig build cli -Dtarget=wasm32-wasi`, `wasmtime run --dir=.::/ --dir=<repo>/zig-out/bin::/zig-out/bin`)로 탐침을 돌렸다.
+
 ## 취소 패드 (2026-11-16, F-158)
 
 - 취소된 fiber의 패드는 위 프레임부터 돈다. 패드가 부른 `@deinit`이 스택을 옮기면 자기 패드를 기다리는 아래 프레임도 보정돼야

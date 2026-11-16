@@ -1264,12 +1264,16 @@ pub const PtrSlot = packed struct(u64) {
     ptr: bool = false,
     /// On a 32-bit target, the upper 4 bytes hold a pointer: a struct packs two 4 byte fields in one register.
     ptr_hi: bool = false,
-    back0: u15 = 0,
+    /// On a 32-bit target, the two halves are pointers in different cases of the choice whose tag is `back0`
+    /// registers before: the lower half when the tag's bit is set in `tags0`, the upper half when it is set in
+    /// `tags1`. There is no second check then (`back1` is 0).
+    split: bool = false,
+    back0: u14 = 0,
     tags0: u16 = 0,
     back1: u15 = 0,
     tags1: u16 = 0,
 
-    pub const max_back = std.math.maxInt(u15);
+    pub const max_back = std.math.maxInt(u14);
     /// A tag value above this has no bit.
     pub const max_tag = 15;
 

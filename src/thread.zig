@@ -130,7 +130,14 @@ inline fn reg_addr_bits(val: u64) u64 {
     return if (@sizeOf(usize) == 4) val & 0xffffffff else val;
 }
 
-/// Whether the tag checks of `slot` hold for the register at `idx` (`bytecode.PtrSlot`).
+/// Whether the tag at `stack[idx - back]` has its bit set in `tags`.
+inline fn ptr_slot_tag_in(stack: [*]cy.Value, idx: usize, back: usize, tags: u16) bool {
+    const tag = reg_addr_bits(stack[idx - back].val);
+    if (tag > cy.bytecode.PtrSlot.max_tag) return false;
+    return (tags >> @intCast(tag)) & 1 != 0;
+}
+
+/// Whether the tag checks of `slot` hold for the register at `idx` (`bytecode.PtrSlot`). Not for a `split` slot.
 fn ptr_slot_tags_hold(stack: [*]cy.Value, idx: usize, slot: cy.bytecode.PtrSlot) bool {
     const checks = [2]struct { back: usize, tags: u16 }{
         .{ .back = slot.back0, .tags = slot.tags0 },
@@ -151,8 +158,16 @@ fn ptr_slot_tags_hold(stack: [*]cy.Value, idx: usize, slot: cy.bytecode.PtrSlot)
 pub fn patch_frame_ptrs(stack: [*]cy.Value, fp: usize, layout: []const cy.bytecode.PtrSlot, old_start: usize, old_bytes: usize, new_start: usize) void {
     for (layout, 0..) |slot, i| {
         if (!slot.any()) continue;
-        // A register inside a result, a choice or an option holds the pointer only in its case.
-        if (!ptr_slot_tags_hold(stack, fp + i, slot)) continue;
+        // A register inside a result, a choice or an option holds the pointer only in its case. The halves of
+        // a `split` register have a case each.
+        var lo = slot.ptr;
+        var hi = slot.ptr_hi;
+        if (slot.split) {
+            lo = lo and ptr_slot_tag_in(stack, fp + i, slot.back0, slot.tags0);
+            hi = hi and ptr_slot_tag_in(stack, fp + i, slot.back0, slot.tags1);
+        } else if (!ptr_slot_tags_hold(stack, fp + i, slot)) {
+            continue;
+        }
 
         // A marked register can still hold something else than an address (a pointer field that was not set,
         // a case whose check did not fit), so the value is compared before it is taken as an address.
@@ -160,9 +175,9 @@ pub fn patch_frame_ptrs(stack: [*]cy.Value, fp: usize, layout: []const cy.byteco
         if (@sizeOf(usize) == 4) {
             // A 4 byte pointer is one half of the register. The other half is another field, or garbage: it is
             // kept as it is (F-156).
-            if (slot.ptr) val.* = (val.* & 0xffffffff_00000000) | patch_addr(val.* & 0xffffffff, old_start, old_bytes, new_start);
-            if (slot.ptr_hi) val.* = (val.* & 0xffffffff) | (patch_addr(val.* >> 32, old_start, old_bytes, new_start) << 32);
-        } else {
+            if (lo) val.* = (val.* & 0xffffffff_00000000) | patch_addr(val.* & 0xffffffff, old_start, old_bytes, new_start);
+            if (hi) val.* = (val.* & 0xffffffff) | (patch_addr(val.* >> 32, old_start, old_bytes, new_start) << 32);
+        } else if (lo) {
             val.* = patch_addr(val.*, old_start, old_bytes, new_start);
         }
     }

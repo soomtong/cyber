@@ -13,6 +13,9 @@
   - `54b19355` F-156: wasm32에서 4바이트 포인터 둘이 든 칸의 스택 이동 보정(`PtrSlot.ptr_hi`). 오늘 전부터 있던 결함이고, 스택
     이동 탐침을 테스트로 넣다가 드러났다. 같은 커밋에 "시작 후 멈춘 자식의 스택 이동은 지금 구조에서 안 생김" 확인 기록과
     변수 `FnTuple` 빌림을 하지 않기로 한 이유(`project_coroutines.md` 끝 세 절).
+- `0.4.12..HEAD` 코드 리뷰 수정(2026-11-16, 모두 13단계 검증 rc=0, push 안 함): F-157(choice의 벡터 payload 보정),
+  F-158(취소 패드가 스택을 옮길 때의 빌림), F-159(wasm32 절반별 case), 다시 unwind의 제곱 비용, `cyber doc` 인자 검사,
+  `docs/agents.md` → `docs/agent-guide.md`(대소문자 무시 파일 시스템에서 `AGENTS.md`로 읽혔다), `fiber_in_progress_panic.cy` 복원.
 - tars-agent는 cyber 0.4.11에 고정(`78df31d`). `730813e`에서 `e25e7d76`의 회신을 기록했고 0.4.12에서 확인한다.
   요청서 `/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.11-codeact-messages.md`.
 
@@ -34,6 +37,10 @@
 3. 기술 부채(급하지 않음):
    - carry 재시도 루프: 실패한 본문의 IR을 되돌리는 장치가 없어 사전 단계로 옮기지 못했다. 콜백 반복은 `cyber.h` · docs.md에 적음.
    - `@destruct_span`은 쓰이지 않아 취소 keep 지점이 아니다. 쓰게 되면 더한다.
+   - `anyFiberFutureReady`의 epoch 캐시(코드 리뷰 6번, 고치지 않음): epoch가 프로세스 전역이라 다른 VM · 워커의 완료도 "없다"
+     캐시를 무효화하고, Future가 계속 끝나는 부하에서는 다시 바퀴 × 그룹 × fiber 훑기가 된다. 답은 맞다. 풀려면 scope가 자기
+     자손의 끝난 Future를 추적해야 한다(`Scope` 구조 변경, 사용자 결정).
+   - `A fiber that was cancelled stopped where it can not be cancelled.` panic은 스크립트로 닿는 경로를 못 찾아 테스트가 없다.
 
 ## 알려진 한계
 
@@ -60,7 +67,7 @@
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-158까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-159까지, 열린 것 없음).
 
 ## 작업 방식
 
@@ -114,6 +121,8 @@
 - wasm32: 값 칸은 8바이트, 포인터는 4바이트. 칸의 위 32비트는 쓰레기라 포인터로 쓸 때는 아래 절반만 본다(F-140 · F-143).
   구조체는 4바이트 필드 둘을 한 칸에 담는다. 칸을 통째로 쓰면 옆 필드가 지워진다(F-156, `PtrSlot.ptr_hi`).
   native에서 스택 이동은 `alloc.resize`가 제자리로 끝나 안 일어날 때가 많다. 이동 경로는 wasm 단계가 더 잘 잡는다.
+  스크립트 하나를 wasm에서 돌리려면 `zig build cli -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe -p <dir>` 뒤 스크립트가 있는 곳에서
+  `wasmtime run --dir=.::/ --dir=<repo>/zig-out/bin::/zig-out/bin <dir>/bin/cyber.wasm x.cy`.
   `@intFromPtr`는 `usize`라 `u64`에 넣을 때 `@as(u64, ...)`.
 - `Heap` · `Pool` 등 C 미러 구조체(`vm.h`)가 있는 타입에 필드를 더하면 오프셋 검사에 걸린다. 끝(`c` 뒤)에 두거나 전역으로 뺀다.
 - opcode 추가: `vm.h` enum과 `vm.c` `JENTRY` 표 같은 위치, `bytecode.zig`의 enum · 길이 · 덤프 · opcode 수 테스트.

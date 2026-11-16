@@ -42,3 +42,7 @@
 - fiber를 취소하거나 버릴 때 `@deinit`이 fiber의 스택을 키우면(깊은 호출), 그 뒤에 도는 `@deinit`이 읽는 빌림(`&T` ·
   `Ptr[T]` 필드)이 해제된 옛 스택을 가리켰다(F-158). 빌림이 같은 함수에 있든 아래 함수에 있든 같다. fiber 스택이 64칸에서
   시작해 `@deinit`이 조금만 깊어도 걸렸다. 0.4.12 전부터 있던 결함이다. 테스트 `concurrency/fiber_cancel_stack_grow.cy`.
+- wasm32에서 choice의 한 case가 빌림이고(`case one &int`) 다른 case가 `i32`와 포인터를 한 칸에 담은 구조체이면
+  (`case mix Mix`, `Mix{n i32, p Ptr[int]}`), 스택이 옮겨질 때 `mix`의 `n`이 옛 스택 범위의 값이면 주소로 보고 바꿨다(F-159).
+  칸의 두 절반이 서로 다른 case에서 포인터인데 조건을 칸 단위로 합쳤기 때문이다. native는 영향이 없다. 테스트
+  `functions/packed_borrow_stack_grow.cy`.

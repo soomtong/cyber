@@ -5,14 +5,15 @@
 - 최신 릴리스 0.4.12(태그 `67a2735c`, `build-919-67a2735`, Latest, 2026-11-16). 노트 `docs/releases/0.4.12.md`.
   내용은 표준 모듈 `json` · `toon` · `regex` · `peg` · `time`, CodeAct 오류 문구 여섯, F-141 ~ F-155 수정.
   `unreleased.md`는 머리말만 남았다. 릴리스 run이 동시 push 취소와 runner 끊김으로 세 번 돌았다(`project_fork_release_ci.md`).
-- 로컬 master와 `origin/master`가 같다(2026-11-16 릴리스 지시로 push). 그 뒤 push도 사용자 지시 때만.
+- 릴리스 뒤 `cyber doc [topic]` · `cyber doc --for-agents`를 더했다(`751d9222`, `unreleased.md` CLI 절). 별도 바이너리로 나누지
+  않은 이유는 `078d0641`. 로컬 master와 `origin/master`가 `078d0641`로 같다. push는 사용자 지시 때만.
 - tars-agent는 cyber 0.4.11에 고정(`78df31d`). `730813e`에서 `e25e7d76`의 회신을 기록했고 0.4.12에서 확인한다.
   요청서 `/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.11-codeact-messages.md`.
 
 ## 다음 할 일
 
-1. tars-agent에 0.4.12를 알린다(그 저장소는 다른 세션이 고치고 있을 수 있어 쓸지는 사용자에게 맡긴다). 고정을 0.4.12로 올리고
-   CodeAct 문구 여섯을 확인하는 것은 tars-agent 쪽 일.
+1. tars-agent는 다른 세션이 0.4.12로 올리는 중이다(2026-11-16 미커밋: `docs/deps.md` 고정 `67a2735c` · 빌드 919, 스파이크
+   `build.zig.zon`, 요청서 삭제). 이 저장소에서 할 일은 없다. 그쪽이 문구 여섯에서 차이를 보고하면 받는다.
 2. 사용자 결정 대기:
    - `scope` 블록 안의 `return` · `break` · `continue`가 합류한다는 것을 알리는 도구(안 1 LSP Information 진단, 안 2 hover,
      안 3 inlay hint). `project_coroutines.md` 끝 절.

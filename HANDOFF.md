@@ -25,6 +25,14 @@
   resize의 받는 변수 보존과 버린 결과의 컴파일 오류(`project_slice_append_aliasing.md` 결정 2). 회신은 tars-agent 요청서 끝
   "cyber 회신" 절(tars-agent에 미커밋으로 둠, 그쪽 세션이 커밋).
 
+- 0.4.13 릴리스 진행 중(2026-11-16, 사용자 지시로 멈춤): `8a892310` "Release 0.4.13"(버전 세 곳, 노트 `docs/releases/0.4.13.md`,
+  13단계 검증 rc=0)을 master에 push했고 Latest Build 성공 뒤 annotated 태그 `0.4.13`을 push했다. 릴리스 run 43868153020에서
+  `macos-26` arm64 lib job이 네 번(attempt 1~4) 러너 미배정으로 취소돼 Release job이 skipped, 0.4.13 릴리스는 없다(나머지 11 job
+  성공, arm64 cli는 attempt 3에서 성공). 남은 일: `gh run rerun 43868153020 -R soomtong/cyber --failed`가 성공하면
+  `gh release edit 0.4.13 --notes-file`(제목 줄 뺀 노트) `--latest` → `install.sh 0.4.13` 임시 설치 확인 → 노트 머리의
+  "(태그 후 기록)"에 태그 커밋 · 빌드 번호를 적고 `project_fork_release_ci.md`에 기록. 대안은 `project_fork_release_ci.md`의 로컬
+  arm64 빌드(릴리스가 없으므로 `gh release create`가 필요, 사용자 결정).
+
 ## 다음 할 일
 
 1. tars-agent는 0.4.12에 고정(`25ccf63`). 위 네 건의 회신을 그쪽이 확인한다. 결정 대기로 남긴 것: `Slice`를 `&&Slice` 제자리

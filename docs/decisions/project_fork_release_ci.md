@@ -103,6 +103,14 @@
   버전 올림 커밋에서 13단계 검증 rc=0 → master · annotated 태그 push → 릴리스 run 43597628878 성공(`build-883-097b831`,
   에셋 15개, `api.json` · `api.html`이 늘었다) → `gh release edit 0.4.11 --notes-file --latest` → `install.sh 0.4.11`을 임시
   경로에 설치해 `Cyber 0.4.11 build-883-097b831`, `cyber-lsp` 링크와 `initialize` 응답, `fiber_await_spawn.cy` 통과를 확인했다.
+- 0.4.12는 2026-11-16에 `67a2735c`(버전 올림 커밋 그대로)로 찍었다. 내용은 표준 모듈 `json` · `toon` · `regex` · `peg` · `time`,
+  CodeAct 오류 문구, F-141 ~ F-155 수정이다. 13단계 검증 rc=0 → master · annotated 태그를 한 번에 push했더니 이번에는 태그 쪽
+  릴리스 run 43789249904가 `concurrency: latest`로 취소됐다(master run이 나중에 들어감). master run이 끝난 뒤 `gh run rerun`으로
+  다시 돌렸고, 둘째 시도에서 macOS Intel cli job이 `Run tests. (debug)` 46분 뒤 "The hosted runner lost communication with the
+  server"로 실패했다(같은 커밋의 master run에서는 3분). `gh run rerun --failed` 셋째 시도에서 성공(`build-919-67a2735`, 에셋 15개)
+  → `gh release edit 0.4.12 --notes-file --latest` → `install.sh 0.4.12`를 임시 경로에 설치해 `Cyber 0.4.12 build-919-67a2735`,
+  `cyber-lsp` `initialize` 응답, `fiber_await_spawn.cy` · `use time` · `use json` 스크립트를 확인했다.
+  다음부터는 master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 - 번들의 `src/`는 타깃별로 다르다. `build.zig`의 `cli` 스텝이 공통 10개에 macOS(`os.macos.cy`,
   `libc.macos.cy`) · Linux(`os.linux.cy`, `libc.linux.cy`) · Windows(`os.windows.cy`, `windows/*.cy`)만
   더한다. 플랫폼 모듈은 전부 `#[cond=meta.system() == ...]` 뒤의 `use`라서 다른 타깃 파일이 없어도 된다.

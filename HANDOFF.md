@@ -2,50 +2,17 @@
 
 ## 지금 상태
 
-- 최신 릴리스 0.4.11(태그 `097b831f`, `build-883-097b831`, Latest). 노트 `docs/releases/0.4.11.md`.
-- 2026-11-16: `time` 코드 리뷰(`/code-review 4b4e2306..HEAD`, 10건) 반영을 마쳤다.
-  - 커밋 `0a123f4a`: 1 `%j`와 월 0 혼동(`Parts.yday` · `has_md`), 2 `Duration` 범위 비대칭(`dur()`), 3 `local()`의 `error.Syntax`
-    누출 → `NotFound`, 4 `format_zoned`가 사용자 이름을 괄호에 씀(`Zone.db`), 9 `Duration.format` 문서, 10 릴리스 노트 첫 bullet.
-  - 그다음 커밋: 5 `%Z`가 없으면 약어를 구하지 않음(`has_zone_spec`), 7 `os`에서 `use time`과 `FileInfo.mtime()` ·
-    `atime()` · `ctime()` 제거(`time.unix(info.mtime_sec, info.mtime_nsec)`로 안내), 8 `is_digit` 등을 core `str.is_ascii_*`로.
-    6(`DateTime` 안 `Zone` 크기)은 사용자 결정으로 보류, 이유는 `project_std_time.md` "보류: `DateTime` 안의 `Zone` 크기".
-    두 커밋 모두 13단계 검증 rc=0.
-- 로컬 master와 `origin/master`가 같다(2026-11-16 사용자 지시로 push). 그 뒤 push도 사용자 지시 때만.
-- 0.4.11 뒤 변경(모두 `docs/releases/unreleased.md`에 있다):
-  - `e25e7d76`: tars-agent CodeAct 회차의 오류 문구 여섯(`for ... in`, `q: byte = 0`, `var` 없는 타입 선언, `none` 비교,
-    옵션 아닌 값의 `?else`, 연산자 타입 불일치).
-  - `260f48e0`: 표준 모듈 `json` · `toon`(TOON 사양 v4.4, 공식 fixture 564/564), `cl_mod_bind_json` · `cl_mod_bind_toon`,
-    F-141(`.?` · `!` 언랩 임시값 누수) · F-143(wasm32 `str.is_utf8` panic) 수정.
-  - 그다음 커밋: `json.to(T, v)` · `json.decode(T, src)`(`Diag.path`), F-142(`int.parse` 넘침 → `error.Overflow`),
-    F-144(`?T` · `!T` 함수의 `return -x`), F-145(`!else`가 `NoCopy` 결과를 옮김), F-146(`meta.access(T, ...)`에 템플릿 인자).
-  - 그다음 커밋: `json.Value.number`(원문 텍스트, 큰 수 무손실), `ParseOptions{exact}` · `toon.DecodeOptions{exact}`, `fmt_number`.
-  - 설계 `docs/decisions/project_std_json_toon.md`, 사용자 문서 `docs/docs.md` "JSON and TOON.".
-  - `7a0c9015`: F-147(원소 256개 이상 리터럴) · F-148(private choice 복사) 수정.
-  - 그다음 커밋: 표준 모듈 `regex`(Pike VM, 선형 시간, ripgrep 문법의 부분집합, Unicode 18.0). 파서 · 컴파일러는 `src/std/regex.cy`,
-    매칭 루프와 Unicode 표는 `src/std/regex.zig` · `regex_unicode.zig`. `cl_mod_bind_regex`. Rust `regex` 테스트 데이터 820개 통과,
-    ripgrep 차분 퍼징 23,000건 차이 없음. 설계와 Rust · Zig · Nim · Python 비교는 `docs/decisions/project_std_regex.md`,
-    사용자 문서 `docs/docs.md` "Regular expressions.".
-  - 그다음 커밋: 표준 모듈 `peg`(LPeg `re` 문법의 부분집합, LPeg식 parsing machine, 결과는 `peg.Capture` 트리). 파서 · 검사 ·
-    코드 생성은 `src/std/peg.cy`, 매칭 루프는 `src/std/peg.zig`. `cl_mod_bind_peg`. LPeg 1.1.0과 차분 퍼징 180,000건 차이 없음.
-    설계와 Janet · LPeg · Rust · Zig · Nim · Python 비교는 `docs/decisions/project_std_peg.md`, 사용자 문서 `docs/docs.md`
-    "Parsing expression grammars.".
-  - 그다음 커밋: F-154(괄호 묶음 뒤 연산자 우선순위: `a - (b) / 2 + 1`이 `a - ((b) / 2 + 1)`로 파싱됐다) 수정.
-  - 그다음 커밋: 표준 모듈 `time`(`Time` · `DateTime` · `Date` · `Duration`, UTC와 분 단위 고정 오프셋, RFC 3339 · strftime 부분집합).
-    달력 · 파서 · 포매터는 순수 Cyber `src/std/time.cy`, 시계 둘만 `src/std/time.zig`. `cl_mod_bind_time`. 파일 시각은 `time.unix(info.mtime_sec, info.mtime_nsec)`.
-    Python `datetime`과 차분 시험 78,000건 차이 없음. 설계와 Rust · Zig · Nim · Python 비교는
-    `docs/decisions/project_std_time.md`, 사용자 문서 `docs/docs.md` "Dates and times.".
-  - 그다음 커밋: F-155(`bool` · enum · `error` · raw 필드가 있는 구조체의 `==`가 컴파일 오류) 수정.
-  - 그다음 커밋: `time`의 IANA 시간대. `time.zone(name)`(시스템 zoneinfo 폴더, 내장 DB 없음) · `time.local()` ·
-    `zone_from_tzif` · `zone_from_posix`, `DateTime`이 zone을 품음, 겹침 · 건너뜀은 `Disambiguation`. TZif 읽기와 POSIX 규칙은
-    `time.cy`, 파일 · `TZ` · `/etc/localtime` 읽기는 `time.zig`. Python `zoneinfo`와 차분 시험 40,000건 차이 없음.
-    `project_std_time.md` "둘째 단계".
-  - 그다음 커밋: RFC 9557(`dt.format_zoned()` · `time.parse_zoned(s)`, 오프셋 불일치는 `error.Conflict`). 결정 28.
+- 최신 릴리스 0.4.12(태그 `67a2735c`, `build-919-67a2735`, Latest, 2026-11-16). 노트 `docs/releases/0.4.12.md`.
+  내용은 표준 모듈 `json` · `toon` · `regex` · `peg` · `time`, CodeAct 오류 문구 여섯, F-141 ~ F-155 수정.
+  `unreleased.md`는 머리말만 남았다. 릴리스 run이 동시 push 취소와 runner 끊김으로 세 번 돌았다(`project_fork_release_ci.md`).
+- 로컬 master와 `origin/master`가 같다(2026-11-16 릴리스 지시로 push). 그 뒤 push도 사용자 지시 때만.
 - tars-agent는 cyber 0.4.11에 고정(`78df31d`). `730813e`에서 `e25e7d76`의 회신을 기록했고 0.4.12에서 확인한다.
   요청서 `/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.11-codeact-messages.md`.
 
 ## 다음 할 일
 
-1. 0.4.12 릴리스: 사용자 지시를 기다린다. tars-agent가 이 버전을 기다린다. 절차는 아래 "릴리스".
+1. tars-agent에 0.4.12를 알린다(그 저장소는 다른 세션이 고치고 있을 수 있어 쓸지는 사용자에게 맡긴다). 고정을 0.4.12로 올리고
+   CodeAct 문구 여섯을 확인하는 것은 tars-agent 쪽 일.
 2. 사용자 결정 대기:
    - `scope` 블록 안의 `return` · `break` · `continue`가 합류한다는 것을 알리는 도구(안 1 LSP Information 진단, 안 2 hover,
      안 3 inlay hint). `project_coroutines.md` 끝 절.
@@ -101,7 +68,7 @@
 
 1. 버전 세 곳: `build.zig` · `build.zig.zon` · `install.sh`.
 2. `unreleased.md` → `docs/releases/<v>.md`(요약 · 호환성 절을 새로 쓴다), `unreleased.md`는 머리말만 남긴다.
-3. 13단계 검증 rc=0 → annotated 태그 → master와 함께 push.
+3. 13단계 검증 rc=0 → master push → 그 Latest Build가 끝난 뒤 annotated 태그 push(같이 올리면 `concurrency: latest`로 한쪽이 취소된다).
 4. 릴리스 run 확인(`gh run list`), `gh release edit <v> --notes-file docs/releases/<v>.md --latest`. Latest는 `gh release list`로 본다.
 5. `install.sh <v>`를 scratchpad에 설치해 버전 문자열 · `cyber-lsp initialize` · 예제 하나 확인.
 6. 노트에 태그 커밋 · 빌드 번호를 적어 커밋하고 `docs/decisions/project_fork_release_ci.md`에도 기록.

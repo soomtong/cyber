@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.12-dev 920-db47d8c</div>
+    <div class="sub-title">v0.4.12-dev 922-078d064</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -5624,6 +5624,7 @@ typedef struct MyNode {
 <li><a href="#help" title="">Help.</a></li>
 <li><a href="#repl" title="">REPL.</a></li>
 <li><a href="#format-source" title="">Format source.</a></li>
+<li><a href="#documentation" title="">Documentation.</a></li>
 <li><a href="#jit-compiler" title="">JIT compiler.</a></li>
 <li><a href="#c-backend" title="">C backend.</a></li>
 </ul>
@@ -5737,6 +5738,19 @@ for nouns |n|:
 <p>A directory search skips directories whose name starts with <code>.</code> (such as <code>.git</code> and <code>.zig-cache</code>), <code>zig-out</code> and <code>node_modules</code>, and it does not follow symbolic links. A path that is named on the command line is always formatted. A file or directory that can not be read or written is reported as <code>path: error: Name</code>, the other files are still formatted, and the exit code is 1.</p>
 <p>A file is rewritten in place, it is not replaced by a new file. A symbolic link stays a link and its target is rewritten, hard links stay linked, the permission bits are kept, and a read-only file is reported as an error.</p>
 <p>Hosts that embed <code>libcyber</code> call the same formatter with <code>cl_vm_format</code>. It returns <code>CL_FORMAT_OK</code>, <code>CL_FORMAT_SYNTAX_ERROR</code> (the source needs a fix, the message is <code>line:col: message</code>), <code>CL_FORMAT_INTERNAL_ERROR</code> (the formatter refused its own output, the source is fine and should be kept) or <code>CL_FORMAT_NO_MEMORY</code>.</p>
+<a href="#cli">^topic</a>
+<h2 id="documentation">Documentation. <a href="#documentation">#</a></h2>
+<p><code>cyber doc</code> prints this manual from the executable, so the text matches the <code>cyber</code> that prints it. It works offline and needs no files next to the executable:</p>
+<pre><code class="language-bash">cyber doc                 # Print the usage and the chapters with their section ids.
+cyber doc optionals       # Print one section with its subsections.
+cyber doc unwrap-or-panic
+cyber doc --list          # Print every section id, indented by level.
+cyber doc --for-agents    # Print a short guide for coding agents and the topic index.
+</code></pre>
+<p>A section id is the anchor of the section on the docs site: the heading text in lower case, with spaces replaced by <code>-</code> and <code>.</code>, <code>/</code>, <code>$</code>, <code>[</code>, <code>]</code> and <code>#</code> removed. A repeated heading gets <code>-1</code>, <code>-2</code> and so on. The heading text also works (<code>cyber doc 'Optionals.'</code>). A part of an id works when only one section contains it. Otherwise the matching ids are listed and the exit code is 1.</p>
+<p><code>cyber doc --for-agents</code> prints <code>docs/agents.md</code> of the source tree: the differences from Python, the common methods, the modules, examples, and the compile errors whose message does not say the fix. It ends with the chapters and their section ids. A project that is written in Cyber can point its agent instructions (<code>AGENTS.md</code>, <code>CLAUDE.md</code>) at this command instead of keeping a copy of the guide.</p>
+<p>The module API is not in <code>cyber doc</code>. It is in <code>api.html</code> on the docs site and in <code>api.json</code> of each release.</p>
+<p>Since <code>doc</code> is a command, a script file named <code>doc</code> without an extension is run as <code>cyber ./doc</code>.</p>
 <a href="#cli">^topic</a>
 <h2 id="jit-compiler">JIT compiler. <a href="#jit-compiler">#</a></h2>
 <p>The JIT compiler is not supported. Passing <code>-jit</code> (or <code>CL_JIT</code> through the embedding API) fails with a compile error. Use the default bytecode VM, or the C backend (<code>-tcc</code>, <code>-cc</code>) for native performance.</p>

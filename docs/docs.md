@@ -1101,6 +1101,19 @@ for arr |it|:
 arr = arr.remove(1)
 ```
 
+`append`, `insert`, `remove`, `clear`, `size_down` and `size_up` return the new slice and leave the receiver as it was,
+like `+`. Assign the result back to keep it: `arr = arr.remove(1)`. Dropping the result (`_ = arr.remove(1)` or a bare
+`arr.clear()`) is a compile error that says so. A result kept in another variable is a separate list:
+```cy
+arr := []int{1, 2, 3}
+rest := arr.remove(0)
+print(arr.len())   --> 3
+print(rest.len())  --> 2
+```
+When the receiver is the only owner of the buffer, `append`, `size_up` and a removal at the end reuse it. A removal or an
+insertion before the end copies, because the receiver still sees those elements. Elements that a shrinking op drops stay
+alive while the receiver can see them, until a later resize of the result or the end of both.
+
 An index or a length that is out of range panics. This holds for `Array`, `Slice`, spans and `Buffer`:
 `remove` and `insert` need a valid index, the start and the end of a slice expression can not be negative,
 and a negative or too large length (`[]int(n, 0)`, `size_up`) panics with `Invalid allocation length`.

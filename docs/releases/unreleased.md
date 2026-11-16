@@ -56,6 +56,20 @@
 
 ## 버그 수정
 
+- 길이를 바꾸는 `Slice` 메서드의 결과를 다른 변수에 받거나 버리면 받는 변수가 해제된 원소를 봤다. `r := out.remove(1)` 뒤
+  `out[1]`이 쓰레기 값이거나 세그폴트였고, 두 번 부르면 `index out of bounds: index 268435454`였다. `clear` · `size_down`도
+  같았고 `insert`는 받는 변수의 원소를 옮겼다. 버퍼를 받는 변수 혼자 가질 때 `clone_on_resize`가 같은 버퍼를 돌려주고,
+  받는 변수는 옛 길이로 그 버퍼를 보기 때문이다. 0.4.11에도 있던 결함이다(회귀 아님). 이제 받는 변수는 그대로다:
+  - `size_down` · `clear` · 끝 원소의 `remove`는 같은 버퍼에서 길이만 줄이고 원소를 해제하지 않는다. 버퍼의 원소 수는 받는
+    변수의 길이로 남아, 받는 변수가 사라진 뒤 결과의 다음 resize나 `@deinit`이 해제한다(2026-11-01 결정의 후보 1을 넓힘).
+  - 끝이 아닌 `remove`와 `insert`는 새 버퍼에 복사한다. 둘 다 O(n)이던 것에 할당 하나가 더해진다. `out = out.remove(0)`
+    반복도 매번 할당한다.
+  - `append` · `size_up` · 끝의 `insert`는 그대로 제자리다(받는 변수의 길이 밖에만 쓴다).
+- `_ = out.remove(i)`와 결과를 쓰지 않은 `out.clear()`는 컴파일 오류다: ``The result of `remove` is the new list, and `out`
+  keeps the old one. Write `out = out.remove(i)`.`` `append` · `insert` · `remove` · `clear` · `size_down` · `size_up`의
+  결과가 `Slice`일 때다. 전에는 결과를 버린 루프가 끝나지 않거나 위 결함으로 프로세스가 죽었다. tars-agent 요청
+  `cyber-0.4.12-spike-defects.md` (a). 테스트 `core/Slice_resize_receiver.cy`, `core/Slice_remove_discard_error.cy`,
+  `core/Slice_clear_unused_error.cy`.
 - wasm32에서 빌림(`&T`)을 둘 이상 가진 구조체나 `[N]&T`가 있는 프레임의 스택이 옮겨지면 메모리가 깨졌다(F-156). 4바이트
   포인터 둘이 값 칸 하나에 들어가는데, 위 절반의 포인터는 보정되지 않았고 아래 절반을 보정할 때 위 절반이 지워졌다. `scope`
   블록에서 빌림을 받은 fiber가 시작하기 전에 부모 fiber의 스택이 자라면 `Retaining untracked heap object`로 죽었다. native는 영향이

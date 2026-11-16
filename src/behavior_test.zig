@@ -502,6 +502,9 @@ fn test_core(run: *Runner) void {
     run.case("core/rune_grapheme_cluster_lit_error.cy");
     run.case("core/set_index_unsupported_error.cy");
     run.case("core/Slice.cy");
+    run.case("core/Slice_resize_receiver.cy");
+    run.case("core/Slice_remove_discard_error.cy");
+    run.case("core/Slice_clear_unused_error.cy");
     run.case("core/Slice_oob_panic.cy");
     run.case("core/Array_remove_oob_panic.cy");
     run.case("core/Array_size_up_neg_panic.cy");

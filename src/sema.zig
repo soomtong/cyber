@@ -450,6 +450,31 @@ fn popLocals2(c: *cy.Chunk, var_start: usize, destruct: bool, node: *ast.Node) !
     c.varStack.items.len = var_start;
 }
 
+/// `_ = out.remove(i)` or a bare `out.remove(i)`. The `Slice` methods that change the length return the new list and
+/// leave the receiver as it was, so a dropped result is a loop that never ends or a lost update.
+fn checkDroppedSliceResult(c: *cy.Chunk, expr_t: *cy.Type, node: *ast.Node) !void {
+    if (node.type() != .callExpr) return;
+    const call = node.cast(.callExpr);
+    if (call.callee.type() != .accessExpr) return;
+    const access = call.callee.cast(.accessExpr);
+    if (access.right.type() != .ident) return;
+    const method = access.right.cast(.ident).name.slice();
+    const methods = [_][]const u8{ "append", "insert", "remove", "clear", "size_down", "size_up" };
+    var found = false;
+    for (methods) |m| {
+        if (std.mem.eql(u8, method, m)) found = true;
+    }
+    if (!found) return;
+    const instance = expr_t.sym().instance orelse return;
+    if (instance.getSymTemplate() != c.sema.slice_tmpl) return;
+    const recv = c.ast.nodeString(access.left);
+    const call_src = c.ast.nodeString(node);
+    if (recv.len > 40 or call_src.len > 80) {
+        return c.reportErrorFmt("The result of `{}` is the new list, and the receiver keeps the old one. Assign it back to the receiver.", &.{v(method)}, node);
+    }
+    return c.reportErrorFmt("The result of `{}` is the new list, and `{}` keeps the old one. Write `{} = {}`.", &.{v(method), v(recv), v(recv), v(call_src)}, node);
+}
+
 fn semaExprStmt(c: *cy.Chunk, node: *ast.Node) !void {
     const var_start = c.varStack.items.len;
     const expr = try c.semaExpr(node, .{});
@@ -466,6 +491,7 @@ fn semaExprStmtEnd(c: *cy.Chunk, expr: ExprResult, var_start: usize, node: *ast.
         const name = try c.sema.allocTypeName(expr.type);
         defer c.alloc.free(name);
 
+        try checkDroppedSliceResult(c, expr.type, node);
         if (expr.type.kind() == .result) {
             return c.reportErrorFmt("Expected to handle the error case for `{}`. Add `!` after the call to unwrap it, or handle the error with `!else` or `try`.", &.{v(name)}, node);
         } else {
@@ -4458,6 +4484,9 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
         .fit_target = has_target_type,
         .assign_to_local = true,
     });
+    if (node.name.type() == .void_lit) {
+        try checkDroppedSliceResult(c, right.type, node.right);
+    }
 
     if (right.type.info.borrow_only and right.resType == .value) {
         if (right.data.value.parent_local) |parent_local| {

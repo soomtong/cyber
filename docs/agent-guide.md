@@ -99,7 +99,7 @@ str (strings do not change; every method returns a new value):
 
 - `xs.len()`, `xs.contains(x)`, `xs.index(x)` gives `?int`, `xs.last()`
 - `xs.join(sep)` for `[]str`, gives `str`
-- `xs.append(x)`, `xs.insert(i, x)`, `xs.remove(i)`, `xs.clear()`: each returns the new list; take it: `xs = xs.remove(0)`
+- `xs.append(x)`, `xs.insert(i, x)`, `xs.remove(i)`, `xs.clear()`: each returns the new list and leaves `xs` as it was; assign it back: `xs = xs.remove(0)`. `_ = xs.remove(0)` is a compile error
 - `xs.sort()` sorts in place in ascending order (numbers and strings). `xs.sort(|a, b| ...)` sorts by a function that returns true when `a` goes first. Both return nothing.
 
 Map[K, V]:

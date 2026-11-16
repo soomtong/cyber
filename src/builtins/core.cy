@@ -1382,7 +1382,13 @@ fn (&Slice[]) clone_on_resize(new_cap int) -> Self:
                     @destruct(T, self.ptr + i)
                 (as[Ptr[int]] self.ptr)[-1] = self._len
         return self.*
+    return self.clone_copy(new_cap)
 
+--| A copy of this view in a new buffer that only the result holds. The resize ops that change elements
+--| the receiver still sees (`remove` and `insert` before the end) use it, because the receiver keeps
+--| its own length and buffer after the call: `r := out.remove(1)` leaves `out` as it was.
+fn (&Slice[]) clone_copy(new_cap int) -> Self:
+    sub_slice := (self.header >> 63 != 0)
     if new_cap < self._len:
         new_cap = self._len
 
@@ -1421,7 +1427,11 @@ fn (&Slice[]) insert(idx int, val T) -> Self:
     if idx.ugt(self._len):
         panic_oob(idx)
 
-    cur := self.clone_on_resize(self._len + 1)
+    if idx == self._len:
+        return self.append(val)
+
+    -- Shifting in place would change what the receiver sees.
+    cur := self.clone_copy(self._len + 1)
 
     if idx == cur._len:
         -- Appending to end.
@@ -1495,7 +1505,10 @@ fn (scope &Slice[]) next_borrow(idx &int) -> scope ?&T:
 fn (&Slice[]) remove(idx int) -> Self:
     if (as[r64] idx) >= (as[r64] self._len):
         panic_oob(idx)
-    cur := self.clone_on_resize(0)
+    if idx == self._len - 1:
+        return self.size_down(idx)
+    -- Shifting in place would change what the receiver sees.
+    cur := self.clone_copy(0)
     @destruct(T, cur.ptr + idx)
     -- Move rest to the left.
     size := type.size(T) * (cur._len-idx-1)
@@ -1515,6 +1528,12 @@ fn (&Slice[]) size_down(new_len int) -> Self:
 
     cur := self.clone_on_resize(0)
     #if type.managed(T):
+        if cur.ptr == self.ptr:
+            -- Same buffer: the receiver still sees the elements past `new_len`. They stay alive and
+            -- the buffer's count stays at the receiver's length. A later resize of the shorter view
+            -- destructs them once the receiver is gone (`clone_on_resize`), or `@deinit` does.
+            cur._len = new_len
+            return cur
         for new_len..cur._len |i|:
             @destruct(T, cur.ptr + i)
     cur._len = new_len

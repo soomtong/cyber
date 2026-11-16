@@ -106,3 +106,17 @@ Beans"(IFL 2019) 및 Lean 발표 자료, Reinking 외 "Perceus"(PLDI 2021), Go B
   `core.cy`를 조금 바꾼 것만으로 증상이 사라졌던 것이다. 확인: 원래 커밋 `8eb4a90`을 worktree로 받아 wasm32 ReleaseSafe
   behavior 테스트가 같은 panic으로 죽는 것을 재현했고, `setOpArgU48` 한 줄만 고치면 통과했다. 그래서 `[-1]` 형태로
   되돌렸다(wasm32 ReleaseSafe · ReleaseFast의 lib · cli · trace · behavior 테스트 통과).
+
+## 결정 2 (2026-11-16): 줄이는 연산과 가운데 변경
+
+tars-agent 요청(`cyber-0.4.12-spike-defects.md` (a))에서 `remove` · `clear` · `size_down` · `insert`의 같은 별칭이 메모리
+안전을 깼다. `append`와 달리 이 연산은 받는 변수의 길이 안쪽을 바꾸기 때문이다(해제하거나 옮긴다).
+
+- 줄이는 연산은 후보 1을 넓혔다. 같은 버퍼면 원소를 해제하지 않고 버퍼 원소 수를 받는 변수의 길이로 둔다. 받는 변수가
+  사라진 뒤의 해제는 이미 있던 장치(`clone_on_resize`의 꼬리 해제, `@deinit`의 원소 수)가 맡는다. O(1)을 지킨다.
+- 끝이 아닌 `remove` · `insert`는 항상 복사한다(`clone_copy`). 받는 변수가 살아 있는지 런타임에 알 수 없고, 제자리로 하면
+  Go처럼 받는 변수의 값이 바뀌어 보인다. 값 의미(COW)를 지키는 쪽을 택했다. 비용은 할당 하나다.
+- 결과를 버리는 꼴(`_ = xs.remove(i)`, 결과를 쓰지 않은 문장)은 컴파일 오류로 고치는 법을 말한다(`sema.zig`
+  `checkDroppedSliceResult`). 메서드 이름 목록과 결과 타입이 `Slice`인지로 판정한다.
+- 남은 일: 후보 2(마지막 사용 분석)가 생기면 `xs = xs.remove(i)`에서 받는 변수를 이동으로 넘겨 가운데 변경도 제자리로 할
+  수 있다. `&&Slice` 제자리 API로 바꾸는 안은 tars-agent 프롬프트 · 문서 영향 때문에 사용자 결정으로 남긴다.

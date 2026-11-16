@@ -26,6 +26,15 @@
   `os.read_file_str(p)` · `str(os.read_file(p)!)` → `os.read_file(p)`, 바이트로 쓰던 `os.read_file(p)` → `os.read_file_bytes(p)`,
   `os.write_file(p, bytes)` → `os.write_file_bytes(p, bytes)`. 결정 `docs/decisions/project_os_file_text_bytes.md`.
 
+## 오류 문구
+
+- 다른 언어의 선언 키워드(`let` · `mut` · `val` · `auto`)로 쓴 선언이 ``Cyber has no `let`. Declare with `x := 1`, or
+  `var x int = 1` for a type.``를 낸다. 타입을 쓴 꼴(`let x: int = 1`, `let x int = 1`)은 ``Declare with `var x int = 1`.``이다.
+  전에는 첫 단어를 이름으로 읽어 ``write `var let x = 1` or `let := x(1)` ``처럼 틀린 고치는 법을 말했다. `let mut x`처럼
+  키워드가 겹쳐도, `=`가 없는 `let x: int`도 같다. 예의 타입은 값이 리터럴이면 그 타입(`int` · `float` · `str` · `bool`),
+  아니면 `T`다. `let := 3`처럼 이 단어를 이름으로 쓰는 것은 그대로 된다. `const`는 Cyber의 상수 선언이라 빠진다.
+  tars-agent 요청 `cyber-0.4.12-spike-defects.md` (b). 테스트 `syntax/foreign_decl_*.cy`.
+
 ## 동시성
 
 - 취소 도중 `@deinit`이 다시 멈춰도(`suspend` · `await`) panic하지 않는다. 그 `@deinit`은 fiber가 있던 다른 함수처럼 멈춘

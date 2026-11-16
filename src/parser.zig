@@ -2431,12 +2431,92 @@ pub const Parser = struct {
         return null;
     }
 
+    /// Declaration keywords of other languages. `let x = 1` would otherwise read as `name T = v`.
+    /// `const` is not here: it declares a constant in Cyber.
+    fn isForeignDeclKeyword(name: []const u8) bool {
+        const keywords = [_][]const u8{ "let", "mut", "val", "auto" };
+        for (keywords) |kw| {
+            if (std.mem.eql(u8, name, kw)) return true;
+        }
+        return false;
+    }
+
+    /// `let x = 1`, `let x: int = 1`, `let mut x = 1`. `kw_pos` is the token index of the first keyword.
+    fn reportForeignDeclError(self: *Parser, kw_pos: u32) anyerror {
+        const src = self.ast.src;
+        const kw_tok = self.tokens[kw_pos];
+        const kw = src[kw_tok.pos()..kw_tok.data.end];
+
+        // Skip further keywords (`let mut x`).
+        var i = kw_pos + 1;
+        while (self.tokenAt(i).tag() == .ident) {
+            const tok = self.tokens[i];
+            if (!isForeignDeclKeyword(src[tok.pos()..tok.data.end])) break;
+            i += 1;
+        }
+        const name_tok = self.tokenAt(i);
+        if (name_tok.tag() != .ident) {
+            return self.reportErrorAtSrc("Cyber has no `{}`. Declare a variable with `x := value`, or `var x T = value` for a type.", &.{v(kw)}, kw_tok.pos());
+        }
+        const name = src[name_tok.pos()..name_tok.data.end];
+
+        var value: []const u8 = "value";
+        var value_t: []const u8 = "T";
+        var type_src: ?[]const u8 = null;
+        // The type ends at `=`, or at the end of the line for `let x: int`.
+        var type_end = i + 1;
+        while (true) : (type_end += 1) {
+            switch (self.tokenAt(type_end).tag()) {
+                .equal, .new_line, .null => break,
+                else => {},
+            }
+        }
+        var type_start = i + 1;
+        if (self.tokenAt(type_start).tag() == .colon) type_start += 1;
+        if (type_start < type_end) {
+            const end_src = if (type_end < self.tokens.len) self.tokens[type_end].pos() else src.len;
+            const ty = std.mem.trim(u8, src[self.tokens[type_start].pos()..end_src], " \t\r");
+            if (ty.len > 0 and ty.len <= 40) type_src = ty;
+        }
+        if (self.tokenAt(type_end).tag() == .equal) {
+            const eq_src = self.tokens[type_end].pos();
+            var line_end: usize = eq_src + 1;
+            while (line_end < src.len and src[line_end] != '\n') : (line_end += 1) {}
+            const val_src = std.mem.trim(u8, src[eq_src+1..line_end], " \t\r");
+            if (val_src.len > 0 and val_src.len <= 40) {
+                value = val_src;
+            }
+            if (val_src.len > 0 and (val_src[0] == '\'' or val_src[0] == '"') and val_src[val_src.len-1] == val_src[0]) {
+                value_t = "str";
+            } else {
+                const after = self.tokenAt(type_end + 2).tag();
+                if (after == .new_line or after == .null) {
+                    value_t = switch (self.tokenAt(type_end + 1).tag()) {
+                        .dec, .hex, .bin, .oct => "int",
+                        .float => "float",
+                        .true_k, .false_k => "bool",
+                        else => "T",
+                    };
+                }
+            }
+        }
+        if (type_src) |ty| {
+            return self.reportErrorAtSrc("Cyber has no `{}`. Declare with `var {} {} = {}`.", &.{v(kw), v(name), v(ty), v(value)}, kw_tok.pos());
+        }
+        return self.reportErrorAtSrc("Cyber has no `{}`. Declare with `{} := {}`, or `var {} {} = {}` for a type.", &.{
+            v(kw), v(name), v(value), v(name), v(value_t), v(value),
+        }, kw_tok.pos());
+    }
+
     /// A typed variable written without `var`: `name: T = v` or `name T = v`.
     /// `name_pos` and `type_pos` are token indexes.
     fn reportTypedDeclError(self: *Parser, name_pos: u32, type_pos: u32) anyerror {
         const src = self.ast.src;
         const name_tok = self.tokens[name_pos];
         const name = src[name_tok.pos()..name_tok.data.end];
+        if (isForeignDeclKeyword(name)) {
+            return self.reportForeignDeclError(name_pos);
+        }
         const eq_pos = self.findEqualOnLine(type_pos) orelse {
             const type_tok = self.tokens[type_pos];
             const type_name = src[type_tok.pos()..type_tok.data.end];
@@ -4860,8 +4940,9 @@ pub const Parser = struct {
 
         if (!is_assign_stmt) {
             if (expr.type() == .ident and self.peek().tag() == .ident) {
-                // `in_s str = ''` without `var`.
-                if (self.findEqualOnLine(self.next_pos) != null) {
+                // `in_s str = ''` without `var`, or `let x` from another language.
+                const expr_name = self.ast.src[self.tokens[start].pos()..self.tokens[start].data.end];
+                if (self.findEqualOnLine(self.next_pos) != null or isForeignDeclKeyword(expr_name)) {
                     return self.reportTypedDeclError(start, self.next_pos);
                 }
             }

@@ -351,7 +351,6 @@ test.eq(10, clamp(42, 0, 10))
 Most compile errors say how to fix the code, for example `Did you mean starts_with?`, `Write else cond:, not else if cond:`, `Unwrap it with ! first`. Follow those. The errors below do not, so the cause and the fix are given here. Each line is the first line of the error.
 
 - `Expected end of line or file. Got ...`: `def`, `class`, `lambda x:`, a semicolon. Rewrite in Cyber syntax.
-- ``To declare a typed variable, write `var let x = 1` or `let := x(1)`.``: `let x = 1` (also `mut`, `val`, `auto`). The suggested fix is wrong. Write `x := 1`.
 - `Expected right operand.`: `i++`, `10 // 3`, a `//` comment. Write `i += 1`, `/`, `--`.
 - `Expected `]`.`: a list comprehension. Write a `for` loop that appends.
 - `Expected `,`.` in a function declaration: a default parameter value. Remove it and add an overload.

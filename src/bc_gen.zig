@@ -2980,19 +2980,44 @@ fn mark_stack_ptr_bytes(c: *Chunk, type_: *cy.Type, byte: usize, conds: PtrConds
         .vector => {
             const vector_t = type_.cast(.vector);
             const elem_size = vector_t.elem_t.size();
-            if (elem_size > 0 and elem_size % ptr_bytes == 0) {
+            // The count of the first element does not tell whether the elements hold a pointer: it is 0 too when
+            // another case of a choice marked that register before. So the type is asked, once.
+            if (elem_size > 0 and elem_size % ptr_bytes == 0 and may_hold_stack_ptr(vector_t.elem_t)) {
                 for (0..vector_t.n) |i| {
-                    const marked = mark_stack_ptr_bytes(c, vector_t.elem_t, byte + i * elem_size, conds);
-                    // The elements have the same layout: no pointer in the first one, none in the others. Two
-                    // 4 byte elements share a register and the second one counts 0, so those are all looked at.
-                    if (marked == 0 and elem_size % 8 == 0) break;
-                    count += marked;
+                    count += mark_stack_ptr_bytes(c, vector_t.elem_t, byte + i * elem_size, conds);
                 }
             }
         },
         else => {},
     }
     return count;
+}
+
+/// Whether `mark_stack_ptr_bytes` can mark a register for a value of `type_`. It does not look at the alignment of
+/// a field, so it can say yes for a type that marks none.
+fn may_hold_stack_ptr(type_: *cy.Type) bool {
+    if (type_.is_stack_ptr() or type_.kind() == .ex_borrow) return true;
+    switch (type_.kind()) {
+        .struct_t => {
+            for (type_.cast(.struct_t).fields()) |field| {
+                if (may_hold_stack_ptr(field.type)) return true;
+            }
+            return false;
+        },
+        .option => return may_hold_stack_ptr(type_.cast(.option).child_t),
+        .result => return may_hold_stack_ptr(type_.cast(.result).child_t),
+        .choice => {
+            for (type_.cast(.choice).cases()) |case| {
+                if (may_hold_stack_ptr(case.payload_t)) return true;
+            }
+            return false;
+        },
+        .vector => {
+            const vector_t = type_.cast(.vector);
+            return vector_t.n > 0 and may_hold_stack_ptr(vector_t.elem_t);
+        },
+        else => return false,
+    }
 }
 
 fn gen_global(c: *Chunk, expr: *ir.Global, cstr: Cstr, node: *ast.Node) !GenValue {

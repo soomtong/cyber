@@ -70,4 +70,30 @@ fb2 := fiber keep_num_fiber(o2)
 _ = fb2.resume()
 test.eq(o2.*, 0)
 
+-- Every element of a vector payload is patched when an earlier case marked its first register.
+type Refs enum:
+    case one &int
+    case many [3]&int
+
+fn many_after_one() -> int:
+    a := 1
+    b := 2
+    m := Refs.many([3]&int{&a, &b, &a})
+    _ = rec(20000)
+    a = 10
+    b = 20
+    switch m:
+        case .many |v|:
+            return v[0].* + v[1].* * 10 + v[2].* * 100
+        else:
+            return -1
+test.eq(many_after_one(), 1210)
+
+fn many_after_one_fiber(out ^int) -> void:
+    out.* = many_after_one()
+o3 := ^int(-1)
+fb3 := fiber many_after_one_fiber(o3)
+_ = fb3.resume()
+test.eq(o3.*, 1210)
+
 --cytest: pass

@@ -29,3 +29,7 @@
   포인터 둘이 값 칸 하나에 들어가는데, 위 절반의 포인터는 보정되지 않았고 아래 절반을 보정할 때 위 절반이 지워졌다. `scope`
   블록에서 빌림을 받은 fiber가 시작하기 전에 부모 fiber의 스택이 자라면 `Retaining untracked heap object`로 죽었다. native는 영향이
   없다. 테스트 `functions/packed_borrow_stack_grow.cy`, `concurrency/scope_block_borrow_cancel.cy`.
+- choice의 앞 case가 빌림 하나(`case one &int`)이고 뒤 case가 빌림 벡터(`case many [3]&int`)이면, 스택이 옮겨질 때 벡터의
+  둘째 원소부터 보정되지 않아 옛 스택을 읽었다(F-157). `case Pair` 뒤의 `case [3]Pair`도 같다. 0.4.12 전부터 있던 결함이다.
+  포인터가 없는 원소의 벡터(`[N]i32` 등)는 wasm32에서 지역을 잡을 때마다 원소 수만큼 돌던 것도 없앴다. 테스트
+  `functions/payload_borrow_stack_grow.cy`.

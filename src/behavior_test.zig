@@ -435,6 +435,7 @@ if (!aot) {
     run.case("concurrency/fiber_no_call_error.cy");
     run.case("concurrency/fiber_block_capture_error.cy");
     run.case("concurrency/fiber_running_panic.cy");
+    run.case("concurrency/fiber_in_progress_panic.cy");
     run.case("concurrency/fiber_panic.cy");
     run.case("concurrency/future_wait_any.cy");
     run.case("concurrency/future_wait_any_empty_panic.cy");

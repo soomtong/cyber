@@ -18,13 +18,17 @@
   `docs/agents.md` → `docs/agent-guide.md`(대소문자 무시 파일 시스템에서 `AGENTS.md`로 읽혔다), `fiber_in_progress_panic.cy` 복원.
   리뷰 6번은 fiber의 소유 링크로 고쳤다: fiber 안의 `Fiber.wait_ready()`는 자기가 돌리는 fiber의 Future만 기다린다(헛깨움 제거,
   그룹 400개 2.7초 → 0.23초, epoch 캐시 삭제).
-- tars-agent는 cyber 0.4.11에 고정(`78df31d`). `730813e`에서 `e25e7d76`의 회신을 기록했고 0.4.12에서 확인한다.
-  요청서 `/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.11-codeact-messages.md`.
+- tars-agent 요청 `cyber-0.4.12-spike-defects.md`의 네 건을 고쳤다(2026-11-16, 모두 13단계 검증 rc=0, push 안 함):
+  `85c95b1d` (c) `os.read_file` → `!str`(UTF-8 검사), `read_file_bytes` · `write_file_bytes` 추가, `read_file_str` 삭제,
+  `write_file`의 `[]byte` 오버로드 삭제(깨지는 변경, 사용자 결정, `project_os_file_text_bytes.md`). `526146a9` (d) `.paths`에
+  `docs/docs.md` · `docs/agent-guide.md`. `4cf57841` (b) `let` · `mut` · `val` · `auto` 선언 문구. `40ae5b5a` (a) `Slice`
+  resize의 받는 변수 보존과 버린 결과의 컴파일 오류(`project_slice_append_aliasing.md` 결정 2). 회신은 tars-agent 요청서 끝
+  "cyber 회신" 절(tars-agent에 미커밋으로 둠, 그쪽 세션이 커밋).
 
 ## 다음 할 일
 
-1. tars-agent는 다른 세션이 0.4.12로 올리는 중이다(2026-11-16 미커밋: `docs/deps.md` 고정 `67a2735c` · 빌드 919, 스파이크
-   `build.zig.zon`, 요청서 삭제). 이 저장소에서 할 일은 없다. 그쪽이 문구 여섯에서 차이를 보고하면 받는다.
+1. tars-agent는 0.4.12에 고정(`25ccf63`). 위 네 건의 회신을 그쪽이 확인한다. 결정 대기로 남긴 것: `Slice`를 `&&Slice` 제자리
+   API로 바꾸는 안, 모듈 API를 `cyber doc`에 넣는 안, `read_file_str` · `write_file(p, bytes)` 오류에 고치는 이름을 말하는 문구.
 2. 사용자 결정 대기:
    - `scope` 블록 안의 `return` · `break` · `continue`가 합류한다는 것을 알리는 도구(안 1 LSP Information 진단, 안 2 hover,
      안 3 inlay hint). `project_coroutines.md` 끝 절.

@@ -160,6 +160,7 @@ fn test_functions(run: *Runner) void {
     run.case("functions/stack_grow_ptr_patch.cy");
     run.case("functions/closure_borrow_stack_grow.cy");
     run.case("functions/payload_borrow_stack_grow.cy");
+    run.case("functions/packed_borrow_stack_grow.cy");
     run.case("functions/too_many_locals_error.cy");
     run.case("functions/lambda.cy");
     run.case("functions/lambda_incompat_arg_error.cy");
@@ -421,6 +422,7 @@ if (!aot) {
     run.case("concurrency/scope_block.cy");
     run.case("concurrency/scope_block_no_result_error.cy");
     run.case("concurrency/scope_block_borrow.cy");
+    run.case("concurrency/scope_block_borrow_cancel.cy");
     run.case("concurrency/scope_block_borrow_inner_error.cy");
     run.case("concurrency/scope_block_borrow_exclusive_error.cy");
     run.case("concurrency/scope_start_borrow_error.cy");

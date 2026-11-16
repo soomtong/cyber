@@ -162,9 +162,11 @@ pub const Heap = struct {
             const func = &obj_ptr.*.func;
             const num_captured: usize = @intCast(func.data.closure.numCaptured);
             for (func.getCapturedValuesPtr()[0..num_captured]) |*val| {
-                const addr = val.val;
+                // On a 32-bit target the pointer is the lower half. The upper half can be garbage (F-156).
+                const hi_mask: u64 = if (@sizeOf(usize) == 4) 0xffffffff_00000000 else 0;
+                const addr = val.val & ~hi_mask;
                 if (addr >= old_start and addr < old_start + old_bytes) {
-                    val.val = addr - old_start + new_start;
+                    val.val = (val.val & hi_mask) | (addr - old_start + new_start);
                 }
             }
         }

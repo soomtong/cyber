@@ -2868,8 +2868,8 @@ const PtrConds = struct {
         return res;
     }
 
-    fn slot(self: PtrConds, reg: usize) cy.bytecode.PtrSlot {
-        var res = cy.bytecode.PtrSlot{ .ptr = true };
+    fn slot(self: PtrConds, reg: usize, hi: bool) cy.bytecode.PtrSlot {
+        var res = cy.bytecode.PtrSlot{ .ptr = !hi, .ptr_hi = hi };
         var n: usize = 0;
         for (self.items[0..self.len]) |cond| {
             const tag_reg = cond.tag_reg orelse continue;
@@ -2890,7 +2890,8 @@ const PtrConds = struct {
 
 /// The slot of a register that two cases of a choice mark: a pointer while either one's checks hold.
 fn merge_ptr_slots(a: cy.bytecode.PtrSlot, b: cy.bytecode.PtrSlot) cy.bytecode.PtrSlot {
-    var res = cy.bytecode.PtrSlot{ .ptr = true };
+    // Two halves of a register on a 32-bit target, or two cases of a choice.
+    var res = cy.bytecode.PtrSlot{ .ptr = a.ptr or b.ptr, .ptr_hi = a.ptr_hi or b.ptr_hi };
     if (a.back0 == 0 or a.back0 != b.back0) return res;
     if (a.back1 == b.back1 and a.tags1 == b.tags1) {
         // Only the first check differs.
@@ -2924,11 +2925,22 @@ fn merge_ptr_slots(a: cy.bytecode.PtrSlot, b: cy.bytecode.PtrSlot) cy.bytecode.P
 /// the tag checks (`bytecode.PtrSlot`), so a register that holds an `int` of another case is not patched when
 /// its value happens to be in the moved range.
 fn mark_stack_ptr_regs(c: *Chunk, type_: *cy.Type, reg: usize, conds: PtrConds) usize {
+    return mark_stack_ptr_bytes(c, type_, reg * 8, conds);
+}
+
+/// A pointer is as large as the VM's `usize`: the bytecode runs where it is compiled.
+const ptr_bytes = @sizeOf(usize);
+
+/// `mark_stack_ptr_regs` for a value at byte offset `byte` of the frame. On a 32-bit target a struct packs 4 byte
+/// fields, so a pointer can be the upper half of a register (`PtrSlot.ptr_hi`).
+fn mark_stack_ptr_bytes(c: *Chunk, type_: *cy.Type, byte: usize, conds: PtrConds) usize {
+    const reg = byte / 8;
     if (type_.is_stack_ptr() or type_.kind() == .ex_borrow) {
-        const new = conds.slot(reg);
+        const new = conds.slot(reg, byte % 8 != 0);
         const cur = &c.buf.ptr_layout_builder.items[reg];
-        if (cur.ptr) {
-            // The cases of a choice can mark the same register. Count it once: `gen_pop_locals` counts registers.
+        if (cur.any()) {
+            // The cases of a choice can mark the same register, and so can the two halves of one. Count it once:
+            // `gen_pop_locals` counts registers.
             cur.* = merge_ptr_slots(cur.*, new);
             return 0;
         }
@@ -2940,38 +2952,40 @@ fn mark_stack_ptr_regs(c: *Chunk, type_: *cy.Type, reg: usize, conds: PtrConds) 
         .struct_t => {
             const struct_t = type_.cast(.struct_t);
             for (struct_t.fields()) |field| {
-                // A pointer field is 8 byte aligned. Smaller fields share a register and hold no pointer.
-                if (field.offset % 8 != 0) continue;
-                count += mark_stack_ptr_regs(c, field.type, reg + field.offset / 8, conds);
+                // A pointer field is aligned to its size. Smaller fields hold no pointer.
+                if ((byte + field.offset) % ptr_bytes != 0) continue;
+                count += mark_stack_ptr_bytes(c, field.type, byte + field.offset, conds);
             }
         },
+        // A tag is 8 bytes, so these start a register and the payload starts the next one.
         .option => {
             const option_t = type_.cast(.option);
             // A zero union is the payload itself. Otherwise the payload follows the tag, which is 1 for some.
             if (option_t.zero_union) {
-                count += mark_stack_ptr_regs(c, option_t.child_t, reg, conds);
+                count += mark_stack_ptr_bytes(c, option_t.child_t, byte, conds);
             } else {
-                count += mark_stack_ptr_regs(c, option_t.child_t, reg + 1, conds.with(reg, 1));
+                count += mark_stack_ptr_bytes(c, option_t.child_t, byte + 8, conds.with(reg, 1));
             }
         },
         .result => {
             // The payload follows the tag, which is 1 for the value. The error case holds no pointer.
-            count += mark_stack_ptr_regs(c, type_.cast(.result).child_t, reg + 1, conds.with(reg, 1));
+            count += mark_stack_ptr_bytes(c, type_.cast(.result).child_t, byte + 8, conds.with(reg, 1));
         },
         .choice => {
             // The payload follows the tag. A register that two cases mark is a pointer in either one.
             for (type_.cast(.choice).cases()) |case| {
-                count += mark_stack_ptr_regs(c, case.payload_t, reg + 1, conds.with(reg, case.val));
+                count += mark_stack_ptr_bytes(c, case.payload_t, byte + 8, conds.with(reg, case.val));
             }
         },
         .vector => {
             const vector_t = type_.cast(.vector);
             const elem_size = vector_t.elem_t.size();
-            if (elem_size > 0 and elem_size % 8 == 0) {
+            if (elem_size > 0 and elem_size % ptr_bytes == 0) {
                 for (0..vector_t.n) |i| {
-                    const marked = mark_stack_ptr_regs(c, vector_t.elem_t, reg + i * (elem_size / 8), conds);
-                    // The elements have the same layout: no pointer in the first one, none in the others.
-                    if (marked == 0) break;
+                    const marked = mark_stack_ptr_bytes(c, vector_t.elem_t, byte + i * elem_size, conds);
+                    // The elements have the same layout: no pointer in the first one, none in the others. Two
+                    // 4 byte elements share a register and the second one counts 0, so those are all looked at.
+                    if (marked == 0 and elem_size % 8 == 0) break;
                     count += marked;
                 }
             }
@@ -3529,7 +3543,7 @@ fn gen_pop_locals(c: *Chunk, stmt: *ir.PopLocals, node: *ast.Node) !void {
 
     var num_ptr_locals: usize = 0;
     for (c.buf.ptr_layout_builder.items[reg_start..c.cur_proc.reg_end]) |slot| {
-        if (slot.ptr) num_ptr_locals += 1;
+        if (slot.any()) num_ptr_locals += 1;
     }
     if (num_ptr_locals > 0) {
         c.cur_proc.num_ptr_locals -= num_ptr_locals;
@@ -4191,14 +4205,14 @@ pub fn pop_regs(c: *Chunk, end: Reg, node: *ast.Node) !void {
         return c.reportErrorFmt("Expected to trunc regs to {}, but found {}.", &.{v(end), v(c.cur_proc.reg_end)}, node);
     }
     if (end + 1 == c.cur_proc.reg_end) {
-        if (c.buf.ptr_layout_builder.items[end].ptr) {
+        if (c.buf.ptr_layout_builder.items[end].any()) {
             c.cur_proc.num_ptr_locals -= 1;
         }
         c.buf.ptr_layout_builder.items.len -= 1;
     } else {
         var num_stack_ptrs: usize = 0;
         for (c.buf.ptr_layout_builder.items[end..c.cur_proc.reg_end]) |slot| {
-            if (slot.ptr) {
+            if (slot.any()) {
                 num_stack_ptrs += 1;
             }
         }

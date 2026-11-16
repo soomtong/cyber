@@ -695,3 +695,29 @@ https://git.openjdk.org/loom/commit/ef84eca96d7ac8929b0dd5ba9d9d56f7722fd274
 - 결과: M=50 4ms, 100 15ms, 200 63ms, 400 240ms. 남은 비용은 바퀴마다 자식 전부를 도는 `Scope.run` 자체와 Future가 끝난 바퀴의
   한 번 훑기다(바퀴 수 × (M + N)).
 - 테스트 `concurrency/scope_nested_wait.cy`(드라이버 fiber가 뒤 그룹부터 완료, 루트가 쥔 `Scope`와 양보만 하는 fiber).
+
+## 변수에 담은 `FnTuple`의 빌림 (2026-11-16, 하지 않음)
+
+0.5 작업의 셋째 후보. `scope` 블록의 `s.start`는 리터럴 `{...}`의 빌림만 받는다. 변수에 담은 `FnTuple`을 받게 하려면
+`FnTuple`을 빌림 컨테이너로 표시해야 하고(`reifyStructType`), 그 타입을 같이 쓰는 `spawn` · `@new_fiber` · `@call`의 검사가
+모두 바뀐다. 사용자 코드에는 `FnTuple`이 나오지 않는다(테스트 · 매뉴얼 · `agents.md`에 없음, 타입 인자인 함수 시그니처를 쓰는
+문법도 사용자 쪽에 없다). 그래서 사용자가 닿는 경로는 리터럴뿐이고 이미 된다. 비용에 비해 얻는 것이 없어 하지 않는다.
+변수로 넘기면 나오는 오류는 리터럴을 쓰라고 말한다(`checkScopeStartCall`).
+
+## 시작한 뒤 멈춘 자식이 있는 동안의 스택 이동 (2026-11-16)
+
+0.5 작업의 넷째 항목. "범위 안 빌림 구현"의 `SUSPEND` · `AWAIT` 지점 레이아웃은 실행으로 확인하지 못한 경로였다.
+
+- 탐침: 부모 fiber가 깊이 n(0..120)의 재귀 뒤, 크기 j(1..24칸)의 지역 배열을 가진 프레임에서 `scope` 블록에 들어간다. 자식
+  하나는 `&x`를 받아 `await`에서 멈추고 (1) 루트가 Future를 끝내 다시 돌거나 (2) 형제가 실패해 취소된다(빌림을 가진 값의
+  `@deinit`이 읽는다). 구성 2880개씩.
+- 변종 빌드로 판정했다. `patchFiberPtrs`를 통째로 끈 빌드는 (1) 350건, (2) 393건이 틀린 값(`0xaa`)을 읽었다. 시작한 fiber만
+  건너뛰는 빌드는 0건. Debug · ReleaseSafe 계측(시작한 fiber의 레지스터가 실제로 고쳐질 때 출력)도 기존 테스트 전체를 포함해
+  0번이었다.
+- 이유: 자식이 멈춘 동안 부모 스택에서 도는 코드는 `Scope.run`의 호출(`size_down` · `wait_ready` · `fiber_cancel`)뿐이다.
+  첫 바퀴는 자식을 처음 resume하기 전에 `@scope_join` → `join` → `run`으로 같은 깊이까지 이미 내려가 있고, 스택은 줄지 않는다.
+  취소 쪽(`Scope.@deinit` → `abort` → `fiber_cancel`)도 그 깊이를 넘지 않는다. 그래서 지금의 core.cy에서는 이 경로가 생기지 않는다.
+  두 지점의 레이아웃은 `Scope.run`이 더 깊은 호출을 하게 될 때를 위한 방어로 남긴다.
+- 테스트 `concurrency/scope_block_borrow_cancel.cy`: 취소 쪽 탐침을 줄인 것(n 60 × j 6). 시작 전 자식 경로를 지나며, 위의 첫
+  변종 빌드에서 129건 실패한다. 이 테스트가 wasm32의 F-156(4바이트 포인터 둘이 든 칸의 보정)을 드러냈다
+  (`project_stack_ptr_patch.md`).

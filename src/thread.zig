@@ -150,19 +150,30 @@ fn ptr_slot_tags_hold(stack: [*]cy.Value, idx: usize, slot: cy.bytecode.PtrSlot)
 /// stack, or the stack of a suspended fiber that borrows from it (`Thread.patchFiberPtrs`).
 pub fn patch_frame_ptrs(stack: [*]cy.Value, fp: usize, layout: []const cy.bytecode.PtrSlot, old_start: usize, old_bytes: usize, new_start: usize) void {
     for (layout, 0..) |slot, i| {
-        if (!slot.ptr) continue;
+        if (!slot.any()) continue;
         // A register inside a result, a choice or an option holds the pointer only in its case.
         if (!ptr_slot_tags_hold(stack, fp + i, slot)) continue;
 
         // A marked register can still hold something else than an address (a pointer field that was not set,
         // a case whose check did not fit), so the value is compared before it is taken as an address.
-        const bits = reg_addr_bits(stack[fp + i].val);
-        if (bits >= old_start and bits < old_start + old_bytes) {
-            const ptr: usize = @intCast(bits);
-            const byte_off = ptr - old_start;
-            stack[fp + i] = cy.Value.initRaw(new_start + byte_off);
+        const val = &stack[fp + i].val;
+        if (@sizeOf(usize) == 4) {
+            // A 4 byte pointer is one half of the register. The other half is another field, or garbage: it is
+            // kept as it is (F-156).
+            if (slot.ptr) val.* = (val.* & 0xffffffff_00000000) | patch_addr(val.* & 0xffffffff, old_start, old_bytes, new_start);
+            if (slot.ptr_hi) val.* = (val.* & 0xffffffff) | (patch_addr(val.* >> 32, old_start, old_bytes, new_start) << 32);
+        } else {
+            val.* = patch_addr(val.*, old_start, old_bytes, new_start);
         }
     }
+}
+
+/// `addr` moved with the stack, or as it is when it is not inside the old stack.
+inline fn patch_addr(addr: u64, old_start: usize, old_bytes: usize, new_start: usize) u64 {
+    if (addr >= old_start and addr < old_start + old_bytes) {
+        return new_start + (addr - old_start);
+    }
+    return addr;
 }
 
 pub const CancelTarget = union(enum) {

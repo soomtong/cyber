@@ -30,8 +30,9 @@
 ## 알려진 한계
 
 - 양보만 하는 fiber와 Future를 기다리는 fiber가 섞이면 `Scope.run`이 쉬지 않고 돈다(설계대로).
-- 실행으로 확인하지 못한 경로: 시작한 자식이 `suspend` · `await`에서 멈춘 동안 부모 스택이 옮겨지는 경우, Windows `FallbackReadLine`.
-- 변수에 담은 `FnTuple`로는 빌림을 넘기지 못한다.
+- 실행으로 확인하지 못한 경로: Windows `FallbackReadLine`. 시작한 자식이 멈춘 동안 부모 스택이 옮겨지는 경우는 지금 구조에서
+  생기지 않음을 확인했다(`project_coroutines.md` 끝 절).
+- 변수에 담은 `FnTuple`로는 빌림을 넘기지 못한다(사용자 코드에 `FnTuple`이 나오지 않아 하지 않기로 함).
 - 최상위 `#x := ...` 컴파일 타임 변수는 뒤의 최상위 실행문에서 못 쓴다(선언 단계에서만 평가).
 - 보간 안의 보간은 지원하지 않는다(토크나이저 상태가 한 단계). 원인을 말하는 오류만 낸다.
 - `?json.Value == none`은 컴파일 오류(core `@eq`가 choice 미지원). `?else` · `Value.eq`를 쓴다.
@@ -51,7 +52,7 @@
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-155까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-156까지, 열린 것 없음).
 
 ## 작업 방식
 
@@ -103,6 +104,8 @@
 ## 구현 함정
 
 - wasm32: 값 칸은 8바이트, 포인터는 4바이트. 칸의 위 32비트는 쓰레기라 포인터로 쓸 때는 아래 절반만 본다(F-140 · F-143).
+  구조체는 4바이트 필드 둘을 한 칸에 담는다. 칸을 통째로 쓰면 옆 필드가 지워진다(F-156, `PtrSlot.ptr_hi`).
+  native에서 스택 이동은 `alloc.resize`가 제자리로 끝나 안 일어날 때가 많다. 이동 경로는 wasm 단계가 더 잘 잡는다.
   `@intFromPtr`는 `usize`라 `u64`에 넣을 때 `@as(u64, ...)`.
 - `Heap` · `Pool` 등 C 미러 구조체(`vm.h`)가 있는 타입에 필드를 더하면 오프셋 검사에 걸린다. 끝(`c` 뒤)에 두거나 전역으로 뺀다.
 - opcode 추가: `vm.h` enum과 `vm.c` `JENTRY` 표 같은 위치, `bytecode.zig`의 enum · 길이 · 덤프 · opcode 수 테스트.

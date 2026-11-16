@@ -22,3 +22,10 @@
 - 중첩 `scope`의 대기가 빨라졌다. 안쪽 `scope`에서 Future를 기다리는 fiber에 바깥 `scope`가 바퀴마다 `Fiber.waiting()`을 물을 때
   매번 스레드의 fiber를 전부 훑었다(바퀴 수 × 그룹 수 × fiber 수). 이제 답을 Future가 완료될 때까지 기억한다. 안쪽 그룹
   400개 · fiber 2401개 · 한 바퀴에 Future 하나를 완료하는 경우가 2.8초에서 0.24초(ReleaseFast). 테스트 `concurrency/scope_nested_wait.cy`.
+
+## 버그 수정
+
+- wasm32에서 빌림(`&T`)을 둘 이상 가진 구조체나 `[N]&T`가 있는 프레임의 스택이 옮겨지면 메모리가 깨졌다(F-156). 4바이트
+  포인터 둘이 값 칸 하나에 들어가는데, 위 절반의 포인터는 보정되지 않았고 아래 절반을 보정할 때 위 절반이 지워졌다. `scope`
+  블록에서 빌림을 받은 fiber가 시작하기 전에 부모 fiber의 스택이 자라면 `Retaining untracked heap object`로 죽었다. native는 영향이
+  없다. 테스트 `functions/packed_borrow_stack_grow.cy`, `concurrency/scope_block_borrow_cancel.cy`.

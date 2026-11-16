@@ -1260,8 +1260,10 @@ pub const PtrLayoutContext = struct {
 /// is set in `tags`. `back == 0` is no check. A check that does not fit is left out, which only makes the
 /// register patched in more cases (the range check of the value still applies).
 pub const PtrSlot = packed struct(u64) {
+    /// The register holds a pointer: the whole value, or its lower 4 bytes on a 32-bit target.
     ptr: bool = false,
-    _pad: u1 = 0,
+    /// On a 32-bit target, the upper 4 bytes hold a pointer: a struct packs two 4 byte fields in one register.
+    ptr_hi: bool = false,
     back0: u15 = 0,
     tags0: u16 = 0,
     back1: u15 = 0,
@@ -1273,5 +1275,10 @@ pub const PtrSlot = packed struct(u64) {
 
     pub fn eql(a: PtrSlot, b: PtrSlot) bool {
         return @as(u64, @bitCast(a)) == @as(u64, @bitCast(b));
+    }
+
+    /// Whether the register holds a pointer in either half.
+    pub fn any(self: PtrSlot) bool {
+        return self.ptr or self.ptr_hi;
     }
 };

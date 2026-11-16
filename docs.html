@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.12-dev 922-078d064</div>
+    <div class="sub-title">v0.4.13-dev 941-8a89231</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1611,7 +1611,7 @@ line %{title}
 <p><code>str(bytes)</code> copies a <code>[]byte</code> or <code>PtrSpan[byte]</code> into a string without checking the encoding.
 <code>str.from_utf8(bytes)</code> checks that the bytes are valid UTF-8 and returns <code>error.Unicode</code> otherwise,
 so it is the one to use for bytes that come from outside the program:</p>
-<pre><code class="language-cy">data := os.read_file('notes.txt')!
+<pre><code class="language-cy">data := os.read_file_bytes('notes.txt')!
 text := str.from_utf8(data) !else ''
 if str.is_utf8(data.span()):
     print('valid')
@@ -1953,6 +1953,17 @@ for arr |it|:
 -- Remove an element at a specific index.
 arr = arr.remove(1)
 </code></pre>
+<p><code>append</code>, <code>insert</code>, <code>remove</code>, <code>clear</code>, <code>size_down</code> and <code>size_up</code> return the new slice and leave the receiver as it was,
+like <code>+</code>. Assign the result back to keep it: <code>arr = arr.remove(1)</code>. Dropping the result (<code>_ = arr.remove(1)</code> or a bare
+<code>arr.clear()</code>) is a compile error that says so. A result kept in another variable is a separate list:</p>
+<pre><code class="language-cy">arr := []int{1, 2, 3}
+rest := arr.remove(0)
+print(arr.len())   --> 3
+print(rest.len())  --> 2
+</code></pre>
+<p>When the receiver is the only owner of the buffer, <code>append</code>, <code>size_up</code> and a removal at the end reuse it. A removal or an
+insertion before the end copies, because the receiver still sees those elements. Elements that a shrinking op drops stay
+alive while the receiver can see them, until a later resize of the result or the end of both.</p>
 <p>An index or a length that is out of range panics. This holds for <code>Array</code>, <code>Slice</code>, spans and <code>Buffer</code>:
 <code>remove</code> and <code>insert</code> need a valid index, the start and the end of a slice expression can not be negative,
 and a negative or too large length (<code>[]int(n, 0)</code>, <code>size_up</code>) panics with <code>Invalid allocation length</code>.
@@ -3737,7 +3748,6 @@ If the main thread panics, then the program aborts without unwinding other child
 <li><a href="#cancellation" title="">Cancellation.</a><ul>
 <li><a href="#cancel" title=""><code>cancel</code>.</a></li>
 <li><a href="#destructing-a-fiber" title="">Destructing a fiber.</a></li>
-<li><a href="#cancellation-limits" title="">Cancellation limits.</a></li>
 </ul>
 </li>
 <li><a href="#generators" title="">Generators.</a><ul>
@@ -4032,7 +4042,7 @@ while a.status() != .done or b.status() != .done:
     if a.waiting() and b.waiting():
         _ = Fiber.wait_ready()
 </code></pre>
-<p>Both computations are started before either result is taken. A loop that resumes fibers needs <code>Fiber.wait_ready()</code>: without it the loop spins while the fibers wait, and it does not end when nothing else completes the futures. That is the case on a machine without spare worker threads, where the waiting root context runs the spawned tasks itself, and for futures that only the host can complete. For those, <code>Fiber.wait_ready()</code> suspends the program and the host sees the futures of all fibers (see <a href="#suspending-an-eval" title="">Suspending an eval</a>). Called inside a fiber, <code>Fiber.wait_ready()</code> suspends that fiber until a future of another fiber is done.</p>
+<p>Both computations are started before either result is taken. A loop that resumes fibers needs <code>Fiber.wait_ready()</code>: without it the loop spins while the fibers wait, and it does not end when nothing else completes the futures. That is the case on a machine without spare worker threads, where the waiting root context runs the spawned tasks itself, and for futures that only the host can complete. For those, <code>Fiber.wait_ready()</code> suspends the program and the host sees the futures of all fibers (see <a href="#suspending-an-eval" title="">Suspending an eval</a>). Called inside a fiber, <code>Fiber.wait_ready()</code> suspends that fiber until a future is done that one of its own fibers awaits: a fiber that it resumed last or asked <code>waiting()</code> about last, or a fiber of one of those. A future of a fiber that another fiber runs does not end the wait, and the call returns <code>false</code> at once when none of its own fibers awaits a future.</p>
 <p>A <a href="#scope-block" title=""><code>scope</code> block</a> does this loop itself.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="fiber-panics">Fiber panics. <a href="#fiber-panics">#</a></h3>
@@ -4185,12 +4195,14 @@ print(f.status())          --> FiberStatus.done
 <p>A fiber that holds a <code>Scope</code>, or that waits in a <code>scope</code> block of its own, cancels the fibers of that scope when it is cancelled.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="destructing-a-fiber">Destructing a fiber. <a href="#destructing-a-fiber">#</a></h3>
-<p>A fiber that is destructed while it is in progress is cancelled first, and so is every fiber that its frames hold. A <code>@deinit</code> that suspends again while its fiber is cancelled panics:</p>
+<p>A fiber that is destructed while it is in progress is cancelled first, and so is every fiber that its frames hold. A <code>@deinit</code> that the cancel calls runs, and when it stops at a <code>suspend</code> or an <code>await</code> it ends there, like the functions that the fiber was in. The cancel then goes on with the other values:</p>
 <pre><code class="language-cy">type Res:
     id int
 
 fn (&Res) @deinit():
+    print("deinit %{self.id}")
     suspend
+    print('not reached while cancelled')
 
 fn work():
     a := ^Res{id = 1}
@@ -4200,15 +4212,12 @@ fn start():
     f := fiber work()
     _ = f.resume()      -- Suspended in the `@deinit` of `b`.
 
-start()                 -- The cancel releases `a`, whose `@deinit` suspends.
---> panic: A fiber was suspended while it was cancelled.
+start()                 -- The cancel ends that `@deinit` and releases `a`, whose `@deinit` stops too.
+--> deinit 2
+--> deinit 1
 </code></pre>
+<p>Code after a <code>suspend</code> or an <code>await</code> in a <code>@deinit</code> does not run when the fiber is cancelled. Put the cleanup that must happen before it.</p>
 <p>A fiber that can not be cancelled panics with <code>Fiber is still in progress.</code> when it is destructed.</p>
-<a href="#concurrency">^topic</a>
-<h3 id="cancellation-limits">Cancellation limits. <a href="#cancellation-limits">#</a></h3>
-<ul>
-<li>A <code>@deinit</code> that suspends while its fiber is cancelled panics: <code>A fiber was suspended while it was cancelled.</code> A cancel runs the <code>@deinit</code> of every value that the fiber's frames own, so a <code>@deinit</code> that can suspend makes a cancel that reaches a second such value panic. Avoid <code>suspend</code> and <code>await</code> in a <code>@deinit</code>.</li>
-</ul>
 <a href="#concurrency">^topic</a>
 <h2 id="generators">Generators. <a href="#generators">#</a></h2>
 <p>Generators are stackless coroutines that are intended to yield values incrementally.
@@ -4624,7 +4633,7 @@ print('not ok')
 <pre><code class="language-cy">use os
 
 fn main() -> !void:
-    src := os.read_file_str('missing.txt')!
+    src := os.read_file('missing.txt')!
     print(src)
 
 --> panic: Unwrapped error `error.FileNotFound`.
@@ -5748,7 +5757,7 @@ cyber doc --list          # Print every section id, indented by level.
 cyber doc --for-agents    # Print a short guide for coding agents and the topic index.
 </code></pre>
 <p>A section id is the anchor of the section on the docs site: the heading text in lower case, with spaces replaced by <code>-</code> and <code>.</code>, <code>/</code>, <code>$</code>, <code>[</code>, <code>]</code> and <code>#</code> removed. A repeated heading gets <code>-1</code>, <code>-2</code> and so on. The heading text also works (<code>cyber doc 'Optionals.'</code>). A part of an id works when only one section contains it. Otherwise the matching ids are listed and the exit code is 1.</p>
-<p><code>cyber doc --for-agents</code> prints <code>docs/agents.md</code> of the source tree: the differences from Python, the common methods, the modules, examples, and the compile errors whose message does not say the fix. It ends with the chapters and their section ids. A project that is written in Cyber can point its agent instructions (<code>AGENTS.md</code>, <code>CLAUDE.md</code>) at this command instead of keeping a copy of the guide.</p>
+<p><code>cyber doc --for-agents</code> prints <code>docs/agent-guide.md</code> of the source tree: the differences from Python, the common methods, the modules, examples, and the compile errors whose message does not say the fix. It ends with the chapters and their section ids. A project that is written in Cyber can point its agent instructions (<code>AGENTS.md</code>, <code>CLAUDE.md</code>) at this command instead of keeping a copy of the guide.</p>
 <p>The module API is not in <code>cyber doc</code>. It is in <code>api.html</code> on the docs site and in <code>api.json</code> of each release.</p>
 <p>Since <code>doc</code> is a command, a script file named <code>doc</code> without an extension is run as <code>cyber ./doc</code>.</p>
 <a href="#cli">^topic</a>

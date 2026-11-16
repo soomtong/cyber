@@ -1,5 +1,5 @@
 {
-  "version": "v0.4.12-dev 922-078d064",
+  "version": "v0.4.13-dev 941-8a89231",
   "types": [
     {"module": "core", "name": "void", "syntax": "void", "kind": "builtin",
       "methods": [],
@@ -227,6 +227,7 @@
         {"name": "clear", "recv": "&Slice[]", "sig": "clear() -> Self"},
         {"name": "contains", "recv": "&Slice[]", "sig": "contains(needle T) -> bool"},
         {"name": "clone_on_resize", "recv": "&Slice[]", "sig": "clone_on_resize(new_cap int) -> Self"},
+        {"name": "clone_copy", "recv": "&Slice[]", "sig": "clone_copy(new_cap int) -> Self", "doc": "A copy of this view in a new buffer that only the result holds. The resize ops that change elements the receiver still sees (`remove` and `insert` before the end) use it, because the receiver keeps its own length and buffer after the call: `r := out.remove(1)` leaves `out` as it was."},
         {"name": "index", "recv": "&Slice[]", "sig": "index(needle T) -> ?int", "doc": "Returns the first index of `needle` in the array or `none` if not found."},
         {"name": "insert", "recv": "&Slice[]", "sig": "insert(idx int, val T) -> Self", "doc": "Inserts a value at index `idx`."},
         {"name": "iterator", "recv": "&Slice[]", "sig": "iterator() -> int", "doc": "Returns a new iterator over the slice elements."},
@@ -659,13 +660,13 @@
       "aliases": {}},
     {"module": "core", "name": "Fiber", "syntax": "Fiber", "kind": "struct", "doc": "A fiber is a stackful coroutine: a function call that runs on its own stack and can be suspended at any call depth with `suspend`. It is created with `fiber f(args)` and advanced with `resume`. A fiber carries no value. Use a generator to produce values.",
       "methods": [
-        {"name": "cancel", "recv": "&Fiber", "sig": "cancel() -> bool", "doc": "Ends a fiber that is not done without running the rest of its function. Every call that the fiber is in returns at once, from the innermost one out, and the values that the calls own are destructed as at a `return`. A fiber that was never resumed is ended without the call and its arguments are released. Returns whether the fiber is done afterwards. A fiber that is running is not cancelled, and neither is one that is suspended inside the `@deinit` of a `^T` reference."},
+        {"name": "cancel", "recv": "&Fiber", "sig": "cancel() -> bool", "doc": "Ends a fiber that is not done without running the rest of its function. Every call that the fiber is in returns at once, from the innermost one out, and the values that the calls own are destructed as at a `return`. A fiber that was never resumed is ended without the call and its arguments are released. A `@deinit` that the unwinding calls runs, and when it stops at a `suspend` or an `await` it ends there the same way. Returns whether the fiber is done afterwards. A fiber that is running is not cancelled."},
         {"name": "resume", "recv": "&Fiber", "sig": "resume() -> FiberStatus", "doc": "Runs the fiber until it suspends or its function returns. Returns `.suspended` or `.done`. Resuming a fiber that is done returns `.done`."},
         {"name": "status", "recv": "&Fiber", "sig": "status() -> FiberStatus"},
-        {"name": "waiting", "recv": "&Fiber", "sig": "waiting() -> bool", "doc": "Whether the fiber is suspended at an `await` or a `Future.wait_any` whose future is not done. A `resume` of such a fiber returns `.suspended` at once."}
+        {"name": "waiting", "recv": "&Fiber", "sig": "waiting() -> bool", "doc": "Whether the fiber is suspended at an `await` or a `Future.wait_any` whose future is not done, or in a `Fiber.wait_ready` while none of its own fibers can go on. A `resume` of such a fiber returns `.suspended` at once."}
       ],
       "funcs": [
-        {"name": "wait_ready", "sig": "wait_ready() -> bool", "doc": "Waits until a future that a suspended fiber of this thread awaits is done, and returns `true`. Returns `false` at once when no fiber awaits a future. A scheduler loop calls it when a round of `resume` calls made no progress. Futures of spawned threads are waited for like `await` does. When only the host can complete the futures, the eval is suspended and all of them are pending (see `cl_vm_pending_futures`). Inside a fiber, that fiber is suspended until one of the futures is done."}
+        {"name": "wait_ready", "sig": "wait_ready() -> bool", "doc": "Waits until a future that a suspended fiber of this thread awaits is done, and returns `true`. Returns `false` at once when no fiber awaits a future. A scheduler loop calls it when a round of `resume` calls made no progress. Futures of spawned threads are waited for like `await` does. When only the host can complete the futures, the eval is suspended and all of them are pending (see `cl_vm_pending_futures`). Inside a fiber, that fiber is suspended until a future is done that one of its own fibers awaits: a fiber that it resumed last or asked `waiting()` about last, or a fiber of one of those. It returns `false` at once when none of them awaits a future."}
       ],
       "aliases": {}},
     {"module": "core", "name": "FiberStatus", "syntax": "FiberStatus", "kind": "enum",
@@ -1819,8 +1820,8 @@
     {"module": "os", "name": "open_file", "sig": "open_file(path str) -> !File"},
     {"module": "os", "name": "open_file", "sig": "open_file(path str, mode OpenMode) -> !File", "doc": "Opens a file at the given `path` with an `OpenMode`."},
     {"module": "os", "name": "parseArgs", "sig": "parseArgs(opts []str) -> ArgsResult", "doc": "Returns a result that can be used to query args. `opts`: The name of options to match excluding the hyphen prefix. eg. `-path`"},
-    {"module": "os", "name": "read_file", "sig": "read_file(path str) -> ![]byte", "doc": "Reads the file contents from `path`."},
-    {"module": "os", "name": "read_file_str", "sig": "read_file_str(path str) -> !str"},
+    {"module": "os", "name": "read_file", "sig": "read_file(path str) -> !str", "doc": "Reads the file at `path` as text. Returns `error.Unicode` when the contents are not valid UTF-8. Read bytes with `read_file_bytes`."},
+    {"module": "os", "name": "read_file_bytes", "sig": "read_file_bytes(path str) -> ![]byte", "doc": "Reads the file contents from `path` as bytes."},
     {"module": "os", "name": "removeDir", "sig": "removeDir(path str) -> !void", "doc": "Removes an empty directory at `path`."},
     {"module": "os", "name": "removeFile", "sig": "removeFile(path str) -> !void", "doc": "Removes the file at `path`."},
     {"module": "os", "name": "resolve_exe_path", "sig": "resolve_exe_path() -> !str", "doc": "Returns the current executable's path."},
@@ -1828,8 +1829,8 @@
     {"module": "os", "name": "set_env", "sig": "set_env(key str, val str) -> !void", "doc": "Sets an environment variable by key."},
     {"module": "os", "name": "sleep", "sig": "sleep(nsecs int) -> !void", "doc": "Pauses the current thread for `nsecs` nanoseconds."},
     {"module": "os", "name": "unset_env", "sig": "unset_env(key str) -> !void", "doc": "Removes an environment variable by key."},
-    {"module": "os", "name": "write_file", "sig": "write_file(path str, contents str) -> !void", "doc": "Writes `contents` as a string or bytes to a file."},
-    {"module": "os", "name": "write_file", "sig": "write_file(path str, contents []byte) -> !void"},
+    {"module": "os", "name": "write_file", "sig": "write_file(path str, contents str) -> !void", "doc": "Writes the text `contents` to a file. Write bytes with `write_file_bytes`."},
+    {"module": "os", "name": "write_file_bytes", "sig": "write_file_bytes(path str, contents []byte) -> !void", "doc": "Writes the bytes `contents` to a file."},
     {"module": "os", "name": "openLib", "sig": "openLib(path ?str) -> DynLib", "doc": "Creates a handle to a dynamic library."},
     {"module": "peg", "name": "compile", "sig": "compile(grammar str) -> !Peg", "doc": "Compiles a grammar. Returns `error.Syntax` for a grammar that is malformed, calls a rule that is not defined, is left recursive or repeats something that can match nothing, and `error.TooBig` for one that is over `MaxInsts`."},
     {"module": "peg", "name": "compile", "sig": "compile(grammar str, diag &Diag) -> !Peg", "doc": "Compiles a grammar. On failure, `diag` tells where and why."},

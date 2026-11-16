@@ -148,6 +148,9 @@ pub const Chunk = struct {
     cancel_sites: std.ArrayList(bc.CancelSite) = .empty,
     cancel_replay: bool = false,
     cancel_replay_last: bool = false,
+    /// bc_gen: the call sites inside the pads that were generated. A cancel that comes while a pad's callee is
+    /// suspended (a `@deinit` that stops again) keeps the pad's frame: it goes on destructing after the call.
+    cancel_replay_keeps: std.ArrayList(u32) = .empty,
 
     /// Main sema block id.
     mainSemaProcId: sema.ProcId,
@@ -348,6 +351,7 @@ pub const Chunk = struct {
         self.cancel_pads.deinit(self.alloc);
         for (self.cancel_sites.items) |site| self.alloc.free(site.local_map);
         self.cancel_sites.deinit(self.alloc);
+        self.cancel_replay_keeps.deinit(self.alloc);
         self.varStack.deinit(self.alloc);
 
         self.typeStack.deinit(self.alloc);

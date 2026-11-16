@@ -12,3 +12,10 @@
   말하지 않는 오류)와 장 · 절 id 목록을 낸다. 바이너리에 들어 있어 `cyber version`과 항상 맞는다. 안내의 예제는 `cli-test`가 모두
   실행해 낡지 않게 한다. tars-agent `prompt/cyber-subset.en.md`에서 호스트 전용 내용을 뺀 것이 바탕이다.
 - `doc`이 명령이 되어 확장자 없는 스크립트 `doc`은 `cyber ./doc`으로 실행한다.
+
+## 동시성
+
+- 취소 도중 `@deinit`이 다시 멈춰도(`suspend` · `await`) panic하지 않는다. 그 `@deinit`은 fiber가 있던 다른 함수처럼 멈춘
+  자리에서 끝나고, 값의 나머지(필드 등)와 다른 값의 해제가 이어진다. 전에는 `panic: A fiber was suspended while it was
+  cancelled.`이었다. `Fiber.cancel()` · fiber 소멸 · `scope`의 취소에 모두 해당한다. 바뀐 점: 취소될 때 `@deinit`의 `suspend` ·
+  `await` 뒤 코드는 돌지 않는다. 테스트 `concurrency/fiber_cancel_deinit_suspend.cy`.

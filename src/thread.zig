@@ -187,6 +187,20 @@ pub fn get_cancel_pad(vm: *cy.VM, pc: [*]cy.Inst) ?CancelTarget {
     return .{ .pad = entry.ptr + table[idx].pad };
 }
 
+/// `get_cancel_pad` for a frame of a fiber that is unwound. A return address that a cancel already sent to a pad
+/// is the start of that pad, not a site: the frame goes there anyway (`.keep`). It happens when a `@deinit` that a
+/// pad called stops again and the fiber is unwound once more.
+fn get_unwind_target(vm: *cy.VM, pc: [*]cy.Inst) ?CancelTarget {
+    if (get_cancel_pad(vm, pc)) |target| return target;
+    const table_idx = cy.debug.indexOfTableEntry(vm.debug_tables, pc) orelse return null;
+    const entry = vm.debug_tables[table_idx];
+    const pc_off = pc - entry.ptr;
+    for (entry.chunk.buf.cancel_table.items) |site| {
+        if (site.pad == pc_off) return .keep;
+    }
+    return null;
+}
+
 pub fn get_ptr_layout(vm: *cy.VM, pc: [*]cy.Inst) ?[]const cy.bytecode.PtrSlot {
     const table_idx = cy.debug.indexOfTableEntry(vm.debug_tables, pc) orelse return null;
     const entry = vm.debug_tables[table_idx];
@@ -468,7 +482,8 @@ pub const Thread = struct {
     /// cancel pad of the site it is at, which destructs the frame's locals and returns. The next `resume`
     /// then runs the pads from the top frame down to the entry frame and the fiber is done.
     /// Returns false, changing nothing, when the fiber can not be unwound this way: it is not suspended, or a
-    /// frame has no pad (a site in a destructor that a pad or the deinit block of a generator called).
+    /// frame has no pad. A fiber that stopped again in the pads (a `@deinit` that they called) is unwound again:
+    /// the frames that already return to a pad keep doing so, and the call sites inside the pads are `.keep`.
     pub fn unwindFiber(self: *Thread, fiber: *vmc.Fiber) bool {
         if (fiber.state != vmc.FIBER_SUSPENDED or !fiber.started) return false;
         const fstack_ptr: [*]Value = @ptrCast(@alignCast(fiber.stack_ptr));
@@ -480,7 +495,7 @@ pub const Thread = struct {
         var pc = top_pc;
         var fp = top_fp;
         while (true) {
-            _ = get_cancel_pad(self.c.vm, pc) orelse return false;
+            _ = get_unwind_target(self.c.vm, pc) orelse return false;
             if (fp == 0) break;
             const frame = getFrame(self, fstack, fp, pc);
             // A generator body (`.gen`) returns through `RET_Y` to the address in the same slot.
@@ -495,7 +510,7 @@ pub const Thread = struct {
         // of its own caller.
         pc = top_pc;
         fp = top_fp;
-        switch (get_cancel_pad(self.c.vm, pc).?) {
+        switch (get_unwind_target(self.c.vm, pc).?) {
             .keep => {},
             .pad => |pad| fiber.pc = @ptrCast(pad),
         }
@@ -503,7 +518,7 @@ pub const Thread = struct {
             const frame = getFrame(self, fstack, fp, pc);
             const prev = frame.prev_context();
             const base = frame.base.?;
-            switch (get_cancel_pad(self.c.vm, prev.pc.?).?) {
+            switch (get_unwind_target(self.c.vm, prev.pc.?).?) {
                 .keep => {},
                 .pad => |pad| {
                     base[1] = Value{ .retPcPtr = @ptrCast(pad) };

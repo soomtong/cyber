@@ -3198,7 +3198,6 @@ fn some_nested_func():
 * [Cancellation.](#cancellation)
   * [`cancel`.](#cancel)
   * [Destructing a fiber.](#destructing-a-fiber)
-  * [Cancellation limits.](#cancellation-limits)
 * [Generators.](#generators)
   * [Generator rules.](#generator-rules)
   * [Resuming a generator.](#resuming-a-generator)
@@ -3703,13 +3702,15 @@ A fiber that is suspended inside the body of a generator is cancelled like any o
 A fiber that holds a `Scope`, or that waits in a `scope` block of its own, cancels the fibers of that scope when it is cancelled.
 
 ### Destructing a fiber.
-A fiber that is destructed while it is in progress is cancelled first, and so is every fiber that its frames hold. A `@deinit` that suspends again while its fiber is cancelled panics:
+A fiber that is destructed while it is in progress is cancelled first, and so is every fiber that its frames hold. A `@deinit` that the cancel calls runs, and when it stops at a `suspend` or an `await` it ends there, like the functions that the fiber was in. The cancel then goes on with the other values:
 ```cy
 type Res:
     id int
 
 fn (&Res) @deinit():
+    print("deinit %{self.id}")
     suspend
+    print('not reached while cancelled')
 
 fn work():
     a := ^Res{id = 1}
@@ -3719,13 +3720,13 @@ fn start():
     f := fiber work()
     _ = f.resume()      -- Suspended in the `@deinit` of `b`.
 
-start()                 -- The cancel releases `a`, whose `@deinit` suspends.
---> panic: A fiber was suspended while it was cancelled.
+start()                 -- The cancel ends that `@deinit` and releases `a`, whose `@deinit` stops too.
+--> deinit 2
+--> deinit 1
 ```
-A fiber that can not be cancelled panics with `Fiber is still in progress.` when it is destructed.
+Code after a `suspend` or an `await` in a `@deinit` does not run when the fiber is cancelled. Put the cleanup that must happen before it.
 
-### Cancellation limits.
-* A `@deinit` that suspends while its fiber is cancelled panics: `A fiber was suspended while it was cancelled.` A cancel runs the `@deinit` of every value that the fiber's frames own, so a `@deinit` that can suspend makes a cancel that reaches a second such value panic. Avoid `suspend` and `await` in a `@deinit`.
+A fiber that can not be cancelled panics with `Fiber is still in progress.` when it is destructed.
 
 ## Generators.
 Generators are stackless coroutines that are intended to yield values incrementally.

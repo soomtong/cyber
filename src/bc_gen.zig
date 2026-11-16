@@ -3845,7 +3845,10 @@ fn find_cancel_pad(c: *cy.Chunk, key: usize) ?cy.sema.CancelPad {
 }
 
 fn push_cancel_site(c: *cy.Chunk, key: usize, pc: usize) !void {
-    if (c.cancel_replay) return;
+    if (c.cancel_replay) {
+        try c.cancel_replay_keeps.append(c.alloc, @intCast(pc));
+        return;
+    }
     if (c.cur_proc.type == .main) return;
     var site = CancelSite{
         .pc = @intCast(pc),
@@ -3902,6 +3905,7 @@ fn gen_cancel_pads(c: *cy.Chunk) !void {
     defer {
         for (c.cancel_sites.items) |site| c.alloc.free(site.local_map);
         c.cancel_sites.clearRetainingCapacity();
+        c.cancel_replay_keeps.clearRetainingCapacity();
     }
     if (c.cancel_sites.items.len == 0) return;
 
@@ -3950,6 +3954,10 @@ fn gen_cancel_pads(c: *cy.Chunk) !void {
         try c.buf.cancel_table.append(c.alloc, .{ .pc = site.pc, .pad = pad_pc });
         prev = site;
         prev_pad = pad_pc;
+    }
+    // The pads come after the body, so their call sites come after the body's sites in the sorted table.
+    for (c.cancel_replay_keeps.items) |pc| {
+        try c.buf.cancel_table.append(c.alloc, .{ .pc = pc, .pad = cy.bytecode.PcCancelPad.keep });
     }
 }
 

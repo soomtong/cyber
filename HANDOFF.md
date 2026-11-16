@@ -29,7 +29,6 @@
 
 ## 알려진 한계
 
-- 취소 도중 다른 `@deinit`이 다시 멈추면 `panic: A fiber was suspended while it was cancelled.`
 - `Fiber.waiting()`은 `wait_ready`로 멈춘 fiber에 대해 스레드의 fiber를 전부 훑는다. 양보만 하는 fiber와 Future를 기다리는
   fiber가 섞이면 `Scope.run`이 쉬지 않고 돈다.
 - 실행으로 확인하지 못한 경로: 시작한 자식이 `suspend` · `await`에서 멈춘 동안 부모 스택이 옮겨지는 경우, Windows `FallbackReadLine`.

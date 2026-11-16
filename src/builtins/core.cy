@@ -4713,8 +4713,8 @@ fn (&Fiber) @deinit():
 --| Ends a fiber that is not done without running the rest of its function. Every call that the fiber is in
 --| returns at once, from the innermost one out, and the values that the calls own are destructed as at a
 --| `return`. A fiber that was never resumed is ended without the call and its arguments are released.
---| Returns whether the fiber is done afterwards. A fiber that is running is not cancelled, and neither is
---| one that is suspended inside the `@deinit` of a `^T` reference.
+--| A `@deinit` that the unwinding calls runs, and when it stops at a `suspend` or an `await` it ends there
+--| the same way. Returns whether the fiber is done afterwards. A fiber that is running is not cancelled.
 fn (&Fiber) cancel() -> bool:
     return fiber_cancel(self.state)
 
@@ -4725,8 +4725,11 @@ fn (&Fiber) cancel() -> bool:
         return true
     if !@fiber_unwind(state):
         return @fiber_status(state) == .done
-    if @bitCast(FiberStatus, @fiber_resume(state)) != .done:
-        panic('A fiber was suspended while it was cancelled.')
+    while @bitCast(FiberStatus, @fiber_resume(state)) != .done:
+        -- A `@deinit` that the unwinding called stopped. It ends where it is, like the calls before it, and
+        -- the unwinding goes on.
+        if !@fiber_unwind(state):
+            panic('A fiber that was cancelled stopped where it can not be cancelled.')
     return true
 
 --| Runs the fiber until it suspends or its function returns.

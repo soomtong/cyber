@@ -599,7 +599,7 @@ move 결과를 `ExprResult.initOwned`(값, 자리 아님)로 돌려주고 그 IR
   패드가 그 값을 다시 소멸했다(F-106의 다른 경로). 전에는 `@deinit`이 두 번 불렸고, keep으로 필드 해제가 이어지자 이중
   해제(Debug `double free`)로 드러났다. `popLocals2`는 `semaDestructBlock3`처럼 `cancel_pad_var_end`를 두고,
   `semaDestructLocal`은 `Chunk.cancel_pad_skip`으로 그 지역 하나를 패드에서 뺀다.
-- 남은 것: 취소 도중 `@deinit`이 다시 멈추면 panic(설계대로. 매뉴얼 예제를 이것으로 바꿨다).
+- 남은 것: 취소 도중 `@deinit`이 다시 멈추면 panic(설계대로. 매뉴얼 예제를 이것으로 바꿨다). 2026-11-16 풀림(아래 절).
 - 테스트 `concurrency/fiber_cancel_deinit.cy`(블록 끝, `release`, 목록 리터럴의 임시 값, `Generator.end`).
 - 리뷰 뒤 정리(2026-11-14). (1) keep 표지는 `*ir.Stmt` 맵에 넣던 전역 sentinel(`sema.cancel_keep`) 대신
   `sema.CancelPad` union(`keep` · `pad`)이다. (2) `isCancelKeepFunc`는 이름 문자열 대신 템플릿 동일성(`Sema.dtor_fn` ·
@@ -653,3 +653,24 @@ TaskGroup / Nursery can lead to counterintuitive behaviour". 고치는 법으로
 출처: https://flake8-async.readthedocs.io/en/latest/rules.html, https://rules.sonarsource.com/python/RSPEC-7514,
 https://developer.apple.com/documentation/swift/withtaskgroup(of:returning:isolation:body:),
 https://git.openjdk.org/loom/commit/ef84eca96d7ac8929b0dd5ba9d9d56f7722fd274
+
+## 취소 도중 다시 멈춘 `@deinit` (2026-11-16)
+
+0.5 작업의 첫 항목. 패드가 부른 `@deinit`이 `suspend` · `await`에서 멈추면 `fiber_cancel`이
+`A fiber was suspended while it was cancelled.`로 panic했다.
+
+- 의미: 그 `@deinit`도 fiber가 있던 다른 함수처럼 멈춘 자리에서 끝난다(뒤 코드는 돌지 않음). 값의 나머지는 keep 프레임
+  (`@destruct` 등)이 해제하고 패드는 다음 지역으로 간다. Kotlin(`finally`의 suspend가 곧바로 취소 예외)과 Trio(취소된
+  범위의 checkpoint가 곧바로 `Cancelled`)와 같은 선택이다. 끝까지 돌려 주는 쪽(asyncio의 `finally` 안 await)은 택하지 않았다:
+  취소가 Future를 기다리며 막힐 수 있고, "멈춘 함수는 더 돌지 않는다"는 규칙이 둘로 갈린다.
+- `fiber_cancel`(core.cy): unwind 뒤 resume이 `.done`이 아니면 다시 unwind하고 resume한다. 다시 unwind하지 못하면
+  `A fiber that was cancelled stopped where it can not be cancelled.`(패드가 없는 지점: 인라인 사슬의 keep 섞임, 호스트 호출 너머).
+- 다시 unwind할 때 막히던 두 곳. (1) 패드 안의 호출 지점은 표에 없었다. `push_cancel_site`가 `cancel_replay` 중이면 그 pc를
+  `Chunk.cancel_replay_keeps`에 모으고 `gen_cancel_pads`가 몸체 지점 뒤에 `keep`으로 붙인다(패드는 몸체 뒤에 생성되므로 표의
+  정렬이 유지된다). (2) 첫 unwind가 반환 주소를 패드 시작으로 바꾼 프레임. `thread.get_unwind_target`이 표에 없는 pc가
+  어떤 지점의 패드 시작이면 `keep`으로 본다(그 프레임은 어차피 패드로 돌아간다).
+- 패드의 호출 지점에는 여전히 포인터 레이아웃이 없다. 패드 안에서 멈춘 동안 그 fiber가 빌린 스택이 옮겨지는 경우는
+  `fiber_cancel`이 곧바로 다시 resume하므로 생기지 않는다.
+- 탐침: 깊은 호출 안의 `suspend`, 필드 Future의 `await`, 목록 원소, `release`, `Generator.end`, fiber 소멸, 실패한
+  `scope`의 형제. Debug(누수 보고 없음) · ReleaseSafe 통과. 테스트 `concurrency/fiber_cancel_deinit_suspend.cy`.
+  `fiber_in_progress_panic.cy`(이 panic의 테스트)는 지웠고 매뉴얼 예제는 새 동작으로 바꿨다.

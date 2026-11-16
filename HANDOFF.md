@@ -1,60 +1,81 @@
-# HANDOFF (2026-11-16)
+# HANDOFF (2026-11-16 밤): tars-agent 요청 반영, 0.4.13 릴리스 보류
 
-## 지금 상태
+## 목표
 
-- 최신 릴리스 0.4.12(태그 `67a2735c`, `build-919-67a2735`, Latest, 2026-11-16). 노트 `docs/releases/0.4.12.md`.
-  내용은 표준 모듈 `json` · `toon` · `regex` · `peg` · `time`, CodeAct 오류 문구 여섯, F-141 ~ F-155 수정.
-  `unreleased.md`는 머리말만 남았다. 릴리스 run이 동시 push 취소와 runner 끊김으로 세 번 돌았다(`project_fork_release_ci.md`).
-- 릴리스 뒤 `cyber doc [topic]` · `cyber doc --for-agents`를 더했다(`751d9222`, `unreleased.md` CLI 절). 별도 바이너리로 나누지
-  않은 이유는 `078d0641`. `origin/master`는 `078d0641`. push는 사용자 지시 때만.
-- 0.5 fiber 작업(2026-11-16, 사용자 위임으로 진행, 모두 13단계 검증 rc=0, push 안 함):
-  - `fa72869e` 취소 도중 다시 멈춘 `@deinit`도 그 자리에서 끝낸다(전에는 panic). 패드 안 호출 지점을 keep으로 두고 다시 unwind.
-  - `2cac860f` 중첩 `scope`의 `Fiber.waiting()` 답을 Future 완료까지 기억(그룹 400개 2.8초 → 0.24초).
-  - `54b19355` F-156: wasm32에서 4바이트 포인터 둘이 든 칸의 스택 이동 보정(`PtrSlot.ptr_hi`). 오늘 전부터 있던 결함이고, 스택
-    이동 탐침을 테스트로 넣다가 드러났다. 같은 커밋에 "시작 후 멈춘 자식의 스택 이동은 지금 구조에서 안 생김" 확인 기록과
-    변수 `FnTuple` 빌림을 하지 않기로 한 이유(`project_coroutines.md` 끝 세 절).
-- `0.4.12..HEAD` 코드 리뷰 수정(2026-11-16, 모두 13단계 검증 rc=0, push 안 함): F-157(choice의 벡터 payload 보정),
-  F-158(취소 패드가 스택을 옮길 때의 빌림), F-159(wasm32 절반별 case), 다시 unwind의 제곱 비용, `cyber doc` 인자 검사,
-  `docs/agents.md` → `docs/agent-guide.md`(대소문자 무시 파일 시스템에서 `AGENTS.md`로 읽혔다), `fiber_in_progress_panic.cy` 복원.
-  리뷰 6번은 fiber의 소유 링크로 고쳤다: fiber 안의 `Fiber.wait_ready()`는 자기가 돌리는 fiber의 Future만 기다린다(헛깨움 제거,
-  그룹 400개 2.7초 → 0.23초, epoch 캐시 삭제).
-- tars-agent 요청 `cyber-0.4.12-spike-defects.md`의 네 건을 고쳤다(2026-11-16, 모두 13단계 검증 rc=0, push 안 함):
-  `85c95b1d` (c) `os.read_file` → `!str`(UTF-8 검사), `read_file_bytes` · `write_file_bytes` 추가, `read_file_str` 삭제,
-  `write_file`의 `[]byte` 오버로드 삭제(깨지는 변경, 사용자 결정, `project_os_file_text_bytes.md`). `526146a9` (d) `.paths`에
-  `docs/docs.md` · `docs/agent-guide.md`. `4cf57841` (b) `let` · `mut` · `val` · `auto` 선언 문구. `40ae5b5a` (a) `Slice`
-  resize의 받는 변수 보존과 버린 결과의 컴파일 오류(`project_slice_append_aliasing.md` 결정 2). 회신은 tars-agent 요청서 끝
-  "cyber 회신" 절(tars-agent에 미커밋으로 둠, 그쪽 세션이 커밋).
+- tars-agent가 보낸 요청(0.4.12 스파이크 결함 넷, 0.4.13-DEV 발견 둘)을 고치고 회신한다.
+- 0.4.13 패치 릴리스. 오늘 밤은 하지 않기로 했다(사용자 지시). 태그는 이미 push돼 있다.
 
-- 0.4.13 릴리스 진행 중(2026-11-16, 사용자 지시로 멈춤): `8a892310` "Release 0.4.13"(버전 세 곳, 노트 `docs/releases/0.4.13.md`,
-  13단계 검증 rc=0)을 master에 push했고 Latest Build 성공 뒤 annotated 태그 `0.4.13`을 push했다. 릴리스 run 43868153020에서
-  `macos-26` arm64 lib job이 네 번(attempt 1~4) 러너 미배정으로 취소돼 Release job이 skipped, 0.4.13 릴리스는 없다(나머지 11 job
-  성공, arm64 cli는 attempt 3에서 성공). 남은 일: `gh run rerun 43868153020 -R soomtong/cyber --failed`가 성공하면
-  `gh release edit 0.4.13 --notes-file`(제목 줄 뺀 노트) `--latest` → `install.sh 0.4.13` 임시 설치 확인 → 노트 머리의
-  "(태그 후 기록)"에 태그 커밋 · 빌드 번호를 적고 `project_fork_release_ci.md`에 기록. 대안은 `project_fork_release_ci.md`의 로컬
-  arm64 빌드(릴리스가 없으므로 `gh release create`가 필요, 사용자 결정).
+## 현재 브랜치
 
-## 다음 할 일
+`master`. `origin/master`는 `8a892310`(Release 0.4.13). 로컬에 push 안 한 커밋 둘(+ 이 HANDOFF 커밋):
+`79925211`(릴리스 보류 기록), `3acc0797`(0.4.13-DEV 발견 두 건 수정).
 
-1. tars-agent는 0.4.12에 고정(`25ccf63`). 위 네 건의 회신을 그쪽이 확인한다. 결정 대기로 남긴 것: `Slice`를 `&&Slice` 제자리
-   API로 바꾸는 안, 모듈 API를 `cyber doc`에 넣는 안, `read_file_str` · `write_file(p, bytes)` 오류에 고치는 이름을 말하는 문구.
-2. 사용자 결정 대기:
-   - `scope` 블록 안의 `return` · `break` · `continue`가 합류한다는 것을 알리는 도구(안 1 LSP Information 진단, 안 2 hover,
-     안 3 inlay hint). `project_coroutines.md` 끝 절.
-   - 정렬: 안 A(일반 지역을 빌림 캡처하는 pinned closure, F-136으로 스택 이동 걸림돌은 풀림), 키 정렬(람다 반환 타입으로
-     제네릭 추론, 이름), 인자 없는 `sort()`의 원소 조건. `project_sort_closures.md` "결정할 것".
-   - core `@eq`의 choice 지원(`?json.Value == none`, `t.eq`로 choice 비교).
-   - 설계 원칙 검토(PR #7, `docs/study/11-design-principles-review.md`) 1.7 · 2.7의 결정 항목: 표준 오류 어휘, 순환 가능성 정적
-     판정, 제네릭 본문 정의 시점 검사, 구조적 병렬 루프, 마지막 사용 분석(빌림 NLL · `Slice` 값 의미 · 암시적 이동 · 분기 안 이동).
-   - 0.5 범위. 사용자 목표는 "fiber 관련 동시성 동작을 모두 완성해 0.5". HANDOFF에 있던 fiber 한계는 모두 처리했다.
-     남은 후보(결정 필요): 스펙 6절 4단계의 "(선택)" `spawn f(args)` 호출식 꼴(스레드 문법, tree-sitter · tars-agent 프롬프트 영향),
-     임베딩 `CL_YIELD`(요청자 없음). 이것들을 빼면 0.5 릴리스 준비(버전 · 노트)로 갈 수 있다.
-3. 기술 부채(급하지 않음):
-   - carry 재시도 루프: 실패한 본문의 IR을 되돌리는 장치가 없어 사전 단계로 옮기지 못했다. 콜백 반복은 `cyber.h` · docs.md에 적음.
-   - `@destruct_span`은 쓰이지 않아 취소 keep 지점이 아니다. 쓰게 되면 더한다.
-   - `Scope.run`은 바퀴마다 자식 전부에게 `waiting()`을 묻는다(바퀴당 fiber 수에 비례). 문제가 되면 futex식 대기 표와 준비 큐로
-     간다(`project_coroutines.md` "fiber의 소유 링크" 절에 검토 기록).
-   - `A fiber that was cancelled stopped where it can not be cancelled.` panic은 불변식 보호다. 닿는 스크립트가 없음을 여덟 경로로
-     확인했다(`project_coroutines.md` "취소 도중 다시 멈춘 `@deinit`" 절). 닿는 경로가 나오면 그 지점에 패드가 빠진 결함이다.
+## 완료된 작업
+
+- [x] 0.4.12 요청(`/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.12-spike-defects.md`) 네 건. 모두 13단계 검증 rc=0.
+  - `85c95b1d` (c) `os.read_file` → `!str`(UTF-8 검사, 아니면 `error.Unicode`), `read_file_bytes` · `write_file_bytes` 추가,
+    `read_file_str` 삭제, `write_file`의 `[]byte` 오버로드 삭제. 깨지는 변경, 사용자 결정(이름 대칭 · 오버로드 없음 · 텍스트가
+    기본). `docs/decisions/project_os_file_text_bytes.md`.
+  - `526146a9` (d) `build.zig.zon` `.paths`에 `docs/docs.md` · `docs/agent-guide.md`(패키지 해시 바뀜).
+  - `4cf57841` (b) `let` · `mut` · `val` · `auto` 선언에 ``Cyber has no `let`. Declare with ...``(`src/parser.zig`
+    `isForeignDeclKeyword` · `reportForeignDeclError`). `const`는 Cyber 상수라 제외.
+  - `40ae5b5a` (a) `Slice` resize의 받는 변수 보존: `size_down` · `clear` · 끝 `remove`는 제자리에서 해제를 미루고, 끝이 아닌
+    `remove` · `insert`는 `clone_copy`로 복사(`src/builtins/core.cy`). 버린 결과는 컴파일 오류(`src/sema.zig`
+    `checkDroppedSliceResult`). `project_slice_append_aliasing.md` "결정 2".
+- [x] 0.4.13 릴리스 준비: `8a892310`(버전 세 곳, `docs/releases/0.4.13.md`, 검증 rc=0) push, Latest Build 성공 뒤 annotated 태그
+  `0.4.13` push. 릴리스 run 43868153020은 Release job skipped(아래 실패한 접근).
+- [x] 0.4.13-DEV 요청(`/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.13-dev-findings.md`) 두 건, `3acc0797`:
+  - (a) `let x := 1` → ``Cyber has no `let`. Declare with `x := 1`.``(`reportForeignDeclError`의 `colon_equal` 분기).
+    테스트 `syntax/foreign_decl_infer_error.cy`.
+  - (b) 세션(`persist_main`)의 마지막 줄 `out.remove(1)`도 버린 결과 오류(`semaMainResultStmt`에서 `checkDroppedSliceResult`).
+    테스트 `src/lib_test/session.zig` 끝 "a dropped Slice resize result on the last line"(필터로 실제로 도는 것 확인).
+  - 13단계 검증을 백그라운드로 돌리던 중 세션을 정리했다. 로그 `/private/tmp/claude-501/-Users-dp-Repository-cyberscript/
+    866045c6-fdd3-4e2f-ae8c-4da5dcd94361/scratchpad/verify-dev.log`(끝 줄 `DONE all steps rc=0`이면 통과). 로그가 없거나
+    끝나지 않았으면 `src/tools/verify.sh`를 다시 돌린다.
+- [x] 회신: 두 요청서 끝의 "cyber 회신" 절. tars-agent 저장소에 미커밋으로 둠(0.4.13-DEV 요청서만 지금 미커밋, 0.4.12 쪽은
+  tars-agent가 이미 반영). tars-agent 커밋은 그쪽 세션 몫.
+
+## 시도했으나 실패한 접근
+
+- 0.4.13 릴리스 run 43868153020의 `gh run rerun --failed` 세 번: `macos-26` arm64 job이 매번 15분 안에 러너를 받지 못해 취소
+  (attempt 3에서 cli는 성공, lib는 attempt 1~4 모두 취소). 무료 arm64 풀의 문제라 재시도 외 CI 쪽 해결책이 없다.
+- `zig fetch .`로 패키지 내용을 보려 했으나 전역 캐시 `p/`에 남지 않았다. `.paths` 확인은 `git ls-files <paths>`를 임시 디렉터리에
+  풀어 그 안에서 `zig build cli` · `lib`로 했다.
+- `docs/gen-docs.cy`는 이 머신에 `libmd4c`가 없어 실행이 안 된다(변경 전에도 같음). `task docs:gen` 경로가 라이브러리 위치를 준다.
+
+## 남은 작업
+
+- [ ] `3acc0797` 검증 결과 확인(위 로그). 실패면 고치고 커밋.
+- [ ] 0.4.13 릴리스(사용자 지시 때). 먼저 결정: 태그 `0.4.13`이 `8a892310`을 가리키므로 `3acc0797`이 빠진다. 다시 찍을지
+  (`project_fork_release_ci.md`의 재태깅 절차: `gh release delete 0.4.13 --cleanup-tag` 또는 릴리스가 없으면 태그만 지우고 새로 찍기,
+  dev 프리릴리스 `v0.4.13-DEV`와 별개), 아니면 그대로 두고 다음 패치로 넘길지. 다시 찍으면 `docs/releases/0.4.13.md`에
+  `unreleased.md`의 두 항목을 옮긴다. 그 뒤 HANDOFF "릴리스" 절 4~6단계.
+- [ ] tars-agent가 회신을 확인하면 받는다. 결정 대기: `Slice`를 `&&Slice` 제자리 API로 바꾸는 안, 모듈 API를 `cyber doc`에
+  넣는 안, `read_file_str` · `write_file(p, bytes)` 오류에 고칠 이름을 말하는 문구, REPL에서 `xs.append(4)` 미리보기가 오류가 된 점.
+- [ ] 사용자 결정 대기(이전부터):
+  - `scope` 블록 안의 `return` · `break` · `continue` 합류를 알리는 도구(LSP 진단 · hover · inlay hint). `project_coroutines.md` 끝 절.
+  - 정렬: pinned closure(안 A), 키 정렬, 인자 없는 `sort()`의 원소 조건. `project_sort_closures.md` "결정할 것".
+  - core `@eq`의 choice 지원(`?json.Value == none`).
+  - 설계 원칙 검토(`docs/study/11-design-principles-review.md`) 1.7 · 2.7: 표준 오류 어휘, 순환 가능성 정적 판정, 제네릭 본문
+    정의 시점 검사, 구조적 병렬 루프, 마지막 사용 분석(`Slice` 값 의미의 제자리 갱신도 여기에 걸린다).
+  - 0.5 범위: `spawn f(args)` 호출식 꼴, 임베딩 `CL_YIELD`. 빼면 0.5 릴리스 준비로 간다.
+- [ ] 기술 부채(급하지 않음): carry 재시도 루프의 IR 되돌리기, `@destruct_span` 취소 keep 지점, `Scope.run`의 바퀴당 `waiting()`
+  질의(futex식 대기 표 후보), 취소 불변식 panic(닿으면 패드 누락 결함). 기록은 `project_coroutines.md`.
+
+## 핵심 파일
+
+- `src/builtins/core.cy` `Slice` 절(`clone_on_resize` · `clone_copy` · `insert` · `remove` · `size_down`, `rg -n "fn \(&Slice\[\]\)"`).
+- `src/sema.zig` `checkDroppedSliceResult`(호출: `semaExprStmtEnd`, `localDecl`의 `_ =`, `semaMainResultStmt`).
+- `src/parser.zig` `isForeignDeclKeyword` · `reportForeignDeclError` · `reportTypedDeclError`.
+- `src/std/os.cy` `read_file` · `read_file_bytes` · `write_file` · `write_file_bytes`.
+- `docs/releases/0.4.13.md`(머리의 "(태그 후 기록)"은 릴리스 뒤 채운다), `docs/releases/unreleased.md`(0.4.13 뒤 두 항목).
+- `docs/decisions/project_fork_release_ci.md`(러너 미배정 · 재태깅 · 로컬 arm64 빌드 절차).
+
+## 다음 에이전트에게
+
+1. 위 검증 로그부터 본다. 통과면 할 일은 사용자 결정 대기뿐이다.
+2. 릴리스는 사용자가 다시 지시할 때만. 지시가 오면 먼저 "태그를 다시 찍어 `3acc0797`을 넣을지"를 묻는다.
+3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 
 ## 알려진 한계
 
@@ -152,6 +173,7 @@
 - behavior 러너에는 파일 필터가 없다(`-Dtest-filter`는 zig test 이름). 파일 하나는 Debug CLI로 돌린다(Debug CLI도 끝에 누수를 보고한다).
 - 누수는 테스트 실패다(2026-11-15): behavior 케이스마다 VM이 자기 `SafeAllocator`를 써서 `leaked N blocks in <경로>`로 실패하고
   (`src/test/setup.zig` `VMrunner`), 커스텀 러너(`src/test_runner.zig`)는 테스트 함수마다 allocator를 검사한다.
+- `src/parser.zig`에서 지역 이름 `t`는 모듈 수준 `t`를 가려 컴파일 오류다(`tok` · `ty`로 쓴다).
 - 언어 메모: 비트 OR은 `||`, AND는 `&&`. 전역은 `global g int = 5`. `var x = 0`은 문법 오류(`x := 0`). `os.parseArgs`는
   `-name=value`만 받는다. `Map`의 개수는 `size()`. `out.* += fut.await()`는 await 전에 `out.*`를 읽는다.
 - 벤치는 다른 프로세스가 CPU를 쓰는지 먼저 본다(tars-linux `services_test`, 종료 금지). 테스트와 동시에 돌리지 않는다.
@@ -163,5 +185,5 @@
 - 임베딩 · tars-agent: `project_embedding_agent_loop.md` · `project_tars_agent_runtime_review.md`, C API `src/include/cyber.h`.
 - 컴파일러 한계: `project_compiler_limits.md`. 평가 순서: `project_eval_order.md`. 스택 포인터 보정: `project_stack_ptr_patch.md`.
 - 방향(네이티브 · LLVM · JIT는 범위 밖): `project_direction.md`.
-- tars-agent는 다른 세션이 동시에 고치고 있을 수 있다(지금도 미커밋 변경이 있다). 그 저장소에 쓰기 전에 `git status`를 보고,
+- tars-agent는 다른 세션이 동시에 고치고 있을 수 있다. 그 저장소에 쓰기 전에 `git status`를 보고,
   쓸지는 사용자에게 맡긴다.

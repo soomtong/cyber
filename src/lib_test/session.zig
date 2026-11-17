@@ -726,3 +726,27 @@ test "A host resolver gates the `use` of the script, and the compiler's own buil
     try zt.eq(C.Success, C.vm_evalx(vm, "main", "x", config, &res));
     try zt.eq(4.0, @as(*f64, @ptrCast(@alignCast(res.res))).*);
 }
+
+test "An `#[extern]` function without the `c` module is a compile error, not a crash." {
+    // The program init looked up `c` for `@initBindLib` and unwrapped a null when the script had no `use c`.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    for ([_][]const u8{
+        "#[extern='abs']\nfn c_abs(a int) -> int\nprint(c_abs(-3))",
+        "#[extern='getpid']\nfn pid() -> int\nprint(pid())",
+    }) |src| {
+        try zt.eq(C.ErrorCompile, C.vm_validate(vm, src));
+        try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", src, config, &res));
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, "An `#[extern]` function needs the `c` module. Add `use c`.") != null);
+    }
+    // The session goes on.
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "x := 1", config, &res));
+}

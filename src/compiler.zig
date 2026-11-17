@@ -1032,7 +1032,10 @@ fn emit_program_init_func(c: *cy.Chunk, start: *cy.Func) !void {
     }
 
     if (has_extern_func) {
-        const init_bind_lib = (try c.get_builtin_chunk("c")).?.sym.getMod().getSym("@initBindLib").?.cast(.func).first;
+        const c_chunk = (try c.get_builtin_chunk("c")) orelse {
+            return c.reportError("An `#[extern]` function needs the `c` module. Add `use c`.", null);
+        };
+        const init_bind_lib = c_chunk.sym.getMod().getSym("@initBindLib").?.cast(.func).first;
         const expr = try sema.sema_call_ir(c, init_bind_lib, &.{}, c.ast.null_node);
         try sema.sema_discard(c, expr, c.ast.null_node);
     }

@@ -71,6 +71,7 @@ fn test_syntax(run: *Runner) void {
     run.case("syntax/typed_decl_colon_error.cy");
     run.case("syntax/typed_decl_no_var_error.cy");
     run.case("syntax/foreign_decl_let_error.cy");
+    run.case("syntax/extern_without_c_error.cy");
     run.case("syntax/foreign_decl_typed_error.cy");
     run.case("syntax/foreign_decl_in_func_error.cy");
     run.case("syntax/foreign_decl_mut_error.cy");

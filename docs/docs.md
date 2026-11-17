@@ -5019,6 +5019,8 @@ The example above would be bound to this C function:
 SDL_Window* SDL_CreateWindow(const char *title, int w, int h, SDL_WindowFlags flags);
 ```
 
+An `extern` function is bound by the `c` module, so the `c` module must be loaded: `use c`, or a module that imports it. Otherwise the declaration is a compile error: ``An `#[extern]` function needs the `c` module. Add `use c`.``
+
 ### `extern` globals.
 An `extern` global is registered for static or runtime binding. It is declared with the type of the C variable, and the script reads and writes the variable of the library:
 ```cy

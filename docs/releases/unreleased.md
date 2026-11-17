@@ -12,3 +12,11 @@
 - resolver가 거부했을 때 문구가 ``Failed to resolve module `c`.``처럼 모듈 이름을 말한다(전에는 ``Failed to resolve module.``).
 - `docs/docs.md` "Allowing modules": 믿을 수 없는 스크립트의 모듈 허용 표는 로더가 아니라 resolver(`curUri`)로 만든다.
   결정 기록은 `docs/decisions/project_embedding_module_allowlist.md`.
+
+## `use c` 없는 `#[extern]` 함수가 컴파일 오류
+
+- `c` 모듈이 실리지 않은 채 `#[extern]` 함수를 선언하면(`#[extern='abs'] fn c_abs(a int) -> int`) 프로그램 초기화가 `c`의
+  `@initBindLib`을 null로 풀어 프로세스가 끝났다(CLI는 `panic: attempt to use null value`, 임베딩 ReleaseFast는 `cl_vm_validate`
+  안의 세그폴트). 이제 선언 위치의 컴파일 오류 ``An `#[extern]` function needs the `c` module. Add `use c`.``다. `use c`나 `c`를
+  가져오는 모듈(`math`)이 먼저 있으면 그대로 된다. tars-agent 요청 `cyber-0.4.13-extern-without-c.md`. 테스트
+  `syntax/extern_without_c_error.cy`, `lib_test/session.zig` "An `#[extern]` function without the `c` module".

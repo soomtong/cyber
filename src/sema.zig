@@ -3817,6 +3817,11 @@ pub fn ensure_resolved_func(c: *cy.Chunk, func: *cy.Func, resolve_new_types: boo
             if (func.isMethod()) {
                 return c.reportError("@extern function cannot be a method.", @ptrCast(func.decl));
             }
+            // The program init calls `@initBindLib` of the `c` module for an extern function. Without `c` loaded
+            // that lookup is null, so the script is a compile error here instead.
+            if (c.compiler.chunk_map.get("c") == null) {
+                return c.reportError("An `#[extern]` function needs the `c` module. Add `use c`.", @ptrCast(func.decl));
+            }
             func.type = .extern_;
             var extern_name = func.name();
             c.has_extern_func = true;

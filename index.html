@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.13-dev 946-e1ad170</div>
+    <div class="sub-title">v0.4.13-dev 947-3aa911c</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -5499,6 +5499,20 @@ int main() {
 }
 </code></pre>
 <p>The above example loads <code>my_mod</code> by setting the appropriate function and global bindings, and returning its source code. Other modules get delegated to the default loader <code>cl_default_loader</code> which knows how to load the builtin modules such as <code>core</code>.</p>
+<a href="#libcyber">^topic</a>
+<h3 id="allowing-modules">Allowing modules. <a href="#allowing-modules">#</a></h3>
+<p>A host that runs untrusted scripts decides which modules a script may import with a resolver, not with the loader. The loader is called once per module, when it is first loaded, and gets only the module's name: <code>core</code> has already loaded <code>meta</code> before the script runs, and a refused <code>c</code> would also break <code>math</code>, which imports <code>c</code> itself. The resolver set with <code>cl_vm_set_resolver</code> is called for every <code>use</code> and gets the importing module (<code>curUri</code>) with the specifier (<code>uri</code>), so it can check only the imports of the script and pass the imports of the standard modules on to <code>cl_default_resolver</code>:</p>
+<pre><code class="language-c">bool resolver(CLVM* vm, CLResolverParams params, size_t* res_uri_len) {
+    // The script is evaluated with the URI "main". An empty `curUri` resolves the script itself.
+    if (params.curUri.len == 4 && strncmp(params.curUri.ptr, "main", 4) == 0) {
+        if (!is_allowed(params.uri)) {
+            return false;   // Compile error: Failed to resolve module `c`.
+        }
+    }
+    return cl_default_resolver(vm, params, res_uri_len);
+}
+</code></pre>
+<p>Before returning false, the resolver can give its own message with <code>clReportApiError</code>. The compiler's own lookups of the builtin modules it needs (<code>c</code> for a module with <code>#[extern]</code> functions such as <code>math</code>, <code>meta</code>) do not call the resolver, so it sees only the <code>use</code> declarations of the sources. Modules to keep from an untrusted script include <code>c</code> (raw memory and foreign calls), <code>os</code> (files and processes, when the host's loader provides it), <code>cy</code> (<code>cy.eval</code> runs code in a new VM that has none of the host's settings) and <code>meta</code> (<code>meta.load</code> reads a file at compile time).</p>
 <a href="#libcyber">^topic</a>
 <h3 id="denying-raw-pointers">Denying raw pointers. <a href="#denying-raw-pointers">#</a></h3>
 <p>A host that runs untrusted scripts can set <code>deny_raw_ptrs</code> in <code>CLEvalConfig</code> or <code>CLCompileConfig</code>. Every chunk that is not a standard module (<code>core</code>, <code>meta</code>, <code>math</code>, <code>cy</code>, <code>c</code>, <code>io</code>, <code>test</code>) then gets a compile error for any expression of a raw pointer type: <code>Ptr[T]</code>, <code>PtrSpan[T]</code> or an option of them. That covers <code>as[Ptr[int]] 8</code>, <code>Ptr[int](8)</code>, <code>as[Ptr[int]] &x</code>, <code>alloc(int)</code> and <code>PtrSpan[int]{length=4}</code>, so a script can not read or write an arbitrary address. Slices, spans, maps, strings and borrows keep working; the core library uses raw pointers for them internally. The default is false. The CLI does not set it.</p>

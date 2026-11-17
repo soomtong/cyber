@@ -67,7 +67,7 @@ Semantics:
 - Integers and floats are separate. `int + float` is an error, and the right operand is fitted to the type of the left one. Convert explicitly: `float(i) + f`. A float with an integer value prints as `5`, not `5.0`.
 - A function cannot read a local variable of the outer scope. Pass it as a parameter, or declare a global with `global g int = 0`.
 - Using a call that returns a value as a statement is an error. To discard the value, write `_ = f()`.
-- A function that returns a value must return on every path. Otherwise: `Missing return statement.`
+- A function that returns a value must return on every path. Otherwise: 'Missing return statement.'
 - There are no default parameter values and no keyword arguments. Use overloading.
 - `return` is not allowed at top level.
 - A list literal without a type takes the type of its first element, and the other elements must have that type: `{1, 'a'}` and `{1.5, 2}` are errors. Write the type: `[]float{1.5, 2}`.
@@ -176,7 +176,7 @@ The API of every module is on the docs site (`api.html`) and in `api.json` of ea
 - To let a function modify an argument, declare `fn inc(p &int)` and call `inc(&a)`.
 - `Array[T]` cannot be copied. Use `move a` to pass or relocate it. Using the original after a move is an error. For an ordinary list use `[]T`.
 - A closure can only capture variables of type `^T` or `&T`. In simple code use a plain function or a loop instead of a closure.
-- In the REPL and in hosts that keep top-level variables between runs, a top-level borrow (`c := &x`) cannot be kept (`Cannot persist local ... of borrow type`). Borrow inside a function, or use `^T`.
+- In the REPL and in hosts that keep top-level variables between runs, a top-level borrow (`c := &x`) cannot be kept ('Cannot persist local ... of borrow type'). Borrow inside a function, or use `^T`.
 
 ## Examples
 

@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.13-dev 948-23ac904</div>
+    <div class="sub-title">v0.4.13-dev 949-d7e261e</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1746,7 +1746,7 @@ print(currency.name())          --> usd
 print(int(currency))            --> <unique ID>
 </code></pre>
 <p>A symbol does not need a declaration. The same name is the same value everywhere in the program.</p>
-<p>Earlier versions wrote a symbol literal as <code>@usd</code>. That is a compile error that names the replacement: <code>Undeclared `@usd`. A symbol literal is written `symbol.usd`.</code></p>
+<p>Earlier versions wrote a symbol literal as <code>@usd</code>. That is a compile error that names the replacement: 'Undeclared <code>@usd</code>. A symbol literal is written <code>symbol.usd</code>.'</p>
 <a href="#basic-types">^topic</a>
 <h2 id="references">References. <a href="#references">#</a></h2>
 <p>A reference type is denoted as <code>^T</code> where <code>T</code> is the type of the value that the reference points to.
@@ -4128,7 +4128,7 @@ fn sum() -> !int:
 </code></pre>
 <p>The rules follow from the lifetime of the fibers:</p>
 <ul>
-<li>The borrowed value is declared before the block. A value that is declared in the body is gone before the fibers are done: <code>A fiber of the `scope` block can not borrow `inner`: it is declared inside the block and is gone before the fibers are done. Declare it before the block.</code></li>
+<li>The borrowed value is declared before the block. A value that is declared in the body is gone before the fibers are done: 'A fiber of the <code>scope</code> block can not borrow <code>inner</code>: it is declared inside the block and is gone before the fibers are done. Declare it before the block.'</li>
 <li>The borrow lasts until the end of the block, like a borrow that a local of the block holds. While a fiber holds <code>&a</code>, the body can not resize <code>a</code>, and an exclusive borrow <code>&&a</code> is given to one fiber only.</li>
 <li>The arguments are written as a literal at the call: <code>s.start(func, {&a, 1})</code>.</li>
 <li>Only the name of a <code>scope</code> block takes borrows. <code>start</code> on any other <code>Scope</code>, including a <code>&Scope</code> that is passed to a function, and <code>fiber f(&a)</code> are compile errors: <code>Cannot borrow a stack value across fibers.</code></li>
@@ -4267,7 +4267,7 @@ for rep2('a', 3) |s|:
     print(s)
 </code></pre>
 <p><code>generator</code> is not a reserved word. It is a modifier only when <code>fn</code> follows it, so it can still be used as a name. A hidden generator is written <code>-generator fn</code>, and attributes go before the modifier (<code>#[inline] generator fn</code>). <code>yield</code> outside a <code>generator fn</code> is a compile error.</p>
-<p>The <code>#[generator]</code> attribute of earlier versions was removed. It is a parse error that names the replacement: <code>The `#[generator]` attribute was replaced by `generator fn`.</code></p>
+<p>The <code>#[generator]</code> attribute of earlier versions was removed. It is a parse error that names the replacement: 'The <code>#[generator]</code> attribute was replaced by <code>generator fn</code>.'</p>
 <a href="#concurrency">^topic</a>
 <h3 id="resuming-a-generator">Resuming a generator. <a href="#resuming-a-generator">#</a></h3>
 <p>A generator begins and resumes execution with <code>next</code> which returns the next yielded value as an optional:</p>
@@ -4564,7 +4564,7 @@ fn add(a int, b int) -> int:
 #[extern] global errno Ptr[int]
 </code></pre>
 <table><thead><tr><th>Attribute</th><th>Applies to</th><th>Purpose</th></tr></thead><tbody><tr><td><code>#[inline]</code></td><td>function</td><td>Calls are inlined in bytecode with a larger size limit.</td></tr><tr><td><code>#[bind]</code></td><td>function, type, global</td><td>The declaration is provided by the host or by a compiler hook. See <a href="#bind-hooks" title=""><code>#[bind]</code> hooks</a>.</td></tr><tr><td><code>#[extern]</code></td><td>function, global</td><td>The declaration is a C symbol. <code>#[extern='name']</code> gives the symbol name. See <a href="#ffi" title="">FFI</a>.</td></tr><tr><td><code>#[unsafe]</code></td><td>function</td><td>The function is exempt from checks on borrow containers. Reserved for the builtin modules.</td></tr><tr><td><code>#[consteval]</code></td><td>function</td><td>The function is only evaluated at compile-time. Reserved for the builtin modules.</td></tr><tr><td><code>#[reserve]</code></td><td>function</td><td>Reserves the name for a declaration that the compiler provides. Reserved for the builtin modules.</td></tr><tr><td><code>#[cond=expr]</code></td><td>function, global, <code>use</code></td><td>The declaration exists only when the compile-time condition is <code>true</code>.</td></tr><tr><td><code>#[call]</code></td><td></td><td>Reserved.</td></tr></tbody></table><p>An unknown attribute name is a parse error: <code>Unknown attribute.</code></p>
-<p>An attribute that is reserved for the builtin modules is a compile error in a script: <code>The `#[consteval]` attribute is reserved for the builtin modules.</code></p>
+<p>An attribute that is reserved for the builtin modules is a compile error in a script: 'The <code>#[consteval]</code> attribute is reserved for the builtin modules.'</p>
 <p>A declaration that <code>#[cond]</code> skips is not declared. Using its name is a compile error unless another declaration of that name exists:</p>
 <pre><code class="language-cy">#[cond=meta.system() == .windows]
 fn sep() -> str:
@@ -5246,7 +5246,7 @@ fn CreateWindow(title Ptr[c_char], w c_int, h c_int, flags WindowFlags) -> Ptr[W
 <p>The example above would be bound to this C function:</p>
 <pre><code class="language-c">SDL_Window* SDL_CreateWindow(const char *title, int w, int h, SDL_WindowFlags flags);
 </code></pre>
-<p>An <code>extern</code> function is bound by the <code>c</code> module, so the <code>c</code> module must be loaded: <code>use c</code>, or a module that imports it. Otherwise the declaration is a compile error: <code>An `#[extern]` function needs the `c` module. Add `use c`.</code></p>
+<p>An <code>extern</code> function is bound by the <code>c</code> module, so the <code>c</code> module must be loaded: <code>use c</code>, or a module that imports it. Otherwise the declaration is a compile error: 'An <code>#[extern]</code> function needs the <code>c</code> module. Add <code>use c</code>.'</p>
 <a href="#ffi">^topic</a>
 <h3 id="extern-globals"><code>extern</code> globals. <a href="#extern-globals">#</a></h3>
 <p>An <code>extern</code> global is registered for static or runtime binding. It is declared with the type of the C variable, and the script reads and writes the variable of the library:</p>

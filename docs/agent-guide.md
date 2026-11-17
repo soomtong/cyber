@@ -4,6 +4,8 @@ Cyber looks like Python: blocks are made by indentation, statements end at a new
 
 This guide is built into the `cyber` executable, so it matches the version in the first line. Older Cyber syntax in your training data (`my`, `dyn`, `func`, `throw`, `catch`, `'$(x)'`, `#[generator] fn f()`, the symbol literal `@name`) is wrong. Write `generator fn f()` and `symbol.name`. If the guide and the compiler disagree, the compiler is right.
 
+When Cyber runs inside another program (an embedding host), the host can load fewer modules, add its own modules, and run code without the `cyber` command. If the host's instructions differ from this guide about running code or about modules, follow the host.
+
 ## Running and checking code
 
 - `cyber main.cy` compiles and runs a program. A compile error is reported before anything runs, with the file, line and column.
@@ -151,6 +153,8 @@ list comprehensions, the `lambda` keyword (a lambda is written `|a, b| a + b` an
 - `regex`: a regular expression engine without backtracking (linear time). `peg`: parsing expression grammars.
 - `time`: clocks, durations, dates and IANA time zones.
 - `meta`, `cy` (the Cyber parser), `c` and `libc` (FFI) are for advanced use.
+
+An embedding host can refuse a module. Then `use name` fails with 'Failed to load module: name', 'Failed to resolve module `name`.' or a message from the host. Do not retry it; use what the host provides.
 
 The API of every module is on the docs site (`api.html`) and in `api.json` of each release. The manual sections `modules` and `ffi` describe how modules and FFI work.
 

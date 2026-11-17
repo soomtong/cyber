@@ -20,3 +20,9 @@
   안의 세그폴트). 이제 선언 위치의 컴파일 오류 'An `#[extern]` function needs the `c` module. Add `use c`.'다. `use c`나 `c`를
   가져오는 모듈(`math`)이 먼저 있으면 그대로 된다. tars-agent 요청 `cyber-0.4.13-extern-without-c.md`. 테스트
   `syntax/extern_without_c_error.cy`, `lib_test/session.zig` "An `#[extern]` function without the `c` module".
+
+## agent-guide: 임베딩 호스트
+
+- `docs/agent-guide.md`(`cyber doc --for-agents`) 머리말에 임베딩 호스트의 지시가 실행 방법과 모듈에 대해 가이드보다 앞선다는
+  줄, "Modules" 절에 거부된 모듈의 문구('Failed to load module: name', 'Failed to resolve module `name`.', 호스트의 문구)와
+  그때 다시 시도하지 말라는 줄을 더했다. CLI를 기준으로 쓴 절은 그대로다. tars-agent 요청 `cyber-agent-guide-embedding-host.md`.

@@ -248,4 +248,13 @@ m_int_expr := Map[int, str]{(1 + 1)='x', 3='y'}
 t.eq('x', m_int_expr[2])
 t.eq('y', m_int_expr[3])
 
+-- values() follows the order of keys().
+mv := Map[str, int]{b=2, a=1, c=3}
+mv_keys := mv.keys()
+mv_vals := mv.values()
+t.eq(mv_vals.len(), 3)
+for mv_keys |i, k|:
+    t.eq(mv[k], mv_vals[i])
+t.eq(Map[str, int]{}.values().len(), 0)
+
 --cytest: pass

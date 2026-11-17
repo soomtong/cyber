@@ -271,4 +271,15 @@ t.eq(r_incl.end, 4)
 r_excl := 0..3
 t.eq(r_excl.end, 3)
 
+-- reverse()
+rv := []int{1, 2, 3, 4}
+rv.reverse()
+t.eq_slice([]int{4, 3, 2, 1}, rv)
+rv_odd := []str{'a', 'b', 'c'}
+rv_odd.reverse()
+t.eq_slice([]str{'c', 'b', 'a'}, rv_odd)
+rv_empty := []int{}
+rv_empty.reverse()
+t.eq(rv_empty.len(), 0)
+
 --cytest: pass

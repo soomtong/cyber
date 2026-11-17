@@ -731,6 +731,21 @@ res = res.concat('end')
 'a' < 'ab'      --> true
 ```
 
+### Lines and padding.
+`lines` splits a string at `\n` and `\r\n` and drops the line breaks. A line break at the end does not start another line, and an empty string has no lines:
+```cy
+'a\r\nb\n\nc\n'.lines()   --> {'a', 'b', '', 'c'}
+''.lines().len()          --> 0
+```
+
+`pad_left` and `pad_right` add spaces, or a given one-rune `fill`, until the string has `width` runes. A longer string is returned as it is:
+```cy
+'ab'.pad_left(4)         --> '  ab'
+'7'.pad_left(3, '0')     --> '007'
+'ab'.pad_right(4, '.')   --> 'ab..'
+```
+A `fill` that is not one rune panics with 'Invalid argument.'. Width counts runes, not display columns: a wide character such as `한` counts as one.
+
 ### String interpolation.
 String templates wrap expressions in `%{}` which converts them to strings using the builtin `to_print_string`:
 ```cy
@@ -1093,6 +1108,9 @@ print(arr.len())  --> 2
 arr.sort(|a, b| a < b)
 arr.sort()
 
+-- Reverse the slice in place.
+arr.reverse()
+
 -- Iterating a slice.
 for arr |it|:
     print(it)
@@ -1118,6 +1136,14 @@ An index or a length that is out of range panics. This holds for `Array`, `Slice
 `remove` and `insert` need a valid index, the start and the end of a slice expression can not be negative,
 and a negative or too large length (`[]int(n, 0)`, `size_up`) panics with `Invalid allocation length`.
 `str.repeat` panics with `InvalidArgument` when the result would be longer than 4 GiB.
+
+An `Array` changes in place. `pop` removes the last element and returns it, or `none` when the array is empty:
+```cy
+a := Array[str]{'x', 'y'}
+print(a.pop().?)       --> y
+print(a.len())         --> 1
+```
+A `[]T` has no `pop`, because its resize methods return the new slice. Take `xs.last()`, then `xs = xs.remove(xs.len() - 1)`.
 
 ## Maps.
 A `Map` type is a dynamic data structure that stores key value pairs in a lookup table governed by hashing functions (key hash and equality functions).
@@ -1156,6 +1182,10 @@ print(map[123])     --> 234
 
 -- Get the size of the map.
 print(map.size())   --> 1
+
+-- The keys and the values, in the same order.
+print(map.keys())   --> {123}
+print(map.values()) --> {234}
 
 -- Remove an entry by key.
 map.remove(123)

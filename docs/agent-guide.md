@@ -96,18 +96,21 @@ str (strings do not change; every method returns a new value):
 - `s.trim()` cuts spaces, tabs and newlines at both ends. `s.trim({'-', '_'})` cuts the given characters.
 - `s.trimLeft()` and `s.trimRight()` cut only the start or only the end, by the same rule.
 - `s.last()` the last byte
+- `s.lines()` gives `[]str` split at `\n` or `\r\n`, without the line breaks and without an empty last line
+- `s.pad_left(n)` and `s.pad_right(n)` add spaces until `s` has `n` characters. `s.pad_left(n, '0')` adds `'0'`.
 
 []T:
 
 - `xs.len()`, `xs.contains(x)`, `xs.index(x)` gives `?int`, `xs.last()`
 - `xs.join(sep)` for `[]str`, gives `str`
 - `xs.append(x)`, `xs.insert(i, x)`, `xs.remove(i)`, `xs.clear()`: each returns the new list and leaves `xs` as it was; assign it back: `xs = xs.remove(0)`. `_ = xs.remove(0)` is a compile error
+- `xs.reverse()` reverses in place and returns nothing, like `xs.sort()`
 - `xs.sort()` sorts in place in ascending order (numbers and strings). `xs.sort(|a, b| ...)` sorts by a function that returns true when `a` goes first. Both return nothing.
 
 Map[K, V]:
 
 - `m[k]` (panics when missing), `m.get(k)` gives `?V`, `m[k] = v`, `m.set(k, v)`
-- `m.contains(k)`, `m.size()`, `m.keys()` gives `[]K`, `m.remove(k)`, `m.clear()`
+- `m.contains(k)`, `m.size()`, `m.keys()` gives `[]K`, `m.values()` gives `[]V` in the same order, `m.remove(k)`, `m.clear()`
 - `for m |e|:` gives entries with `e.key` and `e.value`
 
 Python name to Cyber name:
@@ -118,7 +121,9 @@ Python name to Cyber name:
 - `s.startswith(p)` and `s.endswith(p)` are `s.starts_with(p)` and `s.ends_with(p)`
 - `s.strip()` is `s.trim()`, `s.lstrip()` is `s.trimLeft()` and `s.rstrip()` is `s.trimRight()`
 - `s.find(sub)` is `s.index(sub)` and `s.rfind(sub)` is `s.lastIndexOf(sub)`. Both give `?int`. For the last part of a path use `p.split('/').last()`
-- `len(m)` is `m.size()`. `m.items()` is `for m |e|:`. `list(m)` is `m.keys()`
+- `len(m)` is `m.size()`. `m.items()` is `for m |e|:`. `list(m)` is `m.keys()`. `list(m.values())` is `m.values()`
+- `s.splitlines()` is `s.lines()`. `s.rjust(n)` is `s.pad_left(n)`, `s.ljust(n)` is `s.pad_right(n)` and `s.zfill(n)` is `s.pad_left(n, '0')`
+- `reversed(xs)` is `ys := []int{} + xs` then `ys.reverse()`. `ys := xs` shares the elements, and `ys.reverse()` or `ys.sort()` changes `xs` too
 - `sorted(xs)` is `xs.sort()`, which changes `xs`. `sorted(xs, reverse=True)` is `xs.sort(|a, b| a > b)`
 
 ## Sorting

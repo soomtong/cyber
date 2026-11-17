@@ -1789,6 +1789,9 @@ const member_aliases = [_][2][]const u8{
     // `Map` has `size` instead of `len`.
     .{ "length", "size" }, .{ "len", "size" }, .{ "count", "size" },
     .{ "includes", "contains" }, .{ "has", "contains" },
+    .{ "splitlines", "lines" }, .{ "reversed", "reverse" },
+    .{ "rjust", "pad_left" }, .{ "padStart", "pad_left" }, .{ "pad_start", "pad_left" },
+    .{ "ljust", "pad_right" }, .{ "padEnd", "pad_right" }, .{ "pad_end", "pad_right" },
 };
 
 var suggest_buf: [256]u8 = undefined;

@@ -51,3 +51,17 @@
 - `cyber --version`이 버전을 찍고 끝난다. 전에는 모르는 옵션으로 무시되어 REPL로 들어갔다. `cyber version`은 그대로다.
 - `cyber version`, `cyber --version`, `cyber help`(`-h`, `--help`)의 출력이 stderr에서 stdout으로 옮겨졌다.
   `v=$(cyber --version)`로 버전을 잡을 수 있다. 원본 파일 뒤의 `--version`은 전처럼 스크립트 인자다.
+
+## 컬렉션과 문자열 메소드 보강
+
+- `Map.values()`(`HashMap`도): 값 목록을 `keys()`와 같은 순서로 준다.
+- `[]T`, `[&]T`, `Array`의 `reverse()`: 그 자리에서 뒤집는다. `sort()`처럼 같은 버퍼를 나눈 복사본(`ys := xs`)에도 보인다.
+- `Array.pop() -> ?T`: 마지막 원소를 빼서 돌려주고, 비었으면 `none`. 복사 가능한 원소만(`last()`와 같다). `[]T`에는 없다
+  (크기 변경이 새 값을 돌려주는 규칙이라 값과 목록을 같이 돌려줄 수 없다).
+- `str.lines()`: `\n`과 `\r\n`에서 나누고 줄바꿈은 빼며, 끝의 줄바꿈은 빈 줄을 만들지 않는다. 빈 문자열은 줄이 없다.
+- `str.pad_left(width)`, `pad_right(width)`와 `fill`을 받는 형태: rune 수가 `width`가 될 때까지 공백이나 `fill`(한 rune)을
+  붙인다. 더 긴 문자열은 그대로, 한 rune이 아닌 `fill`은 'Invalid argument.' panic. 너비는 화면 칸이 아니라 rune 수다.
+- 이름 힌트: `splitlines` → `lines`, `reversed` → `reverse`, `rjust` · `padStart` → `pad_left`, `ljust` · `padEnd` → `pad_right`.
+- `docs/docs.md`(Slices, Maps, Strings "Lines and padding")와 `docs/agent-guide.md`의 메소드 목록과 Python 대응표.
+  테스트 `core/Slice.cy`, `core/Array.cy`, `core/Map.cy`, `core/strings.cy`.
+

@@ -236,4 +236,17 @@ t.eq(Array[int]{1, 2, 3}.join(','), '1,2,3')
 t.eq(Array[int]{1, 2, 3}.join('🦊'), '1🦊2🦊3')
 t.eq([]str{'한글', 'x'}.join(' · '), '한글 · x')
 
+-- pop()
+ap := Array[str]{'x', 'y'}
+t.eq(ap.pop().?, 'y')
+t.eq(ap.len(), 1)
+t.eq(ap.pop().?, 'x')
+t.assert(ap.pop() == none)
+t.eq(ap.len(), 0)
+
+-- reverse()
+ar := Array[int]{1, 2, 3}
+ar.reverse()
+t.eq(ar.join(','), '3,2,1')
+
 --cytest: pass

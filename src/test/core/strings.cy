@@ -113,4 +113,19 @@ t.eq('ab' > 'a', true)
 t.eq('a' >= 'a', true)
 t.eq('a' >= 'b', false)
 
+-- lines()
+t.eq_slice([]str{'a', 'b', '', 'c'}, 'a\r\nb\n\nc\n'.lines())
+t.eq_slice([]str{'a', 'b'}, 'a\nb'.lines())
+t.eq(''.lines().len(), 0)
+t.eq_slice([]str{''}, '\n'.lines())
+t.eq_slice([]str{'', ''}, '\r\n\r\n'.lines())
+
+-- pad_left(), pad_right()
+t.eq('ab'.pad_left(4), '  ab')
+t.eq('ab'.pad_right(4), 'ab  ')
+t.eq('7'.pad_left(3, '0'), '007')
+t.eq('한글'.pad_right(4, '·'), '한글··')
+t.eq('abc'.pad_left(2), 'abc')
+t.eq('abc'.pad_right(-1), 'abc')
+
 --cytest: pass

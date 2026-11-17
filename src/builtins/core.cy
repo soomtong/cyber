@@ -1571,6 +1571,10 @@ fn (&Slice[]) sort():
 fn (&Slice[]) sort(less &OpaqueFunc[LessFn[T]]):
     return self.span().sort(less)
 
+--| Reverses the order of the elements in place.
+fn (&Slice[]) reverse():
+    self.span().reverse()
+
 fn (scope &Slice[]) span() -> scope [&]T:
     return {
         base   = as self.ptr,
@@ -1706,6 +1710,18 @@ fn (&Span[]) sort(less &OpaqueFunc[LessFn[T]]):
                 ii -= 1
             else: break
         buf[ii + 1] = cur
+
+--| Reverses the order of the elements in place.
+fn (&Span[]) reverse():
+    buf := as[Ptr[T]] self.base
+    i := 0
+    j := self.length - 1
+    while i < j:
+        tmp := buf[i]
+        buf[i] = buf[j]
+        buf[j] = tmp
+        i += 1
+        j -= 1
 
 --| Returns whether the `Span` ends with `target`.
 fn (&Span[]) ends_with(target Self) -> bool:
@@ -2149,6 +2165,15 @@ fn (scope &Array[]) next_borrow(idx &int) -> scope ?&T:
     idx.* = i + 1
     return &self[i]
 
+--| Removes the last element and returns it, or returns `none` when the array is empty.
+#[cond=type.is_copyable(T)]
+fn (&&Array[]) pop() -> ?T:
+    if self.length == 0:
+        return none
+    val := self.buf[self.length-1]
+    self.size_down(self.length-1)
+    return val
+
 --| Removes an element at index `idx`.
 fn (&&Array[]) remove(idx int):
     if (as[r64] idx) >= (as[r64] self.length):
@@ -2195,6 +2220,10 @@ fn (&Array[]) setLast(val T) -> void:
 #[cond=meta.has_decl(T, '<')]
 fn (&Array[]) sort():
     self[0..].sort(|a, b| a < b)
+
+--| Reverses the order of the elements in place.
+fn (&Array[]) reverse():
+    self[0..].reverse()
 
 --| Sorts the array with the given `less` function.
 --| If element `a` should be ordered before `b`, the function should return `true` otherwise `false`.
@@ -2438,6 +2467,10 @@ fn (&Map[]) iterator() -> int:
 fn (&Map[]) keys() -> []K:
     return self.base.keys() 
 
+--| Returns the values in the same order as `keys()`.
+fn (&Map[]) values() -> []V:
+    return self.base.values()
+
 fn (&Map[]) next(idx &int) -> ?MapEntry[K, V]:
     return self.base.next(idx)
 
@@ -2598,6 +2631,14 @@ fn (&HashMap[]) keys() -> []K:
     iter := self.iterator()
     while self.next(&iter) |e|:
         res = res.append(e.key)
+    return res
+
+--| Returns the values in the same order as `keys()`.
+fn (&HashMap[]) values() -> []V:
+    res := []V{}
+    iter := self.iterator()
+    while self.next(&iter) |e|:
+        res = res.append(e.value)
     return res
 
 fn (&HashMap[]) next(idx &int) -> ?MapEntry[K, V]:
@@ -4112,6 +4153,58 @@ fn (&str) runeStrAt(idx int) -> str:
 
 fn (&str) set(idx int, x byte) -> str:
     return self[0..idx] + str.initRune(x) + self[idx+1..]
+
+--| Returns the lines of the string. A line ends with `\n` or `\r\n`, and the line break is not part
+--| of the line. A line break at the end does not start another line, so `'a\nb\n'` and `'a\nb'` both
+--| give `{'a', 'b'}`. An empty string gives no lines.
+fn (&str) lines() -> []str:
+    res := []str{}
+    len := self.len()
+    i := 0
+    while i < len:
+        end := len
+        next := len
+        if self[i..].index(byte('\n')) |found|:
+            end = i + found
+            next = end + 1
+        line_end := end
+        if line_end > i and self[line_end-1] == byte('\r'):
+            line_end -= 1
+        res += self[i..line_end]
+        i = next
+    return res
+
+--| Returns the string with spaces added at the start until it has `width` runes.
+--| A string with `width` runes or more is returned as it is.
+fn (&str) pad_left(width int) -> str:
+    return self.pad_left(width, ' ')
+
+--| Returns the string with `fill` added at the start until it has `width` runes. `fill` must be one rune.
+fn (&str) pad_left(width int, fill str) -> str:
+    n := pad_count(self.*, width, fill)
+    if n == 0:
+        return self.*
+    return fill.repeat(n) + self.*
+
+--| Returns the string with spaces added at the end until it has `width` runes.
+--| A string with `width` runes or more is returned as it is.
+fn (&str) pad_right(width int) -> str:
+    return self.pad_right(width, ' ')
+
+--| Returns the string with `fill` added at the end until it has `width` runes. `fill` must be one rune.
+fn (&str) pad_right(width int, fill str) -> str:
+    n := pad_count(self.*, width, fill)
+    if n == 0:
+        return self.*
+    return self.* + fill.repeat(n)
+
+fn pad_count(s str, width int, fill str) -> int:
+    if fill.count() != 1:
+        panic('Invalid argument.')
+    n := width - s.count()
+    if n < 0:
+        return 0
+    return n
 
 --| Returns a list of UTF-8 strings split at occurrences of `sep`.
 fn (&str) split(sep str) -> []str:

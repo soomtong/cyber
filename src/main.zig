@@ -75,6 +75,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
                 cmd = .help;
             } else if (std.mem.eql(u8, arg, "--help")) {
                 cmd = .help;
+            } else if (std.mem.eql(u8, arg, "--version")) {
+                cmd = .version;
             } else {
                 if (build_config.trace) {
                     if (std.mem.eql(u8, arg, "-stats")) {
@@ -375,8 +377,15 @@ fn evalPath(alloc: std.mem.Allocator, path: []const u8) !void {
     }
 }
 
+/// Writes to stdout, so `cyber --version` and `cyber help` can be piped or captured.
+fn printOut(comptime format: []const u8, args: anytype) void {
+    const out = std.fmt.allocPrint(std.heap.page_allocator, format, args) catch return;
+    defer std.heap.page_allocator.free(out);
+    std.Io.File.stdout().writeStreamingAll(stdx.io(), out) catch {};
+}
+
 fn help() void {
-    std.debug.print(
+    printOut(
         \\Cyber {s}
         \\
         \\Usage: cyber [command?] [options] [source]
@@ -388,7 +397,7 @@ fn help() void {
         \\  cyber fmt [path...]     Reformat source files in place. See `cyber fmt --help`.
         \\  cyber doc [topic]       Print the manual. `cyber doc --for-agents` prints a guide for agents.
         \\  cyber help              Print usage.
-        \\  cyber version           Print version number.
+        \\  cyber version           Print version number. Also `cyber --version`.
         \\
         \\Backend options:
         \\  -vm     Compile to bytecode. (Default)
@@ -408,7 +417,7 @@ fn help() void {
 }
 
 fn version() void {
-    std.debug.print("{s}\n", .{c.full_version()});
+    printOut("{s}\n", .{c.full_version()});
 }
 
 pub fn panic(msg: []const u8, trace: ?*std.lang.StackTrace, ret_addr: ?usize) noreturn {

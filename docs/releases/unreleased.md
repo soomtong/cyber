@@ -45,3 +45,9 @@
   `s.split('\n')` 등이 조용히 틀렸다(줄 둘이 이어 붙음). `src/string.zig`의 inline asm을 Zig 벡터 코드로 바꿨다. arm64와
   AVX2가 없는 x86_64는 영향이 없었다. 테스트 `core/str_index_char_blocks.cy`.
 - `gen-docs.yml`이 커밋된 `docs/api.json`을 옮기지 않는다(playground 빌드가 내장한다). 사이트의 `api.json`은 버전을 넣어 따로 쓴다.
+
+## CLI: `cyber --version`
+
+- `cyber --version`이 버전을 찍고 끝난다. 전에는 모르는 옵션으로 무시되어 REPL로 들어갔다. `cyber version`은 그대로다.
+- `cyber version`, `cyber --version`, `cyber help`(`-h`, `--help`)의 출력이 stderr에서 stdout으로 옮겨졌다.
+  `v=$(cyber --version)`로 버전을 잡을 수 있다. 원본 파일 뒤의 `--version`은 전처럼 스크립트 인자다.

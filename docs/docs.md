@@ -5486,6 +5486,14 @@ cyber -h
 cyber --help
 ```
 
+To print the version:
+```bash
+cyber version
+cyber --version
+```
+Both write to stdout, so a script can capture them: `v=$(cyber --version)`. An option after the source file
+belongs to the script: `cyber main.cy --version` runs `main.cy` with `--version` in `os.args()`.
+
 ## REPL.
 The default behavior of `cyber` is to start a REPL:
 ```bash

@@ -117,7 +117,7 @@ proc fib[T: Fibable](a: T): T =
   검사 시점에 알 수 없어서다.
 - 사이버 지금: 템플릿(`type C[T Any]`, `fn add[T Any]`)과 제네릭 함수(`%T`, trait 매개변수)는 특수화될 때 구체 타입으로 본문을
   검사한다. 실행 확인: trait 매개변수 함수 `fn describe2(s Shape)`의 본문에 없는 메서드(`s.perimeter()`)를 써도 부르기 전에는
-  통과하고, `describe2(Circle{r=1})`를 부르면 ``Can not find the symbol `perimeter` in `Circle`.``가 본문 위치에 난다. 호출 위치는
+  통과하고, `describe2(Circle{r=1})`를 부르면 'Can not find the symbol `perimeter` in `Circle`.'가 본문 위치에 난다. 호출 위치는
   나오지 않는다. 사용자 템플릿 타입의 쓰지 않는 메서드(`Box[Array[int]]`의 복사하는 메서드)도 오류 없이 통과했다.
   원소 타입에 따라 안 되는 메서드는 `#[cond=type.is_copyable(T)]`처럼 조건으로 막는다. trait는 이미 "generic type"으로 제약에 쓰인다.
 - Nimony가 타협한 지점을 사이버는 언어 규칙으로 풀었다. `move`는 복사 가능 여부와 독립이라, 제네릭 코드가 복사 가능 타입과
@@ -351,7 +351,7 @@ xs := Array[int]{1, 2, 3}
 print(total(move xs))   -- `Array`는 `NoCopy`라 `move`를 적어야 한다
 ~~~
 
-`move` 없이 `total(xs)`라 쓰면 ``Cannot copy `Array[int]`, type implements `NoCopy`.``다(실행 확인).
+`move` 없이 `total(xs)`라 쓰면 'Cannot copy `Array[int]`, type implements `NoCopy`.'다(실행 확인).
 
 Rust는 값으로 넘기면 저절로 이동하므로, 이 자리에서는 사이버가 Rust보다 더 명시적이다.
 

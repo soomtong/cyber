@@ -1053,7 +1053,7 @@ print(Future.complete(100).await())
 |---|---|
 | `let x = 1` / `const x = 1` | `x := 1`(재대입 가능). `const x = 1`은 컴파일 타임 상수 |
 | `x: number` | `int`와 `float`가 분리되어 있다. 암시적 변환은 `int -> float` 방향만 |
-| `` `a ${b}` `` | `'a %{b}'` |
+| '`a ${b}`' | `'a %{b}'` |
 | `// 주석` | `-- 주석` |
 | `{ ... }` | `:` 와 들여쓰기 |
 | `function f(a: number): number {}` | `fn f(a int) -> int:` |
@@ -1372,7 +1372,7 @@ print(total)
 | `Expected assignment to a variable or placeholder for `int`.` | 값을 돌려주는 호출을 문장으로 사용 | `_ = f()` 또는 변수에 대입 |
 | `Can only capture variables declared with the reference types `^T` or `&T`.` | 클로저가 `n := 0` 캡처 | `n := ^0` |
 | `Cannot copy `Array[int]`, type implements `NoCopy`.` | `b := a` | `move a` |
-| `` `a` is no longer alive in this scope.`` | `move` 후 사용 | 이동 후 원본을 쓰지 않는다 |
+| ' `a` is no longer alive in this scope.' | `move` 후 사용 | 이동 후 원본을 쓰지 않는다 |
 | `Expected `else` case since switch does not handle all cases.` | int/str `switch`에 `else` 없음 | `else:` 추가 |
 | `Can not find the symbol `&&` for `bool`.` | JS의 `&&` | `and` (`&&`는 비트 AND) |
 | `Expected type `bool`, got `int`.` | `if x:` (truthy) | `if x != 0:` |

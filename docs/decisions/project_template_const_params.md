@@ -21,8 +21,8 @@
 - `const` 매개변수가 될 수 있는 타입을 `template.is_const_param_type` 하나로 정한다: `type`, 정수(`int` · `i8` · `i16` · `i32` ·
   `byte` · `r16` · `r32` · `r64` · `EvalInt`), `bool`, enum, `EvalStr`, 함수 심볼(`fnsym`), `FuncSig`, `PartialStructLayout`(내부).
   `resolveTemplateArgs`(타입 템플릿)와 `expandTemplateFuncForArgs`(함수 템플릿 `f[...]`)가 인자를 평가하기 전에 매개변수 타입을
-  검사해 그 밖이면 매개변수 타입 위치에 컴파일 오류 ``Unsupported `const` parameter type `float`. A `const` template parameter can be
-  a type, an integer, a `bool`, an enum, an `EvalStr`, or a function symbol.``. `str`은 cte 값이 `EvalStr`라 전부터 인자에서
+  검사해 그 밖이면 매개변수 타입 위치에 컴파일 오류 'Unsupported `const` parameter type `float`. A `const` template parameter can be
+  a type, an integer, a `bool`, an enum, an `EvalStr`, or a function symbol.'. `str`은 cte 값이 `EvalStr`라 전부터 인자에서
   `Expected type str. Found EvalStr.`였는데 이제 매개변수에서 위 오류다.
 - `VariantKeyContext.hash` · `eql`이 `bool`과 모든 폭의 정수를 폭에 맞는 접근자(`asByte` · `asU16` · `asU32` · `asUint`)로 다룬다.
   이전 `i32`는 hash에만 있고 eql에는 없었다.

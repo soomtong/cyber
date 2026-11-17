@@ -87,7 +87,7 @@ struct 필드, enum case, choice case, cunion case의 이름이 한 타입 안�
 
 - 결정: 선언 노드가 없는 sym이면 문맥 없이 오류만 보고한다. `Sym.declNodeOrNull`을 더하고 `declNode`는 그 위에서 panic한다.
   필드와 case sym에 선언 노드를 더하는 쪽은 sym 크기를 늘리므로 택하지 않았다. 두 선언은 같은 타입 안 몇 줄 사이에 있다.
-- 오류: ``CompileError: `red` has already been declared as a `enum_case`.`` 위치는 두 번째 선언이다.
+- 오류: 'CompileError: `red` has already been declared as a `enum_case`.' 위치는 두 번째 선언이다.
 - 테스트: `types/enum_dup_case_error.cy` · `choice_dup_case_error.cy` · `struct_dup_field_error.cy` · `cunion_dup_case_error.cy`.
 
 ## 한계

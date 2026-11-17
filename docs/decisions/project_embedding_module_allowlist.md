@@ -13,7 +13,7 @@ tars-agent는 모델이 쓴 스크립트를 세션 VM에서 돌린다. 바깥에
 - 로더는 모듈이 처음 올라올 때 한 번만, 이름만 받고 불린다(`src/compiler.zig` `loadChunk`).
 - `core`가 `use meta`를 하므로 `meta`는 스크립트보다 먼저 올라온다. 스크립트의 `use meta`는 로더를 부르지 않는다.
   s1에서 `use meta`, `use cy`, `use io`가 모두 로드됐다.
-- `math`는 `use c`, `use meta`, `json`은 `use meta`를 한다. 이름으로 `c`를 막으면 `use math`가 ``Failed to load module: c``다.
+- `math`는 `use c`, `use meta`, `json`은 `use meta`를 한다. 이름으로 `c`를 막으면 `use math`가 'Failed to load module: c'다.
 
 ## 결정
 
@@ -24,7 +24,7 @@ tars-agent는 모델이 쓴 스크립트를 세션 VM에서 돌린다. 바깥에
   `chunk_map`에서 이름으로 찾고, 없을 때만 전처럼 resolver). 전에는 `#[extern]` 함수가 있는 `math`를 쓰면 메인 스크립트의
   초기화에서 `get_chunk_by_uri("c")`가 불려 resolver에 `main->c`로 왔고, 스크립트의 `use c`와 구별되지 않았다.
 - bind 함수에서 chunk 포인터를 기억하는 안은 버렸다. 세션 reset과 실패한 컴파일이 chunk를 표에서 빼므로 포인터가 남는다.
-- 거부 문구는 ``Failed to resolve module `c`.``. 호스트는 `clReportApiError`로 자기 문구를 줄 수 있다.
+- 거부 문구는 'Failed to resolve module `c`.'. 호스트는 `clReportApiError`로 자기 문구를 줄 수 있다.
 - `CLEvalConfig`에 허용 표 필드는 만들지 않는다. resolver로 된다.
 
 ## 확인

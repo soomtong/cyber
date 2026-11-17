@@ -384,7 +384,7 @@ if (!field_access) { res.owned = true; local.type = .dead; return res; }   // �
 // ... 멤버 move: var_active_struct_fields[var_id][필드 오프셋] = false
 ```
 
-통째로 move하면 지역의 `type`을 `.dead`로 바꾸고 결과를 `owned`로 표시한다. 이후 `semaLocal`(4003)이 죽은 지역을 만나면 `` `a` is no longer alive in this scope. ``를 낸다.
+통째로 move하면 지역의 `type`을 `.dead`로 바꾸고 결과를 `owned`로 표시한다. 이후 `semaLocal`(4003)이 죽은 지역을 만나면 '`a` is no longer alive in this scope.'를 낸다.
 죽은 지역은 `semaDestructLocal`이 `type != .local`이라서 건너뛰므로 move한 값은 정리되지 않는다. 새 주인이 정리한다.
 
 멤버 move(`move s.b`, `move s.c.!a`, `move s.d.?`)는 구조체 하나당 `[]bool` 상태 벡터(`proc.var_active_struct_fields`)를 두고 해당 칸을 false로 만든다.

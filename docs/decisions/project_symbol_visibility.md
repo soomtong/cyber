@@ -29,10 +29,10 @@
   (`modules/libc.cy` 테스트가 의존, 매뉴얼 "not exported"는 `use *` 기준).
 - 폴백 모듈(core) 조회 `get_pub_resolved_chunk_sym`은 private 심볼을 "없음"으로 본다. 사용자 스크립트의 맨 `alloc_(8)` · `panic_oob(1)`은
   `Undeclared variable`이다(이전에는 core 내부 함수가 그대로 불렸다).
-- 오버로드는 가시성이 같아야 한다. `fn f(a int)` 뒤 `-fn f(a float)`는 컴파일 오류 ``Overloads of `f` must have the same visibility.``.
+- 오버로드는 가시성이 같아야 한다. `fn f(a int)` 뒤 `-fn f(a float)`는 컴파일 오류 'Overloads of `f` must have the same visibility.'.
   템플릿 인스턴스의 `variant_func` 오버로드도 같은 규칙이다.
-- 오류 메시지: ``Can not access the private symbol `secret` in `a`. A symbol declared with `-` is only visible to the module that declares it.``
-  필드는 ``Can not access the private field `b` in `Info`. ...``. `in` 뒤는 심볼의 부모(모듈 별칭 이름 또는 타입 이름)다.
+- 오류 메시지: 'Can not access the private symbol `secret` in `a`. A symbol declared with `-` is only visible to the module that declares it.'
+  필드는 'Can not access the private field `b` in `Info`. ...'. `in` 뒤는 심볼의 부모(모듈 별칭 이름 또는 타입 이름)다.
 - 메타프로그래밍(`type.info(T).fields`, `#[bind]` 호스트 바인딩, 컴파일러가 이름으로 찾는 `@init` · `@deinit` 등 `@` 메서드)은 검사하지
   않는다. 매뉴얼의 "metaprogramming can get around this constraint"를 유지한다. 컴파일러가 만드는 `@program_init` · `@init` · `@deinit`
   청크 함수는 `hidden = true`로 예약되어 이제 private이지만 `getMod().getSym`으로 직접 찾으므로 영향이 없다.

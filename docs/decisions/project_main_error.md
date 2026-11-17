@@ -12,7 +12,7 @@
 
 `main`이 돌려준 오류는 최상위의 `expr!`와 같은 panic이다.
 
-- ``panic: Unwrapped error `error.FileNotFound`.``로 끝나고 `cyber`의 종료 코드는 1이다. 트레이스의 위치는 `main` 선언이다.
+- 'panic: Unwrapped error `error.FileNotFound`.'로 끝나고 `cyber`의 종료 코드는 1이다. 트레이스의 위치는 `main` 선언이다.
 - 임베딩 호스트는 이 경우 `!T` 값 대신 `CL_ERROR_PANIC`을 받는다. `cl_thread_panic_summary`로 메시지를 읽는다.
 - 오류가 아니면 결과 타입은 `!T` 그대로다. 호스트가 받는 값의 모양은 바뀌지 않는다.
 

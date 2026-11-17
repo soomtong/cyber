@@ -92,8 +92,8 @@ CompileError: The initializer of `a` can reach `foo`, which accesses `a` before 
 
 - 초기화식이 이름으로 쓴 사용자 전역은 `UserVar.init_deps.globals`에 적힌다(함수 본문과 같은 `recordGlobal`).
 - `check`가 초기화식의 직접 참조를 먼저 본다. 더 늦게 초기화되는 전역이면
-  ``The initializer of `b` accesses the global `a`. `a` is initialized after `b`.``, 자기 자신이면
-  ``The initializer of `a` accesses `a` before it is initialized.``
+  'The initializer of `b` accesses the global `a`. `a` is initialized after `b`.', 자기 자신이면
+  'The initializer of `a` accesses `a` before it is initialized.'
 - 가져온 모듈의 전역(`lib.x`)은 먼저 초기화되므로 쓸 수 있다. 앞선 eval의 전역도 쓸 수 있다.
 - 호스트 전역(`#[bind] global`)은 모듈 로드 때 묶이므로 허용한다.
 - 오류 위치는 참조한 식이 아니라 초기화식 전체다(참조 노드를 따로 적지 않는다).

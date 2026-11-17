@@ -184,8 +184,8 @@ Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator 
   `with [...]` 뒤 네 곳에서 확인하고 `parseFuncDecl`에 `generator = true`를 넘긴다. 토크나이저에는 키워드를 더하지 않았다.
 - AST: `FuncDecl.generator: bool`(`src/ast.zig`, `cy` 모듈의 `FuncDecl`도 같은 자리). `AttributeType.generator`와
   `cy` 모듈의 `AttributeKind.generator`는 지웠다. sema는 속성 대신 `decl.generator`를 본다.
-- `#[generator]`는 ``ParseError: The `#[generator]` attribute was replaced by `generator fn`.``
-- 오류 문구: `` `yield` is only allowed in a `generator fn`. ``, ``A `generator fn` can not take the borrow type ...``
+- `#[generator]`는 'ParseError: The `#[generator]` attribute was replaced by `generator fn`.'
+- 오류 문구: '`yield` is only allowed in a `generator fn`.', 'A `generator fn` can not take the borrow type ...'
 - tree-sitter: `generator_fn`은 `generator`와 `fn`을 묶은 한 토큰이다. 낱말 `generator`를 키워드로 두면 식별자로 쓸 수
   없게 되기 때문이다. vim 구문 파일에는 `generator`를 키워드로 더했다(식별자로 써도 강조된다).
 - 치환: 테스트 · 예제 · lib 테스트 · 퍼즈 프로브의 `#[generator]` 선언 전부. REPL의 속성 줄 묶기 테스트
@@ -201,9 +201,9 @@ Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator 
   이 오류는 제너레이터와 무관하다. `[T]` 템플릿은 일반 함수도 인자로 추론하지 않는다(`rep[int](1, 3)`으로 확장하거나
   `%T`를 쓴다). 사용자 결정(2026-11-11): `[T]`는 명시적 확장 전용, 추론은 `%T`라는 구분을 유지하고
   `[T]`에 추론을 넣지 않는다. 실제 결함은 그 다음에 있었다: 인스턴스가 `resolveUserFuncVariant`로 해석돼 제너레이터 설정을
-  건너뛰었고 `rep[int](1, 3)` · `%T` 형태가 ``Can not find the symbol `iterator` for `int`.``였다. 같은 날 수정:
+  건너뛰었고 `rep[int](1, 3)` · `%T` 형태가 'Can not find the symbol `iterator` for `int`.'였다. 같은 날 수정:
   시그니처 변환을 `resolveGeneratorSig`로 뽑아 인스턴스에도 적용한다. 테스트 `concurrency/generator_method.cy`.
-- 함수 본문 안의 `generator fn`은 일반 `fn`과 같이 `` `fn` declarations are not allowed here. ``
+- 함수 본문 안의 `generator fn`은 일반 `fn`과 같이 '`fn` declarations are not allowed here.'
 
 남은 것: `.paused` → `.suspended` 개명(단계 1.5의 나머지), `fiber` · `suspend`(단계 2). 둘 다 같은 날 아래 절에서 했다.
 

@@ -16,7 +16,7 @@
     `read_file_str` 삭제, `write_file`의 `[]byte` 오버로드 삭제. 깨지는 변경, 사용자 결정(이름 대칭 · 오버로드 없음 · 텍스트가
     기본). `docs/decisions/project_os_file_text_bytes.md`.
   - `526146a9` (d) `build.zig.zon` `.paths`에 `docs/docs.md` · `docs/agent-guide.md`(패키지 해시 바뀜).
-  - `4cf57841` (b) `let` · `mut` · `val` · `auto` 선언에 ``Cyber has no `let`. Declare with ...``(`src/parser.zig`
+  - `4cf57841` (b) `let` · `mut` · `val` · `auto` 선언에 'Cyber has no `let`. Declare with ...'(`src/parser.zig`
     `isForeignDeclKeyword` · `reportForeignDeclError`). `const`는 Cyber 상수라 제외.
   - `40ae5b5a` (a) `Slice` resize의 받는 변수 보존: `size_down` · `clear` · 끝 `remove`는 제자리에서 해제를 미루고, 끝이 아닌
     `remove` · `insert`는 `clone_copy`로 복사(`src/builtins/core.cy`). 버린 결과는 컴파일 오류(`src/sema.zig`
@@ -25,7 +25,7 @@
   재시도 일곱째에 성공. `build-945-1dee651`, 에셋 15개, Latest. 노트는 `docs/releases/0.4.13.md`. `install.sh 0.4.13` 설치 확인
   (버전, `cyber-lsp` initialize, hello, `let x := 1` 문구). 기록은 `project_fork_release_ci.md`.
 - [x] 0.4.13-DEV 요청(`/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.13-dev-findings.md`) 두 건, `3acc0797`:
-  - (a) `let x := 1` → ``Cyber has no `let`. Declare with `x := 1`.``(`reportForeignDeclError`의 `colon_equal` 분기).
+  - (a) `let x := 1` → 'Cyber has no `let`. Declare with `x := 1`.'(`reportForeignDeclError`의 `colon_equal` 분기).
     테스트 `syntax/foreign_decl_infer_error.cy`.
   - (b) 세션(`persist_main`)의 마지막 줄 `out.remove(1)`도 버린 결과 오류(`semaMainResultStmt`에서 `checkDroppedSliceResult`).
     테스트 `src/lib_test/session.zig` 끝 "a dropped Slice resize result on the last line"(필터로 실제로 도는 것 확인).

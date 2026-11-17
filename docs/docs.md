@@ -836,7 +836,7 @@ print(int(currency))            --> <unique ID>
 ```
 A symbol does not need a declaration. The same name is the same value everywhere in the program.
 
-Earlier versions wrote a symbol literal as `@usd`. That is a compile error that names the replacement: ``Undeclared `@usd`. A symbol literal is written `symbol.usd`.``
+Earlier versions wrote a symbol literal as `@usd`. That is a compile error that names the replacement: 'Undeclared `@usd`. A symbol literal is written `symbol.usd`.'
 
 ## References.
 A reference type is denoted as `^T` where `T` is the type of the value that the reference points to. 
@@ -3644,7 +3644,7 @@ fn sum() -> !int:
 ```
 The rules follow from the lifetime of the fibers:
 
-* The borrowed value is declared before the block. A value that is declared in the body is gone before the fibers are done: ``A fiber of the `scope` block can not borrow `inner`: it is declared inside the block and is gone before the fibers are done. Declare it before the block.``
+* The borrowed value is declared before the block. A value that is declared in the body is gone before the fibers are done: 'A fiber of the `scope` block can not borrow `inner`: it is declared inside the block and is gone before the fibers are done. Declare it before the block.'
 * The borrow lasts until the end of the block, like a borrow that a local of the block holds. While a fiber holds `&a`, the body can not resize `a`, and an exclusive borrow `&&a` is given to one fiber only.
 * The arguments are written as a literal at the call: `s.start(func, {&a, 1})`.
 * Only the name of a `scope` block takes borrows. `start` on any other `Scope`, including a `&Scope` that is passed to a function, and `fiber f(&a)` are compile errors: `Cannot borrow a stack value across fibers.`
@@ -3797,7 +3797,7 @@ for rep2('a', 3) |s|:
 
 `generator` is not a reserved word. It is a modifier only when `fn` follows it, so it can still be used as a name. A hidden generator is written `-generator fn`, and attributes go before the modifier (`#[inline] generator fn`). `yield` outside a `generator fn` is a compile error.
 
-The `#[generator]` attribute of earlier versions was removed. It is a parse error that names the replacement: ``The `#[generator]` attribute was replaced by `generator fn`.``
+The `#[generator]` attribute of earlier versions was removed. It is a parse error that names the replacement: 'The `#[generator]` attribute was replaced by `generator fn`.'
 
 ### Resuming a generator.
 A generator begins and resumes execution with `next` which returns the next yielded value as an optional:
@@ -4144,7 +4144,7 @@ fn add(a int, b int) -> int:
 
 An unknown attribute name is a parse error: `Unknown attribute.`
 
-An attribute that is reserved for the builtin modules is a compile error in a script: ``The `#[consteval]` attribute is reserved for the builtin modules.``
+An attribute that is reserved for the builtin modules is a compile error in a script: 'The `#[consteval]` attribute is reserved for the builtin modules.'
 
 A declaration that `#[cond]` skips is not declared. Using its name is a compile error unless another declaration of that name exists:
 ```cy
@@ -5019,7 +5019,7 @@ The example above would be bound to this C function:
 SDL_Window* SDL_CreateWindow(const char *title, int w, int h, SDL_WindowFlags flags);
 ```
 
-An `extern` function is bound by the `c` module, so the `c` module must be loaded: `use c`, or a module that imports it. Otherwise the declaration is a compile error: ``An `#[extern]` function needs the `c` module. Add `use c`.``
+An `extern` function is bound by the `c` module, so the `c` module must be loaded: `use c`, or a module that imports it. Otherwise the declaration is a compile error: 'An `#[extern]` function needs the `c` module. Add `use c`.'
 
 ### `extern` globals.
 An `extern` global is registered for static or runtime binding. It is declared with the type of the C variable, and the script reads and writes the variable of the library:

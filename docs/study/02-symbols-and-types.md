@@ -1048,19 +1048,19 @@ Result 도 마찬가지다. 실패한 `mk(-1)` 에 `meta.access_result_payload(r
 
 | 실수 | 메시지 |
 |---|---|
-| 필드가 같은 `B` 를 `A` 인자에 전달 | `` Expected argument `A`, found `B`, when calling `fn take(A) -> void`. `` |
-| `n := 10` 후 `n = 'abc'` | `` Expected type `int`, got `str`. `` |
-| `x := find()`(`?int`) 후 `x + 1` | `` Can not find the symbol `+` for `?int`. `` |
-| `var b Box[float] = a`(`a` 는 `Box[int]`) | `` Expected type `Box[float]`, got `Box[int]`. `` |
-| `f(1, 'two')` | `` Expected argument `int`, found `str`, when calling `fn f(int, int) -> int`. `` |
-| choice 의 `switch` 에서 `case .circle` 만 처리 | `` Unhandled cases in `switch`. `else` can be used to handle the remaining cases. `` |
-| `x := 3.5` 후 `var n int = x` | `` Expected type `int`, got `float`. `` |
-| `var big int = 300` 후 `var small i8 = big` | `` Expected type `i8`, got `int`. `` |
-| `Grid[int, 3]` 를 `Grid[int, 4]` 에 대입 | `` Expected type `Grid[int, 4]`, got `Grid[int, 3]`. `` |
-| `var o Object = ^5` | `` Expected type `Object`, got `^int`. `` (docs 표에는 허용으로 적힘) |
-| `var x Any = 1`, `fn show(x Any)` 호출 | `` Expected type `Any`, got `int`. `` / `` Expected type `Any`. Found `int`. `` |
-| `Wrap[int]` (`type Wrap[T Showable]`) | `` Expected type `Showable`. Found `type`. `` |
-| `OnlyCopy[NC]` (`NC` 는 `with NoCopy`) | `` Expected type `Copyable`. Found `type`. `` |
+| 필드가 같은 `B` 를 `A` 인자에 전달 | 'Expected argument `A`, found `B`, when calling `fn take(A) -> void`.' |
+| `n := 10` 후 `n = 'abc'` | 'Expected type `int`, got `str`.' |
+| `x := find()`(`?int`) 후 `x + 1` | 'Can not find the symbol `+` for `?int`.' |
+| `var b Box[float] = a`(`a` 는 `Box[int]`) | 'Expected type `Box[float]`, got `Box[int]`.' |
+| `f(1, 'two')` | 'Expected argument `int`, found `str`, when calling `fn f(int, int) -> int`.' |
+| choice 의 `switch` 에서 `case .circle` 만 처리 | 'Unhandled cases in `switch`. `else` can be used to handle the remaining cases.' |
+| `x := 3.5` 후 `var n int = x` | 'Expected type `int`, got `float`.' |
+| `var big int = 300` 후 `var small i8 = big` | 'Expected type `i8`, got `int`.' |
+| `Grid[int, 3]` 를 `Grid[int, 4]` 에 대입 | 'Expected type `Grid[int, 4]`, got `Grid[int, 3]`.' |
+| `var o Object = ^5` | 'Expected type `Object`, got `^int`.' (docs 표에는 허용으로 적힘) |
+| `var x Any = 1`, `fn show(x Any)` 호출 | 'Expected type `Any`, got `int`.' / 'Expected type `Any`. Found `int`.' |
+| `Wrap[int]` (`type Wrap[T Showable]`) | 'Expected type `Showable`. Found `type`.' |
+| `OnlyCopy[NC]` (`NC` 는 `with NoCopy`) | 'Expected type `Copyable`. Found `type`.' |
 
 관찰: (1) 암시적 변환은 확장(`i8 -> int`, `int -> float`)만 있다. `float -> int` 와 `int -> i8` 는 `as` 가 필요하다. (2) `?int` 에 대한 `+` 는 "Option 은 연산자가 없다" 는 심볼 조회 실패로 보고되어 "?를 풀어라" 같은 힌트가 없다. (3) 템플릿 제약 위반 메시지의 "Found `type`" 은 인자 `int` 가 타입 값이라서 그 값의 타입인 `type` 이 찍힌 것이다.
 

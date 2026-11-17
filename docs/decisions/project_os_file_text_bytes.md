@@ -38,8 +38,8 @@ tars-agent 요청(`cyber-0.4.12-spike-defects.md` (c))에서 모델이 `write_fi
   같은 일을 하는 길이 둘이 되므로 받지 않는다(사용자 결정). 오버로드 자체는 컴파일 때 정해져 실행 비용이 없다.
 - `read_file`은 `str.from_utf8`로 검사한다(Rust `read_to_string`과 같다). 파일은 프로그램 밖의 바이트이므로
   `project_str_from_utf8.md`의 기준을 따른다.
-- `read_file_str`은 별칭 없이 지웠다(1.0 전). 쓰면 ``Can not find the symbol `read_file_str` in `os`.``다.
-  `write_file(p, bytes)`는 ``Expected argument `str`, found `[]byte` ...``다. 둘 다 고치는 이름을 말하지 않는다.
+- `read_file_str`은 별칭 없이 지웠다(1.0 전). 쓰면 'Can not find the symbol `read_file_str` in `os`.'다.
+  `write_file(p, bytes)`는 'Expected argument `str`, found `[]byte` ...'다. 둘 다 고치는 이름을 말하지 않는다.
   모델이 자주 걸리면 고치는 법을 말하는 문구를 더한다.
 
 ## 바뀐 곳

@@ -28,7 +28,7 @@
 
 - 조건부 메서드: 원소를 복사하는 `Array` 메서드에 `#[cond=type.is_copyable(T)]`(F-91이 만든 수단). `append(span)` ·
   `append(arr)` · `<<`의 같은 둘 · `@init(n, val)` · `clone` · `contains` · `index` · `last` · `size_up` · `setLast`.
-  `NoCopy` 원소에서 부르면 ``Can not find the symbol `last` in `Array[R]`.``가 사용자 줄을 가리킨다.
+  `NoCopy` 원소에서 부르면 'Can not find the symbol `last` in `Array[R]`.'가 사용자 줄을 가리킨다.
   `@index`(값 반환)와 `next`에는 붙이지 않았다. 그래야 `x := a[0]` · `for a |r|`의 오류가 `Cannot copy`로 남는다.
 - `<<`(val T)는 `move val`로 넘긴다. `NoCopy`에서는 `append` 오버로드가 하나라 `Self.append[0]`을 쓸 수 없어 `#if`로 가른다.
 - `@set_index`: `NoCopy`면 `self.buf[idx] = move val`(옛 원소 파괴 뒤 새 값 이동).
@@ -37,7 +37,7 @@
   `Array.@init_sequence`는 `@memcpy`로 바이트를 가져온다(`ensure_cap`의 이동과 같은 방식).
   약속: 복사할 수 없는 원소의 `@init_sequence` · `@init_record`는 넘겨받은 원소를 가져간다. 복사하는 구현은 어차피 컴파일되지 않는다.
 - 빌림 순회: `for` 문의 each가 `&이름`이면 `next` 대신 `next_borrow(idx &int) -> scope ?&T`를 부르고 캡처는 `&T`다.
-  `Array` · `Slice`에 구현. 없는 타입은 `` `Map[str, int]` can not be iterated by borrow. It has no `next_borrow` method. ``
+  `Array` · `Slice`에 구현. 없는 타입은 '`Map[str, int]` can not be iterated by borrow. It has no `next_borrow` method.'
   순회 중 배열은 빌린 상태라 `a << x`는 기존 검사(`Expected exclusive access.`)가 막는다.
 
 ## 확인

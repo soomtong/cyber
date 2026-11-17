@@ -21,13 +21,13 @@ master `78b23f89` Debug 빌드로 실행한 결과:
 |---|---|---|
 | 캡처 없는 람다 | `xs.sort(\|a, b\| a < b)` | 된다 |
 | 원소의 필드 | `cs.sort(\|a, b\| a.n > b.n)` (`[]Count`) | 된다 |
-| 문자열 | `names.sort(\|a, b\| a.less(b))` | 된다. `str`에는 `<`가 없다(`a < b`는 ``Can not find the symbol `<` in `str`.``) |
+| 문자열 | `names.sort(\|a, b\| a.less(b))` | 된다. `str`에는 `<`가 없다(`a < b`는 'Can not find the symbol `<` in `str`.') |
 | 이름 있는 함수 | `names.sort(by_len)` | 된다 |
 | 전역 | `global counts ...` 뒤 `names.sort(\|a, b\| counts[a] > counts[b])` | 된다(전역은 캡처가 아니다) |
-| `^T`를 캡처한 람다 | `counts := ^Map[...]` 뒤 같은 식 | ``Expected argument `&OpaqueFunc[fn(str, str) -> bool]`, found `Func[...]` `` |
-| `&T`를 캡처한 람다 | `c := &counts` 뒤 `names.sort(\|a, b\| c[a] > c[b])` | ``... found `OpaqueFunc[...]` `` |
-| `Func` 변수 | `var f Func[F] = ...` 뒤 `xs.sort(&f)` | ``... found `&Func[...]` `` |
-| 일반 지역을 캡처 | `names.sort(\|a, b\| counts[a] > counts[b])` | ``Can only capture variables declared with the reference types `^T` or `&T`.`` |
+| `^T`를 캡처한 람다 | `counts := ^Map[...]` 뒤 같은 식 | 'Expected argument `&OpaqueFunc[fn(str, str) -> bool]`, found `Func[...]` ' |
+| `&T`를 캡처한 람다 | `c := &counts` 뒤 `names.sort(\|a, b\| c[a] > c[b])` | '... found `OpaqueFunc[...]` ' |
+| `Func` 변수 | `var f Func[F] = ...` 뒤 `xs.sort(&f)` | '... found `&Func[...]` ' |
+| 일반 지역을 캡처 | `names.sort(\|a, b\| counts[a] > counts[b])` | 'Can only capture variables declared with the reference types `^T` or `&T`.' |
 
 관련 코드:
 
@@ -138,8 +138,8 @@ cs.sort_by_key(|c| c.n)                       -- []Count, 오름차순
   `sort()`가 없어 호출 자리에서 인자 수 오류). `sort_by_key`는 넣지 못했다:
   - `fn sort_by_key(key &OpaqueFunc[KeyFn[T, %K]])`는 람다 `|c| c.n`의 타입을 추론하지 못한다("Can not infer function
     type."). `inferLambdaFuncSig`는 목표 타입이 정해져 있어야 하고, 제네릭 `%K`를 람다 본문의 반환 타입으로 추론하는 길이 없다.
-  - 키 타입별 오버로드(`KeyFn[T, int]` · `KeyFn[T, str]`)도 첫 오버로드의 목표로 람다를 검사해 ``Expected type `str`, got
-    `int`.``가 난다.
+  - 키 타입별 오버로드(`KeyFn[T, int]` · `KeyFn[T, str]`)도 첫 오버로드의 목표로 람다를 검사해 'Expected type `str`, got
+    `int`.'가 난다.
   - 필요한 것: 람다 매개변수는 목표에서, 반환 타입은 본문에서 추론해 제네릭 인자를 정하는 단계. 안 A와 같이 검토한다.
 
 ## 결정할 것

@@ -26,3 +26,14 @@
 - `docs/agent-guide.md`(`cyber doc --for-agents`) 머리말에 임베딩 호스트의 지시가 실행 방법과 모듈에 대해 가이드보다 앞선다는
   줄, "Modules" 절에 거부된 모듈의 문구('Failed to load module: name', 'Failed to resolve module `name`.', 호스트의 문구)와
   그때 다시 시도하지 말라는 줄을 더했다. CLI를 기준으로 쓴 절은 그대로다. tars-agent 요청 `cyber-agent-guide-embedding-host.md`.
+
+## 모듈 API: 패키지의 `docs/api.json`과 `cyber doc --api`
+
+- `docs/api.json`(core와 표준 모듈의 함수 · 타입 · 메서드, 시그니처와 doc, 항목마다 `module`)을 저장소에 커밋하고 Zig 패키지
+  `.paths`에 넣었다. 임베딩 호스트가 빌드 때 패키지에서 읽어 모듈별로 거를 수 있다. 커밋하는 판의 `version`은 `source`이고,
+  릴리스 자산의 `api.json`은 전처럼 버전을 넣어 따로 만든다.
+- `cyber doc --api <module>`이 그 모듈의 함수, 타입과 메서드를 시그니처와 doc 첫 줄로 찍는다. `cyber doc --api`는 모듈 목록이다.
+  CLI는 공백을 뺀 `api.json`(약 134 KB)을 내장한다(`src/tools/compact_json.zig`).
+- `docs/api.json`이 소스와 다르면 `src/tools/verify.sh` 14단계와 Latest Build의 "Check docs/api.json."이 실패한다. 모듈 API를
+  바꾸면 `cyber docs/gen-api-json.cy`를 다시 돌려 함께 커밋한다.
+- agent-guide의 "Modules" 절이 api.html 대신 `cyber doc --api <module>`을 가리킨다. tars-agent 요청 `cyber-module-api-for-agents.md`.

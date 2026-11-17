@@ -156,7 +156,7 @@ list comprehensions, the `lambda` keyword (a lambda is written `|a, b| a + b` an
 
 An embedding host can refuse a module. Then `use name` fails with 'Failed to load module: name', 'Failed to resolve module `name`.' or a message from the host. Do not retry it; use what the host provides.
 
-The API of every module is on the docs site (`api.html`) and in `api.json` of each release. The manual sections `modules` and `ffi` describe how modules and FFI work.
+`cyber doc --api <module>` prints the functions and types of a module with their signatures. An embedding host may give them to you in another way. The manual sections `modules` and `ffi` describe how modules and FFI work.
 
 ## Errors and Option (instead of exceptions)
 

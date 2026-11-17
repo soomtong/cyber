@@ -466,6 +466,12 @@ jobs:
       - name: Build Cyber.
         run: zig build cli
 
+      # docs/api.json is committed (the package and `cyber doc --api` carry it). It must match the sources.
+      - name: Check docs/api.json.
+        run: |
+          zig-out/bin/cyber docs/gen-api-json.cy -out=api-check.json
+          cmp api-check.json docs/api.json || { echo "docs/api.json is out of date: run cyber docs/gen-api-json.cy"; exit 1; }
+
       - name: Generate docs. (Release)
         if: startsWith(github.ref, 'refs/tags/')
         run: |

@@ -4,6 +4,9 @@
 -- methods of a type (`str`, `[]T`, `Map[K, V]`) without reading `api.html`.
 -- Usage: cyber docs/gen-api-json.cy [-out=<path>] [-version=<string>]
 -- The default output is `docs/api.json`. Unlike `gen-docs.cy`, it does not need md4c.
+-- `docs/api.json` is committed and is part of the package (`build.zig.zon`); `cyber doc --api` embeds it. Run this
+-- script after a change to the API of a module. `src/tools/verify.sh` fails while the file is out of date. The
+-- committed file has the version `source`; a release asset is made with `-version`.
 --
 -- Shape:
 --   {"version": "...", "types": [Type], "funcs": [Func]}
@@ -22,7 +25,7 @@ use os
 use meta
 
 args := os.parseArgs({'version', 'out'})
-version := args.get('version') ?else 'DEV'
+version := args.get('version') ?else 'source'
 cur_dir := os.dirname(meta.mod_uri()).?
 out_path := args.get('out') ?else '%{cur_dir}/api.json'
 

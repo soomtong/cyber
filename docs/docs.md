@@ -5610,13 +5610,14 @@ cyber doc optionals       # Print one section with its subsections.
 cyber doc unwrap-or-panic
 cyber doc --list          # Print every section id, indented by level.
 cyber doc --for-agents    # Print a short guide for coding agents and the topic index.
+cyber doc --api json      # Print the functions and types of the json module.
 ```
 
 A section id is the anchor of the section on the docs site: the heading text in lower case, with spaces replaced by `-` and `.`, `/`, `$`, `[`, `]` and `#` removed. A repeated heading gets `-1`, `-2` and so on. The heading text also works (`cyber doc 'Optionals.'`). A part of an id works when only one section contains it. Otherwise the matching ids are listed and the exit code is 1.
 
 `cyber doc --for-agents` prints `docs/agent-guide.md` of the source tree: the differences from Python, the common methods, the modules, examples, and the compile errors whose message does not say the fix. It ends with the chapters and their section ids. A project that is written in Cyber can point its agent instructions (`AGENTS.md`, `CLAUDE.md`) at this command instead of keeping a copy of the guide.
 
-The module API is not in `cyber doc`. It is in `api.html` on the docs site and in `api.json` of each release.
+`cyber doc --api <module>` prints the functions of a module, then its types with their methods (`fn (&T) m(...)`) and type functions (`fn T :: f(...)`), each with its signature and the first line of its doc. `cyber doc --api` lists the modules. The source is `docs/api.json`, which `docs/gen-api-json.cy` makes from the module sources. The file is in the source tree and in the Zig package, so a host that embeds Cyber can read it at build time, and every entry has a `module` field to filter by. The docs site has the same API as `api.html`.
 
 Since `doc` is a command, a script file named `doc` without an extension is run as `cyber ./doc`.
 

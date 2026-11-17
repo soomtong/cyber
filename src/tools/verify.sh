@@ -1,5 +1,5 @@
 #!/bin/sh
-# 13-step verification to run before a commit that changes src/. Sequential, about 10 minutes.
+# 14-step verification to run before a commit that changes src/. Sequential, about 10 minutes.
 # usage: verify.sh [log dir]   (default: zig-out/verify)
 # Prints "<step> rc=N" per step and exits 1 if a step failed. The log of a step is <log dir>/<step>.log.
 # - Needs wasmtime for steps 9 to 12.
@@ -36,5 +36,11 @@ for w in $wasm_tests; do
   n=$((n+1))
 done
 run 13-cli-safe          zig build cli -Doptimize=ReleaseSafe
+# docs/api.json is committed and embedded by `cyber doc --api`. It must match the API of the sources.
+api_fresh() {
+  zig-out/bin/cyber docs/gen-api-json.cy -out="$L/api.json" || return 1
+  cmp -s "$L/api.json" docs/api.json || { echo "docs/api.json is out of date: run zig-out/bin/cyber docs/gen-api-json.cy"; diff docs/api.json "$L/api.json" | head -20; return 1; }
+}
+run 14-api-json          api_fresh
 if [ $fail -eq 0 ]; then echo "DONE all steps rc=0"; else echo "FAILED see $L"; fi
 exit $fail

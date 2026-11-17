@@ -8,11 +8,14 @@ const cli = @import("cli.zig");
 
 pub const docs_md = @embedFile("docs_md");
 pub const agents_md = @embedFile("agents_md");
+/// `docs/api.json` without whitespace: the functions and types of the core and std modules.
+pub const api_json = @embedFile("api_json");
 
 pub const usage =
     \\Usage: cyber doc [topic]
     \\       cyber doc --list
     \\       cyber doc --for-agents
+    \\       cyber doc --api [module]
     \\
     \\Prints the manual of this version of Cyber.
     \\A topic is a section id such as `optionals` or `for-range`, the same id
@@ -22,6 +25,9 @@ pub const usage =
     \\Options:
     \\  --list        List every section id, indented by level.
     \\  --for-agents  Print a short guide for coding agents and the topic index.
+    \\  --api [module]
+    \\                Print the functions and types of a module with their
+    \\                signatures, or list the modules without a module name.
     \\  --help        Print this usage.
     \\
 ;
@@ -251,6 +257,13 @@ pub fn main(alloc: std.mem.Allocator, args: []const []const u8, version: []const
             try writeIndex(alloc, &out, &toc);
             return write(out.items);
         },
+        .api => |module| {
+            if (!try apiText(alloc, &out, version, module)) {
+                std.debug.print("error: no module `{s}`. Run `cyber doc --api` for the list.\n", .{module});
+                return 1;
+            }
+            return write(out.items);
+        },
         .topic => |topic| topic,
         .unknown_option => |arg| {
             std.debug.print("error: unknown option `{s}`\n\n{s}", .{ arg, usage });
@@ -289,6 +302,8 @@ const Command = union(enum) {
     help,
     for_agents,
     list,
+    /// `--api` with the module name, or "" for the list of modules.
+    api: []const u8,
     /// No argument: the usage and the topic index.
     index,
     topic: []const u8,
@@ -315,12 +330,23 @@ fn parseArgs(args: []const []const u8) Command {
             next = .for_agents;
         } else if (std.mem.eql(u8, arg, "--list")) {
             next = .list;
+        } else if (std.mem.eql(u8, arg, "--api")) {
+            next = .{ .api = "" };
         } else if (arg.len > 0 and arg[0] == '-') {
             return .{ .unknown_option = arg };
         } else {
             next = .{ .topic = arg };
         }
         if (cmd) |cur| {
+            // `--api json` (or `json --api`): the topic is the module.
+            if (cur == .api and cur.api.len == 0 and next == .topic) {
+                cmd = .{ .api = next.topic };
+                continue;
+            }
+            if (cur == .topic and next == .api and next.api.len == 0) {
+                cmd = .{ .api = cur.topic };
+                continue;
+            }
             if (err == null) {
                 err = if (cur == .topic and next == .topic)
                     .{ .two_topics = .{ cmd_arg, arg } }
@@ -335,6 +361,98 @@ fn parseArgs(args: []const []const u8) Command {
     if (help) return .help;
     if (err) |e| return e;
     return cmd orelse .index;
+}
+
+/// `cyber doc --api [module]`. Prints the entries of `docs/api.json` for one module: its functions, then its types
+/// with their methods (`fn (&T) m(...)`) and type functions (`fn T :: f(...)`). Each signature is followed by the
+/// first line of its doc. Without a module, lists the modules.
+/// Returns false for a module that has no entry.
+fn apiText(alloc: std.mem.Allocator, out: *std.ArrayList(u8), version: []const u8, module: []const u8) !bool {
+    const parsed = try std.json.parseFromSlice(std.json.Value, alloc, api_json, .{});
+    defer parsed.deinit();
+    const types = parsed.value.object.get("types").?.array.items;
+    const funcs = parsed.value.object.get("funcs").?.array.items;
+
+    var names: std.ArrayList([]const u8) = .empty;
+    defer names.deinit(alloc);
+    for ([_][]const std.json.Value{ funcs, types }) |list| {
+        for (list) |e| {
+            const m = str(e, "module");
+            for (names.items) |n| {
+                if (std.mem.eql(u8, n, m)) break;
+            } else try names.append(alloc, m);
+        }
+    }
+
+    if (module.len == 0) {
+        try out.print(alloc, "Modules of Cyber {s}. Run `cyber doc --api <module>` for the functions and types of one.\n\n", .{version});
+        for (names.items) |n| {
+            try out.print(alloc, "  {s}: {} functions, {} types\n", .{ n, countIn(funcs, n), countIn(types, n) });
+        }
+        return true;
+    }
+    for (names.items) |n| {
+        if (std.mem.eql(u8, n, module)) break;
+    } else return false;
+
+    try out.print(alloc, "-- Module `{s}` of Cyber {s}: {} functions, {} types.\n\n", .{ module, version, countIn(funcs, module), countIn(types, module) });
+    for (funcs) |f| {
+        if (!std.mem.eql(u8, str(f, "module"), module)) continue;
+        try out.appendSlice(alloc, "fn ");
+        try writeSig(alloc, out, f);
+    }
+    for (types) |ty| {
+        if (!std.mem.eql(u8, str(ty, "module"), module)) continue;
+        try out.print(alloc, "\ntype {s}{s}", .{ str(ty, "syntax"), str(ty, "tparams") });
+        if (str(ty, "kind").len > 0) try out.print(alloc, "  ({s})", .{str(ty, "kind")});
+        try out.append(alloc, '\n');
+        try writeDoc(alloc, out, str(ty, "doc"), "    ");
+        for (ty.object.get("funcs").?.array.items) |f| {
+            try out.print(alloc, "  fn {s} :: ", .{str(ty, "name")});
+            try writeSig(alloc, out, f);
+        }
+        for (ty.object.get("methods").?.array.items) |f| {
+            try out.print(alloc, "  fn ({s}) ", .{str(f, "recv")});
+            try writeSig(alloc, out, f);
+        }
+    }
+    return true;
+}
+
+fn str(v: std.json.Value, key: []const u8) []const u8 {
+    const field = v.object.get(key) orelse return "";
+    return switch (field) {
+        .string => |s| s,
+        else => "",
+    };
+}
+
+fn countIn(list: []const std.json.Value, module: []const u8) usize {
+    var n: usize = 0;
+    for (list) |e| {
+        if (std.mem.eql(u8, str(e, "module"), module)) n += 1;
+    }
+    return n;
+}
+
+/// `name[tparams](params) -> ret  #[cond=...]`, then the first line of the doc.
+fn writeSig(alloc: std.mem.Allocator, out: *std.ArrayList(u8), f: std.json.Value) !void {
+    const sig = str(f, "sig");
+    const name = str(f, "name");
+    if (std.mem.startsWith(u8, sig, name)) {
+        try out.print(alloc, "{s}{s}{s}", .{ name, str(f, "tparams"), sig[name.len..] });
+    } else {
+        try out.appendSlice(alloc, sig);
+    }
+    if (str(f, "cond").len > 0) try out.print(alloc, "  #[cond={s}]", .{str(f, "cond")});
+    try out.append(alloc, '\n');
+    try writeDoc(alloc, out, str(f, "doc"), "        ");
+}
+
+fn writeDoc(alloc: std.mem.Allocator, out: *std.ArrayList(u8), doc: []const u8, indent: []const u8) !void {
+    if (doc.len == 0) return;
+    const line = doc[0 .. std.mem.indexOfScalar(u8, doc, '\n') orelse doc.len];
+    try out.print(alloc, "{s}{s}\n", .{ indent, line });
 }
 
 fn write(bytes: []const u8) !u8 {
@@ -430,6 +548,12 @@ test "doc: every argument is checked." {
     try t.expect(parseArgs(&.{ "--list", "--list" }) == .conflict);
     try t.expectEqualStrings("b", parseArgs(&.{ "a", "b" }).two_topics[1]);
 
+    try t.expectEqualStrings("", parseArgs(&.{"--api"}).api);
+    try t.expectEqualStrings("json", parseArgs(&.{ "--api", "json" }).api);
+    try t.expectEqualStrings("json", parseArgs(&.{ "json", "--api" }).api);
+    try t.expectEqualStrings("b", parseArgs(&.{ "--api", "a", "b" }).conflict[1]);
+    try t.expect(parseArgs(&.{ "--api", "--list" }) == .conflict);
+
     try t.expect(parseArgs(&.{ "optionals", "--list", "--help" }) == .help);
     try t.expectEqualStrings("--bogus", parseArgs(&.{ "--help", "--bogus" }).unknown_option);
 }
@@ -489,4 +613,22 @@ test "doc: every example of the guide for agents runs." {
     }
     try t.expect(num >= 10);
     try t.expectEqual(@as(usize, 0), failed);
+}
+
+test "doc: --api prints a module of the embedded api.json." {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(t.allocator);
+    try t.expect(try apiText(t.allocator, &out, "test", "json"));
+    try t.expect(std.mem.startsWith(u8, out.items, "-- Module `json` of Cyber test: "));
+    try t.expect(std.mem.indexOf(u8, out.items, "\nfn parse(src str) -> !Value\n") != null);
+    try t.expect(std.mem.indexOf(u8, out.items, "\ntype Value  (choice)\n") != null);
+    try t.expect(std.mem.indexOf(u8, out.items, "\n  fn (&Value) get(key str) -> ?Value\n") != null);
+
+    out.clearRetainingCapacity();
+    try t.expect(try apiText(t.allocator, &out, "test", ""));
+    for ([_][]const u8{ "json", "toon", "regex", "peg", "time", "math" }) |m| {
+        var buf: [32]u8 = undefined;
+        try t.expect(std.mem.indexOf(u8, out.items, try std.fmt.bufPrint(&buf, "\n  {s}: ", .{m})) != null);
+    }
+    try t.expect(!try apiText(t.allocator, &out, "test", "nope"));
 }

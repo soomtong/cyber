@@ -663,8 +663,24 @@ fn create_cli_module(b: *std.Build, vmc: *std.Build.Module, lib: *std.Build.Step
     // `cyber doc` prints these. They are outside `src`, so they are imported as modules.
     mod.addAnonymousImport("docs_md", .{ .root_source_file = b.path("docs/docs.md") });
     mod.addAnonymousImport("agents_md", .{ .root_source_file = b.path("docs/agent-guide.md") });
+    // `cyber doc --api` reads the module API from `docs/api.json`, embedded without its whitespace.
+    mod.addAnonymousImport("api_json", .{ .root_source_file = compactJson(b, b.path("docs/api.json")) });
     mod.linkLibrary(lib);
     return mod;
+}
+
+/// `docs/api.json` without the whitespace between its tokens (`src/tools/compact_json.zig`).
+fn compactJson(b: *std.Build, src: std.Build.LazyPath) std.Build.LazyPath {
+    const exe = b.addExecutable(.{
+        .name = "compact_json",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/compact_json.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    const run = b.addRunArtifact(exe);
+    run.addFileArg(src);
+    return run.addOutputFileArg("api.json");
 }
 
 fn create_lsp_module(b: *std.Build, vmc: *std.Build.Module, lib: *std.Build.Step.Compile, config: CliConfig) !*std.Build.Module {

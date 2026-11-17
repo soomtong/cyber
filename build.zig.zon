@@ -14,8 +14,10 @@
         "build.zig.zon",
         "src",
         "lib",
-        // `cyber doc` embeds these two (build.zig `create_cli_module`).
+        // `cyber doc` embeds these (build.zig `create_cli_module`). `docs/api.json` is the API of the core and
+        // std modules, made by `docs/gen-api-json.cy`; a host can read it from the package.
         "docs/docs.md",
         "docs/agent-guide.md",
+        "docs/api.json",
     },
 }

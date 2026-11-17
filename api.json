@@ -1,5 +1,5 @@
 {
-  "version": "v0.4.13-dev 952-def798e",
+  "version": "v0.4.13-dev 954-4d47ac7",
   "types": [
     {"module": "core", "name": "void", "syntax": "void", "kind": "builtin",
       "methods": [],
@@ -279,7 +279,7 @@
         {"name": "starts_with", "recv": "&Span[]", "sig": "starts_with(target Self) -> bool", "doc": "Returns whether the `Span` starts with `target`."}
       ],
       "funcs": [],
-      "aliases": {"startswith": "starts_with", "startsWith": "starts_with", "hasPrefix": "starts_with", "endsWith": "ends_with", "hasSuffix": "ends_with", "find": "index", "indexOf": "index", "length": "len", "size": "len", "count": "len", "includes": "contains", "has": "contains"}},
+      "aliases": {"startswith": "starts_with", "startsWith": "starts_with", "hasPrefix": "starts_with", "endswith": "ends_with", "endsWith": "ends_with", "hasSuffix": "ends_with", "find": "index", "indexOf": "index", "length": "len", "size": "len", "count": "len", "includes": "contains", "has": "contains"}},
     {"module": "core", "name": "ArrayStore", "syntax": "ArrayStore[T]", "kind": "struct", "tparams": "[T Any]", "doc": "A dynamically sized data structure that contains a sequence of elements. Meant for storing and retrieving small value types such as primitives and references. Cannot be sliced and does not allow referencing to the elements. These constraints allow resizing operations without an exclusive borrow.",
       "methods": [
         {"name": "<<", "recv": "&ArrayStore[]", "sig": "<<(val T)", "doc": "Alias for `append`."},
@@ -530,7 +530,7 @@
         {"name": "ascii_lower", "sig": "ascii_lower(ch byte) -> byte"},
         {"name": "ascii_upper", "sig": "ascii_upper(ch byte) -> byte"}
       ],
-      "aliases": {"startswith": "starts_with", "startsWith": "starts_with", "hasPrefix": "starts_with", "endsWith": "ends_with", "hasSuffix": "ends_with", "find": "index", "indexOf": "index", "rfind": "lastIndexOf", "rindex": "lastIndexOf", "last_index": "lastIndexOf", "strip": "trim", "lstrip": "trimLeft", "trimStart": "trimLeft", "trim_start": "trimLeft", "ltrim": "trimLeft", "trimEnd": "trimRight", "trim_end": "trimRight", "rtrim": "trimRight", "toUpperCase": "upper", "toLower": "lower", "toUpper": "upper", "lowercase": "lower", "uppercase": "upper", "to_uppercase": "upper", "length": "len", "size": "len", "includes": "contains", "has": "contains"}},
+      "aliases": {"startswith": "starts_with", "startsWith": "starts_with", "hasPrefix": "starts_with", "endswith": "ends_with", "endsWith": "ends_with", "hasSuffix": "ends_with", "find": "index", "indexOf": "index", "rfind": "lastIndexOf", "rindex": "lastIndexOf", "last_index": "lastIndexOf", "strip": "trim", "trimSpace": "trim", "lstrip": "trimLeft", "trimStart": "trimLeft", "trim_start": "trimLeft", "ltrim": "trimLeft", "rstrip": "trimRight", "trimEnd": "trimRight", "trim_end": "trimRight", "rtrim": "trimRight", "toLowerCase": "lower", "toUpperCase": "upper", "toLower": "lower", "toUpper": "upper", "lowercase": "lower", "uppercase": "upper", "to_lowercase": "lower", "to_uppercase": "upper", "length": "len", "size": "len", "includes": "contains", "has": "contains"}},
     {"module": "core", "name": "GenericVector", "syntax": "GenericVector[T]", "kind": "builtin", "tparams": "[T Any]",
       "methods": [],
       "funcs": [],
@@ -634,7 +634,7 @@
         {"name": "set_backwards", "recv": "&PtrSpan[]", "sig": "set_backwards(o Self)"}
       ],
       "funcs": [],
-      "aliases": {"startswith": "starts_with", "startsWith": "starts_with", "hasPrefix": "starts_with", "endsWith": "ends_with", "hasSuffix": "ends_with", "find": "index", "indexOf": "index", "length": "len", "size": "len", "count": "len"}},
+      "aliases": {"startswith": "starts_with", "startsWith": "starts_with", "hasPrefix": "starts_with", "endswith": "ends_with", "endsWith": "ends_with", "hasSuffix": "ends_with", "find": "index", "indexOf": "index", "length": "len", "size": "len", "count": "len"}},
     {"module": "core", "name": "SystemKind", "syntax": "SystemKind", "kind": "enum",
       "methods": [],
       "funcs": [],

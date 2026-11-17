@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.13-dev 952-def798e</div>
+    <div class="sub-title">v0.4.13-dev 954-4d47ac7</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -5770,10 +5770,11 @@ cyber doc optionals       # Print one section with its subsections.
 cyber doc unwrap-or-panic
 cyber doc --list          # Print every section id, indented by level.
 cyber doc --for-agents    # Print a short guide for coding agents and the topic index.
+cyber doc --api json      # Print the functions and types of the json module.
 </code></pre>
 <p>A section id is the anchor of the section on the docs site: the heading text in lower case, with spaces replaced by <code>-</code> and <code>.</code>, <code>/</code>, <code>$</code>, <code>[</code>, <code>]</code> and <code>#</code> removed. A repeated heading gets <code>-1</code>, <code>-2</code> and so on. The heading text also works (<code>cyber doc 'Optionals.'</code>). A part of an id works when only one section contains it. Otherwise the matching ids are listed and the exit code is 1.</p>
 <p><code>cyber doc --for-agents</code> prints <code>docs/agent-guide.md</code> of the source tree: the differences from Python, the common methods, the modules, examples, and the compile errors whose message does not say the fix. It ends with the chapters and their section ids. A project that is written in Cyber can point its agent instructions (<code>AGENTS.md</code>, <code>CLAUDE.md</code>) at this command instead of keeping a copy of the guide.</p>
-<p>The module API is not in <code>cyber doc</code>. It is in <code>api.html</code> on the docs site and in <code>api.json</code> of each release.</p>
+<p><code>cyber doc --api <module></code> prints the functions of a module, then its types with their methods (<code>fn (&T) m(...)</code>) and type functions (<code>fn T :: f(...)</code>), each with its signature and the first line of its doc. <code>cyber doc --api</code> lists the modules. The source is <code>docs/api.json</code>, which <code>docs/gen-api-json.cy</code> makes from the module sources. The file is in the source tree and in the Zig package, so a host that embeds Cyber can read it at build time, and every entry has a <code>module</code> field to filter by. The docs site has the same API as <code>api.html</code>.</p>
 <p>Since <code>doc</code> is a command, a script file named <code>doc</code> without an extension is run as <code>cyber ./doc</code>.</p>
 <a href="#cli">^topic</a>
 <h2 id="jit-compiler">JIT compiler. <a href="#jit-compiler">#</a></h2>

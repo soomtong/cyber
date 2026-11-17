@@ -348,28 +348,28 @@ test.eq(10, clamp(42, 0, 10))
 
 ## Errors whose message does not say the fix
 
-Most compile errors say how to fix the code, for example `Did you mean starts_with?`, `Write else cond:, not else if cond:`, `Unwrap it with ! first`. Follow those. The errors below do not, so the cause and the fix are given here. Each line is the first line of the error.
+Most compile errors say how to fix the code, for example 'Did you mean starts_with?', 'Write else cond:, not else if cond:', 'Unwrap it with ! first'. Follow those. The errors below do not, so the cause and the fix are given here. Each line is the first line of the error.
 
-- `Expected end of line or file. Got ...`: `def`, `class`, `lambda x:`, a semicolon. Rewrite in Cyber syntax.
-- `Expected right operand.`: `i++`, `10 // 3`, a `//` comment. Write `i += 1`, `/`, `--`.
-- `Expected `]`.`: a list comprehension. Write a `for` loop that appends.
-- `Expected `,`.` in a function declaration: a default parameter value. Remove it and add an overload.
-- `Expected closing parenthesis.` in a call: a keyword argument `f(a=1)`. Pass it by position.
-- `Expected a target type or at least one element.`: an empty `{}`. Write `[]int{}` or `Map[str, int]{}`.
-- `Expected type `bool`, got `int`.`: a truthy condition. Use a comparison.
-- `Expected `int`, found `float`.`: int and float mixed. Match them with `float(i)`.
-- `Variable `x` is already declared in the block.`: repeated `:=`. Write `x = ...`.
-- `Undeclared variable `x`.` inside a function: an outer local variable. Pass it as a parameter, or use `global`.
-- `Undeclared variable `abs`.` (also `sum`, `sorted`, `enumerate`, `zip`): a Python builtin. See "Missing features" and write a loop.
-- `Can not find the symbol `map` in `[]int`.` (also `filter`): write a loop.
-- `Expected `1` arguments, found `2`, when calling the function `fn print(...)``: write `print('%{a} %{b}')`.
-- `Can not find the symbol `&&` for `bool`.`: logical AND. Write `and`.
-- `Expected assignment to a variable or placeholder ...`: a call whose value is discarded. Write `_ = f()` or assign it to a variable.
-- `Cannot copy ..., type implements `NoCopy`.`: copying an Array. Use `[]T`, or `move`.
-- `Return statement is not allowed in the main block.`: a top-level return. Wrap the code in `fn main():`.
-- `Missing return statement.`: some path has no return. Add a return at the end.
-- ``fn` declarations are not allowed here.`: a function inside a block. Declare it at the top level.
+- 'Expected end of line or file. Got ...': `def`, `class`, `lambda x:`, a semicolon. Rewrite in Cyber syntax.
+- 'Expected right operand.': `i++`, `10 // 3`, a `//` comment. Write `i += 1`, `/`, `--`.
+- 'Expected `]`.': a list comprehension. Write a `for` loop that appends.
+- 'Expected `,`.' in a function declaration: a default parameter value. Remove it and add an overload.
+- 'Expected closing parenthesis.' in a call: a keyword argument `f(a=1)`. Pass it by position.
+- 'Expected a target type or at least one element.': an empty `{}`. Write `[]int{}` or `Map[str, int]{}`.
+- 'Expected type `bool`, got `int`.': a truthy condition. Use a comparison.
+- 'Expected `int`, found `float`.': int and float mixed. Match them with `float(i)`.
+- 'Variable `x` is already declared in the block.': repeated `:=`. Write `x = ...`.
+- 'Undeclared variable `x`.' inside a function: an outer local variable. Pass it as a parameter, or use `global`.
+- 'Undeclared variable `abs`.' (also `sum`, `sorted`, `enumerate`, `zip`): a Python builtin. See "Missing features" and write a loop.
+- 'Can not find the symbol `map` in `[]int`.' (also `filter`): write a loop.
+- 'Expected `1` arguments, found `2`, when calling the function `fn print(...)`': write `print('%{a} %{b}')`.
+- 'Can not find the symbol `&&` for `bool`.': logical AND. Write `and`.
+- 'Expected assignment to a variable or placeholder ...': a call whose value is discarded. Write `_ = f()` or assign it to a variable.
+- 'Cannot copy ..., type implements `NoCopy`.': copying an Array. Use `[]T`, or `move`.
+- 'Return statement is not allowed in the main block.': a top-level return. Wrap the code in `fn main():`.
+- 'Missing return statement.': some path has no return. Add a return at the end.
+- '`fn` declarations are not allowed here.': a function inside a block. Declare it at the top level.
 
-Runtime panics: `Out of bounds index: -1` is a negative index (use `xs.last()`), `OutOfBounds` on a slice is a negative or too large bound, and `MissingKey` is `m[k]` on a missing key (use `m.get(k)`).
+Runtime panics: 'Out of bounds index: -1' is a negative index (use `xs.last()`), `OutOfBounds` on a slice is a negative or too large bound, and `MissingKey` is `m[k]` on a missing key (use `m.get(k)`).
 
 An error raised inside a template can point to a line of a standard module (the module name and line, such as `core:196:5`) instead of your code. Check the call expression yourself.

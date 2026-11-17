@@ -175,7 +175,7 @@ An embedding host can refuse a module. Then `use name` fails with 'Failed to loa
 - An error from `f()!` at the top level, or returned by `fn main() -> !T`, is an uncaught error and ends in a panic. To print a failure and go on, wrap the top-level code in a `try:` block and print it in `else |e|:` (a top-level `!else` block cannot end with `return`).
 - A call that returns `!T` must be handled, even `!void`. A bare `os.write_file(p, s)` is an error. Write `os.write_file(p, s)!` inside `try:`, or `os.write_file(p, s) !else |e|:`.
 - Unwrap a `!T` before you use the value: `x := r()!`, then `x.len()`. `print(r())` and `r().len()` are errors.
-- `int('abc')` gives 0 without an error. When you need validation, use `int.parse(s) !else ...`.
+- `int('abc')` and `float('abc')` give 0 without an error. When you need validation, use `int.parse(s) !else ...` or `float.parse(s) !else ...`.
 
 ## Values, references, borrows
 

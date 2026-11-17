@@ -65,3 +65,9 @@
 - `docs/docs.md`(Slices, Maps, Strings "Lines and padding")와 `docs/agent-guide.md`의 메소드 목록과 Python 대응표.
   테스트 `core/Slice.cy`, `core/Array.cy`, `core/Map.cy`, `core/strings.cy`.
 
+## `float.parse`
+
+- `float.parse(s) -> !float`(`f32.parse`도): 숫자가 아닌 문자열에서 `error.InvalidCharacter`를 돌려준다. `float(s)`는 전처럼 0이다.
+  `int.parse`의 짝. `'1.5'`, `'-2'`, `'1e3'`, `'inf'`, `'nan'`을 읽고 앞뒤 공백은 허용하지 않는다(`int.parse`와 같다).
+  `docs/docs.md` Integers · Floats, agent-guide. 테스트 `core/floats.cy`.
+

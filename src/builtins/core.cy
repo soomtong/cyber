@@ -740,6 +740,14 @@ fn Float[] :: @init(x %T) -> Self:
     #else:
         meta.unsupported()
 
+--| Reads a decimal number such as `'1.5'`, `'-2'`, `'1e3'`, `'inf'` or `'nan'`. Unlike `float(s)`, which gives 0 for a
+--| string that is not a number, returns `error.InvalidCharacter`. Spaces around the number are not allowed.
+fn Float[] :: parse(s str) -> !Self:
+    if !is_float_str(s):
+        return error.InvalidCharacter
+    return Self(s)
+
+#[bind] fn is_float_str(x str) -> bool
 #[bind] fn atof(x str) -> float
 #[bind] fn atof32(x str) -> f32
 #[bind] fn float_pow(x, y float) -> float

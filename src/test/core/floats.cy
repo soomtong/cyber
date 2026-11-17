@@ -63,4 +63,15 @@ test.eq(byte(255.9), 255)
 test.eq(r64(f32(3.7)), 3)
 test.eq(r16(f32(3.7)), 3)
 
+-- float.parse() gives an error for a string that is not a number. float(s) gives 0.
+test.eq(float.parse('1.5')!, 1.5)
+test.eq(float.parse('-2')!, -2.0)
+test.eq(float.parse('1e3')!, 1000.0)
+test.eq(f32.parse('0.25')!, f32(0.25))
+test.eq(float.parse('abc') !else -1.0, -1.0)
+test.eq(float.parse('') !else -1.0, -1.0)
+test.eq(float.parse(' 1') !else -1.0, -1.0)
+test.eq(float.parse('1.5x') !else -1.0, -1.0)
+test.eq(float('abc'), 0.0)
+
 --cytest: pass

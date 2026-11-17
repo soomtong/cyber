@@ -129,7 +129,9 @@
         {"name": "abs", "recv": "Float[]", "sig": "abs() -> Self"},
         {"name": "fmt", "recv": "Float[]", "sig": "fmt() -> str"}
       ],
-      "funcs": [],
+      "funcs": [
+        {"name": "parse", "sig": "parse(s str) -> !Self", "doc": "Reads a decimal number such as `'1.5'`, `'-2'`, `'1e3'`, `'inf'` or `'nan'`. Unlike `float(s)`, which gives 0 for a string that is not a number, returns `error.InvalidCharacter`. Spaces around the number are not allowed."}
+      ],
       "aliases": {}},
     {"module": "core", "name": "Object", "syntax": "Object", "kind": "struct",
       "methods": [
@@ -1656,6 +1658,7 @@
     {"module": "core", "name": "panic_unwrap_error", "sig": "panic_unwrap_error(err error) -> never"},
     {"module": "core", "name": "raw_fmt", "sig": "raw_fmt(x r64, format NumberFormat, config NumberFormatConfig) -> str"},
     {"module": "core", "name": "int_fmt", "sig": "int_fmt(x int, format NumberFormat) -> str"},
+    {"module": "core", "name": "is_float_str", "sig": "is_float_str(x str) -> bool"},
     {"module": "core", "name": "atof", "sig": "atof(x str) -> float"},
     {"module": "core", "name": "atof32", "sig": "atof32(x str) -> f32"},
     {"module": "core", "name": "float_pow", "sig": "float_pow(x, y float) -> float"},

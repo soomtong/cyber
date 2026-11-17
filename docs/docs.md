@@ -559,6 +559,11 @@ Strings and other values can be converted to a `int` using the type as a functio
 a := '123'
 b := int(a) 
 ```
+`int(s)` gives 0 for a string that is not a number. To check the string, use `int.parse`, which returns `!int` and gives
+`error.InvalidCharacter` or `error.Overflow`:
+```cy
+n := int.parse('42') !else 0
+```
 
 Integer types can perform [arithmetic](#arithmetic-operators), [bitwise](#bitwise-operators), and [comparison](#comparison-operators) operations.
 
@@ -584,6 +589,11 @@ Strings and other values can be converted to a `float` using the type as a funct
 ```cy
 a := '12.3'
 b := float(a) 
+```
+`float(s)` also gives 0 for a string that is not a number. `float.parse` (and `f32.parse`) returns `!float` and gives
+`error.InvalidCharacter` instead. It reads `'1.5'`, `'-2'`, `'1e3'`, `'inf'` and `'nan'`, and does not allow spaces around the number:
+```cy
+x := float.parse('1.5') !else 0.0
 ```
 
 Float types can perform [arithmetic](#arithmetic-operators) and [comparison](#comparison-operators) operations.

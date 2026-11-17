@@ -151,6 +151,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"@fabs",  zErrBuiltinFunc(bindings.fabs, null)},
     .{"atof",         zErrFunc(atof)},
     .{"atof32",       zErrFunc(atof32)},
+    .{"is_float_str", zErrFunc(is_float_str)},
     .{"float_pow",    cFunc(bindings.float_pow)},
     .{"float_pow32",  cFunc(bindings.float_pow32)},
     .{"f32_to_f64",   cFunc(f32_to_f64)},
@@ -2401,6 +2402,19 @@ fn atof(t: *cy.Thread) !C.Ret {
         return C.RetOk;
     };
     ret.* = res;
+    return C.RetOk;
+}
+
+/// Whether `atof` would read the whole string as a number, for `float.parse`.
+fn is_float_str(t: *cy.Thread) !C.Ret {
+    const ret = t.ret(bool);
+    const s = t.param(cy.heap.Str);
+    defer t.heap.destructStr(&s);
+    _ = std.fmt.parseFloat(f64, s.slice()) catch {
+        ret.* = false;
+        return C.RetOk;
+    };
+    ret.* = true;
     return C.RetOk;
 }
 

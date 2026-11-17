@@ -687,3 +687,42 @@ test "persist_main: a dropped Slice resize result on the last line is a compile 
     try zt.eq(C.Success, C.vm_evalx(vm, "main", "out = out.remove(1)\nout", config, &res));
     try zt.eq(false, res.res_t == @as(C.TypeId, @intCast(C.TypeVoid)));
 }
+
+test "A host resolver gates the `use` of the script, and the compiler's own builtin lookups skip it." {
+    // The resolver gets the importing module (`curUri`) with each `use`. An allow list for the script holds even
+    // for `meta`, which `core` loaded first, while `math` still imports `c` and `meta` itself. With `math`, the
+    // compiler looks up `c` for `@initBindLib`; that lookup must not reach the resolver as `main` importing `c`.
+    const S = struct {
+        fn resolver(vm_: ?*C.VM, params: C.ResolverParams, res_uri_len: [*c]usize) callconv(.c) bool {
+            const cur = C.from_bytes(params.curUri);
+            const uri = C.from_bytes(params.uri);
+            if (std.mem.eql(u8, cur, "main")) {
+                const allowed = std.mem.eql(u8, uri, "core") or std.mem.eql(u8, uri, "math");
+                if (!allowed) return false;
+            }
+            return C.default_resolver(vm_, params, res_uri_len);
+        }
+    };
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.vm_set_resolver(vm, S.resolver);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "use math\nx := math.sqrt(16.0)", config, &res));
+    for ([_][]const u8{ "c", "meta", "cy", "io" }) |name| {
+        var buf: [64]u8 = undefined;
+        const src = try std.fmt.bufPrint(&buf, "use {s}\n_ = 1", .{name});
+        try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", src, config, &res));
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        const exp = try std.fmt.bufPrint(&buf, "Failed to resolve module `{s}`.", .{name});
+        try zt.expect(std.mem.indexOf(u8, summary, exp) != null);
+    }
+    // The session goes on after a refused `use`.
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "x", config, &res));
+    try zt.eq(4.0, @as(*f64, @ptrCast(@alignCast(res.res))).*);
+}

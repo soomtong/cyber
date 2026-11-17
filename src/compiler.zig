@@ -1032,7 +1032,7 @@ fn emit_program_init_func(c: *cy.Chunk, start: *cy.Func) !void {
     }
 
     if (has_extern_func) {
-        const init_bind_lib = (try c.get_chunk_by_uri("c")).?.sym.getMod().getSym("@initBindLib").?.cast(.func).first;
+        const init_bind_lib = (try c.get_builtin_chunk("c")).?.sym.getMod().getSym("@initBindLib").?.cast(.func).first;
         const expr = try sema.sema_call_ir(c, init_bind_lib, &.{}, c.ast.null_node);
         try sema.sema_discard(c, expr, c.ast.null_node);
     }
@@ -1275,7 +1275,7 @@ fn loadBuiltinChunk(c: *cy.Chunk) !void {
     c.sema.to_print_string_fn = try resolveFirstFunc(c, mod, "to_print_string");
     c.sema.eq_fn = try resolveFirstFunc(c, mod, "@eq");
 
-    const meta_c = (try c.get_chunk_by_uri("meta")).?;
+    const meta_c = (try c.get_builtin_chunk("meta")).?;
     try reserveChunkSyms(meta_c);
     const meta_mod2 = meta_c.sym.getMod();
     c.sema.access_fn = try resolveFirstFunc(c, meta_mod2, "access");
@@ -1792,7 +1792,7 @@ pub fn resolveModuleUriFrom(self: *cy.Chunk, buf: []u8, uri: []const u8, node: ?
         if (self.compiler.hasApiError) {
             return self.reportErrorFmt(self.compiler.apiError, &.{}, node);
         } else {
-            return self.reportErrorFmt("Failed to resolve module.", &.{}, node);
+            return self.reportErrorFmt("Failed to resolve module `{}`.", &.{v(uri)}, node);
         }
     }
     return buf[0..res_uri_len];
@@ -1814,7 +1814,8 @@ pub fn resolveModuleUri(self: *cy.Compiler, buf: []u8, uri: []const u8) ![]const
             _ = try self.addReport(.compile_err, self.apiError, null, 0);
             return error.CompileError;
         } else {
-            _ = try self.addReport(.compile_err, "Failed to resolve module.", null, 0);
+            const msg = try std.fmt.allocPrint(self.alloc, "Failed to resolve module `{s}`.", .{uri});
+            _ = try self.addReportConsume(.compile_err, msg, null, 0);
             return error.CompileError;
         }
     }

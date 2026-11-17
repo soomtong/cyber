@@ -450,6 +450,14 @@ pub const Chunk = struct {
         return self.compiler.chunk_map.get(ruri);
     }
 
+    /// A builtin module (`c`, `meta`) that the compiler itself needs. A loaded one is found by its name without
+    /// calling the host resolver, so the resolver sees only the `use` declarations of the source: a host that
+    /// allows `math` but not `use c` from its scripts would otherwise see this lookup as `main` importing `c`.
+    pub fn get_builtin_chunk(self: *Chunk, name: []const u8) !?*cy.Chunk {
+        if (self.compiler.chunk_map.get(name)) |chunk| return chunk;
+        return self.get_chunk_by_uri(name);
+    }
+
     /// A jump operand is one `Inst` slot. `jump` · `release` · `release_opt` read it as i16, `jump_f` · `jump_t` as u16.
     /// A body long enough to push a jump past that is reported as a compile error instead of tripping `@intCast`
     /// (or, for a forward `jump` between 32768 and 65535, jumping backward at runtime). F-09.

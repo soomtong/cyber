@@ -5289,6 +5289,21 @@ int main() {
 ```
 The above example loads `my_mod` by setting the appropriate function and global bindings, and returning its source code. Other modules get delegated to the default loader `cl_default_loader` which knows how to load the builtin modules such as `core`.
 
+### Allowing modules.
+A host that runs untrusted scripts decides which modules a script may import with a resolver, not with the loader. The loader is called once per module, when it is first loaded, and gets only the module's name: `core` has already loaded `meta` before the script runs, and a refused `c` would also break `math`, which imports `c` itself. The resolver set with `cl_vm_set_resolver` is called for every `use` and gets the importing module (`curUri`) with the specifier (`uri`), so it can check only the imports of the script and pass the imports of the standard modules on to `cl_default_resolver`:
+```c
+bool resolver(CLVM* vm, CLResolverParams params, size_t* res_uri_len) {
+    // The script is evaluated with the URI "main". An empty `curUri` resolves the script itself.
+    if (params.curUri.len == 4 && strncmp(params.curUri.ptr, "main", 4) == 0) {
+        if (!is_allowed(params.uri)) {
+            return false;   // Compile error: Failed to resolve module `c`.
+        }
+    }
+    return cl_default_resolver(vm, params, res_uri_len);
+}
+```
+Before returning false, the resolver can give its own message with `clReportApiError`. The compiler's own lookups of the builtin modules it needs (`c` for a module with `#[extern]` functions such as `math`, `meta`) do not call the resolver, so it sees only the `use` declarations of the sources. Modules to keep from an untrusted script include `c` (raw memory and foreign calls), `os` (files and processes, when the host's loader provides it), `cy` (`cy.eval` runs code in a new VM that has none of the host's settings) and `meta` (`meta.load` reads a file at compile time).
+
 ### Denying raw pointers.
 A host that runs untrusted scripts can set `deny_raw_ptrs` in `CLEvalConfig` or `CLCompileConfig`. Every chunk that is not a standard module (`core`, `meta`, `math`, `cy`, `c`, `io`, `test`) then gets a compile error for any expression of a raw pointer type: `Ptr[T]`, `PtrSpan[T]` or an option of them. That covers `as[Ptr[int]] 8`, `Ptr[int](8)`, `as[Ptr[int]] &x`, `alloc(int)` and `PtrSpan[int]{length=4}`, so a script can not read or write an arbitrary address. Slices, spans, maps, strings and borrows keep working; the core library uses raw pointers for them internally. The default is false. The CLI does not set it.
 ```c

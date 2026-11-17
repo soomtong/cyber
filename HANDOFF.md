@@ -33,6 +33,10 @@
 - [x] 회신: 두 요청서 끝의 "cyber 회신" 절. tars-agent 저장소에 미커밋으로 둠(0.4.13-DEV 요청서만 지금 미커밋, 0.4.12 쪽은
   tars-agent가 이미 반영). tars-agent 커밋은 그쪽 세션 몫.
 
+- [x] 임베딩 모듈 허용 표(tars-agent C3): 컴파일러 내부의 내장 모듈 조회(`c`, `meta`)가 호스트 resolver를 거치지 않게
+  (`Chunk.get_builtin_chunk`), resolver 거부 문구에 모듈 이름. 테스트 `src/lib_test/session.zig` 끝, 결정
+  `docs/decisions/project_embedding_module_allowlist.md`, docs.md "Allowing modules". 13단계 검증 rc=0. push 안 함.
+
 ## 시도했으나 실패한 접근
 
 - `macos-26` arm64 job은 자주 15분 안에 러너를 받지 못해 취소된다(0.4.13 첫 태그 run 43868153020은 네 번 모두 취소). 해결은
@@ -56,6 +60,10 @@
   - 0.5 범위: `spawn f(args)` 호출식 꼴, 임베딩 `CL_YIELD`. 빼면 0.5 릴리스 준비로 간다.
 - [ ] 기술 부채(급하지 않음): carry 재시도 루프의 IR 되돌리기, `@destruct_span` 취소 keep 지점, `Scope.run`의 바퀴당 `waiting()`
   질의(futex식 대기 표 후보), 취소 불변식 panic(닿으면 패드 누락 결함). 기록은 `project_coroutines.md`.
+
+- [ ] tars-agent에 C3 결과 전달: s1 검사 초안 패치 `/private/tmp/claude-501/-Users-dp-Repository-cyberscript/866045c6-fdd3-4e2f-ae8c-4da5dcd94361/scratchpad/s1-resolver-check.patch`
+  (7h, 7i, 7j. 로컬 cyber `--fork`로 PASS 43). C3 줄은 "CLEvalConfig 필드"가 아니라 "호스트 resolver + 이 수정"으로 고칠 것.
+  이 수정은 다음 릴리스(또는 `latest`)에 실려야 tars-agent가 쓴다.
 
 ## 핵심 파일
 

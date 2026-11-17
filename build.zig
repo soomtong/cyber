@@ -6,8 +6,8 @@ const mimalloc_lib = @import("lib/mimalloc/lib.zig");
 const tcc_lib = @import("lib/tcc/lib.zig");
 const Translator = @import("translate_c").Translator;
 
-// FIND: v0.4.13
-const Version = "0.4.13";
+// FIND: v0.4.14
+const Version = "0.4.14";
 
 var optMalloc: ?Allocator = undefined;
 var selinux: bool = undefined;

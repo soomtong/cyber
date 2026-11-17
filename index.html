@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.14-dev 961-8ab88d6</div>
+    <div class="sub-title">v0.4.14-dev 965-86bb5fc</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1950,17 +1950,17 @@ print(arr[2+..2])   --> {3, 4}
 <p>Here are some common slice operations:</p>
 <pre><code class="language-cy">arr := []int{234}
 
--- Append a value.
+-- Append a value in place.
 arr += 123
 
--- Alternative way to append.
-arr = arr.append(123)
+-- Another way to append in place.
+arr.append(123)
 
--- Inserting a value at an index.
-arr = arr.insert(1, 345)
+-- Inserting a value at an index in place.
+arr.insert(1, 345)
 
 -- Get the length.
-print(arr.len())  --> 2
+print(arr.len())  --> 4
 
 -- Sort the slice in place. Without a function, `sort` uses `<` of the element type.
 arr.sort(|a, b| a < b)
@@ -1973,20 +1973,60 @@ arr.reverse()
 for arr |it|:
     print(it)
 
--- Remove an element at a specific index.
-arr = arr.remove(1)
+-- Remove an element at a specific index in place.
+arr.remove(1)
 </code></pre>
-<p><code>append</code>, <code>insert</code>, <code>remove</code>, <code>clear</code>, <code>size_down</code> and <code>size_up</code> return the new slice and leave the receiver as it was,
-like <code>+</code>. Assign the result back to keep it: <code>arr = arr.remove(1)</code>. Dropping the result (<code>_ = arr.remove(1)</code> or a bare
-<code>arr.clear()</code>) is a compile error that says so. A result kept in another variable is a separate list:</p>
+<p><code>append</code>, <code>insert</code>, <code>remove</code>, <code>clear</code>, <code>size_down</code>, <code>size_up</code> and <code>+=</code> change the slice in place and return nothing.
+<code>appended</code>, <code>inserted</code>, <code>removed</code> and <code>+</code> return a new slice and leave the receiver as it was:</p>
 <pre><code class="language-cy">arr := []int{1, 2, 3}
-rest := arr.remove(0)
+rest := arr.removed(0)
 print(arr.len())   --> 3
 print(rest.len())  --> 2
+more := arr + 4
+print(arr.len())   --> 3
+print(more.len())  --> 4
 </code></pre>
-<p>When the receiver is the only owner of the buffer, <code>append</code>, <code>size_up</code> and a removal at the end reuse it. A removal or an
-insertion before the end copies, because the receiver still sees those elements. Elements that a shrinking op drops stay
-alive while the receiver can see them, until a later resize of the result or the end of both.</p>
+<p>Assigning the result of an in-place method (<code>arr = arr.append(1)</code>, <code>rest := arr.remove(0)</code>) is a compile error that
+names the method to use. So is dropping the result of a method that returns a new slice (<code>arr.appended(1)</code> as a
+statement, <code>_ = arr.removed(0)</code>), because it changes nothing.</p>
+<p>Copies of a slice share its buffer until one of them resizes: an in-place resize of a slice whose buffer another value
+also holds (<code>ys := xs</code>, a sub-slice) first copies the buffer, so the other value keeps its elements and its length. Writing
+an element (<code>xs[0] = v</code>, <code>sort</code>, <code>reverse</code>) does not copy: every value that shares the buffer sees it.</p>
+<pre><code class="language-cy">xs := []int{1, 2}
+ys := xs
+xs.append(3)
+print(ys.len())   --> 2
+xs[0] = 9
+print(ys[0])      --> 1
+</code></pre>
+<p>The last <code>print</code> shows <code>1</code> because <code>append</code> already gave <code>xs</code> its own buffer. Without the <code>append</code>, <code>ys[0]</code> would be <code>9</code>.</p>
+<p>A slice that holds its buffer alone resizes in place without copying. A loop of <code>append</code> or <code>+=</code> takes amortized constant
+time per element, while a loop of <code>xs = xs + v</code> copies the slice every time.</p>
+<a href="#basic-types">^topic</a>
+<h4 id="changing-a-global-slice-in-place">Changing a global slice in place. <a href="#changing-a-global-slice-in-place">#</a></h4>
+<p>A global can not be borrowed exclusively: a function could reach the global by its name while it also holds a <code>&&</code>
+borrow of it. The in-place methods still work on a global <code>Slice</code> or <code>Array</code>, on a field of a global, and on the target
+of a pointer, by take-and-restore: the call moves the value out of the global into a hidden local, the global holds an
+empty list while the method runs, and the value moves back right after the call.</p>
+<pre><code class="language-cy">global log []str = {}
+
+fn note(s str):
+    log.append(s)       -- in place, no copy of the list
+    log += '!'
+
+note('a')
+print(log.len())        --> 2
+print(log.pop().?)      --> !
+</code></pre>
+<ul>
+<li>The value is not copied, so a loop that grows a global list stays fast.</li>
+<li>An argument of the call can not read the same global, because it would see the empty list: <code>g.append(g.len())</code> is a
+compile error. Read it into a local first: <code>n := g.len()</code>, then <code>g.append(n)</code>.</li>
+<li>Code that runs inside the method and reads the global by its name sees the empty list. The methods of <code>Slice</code> and
+<code>Array</code> do not, but a <code>@deinit</code> of an element type that reads the global would.</li>
+<li>Only a type with an empty value (<code>[]T</code>, <code>Array[T]</code>) can be taken. An exclusive borrow of a global of another type is a
+compile error.</li>
+</ul>
 <p>An index or a length that is out of range panics. This holds for <code>Array</code>, <code>Slice</code>, spans and <code>Buffer</code>:
 <code>remove</code> and <code>insert</code> need a valid index, the start and the end of a slice expression can not be negative,
 and a negative or too large length (<code>[]int(n, 0)</code>, <code>size_up</code>) panics with <code>Invalid allocation length</code>.
@@ -1996,7 +2036,11 @@ and a negative or too large length (<code>[]int(n, 0)</code>, <code>size_up</cod
 print(a.pop().?)       --> y
 print(a.len())         --> 1
 </code></pre>
-<p>A <code>[]T</code> has no <code>pop</code>, because its resize methods return the new slice. Take <code>xs.last()</code>, then <code>xs = xs.remove(xs.len() - 1)</code>.</p>
+<p><code>[]T</code> has the same <code>pop</code>:</p>
+<pre><code class="language-cy">xs := []int{1, 2}
+print(xs.pop().?)      --> 2
+print(xs.len())        --> 1
+</code></pre>
 <a href="#basic-types">^topic</a>
 <h2 id="maps">Maps. <a href="#maps">#</a></h2>
 <p>A <code>Map</code> type is a dynamic data structure that stores key value pairs in a lookup table governed by hashing functions (key hash and equality functions).

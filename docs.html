@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.13-dev 954-4d47ac7</div>
+    <div class="sub-title">v0.4.14-dev 960-a2b3365</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1540,6 +1540,10 @@ var b byte = 'a'
 <pre><code class="language-cy">a := '123'
 b := int(a) 
 </code></pre>
+<p><code>int(s)</code> gives 0 for a string that is not a number. To check the string, use <code>int.parse</code>, which returns <code>!int</code> and gives
+<code>error.InvalidCharacter</code> or <code>error.Overflow</code>:</p>
+<pre><code class="language-cy">n := int.parse('42') !else 0
+</code></pre>
 <p>Integer types can perform <a href="#arithmetic-operators" title="">arithmetic</a>, <a href="#bitwise-operators" title="">bitwise</a>, and <a href="#comparison-operators" title="">comparison</a> operations.</p>
 <a href="#basic-types">^topic</a>
 <h3 id="floats">Floats. <a href="#floats">#</a></h3>
@@ -1556,6 +1560,10 @@ b := 123.0e4
 <p>Strings and other values can be converted to a <code>float</code> using the type as a function:</p>
 <pre><code class="language-cy">a := '12.3'
 b := float(a) 
+</code></pre>
+<p><code>float(s)</code> also gives 0 for a string that is not a number. <code>float.parse</code> (and <code>f32.parse</code>) returns <code>!float</code> and gives
+<code>error.InvalidCharacter</code> instead. It reads <code>'1.5'</code>, <code>'-2'</code>, <code>'1e3'</code>, <code>'inf'</code> and <code>'nan'</code>, and does not allow spaces around the number:</p>
+<pre><code class="language-cy">x := float.parse('1.5') !else 0.0
 </code></pre>
 <p>Float types can perform <a href="#arithmetic-operators" title="">arithmetic</a> and <a href="#comparison-operators" title="">comparison</a> operations.</p>
 <a href="#basic-types">^topic</a>
@@ -1656,6 +1664,18 @@ res = res.concat('end')
 <pre><code class="language-cy">'a' < 'b'       --> true
 'a' < 'ab'      --> true
 </code></pre>
+<a href="#basic-types">^topic</a>
+<h3 id="lines-and-padding">Lines and padding. <a href="#lines-and-padding">#</a></h3>
+<p><code>lines</code> splits a string at <code>\n</code> and <code>\r\n</code> and drops the line breaks. A line break at the end does not start another line, and an empty string has no lines:</p>
+<pre><code class="language-cy">'a\r\nb\n\nc\n'.lines()   --> {'a', 'b', '', 'c'}
+''.lines().len()          --> 0
+</code></pre>
+<p><code>pad_left</code> and <code>pad_right</code> add spaces, or a given one-rune <code>fill</code>, until the string has <code>width</code> runes. A longer string is returned as it is:</p>
+<pre><code class="language-cy">'ab'.pad_left(4)         --> '  ab'
+'7'.pad_left(3, '0')     --> '007'
+'ab'.pad_right(4, '.')   --> 'ab..'
+</code></pre>
+<p>A <code>fill</code> that is not one rune panics with 'Invalid argument.'. Width counts runes, not display columns: a wide character such as <code>한</code> counts as one.</p>
 <a href="#basic-types">^topic</a>
 <h3 id="string-interpolation">String interpolation. <a href="#string-interpolation">#</a></h3>
 <p>String templates wrap expressions in <code>%{}</code> which converts them to strings using the builtin <code>to_print_string</code>:</p>
@@ -1946,6 +1966,9 @@ print(arr.len())  --> 2
 arr.sort(|a, b| a < b)
 arr.sort()
 
+-- Reverse the slice in place.
+arr.reverse()
+
 -- Iterating a slice.
 for arr |it|:
     print(it)
@@ -1968,6 +1991,12 @@ alive while the receiver can see them, until a later resize of the result or the
 <code>remove</code> and <code>insert</code> need a valid index, the start and the end of a slice expression can not be negative,
 and a negative or too large length (<code>[]int(n, 0)</code>, <code>size_up</code>) panics with <code>Invalid allocation length</code>.
 <code>str.repeat</code> panics with <code>InvalidArgument</code> when the result would be longer than 4 GiB.</p>
+<p>An <code>Array</code> changes in place. <code>pop</code> removes the last element and returns it, or <code>none</code> when the array is empty:</p>
+<pre><code class="language-cy">a := Array[str]{'x', 'y'}
+print(a.pop().?)       --> y
+print(a.len())         --> 1
+</code></pre>
+<p>A <code>[]T</code> has no <code>pop</code>, because its resize methods return the new slice. Take <code>xs.last()</code>, then <code>xs = xs.remove(xs.len() - 1)</code>.</p>
 <a href="#basic-types">^topic</a>
 <h2 id="maps">Maps. <a href="#maps">#</a></h2>
 <p>A <code>Map</code> type is a dynamic data structure that stores key value pairs in a lookup table governed by hashing functions (key hash and equality functions).
@@ -1998,6 +2027,10 @@ print(map[123])     --> 234
 
 -- Get the size of the map.
 print(map.size())   --> 1
+
+-- The keys and the values, in the same order.
+print(map.keys())   --> {123}
+print(map.values()) --> {234}
 
 -- Remove an entry by key.
 map.remove(123)
@@ -4795,6 +4828,26 @@ else |err|:
 <p>Matching is by Unicode code point: <code>.</code> and <code>[가-힣]</code> take a whole character, and offsets are in bytes. A byte of the input that is not UTF-8 is one character for <code>.</code> and for a negated class. The syntax is a subset of LPeg's <code>re</code> with the same meaning, with these differences: strings and classes have escapes, a named capture is a node of the result, <code>=name</code> matches the whole text of the capture, and what calls a Lua function (<code>p -> name</code>, <code>p => name</code>) or builds a table (<code>{| p |}</code>) is not supported. In a class, a <code>%</code> name goes on to the last letter, as in <code>re</code>: write <code>[_%w]</code>, not <code>[%w_]</code>.</p>
 <p>A grammar backtracks, so there is no bound on the time of a match as there is for <code>regex</code>: a grammar can take time that grows fast with the length of the input. A match keeps a stack of open rule calls and choices. When the stack is over <code>peg.MaxStack</code> (100000) entries, for input that nests very deep, <code>parse</code> returns <code>error.TooDeep</code>, and for a match with more than <code>peg.MaxCaptures</code> (1000000) captures it returns <code>error.TooBig</code>. The functions that return an option panic in these cases. A call at the end of the last choice of a rule takes no stack: <code>tail <- !. / . tail</code> runs over any length of input. A grammar over <code>peg.MaxInsts</code> (65536) instructions is <code>error.TooBig</code> (<code>p^100</code> takes 100 times the instructions of <code>p</code>), and patterns nest at most <code>peg.MaxDepth</code> (250) deep. A compiled <code>Peg</code> does not change: compile once and use it for every match.</p>
 <a href="#modules">^topic</a>
+<h3 id="paths">Paths. <a href="#paths">#</a></h3>
+<p>The <code>path</code> module reads and builds path strings with <code>/</code> as the separator. It does not look at the file system, so an embedding host that refuses <code>os</code> can still allow it. It works like Go's <code>path</code> package: a Windows path with <code>\</code> is not split.</p>
+<pre><code class="language-cy">use path
+
+p := path.join('src', 'std/path.cy')   --> 'src/std/path.cy'
+path.base(p)                           --> 'path.cy'
+path.dir(p)                            --> 'src/std'
+path.ext(p)                            --> '.cy'
+path.stem(p)                           --> 'path'
+path.normalize('a//b/./../c/')         --> 'a/c'
+path.is_absolute('/usr/bin')           --> true
+</code></pre>
+<ul>
+<li><code>join(a, b)</code> and <code>join(parts)</code> skip empty parts and normalize the result. A part that starts with <code>/</code> does not drop the parts before it: <code>path.join('a', '/b')</code> is <code>'a/b'</code>.</li>
+<li><code>normalize</code> removes empty and <code>.</code> parts, removes a <code>..</code> together with the part before it and removes a trailing <code>/</code>. A <code>..</code> at the start of a relative path stays (<code>'../a'</code>), and <code>'/..'</code> is <code>'/'</code>. An empty path is <code>'.'</code>.</li>
+<li><code>base</code> and <code>dir</code> ignore a trailing <code>/</code>: <code>base('a/b/')</code> is <code>'b'</code> and <code>dir('a/b/')</code> is <code>'a'</code>. A path without <code>/</code> has the <code>dir</code> <code>'.'</code>.</li>
+<li><code>ext</code> is the end of the last part from its last <code>.</code>, with the <code>.</code>. A name that only starts with a <code>.</code> (<code>'.bashrc'</code>) has no extension. <code>stem</code> is the last part without <code>ext</code>.</li>
+</ul>
+<p><code>os.baseName</code> and <code>os.dirname</code> were removed. Use <code>path.base</code> and <code>path.dir</code>.</p>
+<a href="#modules">^topic</a>
 <h3 id="dates-and-times">Dates and times. <a href="#dates-and-times">#</a></h3>
 <p>The <code>time</code> module has four types. A <code>Time</code> is an instant, a <code>DateTime</code> is an instant seen at a UTC offset or in a time zone, a <code>Date</code> is a calendar day and a <code>Duration</code> is a length of time. An offset is an <code>int</code>: the minutes east of UTC, so <code>+09:00</code> is <code>540</code> and <code>-03:30</code> is <code>-210</code>:</p>
 <pre><code class="language-cy">use time
@@ -4814,7 +4867,7 @@ print(dt.add_months(3)!.format())        --> 2027-02-15T10:22:03.5+09:00
 use time
 
 fn mtime(path str) -> !time.Time:
-    info := os.fileInfo(path)!
+    info := os.file_info(path)!
     return time.unix(info.mtime_sec, info.mtime_nsec)
 
 a := mtime('build.zig')!
@@ -5231,7 +5284,7 @@ An example can be found in <a href="https://github.com/fubark/cyber/blob/master/
 <a href="#ffi">^topic</a>
 <h3 id="open_lib-binding"><code>open_lib</code> binding. <a href="#open_lib-binding">#</a></h3>
 <blockquote><p><em>Planned Feature</em></p>
-</blockquote><p><code>os.openLib</code> is declared but not implemented: calling it panics. Use <a href="#runtime-binding" title="">runtime binding</a> with <code>c.bind_lib</code> instead. The paragraph below describes the planned behavior.</p>
+</blockquote><p><code>os.open_lib</code> is declared but not implemented: calling it panics. Use <a href="#runtime-binding" title="">runtime binding</a> with <code>c.bind_lib</code> instead. The paragraph below describes the planned behavior.</p>
 <p>If the path argument to <code>open_lib</code> is just a filename, the search steps for the library is specific to the operating system. Provide an absolute (eg. '/foo/mylib.so') or relative (eg. './mylib.so') path to load from a direct location instead. When the path argument is <code>none</code>, it loads the currently running executable as a library.</p>
 <a href="#ffi">^topic</a>
 <h3 id="extern-functions"><code>extern</code> functions. <a href="#extern-functions">#</a></h3>
@@ -5667,6 +5720,12 @@ cyber path/to/main.cy
 cyber -h
 cyber --help
 </code></pre>
+<p>To print the version:</p>
+<pre><code class="language-bash">cyber version
+cyber --version
+</code></pre>
+<p>Both write to stdout, so a script can capture them: <code>v=$(cyber --version)</code>. An option after the source file
+belongs to the script: <code>cyber main.cy --version</code> runs <code>main.cy</code> with <code>--version</code> in <code>os.args()</code>.</p>
 <a href="#cli">^topic</a>
 <h2 id="repl">REPL. <a href="#repl">#</a></h2>
 <p>The default behavior of <code>cyber</code> is to start a REPL:</p>

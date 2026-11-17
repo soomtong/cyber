@@ -525,6 +525,7 @@ fn test_core(run: *Runner) void {
     run.case("core/Slice_neg_oob_panic.cy");
     run.case("core/str_new_line_error.cy");
     run.case("core/str_interpolation.cy");
+    run.case("core/str_index_char_blocks.cy");
     run.case("core/str_runeAt_neg_oob_panic.cy");
     run.case("core/str_runeAt_oob_panic.cy");
     run.case("core/str_index_neg_oob_panic.cy");

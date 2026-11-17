@@ -37,3 +37,11 @@
 - `docs/api.json`이 소스와 다르면 `src/tools/verify.sh` 14단계와 Latest Build의 "Check docs/api.json."이 실패한다. 모듈 API를
   바꾸면 `cyber docs/gen-api-json.cy`를 다시 돌려 함께 커밋한다.
 - agent-guide의 "Modules" 절이 api.html 대신 `cyber doc --api <module>`을 가리킨다. tars-agent 요청 `cyber-module-api-for-agents.md`.
+
+## x86_64 AVX2에서 `str.index`의 틀린 위치 (F-160)
+
+- AVX2로 빌드된 x86_64(배포된 Linux x64 바이너리, native 빌드)에서 128바이트 이상인 문자열의 한 바이트 검색이 128바이트
+  블록의 96~127번째에 있는 첫 위치를 `블록 시작 + 128`로 돌려줬다. `s.index('\n')`, `s.index(byte)`, 그리고 그 위의
+  `s.split('\n')` 등이 조용히 틀렸다(줄 둘이 이어 붙음). `src/string.zig`의 inline asm을 Zig 벡터 코드로 바꿨다. arm64와
+  AVX2가 없는 x86_64는 영향이 없었다. 테스트 `core/str_index_char_blocks.cy`.
+- `gen-docs.yml`이 커밋된 `docs/api.json`을 옮기지 않는다(playground 빌드가 내장한다). 사이트의 `api.json`은 버전을 넣어 따로 쓴다.

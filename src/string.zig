@@ -134,65 +134,27 @@ fn indexOfCharSimdRemain(comptime VecSize: usize, buf: []const u8, needle: u8) ?
     return null;
 }
 
+/// Compares four vectors per step and finds which one has the first hit only when one does.
+/// It was inline asm for AVX2 that returned `i + 128` for a hit in the fourth vector (the mask of the third, 0, went
+/// to `@ctz`) and read `ymm1`..`ymm3` in later asm statements that did not own them. LLVM emits the same
+/// `vpcmpeqb` / `vpor` / `vpmovmskb` sequence for this code.
 fn indexOfCharSimdFixed4(comptime VecSize: usize, buf: []const u8, needle: u8) ?usize {
-    if (VecSize == 32 and hasAvx2 and builtin.target.cpu.arch == .x86_64) {
-        // const MaskInt = @Int(.unsigned, VecSize);
-        const vneedle: @Vector(VecSize, u8) = @splat(needle);
-        var i: usize = 0;
-        while (i + VecSize * 4 <= buf.len) : (i += VecSize * 4) {
-            // Inline asm to avoid extra vpmovmskb.
-            // TODO: There is a slight perf gain to be had when using 32-byte aligned memory.
-            const hitMask = asm volatile (
-                \\vpcmpeqb %[v0], %[needle], %%ymm1
-                \\vpcmpeqb %[v1], %[needle], %%ymm2
-                \\vpcmpeqb %[v2], %[needle], %%ymm3
-                \\vpcmpeqb %[v3], %[needle], %%ymm4
-                \\vpor %%ymm1, %%ymm2, %%ymm5
-                \\vpor %%ymm3, %%ymm4, %%ymm6
-                \\vpor %%ymm5, %%ymm6, %%ymm5
-                \\vpmovmskb %%ymm5, %[ret]
-                : [ret] "={eax}" (-> u32),
-                : [needle] "x" (vneedle),
-                  [v0] "x" (@as(@Vector(VecSize, u8), @as(*align(1) const @Vector(VecSize, u8), @ptrCast(&buf[0])).*)),
-                  [v1] "x" (@as(@Vector(VecSize, u8), @as(*align(1) const @Vector(VecSize, u8), @ptrCast(&buf[VecSize])).*)),
-                  [v2] "x" (@as(@Vector(VecSize, u8), @as(*align(1) const @Vector(VecSize, u8), @ptrCast(&buf[VecSize * 2])).*)),
-                  [v3] "x" (@as(@Vector(VecSize, u8), @as(*align(1) const @Vector(VecSize, u8), @ptrCast(&buf[VecSize * 3])).*)),
-                : .{ .ymm1 = true, .ymm2 = true, .ymm3 = true, .ymm4 = true, .ymm5 = true, .ymm6 = true });
-            if (hitMask > 0) {
-                // Find out which one contains the result.
-                var mask = asm (
-                    \\vpmovmskb %%ymm1, %[ret]
-                    : [ret] "={eax}" (-> u32),
-                );
-                if (mask > 0) {
-                    const bitIdx = @ctz(mask);
-                    return i + bitIdx;
-                }
-                mask = asm (
-                    \\vpmovmskb %%ymm2, %[ret]
-                    : [ret] "={eax}" (-> u32),
-                );
-                if (mask > 0) {
-                    const bitIdx = @ctz(mask);
-                    return i + bitIdx + 32;
-                }
-                mask = asm (
-                    \\vpmovmskb %%ymm3, %[ret]
-                    : [ret] "={eax}" (-> u32),
-                );
-                if (mask > 0) {
-                    const bitIdx = @ctz(mask);
-                    return i + bitIdx + 64;
-                } else {
-                    const bitIdx = @ctz(mask);
-                    return i + bitIdx + 96;
-                }
+    const MaskInt = @Int(.unsigned, VecSize);
+    const vneedle: @Vector(VecSize, u8) = @splat(needle);
+    var i: usize = 0;
+    while (i + VecSize * 4 <= buf.len) : (i += VecSize * 4) {
+        var masks: [4]MaskInt = undefined;
+        inline for (0..4) |k| {
+            const v: @Vector(VecSize, u8) = buf[i + k * VecSize ..][0..VecSize].*;
+            masks[k] = @bitCast(v == vneedle);
+        }
+        if ((masks[0] | masks[1] | masks[2] | masks[3]) != 0) {
+            inline for (0..4) |k| {
+                if (masks[k] != 0) return i + k * VecSize + @ctz(masks[k]);
             }
         }
-        return null;
-    } else {
-        return indexOfCharSimdFixed(VecSize, buf, needle);
     }
+    return null;
 }
 
 fn indexOfCharSimdFixed(comptime VecSize: usize, buf: []const u8, needle: u8) ?usize {

@@ -1895,10 +1895,26 @@ fn toSnakeCase(name: []const u8, buf: *[128]u8) ?[]const u8 {
     return buf[0..len];
 }
 
+/// Functions that moved to another module: module uri, old name, hint.
+const moved_module_syms = [_][3][]const u8{
+    .{ "os", "baseName", " Use `path.base` from `use path`." },
+    .{ "os", "basename", " Use `path.base` from `use path`." },
+    .{ "os", "base_name", " Use `path.base` from `use path`." },
+    .{ "os", "dirname", " Use `path.dir` from `use path`." },
+};
+
 /// A hint for a symbol that the module `mod_sym` does not have: ` Did you mean `x`?`, or an empty string.
 /// Like `suggestMember`, names from other languages are mapped first, then a camelCase name is tried as snake_case.
 pub fn suggestModuleSym(c: *cy.Chunk, mod_sym: *cy.Sym, name: []const u8, node: *ast.Node) ![]const u8 {
     if (name.len == 0 or name.len > 64) return "";
+    if (mod_sym.type == .chunk) {
+        const uri = mod_sym.cast(.chunk).chunk.srcUri;
+        for (moved_module_syms) |moved| {
+            if (std.mem.eql(u8, moved[0], uri) and std.mem.eql(u8, moved[1], name)) {
+                return moved[2];
+            }
+        }
+    }
     for (member_aliases) |alias| {
         if (std.mem.eql(u8, alias[0], name) and try c.getResolvedSym(mod_sym, alias[1], node) != null) {
             return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{alias[1]}) catch "";

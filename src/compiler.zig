@@ -24,6 +24,7 @@ const json_mod = @import("std/json.zig");
 const peg_mod = @import("std/peg.zig");
 const regex_mod = @import("std/regex.zig");
 const toon_mod = @import("std/toon.zig");
+const path_mod = @import("std/path.zig");
 const time_mod = @import("std/time.zig");
 const cgen = cy.cgen;
 const bcgen = @import("bc_gen.zig");
@@ -1759,6 +1760,7 @@ const mods = std.StaticStringMap(ModuleEntry).initComptime(.{
     .{"peg", ModuleEntry{.bind = &peg_mod.bind}},
     .{"regex", ModuleEntry{.bind = &regex_mod.bind}},
     .{"toon", ModuleEntry{.bind = &toon_mod.bind}},
+    .{"path", ModuleEntry{.bind = &path_mod.bind}},
 });
 
 /// Whether `uri` names a standard module (`core`, `meta`, ...). `deny_raw_ptrs` exempts these chunks: the core

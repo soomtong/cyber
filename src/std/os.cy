@@ -83,12 +83,6 @@ fn args() -> []str:
 
 #[bind] fn _args(buffer_t int) -> []str
 
-fn baseName(path str) -> str:
-    if path.len() == 0:
-        return ''
-    idx := path.last_index('/') ?else: return path
-    return path[idx + 1..]
-
 --| Returns the path of a locally cached file of `url`.
 --| If no such file exists locally, it's fetched from `url`.
 #[bind] fn cache_url(url str) -> str
@@ -156,30 +150,6 @@ fn chdir(path str) -> !void:
         cpath := str.initz(path)
         if lc.chdir(cpath.ptr) == -1:
             return from_errno()
-
---| Returns the given path with its last component removed.
-fn dirname(path str) -> ?str:
-    if path.len() == 0:
-        return none
-
-    end_index := path.len() - 1
-    while path[end_index] == '/':
-        if end_index == 0:
-            return none
-        end_index -= 1
-
-    while path[end_index] != '/':
-        if end_index == 0:
-            return none
-        end_index -= 1
-
-    if end_index == 0 and path[0] == '/':
-        return path[0..1]
-
-    if end_index == 0:
-        return none
-
-    return path[0..end_index]
 
 --| Runs a shell command and returns the stdout/stderr.
 fn exec(args AsSpan[str]) -> ExecResult:

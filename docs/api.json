@@ -1807,7 +1807,6 @@
     {"module": "os", "name": "stdout", "sig": "stdout() -> File", "doc": "Returns the standard output handle."},
     {"module": "os", "name": "access_file", "sig": "access_file(path str, mode AccessMode) -> !void", "doc": "Attempts to access a file at the given `path` with `mode`."},
     {"module": "os", "name": "args", "sig": "args() -> []str", "doc": "Returns the command line arguments."},
-    {"module": "os", "name": "baseName", "sig": "baseName(path str) -> str"},
     {"module": "os", "name": "cache_url", "sig": "cache_url(url str) -> str", "doc": "Returns the path of a locally cached file of `url`. If no such file exists locally, it's fetched from `url`."},
     {"module": "os", "name": "copy_file", "sig": "copy_file(src_path str, dst_path str) -> !void", "doc": "Copies a file to a destination path."},
     {"module": "os", "name": "create_dir", "sig": "create_dir(path str) -> !void", "doc": "Creates the directory at `path`."},
@@ -1815,7 +1814,6 @@
     {"module": "os", "name": "create_file", "sig": "create_file(path str, truncate bool) -> !File", "doc": "Creates and opens the file at `path`. If `truncate` is true, an existing file will be truncated."},
     {"module": "os", "name": "cwd", "sig": "cwd() -> !str", "doc": "Returns the current working directory."},
     {"module": "os", "name": "chdir", "sig": "chdir(path str) -> !void", "doc": "Change the current working directory."},
-    {"module": "os", "name": "dirname", "sig": "dirname(path str) -> ?str", "doc": "Returns the given path with its last component removed."},
     {"module": "os", "name": "exec", "sig": "exec(args AsSpan[str]) -> ExecResult", "doc": "Runs a shell command and returns the stdout/stderr."},
     {"module": "os", "name": "exit", "sig": "exit(status int) -> never", "doc": "Exits the program with a status code."},
     {"module": "os", "name": "fetch_url", "sig": "fetch_url(url str) -> str", "doc": "Fetches the contents at `url` using the HTTP GET request method."},
@@ -1903,6 +1901,15 @@
     {"module": "toon", "name": "decode", "sig": "decode(src str, diag &json.Diag) -> !json.Value", "doc": "Decodes TOON text. On failure, `diag` tells where and why."},
     {"module": "toon", "name": "decode", "sig": "decode(src str, opts DecodeOptions, diag &json.Diag) -> !json.Value"},
     {"module": "toon", "name": "from_json", "sig": "from_json(src str) -> !str", "doc": "Converts JSON text to TOON text."},
-    {"module": "toon", "name": "to_json", "sig": "to_json(src str) -> !str", "doc": "Converts TOON text to compact JSON text."}
+    {"module": "toon", "name": "to_json", "sig": "to_json(src str) -> !str", "doc": "Converts TOON text to compact JSON text."},
+    {"module": "path", "name": "join", "sig": "join(a str, b str) -> str", "doc": "Joins two paths with `/` and normalizes the result. An empty part is skipped, and a part that starts with `/` does not drop the parts before it: `join('a', '/b')` is `'a/b'`. Joining only empty parts gives `''`."},
+    {"module": "path", "name": "join", "sig": "join(parts AsSpan[str]) -> str", "doc": "Joins the parts with `/` and normalizes the result, like `join(a, b)`."},
+    {"module": "path", "name": "normalize", "sig": "normalize(p str) -> str", "doc": "Returns the shortest path that names the same place, by reading the string only: it removes empty and `.` parts, removes a `..` together with the part before it, and removes a trailing `/`. A `..` at the start of a relative path stays, and a `..` right after the root is removed (`'/..'` is `'/'`). An empty path gives `'.'`."},
+    {"module": "path", "name": "base", "sig": "base(p str) -> str", "doc": "Returns the last part of the path. Trailing `/` are ignored: `base('a/b/')` is `'b'`. `base('/')` is `'/'` and `base('')` is `'.'`."},
+    {"module": "path", "name": "dir", "sig": "dir(p str) -> str", "doc": "Returns the path without its last part, normalized. Trailing `/` are ignored: `dir('a/b/')` is `'a'`. A path with no `/` gives `'.'`, and `dir('/a')` and `dir('/')` give `'/'`."},
+    {"module": "path", "name": "ext", "sig": "ext(p str) -> str", "doc": "Returns the extension of the last part, from its last `.`: `ext('a/b.tar.gz')` is `'.gz'`. A name without a `.` and a name that only starts with one (`'.bashrc'`) give `''`."},
+    {"module": "path", "name": "stem", "sig": "stem(p str) -> str", "doc": "Returns the last part without its extension: `stem('a/b.tar.gz')` is `'b.tar'`, `stem('.bashrc')` is `'.bashrc'`."},
+    {"module": "path", "name": "is_absolute", "sig": "is_absolute(p str) -> bool"},
+    {"module": "path", "name": "trim_slashes", "sig": "trim_slashes(p str) -> str"}
   ]
 }

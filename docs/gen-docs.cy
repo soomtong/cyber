@@ -11,6 +11,7 @@
 
 use cy
 use os
+use path
 use meta
 use math
 use md '../src/tools/md4c.cy'
@@ -20,7 +21,7 @@ version := args.get('version') ?else 'DEV'
 skip_api := args.contains('skip-api')
 import_style := args.get('import-style') != none
 
-curDir := os.dirname(meta.mod_uri()).?
+curDir := path.dir(meta.mod_uri())
 hljs_css := os.read_file('%{curDir}/github-dark.min.css')!
 simple_css = os.read_file('%{curDir}/simple.css')!
 user_css = '<link rel="stylesheet" href="./style.css">'
@@ -737,9 +738,10 @@ fn gen_api_docs(version str) -> !void:
         {path='../src/std/time.cy', section='time'},
         {path='../src/std/test.cy', section='test'},
         {path='../src/std/toon.cy', section='toon'},
+        {path='../src/std/path.cy', section='path'},
     }
 
-    cur_dir := os.dirname(meta.mod_uri()).?
+    cur_dir := path.dir(meta.mod_uri())
     template := os.read_file('%{cur_dir}/api_template.html')!
 
     nav := ''

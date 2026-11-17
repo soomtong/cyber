@@ -64,27 +64,6 @@ else |err|:
 t.eq('error.Unicode', read_err)
 t.eq(2, os.read_file_bytes('src/test/assets/write.txt')!.len())
 
--- dirname()
-t.eq(?str(none), os.dirname('.'))
-t.eq('.', os.dirname('./foo').?)
-t.eq('./foo', os.dirname('./foo/bar.txt').?)
-t.eq('./foo', os.dirname('./foo/bar').?)
-t.eq('/', os.dirname('/root').?)
-t.eq('/root', os.dirname('/root/bar').?)
-t.eq('/root', os.dirname('/root/bar.txt').?)
-
-t.eq('/a/b', os.dirname('/a/b/c').?)
-t.eq('/a/b', os.dirname('/a/b/c///').?)
-t.eq('/', os.dirname('/a').?)
-t.eq(?str(none), os.dirname('/'))
-t.eq(?str(none), os.dirname('//'))
-t.eq(?str(none), os.dirname('///'))
-t.eq(?str(none), os.dirname('////'))
-t.eq(?str(none), os.dirname(''))
-t.eq(?str(none), os.dirname('a'))
-t.eq(?str(none), os.dirname('a/'))
-t.eq(?str(none), os.dirname('a//'))
-
 -- open_dir()
 dir = os.open_dir('src/test')!
 t.eq(os.FileKind.directory, dir.info()!.kind)

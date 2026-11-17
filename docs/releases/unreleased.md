@@ -94,3 +94,13 @@
 - 힌트 별칭 표(`rstrip` → `trim_right` 등)와 `docs/docs.md`, `docs/agent-guide.md`의 이름도 바꿨다. 릴리스 노트와 학습
   문서(`docs/study`)는 그때의 이름 그대로 둔다.
 
+## `path` 모듈
+
+- 새 표준 모듈 `path`(`src/std/path.cy`): `join(a, b)`, `join(parts)`, `base`, `dir`, `ext`, `stem`, `normalize`,
+  `is_absolute`. 구분자는 `/` 하나이고 파일 시스템을 보지 않는다(Go `path` 패키지와 같은 방식). 파일 시스템에 닿지 않으므로
+  `os`를 막는 임베딩 호스트도 허용할 수 있다. 결정 기록 `docs/decisions/project_std_path.md`.
+- 깨지는 변경: `os.baseName`과 `os.dirname`을 뺐다. 'Can not find the symbol `dirname` in `os`. Use `path.dir` from `use path`.'
+  처럼 옮긴 곳을 알려 준다. `os.dirname`은 `?str`을 돌려줬고(`'a'`는 none), `path.dir`은 `str`이다(`'a'`는 `'.'`,
+  결과를 정규화한다).
+- `docs/docs.md` "Paths", agent-guide의 모듈 목록과 Python 대응(`os.path.join` 등). 테스트 `modules/path.cy`.
+

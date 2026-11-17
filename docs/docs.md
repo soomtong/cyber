@@ -4478,6 +4478,26 @@ Matching is by Unicode code point: `.` and `[가-힣]` take a whole character, a
 
 A grammar backtracks, so there is no bound on the time of a match as there is for `regex`: a grammar can take time that grows fast with the length of the input. A match keeps a stack of open rule calls and choices. When the stack is over `peg.MaxStack` (100000) entries, for input that nests very deep, `parse` returns `error.TooDeep`, and for a match with more than `peg.MaxCaptures` (1000000) captures it returns `error.TooBig`. The functions that return an option panic in these cases. A call at the end of the last choice of a rule takes no stack: `tail <- !. / . tail` runs over any length of input. A grammar over `peg.MaxInsts` (65536) instructions is `error.TooBig` (`p^100` takes 100 times the instructions of `p`), and patterns nest at most `peg.MaxDepth` (250) deep. A compiled `Peg` does not change: compile once and use it for every match.
 
+### Paths.
+The `path` module reads and builds path strings with `/` as the separator. It does not look at the file system, so an embedding host that refuses `os` can still allow it. It works like Go's `path` package: a Windows path with `\` is not split.
+```cy
+use path
+
+p := path.join('src', 'std/path.cy')   --> 'src/std/path.cy'
+path.base(p)                           --> 'path.cy'
+path.dir(p)                            --> 'src/std'
+path.ext(p)                            --> '.cy'
+path.stem(p)                           --> 'path'
+path.normalize('a//b/./../c/')         --> 'a/c'
+path.is_absolute('/usr/bin')           --> true
+```
+- `join(a, b)` and `join(parts)` skip empty parts and normalize the result. A part that starts with `/` does not drop the parts before it: `path.join('a', '/b')` is `'a/b'`.
+- `normalize` removes empty and `.` parts, removes a `..` together with the part before it and removes a trailing `/`. A `..` at the start of a relative path stays (`'../a'`), and `'/..'` is `'/'`. An empty path is `'.'`.
+- `base` and `dir` ignore a trailing `/`: `base('a/b/')` is `'b'` and `dir('a/b/')` is `'a'`. A path without `/` has the `dir` `'.'`.
+- `ext` is the end of the last part from its last `.`, with the `.`. A name that only starts with a `.` (`'.bashrc'`) has no extension. `stem` is the last part without `ext`.
+
+`os.baseName` and `os.dirname` were removed. Use `path.base` and `path.dir`.
+
 ### Dates and times.
 The `time` module has four types. A `Time` is an instant, a `DateTime` is an instant seen at a UTC offset or in a time zone, a `Date` is a calendar day and a `Duration` is a length of time. An offset is an `int`: the minutes east of UTC, so `+09:00` is `540` and `-03:30` is `-210`:
 ```cy

@@ -626,7 +626,7 @@ test "doc: --api prints a module of the embedded api.json." {
 
     out.clearRetainingCapacity();
     try t.expect(try apiText(t.allocator, &out, "test", ""));
-    for ([_][]const u8{ "json", "toon", "regex", "peg", "time", "math" }) |m| {
+    for ([_][]const u8{ "json", "toon", "regex", "peg", "time", "math", "path" }) |m| {
         var buf: [32]u8 = undefined;
         try t.expect(std.mem.indexOf(u8, out.items, try std.fmt.bufPrint(&buf, "\n  {s}: ", .{m})) != null);
     }

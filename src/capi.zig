@@ -52,6 +52,7 @@ pub const mod_bind_json = c.cl_mod_bind_json;
 pub const mod_bind_peg = c.cl_mod_bind_peg;
 pub const mod_bind_regex = c.cl_mod_bind_regex;
 pub const mod_bind_toon = c.cl_mod_bind_toon;
+pub const mod_bind_path = c.cl_mod_bind_path;
 pub const mod_set_fallback_func = c.cl_mod_set_fallback_func;
 pub fn mod_add_func(mod: *Sym, name: []const u8, binding: BindFunc) void {
     c.cl_mod_add_func(mod, to_bytes(name), binding);

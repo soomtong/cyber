@@ -120,7 +120,8 @@ Python name to Cyber name:
 - `xs.pop()` is `v := xs.last()` then `xs = xs.remove(xs.len() - 1)`
 - `s.startswith(p)` and `s.endswith(p)` are `s.starts_with(p)` and `s.ends_with(p)`
 - `s.strip()` is `s.trim()`, `s.lstrip()` is `s.trim_left()` and `s.rstrip()` is `s.trim_right()`
-- `s.find(sub)` is `s.index(sub)` and `s.rfind(sub)` is `s.last_index(sub)`. Both give `?int`. For the last part of a path use `p.split('/').last()`
+- `s.find(sub)` is `s.index(sub)` and `s.rfind(sub)` is `s.last_index(sub)`. Both give `?int`. For the last part of a path use `path.base(p)`
+- `os.path.join(a, b)` is `path.join(a, b)`, `os.path.basename(p)` is `path.base(p)`, `os.path.dirname(p)` is `path.dir(p)`, and `os.path.splitext(p)` is `path.stem(p)` with `path.ext(p)`. Add `use path`
 - `len(m)` is `m.size()`. `m.items()` is `for m |e|:`. `list(m)` is `m.keys()`. `list(m.values())` is `m.values()`
 - `s.splitlines()` is `s.lines()`. `s.rjust(n)` is `s.pad_left(n)`, `s.ljust(n)` is `s.pad_right(n)` and `s.zfill(n)` is `s.pad_left(n, '0')`
 - `reversed(xs)` is `ys := []int{} + xs` then `ys.reverse()`. `ys := xs` shares the elements, and `ys.reverse()` or `ys.sort()` changes `xs` too
@@ -157,6 +158,7 @@ list comprehensions, the `lambda` keyword (a lambda is written `|a, b| a + b` an
 - `json`, `toon`: parse and stringify, with a value tree.
 - `regex`: a regular expression engine without backtracking (linear time). `peg`: parsing expression grammars.
 - `time`: clocks, durations, dates and IANA time zones.
+- `path`: path strings with `/`: `path.join(a, b)`, `path.base(p)`, `path.dir(p)`, `path.ext(p)` (`'.txt'`), `path.stem(p)`, `path.normalize(p)`, `path.is_absolute(p)`. It does not touch the file system.
 - `meta`, `cy` (the Cyber parser), `c` and `libc` (FFI) are for advanced use.
 
 An embedding host can refuse a module. Then `use name` fails with 'Failed to load module: name', 'Failed to resolve module `name`.' or a message from the host. Do not retry it; use what the host provides.

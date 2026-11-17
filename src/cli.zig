@@ -58,6 +58,7 @@ const named_std_mods = [_]StdEntry{
     .{ "peg", .{ .bind_fn = C.mod_bind_peg } },
     .{ "regex", .{ .bind_fn = C.mod_bind_regex } },
     .{ "toon", .{ .bind_fn = C.mod_bind_toon } },
+    .{ "path", .{ .bind_fn = C.mod_bind_path } },
     .{ "libc", .{ .src = @embedFile("std/libc.cy") } },
     .{ "os", .{ .src = os_mod.Src, .bind_fn = &os_mod.bind } },
     .{ "cli", .{ .src = Src, .bind_fn = &bind } },

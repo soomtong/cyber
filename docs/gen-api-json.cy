@@ -22,11 +22,12 @@
 
 use cy
 use os
+use path
 use meta
 
 args := os.parse_args({'version', 'out'})
 version := args.get('version') ?else 'source'
-cur_dir := os.dirname(meta.mod_uri()).?
+cur_dir := path.dir(meta.mod_uri())
 out_path := args.get('out') ?else '%{cur_dir}/api.json'
 
 type ModulePair:
@@ -248,6 +249,7 @@ std_mods := []ModulePair{
     {path='../src/std/time.cy', section='time'},
     {path='../src/std/test.cy', section='test'},
     {path='../src/std/toon.cy', section='toon'},
+    {path='../src/std/path.cy', section='path'},
 }
 
 types := []TypeEntry{}

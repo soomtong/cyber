@@ -1,5 +1,6 @@
 #!cyber
 use os
+use path
 use io
 use cy
 use c
@@ -82,11 +83,11 @@ while scanner.next_line()! |line|:
         continue
 
     line_str = line_str[8..].trim({' ', '<', '>', '"'})
-    file_name := os.baseName(line_str)
+    file_name := path.base(line_str)
     include_headers[file_name] = true
 
 -- Also include any declarations from the root `gen.h`.
-file_name := os.baseName(headerPath)
+file_name := path.base(headerPath)
 include_headers[file_name] = true
 
 unit := getTranslationUnit(headerPath)!
@@ -216,7 +217,7 @@ fn visitor(cursor, parent clang.CXCursor, data Ptr[void]) -> i32:
         return clang.CXChildVisit_Continue
     cx_file_name := clang.getFileName(file)
     file_name := fromCXString(cx_file_name)
-    base_name := os.baseName(file_name)
+    base_name := path.base(file_name)
     if !include_headers.contains(base_name):
         -- Not a relevant header.
         return clang.CXChildVisit_Continue

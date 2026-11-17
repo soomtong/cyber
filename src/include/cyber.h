@@ -996,6 +996,7 @@ CLBytes cl_mod_bind_json(CLVM* vm, CLSym* mod);
 CLBytes cl_mod_bind_peg(CLVM* vm, CLSym* mod);
 CLBytes cl_mod_bind_regex(CLVM* vm, CLSym* mod);
 CLBytes cl_mod_bind_toon(CLVM* vm, CLSym* mod);
+CLBytes cl_mod_bind_path(CLVM* vm, CLSym* mod);
 
 // -----------------------------------
 // [ Symbols ]

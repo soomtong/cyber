@@ -1485,6 +1485,80 @@ test "cl_vm_symbol_refs_to and cl_vm_symbol_tokens." {
     }
 }
 
+test "cl_vm_symbol_hints lists inferred types, scope exits and unused names." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_symbol_info(vm, true);
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+
+    const src =
+        \\use meta
+        \\use math
+        \\
+        \\fn step(n int):
+        \\    suspend
+        \\
+        \\fn work() -> !int:
+        \\    total := 1 + 2
+        \\    spare := total * 2
+        \\    _kept := 3
+        \\    var typed int = 4
+        \\    held := &total
+        \\    f := fn() -> int:
+        \\        return held.*
+        \\    scope |s|:
+        \\        s.start(step, {1})
+        \\        for 0..3 |i|:
+        \\            if i == 1:
+        \\                break
+        \\        return f() + typed
+        \\    return 0
+        \\
+        \\print(math.pi)
+    ;
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    var hints: [*c]const C.Hint = null;
+    const len = C.vm_symbol_hints(vm, &hints);
+    const S = struct {
+        fn find(src_: []const u8, hints_: [*c]const C.Hint, len_: usize, kind: u32, needle: []const u8) ?C.Hint {
+            const pos = std.mem.find(u8, src_, needle).?;
+            for (hints_[0..len_]) |hint| {
+                if (hint.kind == kind and hint.pos == pos) return hint;
+            }
+            return null;
+        }
+    };
+    // The type of a local without a declared one.
+    const total = S.find(src, hints, len, C.HintLocalType, "total :=").?;
+    try zt.eqStr("int", C.from_bytes(total.detail));
+    try zt.eq(@as(u32, 5), total.end_pos - total.pos);
+    try zt.expect(S.find(src, hints, len, C.HintLocalType, "typed int") == null);
+    // `return` in the block waits for the fiber. `break` stays in the loop inside the block.
+    const exit = S.find(src, hints, len, C.HintScopeExit, "return f()").?;
+    try zt.eqStr("return", C.from_bytes(exit.detail));
+    try zt.expect(S.find(src, hints, len, C.HintScopeExit, "break") == null);
+    try zt.expect(S.find(src, hints, len, C.HintScopeExit, "return 0") == null);
+    // Unused: a local, and a module. A use in a lambda counts, and `_` says that it is on purpose.
+    try zt.eqStr("spare", C.from_bytes(S.find(src, hints, len, C.HintUnusedLocal, "spare").?.detail));
+    try zt.expect(S.find(src, hints, len, C.HintUnusedLocal, "held :=") == null);
+    try zt.expect(S.find(src, hints, len, C.HintUnusedLocal, "_kept") == null);
+    try zt.expect(S.find(src, hints, len, C.HintUnusedLocal, "total :=") == null);
+    const use = S.find(src, hints, len, C.HintUnusedUse, "use meta").?;
+    try zt.eqStr("meta", C.from_bytes(use.detail));
+    try zt.expect(S.find(src, hints, len, C.HintUnusedUse, "use math") == null);
+    for (1..len) |i| {
+        try zt.expect(hints[i].pos >= hints[i - 1].pos);
+    }
+
+    // A failed compile did not reach every use: nothing is called unused.
+    try zt.eq(C.ErrorCompile, C.vm_compile(vm, "main", "use meta\nx := 1\ny := nope\n", config));
+    const failed_len = C.vm_symbol_hints(vm, &hints);
+    for (hints[0..failed_len]) |hint| {
+        try zt.expect(hint.kind != C.HintUnusedLocal and hint.kind != C.HintUnusedUse);
+    }
+}
+
 test "The symbol queries find nothing when there is no recorded compile." {
     // They read the main chunk, which is undefined before the first compile and freed by a reset: a host that
     // asked then crashed (final review, 2026-11-13).

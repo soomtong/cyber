@@ -1806,6 +1806,7 @@ fn semaScopeExitJoin(c: *cy.Chunk, loop_block: ?usize, node: *ast.Node) !void {
             // The loop is inside the block: the statement does not leave it.
             if (open.body_block < idx) break;
         }
+        if (c.compiler.record_refs and i == c.scope_blocks.items.len - 1) cy.refs.recordScopeExit(c, node);
         _ = try pushBlock(c, node);
         try semaScopeJoinCheck(c, open.local, node);
         const block = try popBlock(c);
@@ -4771,6 +4772,7 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
     // Local now alive.
     svar = &c.varStack.items[var_idx];
     svar.type = .local;
+    if (c.compiler.record_refs) cy.refs.recordDeclaredLocal(c, node.name, if (has_target_type) null else var_t);
     bindBorrowLocal(c, @intCast(var_idx), right);
     if (var_start == c.varStack.items.len and !init_after_aux) {
         declare.cast(.declare_local).init = right.ir;
@@ -6594,6 +6596,12 @@ pub fn lookupIdent(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupId
         switch (res) {
             .local => |id| {
                 const local = &self.varStack.items[id];
+                cy.refs.recordLocalUse(self, node, local.decl_t, local.namePtr[0..local.nameLen]);
+            },
+            .capture => |idx| {
+                // A use in a lambda is a use of the local that it captures.
+                const parent_id = self.proc().captures.items[idx].parent_var_idx;
+                const local = &self.varStack.items[parent_id];
                 cy.refs.recordLocalUse(self, node, local.decl_t, local.namePtr[0..local.nameLen]);
             },
             .static => |sym| cy.refs.recordSym(self, node, name, sym),

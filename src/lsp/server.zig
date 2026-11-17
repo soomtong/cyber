@@ -13,6 +13,7 @@ const position = @import("position.zig");
 const symbols = @import("symbols.zig");
 const complete = @import("complete.zig");
 const workspace = @import("workspace.zig");
+const assist = @import("assist.zig");
 
 const Value = std.json.Value;
 const Encoding = position.Encoding;
@@ -67,6 +68,12 @@ const Diagnostic = struct {
     range: Range,
     msg: []const u8,
     notes: []const Note = &.{},
+    /// 1 error, 2 warning, 3 information, 4 hint. Compile errors are errors, the rest come from compiler hints.
+    severity: u8 = 1,
+    /// A diagnostic of the server (`assist.code_*`), so a code action knows what it is. Empty for compile errors.
+    code: []const u8 = "",
+    /// Tagged `Unnecessary`: the client fades the range.
+    unnecessary: bool = false,
 };
 
 const Group = struct {
@@ -260,6 +267,10 @@ pub const Server = struct {
             try self.onPrepareRename(id, params);
         } else if (std.mem.eql(u8, method, "textDocument/rename")) {
             try self.onRename(id, params);
+        } else if (std.mem.eql(u8, method, "textDocument/codeAction")) {
+            try self.onCodeAction(arena, id, params);
+        } else if (std.mem.eql(u8, method, "textDocument/inlayHint")) {
+            try self.onInlayHint(id, params);
         } else if (id != null) {
             try self.replyError(id, ErrorCode.method_not_found, "The method is not supported.");
         }
@@ -373,6 +384,15 @@ pub const Server = struct {
             try jw.objectField("prepareProvider");
             try jw.write(true);
             try jw.endObject();
+            try jw.objectField("codeActionProvider");
+            try jw.beginObject();
+            try jw.objectField("codeActionKinds");
+            try jw.beginArray();
+            try jw.write("quickfix");
+            try jw.endArray();
+            try jw.endObject();
+            try jw.objectField("inlayHintProvider");
+            try jw.write(true);
             try jw.endObject();
 
             try jw.objectField("serverInfo");
@@ -562,6 +582,7 @@ pub const Server = struct {
                 .msg = try std.fmt.allocPrint(arena, "The document could not be checked (result {}).", .{code}),
             });
         }
+        try self.hintDiagnostics(arena, doc, &groups.items[0].diags);
 
         // The diagnostics of another open document come from its own check. Two checks that publish for the
         // same document would replace each other's result.
@@ -592,6 +613,195 @@ pub const Server = struct {
             errdefer self.alloc.free(dup);
             try doc.related.append(self.alloc, dup);
         }
+    }
+
+    /// The hints of the compiler for the checked document that are worth a diagnostic: statements that wait for
+    /// the fibers of a `scope` block (information) and names that are never used (warning, faded).
+    fn hintDiagnostics(self: *Server, arena: std.mem.Allocator, doc: *Document, diags: *std.ArrayList(Diagnostic)) !void {
+        var ptr: [*c]const c.Hint = null;
+        const count = c.vm_symbol_hints(self.vm, &ptr);
+        for (0..count) |i| {
+            const hint = ptr[i];
+            if (hint.pos > hint.end_pos or hint.end_pos > doc.text.len) continue;
+            const detail = c.from_bytes(hint.detail);
+            var start: usize = hint.pos;
+            var end: usize = hint.end_pos;
+            var diag: Diagnostic = undefined;
+            switch (hint.kind) {
+                c.HintScopeExit => {
+                    // The keyword is enough to point at.
+                    end = @min(end, start + detail.len);
+                    const msg = if (std.mem.eql(u8, detail, "return"))
+                        "`return` waits for the fibers of the `scope` block before it leaves, and its value is computed after them. An error of a fiber leaves in its place."
+                    else
+                        try std.fmt.allocPrint(arena, "`{s}` waits for the fibers of the `scope` block before it leaves the block. An error of a fiber leaves in its place.", .{detail});
+                    diag = .{ .range = undefined, .msg = msg, .severity = 3, .code = assist.code_scope_exit };
+                },
+                c.HintUnusedLocal => {
+                    diag = .{
+                        .range = undefined,
+                        .msg = try std.fmt.allocPrint(arena, "`{s}` is never used. Prefix it with `_` to keep it.", .{detail}),
+                        .severity = 2,
+                        .code = assist.code_unused_local,
+                        .unnecessary = true,
+                    };
+                },
+                c.HintUnusedUse => {
+                    // The statement without the line break.
+                    while (end > start and std.ascii.isWhitespace(doc.text[end - 1])) end -= 1;
+                    diag = .{
+                        .range = undefined,
+                        .msg = try std.fmt.allocPrint(arena, "The module `{s}` is never used.", .{detail}),
+                        .severity = 2,
+                        .code = assist.code_unused_use,
+                        .unnecessary = true,
+                    };
+                },
+                else => continue,
+            }
+            start = @min(start, end);
+            diag.range = .{
+                .start = position.fromOffset(doc.text, start, self.encoding),
+                .end = position.fromOffset(doc.text, end, self.encoding),
+            };
+            try diags.append(arena, diag);
+        }
+    }
+
+    /// Quick fixes for the diagnostics that the client sends back: the names that the compiler suggests,
+    /// and the names that the server found unused (`assist.quickFix`).
+    fn onCodeAction(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
+        const doc = try self.docOf(params);
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginArray();
+        if (getPath(params, &.{ "context", "diagnostics" })) |diags| {
+            if (diags == .array) {
+                for (diags.array.items) |diag| {
+                    const msg = getStr(diag, "message") orelse continue;
+                    const code = getStr(diag, "code") orelse "";
+                    const range_v = getPath(diag, &.{"range"}) orelse continue;
+                    const start = self.offsetAt(doc, getPath(range_v, &.{"start"})) orelse continue;
+                    const end = self.offsetAt(doc, getPath(range_v, &.{"end"})) orelse continue;
+                    const fix = (try assist.quickFix(arena, doc.text, start, end, msg, code)) orelse continue;
+                    try jw.beginObject();
+                    try jw.objectField("title");
+                    try jw.write(fix.title);
+                    try jw.objectField("kind");
+                    try jw.write("quickfix");
+                    try jw.objectField("isPreferred");
+                    try jw.write(true);
+                    try jw.objectField("diagnostics");
+                    try jw.beginArray();
+                    try jw.write(diag);
+                    try jw.endArray();
+                    try jw.objectField("edit");
+                    try jw.beginObject();
+                    try jw.objectField("changes");
+                    try jw.beginObject();
+                    try jw.objectField(doc.uri);
+                    try jw.beginArray();
+                    try jw.beginObject();
+                    try jw.objectField("range");
+                    try writeRange(jw, .{
+                        .start = position.fromOffset(doc.text, fix.start, self.encoding),
+                        .end = position.fromOffset(doc.text, fix.end, self.encoding),
+                    });
+                    try jw.objectField("newText");
+                    try jw.write(fix.new_text);
+                    try jw.endObject();
+                    try jw.endArray();
+                    try jw.endObject();
+                    try jw.endObject();
+                    try jw.endObject();
+                }
+            }
+        }
+        try jw.endArray();
+        try jw.endObject();
+        try self.send(&b);
+    }
+
+    /// Inlay hints: the type of `x := expr` after the name, unless the initializer already names it, and
+    /// `waits for fibers` after a statement that waits for the fibers of a `scope` block before it leaves.
+    fn onInlayHint(self: *Server, id: ?Value, params: Value) !void {
+        const doc = try self.docOf(params);
+        var start: usize = 0;
+        var end: usize = doc.text.len;
+        if (getPath(params, &.{"range"})) |range_v| {
+            start = self.offsetAt(doc, getPath(range_v, &.{"start"})) orelse 0;
+            end = self.offsetAt(doc, getPath(range_v, &.{"end"})) orelse doc.text.len;
+        }
+        if (self.compiled != doc) _ = self.compile(doc);
+
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginArray();
+        var ptr: [*c]const c.Hint = null;
+        const count = c.vm_symbol_hints(self.vm, &ptr);
+        for (0..count) |i| {
+            const hint = ptr[i];
+            if (hint.pos > hint.end_pos or hint.end_pos > doc.text.len) continue;
+            if (hint.pos < start or hint.pos > end) continue;
+            const detail = c.from_bytes(hint.detail);
+            var label: []const u8 = undefined;
+            var at: usize = hint.end_pos;
+            var kind: ?u8 = null;
+            switch (hint.kind) {
+                c.HintLocalType => {
+                    // Only `x := init`: a declared type is in the source already.
+                    var rest = std.mem.trimStart(u8, doc.text[hint.end_pos..], " \t");
+                    if (!std.mem.startsWith(u8, rest, ":=")) continue;
+                    rest = rest[2..];
+                    const line_end = std.mem.findScalar(u8, rest, '\n') orelse rest.len;
+                    if (assist.typeIsWritten(rest[0..line_end], detail)) continue;
+                    label = detail;
+                    kind = 1;
+                },
+                c.HintScopeExit => {
+                    label = "waits for fibers";
+                    // After the statement, on its first line.
+                    const line_end = std.mem.findScalarPos(u8, doc.text, hint.pos, '\n') orelse doc.text.len;
+                    at = @min(hint.end_pos, line_end);
+                    while (at > hint.pos and std.ascii.isWhitespace(doc.text[at - 1])) at -= 1;
+                },
+                else => continue,
+            }
+            try jw.beginObject();
+            try jw.objectField("position");
+            try writePosition(jw, position.fromOffset(doc.text, at, self.encoding));
+            try jw.objectField("label");
+            try jw.write(label);
+            if (kind) |k| {
+                try jw.objectField("kind");
+                try jw.write(k);
+            }
+            try jw.objectField("paddingLeft");
+            try jw.write(true);
+            try jw.endObject();
+        }
+        try jw.endArray();
+        try jw.endObject();
+        try self.send(&b);
+    }
+
+    /// The byte offset of an LSP position object in the document. Null when it is not one.
+    fn offsetAt(self: *Server, doc: *Document, pos_v: ?Value) ?usize {
+        const v = pos_v orelse return null;
+        const line = getInt(v, "line") orelse return null;
+        const character = getInt(v, "character") orelse return null;
+        return position.toOffset(doc.text, .{
+            .line = std.math.cast(u32, line) orelse return null,
+            .character = std.math.cast(u32, character) orelse return null,
+        }, self.encoding);
     }
 
     fn compile(self: *Server, doc: *Document) c.ResultCode {
@@ -646,8 +856,20 @@ pub const Server = struct {
         try jw.objectField("kind");
         try jw.write("markdown");
         try jw.objectField("value");
-        const value = try std.fmt.allocPrint(self.alloc, "```cyber\n{s}\n```", .{c.from_bytes(info.detail)});
-        defer self.alloc.free(value);
+        // The doc comment of a declaration in a source that the server can read.
+        var arena_state: std.heap.ArenaAllocator = .init(self.alloc);
+        defer arena_state.deinit();
+        const arena = arena_state.allocator();
+        var doc_text: []const u8 = "";
+        if (info.has_def and info.kind == c.SymbolDecl) {
+            if (self.sourceOf(arena, doc, c.from_bytes(info.def_uri))) |src| {
+                doc_text = try assist.docComment(arena, src, info.def_pos);
+            }
+        }
+        const value = if (doc_text.len > 0)
+            try std.fmt.allocPrint(arena, "```cyber\n{s}\n```\n\n{s}", .{ c.from_bytes(info.detail), doc_text })
+        else
+            try std.fmt.allocPrint(arena, "```cyber\n{s}\n```", .{c.from_bytes(info.detail)});
         try jw.write(value);
         try jw.endObject();
         try jw.objectField("range");
@@ -1253,11 +1475,20 @@ pub const Server = struct {
             try jw.beginObject();
             try jw.objectField("range");
             try writeRange(jw, diag.range);
-            // The compiler only reports errors.
             try jw.objectField("severity");
-            try jw.write(1);
+            try jw.write(diag.severity);
             try jw.objectField("source");
             try jw.write("cyber");
+            if (diag.code.len > 0) {
+                try jw.objectField("code");
+                try jw.write(diag.code);
+            }
+            if (diag.unnecessary) {
+                try jw.objectField("tags");
+                try jw.beginArray();
+                try jw.write(1);
+                try jw.endArray();
+            }
             try jw.objectField("message");
             try jw.write(diag.msg);
             if (self.related_information and diag.notes.len > 0) {

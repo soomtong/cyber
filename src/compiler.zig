@@ -96,6 +96,14 @@ pub const Compiler = struct {
     ref_tokens: std.ArrayList(cy.refs.Token) = .empty,
     /// Owns the items that the last `refs.members` or `refs.scope` returned.
     ref_arena: ?std.heap.ArenaAllocator = null,
+    /// The locals of the main source that were declared with `x := ...` or `var x T = ...` (`refs.hints`).
+    ref_locals: std.ArrayList(cy.refs.LocalDecl) = .empty,
+    /// The `return`, `break` and `continue` statements of the main source that wait for the fibers of a
+    /// `scope` block before they leave it (`refs.hints`).
+    ref_scope_exits: std.ArrayList([2]u32) = .empty,
+    /// The hints that the last `refs.hints` returned, and the text they point into.
+    ref_hints: std.ArrayList(cy.refs.Hint) = .empty,
+    ref_hint_text: std.ArrayList(u8) = .empty,
     
     /// Sema model resulting from the sema pass.
     sema: sema.Sema,
@@ -248,6 +256,10 @@ pub const Compiler = struct {
             self.refs.deinit(self.alloc);
             self.ref_ranges.deinit(self.alloc);
             self.ref_tokens.deinit(self.alloc);
+            self.ref_locals.deinit(self.alloc);
+            self.ref_scope_exits.deinit(self.alloc);
+            self.ref_hints.deinit(self.alloc);
+            self.ref_hint_text.deinit(self.alloc);
             self.reports.deinit(self.alloc);
         }
 
@@ -365,6 +377,10 @@ pub const Compiler = struct {
         self.refs_main = null;
         self.ref_ranges.clearRetainingCapacity();
         self.ref_tokens.clearRetainingCapacity();
+        self.ref_locals.clearRetainingCapacity();
+        self.ref_scope_exits.clearRetainingCapacity();
+        self.ref_hints.clearRetainingCapacity();
+        self.ref_hint_text.clearRetainingCapacity();
         if (self.ref_arena) |*arena| arena.deinit();
         self.ref_arena = null;
         self.alloc.free(self.ref_detail);

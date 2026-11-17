@@ -292,7 +292,7 @@ test "Compile errors are published as diagnostics." {
     try t.expectEqualStrings("Expected right operand.", str(diags[0], &.{"message"}));
     try expectRange(get(diags[0], &.{"range"}).?, 2, 0, 2, 0);
 
-    try s.change(main_uri, 5, "use os\na := 1\nprint(a)\n");
+    try s.change(main_uri, 5, "use os\na := os.args().len()\nprint(a)\n");
     out = try s.flush();
     try t.expectEqual(@as(usize, 1), out.len);
     try t.expectEqual(@as(i64, 5), int(out[0], &.{ "params", "version" }));
@@ -720,10 +720,12 @@ test "Completion lists members and names for source that is being typed." {
     list = try S.complete(&s, 11, "w := 12");
     try t.expectEqual(@as(usize, 0), list.len);
 
-    // The patched source is not the document: the diagnostics are those of the text as it is.
+    // The patched source is not the document: the diagnostics are those of the text as it is. It compiles,
+    // and only the unused names (`math`, `v`, `w`) are warned about.
     const out = try s.flush();
     const diags = items(out[0], &.{ "params", "diagnostics" });
-    try t.expectEqual(@as(usize, 0), diags.len);
+    try t.expectEqual(@as(usize, 3), diags.len);
+    for (diags) |diag| try t.expectEqual(@as(i64, 2), int(diag, &.{"severity"}));
 }
 
 test "Signature help shows the function that is being called." {
@@ -1298,4 +1300,107 @@ test "A module is read from the editor when it is open, otherwise from the disk.
         // The range is the path of the `use`.
         try expectRange(get(diags[0], &.{"range"}).?, 0, 6, 0, 20);
     }
+}
+
+test "Hints of the compiler: unused names, scope exits, inlay hints, quick fixes and doc comments." {
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+    const arena = s.arena.allocator();
+
+    try s.open(main_uri, 1,
+        \\use math
+        \\use os
+        \\
+        \\--| Doubles a number.
+        \\fn twice(n int) -> int:
+        \\    return n * 2
+        \\
+        \\fn step(n int):
+        \\    suspend
+        \\
+        \\fn work() -> !int:
+        \\    scope |s|:
+        \\        s.start(step, {1})
+        \\        return 1
+        \\    return 0
+        \\
+        \\spare := twice(2)
+        \\total := twice(1) + 1
+        \\print(total)
+        \\print(os.args().len())
+        \\
+    );
+    var out = try s.flush();
+    const diags = items(out[0], &.{ "params", "diagnostics" });
+    try t.expectEqual(@as(usize, 3), diags.len);
+    // A module that is never named: a warning that the client fades.
+    try t.expectEqualStrings("The module `math` is never used.", str(diags[0], &.{"message"}));
+    try t.expectEqual(@as(i64, 2), int(diags[0], &.{"severity"}));
+    try t.expectEqualStrings("unused-use", str(diags[0], &.{"code"}));
+    try t.expectEqual(@as(i64, 1), items(diags[0], &.{"tags"})[0].integer);
+    try expectRange(get(diags[0], &.{"range"}).?, 0, 0, 0, 8);
+    // `return` in the block waits for its fibers: information on the keyword.
+    try t.expectEqual(@as(i64, 3), int(diags[1], &.{"severity"}));
+    try t.expectEqualStrings("scope-exit", str(diags[1], &.{"code"}));
+    try expectRange(get(diags[1], &.{"range"}).?, 13, 8, 13, 14);
+    try t.expectEqualStrings("`spare` is never used. Prefix it with `_` to keep it.", str(diags[2], &.{"message"}));
+    try expectRange(get(diags[2], &.{"range"}).?, 16, 0, 16, 5);
+
+    // The quick fixes for the diagnostics that the client sends back.
+    const diags_json = try std.json.Stringify.valueAlloc(arena, get(out[0], &.{ "params", "diagnostics" }).?, .{});
+    var body = try std.fmt.allocPrint(arena,
+        \\{{"jsonrpc":"2.0","id":10,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{s}"}},
+        \\"range":{{"start":{{"line":0,"character":0}},"end":{{"line":0,"character":0}}}},"context":{{"diagnostics":{s}}}}}}}
+    , .{ main_uri, diags_json });
+    out = try s.send(body);
+    var actions = items(out[0], &.{"result"});
+    try t.expectEqual(@as(usize, 2), actions.len);
+    try t.expectEqualStrings("Remove `use math`", str(actions[0], &.{"title"}));
+    try t.expectEqualStrings("quickfix", str(actions[0], &.{"kind"}));
+    var edit = items(actions[0], &.{ "edit", "changes", main_uri })[0];
+    try expectRange(get(edit, &.{"range"}).?, 0, 0, 1, 0);
+    try t.expectEqualStrings("", str(edit, &.{"newText"}));
+    try t.expectEqualStrings("Prefix `spare` with `_`", str(actions[1], &.{"title"}));
+    edit = items(actions[1], &.{ "edit", "changes", main_uri })[0];
+    try expectRange(get(edit, &.{"range"}).?, 16, 0, 16, 0);
+    try t.expectEqualStrings("_", str(edit, &.{"newText"}));
+
+    // Inlay hints: the inferred types, and the statement that waits.
+    body = try std.fmt.allocPrint(arena,
+        \\{{"jsonrpc":"2.0","id":11,"method":"textDocument/inlayHint","params":{{"textDocument":{{"uri":"{s}"}},
+        \\"range":{{"start":{{"line":0,"character":0}},"end":{{"line":30,"character":0}}}}}}}}
+    , .{main_uri});
+    out = try s.send(body);
+    const hints = items(out[0], &.{"result"});
+    try t.expectEqual(@as(usize, 3), hints.len);
+    try t.expectEqualStrings("waits for fibers", str(hints[0], &.{"label"}));
+    try t.expectEqual(@as(i64, 13), int(hints[0], &.{ "position", "line" }));
+    try t.expectEqual(@as(i64, 16), int(hints[0], &.{ "position", "character" }));
+    try t.expectEqualStrings("int", str(hints[1], &.{"label"}));
+    try t.expectEqual(@as(i64, 1), int(hints[1], &.{"kind"}));
+    try t.expectEqual(@as(i64, 16), int(hints[1], &.{ "position", "line" }));
+    try t.expectEqual(@as(i64, 5), int(hints[1], &.{ "position", "character" }));
+    try t.expectEqual(@as(i64, 17), int(hints[2], &.{ "position", "line" }));
+
+    // Hover shows the doc comment above the declaration.
+    const hover = try s.requestAt("textDocument/hover", main_uri, 16, 10);
+    try t.expectEqualStrings("```cyber\nfn twice(n int) -> int\n```\n\nDoubles a number.", str(hover, &.{ "result", "contents", "value" }));
+
+    // A compile error that names the right name gets a fix that writes it.
+    try s.change(main_uri, 2, "use math\nprint(math.isNaN(1.0))\n");
+    out = try s.flush();
+    const err_json = try std.json.Stringify.valueAlloc(arena, get(out[0], &.{ "params", "diagnostics" }).?, .{});
+    body = try std.fmt.allocPrint(arena,
+        \\{{"jsonrpc":"2.0","id":12,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{s}"}},
+        \\"range":{{"start":{{"line":1,"character":0}},"end":{{"line":1,"character":0}}}},"context":{{"diagnostics":{s}}}}}}}
+    , .{ main_uri, err_json });
+    out = try s.send(body);
+    actions = items(out[0], &.{"result"});
+    try t.expectEqual(@as(usize, 1), actions.len);
+    try t.expectEqualStrings("Change to `is_nan`", str(actions[0], &.{"title"}));
+    edit = items(actions[0], &.{ "edit", "changes", main_uri })[0];
+    try expectRange(get(edit, &.{"range"}).?, 1, 11, 1, 16);
+    try t.expectEqualStrings("is_nan", str(edit, &.{"newText"}));
 }

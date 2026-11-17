@@ -8,7 +8,13 @@ With the language server running:
 
 * Compile errors as diagnostics while typing. The document is compiled as a program, it is not run.
   Related places (`First declared at:`, the call that expanded a template) are attached to the error.
-* Hover: the declaration line of a function or type, the type of a local, a field or an expression.
+* Hover: the declaration line of a function or type, the type of a local, a field or an expression, and the
+  `--|` doc comment above a declaration.
+* Warnings for locals and `use`s that are never used (faded), and a note on each `return`, `break` and
+  `continue` that waits for the fibers of a `scope` block before it leaves.
+* Quick fixes: the name that a compile error suggests (`Did you mean ...?`), `xs = xs.append(v)` to
+  `xs.append(v)`, prefix an unused local with `_`, remove an unused `use`.
+* Inlay hints: the inferred type of `x := expr`, and `waits for fibers` after a statement that waits.
 * Go to Definition, within the document and into the modules it uses.
 * Find References across the workspace, highlights, and Go to Symbol in Workspace. Rename for locals and parameters.
 * Semantic highlighting of the names that the compiler resolved.

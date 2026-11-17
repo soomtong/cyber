@@ -1,6 +1,6 @@
 # LSP 서버 설계와 단계 계획
 
-2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 ~ P4 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P4 구현" 절). 남은 것은 파서 복구(P2의 나머지)와 P5.
+2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 ~ P4 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P4 구현" 절), P5의 code action · inlay hint와 린트 진단(2026-11-18, 12절). 남은 것은 파서 복구(P2의 나머지)와 함수 · 타입 rename.
 앞선 결정은 `docs/decisions/project_fmt.md`의 "내장 도구의 기준"(LSP는 CLI에 넣지 않고 라이브러리 위의 별도 프로그램),
 사실 근거는 `docs/study/01-pipeline-front-end.md` 6절과 `docs/decisions/project_compile_error_report.md`이다.
 
@@ -420,5 +420,77 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
 - 파서 복구(P2의 나머지): 들여쓰기 기준 블록 동기화로 구문 오류를 여러 개 낸다. 구문 오류가 있으면 sema는 돌지 않는다.
 - F-114(검사마다 느는 메모리)와 F-116(private 필드 struct의 `print`)은 2026-11-13에 고쳤다. F-114는 서버가 아니라
   컴파일러의 reset이 컴파일 타임 힙을 비우지 않던 것이다. 300번 검사에 RSS가 변하지 않는다.
-- P5: 함수 · 타입의 rename(워크스페이스 references 위에서, 한계를 정한 뒤), code action, inlay hint.
+- P5의 나머지: 함수 · 타입의 rename(워크스페이스 references 위에서, 한계를 정한 뒤). code action · inlay hint는 12절.
 - Windows에서의 실행 확인.
+
+## 12. P5: 코드 지원과 린트 (2026-11-18)
+
+사용자 요청: `scope` 블록 안의 `return` · `break` · `continue`가 바로 나가지 않는다는 것을 알리는 도구(`project_coroutines.md`의
+"우리 쪽 안")에서 시작해, LSP가 기본으로 갖출 코드 지원 · 린트를 목록으로 만들고 구현한다.
+
+### 기능 목록
+
+| 기능 | LSP 메서드 | 상태 |
+| --- | --- | --- |
+| 컴파일 오류 진단 | `publishDiagnostics` | P1 |
+| 포맷 | `formatting` | P1 |
+| 개요 · 접기 | `documentSymbol` · `foldingRange` | P1 |
+| hover · 정의로 가기 | `hover` · `definition` | P3. hover에 문서 주석을 더함(이번) |
+| 참조 · 강조 · 지역 rename | `references` · `documentHighlight` · `rename` | P3 · P4 |
+| completion · signatureHelp | `completion` · `signatureHelp` | P3 |
+| workspace 심볼 · semantic tokens | `workspace/symbol` · `semanticTokens/full` | P4 |
+| `scope` 출구 알림 | 진단(Information) · inlay hint | 이번 |
+| 쓰지 않는 지역 · `use` | 진단(Warning, `Unnecessary` 태그) | 이번 |
+| quick fix | `codeAction` | 이번 |
+| 추론된 타입 | `inlayHint` | 이번 |
+| 함수 · 타입 rename, 매개변수 이름 inlay, call hierarchy, 범위 포맷 | | 하지 않음(아래) |
+
+### 컴파일러: `cl_vm_symbol_hints`
+
+해석 기록(8절)에 두 표를 더하고, 질의 하나로 편집기에 줄 "메모"를 낸다. `CLHint{pos, end_pos, kind, detail}`, 위치순.
+
+- `CL_HINT_LOCAL_TYPE`: `x := expr`의 추론된 타입. `sema.localDecl`이 타입이 정해진 뒤 `refs.recordDeclaredLocal`로 적는다
+  (`Compiler.ref_locals`). 위치는 이름 슬라이스의 주소에서 얻는다(`recordLocalDecl`과 같다). 반복문 본문을 다시 분석할 때
+  이름 노드의 `pos()`가 소스의 다른 자리를 가리키는 경우가 있었다(저장소 훑기에서 `heap.cy`).
+- `CL_HINT_SCOPE_EXIT`: 합류를 넣는 출구 문장. `semaScopeExitJoin`이 첫 블록을 합류할 때 적는다(`ref_scope_exits`).
+  블록 안의 반복문 안에 있는 `break`는 블록을 떠나지 않으므로 없다.
+- `CL_HINT_UNUSED_LOCAL`: 선언(`x := ...`, `var x T = ...`)은 있고 쓰임이 없는 지역. 쓰임은 기존 해석 기록의 지역 참조다.
+  람다가 capture한 지역의 쓰임은 기록되지 않았는데(8절 "하지 않은 것"), 이번에 `lookupIdent`의 capture 갈래도 원래 지역의
+  쓰임으로 적는다. 매개변수 · `for` 캡처 · `_`로 시작하는 이름은 대상이 아니다.
+- `CL_HINT_UNUSED_USE`: 이름이 한 번도 해석되지 않은 `use x`. `use * '...'`과 속성이 붙은 `use`는 대상이 아니다.
+- 두 "쓰지 않음"은 오류 없는 컴파일에서만 낸다(본문의 첫 오류 뒤는 해석되지 않는다). 그래도 sema가 보지 않는 곳이 있다:
+  택하지 않은 `#if` 갈래, 인스턴스가 없는 템플릿 본문, 문자열. 이름이 그런 자리(해석 기록이 없는 자리)에 단어로 쓰여 있으면
+  쓰지 않음으로 보지 않는다(`refs.mentionedUnresolved`). `std/test.cy`의 `use meta`가 이것으로 빠진다. 대가로 `mk('a')`
+  같은 문자열에 같은 글자가 있는 짧은 이름은 놓친다.
+
+### 서버
+
+- 진단: 컴파일 오류(Error) 뒤에 힌트에서 만든 진단을 붙인다. `code`로 구별한다(`unused-local` · `unused-use` · `scope-exit`).
+  - `scope-exit`(Information, 키워드 범위): '`return` waits for the fibers of the `scope` block before it leaves, and its value is
+    computed after them. An error of a fiber leaves in its place.', `break` · `continue`는 '... before it leaves the block. ...'.
+  - `unused-local` · `unused-use`(Warning, 태그 `Unnecessary`라 에디터가 흐리게 그린다).
+- `textDocument/codeAction`(quickfix): 클라이언트가 돌려준 진단마다 `assist.quickFix`가 고칠 편집을 만든다.
+  - 컴파일러의 'Did you mean `x`?' · 'Did you mean the method `len()`?'(범위가 이름일 때). 이미 `(`가 붙어 있으면 `()`를 뺀다.
+  - 'Use `os.read_file`.'처럼 같은 모듈의 다른 이름. 다른 모듈로 옮겨야 하는 것(`os.dirname` → `path.dir`)은 `use`도 고쳐야
+    해서 만들지 않는다.
+  - `out = out.append(3)`의 'Write `out.append(3)` as a statement.': 줄이 `이름 = 호출`뿐일 때 줄을 바꾼다.
+  - `unused-local`은 이름 앞에 `_`, `unused-use`는 그 줄을 지운다.
+- `textDocument/inlayHint`: `x := expr` 이름 뒤의 타입(kind Type), `scope` 출구 문장 끝의 `waits for fibers`. 초기식이 타입을
+  이미 말하면 뺀다(`Vec2{...}`, `Vec2.zero()`, 문자열 · 수 · `true` 리터럴, 람다. `assist.typeIsWritten`).
+- hover: 선언이 서버가 읽을 수 있는 소스(열린 문서나 파일)에 있으면 바로 위의 `--|` 줄을 코드 블록 뒤에 붙인다. 표준 모듈은
+  서버에 소스가 없어 붙지 않는다.
+
+### 확인
+
+- lib 테스트 `cl_vm_symbol_hints lists inferred types, scope exits and unused names.`, 서버 테스트
+  `Hints of the compiler: unused names, scope exits, inlay hints, quick fixes and doc comments.`, `assist.zig`의 단위 테스트 셋.
+- 저장소 `.cy` 306개(오류 테스트 제외)를 서버로 열어 힌트 진단을 모았다. 처음에는 쓰지 않은 지역 210건 중 상당수가 엉뚱한
+  자리를 가리켰다(위의 노드 위치 문제). 고친 뒤 지역 84건 · `use` 9건 · `scope` 출구 9건이고, 지역은 테스트가 `@deinit`을 보려고
+  만든 값처럼 실제로 쓰지 않는 것이다. `use`는 모두 실제로 쓰지 않거나(주석에만 있는 이름 포함) 문서화된 예외다.
+
+### 하지 않은 것
+
+- 함수 · 타입 rename(11절과 같은 이유), 호출 자리의 매개변수 이름 inlay hint(오버로드 중 고른 함수를 기록하지 않는다, 8절),
+  call hierarchy, 범위 포맷.
+- 매개변수의 쓰지 않음: 콜백처럼 시그니처를 맞추느라 받는 매개변수가 많아 잡음이 크다.
+- 컴파일러 경고: 이 메모는 LSP · 호스트 질의로만 나온다. CLI의 컴파일 결과는 그대로다.

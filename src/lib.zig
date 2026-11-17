@@ -600,6 +600,21 @@ export fn cl_vm_symbol_tokens(vm: *cy.VM, out: *[*c]const C.Token) usize {
     return tokens.len;
 }
 
+comptime {
+    std.debug.assert(@sizeOf(C.Hint) == @sizeOf(cy.refs.Hint));
+    std.debug.assert(@offsetOf(C.Hint, "detail") == @offsetOf(cy.refs.Hint, "detail_ptr"));
+}
+
+export fn cl_vm_symbol_hints(vm: *cy.VM, out: *[*c]const C.Hint) usize {
+    out.* = null;
+    // Unused names need every use: only a compile without a report reached all of them.
+    const complete = vm.last_res == C.Success and vm.compiler.reports.items.len == 0;
+    const hints = cy.refs.hints(vm.compiler, complete) catch return 0;
+    if (hints.len == 0) return 0;
+    out.* = @ptrCast(hints.ptr);
+    return hints.len;
+}
+
 fn toItems(vm: *cy.VM, items: []const cy.refs.Item, out: *[*c]const C.Item) usize {
     out.* = null;
     if (items.len == 0) return 0;

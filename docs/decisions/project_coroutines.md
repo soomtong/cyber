@@ -639,7 +639,7 @@ move 결과를 `ExprResult.initOwned`(값, 자리 아님)로 돌려주고 그 IR
 TaskGroup / Nursery can lead to counterintuitive behaviour". 고치는 법으로 블록 안에서 cancel scope를 취소하고 문장을 블록
 밖에 두라고 권한다. SonarSource S7514도 같은 패턴을 짚는다(다른 fiber의 오류가 `return` 값을 이긴다).
 
-### 우리 쪽 안 (미구현, 사용자 결정 대기)
+### 우리 쪽 안 (2026-11-18 구현: 안 1과 안 3)
 
 컴파일러에는 경고가 없고 LSP 진단은 오류(severity 1)뿐이다(`src/lsp/server.zig`).
 
@@ -649,6 +649,10 @@ TaskGroup / Nursery can lead to counterintuitive behaviour". 고치는 법으로
 - 안 2: hover만. `return` 위에 같은 문장. 작지만 사람이 마우스를 올려야 보인다.
 - 안 3: inlay hint(P5 계획)로 문장 끝에 `waits for fibers`. P5 기반이 먼저 필요하다.
 - Java처럼 오류로 만드는 것은 확정한 규칙 1과 맞지 않아 제외한다.
+- 구현(2026-11-18, 사용자 요청으로 LSP 코드 지원 · 린트를 넓히며): 안 1과 안 3을 같이 했다. sema가 출구 문장을
+  `Compiler.ref_scope_exits`에 적고 `cl_vm_symbol_hints`가 `CL_HINT_SCOPE_EXIT`로 낸다. 서버는 키워드에 Information 진단과
+  문장 끝 inlay hint `waits for fibers`를 낸다. 컴파일 결과(CLI · `cl_vm_eval`)에는 나오지 않는다.
+  자세한 것은 `docs/specs/2026-11-12-lsp-design.md` 12절.
 
 출처: https://flake8-async.readthedocs.io/en/latest/rules.html, https://rules.sonarsource.com/python/RSPEC-7514,
 https://developer.apple.com/documentation/swift/withtaskgroup(of:returning:isolation:body:),

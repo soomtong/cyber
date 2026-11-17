@@ -846,6 +846,34 @@ typedef struct CLToken {
 /// validate or reset.
 size_t cl_vm_symbol_tokens(CLVM* vm, const CLToken** out);
 
+typedef enum {
+    /// `x := expr`: the type inferred for `x`. The range is the name, `detail` is the type.
+    CL_HINT_LOCAL_TYPE = 0,
+    /// A `return`, `break` or `continue` that waits for the fibers of a `scope` block before it leaves the block.
+    /// The range is the statement, `detail` is the keyword.
+    CL_HINT_SCOPE_EXIT = 1,
+    /// A local (`x := ...`, `var x T = ...`) that is never used. The range is the name, `detail` is the name.
+    /// A name that starts with `_` is not listed.
+    CL_HINT_UNUSED_LOCAL = 2,
+    /// A `use` whose module is never named. The range is the statement, `detail` is the name of the module.
+    CL_HINT_UNUSED_USE = 3,
+} CLHintKind;
+
+/// A note on the main source for an editor, see `cl_vm_symbol_hints`. `kind` is a `CLHintKind`.
+typedef struct CLHint {
+    uint32_t pos;
+    uint32_t end_pos;
+    uint32_t kind;
+    CLBytes detail;
+} CLHint;
+
+/// Lists notes on the main source of the last compile: inferred types of locals, statements that wait for the
+/// fibers of a `scope` block, and, when the compile succeeded, the locals and `use`s that are never used.
+/// A failed compile did not reach every use, so it lists no unused ones. Sorted by position. Needs
+/// `cl_vm_set_symbol_info`. Owned by the VM, valid until the next call of this function, eval, compile,
+/// validate or reset.
+size_t cl_vm_symbol_hints(CLVM* vm, const CLHint** out);
+
 // For embedded, Cyber by default uses malloc (it can be configured to use the high-perf mimalloc).
 // If the host uses a different allocator than Cyber, use `cl_vm_alloc` to allocate memory
 // that is handed over to Cyber so it knows how to free it.

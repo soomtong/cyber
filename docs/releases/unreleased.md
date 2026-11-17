@@ -47,3 +47,18 @@
     (`os.write_file_bytes(p, os.read_file(q)!)`는 읽기를 고칠 일이다).
 - 힌트 표는 `sema.zig`의 `moved_module_syms` · `call_arg_hints` · `result_type_hints`. 앞으로 std 이름을 나누거나 바꾸면 이 표에
   한 줄을 더한다.
+
+## 언어 서버: 린트 진단, quick fix, inlay hint, 문서 주석
+
+- `cyber-lsp`가 컴파일 오류 말고도 알려 준다. 컴파일 결과(CLI)는 그대로다.
+  - 쓰지 않는 지역(`x := ...`, `var x T = ...`)과 `use`: Warning, 에디터가 흐리게 그린다(`Unnecessary`). `_`로 시작하는 이름은
+    빼고, 오류 없이 컴파일된 문서에서만 낸다. 택하지 않은 `#if` 갈래 · 문자열에 같은 이름이 있으면 내지 않는다.
+  - `scope` 블록 안에서 블록을 떠나는 `return` · `break` · `continue`: Information. 출구 앞에서 fiber를 기다리고 fiber의 오류가
+    대신 나간다는 문구(`docs/decisions/project_coroutines.md` "우리 쪽 안"의 안 1).
+- `textDocument/codeAction`(quick fix): 컴파일 오류가 말하는 이름('Did you mean `file_exists`?', 'Use `os.read_file`.'),
+  `out = out.append(3)` → `out.append(3)`, 쓰지 않는 지역에 `_` 붙이기, 쓰지 않는 `use` 줄 지우기.
+- `textDocument/inlayHint`: `x := expr`의 추론된 타입(초기식이 타입을 이미 말하면 뺀다), `scope` 출구 문장 끝의 `waits for fibers`.
+- hover가 선언 위의 `--|` 문서 주석을 보여 준다(서버가 읽을 수 있는 소스의 선언).
+- 임베딩: `cl_vm_symbol_hints(vm, &hints)`(`CLHint`, `CLHintKind`)가 더해졌다. 기존 구조체는 그대로다.
+- 고친 것: 람다가 capture한 지역의 쓰임이 해석 기록에 없어 references · 강조에서 빠졌다. 이제 원래 지역의 쓰임으로 나온다.
+- 설계와 확인: `docs/specs/2026-11-12-lsp-design.md` 12절.

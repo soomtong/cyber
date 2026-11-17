@@ -764,3 +764,187 @@ fn symKindName(sym_t: cy.sym.SymType) []const u8 {
         else => "symbol",
     };
 }
+
+// -----------------------------------
+// [ Hints ]
+// -----------------------------------
+
+/// A local of the main source that was declared with `x := ...` or `var x T = ...`.
+pub const LocalDecl = struct {
+    /// The range of the name.
+    pos: u32,
+    end: u32,
+    /// The type of a local that was declared without one. Null when the declaration names it.
+    inferred: ?*cy.Type,
+};
+
+pub const HintKind = enum(u32) {
+    /// `x := expr`: the type that was inferred for `x`. The range is the name, `detail` is the type.
+    local_type = 0,
+    /// A `return`, `break` or `continue` that waits for the fibers of a `scope` block before it leaves the block.
+    /// The range is the statement, `detail` is the keyword.
+    scope_exit = 1,
+    /// A local that is declared and never used. The range is the name, `detail` is the name.
+    unused_local = 2,
+    /// A `use` whose module is never named. The range is the statement, `detail` is the name of the module.
+    unused_use = 3,
+};
+
+pub const Hint = extern struct {
+    pos: u32,
+    end: u32,
+    kind: u32,
+    detail_ptr: [*]const u8,
+    detail_len: usize,
+};
+
+/// `x := expr` or `var x T = expr` in the main source. `inferred` is the type of a local without a declared type.
+pub fn recordDeclaredLocal(c: *cy.Chunk, name_n: *ast.Node, inferred: ?*cy.Type) void {
+    const compiler = c.compiler;
+    if (!compiler.record_refs or c != compiler.main_chunk) return;
+    if (name_n.type() != .ident) return;
+    // The position comes from the name, a slice of the source, like `recordLocalDecl`. The position of the node
+    // is not reliable for a body that sema goes over again (a loop).
+    const name = name_n.cast(.ident).name.slice();
+    const pos = declPos(c, name);
+    if (pos == cy.NullId) return;
+    compiler.ref_locals.append(compiler.alloc, .{ .pos = pos, .end = pos + @as(u32, @intCast(name.len)), .inferred = inferred }) catch {};
+}
+
+/// A statement that waits for the fibers of a `scope` block before it leaves it.
+pub fn recordScopeExit(c: *cy.Chunk, node: *ast.Node) void {
+    const range = rangeOf(c, node) orelse return;
+    c.compiler.ref_scope_exits.append(c.compiler.alloc, range) catch {};
+}
+
+/// Notes on the main source of the last compile for an editor: inferred types, statements that wait for fibers,
+/// and, when `complete` (the compile reached every body without an error), the locals and `use`s that are never
+/// used. Sorted by position. Valid until the next call or compile.
+pub fn hints(compiler: *cy.Compiler, complete: bool) ![]const Hint {
+    const out = &compiler.ref_hints;
+    const text = &compiler.ref_hint_text;
+    out.clearRetainingCapacity();
+    text.clearRetainingCapacity();
+    const main = compiler.refs_main orelse return out.items;
+    const alloc = compiler.alloc;
+
+    // The detail is an offset into `text` until the end, since `text` can move while it grows.
+    const Pending = struct { pos: u32, end: u32, kind: HintKind, start: usize, len: usize };
+    var pending: std.ArrayList(Pending) = .empty;
+    defer pending.deinit(alloc);
+
+    for (compiler.ref_locals.items) |local| {
+        const type_ = local.inferred orelse continue;
+        const name = try compiler.sema.allocTypeName(type_);
+        defer alloc.free(name);
+        const start = text.items.len;
+        try text.appendSlice(alloc, name);
+        try pending.append(alloc, .{ .pos = local.pos, .end = local.end, .kind = .local_type, .start = start, .len = name.len });
+    }
+    for (compiler.ref_scope_exits.items) |range| {
+        const src = main.src[range[0]..range[1]];
+        var kw_len: usize = 0;
+        while (kw_len < src.len and std.ascii.isAlphabetic(src[kw_len])) kw_len += 1;
+        const kw = src[0..kw_len];
+        if (!std.mem.eql(u8, kw, "return") and !std.mem.eql(u8, kw, "break") and !std.mem.eql(u8, kw, "continue")) continue;
+        try pending.append(alloc, .{ .pos = range[0], .end = range[1], .kind = .scope_exit, .start = @intFromPtr(src.ptr) - @intFromPtr(main.src.ptr), .len = kw_len });
+    }
+    if (complete) {
+        try unusedLocals(compiler, main, &pending);
+        try unusedUses(compiler, main, &pending);
+    }
+
+    std.mem.sort(Pending, pending.items, {}, struct {
+        fn lessThan(_: void, x: Pending, y: Pending) bool {
+            return x.pos < y.pos or (x.pos == y.pos and @intFromEnum(x.kind) < @intFromEnum(y.kind));
+        }
+    }.lessThan);
+    for (pending.items, 0..) |p, i| {
+        // A local in a template body is recorded once per instance: the last one is kept.
+        if (i + 1 < pending.items.len) {
+            const next = pending.items[i + 1];
+            if (next.pos == p.pos and next.end == p.end and next.kind == p.kind) continue;
+        }
+        const detail = if (p.kind == .scope_exit or p.kind == .unused_local or p.kind == .unused_use)
+            main.src[p.start..][0..p.len]
+        else
+            text.items[p.start..][0..p.len];
+        try out.append(alloc, .{ .pos = p.pos, .end = p.end, .kind = @intFromEnum(p.kind), .detail_ptr = detail.ptr, .detail_len = detail.len });
+    }
+    return out.items;
+}
+
+fn unusedLocals(compiler: *cy.Compiler, main: *cy.Chunk, pending: anytype) !void {
+    for (compiler.ref_locals.items, 0..) |local, i| {
+        // The same declaration again (another instance of a template body).
+        var seen = false;
+        for (compiler.ref_locals.items[0..i]) |prev| {
+            if (prev.pos == local.pos) seen = true;
+        }
+        if (seen) continue;
+        const name = main.src[local.pos..local.end];
+        // `_x` says that it is not used on purpose.
+        if (name.len == 0 or name[0] == '_') continue;
+        var used = false;
+        for (compiler.refs.items) |ref| {
+            if (ref.kind == .local and ref.data.local_decl == local.pos and ref.pos != local.pos) {
+                used = true;
+                break;
+            }
+        }
+        if (used or mentionedUnresolved(compiler, main, name, local.end)) continue;
+        try pending.append(compiler.alloc, .{ .pos = local.pos, .end = local.end, .kind = .unused_local, .start = local.pos, .len = name.len });
+    }
+}
+
+fn unusedUses(compiler: *cy.Compiler, main: *cy.Chunk, pending: anytype) !void {
+    const root = main.ast.root orelse return;
+    for (root.stmts.slice()) |stmt| {
+        if (stmt.type() != .import_stmt) continue;
+        const import = stmt.cast(.import_stmt);
+        // `use * 'x'` brings in names of its own. A `use` with a condition may be skipped on purpose.
+        if (import.name.type() != .ident or import.attrs.len > 0) continue;
+        const name_range = rangeOf(main, import.name) orelse continue;
+        const name = main.src[name_range[0]..name_range[1]];
+        if (name.len == 0 or name[0] == '_') continue;
+        var used = false;
+        for (compiler.refs.items) |ref| {
+            if (ref.kind != .sym or ref.pos == name_range[0]) continue;
+            if (std.mem.eql(u8, main.src[ref.pos..ref.end], name)) {
+                used = true;
+                break;
+            }
+        }
+        if (used or mentionedUnresolved(compiler, main, name, name_range[1])) continue;
+        const stmt_range = rangeOf(main, stmt) orelse continue;
+        try pending.append(compiler.alloc, .{ .pos = stmt_range[0], .end = stmt_range[1], .kind = .unused_use, .start = name_range[0], .len = name.len });
+    }
+}
+
+/// Whether `name` is written as a word after `from` at a place that sema did not resolve: a branch of `#if`
+/// that was not taken, a template body that was not expanded, or a string. A use could hide there, so the
+/// name is not called unused. Words in `--` comments do not count.
+fn mentionedUnresolved(compiler: *cy.Compiler, main: *cy.Chunk, name: []const u8, from: u32) bool {
+    const src = main.src;
+    var i: usize = from;
+    while (std.mem.indexOfPos(u8, src, i, name)) |at| {
+        i = at + name.len;
+        if (at > 0 and isWordByte(src[at - 1])) continue;
+        if (i < src.len and isWordByte(src[i])) continue;
+        const line_start = if (std.mem.findScalarLast(u8, src[0..at], '\n')) |nl| nl + 1 else 0;
+        if (std.mem.indexOf(u8, src[line_start..at], "--") != null) continue;
+        var resolved = false;
+        for (compiler.refs.items) |ref| {
+            if (ref.pos == at and ref.kind != .expr) {
+                resolved = true;
+                break;
+            }
+        }
+        if (!resolved) return true;
+    }
+    return false;
+}
+
+fn isWordByte(ch: u8) bool {
+    return std.ascii.isAlphanumeric(ch) or ch == '_';
+}

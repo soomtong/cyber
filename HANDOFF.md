@@ -44,7 +44,7 @@
 - [x] `221c9c93` 기준 14단계 검증 rc=0(2026-11-17).
 - [x] tars-agent 안내 변경은 `a7d9c3d`로 커밋됨. 0.4.15 릴리스 뒤 tars-agent 의존을 올리면 안내 예제가 맞는다.
 - [ ] 릴리스 0.4.15는 사용자 지시 때.
-- [ ] tars-agent 결정 대기 중 남은 것: `read_file_str` · `write_file(p, bytes)` 오류에 새 이름을 말하는 문구.
+- [x] `os` 파일 함수 옛 꼴의 오류에 새 이름(`read_file_str`, `write_file(p, bytes)`, 출처 힌트). 결정 문서 "오류 문구에 새 이름".
 - [ ] 사용자 결정 대기(이전부터):
   - `scope` 블록 안의 `return` · `break` · `continue` 합류를 알리는 도구(LSP 진단 · hover · inlay hint). `project_coroutines.md` 끝 절.
   - 정렬: pinned closure(안 A), 키 정렬, 인자 없는 `sort()`의 원소 조건. `project_sort_closures.md` "결정할 것".

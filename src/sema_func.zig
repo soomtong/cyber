@@ -1381,10 +1381,14 @@ fn int_literal_fits_exact(node: *ast.Node, param_t: *cy.Type) bool {
 }
 
 pub fn reportCallFuncMismatch2(c: *cy.Chunk, pre_args: []const Argument, end_args: []const *ast.Node, func: *cy.Func, match_err: FuncMatchError, node: *ast.Node) anyerror {
-    return reportCallFuncMismatch(c, pre_args, end_args, func.name(), func.sig, match_err, node);
+    return reportCallFuncMismatch3(c, pre_args, end_args, func.name(), func.sig, func, match_err, node);
 }
 
 pub fn reportCallFuncMismatch(c: *cy.Chunk, pre_args: []const Argument, end_args: []const *ast.Node, func_name: []const u8, sig: *cy.FuncSig, match_err: FuncMatchError, node: *ast.Node) anyerror {
+    return reportCallFuncMismatch3(c, pre_args, end_args, func_name, sig, null, match_err, node);
+}
+
+fn reportCallFuncMismatch3(c: *cy.Chunk, pre_args: []const Argument, end_args: []const *ast.Node, func_name: []const u8, sig: *cy.FuncSig, func: ?*cy.Func, match_err: FuncMatchError, node: *ast.Node) anyerror {
     const sig_str = try c.sema.allocFuncSigStr(sig, true, c);
     defer c.alloc.free(sig_str);
 
@@ -1470,7 +1474,13 @@ pub fn reportCallFuncMismatch(c: *cy.Chunk, pre_args: []const Argument, end_args
             return c.reportErrorFmt("Can not apply `{}` to `{}` and `{}`.{}", &.{v(func_name), v(left_name), v(argt_name), v(hint)}, err_node);
         }
     }
-    return c.reportErrorFmt("Expected argument `{}`, found `{}`, when calling `fn {}{}`.", &.{v(paramt_name), v(argt_name), v(func_name), v(sig_str)}, err_node);
+    // A text and bytes pair (`os.write_file` and `os.write_file_bytes`): name the other function.
+    // A value from the other function of the pair (`os.read_file(p)!` for `[]byte`) is named first.
+    var hint = try sema.resultTypeHint(c, match_err.param.get_type(), match_err.arg_t, err_node);
+    if (hint.len == 0) {
+        if (func) |f| hint = try sema.callArgHint(c, f, match_err.arg_t);
+    }
+    return c.reportErrorFmt("Expected argument `{}`, found `{}`, when calling `fn {}{}`.{}", &.{v(paramt_name), v(argt_name), v(func_name), v(sig_str), v(hint)}, err_node);
 }
 
 var op_hint_buf: [256]u8 = undefined;

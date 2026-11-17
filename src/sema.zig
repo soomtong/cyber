@@ -63,6 +63,9 @@ const LocalVarS = struct {
     /// For locals this points to a ir.DeclareLocal.
     /// This is NullId for params.
     declIrStart: *ir.Stmt,
+
+    /// The initializer of a `x := expr` declaration. Error hints use it to tell where a value came from.
+    init_node: ?*ast.Node = null,
 };
 
 const LifetimeKind = enum {
@@ -2012,7 +2015,89 @@ const moved_module_syms = [_][3][]const u8{
     .{ "os", "basename", " Use `path.base` from `use path`." },
     .{ "os", "base_name", " Use `path.base` from `use path`." },
     .{ "os", "dirname", " Use `path.dir` from `use path`." },
+    .{ "os", "read_file_str", " Use `os.read_file`. It returns `str`." },
+    .{ "os", "readFileStr", " Use `os.read_file`. It returns `str`." },
 };
+
+/// Hints for an argument that a std function does not take: module uri, function name, argument type, hint.
+/// The function was split into a text and a bytes function, and the hint names the other one.
+const call_arg_hints = [_][4][]const u8{
+    .{ "os", "write_file", "[]byte", " Write bytes with `os.write_file_bytes`." },
+    .{ "os", "write_file_bytes", "str", " Write text with `os.write_file`." },
+};
+
+/// Hints for a value that came from a std call and has the other type of a text and bytes pair:
+/// module name as written, function name, the type that was expected, the type that was found, hint.
+const result_type_hints = [_][5][]const u8{
+    .{ "os", "read_file", "[]byte", "str", " `os.read_file` returns `str`. Read bytes with `os.read_file_bytes`." },
+    .{ "os", "read_file_bytes", "str", "[]byte", " `os.read_file_bytes` returns `[]byte`. Read text with `os.read_file`." },
+};
+
+/// The hint from `call_arg_hints` for the argument type `arg_t` of `func`, or an empty string.
+pub fn callArgHint(c: *cy.Chunk, func: *cy.Func, arg_t: *cy.Type) ![]const u8 {
+    if (func.type == .userLambda) return "";
+    const mod_sym = func.parent.parent orelse return "";
+    if (mod_sym.type != .chunk) return "";
+    const uri = mod_sym.cast(.chunk).chunk.srcUri;
+    const name = func.name();
+    const arg_name = try c.sema.allocTypeName(arg_t);
+    defer c.alloc.free(arg_name);
+    for (call_arg_hints) |hint| {
+        if (std.mem.eql(u8, hint[0], uri) and std.mem.eql(u8, hint[1], name) and std.mem.eql(u8, hint[2], arg_name)) {
+            return hint[3];
+        }
+    }
+    return "";
+}
+
+/// The call that produced the value of `node`: `os.read_file(p)!`, `(…)`, or a local declared with such a call
+/// (`b := os.read_file(p)!`). Returns the callee as written: `os`, `read_file`.
+fn producerCall(c: *cy.Chunk, node: *ast.Node) ?struct { []const u8, []const u8 } {
+    var cur = node;
+    var depth: u32 = 0;
+    while (depth < 8) : (depth += 1) {
+        switch (cur.type()) {
+            .group => cur = cur.cast(.group).child,
+            .unwrap_res => cur = cur.cast(.unwrap_res).res,
+            .ident => {
+                if (c.semaProcs.items.len == 0) return null;
+                const name = c.ast.nodeString(cur);
+                const entry = c.proc().var_cache_entries.get(name) orelse return null;
+                if (entry.type != .local) return null;
+                const local = &c.varStack.items[entry.data.local.varId];
+                if (local.type != .local) return null;
+                const inner = local.inner.local;
+                if (inner.isParam or !inner.hasInit) return null;
+                cur = inner.init_node orelse return null;
+            },
+            .callExpr => {
+                const callee = cur.cast(.callExpr).callee;
+                if (callee.type() != .accessExpr) return null;
+                const access = callee.cast(.accessExpr);
+                if (access.left.type() != .ident or access.right.type() != .ident) return null;
+                return .{ c.ast.nodeString(access.left), c.ast.nodeString(access.right) };
+            },
+            else => return null,
+        }
+    }
+    return null;
+}
+
+/// The hint from `result_type_hints` when `node` has the type `act_t` but `exp_t` was expected, or an empty string.
+pub fn resultTypeHint(c: *cy.Chunk, exp_t: *cy.Type, act_t: *cy.Type, node: *ast.Node) ![]const u8 {
+    const call = producerCall(c, node) orelse return "";
+    const exp_name = try c.sema.allocTypeName(exp_t);
+    defer c.alloc.free(exp_name);
+    const act_name = try c.sema.allocTypeName(act_t);
+    defer c.alloc.free(act_name);
+    for (result_type_hints) |hint| {
+        if (std.mem.eql(u8, hint[0], call[0]) and std.mem.eql(u8, hint[1], call[1]) and
+            std.mem.eql(u8, hint[2], exp_name) and std.mem.eql(u8, hint[3], act_name)) {
+            return hint[4];
+        }
+    }
+    return "";
+}
 
 /// A hint for a symbol that the module `mod_sym` does not have: ` Did you mean `x`?`, or an empty string.
 /// Like `suggestMember`, names from other languages are mapped first, then a camelCase name is tried as snake_case.
@@ -4634,6 +4719,7 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
         .init = null,
     });
     svar.inner.local.declIrStart = declare;
+    svar.inner.local.init_node = node.right;
 
     var var_start = c.varStack.items.len;
     var init_after_aux = false;
@@ -12116,11 +12202,12 @@ pub fn unescapeSeq(seq: []const u8) error{InvalidEscapeSeq}!CharAdvance {
 test "sema internals." {
     // `Local` holds a bare union, which carries a hidden tag only with runtime safety.
     // The borrow tracking fields (`active_ex_borrows`, `ex_borrow`) added a word in 2026-11 (F-25).
+    // `LocalVarS.init_node` (where a value came from, for error hints) added a pointer in 2026-11.
     if (cy.is32Bit) {
-        try t.eq(if (std.debug.runtime_safety) 44 else 40, @sizeOf(Local));
+        try t.eq(if (std.debug.runtime_safety) 48 else 44, @sizeOf(Local));
         try t.eq(16, @sizeOf(FuncSig));
     } else {
-        try t.eq(if (std.debug.runtime_safety) 64 else 56, @sizeOf(Local));
+        try t.eq(if (std.debug.runtime_safety) 72 else 64, @sizeOf(Local));
         try t.eq(24, @sizeOf(FuncSig));
     }
 }
@@ -12804,7 +12891,8 @@ fn reportExpectedType(c: *cy.Chunk, exp_t: *cy.Type, act_t: *cy.Type, node: *ast
     defer c.alloc.free(exp_name);
     const act_name = try c.sema.allocTypeName(act_t);
     defer c.alloc.free(act_name);
-    return c.reportErrorFmt("Expected type `{}`, got `{}`.", &.{v(exp_name), v(act_name)}, node);
+    const hint = try resultTypeHint(c, exp_t, act_t, node);
+    return c.reportErrorFmt("Expected type `{}`, got `{}`.{}", &.{v(exp_name), v(act_name), v(hint)}, node);
 }
 
 fn semaInferSignedLit(c: *cy.Chunk, literal: []const u8, target_t: *cy.Type, base: u8, node: *ast.Node) !?ExprResult {

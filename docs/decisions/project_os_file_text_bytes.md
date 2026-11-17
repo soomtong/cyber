@@ -38,9 +38,30 @@ tars-agent 요청(`cyber-0.4.12-spike-defects.md` (c))에서 모델이 `write_fi
   같은 일을 하는 길이 둘이 되므로 받지 않는다(사용자 결정). 오버로드 자체는 컴파일 때 정해져 실행 비용이 없다.
 - `read_file`은 `str.from_utf8`로 검사한다(Rust `read_to_string`과 같다). 파일은 프로그램 밖의 바이트이므로
   `project_str_from_utf8.md`의 기준을 따른다.
-- `read_file_str`은 별칭 없이 지웠다(1.0 전). 쓰면 'Can not find the symbol `read_file_str` in `os`.'다.
-  `write_file(p, bytes)`는 'Expected argument `str`, found `[]byte` ...'다. 둘 다 고치는 이름을 말하지 않는다.
-  모델이 자주 걸리면 고치는 법을 말하는 문구를 더한다.
+- `read_file_str`은 별칭 없이 지웠다(1.0 전). 처음에는 'Can not find the symbol `read_file_str` in `os`.',
+  `write_file(p, bytes)`는 'Expected argument `str`, found `[]byte` ...'뿐이라 고치는 이름을 말하지 않았다.
+
+## 오류 문구에 새 이름 (2026-11-17, 사용자 결정)
+
+옛 꼴은 모두 고칠 이름을 말한다. 별칭을 두지 않는 대신 오류가 옮기는 법을 알려 준다.
+
+| 쓴 코드 | 붙는 힌트 |
+|---|---|
+| `os.read_file_str(p)`, `os.readFileStr(p)` | Use `os.read_file`. It returns `str`. |
+| `os.write_file(p, bytes)` | Write bytes with `os.write_file_bytes`. |
+| `os.write_file_bytes(p, s)` | Write text with `os.write_file`. |
+| `os.read_file(p)!`을 `[]byte` 자리에 | `os.read_file` returns `str`. Read bytes with `os.read_file_bytes`. |
+| `os.read_file_bytes(p)!`를 `str` 자리에 | `os.read_file_bytes` returns `[]byte`. Read text with `os.read_file`. |
+
+- 출처 힌트(아래 두 줄)는 값이 그 호출에서 바로 왔거나(`!`, 괄호를 벗겨서) 그 호출로 초기화한 지역 변수일 때 붙는다
+  (`LocalVarS.init_node`). 대입으로 값이 바뀐 변수도 선언의 초기식을 본다. 모듈 이름은 쓴 그대로 비교한다(`use os`의 `os`).
+- 인자 불일치에서 출처 힌트가 쓰기 함수 힌트보다 먼저다. `os.write_file_bytes(p, os.read_file(q)!)`는 바이트 복사를 하려다
+  읽기를 잘못 고른 경우가 많다.
+- 표는 `sema.zig`의 `moved_module_syms`(없는 이름), `call_arg_hints`(함수 · 인자 타입), `result_type_hints`(출처 호출 ·
+  기대 타입 · 실제 타입). 다른 std 이름을 나누거나 옮기면 이 표에 한 줄을 더한다. 0.4.14의 snake_case 이름은
+  `toSnakeCase` · `member_aliases`로, `os.baseName` · `os.dirname`은 `moved_module_syms`로 이미 알려 준다.
+- 테스트 `modules/os_read_file_str_error.cy` · `os_write_file_bytes_arg_error.cy` · `os_read_file_bytes_hint_error.cy` ·
+  `os_read_file_text_hint_error.cy`.
 
 ## 바뀐 곳
 

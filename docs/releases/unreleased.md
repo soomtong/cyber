@@ -34,3 +34,16 @@
 - `&&T`로 받은 값에 `p.* = v`로 대입할 수 있다(전에는 'Expected pointer type.').
 - 빈 목록을 만드는 내부 경로(`sema_init_seq2`의 원소 없는 경우)가 span 포인터를 `int`로 만들어 타입 검사에 걸리던 것을 고쳤다
   (사용자 코드에서는 닿지 않던 경로).
+
+## `os` 파일 함수의 옛 꼴이 고치는 이름을 알려 준다
+
+- 0.4.13에서 나눈 텍스트 · 바이트 파일 함수(`docs/decisions/project_os_file_text_bytes.md`)의 옛 꼴이 고칠 이름을 말한다.
+  - `os.read_file_str(p)`(와 `os.readFileStr`): 'Can not find the symbol `read_file_str` in `os`. Use `os.read_file`. It returns `str`.'
+  - `os.write_file(p, bytes)`: '... when calling `fn write_file(str, str) -> !void`. Write bytes with `os.write_file_bytes`.'
+    `os.write_file_bytes(p, s)`는 `os.write_file`을 알려 준다.
+  - `os.read_file`의 결과를 `[]byte` 자리에 쓰면(인자, `var b []byte = ...`) '`os.read_file` returns `str`. Read bytes with
+    `os.read_file_bytes`.'를 붙인다. `os.read_file_bytes`의 결과를 `str` 자리에 쓸 때도 반대로 알려 준다. 값을 담은 지역 변수
+    (`data := os.read_file(p)!` 뒤의 `data`)도 선언의 초기식을 따라가 같은 힌트를 낸다. 이 힌트가 쓰기 함수의 힌트보다 먼저다
+    (`os.write_file_bytes(p, os.read_file(q)!)`는 읽기를 고칠 일이다).
+- 힌트 표는 `sema.zig`의 `moved_module_syms` · `call_arg_hints` · `result_type_hints`. 앞으로 std 이름을 나누거나 바꾸면 이 표에
+  한 줄을 더한다.

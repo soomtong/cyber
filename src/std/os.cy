@@ -30,7 +30,7 @@ use kernel32 'windows/kernel32.cy'
 --| ```cy
 --| use os
 --| 
---| env := os.getEnvAll()
+--| env := os.get_env_all()
 --| for env |e|:
 --|     print('%{e.key} -> %{e.value}')
 --| ```
@@ -68,14 +68,14 @@ const ns_per_ms = 1000 * ns_per_us
 const ns_per_s = 1000 * ns_per_ms
 
 --| Attempts to access a file at the given `path` with `mode`.
-fn accessFile(path str, mode AccessMode) -> !void:
+fn access_file(path str, mode AccessMode) -> !void:
     #if meta.system() == .windows:
         return windows.access_file(path)
     #else:
         cpath := str.initz(path)
         code := lc.access(cpath.ptr, mode)
         if code != 0:
-            return fromErrno()
+            return from_errno()
 
 --| Returns the command line arguments.
 fn args() -> []str:
@@ -86,20 +86,20 @@ fn args() -> []str:
 fn baseName(path str) -> str:
     if path.len() == 0:
         return ''
-    idx := path.lastIndexOf('/') ?else: return path
+    idx := path.last_index('/') ?else: return path
     return path[idx + 1..]
 
 --| Returns the path of a locally cached file of `url`.
 --| If no such file exists locally, it's fetched from `url`.
-#[bind] fn cacheUrl(url str) -> str
+#[bind] fn cache_url(url str) -> str
 
 --| Copies a file to a destination path.
 fn copy_file(src_path str, dst_path str) -> !void:
     #if meta.system() == .macos:
         src := open_file(src_path)!
-        dst := createFile(dst_path)!
+        dst := create_file(dst_path)!
         if lc.macos.fcopyfile(src.fd, dst.fd, none, lc.macos.COPYFILE_DATA) != 0:
-            return fromErrno()
+            return from_errno()
 
     #else meta.system() == .windows:
         src16 := windows.utf8ToUtf16Le(src_path)!
@@ -111,7 +111,7 @@ fn copy_file(src_path str, dst_path str) -> !void:
         panic('copy_file not supported on this platform')
 
 --| Creates the directory at `path`.
-fn createDir(path str) -> !void:
+fn create_dir(path str) -> !void:
     #if meta.system() == .windows:
         path16 := windows.utf8ToUtf16Le(path)!
         if kernel32.CreateDirectoryW(path16.ptr, none) == windows.FALSE:
@@ -119,13 +119,13 @@ fn createDir(path str) -> !void:
     #else:
         cpath := str.initz(path)
         if lc.mkdir(cpath.ptr, lc.DefaultDirMode) != 0:
-            return fromErrno()
+            return from_errno()
 
-fn createFile(path str) -> !File:
-    return createFile(path, true)
+fn create_file(path str) -> !File:
+    return create_file(path, true)
 
 --| Creates and opens the file at `path`. If `truncate` is true, an existing file will be truncated.
-fn createFile(path str, truncate bool) -> !File:
+fn create_file(path str, truncate bool) -> !File:
     #if meta.system() == .windows:
         return windows.create_file(path, truncate)
     #else:
@@ -135,7 +135,7 @@ fn createFile(path str, truncate bool) -> !File:
         cpath := str.initz(path)
         fd := lc.open(cpath.ptr, flags, lc.DefaultFileMode)
         if fd == -1:
-            return fromErrno()
+            return from_errno()
         return {fd=fd}
 
 --| Returns the current working directory.
@@ -145,7 +145,7 @@ fn cwd() -> !str:
     #else:
         buf := [lc.PATH_MAX]byte(0)
         if lc.getcwd(*buf[0], as buf.len()) == none:
-            return fromErrno()
+            return from_errno()
         return c.from_strz(*buf[0])
 
 --| Change the current working directory.
@@ -155,7 +155,7 @@ fn chdir(path str) -> !void:
     #else:
         cpath := str.initz(path)
         if lc.chdir(cpath.ptr) == -1:
-            return fromErrno()
+            return from_errno()
 
 --| Returns the given path with its last component removed.
 fn dirname(path str) -> ?str:
@@ -201,15 +201,15 @@ fn exit(status int) -> never:
         lc.exit(c_int(status))
 
 --| Fetches the contents at `url` using the HTTP GET request method.
-#[bind] fn fetchUrl(url str) -> str
+#[bind] fn fetch_url(url str) -> str
 
 --| Checks whether the file at the given `path` exists.
-fn fileExists(path str) -> bool:
-    accessFile(path, AccessExists) !else:
+fn file_exists(path str) -> bool:
+    access_file(path, AccessExists) !else:
         return false
     return true
 
-fn fileInfo(path str) -> !FileInfo:
+fn file_info(path str) -> !FileInfo:
     cpath := str.initz(path)
     #if meta.system() == .linux:
         return linux.file_info(cpath.ptr)
@@ -217,8 +217,8 @@ fn fileInfo(path str) -> !FileInfo:
     #else meta.system() == .macos:
         cstat := lc.Stat{}
         if lc.stat(cpath.ptr, &cstat) != 0:
-            return fromErrno()
-        return fileInfo(&cstat)
+            return from_errno()
+        return file_info(&cstat)
 
     #else meta.system() == .windows:
         path16 := windows.utf8ToUtf16Le(path)!
@@ -232,15 +232,15 @@ fn fileInfo(path str) -> !FileInfo:
         return windows.fileInfoFromWin32Attr(&data)
 
     #else:
-        panic('fileInfo not supported on this platform')
+        panic('file_info not supported on this platform')
 
 #[cond=meta.system() != .windows]
-fn fileInfo(stat Ptr[lc.Stat]) -> FileInfo:
+fn file_info(stat Ptr[lc.Stat]) -> FileInfo:
     var res FileInfo = undef
     #if meta.system() == .macos:
         res = macos.fromStat(stat)
     #else:
-        panic('fileInfo not supported on this platform')
+        panic('file_info not supported on this platform')
     return res
 
 --| Frees the memory located at `ptr`.
@@ -251,7 +251,7 @@ fn free(ptr Ptr[void]):
     #else:
         lc.free(ptr)
 
-fn fromErrno() -> error:
+fn from_errno() -> error:
     #if meta.system() == .windows:
         panic('unsupported')
     #else:
@@ -278,11 +278,11 @@ fn get_env(key str) -> ?str:
         return c.from_strz(cval)
 
 --| Returns all environment variables as a map.
-fn getEnvAll() -> ^Map[str, str]:
+fn get_env_all() -> ^Map[str, str]:
     #if meta.system() == .windows:
         return windows.getEnvAllWindows()
     #else:
-        panic('getEnvAll not yet implemented on this platform')
+        panic('get_env_all not yet implemented on this platform')
 
 --| Allocates `size` bytes of memory and returns a pointer.
 fn malloc(size int) -> !Ptr[void]:
@@ -295,7 +295,7 @@ fn malloc(size int) -> !Ptr[void]:
     #else:
         ptr := lc.malloc(size)
         if ptr == none:
-            return fromErrno()
+            return from_errno()
         return ptr
 
 --| Returns the number of CPU cores on the current machine.
@@ -305,12 +305,12 @@ fn num_cpus() -> int:
         var count_len c.size_t = type.size(c.c_int)
         res := lc.macos.sysctlbyname('hw.logicalcpu', &count, &count_len, none, 0)
         if res == -1:
-            return fromErrno()
+            return from_errno()
         return count
     #else meta.system() == .linux:
         var cpu_set lc.cpu_set_t = undef
         if lc.linux.sched_getaffinity(0, type.size(lc.cpu_set_t), *cpu_set) != 0:
-            return fromErrno()
+            return from_errno()
         sum := 0
         for cpu_set |x|:
             --sum += @pop_count(x)
@@ -349,20 +349,20 @@ fn open_dir(path str, iterable bool) -> !Dir:
         cpath := str.initz(path)
         fd := lc.open(cpath.ptr, lc.O_RDONLY || lc.O_DIRECTORY || lc.O_CLOEXEC, lc.mode_t(0))
         if fd == -1:
-            return fromErrno()
+            return from_errno()
         return {fd=fd}
 
 --| Returns the current time in nanoseconds since the Epoch.
-fn nanoTime() -> !int:
+fn nano_time() -> !int:
     #if meta.system() == .macos:
         tp := lc.timespec{}
         if lc.clock_gettime(lc.macos.CLOCK_REALTIME, *tp) != 0:
-            return fromErrno()
+            return from_errno()
         return tp.sec * ns_per_s + tp.nsec
     #else meta.system() == .linux:
         tp := lc.timespec{}
         if lc.clock_gettime(lc.linux.CLOCK_REALTIME, *tp) != 0:
-            return fromErrno() 
+            return from_errno() 
         return tp.sec * ns_per_s + tp.nsec
     #else meta.system() == .windows:
         ft := kernel32.FILETIME{dwLowDateTime=undef, dwHighDateTime=undef}
@@ -373,20 +373,20 @@ fn nanoTime() -> !int:
         unix_intervals := intervals - 116444736000000000
         return unix_intervals * 100  -- Convert to nanoseconds
     #else:
-        panic('nanoTime not supported on this platform')
+        panic('nano_time not supported on this platform')
 
 --| High resolution timestamp. Returns a relative up-time in nanoseconds.
 fn now() -> !int:
     #if meta.system() == .macos:
         tp := lc.timespec{}
         if lc.clock_gettime(lc.macos.CLOCK_UPTIME_RAW, *tp) != 0:
-            return fromErrno()
+            return from_errno()
         return tp.sec * ns_per_s + tp.nsec
 
     #else meta.system() == .linux:
         tp := lc.timespec{}
         if lc.clock_gettime(lc.linux.CLOCK_BOOTTIME, *tp) != 0:
-            return fromErrno()
+            return from_errno()
         return tp.sec * ns_per_s + tp.nsec
 
     #else meta.system() == .windows:
@@ -422,12 +422,12 @@ fn open_file(path str, mode OpenMode) -> !File:
             case .read_write => lc.O_RDWR
         fd := lc.open(pathz.ptr, access || lc.O_CLOEXEC, lc.mode_t(0))
         if fd == -1:
-            return fromErrno()
+            return from_errno()
         return {fd=fd}
 
 --| Returns a result that can be used to query args. 
 --| `opts`: The name of options to match excluding the hyphen prefix. eg. `-path`
-fn parseArgs(opts []str) -> ArgsResult:
+fn parse_args(opts []str) -> ArgsResult:
     cmd_args := args()
 
     arg_opts := []ArgOption{}
@@ -467,7 +467,7 @@ fn read_file_bytes(path str) -> ![]byte:
     return file.read_all()
 
 --| Removes an empty directory at `path`.
-fn removeDir(path str) -> !void:
+fn remove_dir(path str) -> !void:
     #if meta.system() == .windows:
         path16 := windows.utf8ToUtf16Le(path)!
         if kernel32.RemoveDirectoryW(path16.ptr) == windows.FALSE:
@@ -475,10 +475,10 @@ fn removeDir(path str) -> !void:
     #else:
         cpath := str.initz(path)
         if lc.rmdir(cpath.ptr) != 0:
-            return fromErrno()
+            return from_errno()
 
 --| Removes the file at `path`.
-fn removeFile(path str) -> !void:
+fn remove_file(path str) -> !void:
     #if meta.system() == .windows:
         path16 := windows.utf8ToUtf16Le(path)!
         if kernel32.DeleteFileW(path16.ptr) == windows.FALSE:
@@ -486,7 +486,7 @@ fn removeFile(path str) -> !void:
     #else:
         cpath := str.initz(path)
         if lc.unlink(cpath.ptr) != 0:
-            return fromErrno()
+            return from_errno()
 
 --| Returns the current executable's path.
 fn resolve_exe_path() -> !str:
@@ -496,7 +496,7 @@ fn resolve_exe_path() -> !str:
         buf := [lc.PATH_MAX]byte(0)
         len := i32(buf.len())
         if lc.macos._NSGetExecutablePath(*buf[0], *len) != 0:
-            return fromErrno()
+            return from_errno()
         path := c.from_strz(*buf[0])
         return resolve_path(path)
     #else:
@@ -522,18 +522,18 @@ fn resolve_path(path str) -> !str:
         pathz := str.initz(path)
         fd := lc.open(pathz.ptr, lc.O_RDONLY || lc.O_CLOEXEC || lc.O_NONBLOCK, lc.mode_t(0))
         if fd == -1:
-            return fromErrno()
+            return from_errno()
 
         #if meta.system() == .macos:
             file := File{fd=fd}
             if lc.fcntl(file.fd, lc.macos.F_GETPATH, *buf[0]) != 0:
-                return fromErrno()
+                return from_errno()
             return c.from_strz(*buf[0])
         #else meta.system() == .linux:
             proc_path := str.initz('/proc/self/fd/%{fd}')
             len := lc.readlink(proc_path.ptr, *buf[0], lc.PATH_MAX)
             if len < 0:
-                return fromErrno()
+                return from_errno()
             return str(buf[0..len])
         #else:
             panic('resolve_path not supported on this platform')
@@ -550,7 +550,7 @@ fn set_env(key str, val str) -> !void:
         ckey := str.initz(key)
         cval := str.initz(val)
         if lc.setenv(ckey.ptr, cval.ptr, 1) != 0:
-            return fromErrno()
+            return from_errno()
 
 --| Pauses the current thread for `nsecs` nanoseconds.
 fn sleep(nsecs int) -> !void:
@@ -570,7 +570,7 @@ fn sleep(nsecs int) -> !void:
         }
         rem := lc.timespec{}
         if lc.nanosleep(*req, *rem) != 0:
-            return fromErrno()
+            return from_errno()
 
 --| Removes an environment variable by key.
 fn unset_env(key str) -> !void:
@@ -583,16 +583,16 @@ fn unset_env(key str) -> !void:
     #else:
         ckey := str.initz(key)
         if lc.unsetenv(ckey.ptr) != 0:
-            return fromErrno()
+            return from_errno()
 
 --| Writes the text `contents` to a file. Write bytes with `write_file_bytes`.
 fn write_file(path str, contents str) -> !void:
-    file := createFile(path)!
+    file := create_file(path)!
     file.write_all(contents)!
 
 --| Writes the bytes `contents` to a file.
 fn write_file_bytes(path str, contents []byte) -> !void:
-    file := createFile(path)!
+    file := create_file(path)!
     file.write_all(contents)!
 
 type ArgOption:
@@ -617,7 +617,7 @@ fn (&ArgsResult) get(name str) -> ?str:
             return opt.value
     return none
 
-fn (&ArgsResult) getAll(name str) -> []str:
+fn (&ArgsResult) get_all(name str) -> []str:
     res := []str{}
     for self.opts |opt|:
         if opt.name == name:
@@ -644,7 +644,7 @@ fn (&File) close() -> void:
             panic("Unexpected. %{windows.fromWin32Error()}")
     #else:
         if lc.close(self.fd) != 0:
-            panic("Unexpected. %{fromErrno()}")
+            panic("Unexpected. %{from_errno()}")
 
     self.closed = true
 
@@ -655,8 +655,8 @@ fn (&File) info() -> !FileInfo:
     #else meta.system() == .macos:
         cstat := lc.Stat{}
         if lc.fstat(self.fd, &cstat) != 0:
-            return fromErrno()
-        return fileInfo(&cstat)
+            return from_errno()
+        return file_info(&cstat)
     #else meta.system() == .windows:
         info := kernel32.BY_HANDLE_FILE_INFORMATION{
             dwFileAttributes=undef, ftCreationTime=undef,
@@ -682,7 +682,7 @@ fn (&File) read(buf [&]byte) -> !int:
     #else:
         read := lc.read(self.fd, as buf.base, buf.length)
         if read == -1:
-            return fromErrno()
+            return from_errno()
         return read
 
 fn (&File) read(bytes int) -> ![]byte:
@@ -716,7 +716,7 @@ fn (&File) read_fill(as_buf AsSpan[byte]) -> !int:
 
 --| Reads until a new line as a `str`.
 --| For bulk line reading, consider using `Scanner.nextLine`.
-fn (&File) readLine() -> !str:
+fn (&File) read_line() -> !str:
     return error.TODO
     -- const input = try std.io.getStdIn().reader().readUntilDelimiterAlloc(vm.alloc, '\n', 10e8);
     -- defer vm.alloc.free(input);
@@ -730,25 +730,25 @@ fn (&File) seek(n int) -> !void:
     #else:
         res := lc.lseek(self.fd, lc.off_t(n), lc.SEEK_CUR)
         if res == -1:
-            return fromErrno()
+            return from_errno()
 
 --| Seeks the read/write position by `pos` bytes from the end. Positive `pos` is invalid.
-fn (&File) seekFromEnd(n int) -> !void:
+fn (&File) seek_from_end(n int) -> !void:
     #if meta.system() == .windows:
         windows.seek_file_from_end(self.fd, n)!
     #else:
         res := lc.lseek(self.fd, lc.off_t(n), lc.SEEK_END)
         if res == -1:
-            return fromErrno()
+            return from_errno()
 
 --| Seeks the read/write position to `pos` bytes from the start. Negative `pos` is invalid.
-fn (&File) seekFromStart(n int) -> !void:
+fn (&File) seek_from_start(n int) -> !void:
     #if meta.system() == .windows:
         windows.seek_file_from_start(self.fd, n)!
     #else:
         res := lc.lseek(self.fd, lc.off_t(n), lc.SEEK_SET)
         if res == -1:
-            return fromErrno()
+            return from_errno()
 
 --| Writes a string to the current file position.
 fn (&File) write(val str) -> !int:
@@ -762,7 +762,7 @@ fn (&File) write(val str) -> !int:
     #else:
         written := lc.write(self.fd, as val.ptr, val.len())
         if written == -1:
-            return fromErrno()
+            return from_errno()
         return written
 
 --| Writes the span `buf` to the file and returns the number of bytes written. Implements `io.Writer`.
@@ -777,7 +777,7 @@ fn (&File) write(buf [&]byte) -> !int:
     #else:
         written := lc.write(self.fd, as buf.base, buf.length)
         if written == -1:
-            return fromErrno()
+            return from_errno()
         return written
 
 --| Writes `buf` to the file and returns the number of bytes written.
@@ -792,7 +792,7 @@ fn (&File) write(buf []byte) -> !int:
     #else:
         written := lc.write(self.fd, as buf.ptr, buf.len())
         if written == -1:
-            return fromErrno()
+            return from_errno()
         return written
 
 fn (&File) write_all(val str) -> !void:
@@ -830,7 +830,7 @@ fn (&Dir) close():
     #else:
         res := lc.close(self.fd)
         if res != 0:
-            panic("Unexpected. %{fromErrno()}")
+            panic("Unexpected. %{from_errno()}")
 
     self.closed = true
 
@@ -841,11 +841,11 @@ fn (&Dir) info() -> !FileInfo:
     #else meta.system() == .macos:
         cstat := lc.Stat{}
         if lc.fstat(self.fd, &cstat) != 0:
-            return fromErrno()
-        return fileInfo(&cstat)
+            return from_errno()
+        return file_info(&cstat)
     #else meta.system() == .windows:
         -- Use path to get directory info
-        return fileInfo(self.path)
+        return file_info(self.path)
     #else:
         panic('Dir.info not supported on this platform')
 
@@ -895,7 +895,7 @@ type DirEntry:
 type DynLib
 
 --| Creates a handle to a dynamic library.
-#[bind] fn openLib(path ?str) -> DynLib:
+#[bind] fn open_lib(path ?str) -> DynLib:
     panic('TODO')
 
 -- #[bind] fn FFI.bindLibTcc(self, path ?str) -> TccState

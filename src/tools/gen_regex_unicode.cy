@@ -60,7 +60,7 @@ fn loose(name str) -> str:
         c := name[i]
         if c == '_' or c == '-' or c == ' ':
             continue
-        res += str.initRune(int(str.ascii_lower(c)))
+        res += str.init_rune(int(str.ascii_lower(c)))
     return res
 
 -- Sorts ranges and joins the ones that touch.

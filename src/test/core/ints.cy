@@ -3,7 +3,7 @@ use meta
 
 -- @init()
 res := int('100')
-t.eqType(int, type.of(res))
+t.eq_type(int, type.of(res))
 t.eq(0, int('100.1'))
 t.eq(100, res)
 t.eq(100, int(100.1))

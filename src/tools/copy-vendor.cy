@@ -5,7 +5,7 @@ use io
 -- Usage:
 -- ./copy-vendor.cy -dst=./lib/tcc -src=/Users/fubar/repos/tinycc
 
-args := os.parseArgs({'src', 'dst'})
+args := os.parse_args({'src', 'dst'})
 dst := args.at('dst')
 src := args.at('src')
 

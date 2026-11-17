@@ -162,7 +162,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     // Table
 
     // str
-    .{"str.initRune",    zErrFunc(str_initRune)},
+    .{"str.init_rune",    zErrFunc(str_initRune)},
     .{"str.initPtrSpan", zErrFunc(string.initPtrSpan)},
     .{"str.isUtf8",      cFunc(string.isUtf8)},
     .{"str.+",           zErrFunc(string.concat)},
@@ -182,14 +182,14 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"str.@index",      zErrFunc(str_byteAt)},
     .{"str.insert",      zErrFunc(string.insertFn)},
     .{"str.insert_byte", zErrFunc(string.insertByte)},
-    .{"str.isAscii",     cFunc(string.isAscii)},
+    .{"str.is_ascii",     cFunc(string.isAscii)},
     .{"str.len",         cFunc(string.lenFn)},
     .{"str.less",        cFunc(string.less)},
     .{"str.lower",       zErrFunc(string.lower)},
     .{"str.replace",     zErrFunc(string.stringReplace)},
     .{"str.repeat",      zErrFunc(string.repeat)},
     .{"str.seek_pos",    zErrFunc(string.seek_pos)},
-    .{"str.runeStrAt",   zErrFunc(string.runeStrAt)},
+    .{"str.rune_str_at",   zErrFunc(string.runeStrAt)},
     .{"str.@slice",      cFunc(string.sliceFn)},
     .{"str.@slice2",     cFunc(string.slice2)},
     .{"str.starts_with", cFunc(string.starts_with)},

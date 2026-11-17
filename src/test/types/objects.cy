@@ -13,7 +13,7 @@ t.eq(n1.value, 123)
 
 -- Deref.
 dn := n1.*
-t.eqType(Node, type.of(dn))
+t.eq_type(Node, type.of(dn))
 t.eq(dn.value, 123)
 
 -- -- Initialize, infer type.

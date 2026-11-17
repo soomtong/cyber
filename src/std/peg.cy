@@ -596,7 +596,7 @@ fn (&Capture) expand(repl str) -> str:
         return 'a line feed'
     if cp < 32 or cp == 127:
         return 'the control character %{cp}'
-    return '`' + str.initRune(cp) + '`'
+    return '`' + str.init_rune(cp) + '`'
 
 -- The ranges of a `%x` class as pairs, or an empty list for a letter that is no class.
 -fn class_ranges(c int) -> []int:
@@ -846,7 +846,7 @@ fn (&Builder) parse_prefix() -> !int:
     self.skip()
     n := self.peek()
     if n == -1 or n == '/' or n == ')' or n == '}':
-        return self.fail('Expected a pattern after `%{str.initRune(c)}`, found %{show(n)}.')
+        return self.fail('Expected a pattern after `%{str.init_rune(c)}`, found %{show(n)}.')
     child := self.parse_prefix()!
     self.depth -= 1
     kind := NAnd
@@ -912,7 +912,7 @@ fn (&Builder) parse_suffix() -> !int:
             node = self.add(Node{kind=NCap, a=node, b=CapString, c=self.strs.len() - 1, from=from, to=self.pos,
                 depth=self.nodes[node].depth + 1})!
         else (c == '=' or c == '~') and self.peek_at(1) == '>':
-            return self.fail('`%{str.initRune(c)}>` calls a function, which is not supported. Check the capture after the match instead.')
+            return self.fail('`%{str.init_rune(c)}>` calls a function, which is not supported. Check the capture after the match instead.')
         else c == '>' and self.peek_at(1) == '>':
             return self.fail('`>>` calls a function, which is not supported. Check the captures after the match instead.')
         else c == '{' and is_digit(self.peek_at(1)):
@@ -993,7 +993,7 @@ fn (&Builder) parse_escape() -> !int:
         else:
             cp := self.rune()
             self.pos = at + 1
-            return self.fail_at(at, 'Unknown escape `\\%{str.initRune(cp)}`. The escapes are `\\n \\r \\t \\\\ \\\' \\" \\[ \\] \\- \\^ \\xHH \\u{H..}`.')
+            return self.fail_at(at, 'Unknown escape `\\%{str.init_rune(cp)}`. The escapes are `\\n \\r \\t \\\\ \\\' \\" \\[ \\] \\- \\^ \\xHH \\u{H..}`.')
 
 -- Reads a literal in quotes into `lits`.
 fn (&Builder) parse_literal() -> !Lit:
@@ -1011,7 +1011,7 @@ fn (&Builder) parse_literal() -> !Lit:
         if c == '\\':
             self.pos += 1
             cp := self.parse_escape()!
-            enc := str.initRune(cp)
+            enc := str.init_rune(cp)
             for 0..enc.len() |i|:
                 self.lits = self.lits.append(int(enc[i]))
             continue
@@ -1107,7 +1107,7 @@ fn (&Builder) parse_class() -> !int:
             else:
                 hi = self.rune()
             if hi < lo:
-                return self.fail_at(at, 'The range `%{str.initRune(lo)}-%{str.initRune(hi)}` ends before it starts.')
+                return self.fail_at(at, 'The range `%{str.init_rune(lo)}-%{str.init_rune(hi)}` ends before it starts.')
         ranges = ranges.append(lo)
         ranges = ranges.append(hi)
     if ranges.len() == 0:
@@ -1165,7 +1165,7 @@ fn (&Builder) parse_primary() -> !int:
                 self.calls = self.calls.append(name)
                 return self.add(Node{kind=NCall, a=self.calls.len() - 1, from=from, to=self.pos})
             if c == '*' or c == '+' or c == '?' or c == '^':
-                return self.fail('The repetition %{show(c)} has nothing to repeat. Write `\'%{str.initRune(c)}\'` to match the character.')
+                return self.fail('The repetition %{show(c)} has nothing to repeat. Write `\'%{str.init_rune(c)}\'` to match the character.')
             if c == '\\':
                 return self.fail('An escape such as `\\n` goes inside a string or a class: `\'\\n\'`. The classes are `%d`, `%s`, `%w` and so on, not `\\d`.')
             if c == '|':
@@ -1176,8 +1176,8 @@ fn (&Builder) parse_primary() -> !int:
                 save := self.pos
                 cp := self.rune()
                 self.pos = save
-                return self.fail('Unexpected %{show(cp)}. Text goes in quotes: `\'%{str.initRune(cp)}\'`.')
-            return self.fail('Unexpected %{show(c)}. Text goes in quotes: `\'%{str.initRune(c)}\'`.')
+                return self.fail('Unexpected %{show(cp)}. Text goes in quotes: `\'%{str.init_rune(cp)}\'`.')
+            return self.fail('Unexpected %{show(c)}. Text goes in quotes: `\'%{str.init_rune(c)}\'`.')
 
 fn (&Builder) parse_capture() -> !int:
     from := self.pos

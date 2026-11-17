@@ -28,7 +28,7 @@ t.eq(345, a.varFunc())
 t.eq(11, a.varFunc1(10))
 t.eq(30, a.varFunc2(10, 20))
 type Fn1 = fn() -> int
-t.eqType(Fn1, type.of(a.func))
+t.eq_type(Fn1, type.of(a.func))
 t.eq(234, a.func())
 t.eq(11, a.func1(10))
 t.eq(30, a.func2(10, 20))

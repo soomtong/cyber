@@ -19,7 +19,7 @@ const mi = @import("mimalloc");
 pub const Src = @embedFile("std/cli.cy");
 
 const funcs = [_]struct { []const u8, C.BindFunc }{
-    .{ "replReadLine", zErrFunc(replReadLine) },
+    .{ "repl_read_line", zErrFunc(replReadLine) },
 };
 
 pub fn bind(_: ?*C.VM, mod: ?*C.Sym) callconv(.c) C.Bytes {

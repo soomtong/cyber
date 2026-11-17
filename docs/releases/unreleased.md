@@ -71,3 +71,26 @@
   `int.parse`의 짝. `'1.5'`, `'-2'`, `'1e3'`, `'inf'`, `'nan'`을 읽고 앞뒤 공백은 허용하지 않는다(`int.parse`와 같다).
   `docs/docs.md` Integers · Floats, agent-guide. 테스트 `core/floats.cy`.
 
+## 이름을 snake_case로 통일 (깨지는 변경)
+
+- 표준 라이브러리의 camelCase 공개 이름 57개를 snake_case로 바꿨다. 옛 이름은 남기지 않는다. 옛 이름을 쓰면
+  'Can not find the symbol `trimLeft` in `str`. Did you mean `trim_left`?'처럼 새 이름을 알려 준다. 모듈 함수
+  (`os.fileExists`)도 이제 같은 힌트를 낸다(`sema.suggestModuleSym`, 테스트 `modules/module_suggest_snake_error.cy`).
+- 대부분 기계적 변환이다(`trimLeft` → `trim_left`, `fileExists` → `file_exists`, `eqNear` → `eq_near`). 다음은 아니다:
+  `str.lastIndexOf` → `str.last_index`(`index`의 짝), `isNaN` → `is_nan`, `isInf` → `is_inf`, `io.indexOfNewLine` →
+  `io.index_newline`(`str.index_newline`과 같은 이름). `Array.setLast` → `set_last`는 `Slice.set_last`와, `PtrSpan.toBytes`
+  → `to_bytes`는 `str.to_bytes`와 같은 이름이 됐다.
+- 바뀐 이름:
+  - core: `str`의 `trim_left`, `trim_right`, `last_index`, `is_ascii`, `before_last`, `rune_str_at`, `init_rune`,
+    `has_ascii_flag`, `Array.set_last`, `ensure_unused_cap`, `Object.to_string`, `PtrSpan.to_bytes`,
+    `PartialVector.set_length`, `HashMap.find_slot`, `Wyhash`의 `read_int`, `read_i32`, `shallow_copy`, `small_key`,
+    `utf8_check`, `utf8_decode`, `utf8_seq_len`.
+  - os: `file_exists`, `create_dir`, `create_file`, `remove_file`, `remove_dir`, `file_info`, `access_file`, `get_env_all`,
+    `nano_time`, `parse_args`, `fetch_url`, `cache_url`, `from_errno`, `open_lib`, `File.read_line`, `seek_from_end`,
+    `seek_from_start`, `ArgsResult.get_all`. (`baseName`은 아래 `path` 절.)
+  - math: `is_nan`, `is_inf`, `is_int`, `deg_to_rad`, `Vec2.len_sq`, `scale_to`, `Vec3.rotate_axis`, `rotate_y`,
+    `Vec4.div_w`, `Transform3D.rotation_x`, `rotation_y`, `rotation_z`.
+  - test: `eq_near`, `eq_type`. cli: `repl_read_line`. io: `index_newline`.
+- 힌트 별칭 표(`rstrip` → `trim_right` 등)와 `docs/docs.md`, `docs/agent-guide.md`의 이름도 바꿨다. 릴리스 노트와 학습
+  문서(`docs/study`)는 그때의 이름 그대로 둔다.
+

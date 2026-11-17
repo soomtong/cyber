@@ -592,9 +592,9 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
     try compiler.mapFunc2(core_sym, "alloc_", "cb_alloc");
     try compiler.mapFunc(core_sym, "eprint", "cb_eprint");
     try compiler.mapFunc2(core_sym, "print", "cb_print");
-    try compiler.mapFunc2(core_sym, "utf8Check", "cb_utf8_check");
-    try compiler.mapFunc2(core_sym, "utf8Decode", "cb_utf8_decode");
-    try compiler.mapFunc2(core_sym, "utf8SeqLen", "cb_utf8_seq_len");
+    try compiler.mapFunc2(core_sym, "utf8_check", "cb_utf8_check");
+    try compiler.mapFunc2(core_sym, "utf8_decode", "cb_utf8_decode");
+    try compiler.mapFunc2(core_sym, "utf8_seq_len", "cb_utf8_seq_len");
     try compiler.mapFunc2(core_sym, "$newObjectUndef", "cb_object_undef");
     try compiler.mapFunc2(core_sym, "$getDeinitObject", "cb_get_deinit_object");
     try compiler.mapFunc(core_sym, "$newAstrUndef", "cb_astr_undef");
@@ -633,7 +633,7 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
 
     const object_sym: *cy.Sym = @ptrCast(self.sema.object_t.sym());
     try compiler.mapFunc2(object_sym, "type", "cb_object_type");
-    try compiler.mapFunc(object_sym, "toString", "cb_object_string");
+    try compiler.mapFunc(object_sym, "to_string", "cb_object_string");
 
     var chunks = try self.alloc.alloc(Chunk, self.chunks.items.len);
     for (self.chunks.items, 0..) |chunk, i| {

@@ -9,7 +9,7 @@ test.eq(1.0, -(-1.0))
 
 -- Scientific notation.
 test.eq(123.0, 1.23e2)
-test.eqNear(1.23, 123e-2)
+test.eq_near(1.23, 123e-2)
 
 -- float.$init()
 test.eq(100.0, float(100))
@@ -29,7 +29,7 @@ test.eq(1_0e1_0, 10e10)
 test.eq(math.inf, 1.0 / 0)
 
 -- NaN.
-test.eq(true, math.isNaN(0.0 * (1.0 / 0)))
+test.eq(true, math.is_nan(0.0 * (1.0 / 0)))
 
 -- Hex, octal and binary literals convert by their value when the target is a float.
 var hex_f float = 0x10

@@ -8,7 +8,7 @@ const zErrFunc = core.zErrFunc;
 const Src = @embedFile("io.cy");
 
 const funcs = [_]struct{[]const u8, C.BindFunc}{
-    .{"indexOfNewLine",    zErrFunc(indexOfNewLine)},
+    .{"index_newline",    zErrFunc(indexOfNewLine)},
 };
 
 pub fn bind(_: *C.VM, mod: *C.Sym) callconv(.c) C.Bytes {

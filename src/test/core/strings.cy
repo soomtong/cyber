@@ -26,9 +26,9 @@ t.eq(s.next(&iter), byte(97))
 
 -- -- decode()
 -- t.eq(arr.decode(), 'abc🦊xyz🐶')
--- t.eq(arr.decode().isAscii(), false)
+-- t.eq(arr.decode().is_ascii(), false)
 -- t.eq(Array('abc').decode(), 'abc')
--- t.eq(Array('abc').decode().isAscii(), true)
+-- t.eq(Array('abc').decode().is_ascii(), true)
 -- t.eq(try Array('').insertByte(0, 255).decode(), error.Unicode)
 
 -- -- fmt()
@@ -79,10 +79,10 @@ t.eq(str(int(123)), '123')
 t.eq(str(error.foo), 'error.foo')
 t.eq(str(symbol.foo), 'symbol.foo')
 
--- initRune(int)
+-- init_rune(int)
 if meta.is_vm_target():
-    t.eq(str.initRune('a'), 'a')
-    t.eq(str.initRune('🦊'), '🦊')
+    t.eq(str.init_rune('a'), 'a')
+    t.eq(str.init_rune('🦊'), '🦊')
     -- t.eq(try runestr(2 ^ 22), error.InvalidRune)
     -- t.eq(try runestr(-1), error.InvalidRune)
 

@@ -20,7 +20,7 @@ fn eq(exp %T, act T):
     if exp != act:
         panic('Expected `%{exp}`, found `%{act}`.')
 
-fn eqType(exp type, act type):
+fn eq_type(exp type, act type):
     if exp != act:
         meta.error('Expected `' + type.name(exp) + '`, found `' + type.name(act) + '`.')
 
@@ -38,10 +38,10 @@ fn eq_span(exp [&]%T, act [&]T):
             fail('Expected %{elem}, found %{act[i]}.\nAt element %{i}.')
 
 --| Returns `true` if two numbers are near each other within epsilon 1e-5.
-fn eqNear(exp float, act float):
-    eqNear(exp, act, 1e-5)
+fn eq_near(exp float, act float):
+    eq_near(exp, act, 1e-5)
 
-fn eqNear(exp float, act float, epsilon float):
+fn eq_near(exp float, act float, epsilon float):
     if (exp - act).abs() >= epsilon:
         fail('Expected `%{exp}` within `%{epsilon}`, found `%{act}`.')
 

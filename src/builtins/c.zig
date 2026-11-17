@@ -296,9 +296,9 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
     // try compiler.mapFunc2(core_sym, "alloc_", "cb_alloc");
     // try compiler.mapFunc(core_sym, "eprint", "cb_eprint");
     // try compiler.mapFunc2(core_sym, "print", "cb_print");
-    // try compiler.mapFunc2(core_sym, "utf8Check", "cb_utf8_check");
-    // try compiler.mapFunc2(core_sym, "utf8Decode", "cb_utf8_decode");
-    // try compiler.mapFunc2(core_sym, "utf8SeqLen", "cb_utf8_seq_len");
+    // try compiler.mapFunc2(core_sym, "utf8_check", "cb_utf8_check");
+    // try compiler.mapFunc2(core_sym, "utf8_decode", "cb_utf8_decode");
+    // try compiler.mapFunc2(core_sym, "utf8_seq_len", "cb_utf8_seq_len");
     // try compiler.mapFunc2(core_sym, "$newObjectUndef", "cb_object_undef");
     // try compiler.mapFunc2(core_sym, "$getDeinitObject", "cb_get_deinit_object");
     // try compiler.mapFunc(core_sym, "$newAstrUndef", "cb_astr_undef");

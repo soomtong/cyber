@@ -554,6 +554,7 @@ fn test_core(run: *Runner) void {
     run.case("core/list_infer_bool_elem_error.cy");
     run.case("core/list_infer_str_first_error.cy");
     run.case("core/method_suggest_trim_start_error.cy");
+    run.case("modules/module_suggest_snake_error.cy");
     run.case("core/result_unwrap_block_reachable_loop_error.cy");
     run.case("syntax/string_interp_backslash_error.cy");
     run.case("syntax/string_interp_nested_error.cy");

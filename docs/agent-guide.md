@@ -91,10 +91,10 @@ These are the common methods of the three types you use most. A Python method th
 str (strings do not change; every method returns a new value):
 
 - `s.len()` bytes, `s.count()` characters
-- `s.contains(sub)`, `s.starts_with(p)`, `s.ends_with(p)`, `s.index(sub)` and `s.lastIndexOf(sub)` give `?int`
+- `s.contains(sub)`, `s.starts_with(p)`, `s.ends_with(p)`, `s.index(sub)` and `s.last_index(sub)` give `?int`
 - `s.split(sep)` gives `[]str`, `s.replace(old, new)`, `s.upper()`, `s.lower()`, `s.repeat(n)`, `s.concat(t)`
 - `s.trim()` cuts spaces, tabs and newlines at both ends. `s.trim({'-', '_'})` cuts the given characters.
-- `s.trimLeft()` and `s.trimRight()` cut only the start or only the end, by the same rule.
+- `s.trim_left()` and `s.trim_right()` cut only the start or only the end, by the same rule.
 - `s.last()` the last byte
 - `s.lines()` gives `[]str` split at `\n` or `\r\n`, without the line breaks and without an empty last line
 - `s.pad_left(n)` and `s.pad_right(n)` add spaces until `s` has `n` characters. `s.pad_left(n, '0')` adds `'0'`.
@@ -119,8 +119,8 @@ Python name to Cyber name:
 - `xs.find(x)` is `xs.index(x)`, which gives `?int`: `xs.index(x) ?else -1`
 - `xs.pop()` is `v := xs.last()` then `xs = xs.remove(xs.len() - 1)`
 - `s.startswith(p)` and `s.endswith(p)` are `s.starts_with(p)` and `s.ends_with(p)`
-- `s.strip()` is `s.trim()`, `s.lstrip()` is `s.trimLeft()` and `s.rstrip()` is `s.trimRight()`
-- `s.find(sub)` is `s.index(sub)` and `s.rfind(sub)` is `s.lastIndexOf(sub)`. Both give `?int`. For the last part of a path use `p.split('/').last()`
+- `s.strip()` is `s.trim()`, `s.lstrip()` is `s.trim_left()` and `s.rstrip()` is `s.trim_right()`
+- `s.find(sub)` is `s.index(sub)` and `s.rfind(sub)` is `s.last_index(sub)`. Both give `?int`. For the last part of a path use `p.split('/').last()`
 - `len(m)` is `m.size()`. `m.items()` is `for m |e|:`. `list(m)` is `m.keys()`. `list(m.values())` is `m.values()`
 - `s.splitlines()` is `s.lines()`. `s.rjust(n)` is `s.pad_left(n)`, `s.ljust(n)` is `s.pad_right(n)` and `s.zfill(n)` is `s.pad_left(n, '0')`
 - `reversed(xs)` is `ys := []int{} + xs` then `ys.reverse()`. `ys := xs` shares the elements, and `ys.reverse()` or `ys.sort()` changes `xs` too

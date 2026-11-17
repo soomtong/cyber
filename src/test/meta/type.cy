@@ -1,17 +1,17 @@
 use t 'test'
 
 -- type.of()
-t.eqType(bool, type.of(true))
-t.eqType(bool, type.of(false))
-t.eqType(int, type.of(123))
-t.eqType(float, type.of(123.0))
-t.eqType(Ptr[void], type.of(as[Ptr[void]] 123))
-t.eqType(str, type.of('abc'))
-t.eqType(str, type.of('abc🦊'))
-t.eqType(symbol, type.of(symbol.abc))
-t.eqType(error, type.of(error.Foo))
-t.eqType([]int, type.of([]int{}))
-t.eqType(Map[str, int], type.of(Map[str, int]{}))
+t.eq_type(bool, type.of(true))
+t.eq_type(bool, type.of(false))
+t.eq_type(int, type.of(123))
+t.eq_type(float, type.of(123.0))
+t.eq_type(Ptr[void], type.of(as[Ptr[void]] 123))
+t.eq_type(str, type.of('abc'))
+t.eq_type(str, type.of('abc🦊'))
+t.eq_type(symbol, type.of(symbol.abc))
+t.eq_type(error, type.of(error.Foo))
+t.eq_type([]int, type.of([]int{}))
+t.eq_type(Map[str, int], type.of(Map[str, int]{}))
 
 -- -- typeinfo()
 -- #var int_t = typeinfo(int).!int_t

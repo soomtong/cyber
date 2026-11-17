@@ -1777,10 +1777,10 @@ const member_aliases = [_][2][]const u8{
     .{ "startswith", "starts_with" }, .{ "startsWith", "starts_with" }, .{ "hasPrefix", "starts_with" },
     .{ "endswith", "ends_with" }, .{ "endsWith", "ends_with" }, .{ "hasSuffix", "ends_with" },
     .{ "find", "index" }, .{ "indexOf", "index" },
-    .{ "rfind", "lastIndexOf" }, .{ "rindex", "lastIndexOf" }, .{ "last_index", "lastIndexOf" },
+    .{ "rfind", "last_index" }, .{ "rindex", "last_index" }, .{ "lastIndexOf", "last_index" }, .{ "isNaN", "is_nan" }, .{ "isInf", "is_inf" }, .{ "indexOfNewLine", "index_newline" },
     .{ "strip", "trim" }, .{ "trimSpace", "trim" },
-    .{ "lstrip", "trimLeft" }, .{ "trimStart", "trimLeft" }, .{ "trim_start", "trimLeft" }, .{ "ltrim", "trimLeft" },
-    .{ "rstrip", "trimRight" }, .{ "trimEnd", "trimRight" }, .{ "trim_end", "trimRight" }, .{ "rtrim", "trimRight" },
+    .{ "lstrip", "trim_left" }, .{ "trimStart", "trim_left" }, .{ "trim_start", "trim_left" }, .{ "ltrim", "trim_left" },
+    .{ "rstrip", "trim_right" }, .{ "trimEnd", "trim_right" }, .{ "trim_end", "trim_right" }, .{ "rtrim", "trim_right" },
     .{ "toLowerCase", "lower" }, .{ "toUpperCase", "upper" },
     .{ "toLower", "lower" }, .{ "toUpper", "upper" }, .{ "lowercase", "lower" }, .{ "uppercase", "upper" },
     .{ "to_lowercase", "lower" }, .{ "to_uppercase", "upper" },
@@ -1837,24 +1837,10 @@ pub fn suggestMember(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast
 
     // camelCase to snake_case.
     var snake_buf: [128]u8 = undefined;
-    var snake_len: usize = 0;
-    var has_upper = false;
-    for (name, 0..) |ch, i| {
-        if (std.ascii.isUpper(ch)) {
-            has_upper = true;
-            if (i > 0) {
-                snake_buf[snake_len] = '_';
-                snake_len += 1;
-            }
-            snake_buf[snake_len] = std.ascii.toLower(ch);
-        } else {
-            snake_buf[snake_len] = ch;
+    if (toSnakeCase(name, &snake_buf)) |snake| {
+        if (try hasMember(c, base_t, snake, node)) {
+            return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{snake}) catch "";
         }
-        snake_len += 1;
-    }
-    const snake = snake_buf[0..snake_len];
-    if (has_upper and try hasMember(c, base_t, snake, node)) {
-        return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{snake}) catch "";
     }
 
     // A member whose name is close. Short names only match one edit away.
@@ -1884,6 +1870,45 @@ pub fn suggestMember(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast
     }
     if (best) |cand| {
         return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{cand}) catch "";
+    }
+    return "";
+}
+
+/// `fileExists` as `file_exists`, or null when `name` has no upper case letter. `name` is at most 64 bytes.
+fn toSnakeCase(name: []const u8, buf: *[128]u8) ?[]const u8 {
+    var len: usize = 0;
+    var has_upper = false;
+    for (name, 0..) |ch, i| {
+        if (std.ascii.isUpper(ch)) {
+            has_upper = true;
+            if (i > 0) {
+                buf[len] = '_';
+                len += 1;
+            }
+            buf[len] = std.ascii.toLower(ch);
+        } else {
+            buf[len] = ch;
+        }
+        len += 1;
+    }
+    if (!has_upper) return null;
+    return buf[0..len];
+}
+
+/// A hint for a symbol that the module `mod_sym` does not have: ` Did you mean `x`?`, or an empty string.
+/// Like `suggestMember`, names from other languages are mapped first, then a camelCase name is tried as snake_case.
+pub fn suggestModuleSym(c: *cy.Chunk, mod_sym: *cy.Sym, name: []const u8, node: *ast.Node) ![]const u8 {
+    if (name.len == 0 or name.len > 64) return "";
+    for (member_aliases) |alias| {
+        if (std.mem.eql(u8, alias[0], name) and try c.getResolvedSym(mod_sym, alias[1], node) != null) {
+            return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{alias[1]}) catch "";
+        }
+    }
+    var snake_buf: [128]u8 = undefined;
+    if (toSnakeCase(name, &snake_buf)) |snake| {
+        if (try c.getResolvedSym(mod_sym, snake, node) != null) {
+            return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{snake}) catch "";
+        }
     }
     return "";
 }

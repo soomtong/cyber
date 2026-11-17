@@ -8,13 +8,13 @@ use cy
 --| ```
 
 --| Starts an isolated REPL session.
---| Invokes `cy.repl(replReadLine)`.
+--| Invokes `cy.repl(repl_read_line)`.
 fn repl() -> void:
-    cy.repl(replReadLine_)
+    cy.repl(repl_read_line_)
 
 --| Default implementation to read a line from the CLI for a REPL.
-#[bind] fn replReadLine(prefix str) -> str
+#[bind] fn repl_read_line(prefix str) -> str
 
-fn replReadLine_(prefix str) -> Future[str]:
-    line := replReadLine(prefix)
+fn repl_read_line_(prefix str) -> Future[str]:
+    line := repl_read_line(prefix)
     return Future.complete(line)

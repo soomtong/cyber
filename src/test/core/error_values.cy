@@ -1,7 +1,7 @@
 use t 'test'
 
 err := error.FileNotFound
-t.eqType(error, type.of(err))
+t.eq_type(error, type.of(err))
 t.eq(error.FileNotFound, err)
 
 -- error.value()

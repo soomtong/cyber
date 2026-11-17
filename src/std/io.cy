@@ -1,5 +1,5 @@
 --| SIMD accelerated.
-#[bind] fn indexOfNewLine(buf [&]byte) -> ?int
+#[bind] fn index_newline(buf [&]byte) -> ?int
 
 type Reader trait:
     fn read(bytes [&]byte) -> !int
@@ -86,7 +86,7 @@ fn (&Scanner[]) next(next_fn ScannerNextFn) -> !?[]byte:
 --| The line returned does not include the new line character(s).
 fn (&Scanner[]) next_line() -> !?[]byte:
     next := fn(span [&]byte) -> !?NextRange:
-        idx := indexOfNewLine(span) ?else:
+        idx := index_newline(span) ?else:
             if span.length == 0:
                 return none
             else:

@@ -637,7 +637,8 @@ pub fn getResolvedSymOrFail(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, nod
             return c.reportErrorFmt("Can not access `{}` from parent `{}`. Parent is not a module.", &.{v(name), v(mod_name)}, node);
         } else {
             const mod_name = try cy.sym.formatSymName(c.sema, &cy.tempBuf, modSym.resolved(), .{ .from = c });
-            return c.reportErrorFmt("Can not find the symbol `{}` in `{}`.", &.{v(name), v(mod_name)}, node);
+            const hint = try sema.suggestModuleSym(c, modSym, name, node);
+            return c.reportErrorFmt("Can not find the symbol `{}` in `{}`.{}", &.{v(name), v(mod_name), v(hint)}, node);
         }
     };
 }

@@ -16,7 +16,7 @@ global args os.ArgsResult = { opts={}, rest={} }
 global prefix str = ''
 global reserved_keywords Map[str, bool] = {}
 
-args = os.parseArgs({'o', 'lib-path', 'strip-prefix'})
+args = os.parse_args({'o', 'lib-path', 'strip-prefix'})
 prefix = args.get('strip-prefix') ?else 'DONT_MATCH'
 reserved_keywords = {
     type = true,

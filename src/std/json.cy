@@ -770,13 +770,13 @@ fn fmt_float(x float) -> str:
     if a >= 1:
         -- `s` is an integer: shortest digits padded with zeros.
         int_len := s.index('.') ?else s.len()
-        digits = s[0..int_len].trimRight('0')
+        digits = s[0..int_len].trim_right('0')
         exp = int_len - 1
     else:
         -- `s` is `0.000...ddd`.
         frac := s[2..]
-        zeros := frac.len() - frac.trimLeft('0').len()
-        digits = frac[zeros..].trimRight('0')
+        zeros := frac.len() - frac.trim_left('0').len()
+        digits = frac[zeros..].trim_right('0')
         exp = -(zeros + 1)
     var out str = if (x < 0) '-' else ''
     out += digits[0..1]
@@ -810,8 +810,8 @@ fn fmt_number(text str) -> str:
         if exp > 1000000000000 or exp < -1000000000000:
             return text
     all := int_part + frac_part
-    lead := all.len() - all.trimLeft('0').len()
-    digits := all[lead..].trimRight('0')
+    lead := all.len() - all.trim_left('0').len()
+    digits := all[lead..].trim_right('0')
     if digits.len() == 0:
         return '0'
     -- The value is `d.ddd * 10^e`.
@@ -852,7 +852,7 @@ fn parse_number(text str, exact bool) -> ?Value:
 --| Returns a readable name for a byte in an error message.
 -fn describe(c byte) -> str:
     if c >= 0x20 and c < 0x7f:
-        return '`' + str.initRune(int(c)) + '`'
+        return '`' + str.init_rune(int(c)) + '`'
     return 'byte 0x' + hex2(c)
 
 --| Writes `s` as a quoted JSON string to `buf`.
@@ -1166,10 +1166,10 @@ fn (&Parser) string() -> !str:
                         self.pos -= 6
                         return self.fail('`\\u%{lo.fmt(.hex)}` does not complete the surrogate pair.')
                     cp = 0x10000 + ((cp - 0xd800) << 10) + (lo - 0xdc00)
-                buf = buf.append(str.initRune(cp).span())
+                buf = buf.append(str.init_rune(cp).span())
                 continue
             else:
-                return self.fail('Unknown escape `\\%{str.initRune(int(self.peek()))}`.')
+                return self.fail('Unknown escape `\\%{str.init_rune(int(self.peek()))}`.')
         self.pos += 1
     return self.fail('Expected `"` to end the string, found the end of input.')
 

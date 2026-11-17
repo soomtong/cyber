@@ -22,9 +22,9 @@ bar := foo3
 t.eq(bar(), 5)
 
 -- Static function binding wrapped in value.
-bar2 := toString
+bar2 := to_string
 t.eq(bar2(10), '10')
-fn toString(val int) -> str:
+fn to_string(val int) -> str:
     return str(val)
 
 -- Using as custom less function for sort.

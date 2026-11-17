@@ -9,7 +9,7 @@ global a int = 123
 t.eq(a, 123)
 
 -- Type is inferred from initializer.
-t.eqType(int, type.of(a))
+t.eq_type(int, type.of(a))
 
 -- Invoke as function.
 type Fn1 = fn() -> int

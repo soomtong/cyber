@@ -25,15 +25,15 @@ pub var process_args: ?std.process.Args = null;
 
 const funcs = [_]struct{[]const u8, C.BindFunc}{
     // Top level
-    .{"cacheUrl",       zErrFunc(cacheUrl)},
-    .{"fetchUrl",       zErrFunc(fetchUrl)},
+    .{"cache_url",       zErrFunc(cacheUrl)},
+    .{"fetch_url",       zErrFunc(fetchUrl)},
     
     .{"stderr",         zErrFunc(stderr)},
     .{"stdin",          zErrFunc(stdin)},
     .{"stdout",         zErrFunc(stdout)},
     .{"_exec",          zErrFunc(exec)},
     .{"_args",          zErrFunc(_args)},
-    .{"openLib",        zErrFunc(openLib)},
+    .{"open_lib",        zErrFunc(openLib)},
 };
 
 const types = [_]struct{[]const u8, C.BindType}{
@@ -172,7 +172,7 @@ pub fn allocCacheUrl(vm: *C.VM, url: []const u8) ![]const u8 {
     const resp = try http.get(alloc, a.httpClient, url);
     defer alloc.free(resp.body);
     if (resp.status != .ok) {
-        cli.tracev("cacheUrl response status: {}", .{resp.status});
+        cli.tracev("cache_url response status: {}", .{resp.status});
         return error.UnknownError;
     } else {
         const entry = try cache.saveNewSpecFile(alloc, specGroup, url, resp.body);

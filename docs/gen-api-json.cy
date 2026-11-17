@@ -24,7 +24,7 @@ use cy
 use os
 use meta
 
-args := os.parseArgs({'version', 'out'})
+args := os.parse_args({'version', 'out'})
 version := args.get('version') ?else 'source'
 cur_dir := os.dirname(meta.mod_uri()).?
 out_path := args.get('out') ?else '%{cur_dir}/api.json'

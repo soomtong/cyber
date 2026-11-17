@@ -469,7 +469,7 @@ fn (&Captures) expand(repl str) -> str:
         return 'a line feed'
     if cp < 32 or cp == 127:
         return 'the control character %{cp}'
-    return '`' + str.initRune(cp) + '`'
+    return '`' + str.init_rune(cp) + '`'
 
 -- Lower case without `_`, `-` and spaces: the loose form of a property value name (UAX44-LM3).
 -fn loose(name str) -> str:
@@ -478,7 +478,7 @@ fn (&Captures) expand(repl str) -> str:
         c := name[i]
         if c == '_' or c == '-' or c == ' ':
             continue
-        res += str.initRune(int(str.ascii_lower(c)))
+        res += str.init_rune(int(str.ascii_lower(c)))
     return res
 
 -- The parser and the code generator. The pattern becomes nodes, the nodes become instructions.
@@ -594,7 +594,7 @@ fn (&Builder) parse_cat() -> !int:
         if c == -1 or c == '|' or c == ')':
             break
         if c == '*' or c == '+' or c == '?' or c == '{':
-            return self.fail('The repetition %{show(c)} has nothing to repeat. Write `\\%{str.initRune(c)}` to match the character.')
+            return self.fail('The repetition %{show(c)} has nothing to repeat. Write `\\%{str.init_rune(c)}` to match the character.')
         node := self.parse_atom()!
         if node == -1:
             -- `(?flags)` sets flags and matches nothing.
@@ -985,15 +985,15 @@ fn (&Builder) escape_char(start int, in_class bool) -> !int:
         case 'Z':
             return self.fail_at(start, '`\\Z` is not supported. The end of the input is `\\z`. Before an optional last line feed, write `\\n?\\z`.')
         case 'G', 'K', 'X', 'R', 'h', 'H', 'N', 'Q', 'E', 'C', 'k', 'g':
-            return self.fail_at(start, 'The escape `\\%{str.initRune(c)}` is not supported.')
+            return self.fail_at(start, 'The escape `\\%{str.init_rune(c)}` is not supported.')
         else:
             pass
     if is_digit(c):
         return self.fail_at(start, 'Backreferences (`\\1`) and octal escapes are not supported: matching never backtracks. Capture both parts and compare them in code. A character by number is `\\x41` or `\\x{1F600}`.')
     if in_class and (c == 'b' or c == 'B' or c == 'A' or c == 'z' or c == '<' or c == '>'):
-        return self.fail_at(start, 'The assertion `\\%{str.initRune(c)}` can not be in a class.')
+        return self.fail_at(start, 'The assertion `\\%{str.init_rune(c)}` can not be in a class.')
     if is_alpha(c):
-        return self.fail_at(start, 'Unknown escape `\\%{str.initRune(c)}`. To match the letter, remove the `\\`.')
+        return self.fail_at(start, 'Unknown escape `\\%{str.init_rune(c)}`. To match the letter, remove the `\\`.')
     -- Punctuation and space stand for themselves.
     return c
 

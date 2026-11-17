@@ -10,9 +10,9 @@ t.eq(os.get_env('testfoo').?, 'testbar')
 os.unset_env('testfoo')!
 t.assert(os.get_env('testfoo') == none)
 
--- accessFile()
-t.eq(error.FileNotFound, os.accessFile('src/test/assets/missing.txt', os.AccessExists).unwrap_error())
-os.accessFile('src/test/assets/file.txt', os.AccessExists)!
+-- access_file()
+t.eq(error.FileNotFound, os.access_file('src/test/assets/missing.txt', os.AccessExists).unwrap_error())
+os.access_file('src/test/assets/file.txt', os.AccessExists)!
 
 -- args()
 -- Not available from static linking.
@@ -28,26 +28,26 @@ if meta.system() != .windows:
     t.eq(0, er.code)
     t.eq('cd\n', os.exec([&]str{'/bin/echo', 'c' + 'd'}).out)
 
--- createDir()
-if os.fileExists('src/test/assets/tempdir'):
-    os.removeDir('src/test/assets/tempdir')!
-os.createDir('src/test/assets/tempdir')!
+-- create_dir()
+if os.file_exists('src/test/assets/tempdir'):
+    os.remove_dir('src/test/assets/tempdir')!
+os.create_dir('src/test/assets/tempdir')!
 
 dir := os.open_dir('src/test/assets/tempdir')!
 t.eq(os.FileKind.directory, dir.info()!.kind)
 
--- createFile() new file.
-rm_res := os.removeFile('src/test/assets/write.txt')
-file := os.createFile('src/test/assets/write.txt')!
+-- create_file() new file.
+rm_res := os.remove_file('src/test/assets/write.txt')
+file := os.create_file('src/test/assets/write.txt')!
 _ = file.write('foobar')!
 t.eq('foobar', os.read_file('src/test/assets/write.txt')!)
 
--- createFile() no truncate.
-file = os.createFile('src/test/assets/write.txt', false)!
+-- create_file() no truncate.
+file = os.create_file('src/test/assets/write.txt', false)!
 t.eq('foobar', os.read_file('src/test/assets/write.txt')!)
 
--- createFile() truncate.
-file = os.createFile('src/test/assets/write.txt', true)!
+-- create_file() truncate.
+file = os.create_file('src/test/assets/write.txt', true)!
 t.eq('', os.read_file('src/test/assets/write.txt')!)
 
 -- Text and bytes.
@@ -95,7 +95,7 @@ t.eq(os.FileKind.file, file.info()!.kind)
 
 -- free() / malloc()
 ptr := os.malloc(16)!
-t.eqType(Ptr[void], type.of(ptr))
+t.eq_type(Ptr[void], type.of(ptr))
 os.free(ptr)
 
 -- File.read(bytes)
@@ -123,28 +123,28 @@ t.eq('bar', str(file.read(3)!))
 file.seek(-6)!
 t.eq('foo', str(file.read(3)!))
 
--- File.seekFromEnd()
+-- File.seek_from_end()
 file = os.open_file('src/test/assets/file.txt', .read)!
-file.seekFromEnd(-3)!
+file.seek_from_end(-3)!
 t.eq('bar', str(file.read(3)!))
--- t.eq(error.InvalidArgument, file.seekFromEnd(1).unwrapError())
-file.seekFromEnd(-6)!
+-- t.eq(error.InvalidArgument, file.seek_from_end(1).unwrapError())
+file.seek_from_end(-6)!
 t.eq('foo', str(file.read(3)!))
 
--- File.seekFromStart()
+-- File.seek_from_start()
 file = os.open_file('src/test/assets/file.txt', .read)!
-t.eq(error.InvalidArgument, file.seekFromStart(-1).unwrap_error())
-file.seekFromStart(3)!
+t.eq(error.InvalidArgument, file.seek_from_start(-1).unwrap_error())
+file.seek_from_start(3)!
 t.eq('bar', str(file.read(3)!))
 
 -- File.write(str) from create
-file = os.createFile('src/test/assets/write.txt', true)!
+file = os.create_file('src/test/assets/write.txt', true)!
 _ = file.write('foobar')!
 t.eq('foobar', os.read_file('src/test/assets/write.txt')!)
 
 -- File.write(str) from open
 file = os.open_file('src/test/assets/write.txt', .write)!
-file.seekFromEnd(0)!
+file.seek_from_end(0)!
 _ = file.write('abcxyz')!
 t.eq('foobarabcxyz', os.read_file('src/test/assets/write.txt')!)
 
@@ -188,14 +188,14 @@ t.eq(os.FileKind.file, entries[2].kind)
 
 -- File times as `time.Time`.
 os.write_file('src/test/assets/write.txt', 'x')!
-info := os.fileInfo('src/test/assets/write.txt')!
+info := os.file_info('src/test/assets/write.txt')!
 mt := time.unix(info.mtime_sec, info.mtime_nsec)!
 t.eq(info.mtime_sec, mt.unix())
 t.eq(info.mtime_nsec, mt.subsec_nanos())
 age := time.now() - mt
 t.eq(true, age < time.minutes(10))
 t.eq(true, age > time.minutes(-10))
-old := os.fileInfo('src/test/assets/file.txt')!
+old := os.file_info('src/test/assets/file.txt')!
 t.eq(true, time.unix(old.mtime_sec, old.mtime_nsec)! <= mt)
 
 -- writeFile(str)

@@ -15,7 +15,7 @@ use meta
 use math
 use md '../src/tools/md4c.cy'
 
-args := os.parseArgs({'version', 'import-style', 'skip-api'})
+args := os.parse_args({'version', 'import-style', 'skip-api'})
 version := args.get('version') ?else 'DEV'
 skip_api := args.contains('skip-api')
 import_style := args.get('import-style') != none

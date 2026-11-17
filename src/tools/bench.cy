@@ -70,7 +70,7 @@ fn peak_memory(cmd []str) -> float:
         res := os.exec(args)
         idx := res.err.index('maximum resident set size') ?else
             panic('NoMemoryOutput')
-        out := res.err[0..idx].trimRight(' ')
+        out := res.err[0..idx].trim_right(' ')
         i := out.len()-1
         while out[i] != ' ':
             i -= 1

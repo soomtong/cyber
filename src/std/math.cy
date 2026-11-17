@@ -109,7 +109,7 @@ const minSafeInt = -9007199254740991.0
 
 --| Not a number. Note that nan == nan.
 --| However, if a nan came from an arithmetic operation, the comparison is undefined.
---| Use `isNaN` instead.
+--| Use `is_nan` instead.
 const nan = as[float] 0x7ff8000000000000
 
 --| Negative infinity.
@@ -290,7 +290,7 @@ fn cos(x %T) -> T:
 fn cosh(a float) -> float:
     return c_cosh(a)
 
-fn degToRad(deg f32) -> f32:
+fn deg_to_rad(deg f32) -> f32:
     return deg * f32(pi2) / 360
 
 --| Returns e^x, where x is the argument, and e is Euler's number (2.718…, the base of the natural logarithm).
@@ -319,19 +319,19 @@ fn frac(a float) -> float:
 fn hypot(a float, b float) -> float:
     @panic('TODO')
 
-fn isInf(a float) -> bool:
+fn is_inf(a float) -> bool:
     return (@bitCast(int, a) && (~0 >> 1)) == @bitCast(int, inf)
 
 --| Returns true if the float has no fractional part, otherwise false.
 #[bind]
-fn isInt(a float) -> bool:
-    if isInf(a):
+fn is_int(a float) -> bool:
+    if is_inf(a):
         return false
     return c_trunc(a) == a
 
 --| Returns whether x is not a number.
 #[bind]
-fn isNaN(a float) -> bool:
+fn is_nan(a float) -> bool:
     return a != a
 
 --| Returns the natural logarithm (㏒e; also, ㏑) of x.
@@ -365,8 +365,8 @@ fn max(a %T, b T) -> T:
 
 #[bind]
 fn max_f64(a float, b float) -> float:
-    if isNaN(a): return b
-    if isNaN(b): return a
+    if is_nan(a): return b
+    if is_nan(b): return a
     return if (a > b) a else b
 
 --| Returns the smallest of two numbers.
@@ -375,8 +375,8 @@ fn min(a %T, b T) -> T:
 
 #[bind]
 fn min_f64(a float, b float) -> float:
-    if isNaN(a): return b
-    if isNaN(b): return a
+    if is_nan(a): return b
+    if is_nan(b): return a
     return if (a < b) a else b
 
 --| Returns the result of the 32-bit integer multiplication of x and y. Integer overflow is allowed.
@@ -741,7 +741,7 @@ fn (Mat4[]) `*`(m Self) -> Self:
 
 -- test "Extracting rotate + uniform scale matrix from transform matrix." {
 --     var xform = Transform.initIdentity();
---     xform.rotateY(std.math.pi/2.0);
+--     xform.rotate_y(std.math.pi/2.0);
 
 --     const pos = Vec3.init(1, 0, 0);
 --     try eqApproxVec3(xform.interpolateVec3(pos), Vec3.init(0, 0, 1));
@@ -802,7 +802,7 @@ fn Transform3D[] :: rotation(x, y, z Vec3[T]) -> Self:
         0, 0, 0, 1,
     })
 
-fn Transform3D[] :: rotationX(rad T) -> Self:
+fn Transform3D[] :: rotation_x(rad T) -> Self:
     c := cos(rad)
     s := sin(rad)
     return Self({
@@ -812,7 +812,7 @@ fn Transform3D[] :: rotationX(rad T) -> Self:
         0, 0,  0, 1,
     })
 
-fn Transform3D[] :: rotationY(rad T) -> Self:
+fn Transform3D[] :: rotation_y(rad T) -> Self:
     c := cos(rad)
     s := sin(rad)
     return Self({
@@ -822,7 +822,7 @@ fn Transform3D[] :: rotationY(rad T) -> Self:
         0, 0, 0,  1,
     })
 
-fn Transform3D[] :: rotationZ(rad T) -> Self:
+fn Transform3D[] :: rotation_z(rad T) -> Self:
     c := cos(rad)
     s := sin(rad)
     return Self({
@@ -921,7 +921,7 @@ fn (&Transform3D[]) translate(x f32, y f32) -> Self:
 --         self.mat = math.mul4x4_4x4(getRotationX(rad), self.mat);
 --     }
 
---     pub fn rotateY(self: *Transform, rad: f32) void {
+--     pub fn rotate_y(self: *Transform, rad: f32) void {
 --         self.mat = math.mul4x4_4x4(getRotationY(rad), self.mat);
 --     }
 
@@ -1030,14 +1030,14 @@ fn (Vec2[]) dot(v Self) -> T:
 fn (Vec2[]) len() -> T:
     return sqrt(self.x*self.x + self.y*self.y)
 
-fn (Vec2[]) lenSq() -> T:
+fn (Vec2[]) len_sq() -> T:
     return self.x*self.x + self.y*self.y
 
 fn (Vec2[]) normalize() -> T:
     length := self.len()
     return {x=self.x/length, y=self.y/length}
 
-fn (Vec2[]) scaleTo(len T) -> Self:
+fn (Vec2[]) scale_to(len T) -> Self:
     factor := len / self.len()
     return {x=x*factor, y=y*factor}
 
@@ -1091,7 +1091,7 @@ fn (Vec3[]) normalize() -> Self:
     return {x=self.x/length, y=self.y/length, z=self.z/length}
 
 -- Rotates the vector along an arbitrary axis. Assumes axis vector is normalized.
-fn (Vec3[]) rotateAxis(axis Self, rad T) -> Self:
+fn (Vec3[]) rotate_axis(axis Self, rad T) -> Self:
     v_para := axis * self.dot(axis)
     v_perp := self + v_para*-1
     v_perp_term := v_perp*cos(rad)
@@ -1103,7 +1103,7 @@ fn (Vec3[]) rotateAxis(axis Self, rad T) -> Self:
     }
 
 -- Uses rotors to rotate the 3d vector around the y axis.
-fn (Vec3[]) rotateY(rad T) -> Self:
+fn (Vec3[]) rotate_y(rad T) -> Self:
     half_rad := rad * 0.5
     a := Self.unit_x
     b := Self(cos(half_rad), 0, sin(half_rad))
@@ -1113,31 +1113,31 @@ fn (Vec3[]) rotateY(rad T) -> Self:
     rba := ra.add(rb_dot)
     return rba
 
--- test "Vec3.rotateY" {
+-- test "Vec3.rotate_y" {
 --     const pif = @as(f32, pi);
 --     // On xz plane.
 --     var v = Vec3.init(1, 0, 0);
---     try eqApproxVec3(v.rotateY(0), Vec3.init(1, 0, 0));
---     try eqApproxVec3(v.rotateY(pif*0.5), Vec3.init(0, 0, 1));
---     try eqApproxVec3(v.rotateY(pif), Vec3.init(-1, 0, 0));
---     try eqApproxVec3(v.rotateY(pif*1.5), Vec3.init(0, 0, -1));
+--     try eqApproxVec3(v.rotate_y(0), Vec3.init(1, 0, 0));
+--     try eqApproxVec3(v.rotate_y(pif*0.5), Vec3.init(0, 0, 1));
+--     try eqApproxVec3(v.rotate_y(pif), Vec3.init(-1, 0, 0));
+--     try eqApproxVec3(v.rotate_y(pif*1.5), Vec3.init(0, 0, -1));
 
 --     // Tilted into y.
 --     v = Vec3.init(1, 1, 0);
---     try eqApproxVec3(v.rotateY(0), Vec3.init(1, 1, 0));
---     try eqApproxVec3(v.rotateY(pif*0.5), Vec3.init(0, 1, 1));
---     try eqApproxVec3(v.rotateY(pif), Vec3.init(-1, 1, 0));
---     try eqApproxVec3(v.rotateY(pif*1.5), Vec3.init(0, 1, -1));
+--     try eqApproxVec3(v.rotate_y(0), Vec3.init(1, 1, 0));
+--     try eqApproxVec3(v.rotate_y(pif*0.5), Vec3.init(0, 1, 1));
+--     try eqApproxVec3(v.rotate_y(pif), Vec3.init(-1, 1, 0));
+--     try eqApproxVec3(v.rotate_y(pif*1.5), Vec3.init(0, 1, -1));
 -- }
 
--- test "Vec3.rotateAxis" {
+-- test "Vec3.rotate_axis" {
 --     const pif = @as(f32, pi);
 --     // Rotate from +y toward +z
 --     var v = Vec3.init(0, 1, 0);
---     try eqApproxVec3(v.rotateAxis(Vec3.init(1, 0, 0), 0), Vec3.init(0, 1, 0));
---     try eqApproxVec3(v.rotateAxis(Vec3.init(1, 0, 0), pif*0.5), Vec3.init(0, 0, 1));
---     try eqApproxVec3(v.rotateAxis(Vec3.init(1, 0, 0), pif), Vec3.init(0, -1, 0));
---     try eqApproxVec3(v.rotateAxis(Vec3.init(1, 0, 0), pif*1.5), Vec3.init(0, 0, -1));
+--     try eqApproxVec3(v.rotate_axis(Vec3.init(1, 0, 0), 0), Vec3.init(0, 1, 0));
+--     try eqApproxVec3(v.rotate_axis(Vec3.init(1, 0, 0), pif*0.5), Vec3.init(0, 0, 1));
+--     try eqApproxVec3(v.rotate_axis(Vec3.init(1, 0, 0), pif), Vec3.init(0, -1, 0));
+--     try eqApproxVec3(v.rotate_axis(Vec3.init(1, 0, 0), pif*1.5), Vec3.init(0, 0, -1));
 -- }
 
 type Vec4[T Any]:
@@ -1161,7 +1161,7 @@ fn (Vec4[]) `*`(s T) -> Self:
 fn (Vec4[]) `/`(s T) -> Self:
     return {x=self.x/s, y=self.y/s, z=self.z/s, w=self.w/s}
 
-fn (Vec4[]) divW() -> Self:
+fn (Vec4[]) div_w() -> Self:
     return {x=self.x/self.w, y=self.y/self.w, z=self.z/self.w, 1}
 
 fn (Vec4[]) dot(v Self) -> T:

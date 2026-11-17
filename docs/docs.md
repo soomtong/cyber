@@ -4500,7 +4500,7 @@ use os
 use time
 
 fn mtime(path str) -> !time.Time:
-    info := os.fileInfo(path)!
+    info := os.file_info(path)!
     return time.unix(info.mtime_sec, info.mtime_nsec)
 
 a := mtime('build.zig')!
@@ -5037,7 +5037,7 @@ A module can be configured to use static binding when building an executable or 
 ### `open_lib` binding.
 > _Planned Feature_
 
-`os.openLib` is declared but not implemented: calling it panics. Use [runtime binding](#runtime-binding) with `c.bind_lib` instead. The paragraph below describes the planned behavior.
+`os.open_lib` is declared but not implemented: calling it panics. Use [runtime binding](#runtime-binding) with `c.bind_lib` instead. The paragraph below describes the planned behavior.
 
 If the path argument to `open_lib` is just a filename, the search steps for the library is specific to the operating system. Provide an absolute (eg. '/foo/mylib.so') or relative (eg. './mylib.so') path to load from a direct location instead. When the path argument is `none`, it loads the currently running executable as a library.
 

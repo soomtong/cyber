@@ -816,7 +816,7 @@ fn (&Object) downcast(%Ref type) -> Ref:
     
 #[bind] fn (&Object) type() -> int
 
-fn (&Object) toString() -> str:
+fn (&Object) to_string() -> str:
     obj_type := self.type()
     switch obj_type:
         case type.id(bool):
@@ -1421,7 +1421,7 @@ fn (&Slice[]) clone_copy(new_cap int) -> Self:
         header = new_cap,
     }
 
--- fn (&&Slice[]) ensureUnusedCap(unused int):
+-- fn (&&Slice[]) ensure_unused_cap(unused int):
 --     cap := self.cap()
 --     if cap - self._len < unused:
 --         self.ensure_cap(cap + 1)
@@ -2090,7 +2090,7 @@ fn (&&Array[]) ensure_cap(new_cap int):
         self.buf = new_buf
         self.header = self.own_msb() || final_cap
 
-fn (&&Array[]) ensureUnusedCap(unused int):
+fn (&&Array[]) ensure_unused_cap(unused int):
     cap := self.cap()
     if cap - self.length < unused:
         self.ensure_cap(cap + 1)
@@ -2221,7 +2221,7 @@ fn (&&Array[]) size_up(new_len int, init T):
     self.length = new_len
 
 #[cond=type.is_copyable(T)]
-fn (&Array[]) setLast(val T) -> void:
+fn (&Array[]) set_last(val T) -> void:
     self[self.length-1] = val
 
 --| Sorts in ascending order with `<`. The element type needs a `<` operator.
@@ -2532,7 +2532,7 @@ fn HashMap[] :: @init_record(pairs [&]Pair[K, V]) -> Self:
     return move new
 
 fn (&HashMap[]) @index(key K) -> V:
-    slot := self.findSlot(key)
+    slot := self.find_slot(key)
     if slot == -1:
         panic('MissingKey')
     return self.vals[slot]
@@ -2553,11 +2553,11 @@ fn (&HashMap[]) clear():
 
 --| Returns whether there is a value mapped to `key`.
 fn (&HashMap[]) contains(key K) -> bool:
-    return self.findSlot(key) != -1
+    return self.find_slot(key) != -1
 
 --| Returns value mapped to `key` or returns `none`.
 fn (&HashMap[]) get(key K) -> ?V:
-    slot := self.findSlot(key)
+    slot := self.find_slot(key)
     if slot == -1:
         return none
     return self.vals[slot]
@@ -2570,7 +2570,7 @@ fn (&HashMap[]) grow():
 
 --| Assumes there is at least 1 vacant slot.
 --| If the entry already exists, the sign bit is set on the result.
---| This returns the first tombstone slot if the key is missing unlike `findSlot`.
+--| This returns the first tombstone slot if the key is missing unlike `find_slot`.
 -fn (&HashMap[]) findSetSlot(key K) -> int:
     mask := self.cap - 1
     hash := HASH(key)
@@ -2600,7 +2600,7 @@ fn (&HashMap[]) grow():
                 return slot || int.min
 
 --| Returns -1 if not found.
-fn (&HashMap[]) findSlot(key K) -> int:
+fn (&HashMap[]) find_slot(key K) -> int:
     if self.cap == 0:
         return -1
     mask := self.cap - 1
@@ -2666,7 +2666,7 @@ fn (&HashMap[]) next(idx &int) -> ?MapEntry[K, V]:
 
 --| Removes the element with the given key `key`.
 fn (&HashMap[]) try_remove(key K) -> bool:
-    slot := self.findSlot(key)
+    slot := self.find_slot(key)
     if slot == -1:
         return false
 
@@ -3395,7 +3395,7 @@ fn Wyhash :: hash(seed int, input Span[byte]) -> int:
     new := Wyhash(seed)
 
     if input.len() <= 16:
-        new.smallKey(input_span)
+        new.small_key(input_span)
     else:
         i := 0
         if input_span.length >= 48:
@@ -3440,10 +3440,10 @@ fn (&Wyhash) final() -> int:
     input := self.buf[0..self.buf_len]
     -- Declared at the same depth as `input`, which borrows it after the inner `if` block ends.
     scratch := [16]byte(0)
-    newSelf := self.shallowCopy() -- ensure idempotency
+    newSelf := self.shallow_copy() -- ensure idempotency
 
     if self.cur_len <= 16:
-        newSelf.smallKey(input)
+        newSelf.small_key(input)
     else:
         offset := 0
         if self.buf_len < 16:
@@ -3462,7 +3462,7 @@ fn (&Wyhash) final() -> int:
 
 --@inline
 --| Copies the core wyhash state but not any internal buffers.
-fn (&Wyhash) shallowCopy() -> Self:
+fn (&Wyhash) shallow_copy() -> Self:
     return {
         a       = self.a,
         b       = self.b,
@@ -3473,14 +3473,14 @@ fn (&Wyhash) shallowCopy() -> Self:
     }
 
 --@inline
-fn (&Wyhash) smallKey(input [&]byte):
+fn (&Wyhash) small_key(input [&]byte):
     assert(input.length <= 16)
 
     if input.length >= 4:
         end := input.length - 4
         quarter := (input.length >> 3) << 2
-        self.a = (@zext(int, Wyhash.readI32(*input[0])) << 32) || @zext(int, Wyhash.readI32(*input[quarter]))
-        self.b = (@zext(int, Wyhash.readI32(*input[end])) << 32) || @zext(int, Wyhash.readI32(*input[end - quarter]))
+        self.a = (@zext(int, Wyhash.read_i32(*input[0])) << 32) || @zext(int, Wyhash.read_i32(*input[quarter]))
+        self.b = (@zext(int, Wyhash.read_i32(*input[end])) << 32) || @zext(int, Wyhash.read_i32(*input[end - quarter]))
     else input.length > 0:
         self.a = (@zext(int, input[0]) << 16) || (@zext(int, input[input.length >> 1]) << 8) || @zext(int, input[input.length - 1])
         self.b = 0
@@ -3493,8 +3493,8 @@ fn (&Wyhash) round(input Ptr[byte]):
     a := 0
     b := 0
     #for 0..3 |i|:
-        a = Wyhash.readInt(*input[8 * (2 * i)])
-        b = Wyhash.readInt(*input[8 * (2 * i + 1)])
+        a = Wyhash.read_int(*input[8 * (2 * i)])
+        b = Wyhash.read_int(*input[8 * (2 * i + 1)])
         self.state[i] = Wyhash.mix(a ~ Wyhash.secret[i + 1], b ~ self.state[i])
 
 fn Wyhash :: rot(x int) -> int:
@@ -3515,10 +3515,10 @@ fn Wyhash :: mix(a int, b int) -> int:
     Wyhash.mum(*a, *b)
     return a ~ b
 
-fn Wyhash :: readInt(ptr Ptr[byte]) -> int:
+fn Wyhash :: read_int(ptr Ptr[byte]) -> int:
     return r64.decode(as ptr, .little)
 
-fn Wyhash :: readI32(ptr Ptr[byte]) -> i32:
+fn Wyhash :: read_i32(ptr Ptr[byte]) -> i32:
     return r32.decode(as ptr, .little)
 
 --@inline
@@ -3526,7 +3526,7 @@ fn (&Wyhash) final0():
     self.state[0] ~= self.state[1] ~ self.state[2]
 
 --@inline
---| input_lb must be at least 16-bytes long (in shorter key cases the smallKey function will be
+--| input_lb must be at least 16-bytes long (in shorter key cases the small_key function will be
 --| used instead). We use an index into a slice to for comptime processing as opposed to if we
 --| used pointers.
 fn (&Wyhash) final1(input_lb [&]byte, start_pos int):
@@ -3536,11 +3536,11 @@ fn (&Wyhash) final1(input_lb [&]byte, start_pos int):
 
     i := 0
     while i + 16 < input.length:
-        self.state[0] = Wyhash.mix(Wyhash.readInt(*input[i]) ~ Wyhash.secret[1], Wyhash.readInt(*input[i + 8]) ~ self.state[0])
+        self.state[0] = Wyhash.mix(Wyhash.read_int(*input[i]) ~ Wyhash.secret[1], Wyhash.read_int(*input[i + 8]) ~ self.state[0])
         i += 16
 
-    self.a = Wyhash.readInt(*input_lb[input_lb.length - 16])
-    self.b = Wyhash.readInt(*input_lb[input_lb.length - 8])
+    self.a = Wyhash.read_int(*input_lb[input_lb.length - 16])
+    self.b = Wyhash.read_int(*input_lb[input_lb.length - 8])
 
 --@inline
 fn (&Wyhash) final2() -> int:
@@ -3641,18 +3641,18 @@ fn str :: @init(x %T) -> str:
 
 --| Converts a rune to a string.
 #[bind]
-fn str :: initRune(val int) -> str:
+fn str :: init_rune(val int) -> str:
     panic('Unsupported')
 
 --| Reallocates with zero sentinel for C compatibility.
 --| The sentinel does not count as a character in the string.
 fn str :: initz(src str) -> str:
     len := src.len()
-    res := if (src.isAscii()) @init_astr_undef(len + 1)
+    res := if (src.is_ascii()) @init_astr_undef(len + 1)
         else @init_ustr_undef(len + 1)
     @memcpy(res.ptr, src.ptr, len)
     res.ptr[len] = 0
-    if src.isAscii():
+    if src.is_ascii():
         res.header = len || (1 << 63)
     else:
         res.header = len
@@ -3690,7 +3690,7 @@ fn str :: ascii_upper(ch byte) -> byte:
 
 fn (&str) @send(thread Thread) -> str:
     len := self.len()
-    res := if (self.isAscii()) @init_astr_undef(thread, len)
+    res := if (self.is_ascii()) @init_astr_undef(thread, len)
         else @init_ustr_undef(thread, len)
     @memcpy(res.ptr, self.ptr, len)
     return move res
@@ -3727,7 +3727,7 @@ fn (&str) @slice(start int, end int) -> str:
         panic('InvalidArgument')
 
     new_len := end - start
-    if self.hasAsciiFlag():
+    if self.has_ascii_flag():
         new_len = new_len || (1 << 63)
     return {
         buf    = self.buf,
@@ -3755,15 +3755,15 @@ fn (scope &str) span() -> scope Span[byte]:
 fn (&str) rune_at(idx int) -> r32:
     if (as[r64] idx) >= (as[r64] self.len()):
         panic('OutOfBounds')
-    if self.hasAsciiFlag():
+    if self.has_ascii_flag():
         return self.ptr[idx]
     else:
-        if !utf8Check(self.ptr + idx, self.len() - idx):
+        if !utf8_check(self.ptr + idx, self.len() - idx):
             return 0xFFFD
-        return utf8Decode(self.ptr + idx)
+        return utf8_decode(self.ptr + idx)
 
 --| Source: https://github.com/sheredom/utf8.h
-fn utf8Check(s Ptr[byte], remaining int) -> bool:
+fn utf8_check(s Ptr[byte], remaining int) -> bool:
     if 0xf0 == (0xf8 && s[0]):
         -- ensure that there's 4 bytes or more remaining
         if remaining < 4:
@@ -3842,7 +3842,7 @@ fn utf8Check(s Ptr[byte], remaining int) -> bool:
         -- we have an invalid 0b1xxxxxxx utf8 code point entry
         return false
 
-fn utf8Decode(s Ptr[byte]) -> r32:
+fn utf8_decode(s Ptr[byte]) -> r32:
     if 0xf0 == (0xf8 && s[0]):
         -- 4 byte utf8 codepoint
         return ((0x07 && s[0]) << 18) || ((0x3f && s[1]) << 12) ||
@@ -3861,7 +3861,7 @@ fn utf8Decode(s Ptr[byte]) -> r32:
         return s[0]
         -- str += 1
 
-fn utf8SeqLen(first byte) -> int:
+fn utf8_seq_len(first byte) -> int:
     if 0xf0 == (0xf8 && first):
         return 4
     else 0xe0 == (0xf0 && first):
@@ -3871,7 +3871,7 @@ fn utf8SeqLen(first byte) -> int:
     else:
         return 1
 
-fn (&str) beforeLast() -> str:
+fn (&str) before_last() -> str:
     return self[0..self.len()-1]
 
 --| Returns a new string that concats this string and `s`.
@@ -3879,7 +3879,7 @@ fn (&str) beforeLast() -> str:
 fn (&str) concat(s str) -> str:
     len := self.len()
     s_len := s.len()
-    res := if (self.isAscii() and s.isAscii()) @newAstrUndef(len + s_len)
+    res := if (self.is_ascii() and s.is_ascii()) @newAstrUndef(len + s_len)
         else @newUstrUndef(len + s_len)
     @memcpy(res.ptr, self.ptr, len)
     @memcpy(res.ptr + len, s.ptr, s_len)
@@ -3912,7 +3912,7 @@ fn (&str) count() -> int:
     idx := 0
     res := 0
     while idx < len:
-        cp_len := utf8SeqLen(self.ptr[idx])
+        cp_len := utf8_seq_len(self.ptr[idx])
         res += 1
         idx += cp_len
     return res
@@ -3939,8 +3939,8 @@ fn (&str) index_rune(needle int) -> ?int:
     len := self.len()
     i := 0
     while i < len:
-        rune_len := utf8SeqLen(self.ptr[i])
-        rune := utf8Decode(self.ptr + i)
+        rune_len := utf8_seq_len(self.ptr[i])
+        rune := utf8_decode(self.ptr + i)
         if rune == needle:
             return i
         i += rune_len
@@ -3975,8 +3975,8 @@ fn (&str) index_any_rune(runes [&]int) -> ?int:
     len := self.len()
     i := 0
     while i < len:
-        rune_len := utf8SeqLen(self.ptr[i])
-        rune := utf8Decode(self.ptr + i)
+        rune_len := utf8_seq_len(self.ptr[i])
+        rune := utf8_decode(self.ptr + i)
         if runes.index(rune) != none:
             return i
         i += rune_len
@@ -4025,7 +4025,7 @@ fn (&str) fmt_bytes(format NumberFormat) -> str:
         res += self[i].fmt(format)
     return res
 
-fn (&str) hasAsciiFlag() -> bool:
+fn (&str) has_ascii_flag() -> bool:
     return (self.header && (1 << 63)) != 0
 
 --| Returns a new string with `str` inserted at byte index `idx`.
@@ -4038,7 +4038,7 @@ fn (&str) insert(idx int, s str) -> str:
 fn (&str) insert(idx int, b byte) -> str:
     len := self.len()
     is_ascii := b < 0x80
-    res := if (@isAscii() and is_ascii) @newAstrUndef(len + 1)
+    res := if (@is_ascii() and is_ascii) @newAstrUndef(len + 1)
         else @newUstrUndef(len + 1)
     @memcpy(res.ptr, self.ptr, idx)
     res.ptr[idx] = b
@@ -4049,8 +4049,8 @@ fn (&str) insert(idx int, b byte) -> str:
 --| Returns whether the string contains all ASCII runes.
 --| Every time this function is called a full scan is performed.
 #[bind]
-fn (&str) isAscii() -> bool:
-    if @hasAsciiFlag():
+fn (&str) is_ascii() -> bool:
+    if @has_ascii_flag():
         return true
     -- TODO: Port SIMD case.
     for 0..self.len() |i|:
@@ -4061,7 +4061,7 @@ fn (&str) isAscii() -> bool:
 fn (&str) last() -> byte:
     return self[self.len()-1]
 
-fn (&str) lastIndexOf(needle str) -> ?int:
+fn (&str) last_index(needle str) -> ?int:
     start := self.len() - needle.len()
     first := needle[0]
     for start..>=0 |i|:
@@ -4097,7 +4097,7 @@ fn (str) `>=`(right str) -> bool:
 #[bind]
 fn (&str) lower() -> str:
     len := self.len()
-    res := if (@isAscii()) @newAstrUndef(len) else @newUstrUndef(len)
+    res := if (@is_ascii()) @newAstrUndef(len) else @newUstrUndef(len)
     for 0..len |i|:
         res.ptr[i] = self.ptr[i].lower()
     return res
@@ -4144,8 +4144,8 @@ fn (&str) seek_pos(n int) -> int:
     while i < len:
         if rune_i == n:
             return i
-        rune_len := utf8SeqLen(self.ptr[i])
-        rune := utf8Decode(self.ptr + i)
+        rune_len := utf8_seq_len(self.ptr[i])
+        rune := utf8_decode(self.ptr + i)
         i += rune_len
         rune_i += 1
 
@@ -4155,12 +4155,12 @@ fn (&str) seek_pos(n int) -> int:
 
 --| Returns the UTF-8 rune starting at byte index `idx` as a string.
 #[bind]
-fn (&str) runeStrAt(idx int) -> str:
-    rune_len := utf8SeqLen(self.ptr[idx])
+fn (&str) rune_str_at(idx int) -> str:
+    rune_len := utf8_seq_len(self.ptr[idx])
     return self[idx..idx+rune_len]
 
 fn (&str) set(idx int, x byte) -> str:
-    return self[0..idx] + str.initRune(x) + self[idx+1..]
+    return self[0..idx] + str.init_rune(x) + self[idx+1..]
 
 --| Returns the lines of the string. A line ends with `\n` or `\r\n`, and the line break is not part
 --| of the line. A line break at the end does not start another line, so `'a\nb\n'` and `'a\nb'` both
@@ -4236,7 +4236,7 @@ fn (&str) split(sep str) -> []str:
 fn (&str) starts_with(prefix str) -> bool:
     return self.ptr[0..self.len()].starts_with(prefix.ptr[0..prefix.len()])
 
-fn (&str) trimLeft(delim str) -> str:
+fn (&str) trim_left(delim str) -> str:
     res := self.*
     if delim.len() == 0:
         return res
@@ -4248,17 +4248,17 @@ fn (&str) trimLeft(delim str) -> str:
     return res
 
 --| Trims until none of `delims` is at that end, in any order.
-fn (&str) trimLeft(delims AsSpan[str]) -> str:
+fn (&str) trim_left(delims AsSpan[str]) -> str:
     res := self.*
     while:
         before := res.len()
         for delims |delim|:
-            res = res.trimLeft(delim)
+            res = res.trim_left(delim)
         if res.len() == before:
             break
     return res
 
-fn (&str) trimRight(delim str) -> str:
+fn (&str) trim_right(delim str) -> str:
     res := self.*
     if delim.len() == 0:
         return res
@@ -4270,40 +4270,40 @@ fn (&str) trimRight(delim str) -> str:
     return res
 
 --| Trims until none of `delims` is at that end, in any order.
-fn (&str) trimRight(delims AsSpan[str]) -> str:
+fn (&str) trim_right(delims AsSpan[str]) -> str:
     res := self.*
     while:
         before := res.len()
         for delims |delim|:
-            res = res.trimRight(delim)
+            res = res.trim_right(delim)
         if res.len() == before:
             break
     return res
 
 --| Returns the string with both ends trimmed.
 fn (&str) trim(delim str) -> str:
-    return self.trimLeft(delim).trimRight(delim)
+    return self.trim_left(delim).trim_right(delim)
 
 fn (&str) trim(delims AsSpan[str]) -> str:
-    return self.trimLeft(delims).trimRight(delims)
+    return self.trim_left(delims).trim_right(delims)
 
 --| Returns the string with spaces, tabs and line breaks trimmed from both ends.
 fn (&str) trim() -> str:
     return self.trim({' ', '\t', '\r', '\n'})
 
 --| Returns the string with spaces, tabs and line breaks trimmed from the start.
-fn (&str) trimLeft() -> str:
-    return self.trimLeft({' ', '\t', '\r', '\n'})
+fn (&str) trim_left() -> str:
+    return self.trim_left({' ', '\t', '\r', '\n'})
 
 --| Returns the string with spaces, tabs and line breaks trimmed from the end.
-fn (&str) trimRight() -> str:
-    return self.trimRight({' ', '\t', '\r', '\n'})
+fn (&str) trim_right() -> str:
+    return self.trim_right({' ', '\t', '\r', '\n'})
 
 --| Returns this string in uppercase.
 #[bind]
 fn (&str) upper() -> str:
     len := self.len()
-    res := if (self.isAscii()) @newAstrUndef(len) else @newUstrUndef(len)
+    res := if (self.is_ascii()) @newAstrUndef(len) else @newUstrUndef(len)
     for 0..len |i|:
         res.ptr[i] = self.ptr[i].upper()
     return res
@@ -4339,7 +4339,7 @@ fn (&PartialVector[]) len() -> int:
     return (as[Ptr[int]] addr).*
 
 #[unsafe]
-fn (&PartialVector[]) setLength(len int):
+fn (&PartialVector[]) set_length(len int):
     addr := @unsafeCast(int, self)
     (as[Ptr[int]] addr).* = len
 
@@ -4668,7 +4668,7 @@ fn (&PtrSpan[]) span() -> [&]T:
 fn (&PtrSpan[]) @set_index(idx int, val T):
     self.ptr[idx] = val
 
-fn (&PtrSpan[]) toBytes() -> PtrSpan[byte]:
+fn (&PtrSpan[]) to_bytes() -> PtrSpan[byte]:
     return (as[Ptr[byte]] self.ptr)[0..self.length * type.size(T)]
 
 --| Returns whether the array ends with `suffix`.

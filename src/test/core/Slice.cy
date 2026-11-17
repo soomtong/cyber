@@ -9,7 +9,7 @@ t.eq(a.len(), 2)
 
 -- Construct slice.
 ta := []int{1, 2, 3}
-t.eqType([]int, type.of(ta))
+t.eq_type([]int, type.of(ta))
 t.eq(ta.len(), 3)
 
 -- To target type.
@@ -76,9 +76,9 @@ t.eq_slice([]int{2, 4, 1, 3}, a)
 -- t.eq([]int{}.join(','), '')
 -- t.eq({1}.join(','), '1')
 -- t.eq({1, 2, 3}.join(','), '1,2,3')
--- t.eq({1, 2, 3}.join(',').isAscii(), true)
+-- t.eq({1, 2, 3}.join(',').is_ascii(), true)
 -- t.eq({1, 2, 3}.join('🦊'), '1🦊2🦊3')
--- t.eq({1, 2, 3}.join('🦊').isAscii(), false)
+-- t.eq({1, 2, 3}.join('🦊').is_ascii(), false)
 
 -- len()
 a = {1, 2, 3, 4}

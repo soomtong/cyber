@@ -238,7 +238,7 @@ fn (&Encoder) line(depth int):
         self.buf = self.buf.append(byte(' '))
 
 fn (&Encoder) check_utf8(s str):
-    if !s.isAscii() and !str.is_utf8(s.span()):
+    if !s.is_ascii() and !str.is_utf8(s.span()):
         self.bad_utf8 = true
 
 fn (&Encoder) quoted(s str) -> str:
@@ -324,7 +324,7 @@ fn (&Encoder) fields_text(cols []Col) -> str:
     out := '{'
     for cols |i, c|:
         if i > 0:
-            out += str.initRune(int(self.delim))
+            out += str.init_rune(int(self.delim))
         out += self.key(c.name)
         if c.sub.len() > 0:
             out += self.fields_text(c.sub)
@@ -561,7 +561,7 @@ fn (&Decoder) prepare(src str) -> !void:
         start = end + 1
         if raw.len() > 0 and raw[raw.len() - 1] == '\r':
             raw = raw[0..raw.len() - 1]
-        raw = raw.trimRight(' ')
+        raw = raw.trim_right(' ')
         spaces := 0
         tabs := 0
         i := 0
@@ -743,9 +743,9 @@ fn (&Decoder) quoted_token(l Line, t str) -> !str:
                 i += 4
                 if cp >= 0xd800 and cp <= 0xdfff:
                     return self.fail(l, 'A `\\u` escape can not encode a surrogate (`\\u%{cp.fmt(.hex)}`).')
-                buf = buf.append(str.initRune(cp).span())
+                buf = buf.append(str.init_rune(cp).span())
             else:
-                return self.fail(l, 'Unknown escape `\\%{str.initRune(int(e))}`.')
+                return self.fail(l, 'Unknown escape `\\%{str.init_rune(int(e))}`.')
     return self.fail(l, 'Expected `"` to end the string.')
 
 --| Decodes a value token.
@@ -1045,7 +1045,7 @@ fn (&Decoder) list_item(l Line, depth int) -> !json.Value:
     if l.text == '-':
         self.pos += 1
         return json.Value.object({})
-    rest := l.text[1..].trimLeft(' ')
+    rest := l.text[1..].trim_left(' ')
     if rest == '[]':
         self.pos += 1
         return json.Value.array({})

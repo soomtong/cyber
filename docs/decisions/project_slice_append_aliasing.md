@@ -120,3 +120,39 @@ tars-agent 요청(`cyber-0.4.12-spike-defects.md` (a))에서 `remove` · `clear`
   `checkDroppedSliceResult`). 메서드 이름 목록과 결과 타입이 `Slice`인지로 판정한다.
 - 남은 일: 후보 2(마지막 사용 분석)가 생기면 `xs = xs.remove(i)`에서 받는 변수를 이동으로 넘겨 가운데 변경도 제자리로 할
   수 있다. `&&Slice` 제자리 API로 바꾸는 안은 tars-agent 프롬프트 · 문서 영향 때문에 사용자 결정으로 남긴다.
+
+## 결정 3 (2026-11-17): 크기 변경은 `&&Slice` 제자리, 새 목록은 `-ed` 메서드
+
+결정 1 · 2는 "값을 돌려주는 크기 변경 + 버퍼가 유일하면 제자리" 구조를 유지한 채 별칭의 해를 막았다. 그래도 세 번의 결함이
+모두 이 구조에서 나왔고(누수 · 이중 해제 · 해제된 칸 읽기), "결과를 받는 변수에 다시 넣어라"는 규칙은 사용자(특히 LLM)가
+자주 어겼다. tars-agent 요청(0.4.12, 0.4.13-DEV)이 모두 이 규칙을 어긴 코드였다. 사용자 결정으로 API를 둘로 나눴다.
+
+- 제자리: `append`, `insert`, `remove`, `clear`, `size_down`, `size_up`, `pop`, `` `+=` ``는 `fn (&&Slice[]) ...`이고 아무것도
+  돌려주지 않는다. Rust `Vec::push(&mut self)`, Swift `mutating`, Python `list.append`, Cyber `Array`와 같은 꼴이다.
+- 새 목록: `appended`, `inserted`, `removed`, `` `+` ``는 `fn (&Slice[]) ... -> Self`이고 항상 새 버퍼를 만든다(`clone_copy`).
+  이름은 Swift의 `sorted()` · `reversed()`처럼 과거분사로 정했다(사용자 결정 1). 빠른 경로가 없으니 결과와 받는 쪽이 버퍼를
+  나누는 일이 없다.
+- 원소 쓰기(`xs[i] = v`, `sort`, `reverse`)는 복사하지 않는다(Go식, 사용자 결정 2: 성능 쪽). 버퍼를 나눈 값 모두에 보인다.
+  크기를 바꾸는 제자리 연산만 버퍼가 유일하지 않으면 먼저 복사한다(Swift `isUniquelyReferenced`와 같은 검사, 다만 변경되는
+  변수 자신에 대해서다. Lean · Koka 저자가 말한 "빌린 수신자의 RC=1 제자리 갱신"의 위험이 `&&`로 없어진다).
+- `size_down` · `clear`는 버퍼를 나눈 경우에도 복사하지 않고 길이만 줄인다(O(1)). 잘린 원소는 다른 값을 위해 살아 있고,
+  버퍼 원소 수(결정 1)가 그 수를 기억한다. 이 값이 나중에 버퍼를 혼자 갖고 커질 때 `drop_tail`이 해제한다.
+- `x op= y`는 왼쪽 타입에 `` `op=` `` 메서드가 있으면 그것을 부른다(`semaOpAssignMethod`). 없으면 전처럼 `x = x op y`.
+  `+`가 항상 복사하게 되어, 이 규칙 없이는 `out += s` 루프가 O(n^2)가 된다. 왼쪽은 변수와 필드 경로(`xs`, `self.out`)만
+  본다(타입을 보려고 한 번 분석한 뒤 일반 대입으로 돌아가도 부작용이 없는 꼴). 참조(`^[]T`)는 전의 안내 오류를 유지한다.
+- 0.4.x 안의 깨지는 변경으로 넣었다(사용자 결정 3: 0.5를 첫 고정 의미 버전으로 두려고 그 전에 깨뜨린다). 옛 꼴
+  `xs = xs.append(v)` · `ys := xs.append(v)`는 고칠 방법을 말하는 오류다(`checkSliceInPlaceResult`). 새 목록 메서드의 결과를
+  버리는 꼴은 제자리 메서드를 알려 준다(`checkDroppedSliceResult`). 세션 마지막 줄의 검사는 뺐다(`xs.append(4)`는 결과가 없는
+  문장, `xs.removed(0)`은 결과를 보여 줌).
+- 전역: 전역은 배타적으로 빌릴 수 없다(`sema_ex_borrow2`, 함수가 같은 전역을 다른 경로로 읽을 수 있어서). 그래서 전역 `[]T`의
+  제자리 메서드는 컴파일 오류(안내 문구)이고, `g += v`는 `semaOpAssignMethod`가 왼쪽이 지역에 뿌리를 두지 않으면
+  (`recParentLocal() == null`) `g = g + v`로 돌아간다(복사, O(n)). 열린 질문: 전역을 숨은 지역으로 꺼내 메서드를 부르고
+  되돌려 넣는 꼴(take-and-restore)로 제자리 갱신을 허용할지. 메서드가 그 사이 전역을 읽으면 빈 값을 보게 된다.
+- 버린 안: 마지막 사용 분석으로 `xs = xs.remove(i)`를 제자리로 바꾸는 것(Lean · Koka). 성능만 바꾸는 최적화라 의미 문제를 풀지
+  않고, 이동을 의미로 넣는 것은 뒤 줄 하나가 앞 줄의 동작을 바꾸는 원격 작용이라 사용자가 반대했다.
+- 함께 드러난 결함: `self.* = res`(관리 대상 지역을 포인터 · 빌림으로 대입)가 복사 없이 넣어 이중 해제였다(F-161, 기존 결함).
+  `&&T`로의 `.deref` 대입도 막혀 있었다.
+- 구현: `src/builtins/core.cy`의 `owns_buffer` · `owns_room` · `drop_tail` · `reserve_own`과 각 메서드, `src/sema.zig`의
+  `semaOpAssignMethod` · `checkSliceInPlaceResult` · `checkDroppedSliceResult`. 테스트 `memory/slice_shared_buffer.cy`,
+  `core/Slice_resize_receiver.cy`, 오류 테스트 `core/Slice_append_assign_error.cy` · `Slice_append_decl_error.cy` ·
+  `Slice_appended_unused_error.cy` · `Slice_removed_discard_error.cy`.

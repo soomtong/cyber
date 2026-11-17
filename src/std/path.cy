@@ -44,7 +44,7 @@ fn normalize(p str) -> str:
             continue
         if part == '..':
             if parts.len() > 0 and parts.last() != '..':
-                parts = parts.remove(parts.len() - 1)
+                parts.remove(parts.len() - 1)
             else !abs:
                 parts += part
             continue

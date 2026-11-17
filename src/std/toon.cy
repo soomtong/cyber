@@ -142,15 +142,15 @@ fn to_json(src str) -> !str:
                     if o.len() == 0:
                         return none
                     all_prim = false
-                    subs = subs.append(o)
+                    subs.append(o)
                 else:
                     all_obj = false
         if all_prim:
-            cols = cols.append(Col{name=e.key, sub={}})
+            cols.append(Col{name=e.key, sub={}})
         else all_obj:
             sub := columns(subs) ?else:
                 return none
-            cols = cols.append(Col{name=e.key, sub=sub})
+            cols.append(Col{name=e.key, sub=sub})
         else:
             return none
     return cols
@@ -161,7 +161,7 @@ fn to_json(src str) -> !str:
     for a |e|:
         switch e:
             case .object |o|:
-                rows = rows.append(o)
+                rows.append(o)
             else:
                 return none
     return columns(rows)
@@ -174,7 +174,7 @@ fn to_json(src str) -> !str:
     for o.entries |e|:
         switch e.value:
             case .object |v|:
-                rows = rows.append(v)
+                rows.append(v)
             else:
                 return none
     return columns(rows)
@@ -229,13 +229,13 @@ fn to_json(src str) -> !str:
     bad_utf8 bool = false
 
 fn (&Encoder) put(s str):
-    self.buf = self.buf.append(s.span())
+    self.buf.append(s.span())
 
 fn (&Encoder) line(depth int):
     if self.buf.len() > 0:
-        self.buf = self.buf.append(byte('\n'))
+        self.buf.append(byte('\n'))
     for 0..depth * self.indent:
-        self.buf = self.buf.append(byte(' '))
+        self.buf.append(byte(' '))
 
 fn (&Encoder) check_utf8(s str):
     if !s.is_ascii() and !str.is_utf8(s.span()):
@@ -243,25 +243,25 @@ fn (&Encoder) check_utf8(s str):
 
 fn (&Encoder) quoted(s str) -> str:
     var out []byte = {}
-    out = out.append(byte('"'))
+    out.append(byte('"'))
     start := 0
     for 0..s.len() |i|:
         c := s[i]
         if c >= 0x20 and c != '"' and c != '\\':
             continue
         if i > start:
-            out = out.append(s[start..i].span())
+            out.append(s[start..i].span())
         start = i + 1
         switch c:
-            case '"': out = out.append('\\"'.span())
-            case '\\': out = out.append('\\\\'.span())
-            case '\n': out = out.append('\\n'.span())
-            case '\r': out = out.append('\\r'.span())
-            case '\t': out = out.append('\\t'.span())
-            else: out = out.append(('\\u00' + hex2(c)).span())
+            case '"': out.append('\\"'.span())
+            case '\\': out.append('\\\\'.span())
+            case '\n': out.append('\\n'.span())
+            case '\r': out.append('\\r'.span())
+            case '\t': out.append('\\t'.span())
+            else: out.append(('\\u00' + hex2(c)).span())
     if s.len() > start:
-        out = out.append(s[start..].span())
-    out = out.append(byte('"'))
+        out.append(s[start..].span())
+    out.append(byte('"'))
     return str(out)
 
 fn (&Encoder) key(k str) -> str:
@@ -316,8 +316,8 @@ fn (&Encoder) join_prims(a []json.Value) -> str:
     var out []byte = {}
     for a |i, e|:
         if i > 0:
-            out = out.append(self.delim)
-        out = out.append(self.prim(e, false).span())
+            out.append(self.delim)
+        out.append(self.prim(e, false).span())
     return str(out)
 
 fn (&Encoder) fields_text(cols []Col) -> str:
@@ -330,7 +330,7 @@ fn (&Encoder) fields_text(cols []Col) -> str:
             out += self.fields_text(c.sub)
     return out + '}'
 
-fn (&Encoder) cells(o json.Object, cols []Col, out &[]byte, first bool) -> bool:
+fn (&Encoder) cells(o json.Object, cols []Col, out &&[]byte, first bool) -> bool:
     is_first := first
     for cols |c|:
         v := o.get(c.name).?
@@ -338,14 +338,14 @@ fn (&Encoder) cells(o json.Object, cols []Col, out &[]byte, first bool) -> bool:
             is_first = self.cells(v.as_object().?, c.sub, out, is_first)
         else:
             if !is_first:
-                out.* = out.*.append(self.delim)
-            out.* = out.*.append(self.prim(v, false).span())
+                out.append(self.delim)
+            out.append(self.prim(v, false).span())
             is_first = false
     return is_first
 
 fn (&Encoder) row(o json.Object, cols []Col) -> str:
     var out []byte = {}
-    _ = self.cells(o, cols, &out, true)
+    _ = self.cells(o, cols, &&out, true)
     return str(out)
 
 -fn all_primitive(a []json.Value) -> bool:
@@ -573,7 +573,7 @@ fn (&Decoder) prepare(src str) -> !void:
             i += 1
         content := raw[i..]
         if raw.len() == 0 or (!self.strict and content.len() == 0):
-            self.lines = self.lines.append(Line{depth=0, text='', num=num, col=1, blank=true})
+            self.lines.append(Line{depth=0, text='', num=num, col=1, blank=true})
             continue
         if tabs == 0 and content[0] == '#':
             continue
@@ -586,7 +586,7 @@ fn (&Decoder) prepare(src str) -> !void:
             depth = spaces / self.indent
         else:
             depth = tabs + spaces / self.indent
-        self.lines = self.lines.append(Line{depth=depth, text=content, num=num, col=i + 1, blank=false})
+        self.lines.append(Line{depth=depth, text=content, num=num, col=i + 1, blank=false})
 
 fn (&Decoder) at_end() -> bool:
     return self.pos >= self.lines.len()
@@ -718,7 +718,7 @@ fn (&Decoder) quoted_token(l Line, t str) -> !str:
                 return self.fail(l, 'Unexpected characters after the closing quote in `%{t}`.')
             return str(buf)
         if c != '\\':
-            buf = buf.append(c)
+            buf.append(c)
             i += 1
             continue
         if i + 1 >= n:
@@ -726,11 +726,11 @@ fn (&Decoder) quoted_token(l Line, t str) -> !str:
         e := t[i + 1]
         i += 2
         switch e:
-            case '\\': buf = buf.append(byte('\\'))
-            case '"': buf = buf.append(byte('"'))
-            case 'n': buf = buf.append(byte('\n'))
-            case 'r': buf = buf.append(byte('\r'))
-            case 't': buf = buf.append(byte('\t'))
+            case '\\': buf.append(byte('\\'))
+            case '"': buf.append(byte('"'))
+            case 'n': buf.append(byte('\n'))
+            case 'r': buf.append(byte('\r'))
+            case 't': buf.append(byte('\t'))
             case 'u':
                 if i + 4 > n:
                     return self.fail(l, 'Expected four hex digits after `\\u`.')
@@ -743,7 +743,7 @@ fn (&Decoder) quoted_token(l Line, t str) -> !str:
                 i += 4
                 if cp >= 0xd800 and cp <= 0xdfff:
                     return self.fail(l, 'A `\\u` escape can not encode a surrogate (`\\u%{cp.fmt(.hex)}`).')
-                buf = buf.append(str.init_rune(cp).span())
+                buf.append(str.init_rune(cp).span())
             else:
                 return self.fail(l, 'Unknown escape `\\%{str.init_rune(int(e))}`.')
     return self.fail(l, 'Expected `"` to end the string.')
@@ -810,10 +810,10 @@ fn (&Decoder) values(l Line, s str, delim byte) -> ![]json.Value:
         else c == '"':
             in_quote = true
         else c == delim:
-            res = res.append(self.prim(l, s[start..i])!)
+            res.append(self.prim(l, s[start..i])!)
             start = i + 1
         i += 1
-    res = res.append(self.prim(l, s[start..])!)
+    res.append(self.prim(l, s[start..])!)
     return res
 
 --| Parses an array header line. `text` starts at the key or at `[`.
@@ -912,7 +912,7 @@ fn (&Decoder) field_list(l Line, text str, i &int, delim byte) -> ![]Col:
             for cols |c|:
                 if c.name == name:
                     return self.fail(l, 'Duplicate field `%{name}` in the field list.')
-        cols = cols.append(Col{name=name, sub=sub})
+        cols.append(Col{name=name, sub=sub})
         if i.* >= n:
             return self.fail(l, 'Expected `}` to close the field list.')
         c := text[i.*]
@@ -951,11 +951,11 @@ fn (&Decoder) build(l Line, cols []Col, cells []json.Value, idx &int) -> json.Ob
 
 fn (&Decoder) open_span(child int) -> !int:
     d := self.scope_depth(child)!
-    self.spans = self.spans.append(d)
+    self.spans.append(d)
     return d
 
 fn (&Decoder) close_span():
-    self.spans = self.spans.size_down(self.spans.len() - 1)
+    self.spans.size_down(self.spans.len() - 1)
 
 fn (&Decoder) table_rows(h Header, l Line, child int) -> !json.Value:
     depth := self.open_span(child)!
@@ -979,7 +979,7 @@ fn (&Decoder) table_rows(h Header, l Line, child int) -> !json.Value:
         if cells.len() != leaves:
             return self.fail(r, 'The table header declares %{leaves} fields, found %{cells.len()} values in the row.')
         idx := 0
-        rows = rows.append(json.Value.object(self.build(r, h.fields, cells, &idx)))
+        rows.append(json.Value.object(self.build(r, h.fields, cells, &idx)))
         self.pos += 1
     self.close_span()
     self.check_count(l, h.n, rows.len(), 'rows')!
@@ -1035,7 +1035,7 @@ fn (&Decoder) list_items(h Header, l Line, child int) -> !json.Value:
             return self.fail(r, 'Unexpected indentation inside the list.')
         if !(r.text == '-' or r.text.starts_with('- ')):
             break
-        items = items.append(self.list_item(r, depth)!)
+        items.append(self.list_item(r, depth)!)
     self.close_span()
     self.check_count(l, h.n, items.len(), 'items')!
     return json.Value.array(items)

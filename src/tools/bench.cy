@@ -55,7 +55,7 @@ fn peak_memory(cmd []str) -> float:
     #if meta.system() == .linux:
         -- GNU time: `\tMaximum resident set size (kbytes): 9312`
         args := []str{'/usr/bin/time', '-v'}
-        args = args + cmd
+        args += cmd
         res := os.exec(args)
         label := 'Maximum resident set size (kbytes):'
         idx := res.err.index(label) ?else
@@ -66,7 +66,7 @@ fn peak_memory(cmd []str) -> float:
     #else:
         -- BSD time: `   9535488  maximum resident set size`
         args := []str{'/usr/bin/time', '-l'}
-        args = args + cmd
+        args += cmd
         res := os.exec(args)
         idx := res.err.index('maximum resident set size') ?else
             panic('NoMemoryOutput')

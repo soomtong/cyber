@@ -1188,8 +1188,9 @@ fn Slice[] :: @init_sequence(init [&]T) -> Self:
 
 --| A `Slice` buffer holds the number of initialized elements in its first 8 bytes, then the elements.
 --| Slices that share a buffer can have different lengths, so `Slice.@deinit` destructs this count
---| instead of its own length. Ops that resize keep it equal to the result's length. The result of
---| `clone_on_resize` is never a sub-slice, so its count is `(as[Ptr[int]] ptr)[-1]` (no call, hot path).
+--| instead of its own length. Ops that resize keep it equal to the result's length. A `Slice` that
+--| owns its buffer (`owns_buffer`) is never a sub-slice, so its count is `(as[Ptr[int]] ptr)[-1]`
+--| (no call, hot path).
 --| Only managed element types read the count, so the resize ops skip it for the others.
 fn new_slice_buffer(%T type, cap int) -> ^RawBuffer[byte]:
     size := type.size(T)
@@ -1323,48 +1324,84 @@ fn (&Slice[]) @slice(start int, end int) -> []T:
 fn (&Slice[]) set(o Self):
     self.span().set(o.span())
 
---| Alias for `append`.
+--| Alias for `appended`: a new `Slice`, the receiver is unchanged.
 fn (&Slice[]) `+`(val T) -> Self:
-    return Self.append[0](self, val)
+    return Self.appended[0](self, val)
 
---| Alias for `append`.
+--| Alias for `appended`: a new `Slice`, the receiver is unchanged.
 fn (&Slice[]) `+`(slice [&]T) -> Self:
-    return Self.append[1](self, slice)
+    return Self.appended[1](self, slice)
 
---| Alias for `append`.
+--| Alias for `appended`: a new `Slice`, the receiver is unchanged.
 fn (&Slice[]) `+`(arr AsSpan[T]) -> Self:
-    return Self.append[2](self, arr)
+    return Self.appended[2](self, arr)
 
---| Appends a value to the end of the `Slice`.
-fn (&Slice[]) append(val T) -> Self:
-    res := self.clone_on_resize(self._len + 1)
-    @ptr_init(res.ptr + res._len, val)
-    res._len += 1
+--| Alias for `append`: `xs += v` appends in place.
+fn (&&Slice[]) `+=`(val T):
+    Self.append[0](self, val)
+
+--| Alias for `append`: `xs += v` appends in place.
+fn (&&Slice[]) `+=`(slice [&]T):
+    Self.append[1](self, slice)
+
+--| Alias for `append`: `xs += v` appends in place.
+fn (&&Slice[]) `+=`(arr AsSpan[T]):
+    Self.append[2](self, arr)
+
+--| Appends a value to the end of the `Slice` in place.
+fn (&&Slice[]) append(val T):
+    self.reserve_own(self._len + 1)
+    @ptr_init(self.ptr + self._len, val)
+    self._len += 1
     #if type.managed(T):
-        (as[Ptr[int]] res.ptr)[-1] = res._len
-    return res
+        (as[Ptr[int]] self.ptr)[-1] = self._len
 
---| Appends the elements of a `Span` to the end of this `Slice`.
-fn (&Slice[]) append(span [&]T) -> Self:
+--| Appends the elements of a `Span` to the end of this `Slice` in place.
+fn (&&Slice[]) append(span [&]T):
     if span.len() == 0:
-        return self.*
-    
-    res := self.clone_on_resize(self._len + span.length)
-    res.ptr[res._len..res._len + span.length].init(as span)
-    res._len += span.length
+        return
+    n := self._len + span.length
+    if self.owns_room(n):
+        self.drop_tail()
+        self.ptr[self._len..n].init(as span)
+        self._len = n
+        #if type.managed(T):
+            (as[Ptr[int]] self.ptr)[-1] = n
+        return
+    -- `span` can view this buffer, so copy from it before the old buffer is released.
+    res := self.clone_copy(n)
+    res.ptr[res._len..n].init(as span)
+    res._len = n
     #if type.managed(T):
-        (as[Ptr[int]] res.ptr)[-1] = res._len
+        (as[Ptr[int]] res.ptr)[-1] = n
+    self.* = move res
+
+--| Appends the elements of a `AsSpan` to the end of this `Slice` in place.
+fn (&&Slice[]) append(arr AsSpan[T]):
+    self.append(arr.span())
+
+--| A new `Slice` with `val` at the end. The receiver is unchanged.
+fn (&Slice[]) appended(val T) -> Self:
+    res := self.clone_copy(self._len + 1)
+    res.append(val)
     return res
 
---| Appends the elements of a `AsSpan` to the end of this array.
-fn (&Slice[]) append(arr AsSpan[T]) -> Self:
-    return self.append(arr.span())
+--| A new `Slice` with the elements of `span` at the end. The receiver is unchanged.
+fn (&Slice[]) appended(span [&]T) -> Self:
+    res := self.clone_copy(self._len + span.length)
+    res.append(span)
+    return res
+
+--| A new `Slice` with the elements of `arr` at the end. The receiver is unchanged.
+fn (&Slice[]) appended(arr AsSpan[T]) -> Self:
+    return self.appended(arr.span())
 
 -- fn (&Slice[]) cap() -> int:
 --     return self.cap
 
-fn (&Slice[]) clear() -> Self:
-    return self.size_down(0)
+--| Removes all elements in place.
+fn (&&Slice[]) clear():
+    self.size_down(0)
 
 -- fn (&Slice[]) clone() -> Self:
 --     new_buf := alloc(T, self.length).ptr
@@ -1378,23 +1415,39 @@ fn (&Slice[]) clear() -> Self:
 fn (&Slice[]) contains(needle T) -> bool:
     return self.span().contains(needle)
 
-fn (&Slice[]) clone_on_resize(new_cap int) -> Self:
-    sub_slice := (self.header >> 63 != 0)
-    if !sub_slice and @isUniqueRef(@unsafeCast(Ptr[void], self.buf)) and new_cap <= self.header:
-        -- Reuse in place. Elements past this view's length were left by a longer result that
-        -- shared the buffer and is gone now, so nothing else can see them.
-        #if type.managed(T):
-            count := (as[Ptr[int]] self.ptr)[-1]
-            if count != self._len:
-                for self._len..count |i|:
-                    @destruct(T, self.ptr + i)
-                (as[Ptr[int]] self.ptr)[-1] = self._len
-        return self.*
-    return self.clone_copy(new_cap)
+--| Whether this `Slice` holds its buffer alone (it is not a sub-slice and no other value holds the buffer).
+--| Only then can a resize op change the buffer in place.
+fn (&Slice[]) owns_buffer() -> bool:
+    if self.header >> 63 != 0:
+        return false
+    return @isUniqueRef(@unsafeCast(Ptr[void], self.buf))
 
---| A copy of this view in a new buffer that only the result holds. The resize ops that change elements
---| the receiver still sees (`remove` and `insert` before the end) use it, because the receiver keeps
---| its own length and buffer after the call: `r := out.remove(1)` leaves `out` as it was.
+--| Whether this `Slice` owns its buffer and the buffer has room for `new_cap` elements.
+fn (&Slice[]) owns_room(new_cap int) -> bool:
+    return self.owns_buffer() and new_cap <= self.header
+
+--| Destructs the elements past this view's length in a buffer that this `Slice` owns. A `Slice` that
+--| shared the buffer and was longer left them (`size_down` on a shared buffer keeps them alive), and it
+--| is gone now, so nothing else can see them.
+fn (&Slice[]) drop_tail():
+    #if type.managed(T):
+        count := (as[Ptr[int]] self.ptr)[-1]
+        if count != self._len:
+            for self._len..count |i|:
+                @destruct(T, self.ptr + i)
+            (as[Ptr[int]] self.ptr)[-1] = self._len
+
+--| Makes this `Slice` own a buffer with room for `new_cap` elements: in place when it already owns one
+--| with room, otherwise a copy replaces it. Other values that shared the old buffer keep it.
+fn (&&Slice[]) reserve_own(new_cap int):
+    if self.owns_room(new_cap):
+        self.drop_tail()
+        return
+    self.* = self.clone_copy(new_cap)
+
+--| A copy of this view in a new buffer that only the result holds, with room for at least `new_cap`
+--| elements. The ops that return a new `Slice` (`appended`, `inserted`, `removed`, `+`) start from it,
+--| so the receiver never shares a buffer with their result.
 fn (&Slice[]) clone_copy(new_cap int) -> Self:
     sub_slice := (self.header >> 63 != 0)
     if new_cap < self._len:
@@ -1430,34 +1483,31 @@ fn (&Slice[]) clone_copy(new_cap int) -> Self:
 fn (&Slice[]) index(needle T) -> ?int:
     return self.span().index(needle)
 
---| Inserts a value at index `idx`.
-fn (&Slice[]) insert(idx int, val T) -> Self:
+--| Inserts a value at index `idx` in place.
+fn (&&Slice[]) insert(idx int, val T):
     if idx.ugt(self._len):
         panic_oob(idx)
 
     if idx == self._len:
-        return self.append(val)
+        self.append(val)
+        return
 
-    -- Shifting in place would change what the receiver sees.
-    cur := self.clone_copy(self._len + 1)
-
-    if idx == cur._len:
-        -- Appending to end.
-        @ptr_init(cur.ptr + cur._len, val)
-        cur._len += 1
-        #if type.managed(T):
-            (as[Ptr[int]] cur.ptr)[-1] = cur._len
-        return cur
-
-    if idx < cur._len:
-        @ptr_init(cur.ptr + cur._len, cur.ptr[cur._len-1])
-    if idx + 1 < cur._len:
-        cur.ptr[idx+1..cur._len].set_backwards(cur.ptr[idx..cur._len-1])
-    cur.ptr[idx] = val
-    cur._len += 1
+    self.reserve_own(self._len + 1)
+    @ptr_init(self.ptr + self._len, self.ptr[self._len-1])
+    if idx + 1 < self._len:
+        self.ptr[idx+1..self._len].set_backwards(self.ptr[idx..self._len-1])
+    self.ptr[idx] = val
+    self._len += 1
     #if type.managed(T):
-        (as[Ptr[int]] cur.ptr)[-1] = cur._len
-    return cur
+        (as[Ptr[int]] self.ptr)[-1] = self._len
+
+--| A new `Slice` with `val` at index `idx`. The receiver is unchanged.
+fn (&Slice[]) inserted(idx int, val T) -> Self:
+    if idx.ugt(self._len):
+        panic_oob(idx)
+    res := self.clone_copy(self._len + 1)
+    res.insert(idx, val)
+    return res
 
 --| Returns a new iterator over the slice elements.
 fn (&Slice[]) iterator() -> int:
@@ -1509,62 +1559,65 @@ fn (scope &Slice[]) next_borrow(idx &int) -> scope ?&T:
     idx.* = i + 1
     return &self[i]
 
---| Removes an element at index `idx`.
-fn (&Slice[]) remove(idx int) -> Self:
+--| Removes the element at index `idx` in place.
+fn (&&Slice[]) remove(idx int):
     if (as[r64] idx) >= (as[r64] self._len):
         panic_oob(idx)
     if idx == self._len - 1:
-        return self.size_down(idx)
-    -- Shifting in place would change what the receiver sees.
-    cur := self.clone_copy(0)
-    @destruct(T, cur.ptr + idx)
+        self.size_down(idx)
+        return
+    n := self._len
+    self.reserve_own(n)
+    @destruct(T, self.ptr + idx)
     -- Move rest to the left.
-    size := type.size(T) * (cur._len-idx-1)
-    @memmove(as (cur.ptr + idx), as (cur.ptr + idx + 1), size)
-    cur._len -= 1
+    size := type.size(T) * (self._len-idx-1)
+    @memmove(as (self.ptr + idx), as (self.ptr + idx + 1), size)
+    self._len -= 1
     #if type.managed(T):
-        (as[Ptr[int]] cur.ptr)[-1] = cur._len
-    return cur
+        (as[Ptr[int]] self.ptr)[-1] = self._len
 
---| Decreases the size of the `Slice` to `new_len` elements.
---| If the new size is smaller, elements at the end of the `Slice` are removed.
-fn (&Slice[]) size_down(new_len int) -> Self:
+--| Removes the last element and returns it, or returns `none` when the slice is empty.
+#[cond=type.is_copyable(T)]
+fn (&&Slice[]) pop() -> ?T:
+    n := self._len
+    if n == 0:
+        return none
+    val := self.ptr[n-1]
+    self.size_down(n-1)
+    return val
+
+--| A new `Slice` without the element at index `idx`. The receiver is unchanged.
+fn (&Slice[]) removed(idx int) -> Self:
+    if (as[r64] idx) >= (as[r64] self._len):
+        panic_oob(idx)
+    res := self.clone_copy(0)
+    res.remove(idx)
+    return res
+
+--| Decreases the size of the `Slice` to `new_len` elements in place. The elements past `new_len` are
+--| removed. It does not copy: when another value shares the buffer, the elements stay alive for it.
+fn (&&Slice[]) size_down(new_len int):
     if new_len.ugt(self._len):
         panic('Invalid argument.')
     if new_len == self._len:
         return
-
-    cur := self.clone_on_resize(0)
+    self._len = new_len
     #if type.managed(T):
-        if cur.ptr == self.ptr:
-            -- Same buffer: the receiver still sees the elements past `new_len`. They stay alive and
-            -- the buffer's count stays at the receiver's length. A later resize of the shorter view
-            -- destructs them once the receiver is gone (`clone_on_resize`), or `@deinit` does.
-            cur._len = new_len
-            return cur
-        for new_len..cur._len |i|:
-            @destruct(T, cur.ptr + i)
-    cur._len = new_len
-    #if type.managed(T):
-        (as[Ptr[int]] cur.ptr)[-1] = cur._len
-    return cur
+        if self.owns_buffer():
+            self.drop_tail()
 
---| Increases the size of the `Slice` to `new_len` elements. If the new size is bigger, `init` values
---| are appended to the `Slice`.
-fn (&Slice[]) size_up(new_len int, init T) -> Self:
+--| Increases the size of the `Slice` to `new_len` elements in place. The new elements are `init`.
+fn (&&Slice[]) size_up(new_len int, init T):
     if new_len < self._len:
         panic('Invalid argument.')
     if new_len == self._len:
         return
 
-    cur := self.clone_on_resize(new_len)
-
-    -- Initialize new slots with `init` value.
-    cur.ptr[cur._len..new_len].init(init)
-    cur._len = new_len
+    self.reserve_own(new_len)
+    self.ptr[self._len..new_len].init(init)
+    self._len = new_len
     #if type.managed(T):
-        (as[Ptr[int]] cur.ptr)[-1] = cur._len
-    return cur
+        (as[Ptr[int]] self.ptr)[-1] = self._len
 
 fn (&Slice[]) set_last(val T) -> void:
     self[self._len-1] = val
@@ -2638,7 +2691,7 @@ fn (&HashMap[]) keys() -> []K:
     res := []K{}
     iter := self.iterator()
     while self.next(&iter) |e|:
-        res = res.append(e.key)
+        res.append(e.key)
     return res
 
 --| Returns the values in the same order as `keys()`.
@@ -2646,7 +2699,7 @@ fn (&HashMap[]) values() -> []V:
     res := []V{}
     iter := self.iterator()
     while self.next(&iter) |e|:
-        res = res.append(e.value)
+        res.append(e.value)
     return res
 
 fn (&HashMap[]) next(idx &int) -> ?MapEntry[K, V]:

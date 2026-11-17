@@ -79,7 +79,7 @@ for files |f|:
         var got []regex.Captures = {}
         if start > 0 or limit == 1:
             if r.captures(hay, start) |c|:
-                got = got.append(c)
+                got.append(c)
         else:
             got = r.captures_all(hay)
         n := got.len()

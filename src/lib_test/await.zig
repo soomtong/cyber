@@ -777,8 +777,8 @@ test "Future.wait_any suspends the eval until the host completes one of the futu
         \\    index := []int{}
         \\    for 0..futs.len() |i|:
         \\        if !done[i]:
-        \\            pending = pending.append(futs[i])
-        \\            index = index.append(i)
+        \\            pending.append(futs[i])
+        \\            index.append(i)
         \\    k := first_done(pending)
         \\    done[index[k]] = true
         \\    order << pending[k].await()

@@ -416,8 +416,8 @@ fn (&Formatter) classify():
                 if operands.len() > 0:
                     operand = operands.last()
                     cond = conds.last()
-                    operands = operands.size_down(operands.len() - 1)
-                    conds = conds.size_down(conds.len() - 1)
+                    operands.size_down(operands.len() - 1)
+                    conds.size_down(conds.len() - 1)
             case .op:
                 self.tokens[i].mark = self.op_mark(i, after_operand, after_cond)
 
@@ -565,7 +565,7 @@ fn (&Formatter) indent():
                     ended_new = b.new_width
                 stmt = b.outer_stmt
                 base = b.outer_base
-                blocks = blocks.size_down(blocks.len() - 1)
+                blocks.size_down(blocks.len() - 1)
 
             block := Block{width = line.width, new_width = 0, depth = depth, outer_stmt = stmt, outer_base = base}
             if in_block(blocks, depth):
@@ -617,14 +617,14 @@ fn (&Formatter) indent():
                 open += i
                 open_attr += after_pound or in_attr
             else t.kind == .close and open.len() > 0:
-                open = open.size_down(open.len() - 1)
-                open_attr = open_attr.size_down(open_attr.len() - 1)
+                open.size_down(open.len() - 1)
+                open_attr.size_down(open_attr.len() - 1)
 
                 -- The bracket also ends the blocks inside it.
                 while blocks.len() > 0 and blocks.last().depth > open.len():
                     stmt = blocks.last().outer_stmt
                     base = blocks.last().outer_base
-                    blocks = blocks.size_down(blocks.len() - 1)
+                    blocks.size_down(blocks.len() - 1)
             prev_last = j
         prev = i
 

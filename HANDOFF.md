@@ -1,82 +1,67 @@
-# HANDOFF (2026-11-17): 0.4.13 릴리스 완료, 사용자 결정 대기
+# HANDOFF (2026-11-17): 0.4.14 릴리스 뒤, `Slice` 제자리 API 전환(미커밋 또는 커밋 직후)
 
 ## 목표
 
-- tars-agent가 보낸 요청(0.4.12 스파이크 결함 넷, 0.4.13-DEV 발견 둘)을 고치고 회신한다. 완료.
-- 0.4.13 패치 릴리스. 완료(`1dee6514`, `build-945-1dee651`).
+- `Slice`의 크기 변경을 `&&Slice` 제자리 API로 바꾸고, 새 목록은 `appended` · `inserted` · `removed` · `+`로 나눈다.
+  사용자 결정(2026-11-17): (1) 이름은 Swift식 `-ed`, (2) 원소 쓰기는 성능 쪽(Go식, 공유 버퍼에 그대로), (3) 0.4.x에서
+  깨지는 변경으로 넣는다(0.5가 첫 고정 의미 버전). 결정 기록: `docs/decisions/project_slice_append_aliasing.md` "결정 3".
 
 ## 현재 브랜치
 
-`master`. 0.4.13 태그 커밋 `1dee6514` 뒤에 릴리스 기록 커밋이 있다.
+`master`. 0.4.14 릴리스(`a2b33655`, `build-960-a2b3365`) 뒤. push 안 함.
 
 ## 완료된 작업
 
-- [x] 0.4.12 요청(`/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.12-spike-defects.md`) 네 건. 모두 13단계 검증 rc=0.
-  - `85c95b1d` (c) `os.read_file` → `!str`(UTF-8 검사, 아니면 `error.Unicode`), `read_file_bytes` · `write_file_bytes` 추가,
-    `read_file_str` 삭제, `write_file`의 `[]byte` 오버로드 삭제. 깨지는 변경, 사용자 결정(이름 대칭 · 오버로드 없음 · 텍스트가
-    기본). `docs/decisions/project_os_file_text_bytes.md`.
-  - `526146a9` (d) `build.zig.zon` `.paths`에 `docs/docs.md` · `docs/agent-guide.md`(패키지 해시 바뀜).
-  - `4cf57841` (b) `let` · `mut` · `val` · `auto` 선언에 'Cyber has no `let`. Declare with ...'(`src/parser.zig`
-    `isForeignDeclKeyword` · `reportForeignDeclError`). `const`는 Cyber 상수라 제외.
-  - `40ae5b5a` (a) `Slice` resize의 받는 변수 보존: `size_down` · `clear` · 끝 `remove`는 제자리에서 해제를 미루고, 끝이 아닌
-    `remove` · `insert`는 `clone_copy`로 복사(`src/builtins/core.cy`). 버린 결과는 컴파일 오류(`src/sema.zig`
-    `checkDroppedSliceResult`). `project_slice_append_aliasing.md` "결정 2".
-- [x] 0.4.13 릴리스(2026-11-17 새벽 완료): 태그 `0.4.13`을 `1dee6514`로 다시 찍어 push, 릴리스 run 43886010148이 arm64 lib
-  재시도 일곱째에 성공. `build-945-1dee651`, 에셋 15개, Latest. 노트는 `docs/releases/0.4.13.md`. `install.sh 0.4.13` 설치 확인
-  (버전, `cyber-lsp` initialize, hello, `let x := 1` 문구). 기록은 `project_fork_release_ci.md`.
-- [x] 0.4.13-DEV 요청(`/Users/dp/Repository/tars-agent/docs/requests/cyber-0.4.13-dev-findings.md`) 두 건, `3acc0797`:
-  - (a) `let x := 1` → 'Cyber has no `let`. Declare with `x := 1`.'(`reportForeignDeclError`의 `colon_equal` 분기).
-    테스트 `syntax/foreign_decl_infer_error.cy`.
-  - (b) 세션(`persist_main`)의 마지막 줄 `out.remove(1)`도 버린 결과 오류(`semaMainResultStmt`에서 `checkDroppedSliceResult`).
-    테스트 `src/lib_test/session.zig` 끝 "a dropped Slice resize result on the last line"(필터로 실제로 도는 것 확인).
-  - 13단계 검증 rc=0.
-- [x] 회신: 두 요청서 끝의 "cyber 회신" 절. tars-agent 저장소에 미커밋으로 둠(0.4.13-DEV 요청서만 지금 미커밋, 0.4.12 쪽은
-  tars-agent가 이미 반영). tars-agent 커밋은 그쪽 세션 몫.
-
-- [x] 임베딩 모듈 허용 표(tars-agent C3): 컴파일러 내부의 내장 모듈 조회(`c`, `meta`)가 호스트 resolver를 거치지 않게
-  (`Chunk.get_builtin_chunk`), resolver 거부 문구에 모듈 이름. 테스트 `src/lib_test/session.zig` 끝, 결정
-  `docs/decisions/project_embedding_module_allowlist.md`, docs.md "Allowing modules". 13단계 검증 rc=0. push 안 함.
+- [x] 0.4.13 · 0.4.14 릴리스. tars-agent 요청 두 건(0.4.12, 0.4.13-DEV)과 C3(모듈 허용 표), 모듈 API(`cyber doc --api`)는
+  0.4.14에 실렸고 tars-agent가 `latest`로 따라가며 닫았다(tars-agent `b1e1d7d`).
+- [x] `Slice` 제자리 API(이번 세션):
+  - `core.cy`: `append` · `insert` · `remove` · `clear` · `size_down` · `size_up` · `pop` · `` `+=` ``는 `fn (&&Slice[])`, 반환 없음.
+    `appended` · `inserted` · `removed` · `` `+` ``는 항상 `clone_copy`. 도우미 `owns_buffer` · `owns_room` · `drop_tail` ·
+    `reserve_own`(옛 `clone_on_resize` 대체). `size_down`은 공유 버퍼에서도 복사하지 않는다.
+  - `sema.zig`: `semaOpAssignMethod`(`x op= y`가 `` `op=` `` 메서드를 부름, 변수 · 필드 경로만), `checkSliceInPlaceResult` ·
+    `checkSliceInPlaceAssign`(옛 꼴 안내 오류), `checkDroppedSliceResult`는 `-ed` 메서드용으로 바꿈. 세션 마지막 줄 검사는 뺌.
+  - F-161(기존 결함): `p.* = r`에서 `semaOwn` 누락으로 이중 해제. `.deref` 대입이 `&&T`도 받게 함.
+  - std · tools · 테스트 · 예제 약 300곳 옮김. `&[]T`로 받아 `.* =`로 쓰던 내부 함수는 `&&[]T`로(`json.quote`, `peg.scan` 등).
+  - 문서: `docs/docs.md` "Slice operations", `docs/agent-guide.md`, `unreleased.md`, findings F-161, `docs/api.json` 재생성.
+  - 테스트: `memory/slice_shared_buffer.cy` · `memory/deref_assign_local.cy` · `core/Slice_resize_receiver.cy`, 오류 테스트
+    `core/Slice_append_assign_error.cy` · `Slice_append_decl_error.cy` · `Slice_appended_unused_error.cy` · `Slice_removed_discard_error.cy`.
 
 ## 시도했으나 실패한 접근
 
-- `macos-26` arm64 job은 자주 15분 안에 러너를 받지 못해 취소된다(0.4.13 첫 태그 run 43868153020은 네 번 모두 취소). 해결은
-  `gh run rerun --failed`를 되풀이하는 것뿐이었다(재태그 run은 일곱째에 성공). 무료 arm64 풀의 문제다.
-- `zig fetch .`로 패키지 내용을 보려 했으나 전역 캐시 `p/`에 남지 않았다. `.paths` 확인은 `git ls-files <paths>`를 임시 디렉터리에
-  풀어 그 안에서 `zig build cli` · `lib`로 했다.
-- `docs/gen-docs.cy`는 이 머신에 `libmd4c`가 없어 실행이 안 된다(변경 전에도 같음). `task docs:gen` 경로가 라이브러리 위치를 준다.
+- `+=` 경로에서 받는 쪽을 `semaExpr`로 읽으면 복사본에 append한다(이중 해제). 메서드 호출처럼 `semaExprSkipSym`을 써야 한다.
+- `xs.append(xs.span())`은 빌림 오류다(안전). 같은 구조체의 두 필드(`self.sets.append(self.ops.span())`)도 `self`를 두 번
+  빌린다고 막힌다. 지역 사본(`ops := self.ops`)으로 우회한다.
+- zsh는 `$files`를 단어로 나누지 않는다. 여러 파일 치환은 `rg -l0 ... | xargs -0`.
 
 ## 남은 작업
 
-- [ ] tars-agent에 0.4.13 릴리스를 알린다(요청서 회신 절은 "push 전" 시점 문구다. tars-agent 세션이 `latest`/0.4.13으로
-  다시 받아 확인하고 닫는다). tars-agent 저장소에는 쓰기 전에 `git status`.
-- [ ] tars-agent가 회신을 확인하면 받는다. 결정 대기: `Slice`를 `&&Slice` 제자리 API로 바꾸는 안, 모듈 API를 `cyber doc`에
-  넣는 안, `read_file_str` · `write_file(p, bytes)` 오류에 고칠 이름을 말하는 문구, REPL에서 `xs.append(4)` 미리보기가 오류가 된 점.
+- [ ] 14단계 검증 rc=0 확인 뒤 커밋(이번 세션에서 돌리는 중이었다. 결과가 없으면 다시 돌린다).
+- [ ] tars-agent 알림: 다음 릴리스(0.4.15)에서 `xs = xs.append(v)`가 컴파일 오류가 된다. tars-agent의
+  `prompt/cyber-subset*.md` · `docs/spec/04-builtin-tools.md`에 옛 규칙이 있다(그 저장소에 다른 세션의 미커밋 변경이 있음, 쓰기 전
+  `git status`, 쓸지는 사용자에게).
+- [ ] 릴리스 0.4.15는 사용자 지시 때.
+- [ ] tars-agent 결정 대기 중 남은 것: `read_file_str` · `write_file(p, bytes)` 오류에 새 이름을 말하는 문구.
 - [ ] 사용자 결정 대기(이전부터):
   - `scope` 블록 안의 `return` · `break` · `continue` 합류를 알리는 도구(LSP 진단 · hover · inlay hint). `project_coroutines.md` 끝 절.
   - 정렬: pinned closure(안 A), 키 정렬, 인자 없는 `sort()`의 원소 조건. `project_sort_closures.md` "결정할 것".
   - core `@eq`의 choice 지원(`?json.Value == none`).
-  - 설계 원칙 검토(`docs/study/11-design-principles-review.md`) 1.7 · 2.7: 표준 오류 어휘, 순환 가능성 정적 판정, 제네릭 본문
-    정의 시점 검사, 구조적 병렬 루프, 마지막 사용 분석(`Slice` 값 의미의 제자리 갱신도 여기에 걸린다).
+  - 설계 원칙 검토(`docs/study/11-design-principles-review.md`) 1.7 · 2.7.
   - 0.5 범위: `spawn f(args)` 호출식 꼴, 임베딩 `CL_YIELD`. 빼면 0.5 릴리스 준비로 간다.
 - [ ] 기술 부채(급하지 않음): carry 재시도 루프의 IR 되돌리기, `@destruct_span` 취소 keep 지점, `Scope.run`의 바퀴당 `waiting()`
-  질의(futex식 대기 표 후보), 취소 불변식 panic(닿으면 패드 누락 결함). 기록은 `project_coroutines.md`.
-
-- [ ] tars-agent에 C3 결과 전달: s1 검사 초안 패치 `/private/tmp/claude-501/-Users-dp-Repository-cyberscript/866045c6-fdd3-4e2f-ae8c-4da5dcd94361/scratchpad/s1-resolver-check.patch`
-  (7h, 7i, 7j. 로컬 cyber `--fork`로 PASS 43). C3 줄은 "CLEvalConfig 필드"가 아니라 "호스트 resolver + 이 수정"으로 고칠 것.
-  이 수정은 다음 릴리스(또는 `latest`)에 실려야 tars-agent가 쓴다.
+  질의, 취소 불변식 panic. 기록은 `project_coroutines.md`.
 
 ## 핵심 파일
 
-- `src/builtins/core.cy` `Slice` 절(`clone_on_resize` · `clone_copy` · `insert` · `remove` · `size_down`, `rg -n "fn \(&Slice\[\]\)"`).
-- `src/sema.zig` `checkDroppedSliceResult`(호출: `semaExprStmtEnd`, `localDecl`의 `_ =`, `semaMainResultStmt`).
+- `src/builtins/core.cy` `Slice` 절(`reserve_own` · `clone_copy` · `append` · `appended` 등, `rg -n "fn \(&&?Slice\[\]\)"`).
+- `src/sema.zig` `semaOpAssignMethod` · `checkSliceInPlaceResult` · `checkDroppedSliceResult`.
 - `src/parser.zig` `isForeignDeclKeyword` · `reportForeignDeclError` · `reportTypedDeclError`.
 - `src/std/os.cy` `read_file` · `read_file_bytes` · `write_file` · `write_file_bytes`.
-- `docs/releases/0.4.13.md`, `docs/releases/unreleased.md`(머리만 있음).
+- `docs/releases/0.4.14.md`, `docs/releases/unreleased.md`.
 - `docs/decisions/project_fork_release_ci.md`(러너 미배정 · 재태깅 · 로컬 arm64 빌드 절차).
 
 ## 다음 에이전트에게
 
-1. 0.4.13은 릴리스됐다. 남은 것은 사용자 결정 대기와 tars-agent 확인이다.
+1. 0.4.14는 릴리스됐다. `Slice` 제자리 API는 다음 릴리스(0.4.15)의 깨지는 변경이다.
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 
@@ -105,7 +90,7 @@
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-159까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-161까지, 열린 것 없음).
 
 ## 작업 방식
 
@@ -177,7 +162,7 @@
 - 누수는 테스트 실패다(2026-11-15): behavior 케이스마다 VM이 자기 `SafeAllocator`를 써서 `leaked N blocks in <경로>`로 실패하고
   (`src/test/setup.zig` `VMrunner`), 커스텀 러너(`src/test_runner.zig`)는 테스트 함수마다 allocator를 검사한다.
 - `src/parser.zig`에서 지역 이름 `t`는 모듈 수준 `t`를 가려 컴파일 오류다(`tok` · `ty`로 쓴다).
-- 언어 메모: 비트 OR은 `||`, AND는 `&&`. 전역은 `global g int = 5`. `var x = 0`은 문법 오류(`x := 0`). `os.parseArgs`는
+- 언어 메모: `Slice`의 `append` 등은 제자리(`xs.append(v)`), 새 목록은 `appended` · `+`. 비트 OR은 `||`, AND는 `&&`. 전역은 `global g int = 5`. `var x = 0`은 문법 오류(`x := 0`). `os.parseArgs`는
   `-name=value`만 받는다. `Map`의 개수는 `size()`. `out.* += fut.await()`는 await 전에 `out.*`를 읽는다.
 - 벤치는 다른 프로세스가 CPU를 쓰는지 먼저 본다(tars-linux `services_test`, 종료 금지). 테스트와 동시에 돌리지 않는다.
 

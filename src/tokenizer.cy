@@ -285,7 +285,7 @@ fn (&Tokenizer) advance():
     self.next_pos += 1
 
 fn (&Tokenizer) tokenize() -> !void:
-    self.tokens = self.tokens.clear()
+    self.tokens.clear()
     self.next_pos = 0
 
     if self.src.len() >= 3:
@@ -432,14 +432,14 @@ fn (&Tokenizer) tokenizeOne(state TokenizeState) -> !TokenizeState:
                 while !self.isAtEnd():
                     if self.peek() == '\n':
                         if self.parse_comments:
-                            self.comments = self.comments + self.src[start..self.next_pos]
+                            self.comments += self.src[start..self.next_pos]
 
                         -- Don't consume new line or the current indentation could augment with the next line.
                         return self.tokenizeOne(state)
                     self.advance()
 
                 if self.parse_comments:
-                    self.comments = self.comments + self.src[start..self.next_pos]
+                    self.comments += self.src[start..self.next_pos]
                 return {tag=.end}
             else next == '>':
                 self.advance()
@@ -1033,13 +1033,13 @@ fn (&Tokenizer) tokenizeNumber(start int) -> !void:
     return
 
 fn (&Tokenizer) pushIndentToken(count int, start_pos int, spaces bool):
-    self.tokens = self.tokens + Token.indent(i32(start_pos), if (spaces) i32(count) else i32(count) || 0x80000000)
+    self.tokens += Token.indent(i32(start_pos), if (spaces) i32(count) else i32(count) || 0x80000000)
 
 fn (&Tokenizer) pushToken(token_t TokenType, start_pos int):
-    self.tokens = self.tokens + Token(token_t, i32(start_pos), i32(self.next_pos))
+    self.tokens += Token(token_t, i32(start_pos), i32(self.next_pos))
 
 fn (&Tokenizer) pushToken2(token_t TokenType, start_pos int, end_pos int):
-    self.tokens = self.tokens + Token(token_t, i32(start_pos), i32(end_pos))
+    self.tokens += Token(token_t, i32(start_pos), i32(end_pos))
 
 fn (&Tokenizer) reportError(msg str) -> error:
     return self.reportErrorAt(msg, self.next_pos)

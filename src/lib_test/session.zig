@@ -663,8 +663,8 @@ test "persist_main: the capture error suggests the borrow for a function only." 
     , config, &res));
 }
 
-test "persist_main: a dropped Slice resize result on the last line is a compile error." {
-    // As the eval result, `out.remove(1)` would read as an update of `out` that did not happen.
+test "persist_main: an in-place Slice resize on the last line has no result, and a new-list method shows the list." {
+    // Before 0.4.15 the resize methods returned the new list, and `out.remove(1)` on the last line was an error.
     const vm = C.vm_initx(zt.alloc);
     defer C.vm_deinit(vm);
     C.setSilent(true);
@@ -673,19 +673,22 @@ test "persist_main: a dropped Slice resize result on the last line is a compile 
     var config = C.defaultEvalConfig();
     config.persist_main = true;
     var res: C.EvalResult = undefined;
-    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "out := []int{1, 2}\nout.remove(1)", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "out := []int{1, 2, 3}\nout.remove(1)", config, &res));
+    try zt.eq(true, res.res_t == @as(C.TypeId, @intCast(C.TypeVoid)));
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "out.len()", config, &res));
+    try zt.eq(2, @as(*i64, @ptrCast(res.res)).*);
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "out.append(4)", config, &res));
+    try zt.eq(true, res.res_t == @as(C.TypeId, @intCast(C.TypeVoid)));
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "out.removed(0)", config, &res));
+    try zt.eq(false, res.res_t == @as(C.TypeId, @intCast(C.TypeVoid)));
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "out.len()", config, &res));
+    try zt.eq(3, @as(*i64, @ptrCast(res.res)).*);
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "out = out.remove(1)", config, &res));
     {
         const summary = C.vm_compile_error_summary(vm);
         defer C.vm_freeb(vm, summary);
-        try zt.expect(std.mem.indexOf(u8, summary, "The result of `remove` is the new list, and `out` keeps the old one. Write `out = out.remove(1)`.") != null);
+        try zt.expect(std.mem.indexOf(u8, summary, "`remove` changes `out` in place and returns nothing.") != null);
     }
-    try zt.eq(C.Success, C.vm_evalx(vm, "main", "out := []int{1, 2}", config, &res));
-    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "out.clear()", config, &res));
-    // Other values on the last line are still the eval result.
-    try zt.eq(C.Success, C.vm_evalx(vm, "main", "out.len()", config, &res));
-    try zt.eq(2, @as(*i64, @ptrCast(res.res)).*);
-    try zt.eq(C.Success, C.vm_evalx(vm, "main", "out = out.remove(1)\nout", config, &res));
-    try zt.eq(false, res.res_t == @as(C.TypeId, @intCast(C.TypeVoid)));
 }
 
 test "A host resolver gates the `use` of the script, and the compiler's own builtin lookups skip it." {

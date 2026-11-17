@@ -450,29 +450,139 @@ fn popLocals2(c: *cy.Chunk, var_start: usize, destruct: bool, node: *ast.Node) !
     c.varStack.items.len = var_start;
 }
 
-/// `_ = out.remove(i)` or a bare `out.remove(i)`. The `Slice` methods that change the length return the new list and
-/// leave the receiver as it was, so a dropped result is a loop that never ends or a lost update.
-fn checkDroppedSliceResult(c: *cy.Chunk, expr_t: *cy.Type, node: *ast.Node) !void {
-    if (node.type() != .callExpr) return;
+/// A method call `recv.method(args)`: the receiver node and the method name.
+const MethodCall = struct {
+    recv: *ast.Node,
+    method: []const u8,
+};
+
+fn methodCallOf(node: *ast.Node) ?MethodCall {
+    if (node.type() != .callExpr) return null;
     const call = node.cast(.callExpr);
-    if (call.callee.type() != .accessExpr) return;
+    if (call.callee.type() != .accessExpr) return null;
     const access = call.callee.cast(.accessExpr);
-    if (access.right.type() != .ident) return;
-    const method = access.right.cast(.ident).name.slice();
-    const methods = [_][]const u8{ "append", "insert", "remove", "clear", "size_down", "size_up" };
-    var found = false;
-    for (methods) |m| {
-        if (std.mem.eql(u8, method, m)) found = true;
-    }
-    if (!found) return;
+    if (access.right.type() != .ident) return null;
+    return .{ .recv = access.left, .method = access.right.cast(.ident).name.slice() };
+}
+
+/// The `Slice` methods that return a new list, paired with the method that changes the receiver in place.
+const slice_new_value_methods = [_][2][]const u8{
+    .{ "appended", "append" }, .{ "inserted", "insert" }, .{ "removed", "remove" },
+};
+
+/// The `Slice` methods that change the receiver in place and return nothing (before 0.4.15 they returned the new list).
+const slice_in_place_methods = [_][]const u8{ "append", "insert", "remove", "clear", "size_down", "size_up" };
+
+/// `src` with the method name `from` after the receiver replaced by `to`: `xs.appended(2)` -> `xs.append(2)`.
+fn renameMethodSrc(buf: []u8, src: []const u8, recv: []const u8, from: []const u8, to: []const u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, src, recv)) return null;
+    const rest = src[recv.len..];
+    if (!std.mem.startsWith(u8, rest, ".") or !std.mem.startsWith(u8, rest[1..], from)) return null;
+    return std.fmt.bufPrint(buf, "{s}.{s}{s}", .{recv, to, rest[1 + from.len..]}) catch null;
+}
+
+var rename_buf: [160]u8 = undefined;
+
+/// `_ = xs.appended(v)` or a bare `xs.appended(v)`. The methods that return a new list leave the receiver as it
+/// was, so a dropped result is a lost update: the in-place method was meant.
+fn checkDroppedSliceResult(c: *cy.Chunk, expr_t: *cy.Type, node: *ast.Node) !void {
+    const mc = methodCallOf(node) orelse return;
     const instance = expr_t.sym().instance orelse return;
     if (instance.getSymTemplate() != c.sema.slice_tmpl) return;
-    const recv = c.ast.nodeString(access.left);
+    for (slice_new_value_methods) |pair| {
+        if (!std.mem.eql(u8, mc.method, pair[0])) continue;
+        const recv = c.ast.nodeString(mc.recv);
+        if (renameMethodSrc(&rename_buf, c.ast.nodeString(node), recv, pair[0], pair[1])) |fixed| {
+            if (recv.len <= 40) {
+                return c.reportErrorFmt("`{}` returns a new list and leaves `{}` as it was. To change `{}` in place, write `{}`.", &.{v(pair[0]), v(recv), v(recv), v(fixed)}, node);
+            }
+        }
+        return c.reportErrorFmt("`{}` returns a new list and leaves the receiver as it was. To change it in place, call `{}`.", &.{v(pair[0]), v(pair[1])}, node);
+    }
+}
+
+/// A `void` call where a value was expected: `checkSliceInPlaceResult` for an assignment, which names the
+/// assigned variable when it is the receiver (`xs = xs.append(v)`).
+fn checkSliceInPlaceAssign(c: *cy.Chunk, node: *ast.Node) !void {
+    const left: ?[]const u8 = if (c.assign_left) |left_n| c.ast.nodeString(left_n) else null;
+    try checkSliceInPlaceResult(c, c.sema.void_t, node, left, false);
+}
+
+/// Whether `res` is a call of a method of a `Slice`.
+fn isSliceMethodCall(c: *cy.Chunk, res: ExprResult) bool {
+    if (res.ir.code != .call) return false;
+    const type_sym = res.ir.cast(.call).func.parent.parent orelse return false;
+    const type_ = type_sym.getStaticType() orelse return false;
+    const instance = type_.sym().instance orelse return false;
+    return instance.getSymTemplate() == c.sema.slice_tmpl;
+}
+
+/// `xs = xs.append(v)` or `ys := xs.append(v)`, the form from before 0.4.15: `append` and the other resize methods of
+/// `Slice` now change the receiver in place and return nothing. `res_t` is the type of the call. `left` is the
+/// assigned variable's source, or null for a declaration. `slice_recv` says that the receiver is a `Slice`, so the
+/// message can name the method that returns a new list.
+fn checkSliceInPlaceResult(c: *cy.Chunk, res_t: *cy.Type, node: *ast.Node, left: ?[]const u8, slice_recv: bool) !void {
+    if (res_t.id() != bt.Void) return;
+    const mc = methodCallOf(node) orelse return;
+    var found = false;
+    for (slice_in_place_methods) |m| {
+        if (std.mem.eql(u8, mc.method, m)) found = true;
+    }
+    if (!found) return;
+    const recv = c.ast.nodeString(mc.recv);
     const call_src = c.ast.nodeString(node);
     if (recv.len > 40 or call_src.len > 80) {
-        return c.reportErrorFmt("The result of `{}` is the new list, and the receiver keeps the old one. Assign it back to the receiver.", &.{v(method)}, node);
+        return c.reportErrorFmt("`{}` changes the receiver in place and returns nothing. Call it as a statement.", &.{v(mc.method)}, node);
     }
-    return c.reportErrorFmt("The result of `{}` is the new list, and `{}` keeps the old one. Write `{} = {}`.", &.{v(method), v(recv), v(recv), v(call_src)}, node);
+    if (left) |left_src| {
+        if (std.mem.eql(u8, left_src, recv)) {
+            return c.reportErrorFmt("`{}` changes `{}` in place and returns nothing. Write `{}`.", &.{v(mc.method), v(recv), v(call_src)}, node);
+        }
+    }
+    if (slice_recv) for (slice_new_value_methods) |pair| {
+        if (!std.mem.eql(u8, mc.method, pair[1])) continue;
+        if (renameMethodSrc(&rename_buf, call_src, recv, pair[1], pair[0])) |new_src| {
+            return c.reportErrorFmt("`{}` changes `{}` in place and returns nothing. Write `{}` as a statement, or `{}` for a new list that leaves `{}` as it was.", &.{
+                v(mc.method), v(recv), v(call_src), v(new_src), v(recv),
+            }, node);
+        }
+    };
+    return c.reportErrorFmt("`{}` changes `{}` in place and returns nothing. Write `{}` as a statement.", &.{v(mc.method), v(recv), v(call_src)}, node);
+}
+
+/// A variable or a field path (`xs`, `self.out`): sema of it has no side effects, so `semaOpAssignMethod`
+/// can look at its type and still fall back to `x = x op y`.
+fn isPlainPlace(node: *ast.Node) bool {
+    return switch (node.type()) {
+        .ident => true,
+        .accessExpr => isPlainPlace(node.cast(.accessExpr).left),
+        else => false,
+    };
+}
+
+/// `x op= y` calls the `op=` method of the type of `x` when the type declares one, so that the type can
+/// change `x` in place (`Slice` appends in place for `+=`). Otherwise `x op= y` is `x = x op y` and this
+/// returns false.
+fn semaOpAssignMethod(c: *cy.Chunk, node: *ast.Node) !bool {
+    const stmt = node.cast(.op_assign_stmt);
+    if (!isPlainPlace(stmt.left)) return false;
+    var name_buf: [8]u8 = undefined;
+    const name = std.fmt.bufPrint(&name_buf, "{s}=", .{stmt.op.name()}) catch return false;
+    const var_start = c.varStack.items.len;
+    const left = try c.semaExprSkipSym(stmt.left, .{});
+    if (left.resType == .sym) return false;
+    // A global (or a field of one) can not be borrowed exclusively (`sema_ex_borrow2`): `g += v` stays `g = g + v`.
+    if (left.recParentLocal() == null) return false;
+    switch (left.type.kind()) {
+        // A reference keeps the guided error of `x = x op y` (`checkRefOperand`).
+        .int, .raw, .float, .pointer => return false,
+        else => {},
+    }
+    const sym = (try c.accessResolvedSym(left.type, name, node)) orelse return false;
+    const func_sym = try requireFuncSym(c, sym, node);
+    const res = try c.semaCallFuncSymRec(func_sym, stmt.left, left, &.{ stmt.right }, false, node);
+    try semaExprStmtEnd(c, res, var_start, node);
+    return true;
 }
 
 fn semaExprStmt(c: *cy.Chunk, node: *ast.Node) !void {
@@ -573,6 +683,7 @@ pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
                     return c.reportErrorFmt("Unsupported op assign statement for {}.", &.{v(stmt.op)}, node);
                 }
             }
+            if (try semaOpAssignMethod(c, node)) return;
             try semaAssignStmt(c, node, stmt.left, node, .{ .rhsOpAssignBinExpr = true });
             return;
         },
@@ -2536,11 +2647,14 @@ fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.
                 child_t = ptr.type.cast(.pointer).child_t;
             } else if (ptr.type.kind() == .borrow) {
                 child_t = ptr.type.cast(.borrow).child_t;
+            } else if (ptr.type.kind() == .ex_borrow) {
+                child_t = ptr.type.cast(.ex_borrow).child_t;
             } else {
                 return c.reportError("Expected pointer type.", ptr_n);
             }
             const expr = Cstr.initRequire(child_t);
-            const right_res = try c.semaExprOrOpAssignBinExpr(right, expr, opts.rhsOpAssignBinExpr);
+            // A local on the right is borrowed: own a copy, or the local and the target release one value twice.
+            const right_res = try semaOwn(c, try c.semaExprOrOpAssignBinExpr(right, expr, opts.rhsOpAssignBinExpr), right);
 
             if (child_t.isManaged()) {
                 const res = try declareHiddenLocal(c, "_res", child_t, right_res, right);
@@ -4536,6 +4650,7 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
     if (node.name.type() == .void_lit) {
         try checkDroppedSliceResult(c, right.type, node.right);
     }
+    try checkSliceInPlaceResult(c, right.type, node.right, null, isSliceMethodCall(c, right));
 
     if (right.type.info.borrow_only and right.resType == .value) {
         if (right.data.value.parent_local) |parent_local| {
@@ -4620,9 +4735,8 @@ fn semaMainResultStmt(c: *cy.Chunk, node: *ast.Node) !void {
 
     var var_start = c.varStack.items.len;
     var init_after_aux = false;
+    // `xs.removed(1)` on the last line is the eval result, not a dropped one: it shows the new list.
     var right = try c.semaExpr(child, .{ .assign_to_local = true });
-    // A dropped `Slice` resize result is an error here too, or the last line would read as an update.
-    try checkDroppedSliceResult(c, right.type, child);
     const no_value = right.type.id() == bt.Void or right.type.id() == bt.Never or right.type.kind() == .result or
         (right.resType == .ct_value and right.data.ct_value.type.id() == bt.Void);
     if (no_value) {
@@ -6550,6 +6664,7 @@ fn checkTypeCstr2(c: *cy.Chunk, ctype: cy.TypeId, cstr_t: TypeId, reportCstrType
     // Dynamic is allowed.
     if (ctype != bt.Dyn) {
         if (!cy.types.isTypeCompat(c.compiler, ctype, cstr_t)) {
+            if (ctype == bt.Void) try checkSliceInPlaceAssign(c, node);
             const cstrName = try c.sema.allocTypeName(reportCstrTypeId);
             defer c.alloc.free(cstrName);
             const typeName = try c.sema.allocTypeName(ctype);
@@ -10776,6 +10891,12 @@ pub fn sema_ex_borrow2(c: *cy.Chunk, child: ExprResult, ex_borrow_t: *cy.Type, n
 
     const parent_local = eff_child.recParentLocal() orelse {
         if (eff_child.resType == .varSym) {
+            if (eff_child.type.sym().instance) |instance| {
+                if (instance.getSymTemplate() == c.sema.slice_tmpl) {
+                    const name = c.ast.nodeString(node);
+                    return c.reportErrorFmt("A global can not be borrowed exclusively, so a method can not change `{}` in place. Assign a new list: `{} = {} + v` (or `appended`, `removed`, `inserted`), or keep the list in a local.", &.{v(name), v(name), v(name)}, node);
+                }
+            }
             return c.reportError("Cannot acquire exclusive borrow. Consider wrapping type in `Ex`.", node);
         } else {
             return c.reportError("Expected parent local.", node);
@@ -12542,6 +12663,7 @@ pub fn semaCZero(c: *cy.Chunk, type_: *cy.Type, node: *ast.Node) !ExprResult {
 }
 
 fn reportExpectedType(c: *cy.Chunk, exp_t: *cy.Type, act_t: *cy.Type, node: *ast.Node) anyerror {
+    if (act_t.id() == bt.Void) try checkSliceInPlaceAssign(c, node);
     const exp_name = try c.sema.allocTypeName(exp_t);
     defer c.alloc.free(exp_name);
     const act_name = try c.sema.allocTypeName(act_t);

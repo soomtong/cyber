@@ -53,7 +53,7 @@ Syntax. Each line is Python, then the Cyber form.
 - `P(name='a', n=1)` becomes `P{name='a', n=1}`. A field is set with `=`, not `:`.
 - `print(a, b)` becomes `print(x)`. It takes exactly one argument. Join values with interpolation.
 - `len(xs)` becomes `xs.len()`. It is a method. `xs.len` is an error.
-- `xs.append(1)` becomes `xs += 1` or `xs = xs.append(1)`. Methods that change the size return a new value, so you must take it.
+- `xs.append(1)` stays `xs.append(1)` (or `xs += 1`). It changes `xs` in place and returns nothing.
 - `x in xs` becomes `xs.contains(x)`, and for a Map `m.contains(k)`
 - `[1, 2, 3]` becomes `{1, 2, 3}`. The list takes the type of its first element (`[]int`), and every other element must have that type. An empty list needs the type: `[]int{}`. You can always write the type: `[]str{'a', 'b'}`.
 - `{"a": 1, "b": 2}` becomes `Map[str, int]{a=1, b=2}`. A bare name is a string key. Put an expression key in parentheses: `Map[str, int]{(k)=1}`. An empty Map is `Map[str, int]{}`.
@@ -103,7 +103,8 @@ str (strings do not change; every method returns a new value):
 
 - `xs.len()`, `xs.contains(x)`, `xs.index(x)` gives `?int`, `xs.last()`
 - `xs.join(sep)` for `[]str`, gives `str`
-- `xs.append(x)`, `xs.insert(i, x)`, `xs.remove(i)`, `xs.clear()`: each returns the new list and leaves `xs` as it was; assign it back: `xs = xs.remove(0)`. `_ = xs.remove(0)` is a compile error
+- `xs.append(x)`, `xs.insert(i, x)`, `xs.remove(i)`, `xs.clear()`, `xs.pop()` gives `?T`: each changes `xs` in place. `xs = xs.remove(0)` is a compile error
+- `xs.appended(x)`, `xs.inserted(i, x)`, `xs.removed(i)`, `xs + x`: each gives a new list and leaves `xs` as it was
 - `xs.reverse()` reverses in place and returns nothing, like `xs.sort()`
 - `xs.sort()` sorts in place in ascending order (numbers and strings). `xs.sort(|a, b| ...)` sorts by a function that returns true when `a` goes first. Both return nothing.
 
@@ -117,7 +118,7 @@ Python name to Cyber name:
 
 - `sep.join(xs)` is `xs.join(sep)` (the list joins, not the separator)
 - `xs.find(x)` is `xs.index(x)`, which gives `?int`: `xs.index(x) ?else -1`
-- `xs.pop()` is `v := xs.last()` then `xs = xs.remove(xs.len() - 1)`
+- `xs.pop()` is `xs.pop()`, but it gives `?T`: `v := xs.pop().?` when `xs` is not empty
 - `s.startswith(p)` and `s.endswith(p)` are `s.starts_with(p)` and `s.ends_with(p)`
 - `s.strip()` is `s.trim()`, `s.lstrip()` is `s.trim_left()` and `s.rstrip()` is `s.trim_right()`
 - `s.find(sub)` is `s.index(sub)` and `s.rfind(sub)` is `s.last_index(sub)`. Both give `?int`. For the last part of a path use `path.base(p)`
@@ -215,12 +216,12 @@ fn mean(xs []int) -> float:
 print(mean({1, 2, 3, 4}))
 ~~~
 
-3. Building and sorting a list (take the value that append returns)
+3. Building and sorting a list (append changes the list in place)
 
 ~~~cy
 names := {'bob', 'alice'}
 names += 'carol'
-names = names.append('dave')
+names.append('dave')
 names.sort()
 print(names.join(','))
 ~~~

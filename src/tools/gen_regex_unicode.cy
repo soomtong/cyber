@@ -50,7 +50,7 @@ fn fields(line str) -> []str:
     if body.trim().len() == 0:
         return res
     for body.split(';') |f|:
-        res = res.append(f.trim())
+        res.append(f.trim())
     return res
 
 -- Lowercases and drops `_`, `-` and spaces (UAX44-LM3 loose matching, without the `is` prefix rule).
@@ -77,7 +77,7 @@ fn merge(ranges []int) -> []int:
                 if hi > last_hi:
                     res[res.len() - 1] = range(last >> 32, hi)
                 continue
-        res = res.append(range(lo, hi))
+        res.append(range(lo, hi))
     return res
 
 type Table:
@@ -95,9 +95,9 @@ fn (&Tables) find(name str) -> ?int:
 
 fn (&Tables) add(name str, r int):
     if self.find(name) |i|:
-        self.list[i].ranges = self.list[i].ranges.append(r)
+        self.list[i].ranges.append(r)
     else:
-        self.list = self.list.append(Table{name=name, ranges={r}})
+        self.list.append(Table{name=name, ranges={r}})
 
 fn (&Tables) get(name str) -> []int:
     i := self.find(name) ?else panic('No table `%{name}`.')
@@ -130,7 +130,7 @@ fn union_of(t &Tables, names []str) -> []int:
     var all []int = {}
     for names |n|:
         for t.get(n) |r|:
-            all = all.append(r)
+            all.append(r)
     return merge(all)
 
 type Name:
@@ -170,34 +170,34 @@ members := [][]str{
     {'Cc', 'Cf', 'Cs', 'Co', 'Cn'},
 }
 for gc.list |t|:
-    tables = tables.append(t)
+    tables.append(t)
 for 0..groups.len() |i|:
-    tables = tables.append(Table{name=groups[i], ranges=union_of(&gc, members[i])})
+    tables.append(Table{name=groups[i], ranges=union_of(&gc, members[i])})
 gc_end := tables.len()
 
 -- Scripts. Kind 1.
 for sc.list |t|:
-    tables = tables.append(t)
+    tables.append(t)
 sc_end := tables.len()
 
 -- Binary properties. Kind 2.
 bin_names := []str{'Alphabetic', 'Lowercase', 'Uppercase', 'White_Space'}
 bin_aliases := []str{'Alpha', 'Lower', 'Upper', 'space'}
-tables = tables.append(Table{name='Alphabetic', ranges=core.get('Alphabetic')})
-tables = tables.append(Table{name='Lowercase', ranges=core.get('Lowercase')})
-tables = tables.append(Table{name='Uppercase', ranges=core.get('Uppercase')})
-tables = tables.append(Table{name='White_Space', ranges=prop.get('White_Space')})
+tables.append(Table{name='Alphabetic', ranges=core.get('Alphabetic')})
+tables.append(Table{name='Lowercase', ranges=core.get('Lowercase')})
+tables.append(Table{name='Uppercase', ranges=core.get('Uppercase')})
+tables.append(Table{name='White_Space', ranges=prop.get('White_Space')})
 
 -- `\w`: Alphabetic + M + Nd + Pc + Join_Control, as in the Rust `regex` crate (UTS#18 Annex C).
 var word []int = {}
 for core.get('Alphabetic') |r|:
-    word = word.append(r)
+    word.append(r)
 for union_of(&gc, {'Mn', 'Mc', 'Me', 'Nd', 'Pc'}) |r|:
-    word = word.append(r)
+    word.append(r)
 for prop.get('Join_Control') |r|:
-    word = word.append(r)
+    word.append(r)
 word_id := tables.len()
-tables = tables.append(Table{name='word', ranges=merge(word)})
+tables.append(Table{name='word', ranges=merge(word)})
 
 fn table_id(tables []Table, from int, to int, name str) -> ?int:
     for from..to |i|:
@@ -212,10 +212,10 @@ for 0..tables.len() - 1 |i|:
         kind = 0
     else i < sc_end:
         kind = 1
-    names = names.append(Name{name=loose(tables[i].name), kind=kind, table=i})
+    names.append(Name{name=loose(tables[i].name), kind=kind, table=i})
 for 0..bin_names.len() |i|:
-    names = names.append(Name{name=loose(bin_aliases[i]), kind=2, table=table_id(tables, sc_end, tables.len(), bin_names[i]).?})
-names = names.append(Name{name='wspace', kind=2, table=table_id(tables, sc_end, tables.len(), 'White_Space').?})
+    names.append(Name{name=loose(bin_aliases[i]), kind=2, table=table_id(tables, sc_end, tables.len(), bin_names[i]).?})
+names.append(Name{name='wspace', kind=2, table=table_id(tables, sc_end, tables.len(), 'White_Space').?})
 
 aliases := os.read_file(dir + '/PropertyValueAliases.txt')!
 for aliases.split('\n') |line|:
@@ -241,7 +241,7 @@ for aliases.split('\n') |line|:
                     dup = true
                     break
             if !dup:
-                names = names.append(Name{name=n, kind=kind, table=t})
+                names.append(Name{name=n, kind=kind, table=t})
 
 -- Simple case folding (statuses C and S). Each code point of an orbit points to the next larger one, the largest to
 -- the smallest (as Go's `unicode.SimpleFold`).
@@ -255,8 +255,8 @@ for fold_src.split('\n') |line|:
         continue
     cp := parse_hex(f[0])
     target := parse_hex(f[2])
-    pairs = pairs.append(range(target, cp))
-    pairs = pairs.append(range(target, target))
+    pairs.append(range(target, cp))
+    pairs.append(range(target, target))
 pairs.sort()
 var fold []int = {}       -- code point << 32 || next
 i := 0
@@ -267,57 +267,57 @@ while i < pairs.len():
     while j < pairs.len() and pairs[j] >> 32 == target:
         cp := pairs[j] && 0xffffffff
         if orbit.len() == 0 or orbit[orbit.len() - 1] != cp:
-            orbit = orbit.append(cp)
+            orbit.append(cp)
         j += 1
     for 0..orbit.len() |k|:
-        fold = fold.append(range(orbit[k], orbit[(k + 1) % orbit.len()]))
+        fold.append(range(orbit[k], orbit[(k + 1) % orbit.len()]))
     i = j
 fold.sort()
 
 -- Output.
 var out []str = {}
-out = out.append('// Generated by src/tools/gen_regex_unicode.cy from the Unicode Character Database %{version}. Do not edit.\n')
-out = out.append('// The data is derived from the Unicode Data Files, Copyright (c) Unicode, Inc., under the Unicode License v3\n')
-out = out.append('// (https://www.unicode.org/license.txt).\n')
-out = out.append('\n/// An inclusive range of code points.\npub const R = [2]u32;\n')
-out = out.append('\npub const version = "%{version}";\n')
-out = out.append('\n/// Table ids of the Perl classes.\npub const word: u16 = %{word_id};\n')
-out = out.append('pub const digit: u16 = %{table_id(tables, 0, gc_end, 'Nd').?};\n')
-out = out.append('pub const space: u16 = %{table_id(tables, sc_end, tables.len(), 'White_Space').?};\n')
-out = out.append('pub const unassigned: u16 = %{table_id(tables, 0, gc_end, 'Cn').?};\n')
+out.append('// Generated by src/tools/gen_regex_unicode.cy from the Unicode Character Database %{version}. Do not edit.\n')
+out.append('// The data is derived from the Unicode Data Files, Copyright (c) Unicode, Inc., under the Unicode License v3\n')
+out.append('// (https://www.unicode.org/license.txt).\n')
+out.append('\n/// An inclusive range of code points.\npub const R = [2]u32;\n')
+out.append('\npub const version = "%{version}";\n')
+out.append('\n/// Table ids of the Perl classes.\npub const word: u16 = %{word_id};\n')
+out.append('pub const digit: u16 = %{table_id(tables, 0, gc_end, 'Nd').?};\n')
+out.append('pub const space: u16 = %{table_id(tables, sc_end, tables.len(), 'White_Space').?};\n')
+out.append('pub const unassigned: u16 = %{table_id(tables, 0, gc_end, 'Cn').?};\n')
 
-out = out.append('\n/// A property value name in loose form (lower case, without `_`, `-` and spaces).\n')
-out = out.append('/// `kind`: 0 general category, 1 script, 2 binary property.\n')
-out = out.append('pub const Name = struct { name: []const u8, kind: u8, table: u16 };\n')
-out = out.append('\npub const names = [_]Name{\n')
+out.append('\n/// A property value name in loose form (lower case, without `_`, `-` and spaces).\n')
+out.append('/// `kind`: 0 general category, 1 script, 2 binary property.\n')
+out.append('pub const Name = struct { name: []const u8, kind: u8, table: u16 };\n')
+out.append('\npub const names = [_]Name{\n')
 for names |n|:
-    out = out.append('    .{ .name = "%{n.name}", .kind = %{n.kind}, .table = %{n.table} },\n')
-out = out.append('};\n')
+    out.append('    .{ .name = "%{n.name}", .kind = %{n.kind}, .table = %{n.table} },\n')
+out.append('};\n')
 
-out = out.append('\npub const tables = [_][]const R{\n')
+out.append('\npub const tables = [_][]const R{\n')
 for 0..tables.len() |t|:
-    out = out.append('    &t%{t}, // %{tables[t].name}\n')
-out = out.append('};\n')
+    out.append('    &t%{t}, // %{tables[t].name}\n')
+out.append('};\n')
 
 total := 0
 for 0..tables.len() |t|:
-    out = out.append('\nconst t%{t} = [_]R{')
+    out.append('\nconst t%{t} = [_]R{')
     rs := tables[t].ranges
     total += rs.len()
     for 0..rs.len() |k|:
         if k % 8 == 0:
-            out = out.append('\n   ')
-        out = out.append(' .{ %{hex(rs[k] >> 32)}, %{hex(rs[k] && 0xffffffff)} },')
-    out = out.append('\n};\n')
+            out.append('\n   ')
+        out.append(' .{ %{hex(rs[k] >> 32)}, %{hex(rs[k] && 0xffffffff)} },')
+    out.append('\n};\n')
 
-out = out.append('\n/// Simple case folding orbits, sorted by code point: `{ c, next }`, where `next` is the next larger code point\n')
-out = out.append('/// that folds to the same one, or the smallest when `c` is the largest.\n')
-out = out.append('pub const fold = [_]R{')
+out.append('\n/// Simple case folding orbits, sorted by code point: `{ c, next }`, where `next` is the next larger code point\n')
+out.append('/// that folds to the same one, or the smallest when `c` is the largest.\n')
+out.append('pub const fold = [_]R{')
 for 0..fold.len() |k|:
     if k % 8 == 0:
-        out = out.append('\n   ')
-    out = out.append(' .{ %{hex(fold[k] >> 32)}, %{hex(fold[k] && 0xffffffff)} },')
-out = out.append('\n};\n')
+        out.append('\n   ')
+    out.append(' .{ %{hex(fold[k] >> 32)}, %{hex(fold[k] && 0xffffffff)} },')
+out.append('\n};\n')
 
 os.write_file(out_path, out.join(''))!
 print('UCD %{version}: %{tables.len()} tables, %{total} ranges, %{names.len()} names, %{fold.len()} fold entries')

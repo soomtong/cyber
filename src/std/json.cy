@@ -85,19 +85,19 @@ fn (&Object) set(key str, value Value):
     if self.index_of(key) |i|:
         self.entries[i].value = value
         return
-    self.entries = self.entries.append(Entry{key=key, value=value})
+    self.entries.append(Entry{key=key, value=value})
 
 --| Removes `key` and returns whether it was present.
 fn (&Object) remove(key str) -> bool:
     if self.index_of(key) |i|:
-        self.entries = self.entries.remove(i)
+        self.entries.remove(i)
         return true
     return false
 
 fn (&Object) keys() -> []str:
     var res []str = {}
     for self.entries |e|:
-        res = res.append(e.key)
+        res.append(e.key)
     return res
 
 --| Returns the member `key` of an object, or `Value.null` when the value is not an object or has no such key.
@@ -302,7 +302,7 @@ fn object(entries [&]Entry) -> Value:
 --| Returns `Value.array` from `elems`.
 fn array(elems [&]Value) -> Value:
     var arr []Value = {}
-    arr = arr.append(elems)
+    arr.append(elems)
     return Value.array(arr)
 
 --| Parses a JSON text. Returns `error.Syntax` for malformed input and `error.Unicode` for input that is not UTF-8.
@@ -380,7 +380,7 @@ fn from(x %T) -> Value:
     #else type.is_instance_of(T, Slice) or type.is_instance_of(T, Array):
         var arr []Value = {}
         for 0..x.len() |i|:
-            arr = arr.append(from_ref(&x[i]))
+            arr.append(from_ref(&x[i]))
         return Value.array(arr)
     #else type.is_instance_of(T, Map):
         keys := x.keys()
@@ -388,7 +388,7 @@ fn from(x %T) -> Value:
         var obj Object = {}
         for keys |k|:
             elem := x[k]
-            obj.entries = obj.entries.append(Entry{key=k, value=from_ref(&elem)})
+            obj.entries.append(Entry{key=k, value=from_ref(&elem)})
         return Value.object(obj)
     #else:
         #switch type.info(T):
@@ -403,7 +403,7 @@ fn from(x %T) -> Value:
                 var obj Object = {}
                 #for 0..info.fields.len() |i|:
                     #field := info.fields[i]
-                    obj.entries = obj.entries.append(Entry{key=#{field.name}, value=from_ref(&meta.access(x, field.name))})
+                    obj.entries.append(Entry{key=#{field.name}, value=from_ref(&meta.access(x, field.name))})
                 return Value.object(obj)
             #case .option:
                 if meta.is_none(x):
@@ -576,7 +576,7 @@ fn to(%T type, v Value, diag &Diag) -> !T:
                     elem := to_ref(Elem, &a[i], diag) !else |err|:
                         diag.path = '[%{i}]' + diag.path
                         return err
-                    res = res.append(elem)
+                    res.append(elem)
                 return res
             else:
                 return mismatch(diag, 'an array', v)
@@ -752,7 +752,7 @@ fn to(%T type, v Value, diag &Diag) -> !T:
     if plain:
         return '.' + key
     var buf []byte = {}
-    quote(&buf, key)
+    quote(&&buf, key)
     return '[' + str(buf) + ']'
 
 --| Formats a finite float in the shortest form that reads back as the same value.
@@ -856,28 +856,28 @@ fn parse_number(text str, exact bool) -> ?Value:
     return 'byte 0x' + hex2(c)
 
 --| Writes `s` as a quoted JSON string to `buf`.
--fn quote(buf &[]byte, s str):
-    buf.* = buf.*.append(byte('"'))
+-fn quote(buf &&[]byte, s str):
+    buf.append(byte('"'))
     start := 0
     for 0..s.len() |i|:
         c := s[i]
         if c >= 0x20 and c != '"' and c != '\\':
             continue
         if i > start:
-            buf.* = buf.*.append(s[start..i].span())
+            buf.append(s[start..i].span())
         start = i + 1
         switch c:
-            case '"': buf.* = buf.*.append('\\"'.span())
-            case '\\': buf.* = buf.*.append('\\\\'.span())
-            case '\n': buf.* = buf.*.append('\\n'.span())
-            case '\r': buf.* = buf.*.append('\\r'.span())
-            case '\t': buf.* = buf.*.append('\\t'.span())
-            case 0x08: buf.* = buf.*.append('\\b'.span())
-            case 0x0c: buf.* = buf.*.append('\\f'.span())
-            else: buf.* = buf.*.append(('\\u00' + hex2(c)).span())
+            case '"': buf.append('\\"'.span())
+            case '\\': buf.append('\\\\'.span())
+            case '\n': buf.append('\\n'.span())
+            case '\r': buf.append('\\r'.span())
+            case '\t': buf.append('\\t'.span())
+            case 0x08: buf.append('\\b'.span())
+            case 0x0c: buf.append('\\f'.span())
+            else: buf.append(('\\u00' + hex2(c)).span())
     if s.len() > start:
-        buf.* = buf.*.append(s[start..].span())
-    buf.* = buf.*.append(byte('"'))
+        buf.append(s[start..].span())
+    buf.append(byte('"'))
 
 -fn hex2(c byte) -> str:
     digits := '0123456789abcdef'
@@ -888,12 +888,12 @@ fn parse_number(text str, exact bool) -> ?Value:
     indent int
 
 fn (&Writer) put(s str):
-    self.buf = self.buf.append(s.span())
+    self.buf.append(s.span())
 
 fn (&Writer) newline(depth int):
-    self.buf = self.buf.append(byte('\n'))
+    self.buf.append(byte('\n'))
     for 0..depth * self.indent:
-        self.buf = self.buf.append(byte(' '))
+        self.buf.append(byte(' '))
 
 fn (&Writer) value(v Value, depth int):
     switch v:
@@ -911,37 +911,37 @@ fn (&Writer) value(v Value, depth int):
         case .number |s|:
             self.put(s)
         case .str |s|:
-            quote(&self.buf, s)
+            quote(&&self.buf, s)
         case .array |a|:
             if a.len() == 0:
                 self.put('[]')
                 return
-            self.buf = self.buf.append(byte('['))
+            self.buf.append(byte('['))
             for a |i, e|:
                 if i > 0:
-                    self.buf = self.buf.append(byte(','))
+                    self.buf.append(byte(','))
                 if self.indent > 0:
                     self.newline(depth + 1)
                 self.value(e, depth + 1)
             if self.indent > 0:
                 self.newline(depth)
-            self.buf = self.buf.append(byte(']'))
+            self.buf.append(byte(']'))
         case .object |o|:
             if o.len() == 0:
                 self.put('{}')
                 return
-            self.buf = self.buf.append(byte('{'))
+            self.buf.append(byte('{'))
             for o.entries |i, e|:
                 if i > 0:
-                    self.buf = self.buf.append(byte(','))
+                    self.buf.append(byte(','))
                 if self.indent > 0:
                     self.newline(depth + 1)
-                quote(&self.buf, e.key)
+                quote(&&self.buf, e.key)
                 self.put(if (self.indent > 0) ': ' else ':')
                 self.value(e.value, depth + 1)
             if self.indent > 0:
                 self.newline(depth)
-            self.buf = self.buf.append(byte('}'))
+            self.buf.append(byte('}'))
 
 -type Parser:
     src   str
@@ -1029,7 +1029,7 @@ fn (&Parser) array() -> !Value:
         return Value.array(arr)
     while:
         self.skip_ws()
-        arr = arr.append(self.value()!)
+        arr.append(self.value()!)
         self.skip_ws()
         c := self.peek()
         if c == ',':
@@ -1075,7 +1075,7 @@ fn (&Parser) object() -> !Value:
                 obj.entries[i].value = val
             else:
                 index[key] = n
-                obj.entries = obj.entries.append(Entry{key=key, value=val})
+                obj.entries.append(Entry{key=key, value=val})
         self.skip_ws()
         c := self.peek()
         if c == ',':
@@ -1128,7 +1128,7 @@ fn (&Parser) string() -> !str:
             return self.fail('A string can not contain %{describe(c)}, escape it.')
         self.pos += 1
     var buf []byte = {}
-    buf = buf.append(src[start..self.pos].span())
+    buf.append(src[start..self.pos].span())
     while self.pos < n:
         c := src[self.pos]
         if c == '"':
@@ -1137,19 +1137,19 @@ fn (&Parser) string() -> !str:
         if c < 0x20:
             return self.fail('A string can not contain %{describe(c)}, escape it.')
         if c != '\\':
-            buf = buf.append(c)
+            buf.append(c)
             self.pos += 1
             continue
         self.pos += 1
         switch self.peek():
-            case '"': buf = buf.append(byte('"'))
-            case '\\': buf = buf.append(byte('\\'))
-            case '/': buf = buf.append(byte('/'))
-            case 'b': buf = buf.append(byte(0x08))
-            case 'f': buf = buf.append(byte(0x0c))
-            case 'n': buf = buf.append(byte('\n'))
-            case 'r': buf = buf.append(byte('\r'))
-            case 't': buf = buf.append(byte('\t'))
+            case '"': buf.append(byte('"'))
+            case '\\': buf.append(byte('\\'))
+            case '/': buf.append(byte('/'))
+            case 'b': buf.append(byte(0x08))
+            case 'f': buf.append(byte(0x0c))
+            case 'n': buf.append(byte('\n'))
+            case 'r': buf.append(byte('\r'))
+            case 't': buf.append(byte('\t'))
             case 'u':
                 self.pos += 1
                 cp := self.hex4()!
@@ -1166,7 +1166,7 @@ fn (&Parser) string() -> !str:
                         self.pos -= 6
                         return self.fail('`\\u%{lo.fmt(.hex)}` does not complete the surrogate pair.')
                     cp = 0x10000 + ((cp - 0xd800) << 10) + (lo - 0xdc00)
-                buf = buf.append(str.init_rune(cp).span())
+                buf.append(str.init_rune(cp).span())
                 continue
             else:
                 return self.fail('Unknown escape `\\%{str.init_rune(int(self.peek()))}`.')

@@ -251,11 +251,11 @@ fn (&Peg) parse(s str, diag &Diag) -> !Capture:
             pos = r.out[OutEnd]
             nfails = 0
         if pos == r.out[OutEnd]:
-            expected = expected.append('the end of the input')
+            expected.append('the end of the input')
     for 0..nfails |i|:
         txt := self.expect_of(r.out[OutPcs + i])
         if txt.len() > 0 and !has_str(expected, txt):
-            expected = expected.append(txt)
+            expected.append(txt)
     diag.pos = pos
     diag.expected = expected
     set_line_col(diag, s)
@@ -323,12 +323,12 @@ fn (&Peg) find(s str, start int) -> ?Capture:
 fn (&Peg) find_all(s str) -> []Capture:
     var ranges []int = {}
     var res []Capture = {}
-    self.scan(s, &ranges, &res, true)
+    self.scan(s, &&ranges, &&res, true)
     return res
 
 -- Finds the matches of `find_all`: the start and the end of each in `ranges`, and its tree in `trees` when
 -- `want_trees`. The trees are left out when only the places are needed, as they cost a string for each capture.
--fn (&Peg) scan(s str, ranges &[]int, trees &[]Capture, want_trees bool):
+-fn (&Peg) scan(s str, ranges &&[]int, trees &&[]Capture, want_trees bool):
     r := new_run()
     at := 0
     last_end := -1
@@ -345,10 +345,10 @@ fn (&Peg) find_all(s str) -> []Capture:
         else:
             at = end
         last_end = end
-        ranges.* = ranges.*.append(start)
-        ranges.* = ranges.*.append(end)
+        ranges.append(start)
+        ranges.append(end)
         if want_trees:
-            trees.* = trees.*.append(self.tree(s, &r))
+            trees.append(self.tree(s, &r))
 
 --| Returns `s` with the leftmost match replaced by `repl`, see `replace_all`.
 fn (&Peg) replace(s str, repl str) -> str:
@@ -363,30 +363,31 @@ fn (&Peg) replace_all(s str, repl str) -> str:
     plain := repl.index('$') == none
     var ranges []int = {}
     var trees []Capture = {}
-    self.scan(s, &ranges, &trees, !plain)
+    self.scan(s, &&ranges, &&trees, !plain)
     var buf []byte = {}
     last := 0
     for 0..ranges.len() / 2 |i|:
-        buf = buf.append(s[last..ranges[i * 2]].span())
+        buf.append(s[last..ranges[i * 2]].span())
         if plain:
-            buf = buf.append(repl.span())
+            buf.append(repl.span())
         else:
-            buf = buf.append(trees[i].expand(repl).span())
+            buf.append(trees[i].expand(repl).span())
         last = ranges[i * 2 + 1]
-    buf = buf.append(s[last..].span())
+    buf.append(s[last..].span())
     return str(buf)
 
 --| Returns the pieces of `s` between the matches.
 fn (&Peg) split(s str) -> []str:
     var ranges []int = {}
     var trees []Capture = {}
-    self.scan(s, &ranges, &trees, false)
+    self.scan(s, &&ranges, &&trees, false)
     var res []str = {}
     last := 0
     for 0..ranges.len() / 2 |i|:
-        res = res.append(s[last..ranges[i * 2]])
+        res.append(s[last..ranges[i * 2]])
         last = ranges[i * 2 + 1]
-    return res.append(s[last..])
+    res.append(s[last..])
+    return res
 
 -- Builds the tree of captures from the log of a match.
 -fn (&Peg) tree(s str, r &Run) -> Capture:
@@ -409,9 +410,9 @@ fn (&Peg) split(s str) -> []str:
                 kinds[sp] = kind
                 auxs[sp] = r.caps[i * 3 + 1]
             else:
-                stack = stack.append(c)
-                kinds = kinds.append(kind)
-                auxs = auxs.append(r.caps[i * 3 + 1])
+                stack.append(c)
+                kinds.append(kind)
+                auxs.append(r.caps[i * 3 + 1])
             sp += 1
             continue
         sp -= 1
@@ -424,17 +425,17 @@ fn (&Peg) split(s str) -> []str:
                 c.text = string_text(s, &c, self.strs[auxs[sp]])
             else:
                 c.text = s[c.start..c.end]
-        stack[sp - 1].kids = stack[sp - 1].kids.append(c)
+        stack[sp - 1].kids.append(c)
     return stack[0]
 
 -fn subst_text(s str, c &Capture) -> str:
     var buf []byte = {}
     last := c.start
     for c.kids |k|:
-        buf = buf.append(s[last..k.start].span())
-        buf = buf.append(k.text.span())
+        buf.append(s[last..k.start].span())
+        buf.append(k.text.span())
         last = k.end
-    buf = buf.append(s[last..c.end].span())
+    buf.append(s[last..c.end].span())
     return str(buf)
 
 -fn string_text(s str, c &Capture, tmpl str) -> str:
@@ -490,13 +491,13 @@ fn (&Capture) get(name str) -> ?Capture:
 --| Returns every capture named `name` inside this one, at any depth, in the order of the input.
 fn (&Capture) all(name str) -> []Capture:
     var res []Capture = {}
-    self.collect(name, &res)
+    self.collect(name, &&res)
     return res
 
--fn (&Capture) collect(name str, res &[]Capture):
+-fn (&Capture) collect(name str, res &&[]Capture):
     for self.kids |k|:
         if k.name == name:
-            res.* = res.*.append(k)
+            res.append(k)
         k.collect(name, res)
 
 --| Returns `repl` with its capture references replaced, see `Peg.replace_all`.
@@ -643,13 +644,13 @@ fn (&Capture) expand(repl str) -> str:
     next := 0
     for 0..n |i|:
         if r[i * 2] > next:
-            res = res.append(next)
-            res = res.append(r[i * 2] - 1)
+            res.append(next)
+            res.append(r[i * 2] - 1)
         if r[i * 2 + 1] + 1 > next:
             next = r[i * 2 + 1] + 1
     if next <= 0x10ffff:
-        res = res.append(next)
-        res = res.append(0x10ffff)
+        res.append(next)
+        res.append(0x10ffff)
     return res
 
 -- The parser, the checks and the code generator. The grammar becomes nodes, the nodes become instructions.
@@ -722,7 +723,7 @@ fn (&Builder) skip():
 fn (&Builder) add(node Node) -> !int:
     if node.depth > MaxDepth:
         return self.fail_at(node.from, 'The grammar nests deeper than %{MaxDepth} levels.')
-    self.nodes = self.nodes.append(node)
+    self.nodes.append(node)
     return self.nodes.len() - 1
 
 fn (&Builder) enter() -> !void:
@@ -734,7 +735,7 @@ fn (&Builder) name_id(name str) -> int:
     for 0..self.names.len() |i|:
         if self.names[i] == name:
             return i
-    self.names = self.names.append(name)
+    self.names.append(name)
     return self.names.len() - 1
 
 -- Reads a name at `pos`, or returns `''`.
@@ -768,16 +769,16 @@ fn (&Builder) build() -> !void:
                     return self.fail_at(at, 'The rule `%{name}` is defined twice.')
             self.skip()
             self.pos += 2
-            self.rules = self.rules.append(name)
-            self.rule_at = self.rule_at.append(at)
+            self.rules.append(name)
+            self.rule_at.append(at)
             -- The place of the root is kept before the rule is parsed, for the order of the rules.
-            self.roots = self.roots.append(-1)
+            self.roots.append(-1)
             idx := self.roots.len() - 1
             self.roots[idx] = self.parse_alt()!
             self.skip()
     else:
         root := self.parse_alt()!
-        self.roots = self.roots.append(root)
+        self.roots.append(root)
     self.skip()
     if self.pos < self.src.len():
         c := self.peek()
@@ -795,13 +796,13 @@ fn (&Builder) parse_alt() -> !int:
     self.enter()!
     from := self.pos
     var branches []int = {}
-    branches = branches.append(self.parse_seq()!)
+    branches.append(self.parse_seq()!)
     while:
         self.skip()
         if self.peek() != '/':
             break
         self.pos += 1
-        branches = branches.append(self.parse_seq()!)
+        branches.append(self.parse_seq()!)
     self.depth -= 1
     if branches.len() == 1:
         return branches[0]
@@ -811,7 +812,7 @@ fn (&Builder) join(kind int, items []int, from int) -> !int:
     start := self.kids.len()
     depth := 0
     for items |n|:
-        self.kids = self.kids.append(n)
+        self.kids.append(n)
         if self.nodes[n].depth > depth:
             depth = self.nodes[n].depth
     return self.add(Node{kind=kind, a=start, b=items.len(), from=from, to=self.pos, depth=depth + 1})
@@ -829,7 +830,7 @@ fn (&Builder) parse_seq() -> !int:
             break
         if is_name_start(c) and self.at_rule():
             break
-        items = items.append(self.parse_prefix()!)
+        items.append(self.parse_prefix()!)
     if items.len() == 0:
         return self.add(Node{kind=NEmpty, from=from, to=from})
     if items.len() == 1:
@@ -908,7 +909,7 @@ fn (&Builder) parse_suffix() -> !int:
             if q != '\'' and q != '"':
                 return self.fail_at(at, 'Only a string can follow `->`, as in `p -> \'text %1\'`. Functions, tables and capture numbers are not supported.')
             tmpl := self.parse_template()!
-            self.strs = self.strs.append(tmpl)
+            self.strs.append(tmpl)
             node = self.add(Node{kind=NCap, a=node, b=CapString, c=self.strs.len() - 1, from=from, to=self.pos,
                 depth=self.nodes[node].depth + 1})!
         else (c == '=' or c == '~') and self.peek_at(1) == '>':
@@ -927,7 +928,7 @@ fn (&Builder) parse_template() -> !str:
     lit := self.parse_literal()!
     var buf []byte = {}
     for 0..lit.b |i|:
-        buf = buf.append(byte(self.lits[lit.a + i]))
+        buf.append(byte(self.lits[lit.a + i]))
     self.lits = self.lits[0..lit.a]
     tmpl := str(buf)
     i := 0
@@ -1013,9 +1014,9 @@ fn (&Builder) parse_literal() -> !Lit:
             cp := self.parse_escape()!
             enc := str.init_rune(cp)
             for 0..enc.len() |i|:
-                self.lits = self.lits.append(int(enc[i]))
+                self.lits.append(int(enc[i]))
             continue
-        self.lits = self.lits.append(c)
+        self.lits.append(c)
         self.pos += 1
     return Lit{a=start, b=self.lits.len() - start}
 
@@ -1039,12 +1040,12 @@ fn (&Builder) set_node(ranges []int, negated bool, from int) -> !int:
     neg := 0
     if negated:
         neg = 1
-    self.sets = self.sets.append(lo)
-    self.sets = self.sets.append(hi)
-    self.sets = self.sets.append(neg)
-    self.sets = self.sets.append(n)
+    self.sets.append(lo)
+    self.sets.append(hi)
+    self.sets.append(neg)
+    self.sets.append(n)
     for ranges |v|:
-        self.sets = self.sets.append(v)
+        self.sets.append(v)
     return self.add(Node{kind=NSet, a=off, from=from, to=self.pos})
 
 -- Reads the letter of a `%x` class after the `%` and returns its ranges.
@@ -1089,7 +1090,7 @@ fn (&Builder) parse_class() -> !int:
         if c == '%':
             self.pos += 1
             for self.parse_percent(true)! |v|:
-                ranges = ranges.append(v)
+                ranges.append(v)
             continue
         lo := 0
         if c == '\\':
@@ -1108,8 +1109,8 @@ fn (&Builder) parse_class() -> !int:
                 hi = self.rune()
             if hi < lo:
                 return self.fail_at(at, 'The range `%{str.init_rune(lo)}-%{str.init_rune(hi)}` ends before it starts.')
-        ranges = ranges.append(lo)
-        ranges = ranges.append(hi)
+        ranges.append(lo)
+        ranges.append(hi)
     if ranges.len() == 0:
         return self.fail_at(open, 'This class is empty. Write `\\]` for a `]` in a class.')
     return self.set_node(ranges, negated, open)
@@ -1162,7 +1163,7 @@ fn (&Builder) parse_primary() -> !int:
         else:
             if is_name_start(c):
                 name := self.read_name()
-                self.calls = self.calls.append(name)
+                self.calls.append(name)
                 return self.add(Node{kind=NCall, a=self.calls.len() - 1, from=from, to=self.pos})
             if c == '*' or c == '+' or c == '?' or c == '^':
                 return self.fail('The repetition %{show(c)} has nothing to repeat. Write `\'%{str.init_rune(c)}\'` to match the character.')
@@ -1257,7 +1258,7 @@ fn (&Builder) nullable(n int) -> bool:
             return true
 
 -- Collects the rules that a node can call before it takes input.
-fn (&Builder) left_calls(n int, out &[]int):
+fn (&Builder) left_calls(n int, out &&[]int):
     node := self.nodes[n]
     switch node.kind:
         case NSeq:
@@ -1279,7 +1280,7 @@ fn (&Builder) left_calls(n int, out &[]int):
             if node.a != -1:
                 self.left_calls(node.a, out)
         case NCall:
-            out.* = out.*.append(node.a)
+            out.append(node.a)
         else:
             pass
 
@@ -1298,8 +1299,8 @@ fn (&Builder) check() -> !void:
         var edges [][]int = {}
         for 0..nrules |r|:
             var out []int = {}
-            self.left_calls(self.roots[r], &out)
-            edges = edges.append(out)
+            self.left_calls(self.roots[r], &&out)
+            edges.append(out)
         for 0..nrules |r|:
             -- `prev[x]` is the rule that led to `x`, -1 when `x` was not reached.
             prev := []int(nrules, -1)
@@ -1314,7 +1315,7 @@ fn (&Builder) check() -> !void:
                         var chain []int = {}
                         x := cur
                         while x != r:
-                            chain = chain.append(x)
+                            chain.append(x)
                             x = prev[x]
                         via := ''
                         i := chain.len() - 1
@@ -1324,7 +1325,7 @@ fn (&Builder) check() -> !void:
                         return self.fail_at(self.rule_at[r], 'The rule `%{path}` is left recursive (%{path}%{via} -> %{path}): it calls itself before it takes any input, which never ends. Write the repetition as a loop: `a <- b (op b)*`.')
                     if prev[next] == -1 and next != r:
                         prev[next] = cur
-                        queue = queue.append(next)
+                        queue.append(next)
     for 0..self.nodes.len() |i|:
         node := self.nodes[i]
         if node.kind == NRep and node.c == -1 and self.nullable(node.a):
@@ -1338,9 +1339,9 @@ fn (&Builder) emit(op int, a int, b int) -> !int:
         self.msg = 'The grammar is too big: its program has more than %{MaxInsts} instructions.'
         self.err_pos = 0
         return error.TooBig
-    self.insts = self.insts.append(op)
-    self.insts = self.insts.append(a)
-    self.insts = self.insts.append(b)
+    self.insts.append(op)
+    self.insts.append(a)
+    self.insts.append(b)
     return self.insts.len() / 3 - 1
 
 fn (&Builder) patch(pc int):
@@ -1348,8 +1349,8 @@ fn (&Builder) patch(pc int):
 
 -- Notes what the instruction `pc` expects, for the message of a failed `parse`.
 fn (&Builder) expects(pc int, txt str):
-    self.exp_pc = self.exp_pc.append(pc)
-    self.exp_txt = self.exp_txt.append(txt)
+    self.exp_pc.append(pc)
+    self.exp_txt.append(txt)
 
 -- The text of a node in the grammar, on one line and not too long.
 fn (&Builder) text_of(n int) -> str:
@@ -1390,7 +1391,7 @@ fn (&Builder) gen(n int) -> !void:
             for 0..node.b - 1 |i|:
                 choice := self.emit(OpChoice, 0, 0)!
                 self.gen(self.kids[node.a + i])!
-                ends = ends.append(self.emit(OpCommit, 0, 0)!)
+                ends.append(self.emit(OpCommit, 0, 0)!)
                 self.patch(choice)
             self.gen(self.kids[node.a + node.b - 1])!
             for ends |pc|:
@@ -1439,7 +1440,7 @@ fn (&Builder) gen(n int) -> !void:
             self.patch(choice)
         case NCall:
             pc := self.emit(OpCall, node.a, 0)!
-            self.fixes = self.fixes.append(pc)
+            self.fixes.append(pc)
         case NCap:
             if node.b == CapPos:
                 _ = self.emit(OpOpen, CapSimple, 0)!
@@ -1460,11 +1461,11 @@ fn (&Builder) gen_all() -> !void:
         _ = self.emit(OpEnd, 0, 0)!
         return
     first := self.emit(OpCall, 0, 0)!
-    self.fixes = self.fixes.append(first)
+    self.fixes.append(first)
     _ = self.emit(OpEnd, 0, 0)!
     var addrs []int = {}
     for 0..self.rules.len() |r|:
-        addrs = addrs.append(self.here())
+        addrs.append(self.here())
         self.gen(self.roots[r])!
         _ = self.emit(OpRet, 0, 0)!
     for self.fixes |pc|:
@@ -1476,7 +1477,7 @@ fn (&Builder) gen_all() -> !void:
 fn (&Builder) assemble() -> []int:
     inst_off := HeaderLen + self.lits.len() + self.sets.len()
     var prog []int = {Magic, self.insts.len() / 3, inst_off, 0, 0, 0, 0, 0}
-    prog = prog.append(self.lits.span())
-    prog = prog.append(self.sets.span())
-    prog = prog.append(self.insts.span())
+    prog.append(self.lits.span())
+    prog.append(self.sets.span())
+    prog.append(self.insts.span())
     return prog

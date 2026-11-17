@@ -401,20 +401,20 @@ fn (&Duration) format() -> str:
     a := self.abs()
     var buf []byte = {}
     if self.sec < 0:
-        buf = buf.append('-')
+        buf.append('-')
     h := a.sec / 3600
     m := a.sec % 3600 / 60
     s := a.sec % 60
     if h > 0:
-        buf = buf.append(str(h).span())
-        buf = buf.append('h')
+        buf.append(str(h).span())
+        buf.append('h')
     if m > 0:
-        buf = buf.append(str(m).span())
-        buf = buf.append('m')
+        buf.append(str(m).span())
+        buf.append('m')
     if s > 0 or a.nsec > 0 or (h == 0 and m == 0):
-        buf = buf.append(str(s).span())
+        buf.append(str(s).span())
         buf = put_frac(buf, a.nsec)
-        buf = buf.append('s')
+        buf.append('s')
     return str(buf)
 
 -- Time.
@@ -674,19 +674,19 @@ fn (&DateTime) format() -> str:
     c := civil_from_days(self.local_day())
     sod := self.day_sec()
     buf = put_num(buf, c.y, 4)
-    buf = buf.append('-')
+    buf.append('-')
     buf = put_num(buf, c.m, 2)
-    buf = buf.append('-')
+    buf.append('-')
     buf = put_num(buf, c.d, 2)
-    buf = buf.append('T')
+    buf.append('T')
     buf = put_num(buf, sod / 3600, 2)
-    buf = buf.append(':')
+    buf.append(':')
     buf = put_num(buf, sod % 3600 / 60, 2)
-    buf = buf.append(':')
+    buf.append(':')
     buf = put_num(buf, sod % 60, 2)
     buf = put_frac(buf, self.nsec)
     if self.off == 0:
-        buf = buf.append('Z')
+        buf.append('Z')
     else:
         buf = put_offset(buf, self.off, true)
     return str(buf)
@@ -808,9 +808,9 @@ fn (&Date) format() -> str:
     var buf []byte = {}
     c := civil_from_days(self.days)
     buf = put_num(buf, c.y, 4)
-    buf = buf.append('-')
+    buf.append('-')
     buf = put_num(buf, c.m, 2)
-    buf = buf.append('-')
+    buf.append('-')
     buf = put_num(buf, c.d, 2)
     return str(buf)
 
@@ -826,8 +826,9 @@ fn (&Date) format(fmt str) -> !str:
     s := str(v)
     var b []byte = buf
     for 0..(width - s.len()) |i|:
-        b = b.append('0')
-    return b.append(s.span())
+        b.append('0')
+    b.append(s.span())
+    return b
 
 -- Appends `.` and the digits of `nsec` without trailing zeros, or nothing for 0.
 -fn put_frac(buf []byte, nsec int) -> []byte:
@@ -838,20 +839,21 @@ fn (&Date) format(fmt str) -> !str:
     while v % 10 == 0:
         v /= 10
         digits -= 1
-    b := buf.append('.')
+    var b []byte = buf
+    b.append('.')
     return put_num(b, v, digits)
 
 -fn put_offset(buf []byte, off int, colon bool) -> []byte:
     var b []byte = buf
     a := off
     if off < 0:
-        b = b.append('-')
+        b.append('-')
         a = -off
     else:
-        b = b.append('+')
+        b.append('+')
     b = put_num(b, a / 60, 2)
     if colon:
-        b = b.append(':')
+        b.append(':')
     return put_num(b, a % 60, 2)
 
 -fn month_name(m int) -> str:
@@ -917,7 +919,7 @@ fn (&Date) format(fmt str) -> !str:
         ch := fmt[i]
         i += 1
         if ch != '%':
-            buf = buf.append(ch)
+            buf.append(ch)
             continue
         if i >= n:
             return error.Format
@@ -954,18 +956,18 @@ fn (&Date) format(fmt str) -> !str:
                 buf = put_num(buf, c.d, 2)
             case 'e':
                 if c.d < 10:
-                    buf = buf.append(' ')
-                buf = buf.append(str(c.d).span())
+                    buf.append(' ')
+                buf.append(str(c.d).span())
             case 'j':
                 buf = put_num(buf, year_day(self.day), 3)
             case 'b', 'h':
-                buf = buf.append(month_name(c.m)[0..3].span())
+                buf.append(month_name(c.m)[0..3].span())
             case 'B':
-                buf = buf.append(month_name(c.m).span())
+                buf.append(month_name(c.m).span())
             case 'a':
-                buf = buf.append(weekday_name(weekday_num(self.day))[0..3].span())
+                buf.append(weekday_name(weekday_num(self.day))[0..3].span())
             case 'A':
-                buf = buf.append(weekday_name(weekday_num(self.day)).span())
+                buf.append(weekday_name(weekday_num(self.day)).span())
             case 'u':
                 buf = put_num(buf, weekday_num(self.day) + 1, 1)
             case 'w':
@@ -983,9 +985,9 @@ fn (&Date) format(fmt str) -> !str:
                 buf = put_num(buf, h, 2)
             case 'p':
                 if self.sod < 43200:
-                    buf = buf.append('AM'.span())
+                    buf.append('AM'.span())
                 else:
-                    buf = buf.append('PM'.span())
+                    buf.append('PM'.span())
             case 'M':
                 buf = put_num(buf, self.sod % 3600 / 60, 2)
             case 'S':
@@ -1001,9 +1003,9 @@ fn (&Date) format(fmt str) -> !str:
             case 'z':
                 buf = put_offset(buf, self.off, colon)
             case 'Z':
-                buf = buf.append(self.abbr.span())
+                buf.append(self.abbr.span())
             case 's':
-                buf = buf.append(str(self.unix).span())
+                buf.append(str(self.unix).span())
             case 'F':
                 buf = self.run(buf, '%Y-%m-%d')!
             case 'T':
@@ -1013,11 +1015,11 @@ fn (&Date) format(fmt str) -> !str:
             case 'D':
                 buf = self.run(buf, '%m/%d/%y')!
             case 'n':
-                buf = buf.append('\n')
+                buf.append('\n')
             case 't':
-                buf = buf.append('\t')
+                buf.append('\t')
             case '%':
-                buf = buf.append('%')
+                buf.append('%')
             else:
                 return error.Format
     return buf

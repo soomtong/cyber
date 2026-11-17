@@ -235,7 +235,7 @@ fn (&Regex) find_all(s str) -> []Match:
             -- Search again past the next code point.
             skip = true
             continue
-        res = res.append(Match{start=slots[0], end=slots[1], text=s[slots[0]..slots[1]]})
+        res.append(Match{start=slots[0], end=slots[1], text=s[slots[0]..slots[1]]})
         last_end = slots[1]
         at = slots[1]
     return res
@@ -269,7 +269,7 @@ fn (&Regex) captures_all(s str) -> []Captures:
             continue
         last_end = slots[1]
         at = slots[1]
-        res = res.append(Captures{hay=s, slots=slots, names=self.names})
+        res.append(Captures{hay=s, slots=slots, names=self.names})
     return res
 
 --| Returns `s` with the leftmost match replaced by `repl`, see `replace_all`.
@@ -293,10 +293,10 @@ fn (&Regex) replace_all(s str, repl str) -> str:
         var buf []byte = {}
         last := 0
         for self.find_all(s) |m|:
-            buf = buf.append(s[last..m.start].span())
-            buf = buf.append(repl.span())
+            buf.append(s[last..m.start].span())
+            buf.append(repl.span())
             last = m.end
-        buf = buf.append(s[last..].span())
+        buf.append(s[last..].span())
         return str(buf)
     if limit == 1:
         if self.captures(s) |c|:
@@ -307,10 +307,10 @@ fn (&Regex) replace_all(s str, repl str) -> str:
     last := 0
     for self.captures_all(s) |c|:
         m := c.get(0).?
-        buf = buf.append(s[last..m.start].span())
-        buf = buf.append(c.expand(repl).span())
+        buf.append(s[last..m.start].span())
+        buf.append(c.expand(repl).span())
         last = m.end
-    buf = buf.append(s[last..].span())
+    buf.append(s[last..].span())
     return str(buf)
 
 --| Returns the pieces of `s` between the matches. Groups are not part of the result.
@@ -318,9 +318,10 @@ fn (&Regex) split(s str) -> []str:
     var res []str = {}
     last := 0
     for self.find_all(s) |m|:
-        res = res.append(s[last..m.start])
+        res.append(s[last..m.start])
         last = m.end
-    return res.append(s[last..])
+    res.append(s[last..])
+    return res
 
 --| Returns at most `limit` pieces of `s`. The last piece is the rest of the input.
 fn (&Regex) split(s str, limit int) -> []str:
@@ -331,9 +332,10 @@ fn (&Regex) split(s str, limit int) -> []str:
     for self.find_all(s) |m|:
         if res.len() + 1 >= limit:
             break
-        res = res.append(s[last..m.start])
+        res.append(s[last..m.start])
         last = m.end
-    return res.append(s[last..])
+    res.append(s[last..])
+    return res
 
 --| Returns the number of groups, with group 0.
 fn (&Captures) len() -> int:
@@ -552,7 +554,7 @@ fn (&Builder) skip_x():
 fn (&Builder) add(node Node) -> !int:
     if node.depth > MaxDepth:
         return self.fail('The pattern nests deeper than %{MaxDepth} levels.')
-    self.nodes = self.nodes.append(node)
+    self.nodes.append(node)
     return self.nodes.len() - 1
 
 fn (&Builder) enter(open int) -> !void:
@@ -566,7 +568,7 @@ fn (&Builder) join(kind int, items []int) -> !int:
     depth := 0
     empty := kind == NCat
     for items |n|:
-        self.kids = self.kids.append(n)
+        self.kids.append(n)
         if self.nodes[n].depth > depth:
             depth = self.nodes[n].depth
         if kind == NCat:
@@ -578,10 +580,10 @@ fn (&Builder) join(kind int, items []int) -> !int:
 -- alt := cat ('|' cat)*. Stops at `)` and at the end.
 fn (&Builder) parse_alt() -> !int:
     var branches []int = {}
-    branches = branches.append(self.parse_cat()!)
+    branches.append(self.parse_cat()!)
     while self.peek() == '|':
         self.pos += 1
-        branches = branches.append(self.parse_cat()!)
+        branches.append(self.parse_cat()!)
     if branches.len() == 1:
         return branches[0]
     return self.join(NAlt, branches)
@@ -610,7 +612,7 @@ fn (&Builder) parse_cat() -> !int:
                 node = self.parse_repeat(node)!
             else:
                 break
-        items = items.append(node)
+        items.append(node)
     if items.len() == 0:
         return self.add(Node{kind=NEmpty, empty=true})
     if items.len() == 1:
@@ -713,9 +715,9 @@ fn (&Builder) literal(cp int) -> !int:
     return self.add(Node{kind=NChar, a=cp})
 
 fn (&Builder) leaf(op int, a int, b int):
-    self.ops = self.ops.append(op)
-    self.ops = self.ops.append(a)
-    self.ops = self.ops.append(b)
+    self.ops.append(op)
+    self.ops.append(a)
+    self.ops.append(b)
 
 -- Makes a set of the ops in `ops` and returns its node.
 fn (&Builder) finish_set(fold bool) -> !int:
@@ -723,11 +725,13 @@ fn (&Builder) finish_set(fold bool) -> !int:
     flags := 0
     if fold:
         flags = SetFold
-    self.sets = self.sets.append(0)
-    self.sets = self.sets.append(0)
-    self.sets = self.sets.append(flags)
-    self.sets = self.sets.append(self.ops.len() / 3)
-    self.sets = self.sets.append(self.ops.span())
+    self.sets.append(0)
+    self.sets.append(0)
+    self.sets.append(flags)
+    -- A copy that shares the buffer: appending a span of `self.ops` would borrow `self` twice.
+    ops := self.ops
+    self.sets.append(ops.len() / 3)
+    self.sets.append(ops.span())
     self.sets[off] = set_ascii(self.sets.span(), off, 0)
     self.sets[off + 1] = set_ascii(self.sets.span(), off, 1)
     return self.add(Node{kind=NSet, a=off})
@@ -760,7 +764,7 @@ fn (&Builder) parse_group() -> !int:
                 self.pos += 1
             name := self.parse_name()!
             group = self.names.len()
-            self.names = self.names.append(name)
+            self.names.append(name)
         else:
             self.pos += 1
             colon := self.parse_flags(open)!
@@ -768,7 +772,7 @@ fn (&Builder) parse_group() -> !int:
                 return -1
     else:
         group = self.names.len()
-        self.names = self.names.append('')
+        self.names.append('')
     self.enter(open)!
     child := self.parse_alt()!
     if self.peek() != ')':
@@ -1230,9 +1234,9 @@ fn (&Builder) emit(op int, a int, b int) -> !int:
         self.msg = 'The pattern is too big: its program has more than %{MaxInsts} instructions. Lower the repetition counts.'
         self.err_pos = 0
         return error.TooBig
-    self.insts = self.insts.append(op)
-    self.insts = self.insts.append(a)
-    self.insts = self.insts.append(b)
+    self.insts.append(op)
+    self.insts.append(a)
+    self.insts.append(b)
     return self.insts.len() / 3 - 1
 
 -- Emits a split whose first way enters the code that follows it. Returns the split, to set its other way later.
@@ -1297,7 +1301,7 @@ fn (&Builder) gen(n int) -> !void:
                 if i + 1 < node.b:
                     s := self.split_enter(true)!
                     self.gen(self.kids[node.a + i])!
-                    jumps = jumps.append(self.emit(OpJmp, 0, 0)!)
+                    jumps.append(self.emit(OpJmp, 0, 0)!)
                     self.split_leave(s, true)
                 else:
                     self.gen(self.kids[node.a + i])!
@@ -1339,7 +1343,7 @@ fn (&Builder) gen_repeat(node Node) -> !void:
     -- The optional rest, `(e(e)?)?`: each split leaves to the end.
     var splits []int = {}
     for 0..node.c - node.b:
-        splits = splits.append(self.split_enter(greedy)!)
+        splits.append(self.split_enter(greedy)!)
         self.gen(child)!
     for splits |s|:
         self.split_leave(s, greedy)
@@ -1348,19 +1352,19 @@ fn (&Builder) gen_repeat(node Node) -> !void:
 -fn push_utf8(out []int, cp int) -> []int:
     res := out
     if cp < 0x80:
-        res = res.append(cp)
+        res.append(cp)
     else cp < 0x800:
-        res = res.append(0xc0 || (cp >> 6))
-        res = res.append(0x80 || (cp && 0x3f))
+        res.append(0xc0 || (cp >> 6))
+        res.append(0x80 || (cp && 0x3f))
     else cp < 0x10000:
-        res = res.append(0xe0 || (cp >> 12))
-        res = res.append(0x80 || ((cp >> 6) && 0x3f))
-        res = res.append(0x80 || (cp && 0x3f))
+        res.append(0xe0 || (cp >> 12))
+        res.append(0x80 || ((cp >> 6) && 0x3f))
+        res.append(0x80 || (cp && 0x3f))
     else:
-        res = res.append(0xf0 || (cp >> 18))
-        res = res.append(0x80 || ((cp >> 12) && 0x3f))
-        res = res.append(0x80 || ((cp >> 6) && 0x3f))
-        res = res.append(0x80 || (cp && 0x3f))
+        res.append(0xf0 || (cp >> 18))
+        res.append(0x80 || ((cp >> 12) && 0x3f))
+        res.append(0x80 || ((cp >> 6) && 0x3f))
+        res.append(0x80 || (cp && 0x3f))
     return res
 
 -- Lays out the program.
@@ -1392,14 +1396,14 @@ fn (&Builder) assemble() -> []int:
     set_base := HeaderLen + prefix.len()
     inst_base := set_base + self.sets.len()
     var prog []int = {Magic, n, self.names.len() * 2, flags, prefix.len(), HeaderLen, inst_base, 0}
-    prog = prog.append(prefix.span())
-    prog = prog.append(self.sets.span())
+    prog.append(prefix.span())
+    prog.append(self.sets.span())
     for 0..n |i|:
         op := self.insts[i * 3]
         a := self.insts[i * 3 + 1]
         if op == OpSet:
             a += set_base
-        prog = prog.append(op)
-        prog = prog.append(a)
-        prog = prog.append(self.insts[i * 3 + 2])
+        prog.append(op)
+        prog.append(a)
+        prog.append(self.insts[i * 3 + 2])
     return prog

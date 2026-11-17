@@ -658,7 +658,7 @@ fn (&File) read(buf [&]byte) -> !int:
 fn (&File) read(bytes int) -> ![]byte:
     buf := []byte(bytes, 0)
     read := self.read(buf.span())!
-    buf = buf.size_down(read)
+    buf.size_down(read)
     return buf
 
 --| Reads to the end of the file.

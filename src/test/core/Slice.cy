@@ -37,7 +37,7 @@ t.eq(1, a2_view[0].*)
 
 -- Set index
 a = {}
-a = a.size_up(3, 0)
+a.size_up(3, 0)
 a[2] = 3
 t.eq(a[2], 3)
 
@@ -54,20 +54,20 @@ t.eq_slice([]int{1, 2, 3, 4, 5, 6}, a)
 
 -- insert() in empty
 a = {}
-a = a.insert(0, 1)
+a.insert(0, 1)
 t.eq(a[0], 1)
 
 -- insert() at start
-a = a.insert(0, 2)
+a.insert(0, 2)
 t.eq(2, a.len())
 t.eq_slice([]int{2, 1}, a)
 
 -- insert() at end
-a = a.insert(2, 3)
+a.insert(2, 3)
 t.eq_slice([]int{2, 1, 3}, a)
 
 -- insert() in middle
-a = a.insert(1, 4)
+a.insert(1, 4)
 t.eq_slice([]int{2, 4, 1, 3}, a)
 
 -- TODO: insert() at index out of bounds.
@@ -86,21 +86,21 @@ t.eq(4, a.len())
 
 -- remove()
 a = {1, 2, 3}
-a = a.remove(1)
+a.remove(1)
 t.eq(2, a.len())
 t.eq(1, a[0])
 t.eq(3, a[1])
 
 -- remove() first item.
 a = {1, 2, 3}
-a = a.remove(0)
+a.remove(0)
 t.eq(2, a.len())
 t.eq(2, a[0])
 t.eq(3, a[1])
 
 -- remove() last item.
 a = {1, 2, 3}
-a = a.remove(2)
+a.remove(2)
 t.eq(2, a.len())
 t.eq(1, a[0])
 t.eq(2, a[1])
@@ -109,17 +109,17 @@ t.eq(2, a[1])
 
 -- remove() rc item.
 a2 = {^1, ^2, ^3}
-a2 = a2.remove(1)
+a2.remove(1)
 t.eq(2, a2.len())
 t.eq(1, a2[0].*)
 t.eq(3, a2[1].*)
 
 -- size_up/size_down()
 a = {1, 2, 3}
-a = a.size_up(4, 0)
+a.size_up(4, 0)
 t.eq(4, a.len())
 t.eq(0, a[3])
-a = a.size_down(2)
+a.size_down(2)
 t.eq(2, a.len())
 t.eq(2, a[1])
 

@@ -9,11 +9,11 @@ use os
 -- The values of the captures as LPeg lists them: a named capture gives none, and the captures inside a string
 -- or a substitution capture are part of its text. Those two are told by a text that is not the input text,
 -- which the generator makes sure of.
-fn values(hay str, c &peg.Capture, out &[]str):
+fn values(hay str, c &peg.Capture, out &&[]str):
     for c.kids |k|:
         if k.name.len() > 0:
             continue
-        out.* = out.*.append(k.text)
+        out.append(k.text)
         if k.text == hay[k.start..k.end]:
             values(hay, &k, out)
 
@@ -21,7 +21,7 @@ fn values(hay str, c &peg.Capture, out &[]str):
 fn bytes_str(v json.Value) -> str:
     var buf []byte = {}
     for v.as_array().? |b|:
-        buf = buf.append(byte(b.as_int().?))
+        buf.append(byte(b.as_int().?))
     return str(buf)
 
 -- Every match of `find_all` as `start-end`, joined with commas.
@@ -92,7 +92,7 @@ for doc.as_array().? |c|:
     got := '%{m.?.end}'
     var vals []str = {}
     root := m.?
-    values(hay, &root, &vals)
+    values(hay, &root, &&vals)
     for vals |v|:
         got += '|' + v
     want := '%{c['end'].as_int().?}'

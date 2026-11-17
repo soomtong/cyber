@@ -435,7 +435,7 @@ t.eq(error.NotFound, time.zone('../../etc/passwd').unwrap_error())
 t.eq(error.NotFound, time.zone('/etc/localtime').unwrap_error())
 t.eq(error.Syntax, time.zone_from_tzif('x', []byte{1, 2, 3}).unwrap_error())
 var junk []byte = {}
-junk = junk.append('TZif2 and then nothing that a file of zone data would have in it'.span())
+junk.append('TZif2 and then nothing that a file of zone data would have in it'.span())
 t.eq(error.Syntax, time.zone_from_tzif('x', junk).unwrap_error())
 
 -- `%Z` of a value without a zone is `UTC` or the offset. It is not parsed.

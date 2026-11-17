@@ -1102,17 +1102,17 @@ Here are some common slice operations:
 ```cy
 arr := []int{234}
 
--- Append a value.
+-- Append a value in place.
 arr += 123
 
--- Alternative way to append.
-arr = arr.append(123)
+-- Another way to append in place.
+arr.append(123)
 
--- Inserting a value at an index.
-arr = arr.insert(1, 345)
+-- Inserting a value at an index in place.
+arr.insert(1, 345)
 
 -- Get the length.
-print(arr.len())  --> 2
+print(arr.len())  --> 4
 
 -- Sort the slice in place. Without a function, `sort` uses `<` of the element type.
 arr.sort(|a, b| a < b)
@@ -1125,22 +1125,44 @@ arr.reverse()
 for arr |it|:
     print(it)
 
--- Remove an element at a specific index.
-arr = arr.remove(1)
+-- Remove an element at a specific index in place.
+arr.remove(1)
 ```
 
-`append`, `insert`, `remove`, `clear`, `size_down` and `size_up` return the new slice and leave the receiver as it was,
-like `+`. Assign the result back to keep it: `arr = arr.remove(1)`. Dropping the result (`_ = arr.remove(1)` or a bare
-`arr.clear()`) is a compile error that says so. A result kept in another variable is a separate list:
+`append`, `insert`, `remove`, `clear`, `size_down`, `size_up` and `+=` change the slice in place and return nothing.
+`appended`, `inserted`, `removed` and `+` return a new slice and leave the receiver as it was:
 ```cy
 arr := []int{1, 2, 3}
-rest := arr.remove(0)
+rest := arr.removed(0)
 print(arr.len())   --> 3
 print(rest.len())  --> 2
+more := arr + 4
+print(arr.len())   --> 3
+print(more.len())  --> 4
 ```
-When the receiver is the only owner of the buffer, `append`, `size_up` and a removal at the end reuse it. A removal or an
-insertion before the end copies, because the receiver still sees those elements. Elements that a shrinking op drops stay
-alive while the receiver can see them, until a later resize of the result or the end of both.
+Assigning the result of an in-place method (`arr = arr.append(1)`, `rest := arr.remove(0)`) is a compile error that
+names the method to use. So is dropping the result of a method that returns a new slice (`arr.appended(1)` as a
+statement, `_ = arr.removed(0)`), because it changes nothing.
+
+Copies of a slice share its buffer until one of them resizes: an in-place resize of a slice whose buffer another value
+also holds (`ys := xs`, a sub-slice) first copies the buffer, so the other value keeps its elements and its length. Writing
+an element (`xs[0] = v`, `sort`, `reverse`) does not copy: every value that shares the buffer sees it.
+```cy
+xs := []int{1, 2}
+ys := xs
+xs.append(3)
+print(ys.len())   --> 2
+xs[0] = 9
+print(ys[0])      --> 1
+```
+The last `print` shows `1` because `append` already gave `xs` its own buffer. Without the `append`, `ys[0]` would be `9`.
+
+A slice that holds its buffer alone resizes in place without copying. A loop of `append` or `+=` takes amortized constant
+time per element, while a loop of `xs = xs + v` copies the slice every time.
+
+A global can not be borrowed exclusively, so the in-place methods do not work on a global slice: `g.append(v)` is a
+compile error. `g += v` on a global is `g = g + v`, which copies. Keep a list that grows in a local, or in a field of a
+value that a function takes as `&&`.
 
 An index or a length that is out of range panics. This holds for `Array`, `Slice`, spans and `Buffer`:
 `remove` and `insert` need a valid index, the start and the end of a slice expression can not be negative,
@@ -1153,7 +1175,12 @@ a := Array[str]{'x', 'y'}
 print(a.pop().?)       --> y
 print(a.len())         --> 1
 ```
-A `[]T` has no `pop`, because its resize methods return the new slice. Take `xs.last()`, then `xs = xs.remove(xs.len() - 1)`.
+`[]T` has the same `pop`:
+```cy
+xs := []int{1, 2}
+print(xs.pop().?)      --> 2
+print(xs.len())        --> 1
+```
 
 ## Maps.
 A `Map` type is a dynamic data structure that stores key value pairs in a lookup table governed by hashing functions (key hash and equality functions).

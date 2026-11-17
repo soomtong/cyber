@@ -65,7 +65,7 @@ t.eq(1, m.len())
 ints.remove(0)
 t.eq(2, ints[0])
 
--- A global can not be borrowed exclusively, so `+=` on a global is `g = g + v` (a copy).
+-- `+=` on a global appends in place: the call takes the value out of the global and puts it back.
 global gl []str = {}
 fn add_gl(s str):
     gl += s

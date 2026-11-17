@@ -200,6 +200,7 @@ fn test_memory(run: *Runner) void {
     run.case("memory/host_str_params.cy");
     run.case("memory/slice_shared_buffer.cy");
     run.case("memory/deref_assign_local.cy");
+    run.case("memory/global_take_restore.cy");
     run.case("memory/future_resolver.cy");
     run.case("memory/return_local_move.cy");
     run.case("memory/release_expr_stmt_return.cy");
@@ -511,7 +512,7 @@ fn test_core(run: *Runner) void {
     run.case("core/Slice_appended_unused_error.cy");
     run.case("core/Slice_append_assign_error.cy");
     run.case("core/Slice_append_decl_error.cy");
-    run.case("core/Slice_global_append_error.cy");
+    run.case("core/Slice_global_take_arg_error.cy");
     run.case("core/Slice_oob_panic.cy");
     run.case("core/Array_remove_oob_panic.cy");
     run.case("core/Array_size_up_neg_panic.cy");

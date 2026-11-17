@@ -1160,9 +1160,29 @@ The last `print` shows `1` because `append` already gave `xs` its own buffer. Wi
 A slice that holds its buffer alone resizes in place without copying. A loop of `append` or `+=` takes amortized constant
 time per element, while a loop of `xs = xs + v` copies the slice every time.
 
-A global can not be borrowed exclusively, so the in-place methods do not work on a global slice: `g.append(v)` is a
-compile error. `g += v` on a global is `g = g + v`, which copies. Keep a list that grows in a local, or in a field of a
-value that a function takes as `&&`.
+#### Changing a global slice in place.
+A global can not be borrowed exclusively: a function could reach the global by its name while it also holds a `&&`
+borrow of it. The in-place methods still work on a global `Slice` or `Array`, on a field of a global, and on the target
+of a pointer, by take-and-restore: the call moves the value out of the global into a hidden local, the global holds an
+empty list while the method runs, and the value moves back right after the call.
+```cy
+global log []str = {}
+
+fn note(s str):
+    log.append(s)       -- in place, no copy of the list
+    log += '!'
+
+note('a')
+print(log.len())        --> 2
+print(log.pop().?)      --> !
+```
+- The value is not copied, so a loop that grows a global list stays fast.
+- An argument of the call can not read the same global, because it would see the empty list: `g.append(g.len())` is a
+  compile error. Read it into a local first: `n := g.len()`, then `g.append(n)`.
+- Code that runs inside the method and reads the global by its name sees the empty list. The methods of `Slice` and
+  `Array` do not, but a `@deinit` of an element type that reads the global would.
+- Only a type with an empty value (`[]T`, `Array[T]`) can be taken. An exclusive borrow of a global of another type is a
+  compile error.
 
 An index or a length that is out of range panics. This holds for `Array`, `Slice`, spans and `Buffer`:
 `remove` and `insert` need a valid index, the start and the end of a slice expression can not be negative,

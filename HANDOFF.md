@@ -23,6 +23,12 @@
   - F-161(기존 결함): `p.* = r`에서 `semaOwn` 누락으로 이중 해제. `.deref` 대입이 `&&T`도 받게 함.
   - std · tools · 테스트 · 예제 약 300곳 옮김. `&[]T`로 받아 `.* =`로 쓰던 내부 함수는 `&&[]T`로(`json.quote`, `peg.scan` 등).
   - 문서: `docs/docs.md` "Slice operations", `docs/agent-guide.md`, `unreleased.md`, findings F-161, `docs/api.json` 재생성.
+  - 커밋 `e323ebaf`. 이어서 전역 take-and-restore(사용자 결정): 수신자가 전역 · 전역의 필드 · 포인터 대상이고 타입에 빈 값이 있으면
+    (`@init_sequence`) 호출 동안 값을 숨은 지역으로 옮기고 호출 직후 되돌린다(`takeGlobal` · `restoreGlobal`, `Chunk.global_take_*`).
+    인자가 같은 전역을 읽으면 오류(`mentionsIdent`). 테스트 `memory/global_take_restore.cy`, `core/Slice_global_take_arg_error.cy`.
+    docs.md "Changing a global slice in place.", 결정 문서 "결정 3-1".
+  - tars-agent도 고쳤다(미커밋): `prompt/cyber-subset*.md`의 `[]T` 줄 · 예제 3, `docs/TODO.md`에 0.4.15로 옮기는 항목. 0.4.14 기준
+    빌드에서는 예제 3이 오류라 의존을 0.4.15로 올릴 때 맞춰진다. 앞으로 사용자 영향 변경은 tars-agent 문서도 같이 고친다(사용자 지시).
   - 테스트: `memory/slice_shared_buffer.cy` · `memory/deref_assign_local.cy` · `core/Slice_resize_receiver.cy`, 오류 테스트
     `core/Slice_append_assign_error.cy` · `Slice_append_decl_error.cy` · `Slice_appended_unused_error.cy` · `Slice_removed_discard_error.cy`.
 
@@ -36,9 +42,7 @@
 ## 남은 작업
 
 - [ ] 14단계 검증 rc=0 확인 뒤 커밋(이번 세션에서 돌리는 중이었다. 결과가 없으면 다시 돌린다).
-- [ ] tars-agent 알림: 다음 릴리스(0.4.15)에서 `xs = xs.append(v)`가 컴파일 오류가 된다. tars-agent의
-  `prompt/cyber-subset*.md` · `docs/spec/04-builtin-tools.md`에 옛 규칙이 있다(그 저장소에 다른 세션의 미커밋 변경이 있음, 쓰기 전
-  `git status`, 쓸지는 사용자에게).
+- [ ] tars-agent의 미커밋 변경(안내 두 판, TODO)을 커밋할지 사용자에게 묻는다. 0.4.15 릴리스 뒤 tars-agent 의존을 올리면 안내 예제가 맞는다.
 - [ ] 릴리스 0.4.15는 사용자 지시 때.
 - [ ] tars-agent 결정 대기 중 남은 것: `read_file_str` · `write_file(p, bytes)` 오류에 새 이름을 말하는 문구.
 - [ ] 사용자 결정 대기(이전부터):

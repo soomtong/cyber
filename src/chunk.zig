@@ -79,6 +79,13 @@ pub const Chunk = struct {
     /// The left side of a plain `x = y` that sema is resolving. An undeclared name there gets a `:=` hint.
     assign_left: ?*ast.Node = null,
 
+    /// The receiver node and the argument nodes of the method call that sema is matching (`semaCallFuncSymRec`). An
+    /// exclusive borrow of a global for this receiver takes the global's value out for the call (`takeGlobal`).
+    global_take_rec: ?*ast.Node = null,
+    global_take_args: []const *ast.Node = &.{},
+    /// The global that the current method call took, to be put back after the call (`restoreGlobal`).
+    global_take: ?sema.GlobalTake = null,
+
     /// The current expr that has a continuation body, otherwise null.
     cur_cont_expr: ?*ast.LambdaContExpr,
 

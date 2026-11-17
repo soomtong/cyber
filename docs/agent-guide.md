@@ -105,6 +105,7 @@ str (strings do not change; every method returns a new value):
 - `xs.join(sep)` for `[]str`, gives `str`
 - `xs.append(x)`, `xs.insert(i, x)`, `xs.remove(i)`, `xs.clear()`, `xs.pop()` gives `?T`: each changes `xs` in place. `xs = xs.remove(0)` is a compile error
 - `xs.appended(x)`, `xs.inserted(i, x)`, `xs.removed(i)`, `xs + x`: each gives a new list and leaves `xs` as it was
+- The in-place methods also work on a global list (`global log []str = {}`, then `log.append(s)` in a function). An argument can not read the same global: `g.append(g.len())` is a compile error, so write `n := g.len()` first
 - `xs.reverse()` reverses in place and returns nothing, like `xs.sort()`
 - `xs.sort()` sorts in place in ascending order (numbers and strings). `xs.sort(|a, b| ...)` sorts by a function that returns true when `a` goes first. Both return nothing.
 

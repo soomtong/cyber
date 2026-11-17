@@ -571,8 +571,6 @@ fn semaOpAssignMethod(c: *cy.Chunk, node: *ast.Node) !bool {
     const var_start = c.varStack.items.len;
     const left = try c.semaExprSkipSym(stmt.left, .{});
     if (left.resType == .sym) return false;
-    // A global (or a field of one) can not be borrowed exclusively (`sema_ex_borrow2`): `g += v` stays `g = g + v`.
-    if (left.recParentLocal() == null) return false;
     switch (left.type.kind()) {
         // A reference keeps the guided error of `x = x op y` (`checkRefOperand`).
         .int, .raw, .float, .pointer => return false,
@@ -594,6 +592,8 @@ fn semaExprStmt(c: *cy.Chunk, node: *ast.Node) !void {
 /// The statement part of an expression statement, after the expression itself was analyzed.
 fn semaExprStmtEnd(c: *cy.Chunk, expr: ExprResult, var_start: usize, node: *ast.Node) !void {
     if (expr.resType == .ct_value and expr.data.ct_value.type.id() == bt.Void) {
+        // A call that took a global ran already and left hidden locals (`restoreGlobal`).
+        try popLocals(c, var_start, node);
         return;
     }
 
@@ -7720,6 +7720,26 @@ pub fn semaCallFuncSymRec2(c: *cy.Chunk, sym: *cy.sym.FuncSym, args: []const Arg
 
 pub fn semaCallFuncSymRec(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, rec_res: ExprResult,
     args: []const *ast.Node, req_value: bool, node: *ast.Node) !ExprResult {
+    const saved_rec = c.global_take_rec;
+    const saved_args = c.global_take_args;
+    const saved_take = c.global_take;
+    c.global_take_rec = rec;
+    c.global_take_args = args;
+    c.global_take = null;
+    defer {
+        c.global_take_rec = saved_rec;
+        c.global_take_args = saved_args;
+        c.global_take = saved_take;
+    }
+    const res = try semaCallFuncSymRecInner(c, sym, rec, rec_res, args, req_value, node);
+    if (c.global_take) |take| {
+        return restoreGlobal(c, take, res, node);
+    }
+    return res;
+}
+
+fn semaCallFuncSymRecInner(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, rec_res: ExprResult,
+    args: []const *ast.Node, req_value: bool, node: *ast.Node) !ExprResult {
     const rec_arg = Argument.initReceiver(rec, rec_res);
     if (sym.first.type == .trait) {
         // Trait function will always match first argument.
@@ -10885,18 +10905,134 @@ fn semaLambdaMulti(c: *cy.Chunk, lambda: *ast.LambdaMulti, stmts: []const *ast.N
     }
 }
 
+/// A place (a global, a field of one, the target of a pointer) that a method call took out for an exclusive borrow
+/// of its receiver (`takeGlobal`). `ptr` is a hidden local with the address of the place.
+pub const GlobalTake = struct {
+    ptr: LocalId,
+    local: LocalId,
+    type: *cy.Type,
+};
+
+/// Whether `name` appears in `src` as a whole identifier (not as a part of a longer name, a field after `.`, or the
+/// text of a string literal; an interpolation `%{...}` inside a string is code and is searched).
+fn mentionsIdent(src: []const u8, name: []const u8) bool {
+    var quote: u8 = 0;
+    var interp_depth: u32 = 0;
+    var i: usize = 0;
+    while (i < src.len) : (i += 1) {
+        const ch = src[i];
+        if (quote != 0 and interp_depth == 0) {
+            if (ch == '\\') {
+                i += 1;
+            } else if (ch == '%' and i + 1 < src.len and src[i + 1] == '{') {
+                interp_depth = 1;
+                i += 1;
+            } else if (ch == quote) {
+                quote = 0;
+            }
+            continue;
+        }
+        if (interp_depth > 0) {
+            if (ch == '{') interp_depth += 1;
+            if (ch == '}') {
+                interp_depth -= 1;
+                continue;
+            }
+        } else if (ch == '\'' or ch == '"') {
+            quote = ch;
+            continue;
+        }
+        if (!std.mem.startsWith(u8, src[i..], name)) continue;
+        const end = i + name.len;
+        const before_ok = i == 0 or !(std.ascii.isAlphanumeric(src[i - 1]) or src[i - 1] == '_' or src[i - 1] == '.');
+        const after_ok = end == src.len or !(std.ascii.isAlphanumeric(src[end]) or src[end] == '_');
+        if (before_ok and after_ok) return true;
+    }
+    return false;
+}
+
+test "mentionsIdent" {
+    try std.testing.expect(mentionsIdent("g.len()", "g"));
+    try std.testing.expect(!mentionsIdent("'a'.concat('1')", "a"));
+    try std.testing.expect(mentionsIdent("'n %{a.len()}'", "a"));
+    try std.testing.expect(!mentionsIdent("x.a + ab", "a"));
+    try std.testing.expect(!mentionsIdent("'it\\'s a'", "a"));
+}
+
+/// The first name of a receiver path: `s` of `s.xs`.
+fn rootName(src: []const u8) []const u8 {
+    var end: usize = 0;
+    while (end < src.len and (std.ascii.isAlphanumeric(src[end]) or src[end] == '_')) end += 1;
+    return src[0..end];
+}
+
+/// Take-and-restore: a global can not be borrowed exclusively, because a function could reach it through the global
+/// while it holds the borrow. For the receiver of a method call (`g.append(v)`, `g += v`, `s.xs.append(v)`), the
+/// value of the place moves into a hidden local for the call, the place holds an empty value meanwhile, and
+/// `restoreGlobal` moves the value back right after the call. Only for a type that has an empty value
+/// (`@init_sequence`: `Slice`, `Array`). Returns the hidden local, or null for another type.
+fn takeGlobal(c: *cy.Chunk, place: ExprResult, node: *ast.Node) !?ExprResult {
+    const var_t = place.type;
+    const init_seq = (try c.accessResolvedSym(var_t, "@init_sequence", node)) orelse return null;
+    if (init_seq.type != .func) return null;
+    const name = rootName(c.ast.nodeString(node));
+    if (name.len > 0) {
+        for (c.global_take_args) |arg| {
+            if (mentionsIdent(c.ast.nodeString(arg), name)) {
+                return c.reportErrorFmt("The method takes `{}` out while it runs, so an argument can not read `{}`. Read it into a local first.", &.{v(c.ast.nodeString(node)), v(name)}, arg);
+            }
+        }
+    }
+    // The address is taken once, so the place is evaluated once.
+    const ptr_t = try getPtrType(c, var_t);
+    const addr = try semaAddressOf(c, place, ptr_t, node);
+    const ptr = try declareHiddenLocal(c, "_place", ptr_t, addr, node);
+    // Like `_temp` in `semaAssignToGlobal`: the local gets the value without a copy, and the place gets a new value
+    // without a release.
+    const read = try c.ir.newExpr(.deref, var_t, node, .{ .expr = (try semaLocal(c, ptr.id, node)).ir });
+    const taken = try declareHiddenLocal(c, "_global", var_t, ExprResult.init(read, var_t), node);
+    const empty = try sema_init_seq2(c, init_seq, &.{}, node);
+    _ = try c.ir.pushStmt(.set_deref, node, .{ .ptr = (try semaLocal(c, ptr.id, node)).ir, .right = empty.ir });
+    c.global_take = .{ .ptr = ptr.id, .local = taken.id, .type = var_t };
+    return try semaLocal(c, taken.id, node);
+}
+
+/// Runs the call `res` that took a place (`takeGlobal`) and moves the value back. The result of the call is kept in a
+/// hidden local, so the place holds its value again when the result is used.
+fn restoreGlobal(c: *cy.Chunk, take: GlobalTake, res: ExprResult, node: *ast.Node) !ExprResult {
+    var out: ExprResult = undefined;
+    if (res.resType == .ct_value) {
+        out = res;
+    } else if (res.type.id() == bt.Void or res.type.id() == bt.Never) {
+        _ = try c.ir.pushStmt(.discard, node, .{ .expr = res.ir });
+        out = ExprResult.initVoid(c.sema.void_t);
+    } else {
+        const tmp = try declareHiddenLocal(c, "_res", res.type, res, node);
+        c.varStack.items[tmp.id].lifetime = .initTemp();
+        out = try semaLocal(c, tmp.id, node);
+    }
+    // Destruct the empty value, then move the taken value back.
+    const read = try c.ir.newExpr(.deref, take.type, node, .{ .expr = (try semaLocal(c, take.ptr, node)).ir });
+    const cur = try declareHiddenLocal(c, "_temp", take.type, ExprResult.init(read, take.type), node);
+    try semaDestructLocal(c, &c.varStack.items[cur.id], node);
+    c.varStack.items[cur.id].type = .dead;
+    const taken = try semaLocal(c, take.local, node);
+    _ = try c.ir.pushStmt(.set_deref, node, .{ .ptr = (try semaLocal(c, take.ptr, node)).ir, .right = taken.ir });
+    c.varStack.items[take.local].type = .dead;
+    return out;
+}
+
 pub fn sema_ex_borrow2(c: *cy.Chunk, child: ExprResult, ex_borrow_t: *cy.Type, node: *ast.Node) !ExprResult {
     try checkPartialMoveWhole(c, child, "borrow", node);
     const eff_child = try sema.semaEnsureAddressable(c, child, node);
 
     const parent_local = eff_child.recParentLocal() orelse {
-        if (eff_child.resType == .varSym) {
-            if (eff_child.type.sym().instance) |instance| {
-                if (instance.getSymTemplate() == c.sema.slice_tmpl) {
-                    const name = c.ast.nodeString(node);
-                    return c.reportErrorFmt("A global can not be borrowed exclusively, so a method can not change `{}` in place. Assign a new list: `{} = {} + v` (or `appended`, `removed`, `inserted`), or keep the list in a local.", &.{v(name), v(name), v(name)}, node);
-                }
+        if (c.global_take_rec == node and c.global_take == null and eff_child.addressable) {
+            if (try takeGlobal(c, eff_child, node)) |local_res| {
+                return sema_ex_borrow2(c, local_res, ex_borrow_t, node);
             }
+        }
+        if (eff_child.resType == .varSym) {
             return c.reportError("Cannot acquire exclusive borrow. Consider wrapping type in `Ex`.", node);
         } else {
             return c.reportError("Expected parent local.", node);
@@ -10981,7 +11117,7 @@ fn sema_init_seq2(c: *cy.Chunk, init_seq: *cy.Sym, args: []*ir.Expr, node: *ast.
     const elem_t = instance.params[0].asPtr(*cy.Type);
     const borrow_t = try getBorrowType(c, elem_t);
     if (args.len == 0) {
-        const ptr = try c.semaConst(0, c.sema.i64_t, node);
+        const ptr = try c.semaConst(0, borrow_t, node);
         const init_span = try sema_span(c, init_span_t, ptr, 0, node);
         return c.semaCallFuncSym1(func_sym, node, init_span, node);
     } else {

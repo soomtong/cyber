@@ -185,6 +185,10 @@ zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Dd
   `.zig-cache`를 `actions/cache`로 복원하므로 0.17.1에서는 같은 문제가 생길 수 있었다).
 - 워크플로의 `push.paths`가 `.github/**` · `**.md`를 제외하므로 워크플로만 고친 커밋은 Latest Build를 트리거하지 않는다. 확인하려면
   `gh workflow run latest-build.yml -R soomtong/cyber --ref master`로 직접 실행한다.
+- 0.4.15(2026-11-18): `macos-26-intel` cli job이 master run에서 "The hosted runner lost communication with the server"로, 태그 run에서
+  `limits.zig`의 CPU 시간 검사(`A thread that awaits a spawned thread sleeps instead of spinning.`, `used < 200000`)로 실패했다.
+  다른 플랫폼 cli job은 같은 테스트를 통과했다. 태그 run을 `gh run rerun <run> --failed`로 다시 돌려 통과했고 Release job이 이어서
+  릴리스를 만들었다(`build-969-93a9ca4`, 에셋 15개). CPU 시간 검사는 부하 걸린 x64 러너에서 흔들릴 수 있다.
 
 ## 번들에 언어 서버 (2026-11-13)
 

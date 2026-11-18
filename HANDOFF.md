@@ -1,36 +1,29 @@
-# HANDOFF (2026-11-17): 0.4.14 릴리스 뒤, `Slice` 제자리 API 전환 커밋 · 검증 완료
+# HANDOFF (2026-11-18): 0.4.15 릴리스(Slice 제자리 API, os 힌트, LSP 린트 · quick fix · inlay hint · 파서 복구)
 
 ## 목표
 
-- `Slice`의 크기 변경을 `&&Slice` 제자리 API로 바꾸고, 새 목록은 `appended` · `inserted` · `removed` · `+`로 나눈다.
-  사용자 결정(2026-11-17): (1) 이름은 Swift식 `-ed`, (2) 원소 쓰기는 성능 쪽(Go식, 공유 버퍼에 그대로), (3) 0.4.x에서
-  깨지는 변경으로 넣는다(0.5가 첫 고정 의미 버전). 결정 기록: `docs/decisions/project_slice_append_aliasing.md` "결정 3".
+- 0.4.15 릴리스: `Slice` 제자리 API(깨지는 변경), `os` 파일 함수 옛 꼴의 힌트, `cyber-lsp`의 코드 지원 · 린트.
+  LSP 확장은 사용자 요청(2026-11-18): "기본으로 탑재할 수 있는 LSP 기능을 목록화하고 구현, 패치 버전 릴리스".
 
 ## 현재 브랜치
 
-`master`. 0.4.14 릴리스(`a2b33655`, `build-960-a2b3365`) 뒤. push 안 함.
+`master`. 0.4.15 릴리스(`93a9ca4f`) 뒤 기록 커밋까지 push.
 
 ## 완료된 작업
 
-- [x] 0.4.13 · 0.4.14 릴리스. tars-agent 요청 두 건(0.4.12, 0.4.13-DEV)과 C3(모듈 허용 표), 모듈 API(`cyber doc --api`)는
-  0.4.14에 실렸고 tars-agent가 `latest`로 따라가며 닫았다(tars-agent `b1e1d7d`).
-- [x] `Slice` 제자리 API(이번 세션):
-  - `core.cy`: `append` · `insert` · `remove` · `clear` · `size_down` · `size_up` · `pop` · `` `+=` ``는 `fn (&&Slice[])`, 반환 없음.
-    `appended` · `inserted` · `removed` · `` `+` ``는 항상 `clone_copy`. 도우미 `owns_buffer` · `owns_room` · `drop_tail` ·
-    `reserve_own`(옛 `clone_on_resize` 대체). `size_down`은 공유 버퍼에서도 복사하지 않는다.
-  - `sema.zig`: `semaOpAssignMethod`(`x op= y`가 `` `op=` `` 메서드를 부름, 변수 · 필드 경로만), `checkSliceInPlaceResult` ·
-    `checkSliceInPlaceAssign`(옛 꼴 안내 오류), `checkDroppedSliceResult`는 `-ed` 메서드용으로 바꿈. 세션 마지막 줄 검사는 뺌.
-  - F-161(기존 결함): `p.* = r`에서 `semaOwn` 누락으로 이중 해제. `.deref` 대입이 `&&T`도 받게 함.
-  - std · tools · 테스트 · 예제 약 300곳 옮김. `&[]T`로 받아 `.* =`로 쓰던 내부 함수는 `&&[]T`로(`json.quote`, `peg.scan` 등).
-  - 문서: `docs/docs.md` "Slice operations", `docs/agent-guide.md`, `unreleased.md`, findings F-161, `docs/api.json` 재생성.
-  - 커밋 `e323ebaf`. 이어서 전역 take-and-restore(사용자 결정): 수신자가 전역 · 전역의 필드 · 포인터 대상이고 타입에 빈 값이 있으면
-    (`@init_sequence`) 호출 동안 값을 숨은 지역으로 옮기고 호출 직후 되돌린다(`takeGlobal` · `restoreGlobal`, `Chunk.global_take_*`).
-    인자가 같은 전역을 읽으면 오류(`mentionsIdent`). 테스트 `memory/global_take_restore.cy`, `core/Slice_global_take_arg_error.cy`.
-    docs.md "Changing a global slice in place.", 결정 문서 "결정 3-1".
-  - tars-agent도 고쳤다(`a7d9c3d`): `prompt/cyber-subset*.md`의 `[]T` 줄 · 예제 3, `docs/TODO.md`에 0.4.15로 옮기는 항목. 0.4.14 기준
-    빌드에서는 예제 3이 오류라 의존을 0.4.15로 올릴 때 맞춰진다. 앞으로 사용자 영향 변경은 tars-agent 문서도 같이 고친다(사용자 지시).
-  - 테스트: `memory/slice_shared_buffer.cy` · `memory/deref_assign_local.cy` · `core/Slice_resize_receiver.cy`, 오류 테스트
-    `core/Slice_append_assign_error.cy` · `Slice_append_decl_error.cy` · `Slice_appended_unused_error.cy` · `Slice_removed_discard_error.cy`.
+- [x] `Slice` 제자리 API와 전역 take-and-restore(`e323ebaf`, `221c9c93`). 결정 `project_slice_append_aliasing.md` 결정 3 · 3-1.
+- [x] `os` 파일 함수 옛 꼴의 힌트(`86bb5fc5`): `sema.zig`의 `moved_module_syms` · `call_arg_hints` · `result_type_hints`,
+  출처 추적 `producerCall`(지역의 초기식은 `LocalVarS.init_node`). 결정 `project_os_file_text_bytes.md` "오류 문구에 새 이름".
+  `Local` 크기 검사가 64비트 72/64, 32비트 48/44로 올랐다.
+- [x] LSP 확장(`a72c6c5c`). 기능 표 · 설계 · 확인은 `docs/specs/2026-11-12-lsp-design.md` 12절.
+  - 컴파일러: `cl_vm_symbol_hints`(`CLHint` · `CLHintKind`): 추론 타입, `scope` 출구, 쓰지 않는 지역 · `use`(오류 없는 컴파일만).
+    `refs.zig` "Hints" 절, `Compiler.ref_locals` · `ref_scope_exits`. capture된 지역의 쓰임도 기록한다(references에도 나옴).
+  - 서버: 힌트 진단(`code` `unused-local` · `unused-use` · `scope-exit`), `codeAction` quickfix, `inlayHint`, hover의 `--|` 주석.
+    판단 함수는 `src/lsp/assist.zig`(단위 테스트).
+  - `project_coroutines.md` "우리 쪽 안"의 안 1 · 3을 구현으로 닫았다.
+- [x] LSP 파서 복구(`129dec48`): 구문 오류를 모두 진단한다(`ParseOptions.recover`, `Parser.resumePos`). 구문 오류가 있으면
+  sema는 돌지 않는다. outline도 복구해서 파싱한다. 설계 · 확인은 LSP 설계 문서 13절.
+- [x] tars-agent: `docs/TODO.md`의 0.4.15 항목에 os 힌트를 적었다(`74e0615`, push 안 함).
 
 ## 시도했으나 실패한 접근
 
@@ -41,31 +34,33 @@
 
 ## 남은 작업
 
-- [x] `221c9c93` 기준 14단계 검증 rc=0(2026-11-17).
-- [x] tars-agent 안내 변경은 `a7d9c3d`로 커밋됨. 0.4.15 릴리스 뒤 tars-agent 의존을 올리면 안내 예제가 맞는다.
-- [ ] 릴리스 0.4.15는 사용자 지시 때.
-- [x] `os` 파일 함수 옛 꼴의 오류에 새 이름(`read_file_str`, `write_file(p, bytes)`, 출처 힌트). 결정 문서 "오류 문구에 새 이름".
+- [x] 0.4.15 릴리스(2026-11-18): 태그 `0.4.15` → `93a9ca4f`, `build-969-93a9ca4`, Latest, 에셋 15개(CI). `install.sh 0.4.15`를 임시
+  경로에 설치해 버전 · 스크립트 · `cyber-lsp`의 여러 구문 오류 진단을 확인했다. `/usr/local`의 설치는 사용자가 다시 한다.
+- [ ] tars-agent 의존을 0.4.15로 올리기는 tars-agent 쪽 일(TODO 항목).
 - [ ] 사용자 결정 대기(이전부터):
-  - `scope` 블록 안의 `return` · `break` · `continue` 합류를 알리는 도구(LSP 진단 · hover · inlay hint). `project_coroutines.md` 끝 절.
   - 정렬: pinned closure(안 A), 키 정렬, 인자 없는 `sort()`의 원소 조건. `project_sort_closures.md` "결정할 것".
   - core `@eq`의 choice 지원(`?json.Value == none`).
   - 설계 원칙 검토(`docs/study/11-design-principles-review.md`) 1.7 · 2.7.
   - 0.5 범위: `spawn f(args)` 호출식 꼴, 임베딩 `CL_YIELD`. 빼면 0.5 릴리스 준비로 간다.
+- [ ] LSP 다음 후보: 함수 · 타입 rename, 호출 자리 매개변수 이름 inlay, VS Code 테스트(`task test:vscode`)에 새 항목 추가(이번에는
+  돌리지 않았다), 본문 안 문장 단위 복구 · 선언 오류 복구(LSP 설계 문서 13절 앞).
 - [ ] 기술 부채(급하지 않음): carry 재시도 루프의 IR 되돌리기, `@destruct_span` 취소 keep 지점, `Scope.run`의 바퀴당 `waiting()`
-  질의, 취소 불변식 panic. 기록은 `project_coroutines.md`.
+  질의, 취소 불변식 panic. 기록은 `project_coroutines.md`. 반복문 본문을 다시 볼 때 이름 노드의 `pos()`가 어긋나는 현상(LSP 12절)은
+  원인을 보지 않았다(힌트는 이름 슬라이스로 우회).
 
 ## 핵심 파일
 
+- `src/refs.zig` "Hints" 절, `src/lsp/server.zig` `hintDiagnostics` · `onCodeAction` · `onInlayHint`, `src/lsp/assist.zig`.
 - `src/builtins/core.cy` `Slice` 절(`reserve_own` · `clone_copy` · `append` · `appended` 등, `rg -n "fn \(&&?Slice\[\]\)"`).
 - `src/sema.zig` `semaOpAssignMethod` · `checkSliceInPlaceResult` · `checkDroppedSliceResult`.
 - `src/parser.zig` `isForeignDeclKeyword` · `reportForeignDeclError` · `reportTypedDeclError`.
 - `src/std/os.cy` `read_file` · `read_file_bytes` · `write_file` · `write_file_bytes`.
-- `docs/releases/0.4.14.md`, `docs/releases/unreleased.md`.
+- `docs/releases/0.4.15.md`, `docs/releases/unreleased.md`.
 - `docs/decisions/project_fork_release_ci.md`(러너 미배정 · 재태깅 · 로컬 arm64 빌드 절차).
 
 ## 다음 에이전트에게
 
-1. 0.4.14는 릴리스됐다. `Slice` 제자리 API는 다음 릴리스(0.4.15)의 깨지는 변경이다.
+1. 0.4.15가 마지막 릴리스다.
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 
@@ -166,6 +161,7 @@
 - 누수는 테스트 실패다(2026-11-15): behavior 케이스마다 VM이 자기 `SafeAllocator`를 써서 `leaked N blocks in <경로>`로 실패하고
   (`src/test/setup.zig` `VMrunner`), 커스텀 러너(`src/test_runner.zig`)는 테스트 함수마다 allocator를 검사한다.
 - `src/parser.zig`에서 지역 이름 `t`는 모듈 수준 `t`를 가려 컴파일 오류다(`tok` · `ty`로 쓴다).
+- LSP 탐침: scratchpad에 JSON-RPC 클라이언트(파이썬, `Content-Length` 프레이밍)를 두고 서버에 직접 보낸다. 저장소 `.cy`를 다 열어 진단을 모으면 오탐이 드러난다.
 - 언어 메모: `Slice`의 `append` 등은 제자리(`xs.append(v)`), 새 목록은 `appended` · `+`. 비트 OR은 `||`, AND는 `&&`. 전역은 `global g int = 5`. `var x = 0`은 문법 오류(`x := 0`). `os.parseArgs`는
   `-name=value`만 받는다. `Map`의 개수는 `size()`. `out.* += fut.await()`는 await 전에 `out.*`를 읽는다.
 - 벤치는 다른 프로세스가 CPU를 쓰는지 먼저 본다(tars-linux `services_test`, 종료 금지). 테스트와 동시에 돌리지 않는다.

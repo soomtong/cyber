@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.15-dev 970-95fde90</div>
+    <div class="sub-title">v0.4.15-dev 971-1ed147a</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -2027,6 +2027,8 @@ compile error. Read it into a local first: <code>n := g.len()</code>, then <code
 <li>Only a type with an empty value (<code>[]T</code>, <code>Array[T]</code>) can be taken. An exclusive borrow of a global of another type is a
 compile error.</li>
 </ul>
+<p>A <code>^[]T</code> reference does not turn into the <code>&&</code> borrow of an in-place method by itself, since other references may share
+the list. Call the method on the target: <code>rows.*.append('a')</code>. <code>rows.append('a')</code> is a compile error that names this form.</p>
 <p>An index or a length that is out of range panics. This holds for <code>Array</code>, <code>Slice</code>, spans and <code>Buffer</code>:
 <code>remove</code> and <code>insert</code> need a valid index, the start and the end of a slice expression can not be negative,
 and a negative or too large length (<code>[]int(n, 0)</code>, <code>size_up</code>) panics with <code>Invalid allocation length</code>.
@@ -3701,11 +3703,13 @@ res = 'abcxyz'
 <pre><code class="language-cy">data := os.read_file('data.txt')!
 </code></pre>
 <p>In the main block, the rethrow case would result in a thread panic. Inside a <a href="#unwrap-block" title=""><code>try</code> block</a>, the rethrow case jumps to the block's <code>else</code> instead.</p>
-<p>If the unwrap expression is inside a function, the rethrow case would bubble up the error to the caller. This suggests that the function must have a <code>Result</code> return type:</p>
+<p>If the unwrap expression is inside a function, the rethrow case would bubble up the error to the caller. This suggests that the function must have a <code>!T</code> (or <code>error</code>) return type:</p>
 <pre><code class="language-cy">fn content_length(path str) -> !int:
     data := os.read_file(path)!
     return data.len()
 </code></pre>
+<p>In a function that returns another type, <code>!</code> is a compile error that names the return type and the two fixes: declare it <code>-> !T</code>, or handle the error in place with <code>!else</code> or a <code>try</code> block.</p>
+<p><code>.!</code> unwraps a choice case (<code>s.!line</code>), not an option or a result. <code>x.!</code> with no case name is a parse error that names <code>.?</code> for an option and <code>f()!</code> for a result.</p>
 <p>A result can not be printed before it is unwrapped. <code>print(os.read_file(path))</code> and <code>'%{os.read_file(path)}'</code> are compile errors that say to unwrap it with <code>!</code> or to handle the error. Generic code (a <code>%T</code> parameter that is a result) prints the payload or the error.</p>
 <a href="#error-handling">^topic</a>
 <h3 id="unwrap-or-default-1">Unwrap or default. <a href="#unwrap-or-default-1">#</a></h3>

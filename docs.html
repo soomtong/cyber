@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.15-dev 971-1ed147a</div>
+    <div class="sub-title">v0.4.15-dev 973-3da1f68</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -2006,8 +2006,8 @@ time per element, while a loop of <code>xs = xs + v</code> copies the slice ever
 <h4 id="changing-a-global-slice-in-place">Changing a global slice in place. <a href="#changing-a-global-slice-in-place">#</a></h4>
 <p>A global can not be borrowed exclusively: a function could reach the global by its name while it also holds a <code>&&</code>
 borrow of it. The in-place methods still work on a global <code>Slice</code> or <code>Array</code>, on a field of a global, and on the target
-of a pointer, by take-and-restore: the call moves the value out of the global into a hidden local, the global holds an
-empty list while the method runs, and the value moves back right after the call.</p>
+of a pointer, by take-and-restore: the arguments are evaluated first, then the call moves the value out of the global
+into a hidden local, the global holds an empty list while the method runs, and the value moves back right after the call.</p>
 <pre><code class="language-cy">global log []str = {}
 
 fn note(s str):
@@ -2020,8 +2020,12 @@ print(log.pop().?)      --> !
 </code></pre>
 <ul>
 <li>The value is not copied, so a loop that grows a global list stays fast.</li>
-<li>An argument of the call can not read the same global, because it would see the empty list: <code>g.append(g.len())</code> is a
-compile error. Read it into a local first: <code>n := g.len()</code>, then <code>g.append(n)</code>.</li>
+<li>An argument is evaluated before the value moves out, so it reads the global as it was: <code>g.append(g.len())</code> and
+<code>g.append(next())</code> with a <code>next</code> that reads <code>g</code> both work. An argument that leaves the call (<code>g += f()!</code> when <code>f</code>
+returns an error) leaves the global as it was.</li>
+<li>An argument that borrows the same global can not be evaluated first: <code>g.append(g.span())</code> is the compile error 'The
+method takes <code>g</code> out while it runs, so this argument can not read <code>g</code>. Read it into a local first.' Another field of
+the same global is fine: <code>st.xs.append(st.ys.span())</code>.</li>
 <li>Code that runs inside the method and reads the global by its name sees the empty list. The methods of <code>Slice</code> and
 <code>Array</code> do not, but a <code>@deinit</code> of an element type that reads the global would.</li>
 <li>Only a type with an empty value (<code>[]T</code>, <code>Array[T]</code>) can be taken. An exclusive borrow of a global of another type is a
@@ -5510,7 +5514,8 @@ for (size_t i = 0; i < count; i += 1) {
     }
 }
 </code></pre>
-<p>A range can end on a later line than it starts. A token or parse error reports a position: its range is the code point there, or empty at the end of a line.
+<p>A range can end on a later line than it starts. A token or parse error reports a position: its range is the code point there, or empty at the end of a line.</p>
+<p>When the compiler knows the edit that fixes an error, <code>has_fix</code> is set: replace the bytes <code>fix_pos</code> to <code>fix_end_pos</code> (exclusive) of the source with <code>fix_text</code>. A misspelled member (<code>Did you mean ...?</code>), a function that was renamed in its module, and <code>xs = xs.append(v)</code> have one. <code>cyber-lsp</code> offers it as a quick fix. A note never has a fix.
 By default the compiler stops at its first error and the count is 0 or 1. <code>cl_vm_set_error_recovery(vm, true)</code> lets it go on. Every syntax error is reported: a statement with a syntax error is skipped together with the lines indented under it, and parsing goes on at the next line of the same block or of a block around it. A source with a syntax error is not checked further, so its other errors are reported once the syntax errors are fixed. In a source without syntax errors, the main block, each function and each method is abandoned at its first error and the others are still checked, so every body reports at most one error. An error in a declaration (a type, a signature, a global) still ends the compile. The result is <code>CL_ERROR_COMPILE</code> either way and nothing is run. The summary and <code>cl_vm_compile_error</code> describe the first error.</p>
 <p>A compile error does not end a session. The next eval or validate compiles on top of what the evals before the failed one left: with <code>persist_main</code> their locals and declarations are still there, and nothing that the failed script declared is kept. A module that the failed compile loaded for the first time is loaded again by the next <code>use</code>. The template instances that it expanded from earlier modules (<code>[]str</code> with <code>sort</code>) are checked and generated by the next compile. If the body of such an instance does not compile (<code>Map[[]int, int]</code> behind an earlier error), the next compile drops the instance instead of reporting its error, and a later use of it reports that it could not be expanded. To drop it, that compile starts over (up to 8 times, one more dropped instance each time), so the module loader, the resolvers and the compile-time host functions can be called again for the same source within one eval or validate. Make them return the same result for the same request. When the first compile of a VM fails, the next eval resets the VM.</p>
 <a href="#libcyber">^topic</a>

@@ -3816,7 +3816,8 @@ pub const Parser = struct {
                 .dot_bang => {
                     self.advance();
                     const right = (try self.parseOptName()) orelse {
-                        return self.reportError("Expected ident.", &.{});
+                        // `x.!` with no case name: likely meant to unwrap an option or an error.
+                        return self.reportError("Expected a choice case name after `.!` (`c.!line`). Unwrap an option with `.?`, and an error with `!` after the call (`f()!`).", &.{});
                     };
                     left = try self.ast.newNodeErase(.unwrap_choice, .{
                         .left = left,

@@ -1184,6 +1184,9 @@ print(log.pop().?)      --> !
 - Only a type with an empty value (`[]T`, `Array[T]`) can be taken. An exclusive borrow of a global of another type is a
   compile error.
 
+A `^[]T` reference does not turn into the `&&` borrow of an in-place method by itself, since other references may share
+the list. Call the method on the target: `rows.*.append('a')`. `rows.append('a')` is a compile error that names this form.
+
 An index or a length that is out of range panics. This holds for `Array`, `Slice`, spans and `Buffer`:
 `remove` and `insert` need a valid index, the start and the end of a slice expression can not be negative,
 and a negative or too large length (`[]int(n, 0)`, `size_up`) panics with `Invalid allocation length`.
@@ -3162,12 +3165,15 @@ data := os.read_file('data.txt')!
 ```
 In the main block, the rethrow case would result in a thread panic. Inside a [`try` block](#unwrap-block), the rethrow case jumps to the block's `else` instead.
 
-If the unwrap expression is inside a function, the rethrow case would bubble up the error to the caller. This suggests that the function must have a `Result` return type:
+If the unwrap expression is inside a function, the rethrow case would bubble up the error to the caller. This suggests that the function must have a `!T` (or `error`) return type:
 ```cy
 fn content_length(path str) -> !int:
     data := os.read_file(path)!
     return data.len()
 ```
+In a function that returns another type, `!` is a compile error that names the return type and the two fixes: declare it `-> !T`, or handle the error in place with `!else` or a `try` block.
+
+`.!` unwraps a choice case (`s.!line`), not an option or a result. `x.!` with no case name is a parse error that names `.?` for an option and `f()!` for a result.
 
 A result can not be printed before it is unwrapped. `print(os.read_file(path))` and `'%{os.read_file(path)}'` are compile errors that say to unwrap it with `!` or to handle the error. Generic code (a `%T` parameter that is a result) prints the payload or the error.
 

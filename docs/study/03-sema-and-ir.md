@@ -475,7 +475,7 @@ Option 은 `{tag, payload}` 두 칸짜리 choice 이고(`field idx=0` 이 태그
 
 - 감싼 함수의 반환 타입이 `error` 면 에러 값을 그대로 `semaReturnExpr` 한다.
 - 반환 타입이 `Result` 면 `init Result(tag 0, err)` 를 만들어 `semaReturnExpr` 한다. 소멸자가 함께 push 되므로 조기 반환도 정리된다.
-- 둘 다 아니면 "Expected `Result` or `error` return type for enclosing function." 에러다.
+- 둘 다 아니면 "Expected a `!T` or `error` return type for `!`. The function `f` returns `T`, ..." 에러다(함수 이름 · 반환 타입 · 고칠 꼴을 말한다).
 - main 블록(함수 밖)이면 `panic_unwrap_error_fn` 호출로 패닉한다("Unwrapped error `error.Invalid`." 는 `try_panic.cy` 의 기대 메시지).
 
 `fn use_bang(x int) -> !int:` 안의 `v := may_fail(x)!` 를 트레이스한 실제 IR 생성 순서(숨은 지역 `_temp`, `_res_addr`)는 `local Result`, `address_of Borrow`, `field Int`, `is_zero`, `field error`, `case error`, `init Result`, `const64`, `init_case`, `set_ret`, `ret`, `if_block`, `field Int`, `case Int`, `set_local`, `pop_locals` 였다. 에러 분기 안의 `set_ret`, `ret` 를 `if_block` 이 감싸고, 정상 경로는 `field`+`case` 로 payload 를 읽는 모양이다.

@@ -1241,6 +1241,17 @@ fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template
     } else {
         const ct_compat = cy.types.isTypeCompat(c.compiler, res.type, target.?.get_type());
         if (!ct_compat) {
+            if (arg.type == .receiver) {
+                var hint_buf: [256]u8 = undefined;
+                const hint = refReceiverHint(c, target.?.get_type(), res.type, arg.node, template.head.name(), &hint_buf);
+                if (hint.len > 0) {
+                    const exp_name = try c.sema.allocTypeName(target.?.get_type());
+                    defer c.alloc.free(exp_name);
+                    const act_name = try c.sema.allocTypeName(res.type);
+                    defer c.alloc.free(act_name);
+                    return c.reportErrorFmt("Expected type `{}`. Found `{}`.{}", &.{v(exp_name), v(act_name), v(hint)}, arg.node);
+                }
+            }
             return sema.reportIncompatType(c, target.?.get_type(), res.type, arg.node);
         }
     }
@@ -1384,6 +1395,17 @@ pub fn reportCallFuncMismatch2(c: *cy.Chunk, pre_args: []const Argument, end_arg
     return reportCallFuncMismatch3(c, pre_args, end_args, func.name(), func.sig, func, match_err, node);
 }
 
+/// A method that changes its receiver in place (`&>T`) called on a `^T`: name the `.*` form.
+/// `^T` does not turn into `&>T` on its own, since other references may share the value.
+fn refReceiverHint(c: *cy.Chunk, param_t: *cy.Type, arg_t: *cy.Type, rec_n: *ast.Node, func_name: []const u8, buf: []u8) []const u8 {
+    if (param_t.kind() != .ex_borrow or arg_t.kind() != .pointer) return "";
+    const pointer = arg_t.cast(.pointer);
+    if (!pointer.ref or pointer.child_t != param_t.cast(.ex_borrow).child_t) return "";
+    const rec_src = c.ast.nodeString(rec_n);
+    if (!isShortSrc(rec_src)) return "";
+    return std.fmt.bufPrint(buf, " To change the value that `{s}` points to, write `{s}.*.{s}(...)`.", .{rec_src, rec_src, func_name}) catch "";
+}
+
 pub fn reportCallFuncMismatch(c: *cy.Chunk, pre_args: []const Argument, end_args: []const *ast.Node, func_name: []const u8, sig: *cy.FuncSig, match_err: FuncMatchError, node: *ast.Node) anyerror {
     return reportCallFuncMismatch3(c, pre_args, end_args, func_name, sig, null, match_err, node);
 }
@@ -1477,6 +1499,10 @@ fn reportCallFuncMismatch3(c: *cy.Chunk, pre_args: []const Argument, end_args: [
     // A text and bytes pair (`os.write_file` and `os.write_file_bytes`): name the other function.
     // A value from the other function of the pair (`os.read_file(p)!` for `[]byte`) is named first.
     var hint = try sema.resultTypeHint(c, match_err.param.get_type(), match_err.arg_t, err_node);
+    var rec_hint_buf: [256]u8 = undefined;
+    if (hint.len == 0 and arg_idx == 0 and pre_args.len > 0 and pre_args[0].type == .receiver) {
+        hint = refReceiverHint(c, match_err.param.get_type(), match_err.arg_t, err_node, func_name, &rec_hint_buf);
+    }
     if (hint.len == 0) {
         if (func) |f| hint = try sema.callArgHint(c, f, match_err.arg_t);
     }

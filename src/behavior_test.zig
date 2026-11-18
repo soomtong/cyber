@@ -571,6 +571,7 @@ fn test_core(run: *Runner) void {
     run.case("syntax/string_interp_nested_error.cy");
     run.case("syntax/comment_pound_error.cy");
     run.case("syntax/comment_pound_line_end_error.cy");
+    run.case("syntax/dot_bang_without_case_error.cy");
     run.case("control_flow/for_each_swapped_error.cy");
     run.case("syntax/func_return_tuple_error.cy");
     run.case("syntax/return_multiple_error.cy");
@@ -594,6 +595,8 @@ fn test_vars(run: *Runner) void {
     run.case("vars/local_no_shadow_for_capture.cy");
     run.case("vars/op_assign.cy");
     run.case("vars/op_assign_ref_error.cy");
+    run.case("vars/ref_slice_append_error.cy");
+    run.case("vars/ref_slice_insert_error.cy");
     run.case("vars/op_assign_ref_int_error.cy");
     run.case("vars/ref_operand_error.cy");
     run.case("vars/read_undeclared_error.cy");
@@ -671,6 +674,8 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/result_unhandled_error.cy");
     run.case("control_flow/unwrap_not_result_error.cy");
     run.case("control_flow/unwrap_option_with_bang_error.cy");
+    run.case("control_flow/bang_in_non_result_func_error.cy");
+    run.case("control_flow/bang_in_non_result_lambda_error.cy");
     run.case("control_flow/else_not_option_error.cy");
     run.case("control_flow/else_block_not_option_error.cy");
     run.case("types/none_compare_not_option_error.cy");

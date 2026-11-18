@@ -1650,7 +1650,17 @@ fn semaPropagateError(c: *cy.Chunk, err: ExprResult, node: *ast.Node) !void {
             const ret = try semaInitChoice(c, ret_t, 0, 0, err, node);
             try semaReturnExpr(c, ret, node);
         } else {
-            return c.reportErrorFmt("Expected `Result` or `error` return type for enclosing function.", &.{}, node);
+            const ret_name = try c.sema.allocTypeName(ret_t);
+            defer c.alloc.free(ret_name);
+            const func = proc.func.?;
+            if (func.type == .userLambda) {
+                return c.reportErrorFmt("Expected a `!T` or `error` return type for `!`. The lambda returns `{}`, so `!` can not pass the error on. Declare it `-> !{}`, or handle the error here with `!else` or `try`.", &.{
+                    v(ret_name), v(ret_name),
+                }, node);
+            }
+            return c.reportErrorFmt("Expected a `!T` or `error` return type for `!`. The function `{}` returns `{}`, so `!` can not pass the error on. Declare it `-> !{}`, or handle the error here with `!else` or `try`.", &.{
+                v(func.name()), v(ret_name), v(ret_name),
+            }, node);
         }
     } else {
         // Panic.

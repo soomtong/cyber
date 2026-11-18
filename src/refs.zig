@@ -819,10 +819,12 @@ pub fn recordScopeExit(c: *cy.Chunk, node: *ast.Node) void {
 
 /// Notes on the main source of the last compile for an editor: inferred types, statements that wait for fibers,
 /// and, when `complete` (the compile reached every body without an error), the locals and `use`s that are never
-/// used. Sorted by position. Valid until the next call or compile.
+/// used. Sorted by position. Valid until the next compile. The hints are made once per compile.
 pub fn hints(compiler: *cy.Compiler, complete: bool) ![]const Hint {
     const out = &compiler.ref_hints;
     const text = &compiler.ref_hint_text;
+    if (compiler.ref_hints_done == complete) return out.items;
+    compiler.ref_hints_done = null;
     out.clearRetainingCapacity();
     text.clearRetainingCapacity();
     const main = compiler.refs_main orelse return out.items;
@@ -850,8 +852,10 @@ pub fn hints(compiler: *cy.Compiler, complete: bool) ![]const Hint {
         try pending.append(alloc, .{ .pos = range[0], .end = range[1], .kind = .scope_exit, .start = @intFromPtr(src.ptr) - @intFromPtr(main.src.ptr), .len = kw_len });
     }
     if (complete) {
-        try unusedLocals(compiler, main, &pending);
-        try unusedUses(compiler, main, &pending);
+        var index = try RefIndex.init(compiler);
+        defer index.deinit(alloc);
+        try unusedLocals(compiler, main, &index, &pending);
+        try unusedUses(compiler, main, &index, &pending);
     }
 
     std.mem.sort(Pending, pending.items, {}, struct {
@@ -871,33 +875,51 @@ pub fn hints(compiler: *cy.Compiler, complete: bool) ![]const Hint {
             text.items[p.start..][0..p.len];
         try out.append(alloc, .{ .pos = p.pos, .end = p.end, .kind = @intFromEnum(p.kind), .detail_ptr = detail.ptr, .detail_len = detail.len });
     }
+    compiler.ref_hints_done = complete;
     return out.items;
 }
 
-fn unusedLocals(compiler: *cy.Compiler, main: *cy.Chunk, pending: anytype) !void {
-    for (compiler.ref_locals.items, 0..) |local, i| {
-        // The same declaration again (another instance of a template body).
-        var seen = false;
-        for (compiler.ref_locals.items[0..i]) |prev| {
-            if (prev.pos == local.pos) seen = true;
+/// The positions that `unusedLocals` and `unusedUses` ask about, from one pass over the references.
+const RefIndex = struct {
+    /// The declarations of the locals that are used somewhere else than at the declaration.
+    used_decls: std.AutoHashMapUnmanaged(u32, void) = .empty,
+    /// The positions that sema resolved to a local or a symbol.
+    resolved: std.AutoHashMapUnmanaged(u32, void) = .empty,
+
+    fn init(compiler: *cy.Compiler) !RefIndex {
+        var index: RefIndex = .{};
+        errdefer index.deinit(compiler.alloc);
+        for (compiler.refs.items) |ref| {
+            if (ref.kind != .expr) try index.resolved.put(compiler.alloc, ref.pos, {});
+            if (ref.kind == .local and ref.pos != ref.data.local_decl) {
+                try index.used_decls.put(compiler.alloc, ref.data.local_decl, {});
+            }
         }
-        if (seen) continue;
+        return index;
+    }
+
+    fn deinit(self: *RefIndex, alloc: std.mem.Allocator) void {
+        self.used_decls.deinit(alloc);
+        self.resolved.deinit(alloc);
+    }
+};
+
+fn unusedLocals(compiler: *cy.Compiler, main: *cy.Chunk, index: *const RefIndex, pending: anytype) !void {
+    // A declaration is recorded once per instance of a template body.
+    var seen: std.AutoHashMapUnmanaged(u32, void) = .empty;
+    defer seen.deinit(compiler.alloc);
+    for (compiler.ref_locals.items) |local| {
+        if ((try seen.fetchPut(compiler.alloc, local.pos, {})) != null) continue;
         const name = main.src[local.pos..local.end];
         // `_x` says that it is not used on purpose.
         if (name.len == 0 or name[0] == '_') continue;
-        var used = false;
-        for (compiler.refs.items) |ref| {
-            if (ref.kind == .local and ref.data.local_decl == local.pos and ref.pos != local.pos) {
-                used = true;
-                break;
-            }
-        }
-        if (used or mentionedUnresolved(compiler, main, name, local.end)) continue;
+        if (index.used_decls.contains(local.pos)) continue;
+        if (mentionedUnresolved(main, index, name, local.end)) continue;
         try pending.append(compiler.alloc, .{ .pos = local.pos, .end = local.end, .kind = .unused_local, .start = local.pos, .len = name.len });
     }
 }
 
-fn unusedUses(compiler: *cy.Compiler, main: *cy.Chunk, pending: anytype) !void {
+fn unusedUses(compiler: *cy.Compiler, main: *cy.Chunk, index: *const RefIndex, pending: anytype) !void {
     const root = main.ast.root orelse return;
     for (root.stmts.slice()) |stmt| {
         if (stmt.type() != .import_stmt) continue;
@@ -915,7 +937,7 @@ fn unusedUses(compiler: *cy.Compiler, main: *cy.Chunk, pending: anytype) !void {
                 break;
             }
         }
-        if (used or mentionedUnresolved(compiler, main, name, name_range[1])) continue;
+        if (used or mentionedUnresolved(main, index, name, name_range[1])) continue;
         const stmt_range = rangeOf(main, stmt) orelse continue;
         try pending.append(compiler.alloc, .{ .pos = stmt_range[0], .end = stmt_range[1], .kind = .unused_use, .start = name_range[0], .len = name.len });
     }
@@ -924,7 +946,7 @@ fn unusedUses(compiler: *cy.Compiler, main: *cy.Chunk, pending: anytype) !void {
 /// Whether `name` is written as a word after `from` at a place that sema did not resolve: a branch of `#if`
 /// that was not taken, a template body that was not expanded, or a string. A use could hide there, so the
 /// name is not called unused. Words in `--` comments do not count.
-fn mentionedUnresolved(compiler: *cy.Compiler, main: *cy.Chunk, name: []const u8, from: u32) bool {
+fn mentionedUnresolved(main: *cy.Chunk, index: *const RefIndex, name: []const u8, from: u32) bool {
     const src = main.src;
     var i: usize = from;
     while (std.mem.indexOfPos(u8, src, i, name)) |at| {
@@ -933,14 +955,7 @@ fn mentionedUnresolved(compiler: *cy.Compiler, main: *cy.Chunk, name: []const u8
         if (i < src.len and isWordByte(src[i])) continue;
         const line_start = if (std.mem.findScalarLast(u8, src[0..at], '\n')) |nl| nl + 1 else 0;
         if (std.mem.indexOf(u8, src[line_start..at], "--") != null) continue;
-        var resolved = false;
-        for (compiler.refs.items) |ref| {
-            if (ref.pos == at and ref.kind != .expr) {
-                resolved = true;
-                break;
-            }
-        }
-        if (!resolved) return true;
+        if (!index.resolved.contains(@intCast(at))) return true;
     }
     return false;
 }

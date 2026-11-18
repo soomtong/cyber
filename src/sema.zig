@@ -507,24 +507,28 @@ fn checkDroppedSliceResult(c: *cy.Chunk, expr_t: *cy.Type, node: *ast.Node) !voi
 /// A `void` call where a value was expected: `checkSliceInPlaceResult` for an assignment, which names the
 /// assigned variable when it is the receiver (`xs = xs.append(v)`).
 fn checkSliceInPlaceAssign(c: *cy.Chunk, node: *ast.Node) !void {
-    const left: ?[]const u8 = if (c.assign_left) |left_n| c.ast.nodeString(left_n) else null;
-    try checkSliceInPlaceResult(c, c.sema.void_t, node, left, false);
+    try checkSliceInPlaceResult(c, c.sema.void_t, node, if (c.assign_right == node) c.assign_target else null, false);
 }
 
-/// Whether `res` is a call of a method of a `Slice`.
-fn isSliceMethodCall(c: *cy.Chunk, res: ExprResult) bool {
-    if (res.ir.code != .call) return false;
-    const type_sym = res.ir.cast(.call).func.parent.parent orelse return false;
+/// Whether `node` is a call of a method of a `Slice` that returned nothing. The call is the last one that sema
+/// analyzed (`Chunk.slice_void_call`), so this is asked right after the call.
+fn isSliceVoidCall(c: *cy.Chunk, node: *ast.Node) bool {
+    return c.slice_void_call == node;
+}
+
+/// Whether the methods of `sym` are methods of a `Slice`.
+fn isSliceMethodSym(c: *cy.Chunk, sym: *cy.sym.FuncSym) bool {
+    const type_sym = sym.head.parent orelse return false;
     const type_ = type_sym.getStaticType() orelse return false;
     const instance = type_.sym().instance orelse return false;
-    return instance.getSymTemplate() == c.sema.slice_tmpl;
+    return instance.type == .sym and instance.getSymTemplate() == c.sema.slice_tmpl;
 }
 
 /// `xs = xs.append(v)` or `ys := xs.append(v)`, the form from before 0.4.15: `append` and the other resize methods of
 /// `Slice` now change the receiver in place and return nothing. `res_t` is the type of the call. `left` is the
-/// assigned variable's source, or null for a declaration. `slice_recv` says that the receiver is a `Slice`, so the
-/// message can name the method that returns a new list.
-fn checkSliceInPlaceResult(c: *cy.Chunk, res_t: *cy.Type, node: *ast.Node, left: ?[]const u8, slice_recv: bool) !void {
+/// assigned variable, or null for a declaration or another place. `must_be_slice` is for a place where a `void`
+/// value is not an error by itself (a declaration): only a call of a `Slice` method is reported there.
+fn checkSliceInPlaceResult(c: *cy.Chunk, res_t: *cy.Type, node: *ast.Node, left: ?*ast.Node, must_be_slice: bool) !void {
     if (res_t.id() != bt.Void) return;
     const mc = methodCallOf(node) orelse return;
     var found = false;
@@ -532,14 +536,22 @@ fn checkSliceInPlaceResult(c: *cy.Chunk, res_t: *cy.Type, node: *ast.Node, left:
         if (std.mem.eql(u8, mc.method, m)) found = true;
     }
     if (!found) return;
+    // The receiver is a `Slice`, so the message can name the method that returns a new list.
+    const slice_recv = isSliceVoidCall(c, node);
+    if (must_be_slice and !slice_recv) return;
     const recv = c.ast.nodeString(mc.recv);
     const call_src = c.ast.nodeString(node);
     if (recv.len > 40 or call_src.len > 80) {
         return c.reportErrorFmt("`{}` changes the receiver in place and returns nothing. Call it as a statement.", &.{v(mc.method)}, node);
     }
-    if (left) |left_src| {
-        if (std.mem.eql(u8, left_src, recv)) {
-            return c.reportErrorFmt("`{}` changes `{}` in place and returns nothing. Write `{}`.", &.{v(mc.method), v(recv), v(call_src)}, node);
+    if (left) |left_n| {
+        if (std.mem.eql(u8, c.ast.nodeString(left_n), recv)) {
+            // The fix replaces the assignment `xs = xs.append(v)` with the call.
+            return c.reportErrorFix("`{}` changes `{}` in place and returns nothing. Write `{}` as a statement.", &.{v(mc.method), v(recv), v(call_src)}, node, .{
+                .pos = left_n.pos(),
+                .end_pos = node.end(),
+                .text = call_src,
+            });
         }
     }
     if (slice_recv) for (slice_new_value_methods) |pair| {
@@ -1921,6 +1933,31 @@ const member_aliases = [_][2][]const u8{
 
 var suggest_buf: [256]u8 = undefined;
 
+/// The name that the last hint of `suggestMember`, `suggestField` or `suggestModuleSym` offers in place of the
+/// name that was not found: `trim_left`, or `len()` for a method. Empty when the hint offers no name.
+var suggest_new_buf: [80]u8 = undefined;
+var suggest_new: []const u8 = "";
+
+fn setSuggestNew(comptime format: []const u8, args: anytype) void {
+    suggest_new = std.fmt.bufPrint(&suggest_new_buf, format, args) catch "";
+}
+
+/// The edit that writes the name of the last hint over `node`, the name `name` that was not found. The report
+/// drops the fix when there is none (`Chunk.reportErrorFix`).
+pub fn suggestedFix(c: *cy.Chunk, name: []const u8, node: *ast.Node) cy.compiler.ReportFix {
+    const none: cy.compiler.ReportFix = .{ .pos = cy.NullId, .end_pos = 0, .text = "" };
+    if (suggest_new.len == 0) return none;
+    const pos = node.pos();
+    if (pos == cy.NullId) return none;
+    const src = c.compiler.chunks.items[node.src()].src;
+    const end = node.end();
+    if (end > src.len or pos > end or !std.mem.eql(u8, src[pos..end], name)) return none;
+    var text = suggest_new;
+    // `v.len(1)` for `v.length(1)`: the call is already written.
+    if (std.mem.endsWith(u8, text, "()") and end < src.len and src[end] == '(') text = text[0 .. text.len - 2];
+    return .{ .pos = pos, .end_pos = end, .text = text };
+}
+
 /// A hint for a member that `rec_t` does not have: ` Did you mean `x`?`, or an empty string.
 /// Names from Python and JavaScript are mapped to the Cyber names, then a camelCase name is tried
 /// as snake_case, then a member whose name is close.
@@ -1932,6 +1969,7 @@ pub fn suggestMember(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast
         .ex_borrow => base_t = rec_t.cast(.ex_borrow).child_t,
         else => {},
     }
+    suggest_new = "";
     if (name.len == 0 or name.len > 64) return "";
 
     if (base_t.kind() == .result and try hasMember(c, base_t.cast(.result).child_t, name, node)) {
@@ -1951,12 +1989,14 @@ pub fn suggestMember(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast
     }
     for (member_aliases) |alias| {
         if (std.mem.eql(u8, alias[0], name) and try hasMember(c, base_t, alias[1], node)) {
+            setSuggestNew("{s}", .{alias[1]});
             return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{alias[1]}) catch "";
         }
     }
 
     // `to_upper` for `upper`.
     if (std.mem.startsWith(u8, name, "to_") and name.len > 3 and try hasMember(c, base_t, name[3..], node)) {
+        setSuggestNew("{s}", .{name[3..]});
         return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{name[3..]}) catch "";
     }
 
@@ -1964,6 +2004,7 @@ pub fn suggestMember(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast
     var snake_buf: [128]u8 = undefined;
     if (toSnakeCase(name, &snake_buf)) |snake| {
         if (try hasMember(c, base_t, snake, node)) {
+            setSuggestNew("{s}", .{snake});
             return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{snake}) catch "";
         }
     }
@@ -1994,6 +2035,7 @@ pub fn suggestMember(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast
         }
     }
     if (best) |cand| {
+        setSuggestNew("{s}", .{cand});
         return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{cand}) catch "";
     }
     return "";
@@ -2020,14 +2062,15 @@ fn toSnakeCase(name: []const u8, buf: *[128]u8) ?[]const u8 {
     return buf[0..len];
 }
 
-/// Functions that moved to another module: module uri, old name, hint.
-const moved_module_syms = [_][3][]const u8{
-    .{ "os", "baseName", " Use `path.base` from `use path`." },
-    .{ "os", "basename", " Use `path.base` from `use path`." },
-    .{ "os", "base_name", " Use `path.base` from `use path`." },
-    .{ "os", "dirname", " Use `path.dir` from `use path`." },
-    .{ "os", "read_file_str", " Use `os.read_file`. It returns `str`." },
-    .{ "os", "readFileStr", " Use `os.read_file`. It returns `str`." },
+/// Functions that moved or were renamed: module uri, old name, hint, and the new name when it is in the same
+/// module (the fix writes it over the old name).
+const moved_module_syms = [_][4][]const u8{
+    .{ "os", "baseName", " Use `path.base` from `use path`.", "" },
+    .{ "os", "basename", " Use `path.base` from `use path`.", "" },
+    .{ "os", "base_name", " Use `path.base` from `use path`.", "" },
+    .{ "os", "dirname", " Use `path.dir` from `use path`.", "" },
+    .{ "os", "read_file_str", " Use `os.read_file`. It returns `str`.", "read_file" },
+    .{ "os", "readFileStr", " Use `os.read_file`. It returns `str`.", "read_file" },
 };
 
 /// Hints for an argument that a std function does not take: module uri, function name, argument type, hint.
@@ -2113,23 +2156,28 @@ pub fn resultTypeHint(c: *cy.Chunk, exp_t: *cy.Type, act_t: *cy.Type, node: *ast
 /// A hint for a symbol that the module `mod_sym` does not have: ` Did you mean `x`?`, or an empty string.
 /// Like `suggestMember`, names from other languages are mapped first, then a camelCase name is tried as snake_case.
 pub fn suggestModuleSym(c: *cy.Chunk, mod_sym: *cy.Sym, name: []const u8, node: *ast.Node) ![]const u8 {
+    suggest_new = "";
+    suggest_new = "";
     if (name.len == 0 or name.len > 64) return "";
     if (mod_sym.type == .chunk) {
         const uri = mod_sym.cast(.chunk).chunk.srcUri;
         for (moved_module_syms) |moved| {
             if (std.mem.eql(u8, moved[0], uri) and std.mem.eql(u8, moved[1], name)) {
+                suggest_new = moved[3];
                 return moved[2];
             }
         }
     }
     for (member_aliases) |alias| {
         if (std.mem.eql(u8, alias[0], name) and try c.getResolvedSym(mod_sym, alias[1], node) != null) {
+            setSuggestNew("{s}", .{alias[1]});
             return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{alias[1]}) catch "";
         }
     }
     var snake_buf: [128]u8 = undefined;
     if (toSnakeCase(name, &snake_buf)) |snake| {
         if (try c.getResolvedSym(mod_sym, snake, node) != null) {
+            setSuggestNew("{s}", .{snake});
             return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{snake}) catch "";
         }
     }
@@ -2138,10 +2186,12 @@ pub fn suggestModuleSym(c: *cy.Chunk, mod_sym: *cy.Sym, name: []const u8, node: 
 
 /// `suggestMember` for a field access `x.name`. A suggested method is written as a call: `len()`.
 pub fn suggestField(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast.Node) ![]const u8 {
+    suggest_new = "";
     if (name.len <= 64) {
         const own_t = rec_t.getRefLikeChild() orelse rec_t;
         if (try c.accessResolvedSym(own_t, name, node)) |sym| {
             if (sym.type == .func) {
+                setSuggestNew("{s}()", .{name});
                 return std.fmt.bufPrint(&suggest_buf, " Did you mean the method `{s}()`?", .{name}) catch "";
             }
         }
@@ -2161,6 +2211,7 @@ pub fn suggestField(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast.
     if (sym.type != .func) {
         return hint;
     }
+    setSuggestNew("{s}()", .{target});
     return std.fmt.bufPrint(&suggest_buf, " Did you mean the method `{s}()`?", .{target}) catch "";
 }
 
@@ -2804,7 +2855,7 @@ fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.
 
                 var right_cstr = Cstr.initRequire(svar.decl_t);
                 right_cstr.assign_to_local = true;
-                right_res = try c.semaExprOrOpAssignBinExpr(right, right_cstr, opts.rhsOpAssignBinExpr);
+                right_res = try semaAssignRight(c, left_n, right, right_cstr, opts.rhsOpAssignBinExpr);
                 if (right_res.resType == .value and right_res.data.value.has_aux_local) {
                     var_start += 1;
                 }
@@ -2860,7 +2911,7 @@ fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.
                 return;
             } else {
                 const right_cstr = Cstr.initRequire(leftT);
-                right_res = try c.semaExprOrOpAssignBinExpr(right, right_cstr, opts.rhsOpAssignBinExpr);
+                right_res = try semaAssignRight(c, left_n, right, right_cstr, opts.rhsOpAssignBinExpr);
                 right_res = try semaOwn(c, right_res, right);
             }
 
@@ -2906,6 +2957,18 @@ fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.
         else => {},
     }
     return c.reportErrorFmt("Assignment to the left `{}` is unsupported.", &.{v(left_n.type())}, node);
+}
+
+/// The right side of `left_n = right`. While it is analyzed, the chunk knows the variable that is assigned
+/// (`Chunk.assign_target`).
+fn semaAssignRight(c: *cy.Chunk, left_n: *ast.Node, right: *ast.Node, cstr: Cstr, op_assign_bin_expr: bool) !ExprResult {
+    c.assign_target = left_n;
+    c.assign_right = right;
+    defer {
+        c.assign_target = null;
+        c.assign_right = null;
+    }
+    return c.semaExprOrOpAssignBinExpr(right, cstr, op_assign_bin_expr);
 }
 
 fn semaIndexExpr2(c: *cy.Chunk, left: ExprResult, left_n: *ast.Node, arg0: ExprResult, arg0_n: *ast.Node, node: *ast.Node) !ExprResult {
@@ -3234,14 +3297,14 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
             const type_name = try c.sema.allocTypeName(type_);
             defer c.alloc.free(type_name);
             const hint = try suggestField(c, type_, name, field);
-            return c.reportErrorFmt("Field `{}` does not exist in `{}`.{}", &.{v(name), v(type_name), v(hint)}, field);
+            return c.reportErrorFix("Field `{}` does not exist in `{}`.{}", &.{v(name), v(type_name), v(hint)}, field, suggestedFix(c, name, field));
         }
         const child_ts = child_t.sym();
         const sym = child_ts.getMod().getSym(name) orelse {
             const type_name = try c.sema.allocTypeName(child_t);
             defer c.alloc.free(type_name);
             const hint = try suggestField(c, child_t, name, field);
-            return c.reportErrorFmt("Field `{}` does not exist in `{}`.{}", &.{v(name), v(type_name), v(hint)}, field);
+            return c.reportErrorFix("Field `{}` does not exist in `{}`.{}", &.{v(name), v(type_name), v(hint)}, field, suggestedFix(c, name, field));
         };
         if (check_visible) try cy.module.check_sym_visible(c, sym, field);
         if (sym.type != .field) {
@@ -3273,7 +3336,8 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: ExprResult, name: []
 /// `name` is a member of the type but not a field. A method of the same name is suggested with a call: `s.len()`.
 fn reportNotField(c: *cy.Chunk, type_name: []const u8, name: []const u8, sym: *cy.Sym, node: *ast.Node) error{CompileError, OutOfMemory, FormatError, WriteFailed} {
     if (sym.type == .func) {
-        return c.reportErrorFmt("Type `{}` does not have a field named `{}`. Did you mean the method `{}()`?", &.{v(type_name), v(name), v(name)}, node);
+        setSuggestNew("{s}()", .{name});
+        return c.reportErrorFix("Type `{}` does not have a field named `{}`. Did you mean the method `{}()`?", &.{v(type_name), v(name), v(name)}, node, suggestedFix(c, name, node));
     }
     return c.reportErrorFmt("Type `{}` does not have a field named `{}`.", &.{v(type_name), v(name)}, node);
 }
@@ -4747,7 +4811,7 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
     if (node.name.type() == .void_lit) {
         try checkDroppedSliceResult(c, right.type, node.right);
     }
-    try checkSliceInPlaceResult(c, right.type, node.right, null, isSliceMethodCall(c, right));
+    try checkSliceInPlaceResult(c, right.type, node.right, null, true);
 
     if (right.type.info.borrow_only and right.resType == .value) {
         if (right.data.value.parent_local) |parent_local| {
@@ -7836,6 +7900,9 @@ pub fn semaCallFuncSymRec(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, re
         c.global_take = saved_take;
     }
     const res = try semaCallFuncSymRecInner(c, sym, rec, rec_res, args, req_value, node);
+    if (res.type.id() == bt.Void and isSliceMethodSym(c, sym)) {
+        c.slice_void_call = node;
+    }
     if (c.global_take) |take| {
         return restoreGlobal(c, take, res, node);
     }
@@ -9615,7 +9682,7 @@ pub fn semaCallExpr(c: *cy.Chunk, node: *ast.Node, opt_target: ?*cy.Type) !ExprR
                     const type_name = try c.sema.allocTypeName(leftRes.type);
                     defer c.alloc.free(type_name);
                     const hint = try suggestMember(c, leftRes.type, right_name, callee.right);
-                    return c.reportErrorFmt("Can not find the symbol `{}` in `{}`.{}", &.{v(right_name), v(type_name), v(hint)}, callee.right);
+                    return c.reportErrorFix("Can not find the symbol `{}` in `{}`.{}", &.{v(right_name), v(type_name), v(hint)}, callee.right, suggestedFix(c, right_name, callee.right));
                 };
 
                 if (rightSym.type == .func) {
@@ -9650,7 +9717,7 @@ pub fn semaCallExpr(c: *cy.Chunk, node: *ast.Node, opt_target: ?*cy.Type) !ExprR
                 const type_name = try c.sema.allocTypeName(leftRes.type);
                 defer c.alloc.free(type_name);
                 const hint = try suggestMember(c, leftRes.type, right_name, callee.right);
-                return c.reportErrorFmt("Can not find the symbol `{}` in `{}`.{}", &.{v(right_name), v(type_name), v(hint)}, callee.right);
+                return c.reportErrorFix("Can not find the symbol `{}` in `{}`.{}", &.{v(right_name), v(type_name), v(hint)}, callee.right, suggestedFix(c, right_name, callee.right));
             };
 
             if (rightSym.type == .func) {
@@ -11009,17 +11076,43 @@ fn semaLambdaMulti(c: *cy.Chunk, lambda: *ast.LambdaMulti, stmts: []const *ast.N
     }
 }
 
-/// A place (a global, a field of one, the target of a pointer) that a method call took out for an exclusive borrow
-/// of its receiver (`takeGlobal`). `ptr` is a hidden local with the address of the place.
+/// A place (a global, a field of one, the target of a pointer) that a method call takes out for an exclusive borrow
+/// of its receiver (`takeGlobal`). `ptr` is a hidden local with the address of the place. `local` is the hidden local
+/// that the receiver borrows.
 pub const GlobalTake = struct {
     ptr: LocalId,
     local: LocalId,
     type: *cy.Type,
+    /// The receiver node, for the error of an argument that reads the place.
+    rec: *ast.Node,
+    /// Whether the value of the place moved into `local` (`finishGlobalTake`).
+    done: bool = false,
 };
 
-/// Whether `name` appears in `src` as a whole identifier (not as a part of a longer name, a field after `.`, or the
-/// text of a string literal; an interpolation `%{...}` inside a string is code and is searched).
-fn mentionsIdent(src: []const u8, name: []const u8) bool {
+fn isIdentChar(ch: u8) bool {
+    return std.ascii.isAlphanumeric(ch) or ch == '_';
+}
+
+/// The path of a receiver: `s.xs` of `s.xs`, `g` of `(g)`, `p` of `p.*`, `xs` of `xs[0].ys`.
+fn placePath(src: []const u8) []const u8 {
+    var start: usize = 0;
+    while (start < src.len and (src[start] == '(' or src[start] == ' ')) start += 1;
+    var end = start;
+    while (end < src.len) {
+        if (isIdentChar(src[end])) {
+            end += 1;
+        } else if (src[end] == '.' and end + 1 < src.len and isIdentChar(src[end + 1])) {
+            end += 1;
+        } else break;
+    }
+    return src[start..end];
+}
+
+/// Whether the code `src` reads the place `path` (`g`, `s.xs`), a part of it (`s.xs.len`), or a value that holds it
+/// (`s`). A different field (`s.n`) does not read it. A method call on a parent (`s.sum()`) can read it.
+/// The text of a string literal is skipped; an interpolation `%{...}` inside a string is code and is searched.
+fn mentionsPlace(src: []const u8, path: []const u8) bool {
+    if (path.len == 0) return false;
     var quote: u8 = 0;
     var interp_depth: u32 = 0;
     var i: usize = 0;
@@ -11046,28 +11139,56 @@ fn mentionsIdent(src: []const u8, name: []const u8) bool {
             quote = ch;
             continue;
         }
-        if (!std.mem.startsWith(u8, src[i..], name)) continue;
-        const end = i + name.len;
-        const before_ok = i == 0 or !(std.ascii.isAlphanumeric(src[i - 1]) or src[i - 1] == '_' or src[i - 1] == '.');
-        const after_ok = end == src.len or !(std.ascii.isAlphanumeric(src[end]) or src[end] == '_');
-        if (before_ok and after_ok) return true;
+        if (!isIdentChar(ch)) continue;
+        // The start of a name chain (`a.b.c`). A chain after `.` is a field of another value.
+        const chain_start = i;
+        var end = i;
+        while (end < src.len) {
+            if (isIdentChar(src[end])) {
+                end += 1;
+            } else if (src[end] == '.' and end + 1 < src.len and isIdentChar(src[end + 1])) {
+                end += 1;
+            } else break;
+        }
+        i = end - 1;
+        if (chain_start > 0 and src[chain_start - 1] == '.') continue;
+        var chain = src[chain_start..end];
+        if (end < src.len and src[end] == '(') {
+            // The last name is a method. It can read every part of its receiver.
+            const dot = std.mem.lastIndexOfScalar(u8, chain, '.') orelse continue;
+            chain = chain[0..dot];
+        }
+        var chain_it = std.mem.splitScalar(u8, chain, '.');
+        var path_it = std.mem.splitScalar(u8, path, '.');
+        while (true) {
+            const chain_part = chain_it.next() orelse return true;
+            const path_part = path_it.next() orelse return true;
+            if (!std.mem.eql(u8, chain_part, path_part)) break;
+        }
     }
     return false;
 }
 
-test "mentionsIdent" {
-    try std.testing.expect(mentionsIdent("g.len()", "g"));
-    try std.testing.expect(!mentionsIdent("'a'.concat('1')", "a"));
-    try std.testing.expect(mentionsIdent("'n %{a.len()}'", "a"));
-    try std.testing.expect(!mentionsIdent("x.a + ab", "a"));
-    try std.testing.expect(!mentionsIdent("'it\\'s a'", "a"));
+test "mentionsPlace" {
+    try std.testing.expect(mentionsPlace("g.span()", "g"));
+    try std.testing.expect(mentionsPlace("g", "g"));
+    try std.testing.expect(!mentionsPlace("'a'.concat('1')", "a"));
+    try std.testing.expect(mentionsPlace("'n %{a.len()}'", "a"));
+    try std.testing.expect(!mentionsPlace("x.a + ab", "a"));
+    try std.testing.expect(!mentionsPlace("'it\\'s a'", "a"));
+    try std.testing.expect(!mentionsPlace("st.n", "st.xs"));
+    try std.testing.expect(mentionsPlace("st", "st.xs"));
+    try std.testing.expect(mentionsPlace("st.xs[1..]", "st.xs"));
+    try std.testing.expect(mentionsPlace("st.view()", "st.xs"));
+    try std.testing.expect(!mentionsPlace("st.other.span()", "st.xs"));
+    try std.testing.expect(!mentionsPlace("view()", "view"));
 }
 
-/// The first name of a receiver path: `s` of `s.xs`.
-fn rootName(src: []const u8) []const u8 {
-    var end: usize = 0;
-    while (end < src.len and (std.ascii.isAlphanumeric(src[end]) or src[end] == '_')) end += 1;
-    return src[0..end];
+test "placePath" {
+    try std.testing.expectEqualStrings("g", placePath("(g)"));
+    try std.testing.expectEqualStrings("s.xs", placePath("s.xs"));
+    try std.testing.expectEqualStrings("p", placePath("p.*"));
+    try std.testing.expectEqualStrings("xs", placePath("xs[0].ys"));
 }
 
 /// Take-and-restore: a global can not be borrowed exclusively, because a function could reach it through the global
@@ -11075,35 +11196,97 @@ fn rootName(src: []const u8) []const u8 {
 /// value of the place moves into a hidden local for the call, the place holds an empty value meanwhile, and
 /// `restoreGlobal` moves the value back right after the call. Only for a type that has an empty value
 /// (`@init_sequence`: `Slice`, `Array`). Returns the hidden local, or null for another type.
+///
+/// The value moves after the arguments are evaluated (`finishGlobalTake`), so an argument reads the place as it
+/// was, and an argument that leaves the call (`f()!`) leaves the place as it was. Until then the hidden local holds
+/// the empty value.
 fn takeGlobal(c: *cy.Chunk, place: ExprResult, node: *ast.Node) !?ExprResult {
     const var_t = place.type;
     const init_seq = (try c.accessResolvedSym(var_t, "@init_sequence", node)) orelse return null;
     if (init_seq.type != .func) return null;
-    const name = rootName(c.ast.nodeString(node));
-    if (name.len > 0) {
-        for (c.global_take_args) |arg| {
-            if (mentionsIdent(c.ast.nodeString(arg), name)) {
-                return c.reportErrorFmt("The method takes `{}` out while it runs, so an argument can not read `{}`. Read it into a local first.", &.{v(c.ast.nodeString(node)), v(name)}, arg);
-            }
-        }
-    }
     // The address is taken once, so the place is evaluated once.
     const ptr_t = try getPtrType(c, var_t);
     const addr = try semaAddressOf(c, place, ptr_t, node);
     const ptr = try declareHiddenLocal(c, "_place", ptr_t, addr, node);
-    // Like `_temp` in `semaAssignToGlobal`: the local gets the value without a copy, and the place gets a new value
-    // without a release.
-    const read = try c.ir.newExpr(.deref, var_t, node, .{ .expr = (try semaLocal(c, ptr.id, node)).ir });
-    const taken = try declareHiddenLocal(c, "_global", var_t, ExprResult.init(read, var_t), node);
     const empty = try sema_init_seq2(c, init_seq, &.{}, node);
-    _ = try c.ir.pushStmt(.set_deref, node, .{ .ptr = (try semaLocal(c, ptr.id, node)).ir, .right = empty.ir });
-    c.global_take = .{ .ptr = ptr.id, .local = taken.id, .type = var_t };
+    const taken = try declareHiddenLocal(c, "_global", var_t, empty, node);
+    c.global_take = .{ .ptr = ptr.id, .local = taken.id, .type = var_t, .rec = node };
     return try semaLocal(c, taken.id, node);
+}
+
+/// An argument that is a local, a part of one, a constant, or a borrow of a local does not read a global.
+fn argReadsNoGlobal(expr: *ir.Expr) bool {
+    return switch (expr.code) {
+        .local, .captured, .const8, .const16, .const32, .const64, .truev, .falsev, .voidv, .undef,
+        .func, .func_ptr, .string, .init_zero => true,
+        .address_of => argReadsNoGlobal(expr.cast(.address_of).expr),
+        .field => argReadsNoGlobal(expr.cast(.field).rec),
+        .retain => argReadsNoGlobal(expr.cast(.retain).expr),
+        .unwrap_nz => argReadsNoGlobal(expr.cast(.unwrap_nz).option),
+        .unwrap_addr => addrOfLocal(expr.cast(.unwrap_addr).choice),
+        .deref => addrOfLocal(expr.cast(.deref).expr),
+        .bitcast => argReadsNoGlobal(expr.cast(.bitcast).expr),
+        .cast => argReadsNoGlobal(expr.cast(.cast).expr),
+        else => false,
+    };
+}
+
+/// Whether `expr` is the address of a local or of a part of one. A pointer or a borrow that a local holds can
+/// point to a global.
+fn addrOfLocal(expr: *ir.Expr) bool {
+    return switch (expr.code) {
+        .local => switch (expr.type.kind()) {
+            .pointer, .borrow, .ex_borrow => false,
+            else => !expr.type.info.borrow_only,
+        },
+        .address_of => argReadsNoGlobal(expr.cast(.address_of).expr),
+        .unwrap_addr => addrOfLocal(expr.cast(.unwrap_addr).choice),
+        .bitcast => addrOfLocal(expr.cast(.bitcast).expr),
+        else => false,
+    };
+}
+
+/// Called when the arguments of the call that took a place (`takeGlobal`) are matched, while they are still pending
+/// operands: the statements here evaluate them into locals first (`seqFlush`). Then the value of the place and the
+/// empty value of the hidden local change places.
+/// `args` and `nodes` are the arguments after the receiver. An argument that can not be held in a local (a borrow,
+/// a place) is evaluated inside the call, where the place is empty: it is an error for it to read the place.
+pub fn finishGlobalTake(c: *cy.Chunk, args: []const *ir.Expr, nodes: []const *ast.Node) !void {
+    var take = c.global_take orelse return;
+    if (take.done) return;
+    const node = take.rec;
+    // Like `_temp` in `semaAssignToGlobal`: a local gets the value without a copy, and the place gets a new value
+    // without a release.
+    const read = try c.ir.newExpr(.deref, take.type, node, .{ .expr = (try semaLocal(c, take.ptr, node)).ir });
+    const swap = try declareHiddenLocal(c, "_swap", take.type, ExprResult.init(read, take.type), node);
+    _ = try c.ir.pushStmt(.set_deref, node, .{
+        .ptr = (try semaLocal(c, take.ptr, node)).ir,
+        .right = (try semaLocal(c, take.local, node)).ir,
+    });
+    _ = try c.ir.pushStmt(.set_local, node, .{
+        .id = c.varStack.items[take.local].inner.local.id,
+        .right = (try semaLocal(c, swap.id, node)).ir,
+    });
+    c.varStack.items[swap.id].type = .dead;
+    take.done = true;
+    c.global_take = take;
+
+    const path = placePath(c.ast.nodeString(node));
+    for (args, nodes) |arg, arg_n| {
+        if (argReadsNoGlobal(arg)) continue;
+        if (mentionsPlace(c.ast.nodeString(arg_n), path)) {
+            return c.reportErrorFmt("The method takes `{}` out while it runs, so this argument can not read `{}`. Read it into a local first.", &.{v(c.ast.nodeString(node)), v(path)}, arg_n);
+        }
+    }
 }
 
 /// Runs the call `res` that took a place (`takeGlobal`) and moves the value back. The result of the call is kept in a
 /// hidden local, so the place holds its value again when the result is used.
 fn restoreGlobal(c: *cy.Chunk, take: GlobalTake, res: ExprResult, node: *ast.Node) !ExprResult {
+    if (!take.done) {
+        // The hidden local would hold the empty value, and the call would change that.
+        return c.reportError("Unsupported: this call can not change a global in place. Change a local and assign it to the global.", node);
+    }
     var out: ExprResult = undefined;
     if (res.resType == .ct_value) {
         out = res;

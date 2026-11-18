@@ -469,12 +469,17 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
   - `scope-exit`(Information, 키워드 범위): '`return` waits for the fibers of the `scope` block before it leaves, and its value is
     computed after them. An error of a fiber leaves in its place.', `break` · `continue`는 '... before it leaves the block. ...'.
   - `unused-local` · `unused-use`(Warning, 태그 `Unnecessary`라 에디터가 흐리게 그린다).
-- `textDocument/codeAction`(quickfix): 클라이언트가 돌려준 진단마다 `assist.quickFix`가 고칠 편집을 만든다.
-  - 컴파일러의 'Did you mean `x`?' · 'Did you mean the method `len()`?'(범위가 이름일 때). 이미 `(`가 붙어 있으면 `()`를 뺀다.
-  - 'Use `os.read_file`.'처럼 같은 모듈의 다른 이름. 다른 모듈로 옮겨야 하는 것(`os.dirname` → `path.dir`)은 `use`도 고쳐야
-    해서 만들지 않는다.
-  - `out = out.append(3)`의 'Write `out.append(3)` as a statement.': 줄이 `이름 = 호출`뿐일 때 줄을 바꾼다.
-  - `unused-local`은 이름 앞에 `_`, `unused-use`는 그 줄을 지운다.
+- `textDocument/codeAction`(quickfix): 클라이언트가 돌려준 진단마다 고칠 편집을 만든다.
+  - 컴파일 오류의 fix는 컴파일러가 만든다(2026-11-18 고침). `CLReport`의 `has_fix` · `fix_pos` · `fix_end_pos` · `fix_text`를
+    서버가 진단의 `data.fix`(`range`, `newText`)로 내보내고, `codeAction` 요청에 실려 돌아온 것을 그대로 편집으로 쓴다.
+    처음에는 서버가 오류 문구의 영어 문자열('Did you mean `', '. Use `', '` as a statement.')에서 fix를 읽었다. 문구가 바뀌면
+    fix가 조용히 사라지고, 문구가 같은 두 경우(`xs = xs.append(2)`와 `ys = xs.append(2)`)를 구별하지 못해 뒤의 것에서 `ys`의
+    갱신을 지웠다. 컴파일러 쪽은 `Chunk.reportErrorFix`와 `sema.suggestedFix`.
+  - 컴파일러가 fix를 싣는 오류: 'Did you mean `x`?' · 'Did you mean the method `len()`?'(이미 `(`가 붙어 있으면 `()`를 뺀다),
+    같은 모듈에서 이름이 바뀐 함수(`os.read_file_str` → `read_file`), `xs = xs.append(v)`(대입문 전체를 호출로).
+    다른 모듈로 옮겨야 하는 것(`os.dirname` → `path.dir`)은 `use`도 고쳐야 해서 싣지 않는다.
+  - 서버가 만든 진단은 `assist.quickFix`가 코드로 고른다: `unused-local`은 이름 앞에 `_`, `unused-use`는 그 줄을 지운다.
+  - 힌트는 컴파일당 한 번 만든다(`Compiler.ref_hints_done`). 진단과 inlay hint 요청이 같은 목록을 쓴다.
 - `textDocument/inlayHint`: `x := expr` 이름 뒤의 타입(kind Type), `scope` 출구 문장 끝의 `waits for fibers`. 초기식이 타입을
   이미 말하면 뺀다(`Vec2{...}`, `Vec2.zero()`, 문자열 · 수 · `true` 리터럴, 람다. `assist.typeIsWritten`).
 - hover: 선언이 서버가 읽을 수 있는 소스(열린 문서나 파일)에 있으면 바로 위의 `--|` 줄을 코드 블록 뒤에 붙인다. 표준 모듈은
@@ -483,7 +488,8 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
 ### 확인
 
 - lib 테스트 `cl_vm_symbol_hints lists inferred types, scope exits and unused names.`, 서버 테스트
-  `Hints of the compiler: unused names, scope exits, inlay hints, quick fixes and doc comments.`, `assist.zig`의 단위 테스트 셋.
+  `Hints of the compiler: unused names, scope exits, inlay hints, quick fixes and doc comments.`,
+  `The fix of a compile error is the edit that the compiler sends with it.`, `assist.zig`의 단위 테스트 셋.
 - 저장소 `.cy` 306개(오류 테스트 제외)를 서버로 열어 힌트 진단을 모았다. 처음에는 쓰지 않은 지역 210건 중 상당수가 엉뚱한
   자리를 가리켰다(위의 노드 위치 문제). 고친 뒤 지역 84건 · `use` 9건 · `scope` 출구 9건이고, 지역은 테스트가 `@deinit`을 보려고
   만든 값처럼 실제로 쓰지 않는 것이다. `use`는 모두 실제로 쓰지 않거나(주석에만 있는 이름 포함) 문서화된 예외다.

@@ -221,6 +221,7 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
     defer template_ctx.deinit(c);
 
     var arg_idx: u32 = 0;
+    var arg_nodes: [256]*ast.Node = undefined;
 
     // An argument is evaluated before a statement that a later argument adds (`sema.seqFlush`).
     const seq_start = c.seq_pending.items.len;
@@ -241,6 +242,7 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
             if (arg_res.resType == .value and !arg_res.addressable) {
                 try sema.seqPush(c, &args[arg_idx], arg_res.owned, arg.node);
             }
+            arg_nodes[arg_idx] = arg.node;
             arg_idx += 1;
         } else if (final_arg.resolve_t == .template) {
             const name = template.func_params[i].name_type.as_name();
@@ -248,6 +250,10 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
         } else if (final_arg.resolve_t == .incompat) {
             return error.Unexpected;
         }
+    }
+
+    if (tookReceiver(c, pre_args) and arg_idx > 0) {
+        try sema.finishGlobalTake(c, args[1..arg_idx], arg_nodes[1..arg_idx]);
     }
 
     const func_instance = try genFunc(c, template, &template_ctx, node);
@@ -600,9 +606,20 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         }
     }
 
+    if (tookReceiver(c, pre_args) and arg_idx > 0) {
+        try sema.finishGlobalTake(c, args[1..arg_idx], arg_nodes[1..arg_idx]);
+    }
+
     return .{
         .ret_parent_scope_local = ret_parent_scope_local,
     };
+}
+
+/// Whether the receiver of this call is the one that `sema.takeGlobal` took a place for.
+fn tookReceiver(c: *cy.Chunk, pre_args: []const Argument) bool {
+    if (c.global_take == null) return false;
+    if (pre_args.len == 0 or pre_args[0].type != .receiver) return false;
+    return pre_args[0].node == c.global_take_rec;
 }
 
 pub fn matchFuncSym2(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const Argument, end_args: []const *ast.Node,
@@ -722,6 +739,7 @@ fn matchRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end
     // Save last statement to clear any that were added on a mismatch.
     const start_stmt = c.ir.curBlock().last;
     const var_start = c.varStack.items.len;
+    const saved_take = c.global_take;
 
     if (try matchOverloadedFunc(c, func, pre_args, end_args, loc, exact, match_err, node)) |res| {
         return .{
@@ -739,6 +757,8 @@ fn matchRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end
     if (var_start < c.varStack.items.len) {
         c.varStack.items.len = var_start;
     }
+    // The hidden locals of a take (`sema.takeGlobal`) went with them. The next candidate takes again.
+    c.global_take = saved_take;
 
     if (start_stmt != null) {
         // TODO: Also remove the statements and expressions generated.

@@ -48,6 +48,31 @@ const caseFilter: ?[]const u8 = null;
 // const caseFilter: ?[]const u8 = "meta.cy";
 const failFast: bool = true;
 
+/// One of the processes that share the cases of "Tests.": `index` of `count`.
+const Shard = struct {
+    index: usize,
+    count: usize,
+};
+
+/// `zig build behavior-test` runs the test executable several times at once, each with `CYBER_TEST_SHARD=i/n`
+/// (build.zig, `-Dtest-shards`). Every case belongs to one shard. Without the variable there is one shard.
+fn testShard() Shard {
+    const none: Shard = .{ .index = 0, .count = 1 };
+    if (is_wasm) return none;
+    const val = stdx.getEnvVarOwned(t.alloc, "CYBER_TEST_SHARD") catch return none;
+    defer t.alloc.free(val);
+    const slash = std.mem.indexOfScalar(u8, val, '/') orelse return none;
+    const index = std.fmt.parseInt(usize, val[0..slash], 10) catch return none;
+    const count = std.fmt.parseInt(usize, val[slash + 1 ..], 10) catch return none;
+    if (count == 0 or index >= count) return none;
+    return .{ .index = index, .count = count };
+}
+
+/// The tests that are not split into cases run in the first shard only.
+fn inFirstShard() bool {
+    return testShard().index == 0;
+}
+
 pub fn isAot(backend: c.Backend) bool {
     return backend == c.BackendTCC or backend == c.BackendCC;
 }
@@ -513,6 +538,8 @@ fn test_core(run: *Runner) void {
     run.case("core/Slice_append_assign_error.cy");
     run.case("core/Slice_append_decl_error.cy");
     run.case("core/Slice_global_take_arg_error.cy");
+    run.case("core/Slice_append_other_assign_error.cy");
+    run.case("core/Slice_in_place_names_other_types.cy");
     run.case("core/Slice_oob_panic.cy");
     run.case("core/Array_remove_oob_panic.cy");
     run.case("core/Array_size_up_neg_panic.cy");
@@ -703,10 +730,14 @@ test "Tests." {
 
     run.case("../tokenizer.cy");
 
+    const shard = testShard();
     var numPassed: u32 = 0;
     var skipped: u32 = 0;
-    defer std.debug.print("Tests passed: {}/{}, skipped: {}\n", .{numPassed, run.cases.items.len, skipped});
-    for (run.cases.items) |run_case| {
+    var num_cases: u32 = 0;
+    defer std.debug.print("Tests passed: {}/{}, skipped: {} (shard {}/{})\n", .{numPassed, num_cases, skipped, shard.index + 1, shard.count});
+    for (run.cases.items, 0..) |run_case, case_idx| {
+        if (case_idx % shard.count != shard.index) continue;
+        num_cases += 1;
         if (caseFilter) |filter| {
             if (std.mem.find(u8, run_case.config.uri, filter) == null) {
                 continue;
@@ -730,12 +761,13 @@ test "Tests." {
         };
         numPassed += 1;
     }
-    if (numPassed < run.cases.items.len) {
+    if (numPassed < num_cases) {
         return error.Failed;
     }
 }
 
 test "Compile." {
+    if (!inFirstShard()) return;
     // examples.
     // try compileCase(.{}, "../examples/fiber.cy");
     try compileCase("../examples/fizzbuzz.cy");
@@ -774,7 +806,7 @@ fn compileCase(path: []const u8) !void {
 }
 
 test "FFI." {
-    if (is_wasm or !test_config.ffi or builtin.target.abi == .msvc) {
+    if (is_wasm or !test_config.ffi or builtin.target.abi == .msvc or !inFirstShard()) {
         return;
     }
 
@@ -786,6 +818,7 @@ test "FFI." {
 }
 
 test "windows new lines" {
+    if (!inFirstShard()) return;
     try eval(.{ .silent = true }, "a = 123\r\nb = 234\r\nc =",
     struct { fn func(run: *VMrunner, res: EvalResult) !void {
         try run.expectErrorReport(res, c.ErrorCompile,
@@ -800,6 +833,7 @@ test "windows new lines" {
 }
 
 test "typed declaration error at the end of the source" {
+    if (!inFirstShard()) return;
     // No new line follows the last token.
     try eval(.{ .silent = true }, "x: int = 5",
     struct { fn func(run: *VMrunner, res: EvalResult) !void {

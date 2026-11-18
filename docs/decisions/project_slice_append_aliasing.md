@@ -151,9 +151,20 @@ tars-agent 요청(`cyber-0.4.12-spike-defects.md` (a))에서 `remove` · `clear`
   담고, 자리의 빈 값을 해제하고, 값을 되돌린다(`takeGlobal` · `restoreGlobal`, `semaCallFuncSymRec`가 수신자 노드를
   `Chunk.global_take_rec`로 알려 준다). 되돌리기는 문장 끝이 아니라 호출 직후다. 문장 끝이면 `while g.pop() |w|:`의 본문이 빈
   목록을 보고, 다음 조건 평가가 빈 목록에서 다시 꺼낸다.
-  - 인자는 호출 때 평가되어 빈 목록을 본다. 그래서 인자의 소스에 수신자의 첫 이름이 식별자로 나오면 컴파일 오류다
-    (`mentionsIdent`, 문자열 리터럴은 건너뛰고 `%{...}` 보간은 본다. 지역의 `xs.append(xs.len())`도 빌림 충돌 오류라 규칙이
-    같다). 보수적인 문자열 검사라 같은 이름의 다른 것(가린 지역)에도 걸릴 수 있다.
+  - 인자(2026-11-18 고침, 0.4.14..0.4.15 코드 리뷰): 처음에는 수신자를 맞출 때 바로 값을 꺼냈다. 인자는 그 뒤 호출 안에서
+    평가되어 빈 목록을 봤고, 인자가 `!`로 빠져나가면 되돌리기가 실행되지 않아 전역이 빈 목록으로 남았다(값 유실). 인자
+    소스에 수신자의 첫 이름이 나오는지 보는 문자열 검사(`mentionsIdent`)로 막았지만 함수를 거친 읽기는 못 잡았다.
+    지금은 값을 인자 뒤에 꺼낸다: 수신자 때는 `_global`에 빈 값만 두고, 인자를 다 맞춘 뒤 `finishGlobalTake`가 자리의 값과
+    바꾼다. 그 문장을 넣을 때 대기 중인 인자가 `_seq` 지역으로 먼저 평가된다(`seqFlush`). 그래서 `g.append(g.len())`,
+    `g.append(next())`, `g += f()!`가 모두 맞게 돈다.
+  - 지역에 담을 수 없는 인자(빌림, 자리)는 여전히 호출 안에서 평가된다. 그런 인자가 꺼낸 자리를 읽으면 컴파일 오류다
+    (`mentionsPlace`: 수신자의 경로 `st.xs`와 인자 소스의 이름 사슬을 비교한다. 다른 필드 `st.ys`는 통과, 부모 `st`와 부모의
+    메서드 `st.view()`는 오류. 문자열 리터럴은 건너뛰고 `%{...}` 보간은 본다). 지역 · 상수 · 지역의 일부인 인자는 IR로
+    알아보고 검사하지 않는다(`argReadsNoGlobal`).
+  - overload 후보가 맞지 않으면 그 시도의 지역과 문장이 버려진다(`matchRtOverload`). 꺼낸 상태(`Chunk.global_take`)도 같이
+    되돌려야 다음 후보가 다시 꺼낸다. 되돌리지 않아 `g.append(h)`(목록을 받는 overload)가 컴파일되지 않았다.
+  - `finishGlobalTake`가 불리지 않는 호출 경로가 생기면 `restoreGlobal`이 'Unsupported: this call can not change a global in
+    place.'로 막는다(빈 값에 메서드가 돌고 진짜 값이 해제되는 것을 막는 안전망).
   - 메서드 본문이 이름으로 전역을 읽으면 빈 목록을 본다. `Slice` · `Array`의 메서드는 읽지 않는다. 원소 타입의 `@deinit`이 그
     전역을 읽는 경우가 남은 경우다(문서에 적음). Rust의 `std::mem::take` 뒤 되돌리기와 같은 꼴이다.
   - 빈 값이 없는 타입의 전역은 전처럼 'Cannot acquire exclusive borrow.' 오류다.

@@ -79,6 +79,14 @@ pub const Chunk = struct {
     /// The left side of a plain `x = y` that sema is resolving. An undeclared name there gets a `:=` hint.
     assign_left: ?*ast.Node = null,
 
+    /// The variable and the right side of the assignment `x = right` while sema analyzes the right side, for the
+    /// error of `xs = xs.append(v)` (`sema.checkSliceInPlaceAssign`).
+    assign_target: ?*ast.Node = null,
+    assign_right: ?*ast.Node = null,
+
+    /// The last method call of a `Slice` that returned nothing (`sema.semaCallFuncSymRec`).
+    slice_void_call: ?*ast.Node = null,
+
     /// The receiver node and the argument nodes of the method call that sema is matching (`semaCallFuncSymRec`). An
     /// exclusive borrow of a global for this receiver takes the global's value out for the call (`takeGlobal`).
     global_take_rec: ?*ast.Node = null,
@@ -645,6 +653,22 @@ pub const Chunk = struct {
 
     pub fn reportErrorFmt(self: *Chunk, format: []const u8, args: []const fmt.FmtValue, opt_node: ?*ast.Node) error{CompileError, OutOfMemory, FormatError, WriteFailed} {
         const id = try self.addReportFmt(format, args, opt_node);
+        try self.appendErrorTrace(&self.compiler.reports.items[id]);
+        return error.CompileError;
+    }
+
+    /// `reportErrorFmt` with the edit that fixes the error. `fix.text` is copied. A fix with an empty or reversed
+    /// range that the source does not hold is dropped.
+    pub fn reportErrorFix(self: *Chunk, format: []const u8, args: []const fmt.FmtValue, node: *ast.Node, fix: cy.compiler.ReportFix) error{CompileError, OutOfMemory, FormatError, WriteFailed} {
+        const id = try self.addReportFmt(format, args, node);
+        const src_len = self.compiler.chunks.items[node.src()].src.len;
+        if (fix.pos != cy.NullId and fix.pos <= fix.end_pos and fix.end_pos <= src_len) {
+            self.compiler.reports.items[id].fix = .{
+                .pos = fix.pos,
+                .end_pos = fix.end_pos,
+                .text = try self.alloc.dupe(u8, fix.text),
+            };
+        }
         try self.appendErrorTrace(&self.compiler.reports.items[id]);
         return error.CompileError;
     }

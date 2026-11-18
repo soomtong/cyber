@@ -104,6 +104,9 @@ pub const Compiler = struct {
     /// The hints that the last `refs.hints` returned, and the text they point into.
     ref_hints: std.ArrayList(cy.refs.Hint) = .empty,
     ref_hint_text: std.ArrayList(u8) = .empty,
+    /// Whether `ref_hints` holds the hints of the last compile, and the `complete` they were made with. `refs.hints`
+    /// is asked more than once per compile (diagnostics, every inlay hint request).
+    ref_hints_done: ?bool = null,
     
     /// Sema model resulting from the sema pass.
     sema: sema.Sema,
@@ -381,6 +384,7 @@ pub const Compiler = struct {
         self.ref_scope_exits.clearRetainingCapacity();
         self.ref_hints.clearRetainingCapacity();
         self.ref_hint_text.clearRetainingCapacity();
+        self.ref_hints_done = null;
         if (self.ref_arena) |*arena| arena.deinit();
         self.ref_arena = null;
         self.alloc.free(self.ref_detail);
@@ -795,13 +799,25 @@ pub const Report = struct {
     /// Backtrace.
     next: ?*Report = null,
 
+    /// The edit of the source that fixes the error, when the compiler knows one.
+    fix: ?ReportFix = null,
+
     pub fn deinit(self: *Report, alloc: std.mem.Allocator) void {
         if (self.next) |next| {
             next.deinit(alloc);
             alloc.destroy(next);
         }
+        if (self.fix) |fix| alloc.free(fix.text);
         alloc.free(self.msg);
     }
+};
+
+/// Replaces the bytes `pos..end_pos` of the source of the report's chunk with `text`.
+/// In a `Report`, `text` is owned by the report.
+pub const ReportFix = struct {
+    pos: u32,
+    end_pos: u32,
+    text: []const u8,
 };
 
 pub const AotCompileResult = struct {

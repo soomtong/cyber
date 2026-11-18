@@ -16,9 +16,9 @@ pub const code_unused_local = "unused-local";
 pub const code_unused_use = "unused-use";
 pub const code_scope_exit = "scope-exit";
 
-/// The fix for a diagnostic with message `msg` and code `code` (empty for a compile error) over `text[start..end]`.
-/// Null when the message names no fix that can be made from the text.
-pub fn quickFix(alloc: std.mem.Allocator, text: []const u8, start: usize, end: usize, msg: []const u8, code: []const u8) !?Fix {
+/// The fix for a diagnostic of the server with code `code` over `text[start..end]`. Null for another code.
+/// The fix of a compile error is not made here: the compiler sends the edit with the error (`CLReport.fix_text`).
+pub fn quickFix(alloc: std.mem.Allocator, text: []const u8, start: usize, end: usize, code: []const u8) !?Fix {
     if (start > end or end > text.len) return null;
     const range_text = text[start..end];
 
@@ -43,67 +43,7 @@ pub fn quickFix(alloc: std.mem.Allocator, text: []const u8, start: usize, end: u
             .new_text = try alloc.dupe(u8, ""),
         };
     }
-    if (code.len > 0) return null;
-
-    // 'Did you mean `trim_left`?', 'Did you mean the method `len()`?'
-    if (quoteAfter(msg, "Did you mean the method `") orelse quoteAfter(msg, "Did you mean `")) |name| {
-        if (!isIdentifier(range_text)) return null;
-        var new_text = name;
-        // `v.len` -> `v.len()`, but not when the call is already written.
-        if (std.mem.endsWith(u8, name, "()") and end < text.len and text[end] == '(') new_text = name[0 .. name.len - 2];
-        if (!isIdentifier(new_text) and !(std.mem.endsWith(u8, new_text, "()") and isIdentifier(new_text[0 .. new_text.len - 2]))) return null;
-        return .{
-            .title = try std.fmt.allocPrint(alloc, "Change to `{s}`", .{new_text}),
-            .start = start,
-            .end = end,
-            .new_text = try alloc.dupe(u8, new_text),
-        };
-    }
-
-    // 'Can not find the symbol `read_file_str` in `os`. Use `os.read_file`. ...': the same module, another name.
-    if (quoteAfter(msg, ". Use `")) |path| {
-        if (!isIdentifier(range_text)) return null;
-        const dot = std.mem.findScalarLast(u8, path, '.') orelse return null;
-        const mod = path[0..dot];
-        const member = path[dot + 1 ..];
-        if (!isIdentifier(member)) return null;
-        // Only when the name is written after the same module: `os.read_file_str` -> `os.read_file`.
-        if (start < mod.len + 1 or !std.mem.eql(u8, text[start - mod.len - 1 .. start], path[0 .. dot + 1])) return null;
-        return .{
-            .title = try std.fmt.allocPrint(alloc, "Change to `{s}`", .{path}),
-            .start = start,
-            .end = end,
-            .new_text = try alloc.dupe(u8, member),
-        };
-    }
-
-    // '`append` changes `out` in place and returns nothing. Write `out.append(3)` as a statement.'
-    if (std.mem.indexOf(u8, msg, "` as a statement.") != null) {
-        const code_text = quoteAfter(msg, "Write `") orelse return null;
-        // The line must be `<name> = <the call>` and nothing else.
-        const line_start = if (std.mem.findScalarLast(u8, text[0..start], '\n')) |i| i + 1 else 0;
-        const line_end = std.mem.findScalarPos(u8, text, end, '\n') orelse text.len;
-        if (std.mem.trim(u8, text[end..line_end], " \t\r").len != 0) return null;
-        const head = std.mem.trimStart(u8, text[line_start..start], " \t");
-        const head_at = start - head.len;
-        if (!std.mem.endsWith(u8, head, " = ") or !isIdentifier(head[0 .. head.len - 3])) return null;
-        return .{
-            .title = try std.fmt.allocPrint(alloc, "Change to `{s}`", .{code_text}),
-            .start = head_at,
-            .end = end,
-            .new_text = try alloc.dupe(u8, code_text),
-        };
-    }
     return null;
-}
-
-/// The text between `prefix` and the next backtick.
-fn quoteAfter(msg: []const u8, prefix: []const u8) ?[]const u8 {
-    const at = std.mem.indexOf(u8, msg, prefix) orelse return null;
-    const rest = msg[at + prefix.len ..];
-    const close = std.mem.findScalar(u8, rest, '`') orelse return null;
-    if (close == 0) return null;
-    return rest[0..close];
 }
 
 /// The tokenizer takes ASCII letters, digits and `_` in a name.
@@ -178,53 +118,24 @@ pub fn typeIsWritten(init: []const u8, type_name: []const u8) bool {
 
 const t = std.testing;
 
-test "Quick fixes from the messages of the compiler and the hints of the server." {
+test "Quick fixes for the hints of the server." {
     var arena_state: std.heap.ArenaAllocator = .init(t.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    var text: []const u8 = "ok := os.fileExists('a')\n";
-    var start = std.mem.indexOf(u8, text, "fileExists").?;
-    var fix = (try quickFix(arena, text, start, start + 10, "Can not find the symbol `fileExists` in `os`. Did you mean `file_exists`?", "")).?;
-    try t.expectEqualStrings("file_exists", fix.new_text);
-    try t.expectEqual(start, fix.start);
-    try t.expectEqualStrings("Change to `file_exists`", fix.title);
-
-    text = "n := v.len\n";
-    start = std.mem.indexOf(u8, text, "len").?;
-    fix = (try quickFix(arena, text, start, start + 3, "Can not find the field `len` in `Vec2`. Did you mean the method `len()`?", "")).?;
-    try t.expectEqualStrings("len()", fix.new_text);
-    text = "n := v.len(1)\n";
-    fix = (try quickFix(arena, text, start, start + 3, "Did you mean the method `len()`?", "")).?;
-    try t.expectEqualStrings("len", fix.new_text);
-
-    text = "s := os.read_file_str('a')!\n";
-    start = std.mem.indexOf(u8, text, "read_file_str").?;
-    fix = (try quickFix(arena, text, start, start + 13, "Can not find the symbol `read_file_str` in `os`. Use `os.read_file`. It returns `str`.", "")).?;
-    try t.expectEqualStrings("read_file", fix.new_text);
-    // Another module: the fix would have to change the module and the `use` too.
-    text = "d := os.dirname(p)\n";
-    start = std.mem.indexOf(u8, text, "dirname").?;
-    try t.expect((try quickFix(arena, text, start, start + 7, "Can not find the symbol `dirname` in `os`. Use `path.dir` from `use path`.", "")) == null);
-
-    text = "fn f():\n    out = out.append(3)\n";
-    start = std.mem.indexOf(u8, text, "out.append").?;
-    fix = (try quickFix(arena, text, start, start + 13, "`append` changes `out` in place and returns nothing. Write `out.append(3)` as a statement.", "")).?;
-    try t.expectEqualStrings("out.append(3)", fix.new_text);
-    try t.expectEqualStrings("out = out.append(3)", text[fix.start..fix.end]);
-
-    text = "use os\nuse math\nprint(1)\n";
-    start = std.mem.indexOf(u8, text, "use math").?;
-    fix = (try quickFix(arena, text, start, start + 8, "The module `math` is never used.", code_unused_use)).?;
+    var text: []const u8 = "use os\nuse math\nprint(1)\n";
+    const start = std.mem.indexOf(u8, text, "use math").?;
+    var fix = (try quickFix(arena, text, start, start + 8, code_unused_use)).?;
     try t.expectEqualStrings("use math\n", text[fix.start..fix.end]);
     try t.expectEqualStrings("", fix.new_text);
 
     text = "x := 1\n";
-    fix = (try quickFix(arena, text, 0, 1, "`x` is never used.", code_unused_local)).?;
+    fix = (try quickFix(arena, text, 0, 1, code_unused_local)).?;
     try t.expectEqual(@as(usize, 0), fix.end);
     try t.expectEqualStrings("_", fix.new_text);
 
-    try t.expect((try quickFix(arena, text, 0, 1, "Undeclared variable `x`.", "")) == null);
+    // A compile error has no code. Its fix comes from the compiler.
+    try t.expect((try quickFix(arena, text, 0, 1, "")) == null);
 }
 
 test "The doc comment above a declaration." {

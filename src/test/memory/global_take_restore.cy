@@ -56,6 +56,76 @@ g.append(h.pop().?)
 t.eq('h1', g[0])
 t.eq(0, h.len())
 
+-- An argument is evaluated before the value is taken out, so it reads the global as it was: directly, through a
+-- function, and through a method that takes the global itself.
+global q []int = {1, 2, 3}
+fn q_len() -> int:
+    return q.len()
+q.append(q.len())
+q.append(q_len())
+(q).append(q.len())
+q.append(q.pop().?)
+q += q
+t.eq(12, q.len())
+t.eq(3, q[3])
+t.eq(4, q[4])
+t.eq(5, q[5])
+t.eq(1, q[6])
+q.size_up(14, q_len())
+t.eq(12, q[13])
+
+-- An argument that leaves the call (`!` in a function, `!` in a `try`) leaves the global as it was.
+fn fail() -> !str:
+    return error.Bad
+fn add_failing() -> !void:
+    g += fail()!
+fn try_add() -> bool:
+    add_failing() !else |e|:
+        return false
+    return true
+g_before := g.len()
+t.eq(false, try_add())
+t.eq(g_before, g.len())
+t.eq('h1', g[0])
+try:
+    q.append(int.parse('zz')!)
+else |e|:
+    pass
+t.eq(14, q.len())
+t.eq(false, try_add_field())
+t.eq(1, st.items.len())
+fn add_field_failing() -> !void:
+    st.items.append(fail()!)
+fn try_add_field() -> bool:
+    add_field_failing() !else |e|:
+        return false
+    return true
+
+-- A method with more than one function of the name: a list, a span, and their `+=`.
+local_more := []int{7, 8}
+q.clear()
+q.append(local_more)
+q.append(local_more.span())
+q += local_more
+q += local_more.span()
+t.eq(8, q.len())
+global ga Array[int] = {}
+ga.append(local_more)
+t.eq(2, ga.len())
+
+-- Another field of the same global can be an argument, also as a borrow.
+type Pair:
+    xs []int
+    ys []int
+    n  int
+global pair Pair = Pair{xs={1}, ys={5, 6}, n=7}
+pair.xs.append(pair.n)
+pair.xs.append(pair.ys.span())
+pair.xs += pair.ys
+t.eq(6, pair.xs.len())
+t.eq(7, pair.xs[1])
+t.eq(6, pair.xs[5])
+
 -- Through a pointer.
 fn push(p Ptr[[]str], s str):
     p.*.append(s)

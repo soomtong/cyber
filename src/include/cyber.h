@@ -695,6 +695,13 @@ typedef struct CLReport {
     /// A token or parse error reports a position: the range is the code point there, or empty at the end of a line.
     uint32_t pos;
     uint32_t end_pos;
+
+    /// Whether the compiler knows an edit that fixes the error: replace the bytes `fix_pos` to `fix_end_pos`
+    /// (exclusive) of the source `uri` with `fix_text`. Owned by the VM. Never set for a note.
+    bool has_fix;
+    uint32_t fix_pos;
+    uint32_t fix_end_pos;
+    CLBytes fix_text;
 } CLReport;
 
 /// Whether the compiler goes on after a compile error to report more than one. Off by default.

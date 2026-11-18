@@ -696,6 +696,10 @@ fn toReport(vm: *cy.VM, report: cy.Report, kind: C.ReportKind) C.Report {
         .end_col = loc.end_col,
         .pos = loc.pos,
         .end_pos = loc.end_pos,
+        .has_fix = loc.has_pos and report.fix != null,
+        .fix_pos = if (report.fix) |fix| fix.pos else 0,
+        .fix_end_pos = if (report.fix) |fix| fix.end_pos else 0,
+        .fix_text = C.to_bytes(if (report.fix) |fix| fix.text else ""),
     };
 }
 

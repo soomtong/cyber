@@ -463,7 +463,11 @@ pub const Parser = struct {
             var indent: u32 = 0;
             while (j < self.tokens.len) {
                 switch (self.tokens[j].tag()) {
-                    .new_line => j += 1,
+                    // The indent of a blank line is not the indent of the line after it.
+                    .new_line => {
+                        indent = 0;
+                        j += 1;
+                    },
                     .indent => {
                         indent = self.tokens[j].data.indent & 0x7fffffff;
                         j += 1;

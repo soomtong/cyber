@@ -638,7 +638,7 @@ pub fn getResolvedSymOrFail(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, nod
         } else {
             const mod_name = try cy.sym.formatSymName(c.sema, &cy.tempBuf, modSym.resolved(), .{ .from = c });
             const hint = try sema.suggestModuleSym(c, modSym, name, node);
-            return c.reportErrorFmt("Can not find the symbol `{}` in `{}`.{}", &.{v(name), v(mod_name), v(hint)}, node);
+            return c.reportErrorFix("Can not find the symbol `{}` in `{}`.{}", &.{v(name), v(mod_name), v(hint)}, node, sema.suggestedFix(c, name, node));
         }
     };
 }
@@ -667,7 +667,7 @@ pub fn accessResolvedSymOrFail(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, 
         const type_name = try c.sema.allocTypeName(rec_t);
         defer c.alloc.free(type_name);
         const hint = try cy.sema.suggestMember(c, rec_t, name, node);
-        return c.reportErrorFmt("Can not find the symbol `{}` for `{}`.{}", &.{v(name), v(type_name), v(hint)}, node);
+        return c.reportErrorFix("Can not find the symbol `{}` for `{}`.{}", &.{v(name), v(type_name), v(hint)}, node, cy.sema.suggestedFix(c, name, node));
     };
 }
 

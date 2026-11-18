@@ -407,8 +407,16 @@ test "Every syntax error gets a diagnostic." {
     try t.expectEqual(@as(i64, 4), get(diags[1], &.{ "range", "start", "line" }).?.integer);
     try t.expectEqual(@as(i64, 7), get(diags[2], &.{ "range", "start", "line" }).?.integer);
 
+    // A line of only spaces does not lend its indent to the line after it: `fn foo` starts a statement.
+    try s.change(main_uri, 2, "x := )\n    \nfn foo():\n    y := )\n\nz := 1\n");
+    out = try s.flush();
+    const blank = items(out[0], &.{ "params", "diagnostics" });
+    try t.expectEqual(@as(usize, 2), blank.len);
+    try t.expectEqual(@as(i64, 0), get(blank[0], &.{ "range", "start", "line" }).?.integer);
+    try t.expectEqual(@as(i64, 3), get(blank[1], &.{ "range", "start", "line" }).?.integer);
+
     // Fixing them brings the errors of the checks after parsing.
-    try s.change(main_uri, 2,
+    try s.change(main_uri, 3,
         \\fn a() -> int:
         \\    return nope
         \\
@@ -1440,4 +1448,61 @@ test "Hints of the compiler: unused names, scope exits, inlay hints, quick fixes
     edit = items(actions[0], &.{ "edit", "changes", main_uri })[0];
     try expectRange(get(edit, &.{"range"}).?, 1, 11, 1, 16);
     try t.expectEqualStrings("is_nan", str(edit, &.{"newText"}));
+}
+
+/// The code actions for the diagnostics of `text`.
+fn codeActionsOf(s: *Session, version: i64, text: []const u8) ![]const Value {
+    const arena = s.arena.allocator();
+    try s.change(main_uri, version, text);
+    var out = try s.flush();
+    const diags_json = try std.json.Stringify.valueAlloc(arena, get(out[0], &.{ "params", "diagnostics" }).?, .{});
+    const body = try std.fmt.allocPrint(arena,
+        \\{{"jsonrpc":"2.0","id":{},"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{s}"}},
+        \\"range":{{"start":{{"line":0,"character":0}},"end":{{"line":0,"character":0}}}},"context":{{"diagnostics":{s}}}}}}}
+    , .{ 100 + version, main_uri, diags_json });
+    out = try s.send(body);
+    return items(out[0], &.{"result"});
+}
+
+test "The fix of a compile error is the edit that the compiler sends with it." {
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+    try s.open(main_uri, 1, "print(1)\n");
+    _ = try s.flush();
+
+    // `xs = xs.append(v)`: the assignment becomes the call.
+    var actions = try codeActionsOf(&s, 2, "xs := []int{1}\nxs = xs.append(2)\nprint(xs)\n");
+    try t.expectEqual(@as(usize, 1), actions.len);
+    try t.expectEqualStrings("Change to `xs.append(2)`", str(actions[0], &.{"title"}));
+    var edit = items(actions[0], &.{ "edit", "changes", main_uri })[0];
+    try expectRange(get(edit, &.{"range"}).?, 1, 0, 1, 17);
+    try t.expectEqualStrings("xs.append(2)", str(edit, &.{"newText"}));
+
+    // Another variable on the left: the call as a statement would leave it unchanged, so there is no fix.
+    actions = try codeActionsOf(&s, 3, "xs := []int{1}\nvar ys []int = {}\nys = xs.append(2)\nprint(ys)\n");
+    try t.expectEqual(@as(usize, 0), actions.len);
+
+    // A function that was renamed in its module.
+    actions = try codeActionsOf(&s, 4, "use os\nprint(os.read_file_str('a')!)\n");
+    try t.expectEqual(@as(usize, 1), actions.len);
+    try t.expectEqualStrings("Change to `read_file`", str(actions[0], &.{"title"}));
+    edit = items(actions[0], &.{ "edit", "changes", main_uri })[0];
+    try expectRange(get(edit, &.{"range"}).?, 1, 9, 1, 22);
+
+    // A function that moved to another module has no edit of one name.
+    actions = try codeActionsOf(&s, 5, "use os\nprint(os.dirname('a/b'))\n");
+    try t.expectEqual(@as(usize, 0), actions.len);
+
+    // A method that is read like a field gets its call, once.
+    actions = try codeActionsOf(&s, 6, "xs := []int{1}\nprint(xs.len)\n");
+    try t.expectEqual(@as(usize, 1), actions.len);
+    edit = items(actions[0], &.{ "edit", "changes", main_uri })[0];
+    try t.expectEqualStrings("len()", str(edit, &.{"newText"}));
+    try expectRange(get(edit, &.{"range"}).?, 1, 9, 1, 12);
+    actions = try codeActionsOf(&s, 7, "xs := []int{1}\nprint(xs.length())\n");
+    try t.expectEqual(@as(usize, 1), actions.len);
+    edit = items(actions[0], &.{ "edit", "changes", main_uri })[0];
+    try t.expectEqualStrings("len", str(edit, &.{"newText"}));
 }

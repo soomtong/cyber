@@ -74,6 +74,14 @@ const Diagnostic = struct {
     code: []const u8 = "",
     /// Tagged `Unnecessary`: the client fades the range.
     unnecessary: bool = false,
+    /// The edit of the compiler that fixes the error. It goes out as `data.fix` and comes back with a code action
+    /// request.
+    fix: ?TextFix = null,
+};
+
+const TextFix = struct {
+    range: Range,
+    new_text: []const u8,
 };
 
 const Group = struct {
@@ -547,7 +555,17 @@ pub const Server = struct {
                 const uri = try self.uriOfReport(arena, doc, rep);
                 const range = try self.rangeOfReport(arena, doc, rep);
                 if (std.mem.eql(u8, uri, doc.uri)) {
-                    try groups.items[0].diags.append(arena, .{ .range = range, .msg = msg, .notes = notes.items });
+                    var fix: ?TextFix = null;
+                    if (rep.has_fix and rep.fix_pos <= rep.fix_end_pos and rep.fix_end_pos <= doc.text.len) {
+                        fix = .{
+                            .range = .{
+                                .start = position.fromOffset(doc.text, rep.fix_pos, self.encoding),
+                                .end = position.fromOffset(doc.text, rep.fix_end_pos, self.encoding),
+                            },
+                            .new_text = try validText(arena, c.from_bytes(rep.fix_text)),
+                        };
+                    }
+                    try groups.items[0].diags.append(arena, .{ .range = range, .msg = msg, .notes = notes.items, .fix = fix });
                     continue;
                 }
 
@@ -668,8 +686,8 @@ pub const Server = struct {
         }
     }
 
-    /// Quick fixes for the diagnostics that the client sends back: the names that the compiler suggests,
-    /// and the names that the server found unused (`assist.quickFix`).
+    /// Quick fixes for the diagnostics that the client sends back. A compile error carries the edit of the
+    /// compiler in `data.fix`. A diagnostic of the server (an unused name) gets its edit from `assist.quickFix`.
     fn onCodeAction(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
         const doc = try self.docOf(params);
         var b: Builder = undefined;
@@ -682,12 +700,25 @@ pub const Server = struct {
         if (getPath(params, &.{ "context", "diagnostics" })) |diags| {
             if (diags == .array) {
                 for (diags.array.items) |diag| {
-                    const msg = getStr(diag, "message") orelse continue;
-                    const code = getStr(diag, "code") orelse "";
-                    const range_v = getPath(diag, &.{"range"}) orelse continue;
-                    const start = self.offsetAt(doc, getPath(range_v, &.{"start"})) orelse continue;
-                    const end = self.offsetAt(doc, getPath(range_v, &.{"end"})) orelse continue;
-                    const fix = (try assist.quickFix(arena, doc.text, start, end, msg, code)) orelse continue;
+                    var fix: assist.Fix = undefined;
+                    if (getPath(diag, &.{ "data", "fix" })) |data_fix| {
+                        const new_text = getStr(data_fix, "newText") orelse continue;
+                        const start = self.offsetAt(doc, getPath(data_fix, &.{ "range", "start" })) orelse continue;
+                        const end = self.offsetAt(doc, getPath(data_fix, &.{ "range", "end" })) orelse continue;
+                        if (start > end) continue;
+                        fix = .{
+                            .title = try std.fmt.allocPrint(arena, "Change to `{s}`", .{new_text}),
+                            .start = start,
+                            .end = end,
+                            .new_text = new_text,
+                        };
+                    } else {
+                        const code = getStr(diag, "code") orelse continue;
+                        const range_v = getPath(diag, &.{"range"}) orelse continue;
+                        const start = self.offsetAt(doc, getPath(range_v, &.{"start"})) orelse continue;
+                        const end = self.offsetAt(doc, getPath(range_v, &.{"end"})) orelse continue;
+                        fix = (try assist.quickFix(arena, doc.text, start, end, code)) orelse continue;
+                    }
                     try jw.beginObject();
                     try jw.objectField("title");
                     try jw.write(fix.title);
@@ -1491,6 +1522,18 @@ pub const Server = struct {
             }
             try jw.objectField("message");
             try jw.write(diag.msg);
+            if (diag.fix) |fix| {
+                try jw.objectField("data");
+                try jw.beginObject();
+                try jw.objectField("fix");
+                try jw.beginObject();
+                try jw.objectField("range");
+                try writeRange(jw, fix.range);
+                try jw.objectField("newText");
+                try jw.write(fix.new_text);
+                try jw.endObject();
+                try jw.endObject();
+            }
             if (self.related_information and diag.notes.len > 0) {
                 try jw.objectField("relatedInformation");
                 try jw.beginArray();

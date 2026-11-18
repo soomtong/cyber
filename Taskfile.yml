@@ -142,7 +142,7 @@ tasks:
         vars: { OPT: ReleaseSafe, TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '{{.CLI_ARGS}}' }
 
   test:behavior:
-    desc: 'Run the behavior tests (src/test/**.cy scripts). BACKEND=vm|tcc|cc picks the compiler.'
+    desc: 'Run the behavior tests (src/test/**.cy scripts). BACKEND=vm|tcc|cc picks the compiler. The cases run in 4 processes at once; `-- -Dtest-shards=1` runs them in one.'
     cmds:
       - task: zig:build
         vars: { STEP: behavior-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '{{.CLI_ARGS}}' }

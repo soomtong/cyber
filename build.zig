@@ -17,6 +17,7 @@ var test_backend: config_.TestBackend = undefined;
 var trace: bool = undefined;
 var log_mem: bool = undefined;
 var no_cache: bool = undefined;
+var test_shards: u32 = undefined;
 var optFFI: ?bool = undefined;
 var optStatic: ?bool = undefined;
 var strip: bool = undefined;
@@ -51,6 +52,7 @@ pub fn build(b: *std.Build) !void {
     trace = b.option(bool, "trace", "Enable tracing features.") orelse (optimize == .debug);
     log_mem = b.option(bool, "log-mem", "Log memory traces.") orelse false;
     no_cache = b.option(bool, "no-cache", "Disable caching when running tests.") orelse false;
+    test_shards = b.option(u32, "test-shards", "Processes that share the behavior tests and run at once. Default 4.") orelse 4;
     dev = b.option(bool, "dev", "Marks version as dev.") orelse true;
     build_tag = non_empty(b.option([]const u8, "build", "Build number for the version string. Falls back to the BUILD env var."));
     commit_tag = non_empty(b.option([]const u8, "commit", "Short commit hash for the version string. Falls back to the COMMIT env var."));
@@ -198,11 +200,17 @@ pub fn build(b: *std.Build) !void {
         main_step.dependOn(&install.step);
     }
 
+    // The cases are shared between `test_shards` processes that run at once (`testShard` in behavior_test.zig).
     const behavior_test_cmd = b.step("behavior-test", "Run behavior tests.");
     {
-        var run = b.addRunArtifact(behavior_test);
-        run.has_side_effects = no_cache;
-        behavior_test_cmd.dependOn(&run.step);
+        const shards = @max(test_shards, 1);
+        for (0..shards) |i| {
+            var run = b.addRunArtifact(behavior_test);
+            run.setName(b.fmt("run behavior_test {}/{}", .{ i + 1, shards }));
+            run.setEnvironmentVariable("CYBER_TEST_SHARD", b.fmt("{}/{}", .{ i, shards }));
+            runTestInParallel(run);
+            behavior_test_cmd.dependOn(&run.step);
+        }
     }
 
     const lib_test_cmd = b.step("lib-test", "Run lib tests.");
@@ -222,6 +230,7 @@ pub fn build(b: *std.Build) !void {
         var test2 = run_lib_standalone_test(b, "examples/libcyber/bind_module.c", lib_bin);
         var test3 = run_lib_standalone_test(b, "examples/libcyber/host_tool.c", lib_bin);
         var test4 = run_lib_standalone_test(b, "examples/libcyber/host_await.c", lib_bin);
+        for ([_]*std.Build.Step.Run{ test1, test2, test3, test4 }) |run| runTestInParallel(run);
         lib_standalone_test_cmd.dependOn(&test1.step);
         lib_standalone_test_cmd.dependOn(&test2.step);
         lib_standalone_test_cmd.dependOn(&test3.step);
@@ -238,7 +247,7 @@ pub fn build(b: *std.Build) !void {
     const trace_test_cmd = b.step("trace-test", "Run trace tests.");
     {
         const run = b.addRunArtifact(trace_test);
-        run.has_side_effects = no_cache;
+        runTestInParallel(run);
         trace_test_cmd.dependOn(&run.step);
     }
 
@@ -256,6 +265,14 @@ pub fn build(b: *std.Build) !void {
     }
 
     b.step("version", "Get the short version.").dependOn(&addPrintStep(b, Version).step);
+}
+
+/// A run step that inherits stdio takes a global lock, so that no other step runs or compiles in the meantime.
+/// With a check its output is collected and shown when it fails, and the test executables run at the same time.
+/// The scripts that a test reads are not inputs of the step, so it always runs.
+fn runTestInParallel(run: *std.Build.Step.Run) void {
+    run.expectExitCode(0);
+    run.has_side_effects = true;
 }
 
 fn run_lib_standalone_test(b: *std.Build, path: []const u8, lib_bin: std.Build.LazyPath) *std.Build.Step.Run {

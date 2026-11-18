@@ -190,6 +190,46 @@ zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Dd
   다른 플랫폼 cli job은 같은 테스트를 통과했다. 태그 run을 `gh run rerun <run> --failed`로 다시 돌려 통과했고 Release job이 이어서
   릴리스를 만들었다(`build-969-93a9ca4`, 에셋 15개). CPU 시간 검사는 부하 걸린 x64 러너에서 흔들릴 수 있다.
 
+## CI 시간 줄이기 (2026-11-18)
+
+사용자 요청: "전체 CI가 시간이 너무 긴데 줄일 수 있는 방법을 검토". 검토와 채택은 위임받아 정했다. push 전이라 CI에서의 수치는
+아직 없다. 아래 "전"은 Latest Build `44236296335`(21분 28초)와 `44223527025`의 step 시간이다.
+
+- 원인 1, 테스트가 한 줄로 돈다. stdio를 물려받는 run step(`simple` 러너인 behavior · trace 테스트, standalone 예제)은 Zig 빌드
+  시스템의 전역 잠금을 잡는다(`std.Build.Step.Run.StdIo.inherit`: "this step will obtain a global lock to prevent other steps
+  from running in the meantime"). 그 동안 다른 테스트도, 다른 테스트 실행 파일의 컴파일도 멈춘다. behavior 테스트는 한
+  프로세스가 558개 스크립트를 차례로 돈다. Debug에서는 스크립트 하나가 1초쯤 걸린다(매번 core를 컴파일하는 Debug 컴파일러).
+  - 고침(`build.zig`): `runTestInParallel`이 run step에 종료 코드 검사를 달아 stdio를 `.check`로 바꾼다(출력은 모았다가 보여 준다).
+    테스트가 읽는 `.cy`는 step의 입력이 아니라서 `has_side_effects = true`로 항상 돌린다.
+  - behavior 테스트는 `-Dtest-shards`(기본 4)개 프로세스가 나눠 돈다. 각 프로세스는 `CYBER_TEST_SHARD=i/n`을 받고 차례가
+    `i`인 케이스만 돈다(`behavior_test.zig`의 `testShard`). `Compile.` · `FFI.` 같은 나머지 테스트는 첫 shard만 돈다.
+    wasm(`build-test` 뒤 wasm3)은 환경 변수가 없어 전처럼 한 번에 다 돈다.
+  - 로컬(arm64 macOS, 10코어, Debug): `zig build behavior-test` 6분 45초 → 2분 29초, `zig build test` 7분 34초 → 3분 50초.
+    남은 긴 줄은 `lsp-test`(130초)와 `lib-test`(120초)로, 각각 한 프로세스다. CI 러너는 3~4코어다.
+  - 케이스 하나를 일부러 틀리게 해서 확인했다: 그 shard가 'failed test: ...'를 내고 `zig build`가 1로 끝난다.
+  - 파일을 쓰는 케이스는 `modules/os.cy` 하나라 shard끼리 겹치지 않는다. LSP 테스트는 `tmpDir`을 쓴다.
+  - 위험: 부하가 늘어 시간에 기대는 검사가 흔들릴 수 있다(위 0.4.15의 `limits.zig` CPU 시간 검사). 흔들리면
+    `-Dtest-shards=1`로 가른다.
+- 원인 2, 같은 테스트를 두 번 돈다. `cmd=lib` job은 같은 타깃의 `cmd=cli` job과 같은 `zig build test`를 돌리고 마지막 Build만
+  달랐다. job 11개 중 4개(linux-gnu, macos x64, macos arm64, windows-gnu의 lib)가 중복이었다.
+  - 고침: 그 넷을 지우고 cli job에 `lib: true`를 달아 `zig build lib`를 한 번 더 돌린다. 아티팩트 이름(`...-cli`, `...-lib`)과
+    릴리스 에셋 이름은 그대로다. MSVC lib job은 CLI가 없어 남긴다. `pr-build.yml`도 같다.
+  - 벽시계 시간을 정하던 것은 `macos-26` 두 job(19~21분)이었다. lib job이 없어지고, cli job은 Debug 테스트(12~13.6분)가
+    줄어야 짧아진다. 러너 사용 시간은 job 4개만큼 준다.
+- 원인 3, 문서 생성이 Debug CLI로 돈다. `docs` job과 `gen-docs.yml`의 'Generate docs.'가 7분이었다(`gen-docs.cy`와
+  `gen-api-json.cy`). ReleaseSafe CLI로는 로컬에서 0.9초와 0.1초다(Debug는 21초와 15초). `zig build cli -Doptimize=ReleaseSafe`로
+  바꿨다. 빌드는 로컬에서 63초로 Debug보다 30초쯤 길다.
+- 원인 4, 컴파일러 캐시를 첫 `zig build` 뒤에 복원했다. 'Fetch Zig packages.'(`zig build --fetch`)가 패키지 캐시를 맞고도
+  1~2.8분이었다. 빈 캐시에서 빌드 러너를 컴파일하기 때문으로 본다(확인은 push 뒤). 'Cache.'를 fetch 앞으로 옮겼다. 키가
+  고정값(`...-1`)이라 2026-11-11에 저장된 뒤 갱신되지 않았다. 키에 Zig 버전과 `build.zig` · `build.zig.zon`의 해시를 넣고
+  `restore-keys`로 옛 캐시를 받는다. 소스가 바뀌면 실행 파일은 어차피 다시 컴파일되므로 커밋마다 저장하지는 않는다.
+- 하지 않은 것:
+  - arm64 macOS의 Debug 테스트 빼기. 가장 느린 step이지만 개발 기기와 같은 타깃의 Trace 검사라 남겼다. 병렬화로도
+    길면 다음 후보다.
+  - `lsp-test` · `lib-test` 쪼개기. 기본 러너(서버 프로토콜)라 테스트 이름 필터로 나눠야 한다.
+  - ReleaseFast 테스트 · wasm의 두 모드 줄이기. 검사 범위가 준다.
+- 워크플로만 고친 커밋은 Latest Build를 트리거하지 않는다(위). 이번 커밋은 `build.zig`와 소스가 같이 바뀌어 push하면 돈다.
+
 ## 번들에 언어 서버 (2026-11-13)
 
 - Linux · macOS 번들은 `cyber`와 `cyber-lsp` 둘을 담는다(0.4.9 다음 릴리스부터). `latest-build.yml`의 `cli` 작업이

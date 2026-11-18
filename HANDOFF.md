@@ -1,13 +1,15 @@
-# HANDOFF (2026-11-18): 0.4.15 릴리스(Slice 제자리 API, os 힌트, LSP 린트 · quick fix · inlay hint · 파서 복구)
+# HANDOFF (2026-11-18): 0.4.15 뒤 코드 리뷰 수정 10건과 CI 시간 줄이기
 
 ## 목표
 
 - 0.4.15 릴리스: `Slice` 제자리 API(깨지는 변경), `os` 파일 함수 옛 꼴의 힌트, `cyber-lsp`의 코드 지원 · 린트.
   LSP 확장은 사용자 요청(2026-11-18): "기본으로 탑재할 수 있는 LSP 기능을 목록화하고 구현, 패치 버전 릴리스".
+- 릴리스 뒤(2026-11-18): `/code-review` 0.4.14..HEAD의 10건을 모두 고치고, CI 시간을 줄이는 방법을 검토 · 적용
+  (사용자: "10번까지 작업을 마치고 ... 전체 CI가 시간이 너무 긴데 줄일 수 있는 방법을 검토", 검토 승인은 위임).
 
 ## 현재 브랜치
 
-`master`. 0.4.15 릴리스(`93a9ca4f`) 뒤 기록 커밋까지 push.
+`master`. 0.4.15 릴리스(`93a9ca4f`) 뒤 기록 커밋까지 push. 그 뒤의 리뷰 수정 · CI 커밋은 push하지 않았다(push는 지시 때만).
 
 ## 완료된 작업
 
@@ -25,6 +27,13 @@
   sema는 돌지 않는다. outline도 복구해서 파싱한다. 설계 · 확인은 LSP 설계 문서 13절.
 - [x] tars-agent: `docs/TODO.md`의 0.4.15 항목에 os 힌트를 적었다(`74e0615`, push 안 함).
 
+- [x] 코드 리뷰 수정 10건(2026-11-18). 목록과 동작 변화는 `docs/releases/unreleased.md` "0.4.14..0.4.15 코드 리뷰에서 나온 수정".
+  - 전역 take-and-restore: 값을 인자 뒤에 꺼낸다(`sema.finishGlobalTake`, `sema_func.matchFuncSig` 끝에서 호출).
+    결정 문서 `project_slice_append_aliasing.md` 결정 3-1의 "인자" 항목.
+  - 컴파일러가 fix를 오류에 싣는다(`Chunk.reportErrorFix`, `sema.suggestedFix`, `CLReport.has_fix`). LSP는 `data.fix`.
+  - 확인: `zig build test` Debug · ReleaseSafe 통과(behavior 558개, LSP 41개).
+- [x] CI 시간 줄이기(2026-11-18). 원인 넷과 고친 것은 `project_fork_release_ci.md` "CI 시간 줄이기". CI에서의 수치는 push 뒤에 본다.
+
 ## 시도했으나 실패한 접근
 
 - `+=` 경로에서 받는 쪽을 `semaExpr`로 읽으면 복사본에 append한다(이중 해제). 메서드 호출처럼 `semaExprSkipSym`을 써야 한다.
@@ -33,6 +42,10 @@
 - zsh는 `$files`를 단어로 나누지 않는다. 여러 파일 치환은 `rg -l0 ... | xargs -0`.
 
 ## 남은 작업
+
+- [ ] 리뷰 수정 · CI 커밋 push(사용자 지시 때). push 뒤 Latest Build의 job별 시간을 전(`44236296335`, 21분 28초)과 비교해
+  `project_fork_release_ci.md`에 적는다. macOS arm64 Debug 테스트가 여전히 길면 그 step을 빼는 안이 다음 후보다.
+- [ ] tars-agent `docs/TODO.md`에 다음 빌드에서 안내 105행을 고칠 항목을 적었다(커밋 안 함).
 
 - [x] 0.4.15 릴리스(2026-11-18): 태그 `0.4.15` → `93a9ca4f`, `build-969-93a9ca4`, Latest, 에셋 15개(CI). `install.sh 0.4.15`를 임시
   경로에 설치해 버전 · 스크립트 · `cyber-lsp`의 여러 구문 오류 진단을 확인했다. `/usr/local`의 설치는 사용자가 다시 한다.

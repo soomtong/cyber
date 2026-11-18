@@ -40,6 +40,20 @@ jobs:
           cmake ..
           make
 
+      # The compiler cache: the build runner, compiler-rt and the C dependencies do not change with the sources.
+      # It is restored before the first `zig build` (the fetch below), which otherwise compiles the build runner
+      # from nothing. A changed build script or Zig version saves a new cache; until then the newest one is used.
+      - name: Cache.
+        uses: actions/cache@v5
+        with:
+          path: |-
+            ~/.cache/zig
+            .zig-cache
+          key: docs-build-zig${{ env.ZIG_VERSION }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            docs-build-zig${{ env.ZIG_VERSION }}-
+            build-1
+
       # Dependencies of build.zig.zon are fetched into zig-pkg. Restoring them before the first `zig build` keeps a
       # build from failing when the host of a dependency (codeberg.org) is down.
       # build.zig.zon also holds the version, so a release commit changes the key. `restore-keys` then restores the
@@ -95,19 +109,9 @@ jobs:
             core.exportVariable('BUILD', build.trim());
             core.exportVariable('COMMIT', context.sha.substring(0, 7));
 
-      - name: Cache.
-        uses: actions/cache@v5
-        with:
-          path: |-
-            ~/.cache/zig
-            .zig-cache
-          key:
-            build-1
-          restore-keys:
-            build-1
-
+      # An optimized build: the Debug CLI took 7 minutes to run the two generator scripts, this one takes seconds.
       - name: Build Cyber.
-        run: zig build cli
+        run: zig build cli -Doptimize=ReleaseSafe
 
       - name: Generate docs.
         run: |

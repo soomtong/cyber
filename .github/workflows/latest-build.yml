@@ -32,11 +32,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # `lib: true` also builds the static library in the job of the CLI. Both come from the same sources and
+        # `zig build test` is the same command for both, so a job of its own for the library ran every test twice.
+        # The MSVC library keeps its job: no CLI is built for that ABI.
         config:
           - host: ubuntu-24.04
             target: x86_64-linux-gnu
             mode: release
             cmd: cli
+            lib: true
           - host: ubuntu-24.04
             target: x86_64-selinux-gnu
             mode: release
@@ -45,18 +49,17 @@ jobs:
             target: x86_64-macos-none
             mode: release
             cmd: cli
+            lib: true
           - host: macos-26
             target: aarch64-macos-none
             mode: release
             cmd: cli
+            lib: true
           - host: windows-2022
             target: x86_64-windows-gnu
             mode: release
             cmd: cli
-          - host: windows-2022
-            target: x86_64-windows-gnu
-            mode: release
-            cmd: lib
+            lib: true
           - host: windows-2022
             target: x86_64-windows-msvc
             mode: release
@@ -65,18 +68,6 @@ jobs:
             target: wasm32-wasi
             mode: release
             cmd: cli
-          - host: ubuntu-24.04
-            target: x86_64-linux-gnu
-            mode: release
-            cmd: lib
-          - host: macos-26-intel
-            target: x86_64-macos-none
-            mode: release
-            cmd: lib
-          - host: macos-26
-            target: aarch64-macos-none
-            mode: release
-            cmd: lib
     env:
       BIN_ZIP: >-
         ${{ fromJson('{
@@ -158,6 +149,21 @@ jobs:
           7z x zig.zip
           Add-Content $env:GITHUB_PATH 'C:\zig-x86_64-windows-${{ env.ZIG_VERSION }}\'
 
+      # The compiler cache: the build runner, compiler-rt and the C dependencies do not change with the sources.
+      # It is restored before the first `zig build` (the fetch below), which otherwise compiles the build runner
+      # from nothing. A changed build script or Zig version saves a new cache; until then the newest one is used.
+      - name: Cache.
+        uses: actions/cache@v5
+        with:
+          path: |-
+            ~/.cache/zig
+            .zig-cache
+            ~/AppData/Local/zig
+          key: build-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            build-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-zig${{ env.ZIG_VERSION }}-
+            build-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-
+
       # Dependencies of build.zig.zon are fetched into zig-pkg. Restoring them before the first `zig build` keeps a
       # build from failing when the host of a dependency (codeberg.org) is down.
       # build.zig.zon also holds the version, so a release commit changes the key. `restore-keys` then restores the
@@ -213,19 +219,6 @@ jobs:
             core.exportVariable('BUILD', build.trim());
             core.exportVariable('COMMIT', context.sha.substring(0, 7));
 
-      - name: Cache.
-        #if: env.BUILD_TARGET != 'x86_64-windows-gnu'
-        uses: actions/cache@v5
-        with:
-          path: |-
-            ~/.cache/zig
-            .zig-cache
-            ~/AppData/Local/zig
-          key:
-            build-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-1
-          restore-keys:
-            build-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-1
-
       - name: Run tests. (debug)
         if: env.BUILD_TARGET != 'wasm32-wasi' && (env.BUILD_CMD == 'cli' || (env.BUILD_CMD == 'lib' && env.BUILD_TARGET != 'x86_64-windows-msvc'))
         run: |
@@ -268,6 +261,10 @@ jobs:
 
       - name: Build.
         run: zig build ${{ env.BUILD_CMD }} ${{ env.ZIG_MODE_FLAG }} ${{ env.ZIG_TARGET_FLAG }} ${{ env.DEV_FLAG }} -Dbuild=${{ env.BUILD }} -Dcommit=${{ env.COMMIT }}
+
+      - name: Build library.
+        if: matrix.config.lib
+        run: zig build lib ${{ env.ZIG_MODE_FLAG }} ${{ env.ZIG_TARGET_FLAG }} ${{ env.DEV_FLAG }} -Dbuild=${{ env.BUILD }} -Dcommit=${{ env.COMMIT }}
 
       # The language server goes into the bundle next to the CLI. Not on Windows yet: it builds there but has
       # not been run (docs/specs/2026-11-12-lsp-design.md).
@@ -314,7 +311,7 @@ jobs:
           cd zig-out/bin && 7z a ../../${{env.BIN_ZIP}} cyber.exe
 
       - name: Move. (windows lib)
-        if: env.BUILD_TARGET == 'x86_64-windows-gnu' && env.BUILD_CMD == 'lib'
+        if: env.BUILD_TARGET == 'x86_64-windows-gnu' && matrix.config.lib
         run: |
           mv zig-out/lib/cyber.lib libcyber-windows-gnu-x64.lib
 
@@ -324,17 +321,17 @@ jobs:
           mv zig-out/lib/cyber.lib libcyber-windows-msvc-x64.lib
 
       - name: Move. (linux lib)
-        if: env.BUILD_TARGET == 'x86_64-linux-gnu' && env.BUILD_CMD == 'lib'
+        if: env.BUILD_TARGET == 'x86_64-linux-gnu' && matrix.config.lib
         run: |
           mv zig-out/lib/libcyber.a libcyber-linux-x64.a
 
       - name: Move. (macos lib)
-        if: env.BUILD_TARGET == 'x86_64-macos-none' && env.BUILD_CMD == 'lib'
+        if: env.BUILD_TARGET == 'x86_64-macos-none' && matrix.config.lib
         run: |
           mv zig-out/lib/libcyber.a libcyber-macos-x64.a
 
       - name: Move. (macos lib)
-        if: env.BUILD_TARGET == 'aarch64-macos-none' && env.BUILD_CMD == 'lib'
+        if: env.BUILD_TARGET == 'aarch64-macos-none' && matrix.config.lib
         run: |
           mv zig-out/lib/libcyber.a libcyber-macos-arm64.a
 
@@ -357,10 +354,10 @@ jobs:
             ${{ env.BIN_ZIP }}
 
       - name: Save artifact.
-        if: env.BUILD_CMD == 'lib'
+        if: env.BUILD_CMD == 'lib' || matrix.config.lib
         uses: actions/upload-artifact@v6
         with:
-          name: bin-${{ env.BUILD_HOST }}-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-${{ env.BUILD_CMD }}
+          name: bin-${{ env.BUILD_HOST }}-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-lib
           path: |
             libcyber-windows-gnu-x64.lib
             libcyber-windows-msvc-x64.lib
@@ -396,6 +393,20 @@ jobs:
           cd build
           cmake ..
           make
+
+      # The compiler cache: the build runner, compiler-rt and the C dependencies do not change with the sources.
+      # It is restored before the first `zig build` (the fetch below), which otherwise compiles the build runner
+      # from nothing. A changed build script or Zig version saves a new cache; until then the newest one is used.
+      - name: Cache.
+        uses: actions/cache@v5
+        with:
+          path: |-
+            ~/.cache/zig
+            .zig-cache
+          key: docs-build-zig${{ env.ZIG_VERSION }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            docs-build-zig${{ env.ZIG_VERSION }}-
+            build-1
 
       # Dependencies of build.zig.zon are fetched into zig-pkg. Restoring them before the first `zig build` keeps a
       # build from failing when the host of a dependency (codeberg.org) is down.
@@ -452,19 +463,9 @@ jobs:
             core.exportVariable('BUILD', build.trim());
             core.exportVariable('COMMIT', context.sha.substring(0, 7));
 
-      - name: Cache.
-        uses: actions/cache@v5
-        with:
-          path: |-
-            ~/.cache/zig
-            .zig-cache
-          key:
-            build-1
-          restore-keys:
-            build-1
-
+      # An optimized build: the Debug CLI took 7 minutes to run the two generator scripts, this one takes seconds.
       - name: Build Cyber.
-        run: zig build cli
+        run: zig build cli -Doptimize=ReleaseSafe
 
       # docs/api.json is committed (the package and `cyber doc --api` carry it). It must match the sources.
       - name: Check docs/api.json.

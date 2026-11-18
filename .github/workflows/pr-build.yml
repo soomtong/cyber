@@ -23,11 +23,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # `lib: true` also builds the static library in the job of the CLI (see latest-build.yml).
         config:
           - host: ubuntu-24.04
             target: x86_64-linux-gnu
             mode: release
             cmd: cli
+            lib: true
           - host: ubuntu-24.04
             target: x86_64-selinux-gnu
             mode: release
@@ -36,36 +38,23 @@ jobs:
             target: x86_64-macos-none
             mode: release
             cmd: cli
+            lib: true
           - host: macos-15
             target: aarch64-macos-none
             mode: release
             cmd: cli
+            lib: true
           - host: windows-2022
             target: x86_64-windows-gnu
             mode: release
             cmd: cli
+            lib: true
           - host: ubuntu-24.04
             target: wasm32-wasi
             mode: release
             cmd: cli
           - host: windows-2022
-            target: x86_64-windows-gnu
-            mode: release
-            cmd: lib
-          - host: windows-2022
             target: x86_64-windows-msvc
-            mode: release
-            cmd: lib
-          - host: ubuntu-24.04
-            target: x86_64-linux-gnu
-            mode: release
-            cmd: lib
-          - host: macos-15-intel
-            target: x86_64-macos-none
-            mode: release
-            cmd: lib
-          - host: macos-15
-            target: aarch64-macos-none
             mode: release
             cmd: lib
     env:
@@ -136,6 +125,21 @@ jobs:
           7z x zig.zip
           Add-Content $env:GITHUB_PATH 'C:\zig-x86_64-windows-${{ env.ZIG_VERSION }}\'
 
+      # The compiler cache: the build runner, compiler-rt and the C dependencies do not change with the sources.
+      # It is restored before the first `zig build` (the fetch below), which otherwise compiles the build runner
+      # from nothing. A changed build script or Zig version saves a new cache; until then the newest one is used.
+      - name: Cache.
+        uses: actions/cache@v5
+        with:
+          path: |-
+            ~/.cache/zig
+            .zig-cache
+            ~/AppData/Local/zig
+          key: pr-build-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            pr-build-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-zig${{ env.ZIG_VERSION }}-
+            pr-build-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-
+
       # Dependencies of build.zig.zon are fetched into zig-pkg. Restoring them before the first `zig build` keeps a
       # build from failing when the host of a dependency (codeberg.org) is down.
       # build.zig.zon also holds the version, so a release commit changes the key. `restore-keys` then restores the
@@ -161,18 +165,6 @@ jobs:
             sleep $((attempt * 20))
           done
           exit 1
-
-      - name: Cache.
-        uses: actions/cache@v5
-        with:
-          path: |-
-            ~/.cache/zig
-            .zig-cache
-            ~/AppData/Local/zig
-          key:
-            pr-build-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-1
-          restore-keys:
-            pr-build-${{ env.BUILD_TARGET }}-${{ env.BUILD_MODE }}-1
 
       - name: Run tests. (debug)
         if: env.BUILD_TARGET != 'wasm32-wasi' && (env.BUILD_CMD == 'cli' || (env.BUILD_CMD == 'lib' && env.BUILD_TARGET != 'x86_64-windows-msvc'))
@@ -216,3 +208,7 @@ jobs:
 
       - name: Build.
         run: zig build ${{ env.BUILD_CMD }} ${{ env.ZIG_MODE_FLAG }} ${{ env.ZIG_TARGET_FLAG }}
+
+      - name: Build library.
+        if: matrix.config.lib
+        run: zig build lib ${{ env.ZIG_MODE_FLAG }} ${{ env.ZIG_TARGET_FLAG }}

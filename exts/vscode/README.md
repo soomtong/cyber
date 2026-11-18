@@ -22,7 +22,7 @@ With the language server running:
 * Format Document, the same result as `cyber fmt`.
 * Outline (types with their fields, functions, methods, constants, globals) and folding by indentation.
 
-The main block and each function show their first error. A syntax error is shown alone until it is fixed.
+Every syntax error is shown. Once there are none, the main block and each function show their first error.
 
 ## Requirements
 

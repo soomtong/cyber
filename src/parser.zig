@@ -46,7 +46,14 @@ const ParseOptions = struct {
 
     /// Used by libcyber's `findType`.
     parse_func_types: bool = false,
+
+    /// Go on after a syntax error to report the next ones. A statement that fails is left out of the tree and
+    /// parsing resumes at the next line that is not indented deeper than it. The result still has `has_error`.
+    recover: bool = false,
 };
+
+/// Syntax errors after which recovery stops.
+const max_recover_errors = 100;
 
 /// Parses source code into AST.
 pub const Parser = struct {
@@ -79,6 +86,13 @@ pub const Parser = struct {
 
     parse_func_types: bool,
 
+    /// `ParseOptions.recover`.
+    recover: bool,
+    /// Syntax errors reported in this parse.
+    error_count: u32,
+    /// Where the last syntax error was reported. A resumed statement that fails at the same place is not reported twice.
+    last_error_pos: u32,
+
     /// For custom functions.
     user: struct {
         ctx: *anyopaque,
@@ -109,6 +123,9 @@ pub const Parser = struct {
             .ctx = undefined,
             .has_error = false,
             .parse_func_types = false,
+            .recover = false,
+            .error_count = 0,
+            .last_error_pos = 0,
             .has_top_ct_stmt = false,
         };
         try self.ast.init(alloc, "", 0);
@@ -131,6 +148,9 @@ pub const Parser = struct {
         self.deps.clearRetainingCapacity();
         self.has_error = false;
         self.parse_func_types = opts.parse_func_types;
+        self.recover = opts.recover;
+        self.error_count = 0;
+        self.last_error_pos = 0;
 
         var tokenizer = cy.Tokenizer.init(self.alloc, src);
         defer tokenizer.deinit();
@@ -204,12 +224,21 @@ pub const Parser = struct {
         }
 
         try self.pushBlock();
-        const stmts = try self.parseBodyStatements(0, .{ .allow_decls = true });
+        var stmts = try self.parseBodyStatements(0, .{ .allow_decls = true });
         _ = self.popBlock();
 
-        try self.consumeNewLineOrEnd();
-        if (try self.consumeFirstIndent()) |_| {
-            return self.reportError("Unexpected indentation.", &.{});
+        // The top level ends at the end of the tokens. With recovery a line that is left unfinished or a line
+        // indented deeper is reported and parsing resumes at the next line of the top level.
+        while (true) {
+            const end_pos = self.next_pos;
+            if (self.consumeRootEnd()) |_| break else |err| {
+                try self.recoverAt(err, end_pos, 0);
+            }
+            if (!try self.consumeNextLineIndent(0)) break;
+            try self.pushBlock();
+            const more = try self.parseBodyStatements(0, .{ .allow_decls = true });
+            _ = self.popBlock();
+            stmts = try std.mem.concat(self.ast.node_alloc, *ast.Node, &.{ stmts, more });
         }
 
         return self.ast.newNode(.root, .{
@@ -357,21 +386,97 @@ pub const Parser = struct {
 
         const stmt_start = self.node_stack.items.len;
         defer self.node_stack.items.len = stmt_start;
+        const first_pos = self.next_pos;
 
-        var stmt = try self.parseStatement(config);
-        try self.pushNode(stmt);
+        if (try self.parseStatementOrRecover(reqIndent, config)) |stmt| {
+            try self.pushNode(stmt);
+        }
 
         // Parse body statements until indentation goes back to at least the previous indent.
         while (true) {
             const start = self.next_pos;
-            if (!try self.consumeNextLineIndent(reqIndent)) {
+            const more = self.consumeNextLineIndent(reqIndent) catch |err| {
+                try self.recoverAt(err, start, reqIndent);
+                continue;
+            };
+            if (!more) {
                 self.next_pos = start;
                 break;
             }
-            stmt = try self.parseStatement(config);
-            try self.pushNode(stmt);
+            if (try self.parseStatementOrRecover(reqIndent, config)) |stmt| {
+                try self.pushNode(stmt);
+            }
+        }
+        // Every statement failed and was left out. A body has at least one statement.
+        if (self.node_stack.items.len == stmt_start) {
+            try self.pushNode(try self.newTokenNode(.passStmt, @min(first_pos, @as(u32, @intCast(self.tokens.len -| 1)))));
         }
         return self.ast.dupeNodes(self.node_stack.items[stmt_start..]);
+    }
+
+    fn consumeRootEnd(self: *Parser) !void {
+        try self.consumeNewLineOrEnd();
+        if (try self.consumeFirstIndent()) |_| {
+            return self.reportError("Unexpected indentation.", &.{});
+        }
+    }
+
+    /// A statement of a body at `req_indent`. With recovery a statement that fails is reported, left out
+    /// (null) and the parser is put at the line to resume at.
+    fn parseStatementOrRecover(self: *Parser, req_indent: u32, config: ParseStmtConfig) !?*ast.Node {
+        const start = self.next_pos;
+        const block_len = self.blockStack.items.len;
+        return self.parseStatement(config) catch |err| {
+            if (!self.canRecover(err)) return err;
+            // A block that the statement opened is not closed by its own code on an error.
+            while (self.blockStack.items.len > block_len) {
+                var block = self.blockStack.pop().?;
+                block.deinit(self.alloc);
+            }
+            self.next_pos = self.resumePos(start, req_indent);
+            return null;
+        };
+    }
+
+    /// Recovery from an error outside a statement, from the token at `start`.
+    fn recoverAt(self: *Parser, err: anyerror, start: u32, req_indent: u32) !void {
+        if (!self.canRecover(err)) return err;
+        self.next_pos = self.resumePos(start, req_indent);
+    }
+
+    fn canRecover(self: *Parser, err: anyerror) bool {
+        return self.recover and err == error.ParseError and self.error_count < max_recover_errors;
+    }
+
+    /// The new line token before the line to resume at, after a statement at `start` failed in a body at
+    /// `req_indent`. That is the first line after `start` that is indented less than the body, which ends it,
+    /// or as much as the body and at or after the error, so that lines that the failed statement already
+    /// read are not read again. Lines indented deeper belong to the failed statement. At the end of the
+    /// tokens, the end.
+    fn resumePos(self: *Parser, start: u32, req_indent: u32) u32 {
+        const req = req_indent & 0x7fffffff;
+        var i = start + 1;
+        while (i < self.tokens.len) : (i += 1) {
+            if (self.tokens[i].tag() != .new_line) continue;
+            // The first token of the next line that is not blank.
+            var j = i + 1;
+            var indent: u32 = 0;
+            while (j < self.tokens.len) {
+                switch (self.tokens[j].tag()) {
+                    .new_line => j += 1,
+                    .indent => {
+                        indent = self.tokens[j].data.indent & 0x7fffffff;
+                        j += 1;
+                    },
+                    else => break,
+                }
+            }
+            if (j >= self.tokens.len or self.tokens[j].tag() == .null) return i;
+            if (indent < req) return i;
+            if (indent == req and self.tokens[j].pos() >= self.last_error_pos) return i;
+            i = j - 1;
+        }
+        return @intCast(self.tokens.len);
     }
 
     /// Parses the first child indent and returns the indent size.
@@ -3134,7 +3239,13 @@ pub const Parser = struct {
     }
 
     fn reportErrorAtSrc(self: *Parser, format: []const u8, args: []const fmt.FmtValue, srcPos: u32) anyerror {
+        // A statement resumed after an error that fails at the same place again.
+        if (self.recover and self.has_error and srcPos == self.last_error_pos) {
+            return error.ParseError;
+        }
         self.has_error = true;
+        self.error_count += 1;
+        self.last_error_pos = srcPos;
         return self.reportFn(self, format, args, srcPos);
     }
 

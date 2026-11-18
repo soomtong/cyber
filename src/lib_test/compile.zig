@@ -907,12 +907,47 @@ test "With error recovery every body reports its first error." {
     try zt.eq(C.ErrorCompile, C.vm_validate(vm, "fn a() -> int:\n    return nope1\nfn b() -> int:\n    return nope2"));
     try zt.eq(@as(usize, 2), C.vm_compile_report_count(vm));
 
-    // A syntax error and an error in a declaration still end the compile.
+    // A source with a syntax error is not checked further: only the syntax errors are reported.
     C.vm_reset(vm);
     try zt.eq(C.ErrorCompile, C.vm_eval(vm, "fn a() -> int:\n    return nope1\nfn b( -> int:\n    return nope2", &res));
     try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
     try zt.expect(C.vm_compile_report(vm, 0, &rep));
     try zt.eq(C.ReportParseError, rep.kind);
+
+    // Every syntax error is reported. The statement with the error is skipped with the lines indented under it,
+    // and parsing goes on at the next line of the same body or of a body around it.
+    const syntax_src =
+        \\fn a() -> int:
+        \\    return nope1
+        \\fn b( -> int:
+        \\    return 1
+        \\x := )
+        \\fn c():
+        \\    y := 1 + ]
+        \\    z := 3
+        \\    if z ==:
+        \\        pass
+        \\w := 4
+        \\    v := 5
+        \\print(w)
+    ;
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, syntax_src, &res));
+    const syntax_lines = [_]u32{ 2, 4, 6, 8, 11 };
+    try zt.eq(syntax_lines.len, C.vm_compile_report_count(vm));
+    for (syntax_lines, 0..) |line, i| {
+        try zt.expect(C.vm_compile_report(vm, i, &rep));
+        try zt.eq(C.ReportParseError, rep.kind);
+        try zt.eq(line, rep.line);
+    }
+    // Without recovery the first one ends the compile.
+    C.vm_set_error_recovery(vm, false);
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, syntax_src, &res));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+    C.vm_set_error_recovery(vm, true);
+
+    // An error in a declaration still ends the compile.
 
     C.vm_reset(vm);
     try zt.eq(C.ErrorCompile, C.vm_eval(vm, "fn a(x Nope) -> int:\n    return 1\nfn b() -> int:\n    return nope2", &res));

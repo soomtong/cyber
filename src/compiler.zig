@@ -836,7 +836,8 @@ pub fn performChunkParse(self: *Compiler, chunk: *cy.Chunk) !void {
     chunk.parser.tokenizerReportFn = S.tokenizerReport;
     chunk.parser.ctx = chunk;
 
-    const res = try chunk.parser.parse(chunk.src, chunk.id, .{});
+    // With recovery every syntax error of the chunk is reported. A chunk with one is still not checked further.
+    const res = try chunk.parser.parse(chunk.src, chunk.id, .{ .recover = chunk.compiler.recover });
     tt.endPrintVerbose("parse");
     // Update buffer pointers so success/error paths can access them.
     chunk.updateAstView(res.ast);

@@ -147,7 +147,8 @@ const Collector = struct {
     }
 };
 
-/// The declarations at the top level of `src`, in source order. Null if `src` does not parse.
+/// The declarations at the top level of `src`, in source order. A declaration with a syntax error is left out.
+/// Null if `src` does not tokenize.
 /// The result is allocated in `arena` and its names point into `src` or `arena`.
 pub fn documentSymbols(arena: std.mem.Allocator, src: []const u8) error{OutOfMemory}!?[]const Symbol {
     var parser: cy.Parser = undefined;
@@ -157,11 +158,11 @@ pub fn documentSymbols(arena: std.mem.Allocator, src: []const u8) error{OutOfMem
     parser.tokenizerReportFn = tokenizerReport;
     parser.ctx = &parser;
 
-    const res = parser.parse(src, 0, .{}) catch |err| switch (err) {
+    // A statement with a syntax error is left out and the declarations around it are still listed.
+    const res = parser.parse(src, 0, .{ .recover = true }) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return null,
     };
-    if (res.has_error) return null;
     const root = res.root orelse return null;
 
     var c: Collector = .{ .arena = arena, .src = src };
@@ -283,8 +284,13 @@ test "The outline lists the declarations of a source." {
     try t.expectEqualStrings("total", syms[5].name);
     try t.expectEqual(Kind.variable, syms[5].kind);
 
-    // A source that does not parse has no outline.
-    try t.expectEqual(@as(?[]const Symbol, null), try documentSymbols(arena, "fn add(a int:\n"));
+    // A declaration with a syntax error is left out. The ones around it are listed.
+    const broken = (try documentSymbols(arena, "fn add(a int:\n    return a\n\nfn sub(a int) -> int:\n    b := )\n    return a\n\nx := 1\n")).?;
+    try t.expectEqual(@as(usize, 2), broken.len);
+    try t.expectEqualStrings("sub", broken[0].name);
+    try t.expectEqualStrings("x", broken[1].name);
+    // A source that does not tokenize has no outline.
+    try t.expectEqual(@as(?[]const Symbol, null), try documentSymbols(arena, "x := 'abc\n"));
 }
 
 test "Folding follows the indentation." {

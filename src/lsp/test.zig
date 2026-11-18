@@ -382,6 +382,43 @@ test "Every body with an error gets a diagnostic." {
     try t.expectEqual(@as(usize, 1), items(out[0], &.{ "params", "diagnostics" }).len);
 }
 
+test "Every syntax error gets a diagnostic." {
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+
+    // A source with a syntax error is not checked further, so `nope` gets no diagnostic.
+    try s.open(main_uri, 1,
+        \\fn a() -> int:
+        \\    x := )
+        \\    return nope
+        \\
+        \\fn b(:
+        \\    pass
+        \\
+        \\y := 1 + ]
+        \\
+    );
+    var out = try s.flush();
+    const diags = items(out[0], &.{ "params", "diagnostics" });
+    try t.expectEqual(@as(usize, 3), diags.len);
+    try expectRange(get(diags[0], &.{"range"}).?, 1, 9, 1, 10);
+    try t.expectEqual(@as(i64, 4), get(diags[1], &.{ "range", "start", "line" }).?.integer);
+    try t.expectEqual(@as(i64, 7), get(diags[2], &.{ "range", "start", "line" }).?.integer);
+
+    // Fixing them brings the errors of the checks after parsing.
+    try s.change(main_uri, 2,
+        \\fn a() -> int:
+        \\    return nope
+        \\
+    );
+    out = try s.flush();
+    const after = items(out[0], &.{ "params", "diagnostics" });
+    try t.expectEqual(@as(usize, 1), after.len);
+    try t.expectEqualStrings("Undeclared variable `nope`.", str(after[0], &.{"message"}));
+}
+
 test "Positions are bytes for a client that offers utf-8." {
     var s: Session = undefined;
     try s.init();

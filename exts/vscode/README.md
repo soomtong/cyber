@@ -14,7 +14,8 @@ With the language server running:
   `continue` that waits for the fibers of a `scope` block before it leaves.
 * Quick fixes: the name that a compile error suggests (`Did you mean ...?`), `xs = xs.append(v)` to
   `xs.append(v)`, prefix an unused local with `_`, remove an unused `use`.
-* Inlay hints: the inferred type of `x := expr`, and `waits for fibers` after a statement that waits.
+* Inlay hints: the inferred type of `x := expr`, `waits for fibers` after a statement that waits, and the parameter
+  names before the arguments of a call to a function with two or more parameters.
 * Go to Definition, within the document and into the modules it uses.
 * Find References across the workspace, highlights, and Go to Symbol in Workspace. Rename for locals and parameters.
 * Semantic highlighting of the names that the compiler resolved.

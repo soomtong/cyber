@@ -66,3 +66,9 @@
 - core의 템플릿을 쓰는 식(`[]int{1, 2}`, `s.len()`)이 있으면, core 소스의 위치가 이 문서의 위치로 기록됐다. 문서가 길면 주석이나
   관계없는 자리에서 hover가 `void` · `int` · `str` 같은 타입을 보였다. 이제 다른 소스의 노드는 기록하지 않는다.
   `cl_vm_symbol_at` · `cl_vm_symbol_refs`도 같다.
+
+## cyber-lsp: 호출 자리의 매개변수 이름 (2026-11-19)
+
+- inlay hint가 매개변수가 둘 이상인 함수 호출의 인자 앞에 매개변수 이름을 보인다: `area(‹width:›7, ‹height:›3)`. 오버로드는 호출이
+  실제로 고른 함수의 이름이다. 메서드의 수신자, 그리고 이미 이름을 말하는 인자(`height`, `self.height`, `old_height`)에는 없다.
+- libcyber: `CL_HINT_PARAM_NAME`(`CLHintKind` 4)이 생겼다. `cl_vm_symbol_hints`가 오류 없는 컴파일이 아니어도 낸다.

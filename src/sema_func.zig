@@ -644,6 +644,7 @@ pub fn matchFuncSym2(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const 
             if (c.compiler.config.deny_spawn and func_sym == c.sema.spawn_sym and !c.is_builtin) {
                 return c.reportErrorFmt("`spawn` is not allowed. The host disabled threads for this script (`deny_spawn`). Use `fiber` or a `scope` block for concurrent work.", &.{}, node);
             }
+            if (c.compiler.record_refs) cy.refs.recordCall(c, node, res.func);
             sema.markHotCall(c, res.func);
             try cy.global_init.recordCall(c, res.func);
             try sema.semaCancelHoist(c);

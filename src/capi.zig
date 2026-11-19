@@ -321,6 +321,7 @@ pub const HintLocalType: u32 = c.CL_HINT_LOCAL_TYPE;
 pub const HintScopeExit: u32 = c.CL_HINT_SCOPE_EXIT;
 pub const HintUnusedLocal: u32 = c.CL_HINT_UNUSED_LOCAL;
 pub const HintUnusedUse: u32 = c.CL_HINT_UNUSED_USE;
+pub const HintParamName: u32 = c.CL_HINT_PARAM_NAME;
 pub const vm_symbol_hints = c.cl_vm_symbol_hints;
 pub const vm_members_at = c.cl_vm_members_at;
 pub const vm_names_at = c.cl_vm_names_at;

@@ -101,6 +101,8 @@ pub const Compiler = struct {
     /// The `return`, `break` and `continue` statements of the main source that wait for the fibers of a
     /// `scope` block before they leave it (`refs.hints`).
     ref_scope_exits: std.ArrayList([2]u32) = .empty,
+    /// The calls of the main source and the functions they call (`refs.hints`).
+    ref_calls: std.ArrayList(cy.refs.Call) = .empty,
     /// The hints that the last `refs.hints` returned, and the text they point into.
     ref_hints: std.ArrayList(cy.refs.Hint) = .empty,
     ref_hint_text: std.ArrayList(u8) = .empty,
@@ -261,6 +263,7 @@ pub const Compiler = struct {
             self.ref_tokens.deinit(self.alloc);
             self.ref_locals.deinit(self.alloc);
             self.ref_scope_exits.deinit(self.alloc);
+            self.ref_calls.deinit(self.alloc);
             self.ref_hints.deinit(self.alloc);
             self.ref_hint_text.deinit(self.alloc);
             self.reports.deinit(self.alloc);
@@ -382,6 +385,7 @@ pub const Compiler = struct {
         self.ref_tokens.clearRetainingCapacity();
         self.ref_locals.clearRetainingCapacity();
         self.ref_scope_exits.clearRetainingCapacity();
+        self.ref_calls.clearRetainingCapacity();
         self.ref_hints.clearRetainingCapacity();
         self.ref_hint_text.clearRetainingCapacity();
         self.ref_hints_done = null;

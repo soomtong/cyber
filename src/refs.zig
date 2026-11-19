@@ -781,6 +781,20 @@ pub const LocalDecl = struct {
     inferred: ?*cy.Type,
 };
 
+/// A call of the main source and the function that it calls, out of the overloads.
+pub const Call = struct {
+    node: *ast.Node,
+    func: *cy.Func,
+};
+
+/// A call `f(a, b)` or `x.f(a, b)` of the main source. Calls that sema makes for other nodes (operators,
+/// literals) are not `callExpr` nodes and are skipped.
+pub fn recordCall(c: *cy.Chunk, node: *ast.Node, func: *cy.Func) void {
+    if (node.type() != .callExpr) return;
+    _ = rangeOf(c, node) orelse return;
+    c.compiler.ref_calls.append(c.compiler.alloc, .{ .node = node, .func = func }) catch {};
+}
+
 pub const HintKind = enum(u32) {
     /// `x := expr`: the type that was inferred for `x`. The range is the name, `detail` is the type.
     local_type = 0,
@@ -791,6 +805,9 @@ pub const HintKind = enum(u32) {
     unused_local = 2,
     /// A `use` whose module is never named. The range is the statement, `detail` is the name of the module.
     unused_use = 3,
+    /// An argument of a call to a function with two or more parameters: the name of its parameter. The range is the
+    /// argument, `detail` is the name. Not listed when the argument is a name that ends in the parameter's name.
+    param_name = 4,
 };
 
 pub const Hint = extern struct {
@@ -855,6 +872,7 @@ pub fn hints(compiler: *cy.Compiler, complete: bool) ![]const Hint {
         if (!std.mem.eql(u8, kw, "return") and !std.mem.eql(u8, kw, "break") and !std.mem.eql(u8, kw, "continue")) continue;
         try pending.append(alloc, .{ .pos = range[0], .end = range[1], .kind = .scope_exit, .start = @intFromPtr(src.ptr) - @intFromPtr(main.src.ptr), .len = kw_len });
     }
+    try paramNames(compiler, main, text, &pending);
     if (complete) {
         var index = try RefIndex.init(compiler);
         defer index.deinit(alloc);
@@ -881,6 +899,76 @@ pub fn hints(compiler: *cy.Compiler, complete: bool) ![]const Hint {
     }
     compiler.ref_hints_done = complete;
     return out.items;
+}
+
+/// The names of the parameters at the arguments of the calls in the main source.
+fn paramNames(compiler: *cy.Compiler, main: *cy.Chunk, text: *std.ArrayList(u8), pending: anytype) !void {
+    const alloc = compiler.alloc;
+    // A call in a template body or a loop is recorded more than once.
+    var seen: std.AutoHashMapUnmanaged(*ast.Node, void) = .empty;
+    defer seen.deinit(alloc);
+    for (compiler.ref_calls.items) |call_rec| {
+        if ((try seen.fetchPut(alloc, call_rec.node, {})) != null) continue;
+        const decl_n = call_rec.func.decl orelse continue;
+        if (decl_n.type() != .funcDecl) continue;
+        const decl = decl_n.cast(.funcDecl);
+
+        // The parameters that the arguments are written for: not the receiver, not the template parameters.
+        var names_buf: [32][]const u8 = undefined;
+        var nparams: usize = 0;
+        for (decl.params.slice()) |param| {
+            if (param.template_param) continue;
+            const name = param.name_type.nameOrNull() orelse break;
+            if (std.mem.eql(u8, name, "self")) continue;
+            if (nparams == names_buf.len) break;
+            names_buf[nparams] = name;
+            nparams += 1;
+        }
+        const names = names_buf[0..nparams];
+        if (names.len < 2) continue;
+
+        const args = call_rec.node.cast(.callExpr).args.slice();
+        // `Vec2.scale(v, 2.0)` passes the receiver as the first argument.
+        const skip: usize = if (args.len == names.len) 0 else if (args.len == names.len + 1) 1 else continue;
+        for (args[skip..], names) |arg, name| {
+            if (name.len == 0 or name[0] == '_') continue;
+            if (arg.src() != main.id) continue;
+            const pos = arg.pos();
+            const end = arg.end();
+            if (pos == cy.NullId or end == cy.NullId or end <= pos or end > main.src.len) continue;
+            if (argNamesParam(main.src[pos..end], name)) continue;
+            const start = text.items.len;
+            try text.appendSlice(alloc, name);
+            try pending.append(alloc, .{ .pos = pos, .end = end, .kind = .param_name, .start = start, .len = name.len });
+        }
+    }
+}
+
+/// Whether an argument already says the name of its parameter: `width`, `self.width`, `&width`, `old_width`.
+fn argNamesParam(arg: []const u8, param: []const u8) bool {
+    var s = std.mem.trim(u8, arg, " \t");
+    while (s.len > 0 and (s[0] == '&' or s[0] == '^')) s = s[1..];
+    var end = s.len;
+    while (end > 0 and (std.ascii.isAlphanumeric(s[end - 1]) or s[end - 1] == '_')) end -= 1;
+    // Only a name or a path of names, not a call or an expression that ends in a name.
+    for (s[0..end]) |ch| {
+        if (!(std.ascii.isAlphanumeric(ch) or ch == '_' or ch == '.' or ch == '&')) return false;
+    }
+    const last = s[end..];
+    if (last.len < param.len) return false;
+    if (!std.mem.endsWith(u8, last, param)) return false;
+    return last.len == param.len or last[last.len - param.len - 1] == '_';
+}
+
+test argNamesParam {
+    try std.testing.expect(argNamesParam("width", "width"));
+    try std.testing.expect(argNamesParam("self.width", "width"));
+    try std.testing.expect(argNamesParam("&width", "width"));
+    try std.testing.expect(argNamesParam("old_width", "width"));
+    try std.testing.expect(!argNamesParam("bandwidth", "width"));
+    try std.testing.expect(!argNamesParam("f(width)", "width"));
+    try std.testing.expect(!argNamesParam("1", "width"));
+    try std.testing.expect(!argNamesParam("a + width", "width"));
 }
 
 /// The positions that `unusedLocals` and `unusedUses` ask about, from one pass over the references.

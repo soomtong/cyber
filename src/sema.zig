@@ -7938,6 +7938,7 @@ pub fn markHotCall(c: *cy.Chunk, func: *cy.Func) void {
 }
 
 pub fn sema_call_ir(c: *cy.Chunk, func: *cy.Func, args: []const *ir.Expr, node: *ast.Node) !ExprResult {
+    if (c.compiler.record_refs) cy.refs.recordCall(c, node, func);
     markHotCall(c, func);
     try cy.global_init.recordCall(c, func);
     try semaCancelHoist(c);

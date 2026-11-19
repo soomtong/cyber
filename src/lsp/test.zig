@@ -1412,22 +1412,26 @@ test "Hints of the compiler: unused names, scope exits, inlay hints, quick fixes
     try expectRange(get(edit, &.{"range"}).?, 16, 0, 16, 0);
     try t.expectEqualStrings("_", str(edit, &.{"newText"}));
 
-    // Inlay hints: the inferred types, and the statement that waits.
+    // Inlay hints: the parameter names of `s.start`, the inferred types, and the statement that waits.
     body = try std.fmt.allocPrint(arena,
         \\{{"jsonrpc":"2.0","id":11,"method":"textDocument/inlayHint","params":{{"textDocument":{{"uri":"{s}"}},
         \\"range":{{"start":{{"line":0,"character":0}},"end":{{"line":30,"character":0}}}}}}}}
     , .{main_uri});
     out = try s.send(body);
     const hints = items(out[0], &.{"result"});
-    try t.expectEqual(@as(usize, 3), hints.len);
-    try t.expectEqualStrings("waits for fibers", str(hints[0], &.{"label"}));
-    try t.expectEqual(@as(i64, 13), int(hints[0], &.{ "position", "line" }));
-    try t.expectEqual(@as(i64, 16), int(hints[0], &.{ "position", "character" }));
-    try t.expectEqualStrings("int", str(hints[1], &.{"label"}));
-    try t.expectEqual(@as(i64, 1), int(hints[1], &.{"kind"}));
-    try t.expectEqual(@as(i64, 16), int(hints[1], &.{ "position", "line" }));
-    try t.expectEqual(@as(i64, 5), int(hints[1], &.{ "position", "character" }));
-    try t.expectEqual(@as(i64, 17), int(hints[2], &.{ "position", "line" }));
+    try t.expectEqual(@as(usize, 5), hints.len);
+    try t.expectEqualStrings("func:", str(hints[0], &.{"label"}));
+    try t.expectEqualStrings("args:", str(hints[1], &.{"label"}));
+    try t.expectEqual(@as(i64, 12), int(hints[1], &.{ "position", "line" }));
+    try t.expectEqual(@as(i64, 22), int(hints[1], &.{ "position", "character" }));
+    try t.expectEqualStrings("waits for fibers", str(hints[2], &.{"label"}));
+    try t.expectEqual(@as(i64, 13), int(hints[2], &.{ "position", "line" }));
+    try t.expectEqual(@as(i64, 16), int(hints[2], &.{ "position", "character" }));
+    try t.expectEqualStrings("int", str(hints[3], &.{"label"}));
+    try t.expectEqual(@as(i64, 1), int(hints[3], &.{"kind"}));
+    try t.expectEqual(@as(i64, 16), int(hints[3], &.{ "position", "line" }));
+    try t.expectEqual(@as(i64, 5), int(hints[3], &.{ "position", "character" }));
+    try t.expectEqual(@as(i64, 17), int(hints[4], &.{ "position", "line" }));
 
     // Hover shows the doc comment above the declaration.
     const hover = try s.requestAt("textDocument/hover", main_uri, 16, 10);
@@ -1448,6 +1452,44 @@ test "Hints of the compiler: unused names, scope exits, inlay hints, quick fixes
     edit = items(actions[0], &.{ "edit", "changes", main_uri })[0];
     try expectRange(get(edit, &.{"range"}).?, 1, 11, 1, 16);
     try t.expectEqualStrings("is_nan", str(edit, &.{"newText"}));
+}
+
+test "Inlay hints name the parameters at the arguments of a call." {
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+    const arena = s.arena.allocator();
+
+    try s.open(main_uri, 1,
+        \\fn area(width int, height int) -> int:
+        \\    return width * height
+        \\
+        \\fn area(radius float, turns float) -> float:
+        \\    return radius * turns
+        \\
+        \\height := 2
+        \\print(area(7, height))
+        \\print(area(1.5, 2.5))
+        \\
+    );
+    _ = try s.flush();
+    const body = try std.fmt.allocPrint(arena,
+        \\{{"jsonrpc":"2.0","id":11,"method":"textDocument/inlayHint","params":{{"textDocument":{{"uri":"{s}"}},
+        \\"range":{{"start":{{"line":0,"character":0}},"end":{{"line":30,"character":0}}}}}}}}
+    , .{main_uri});
+    const out = try s.send(body);
+    const hints = items(out[0], &.{"result"});
+    // `height` says its parameter already. The float overload has names of its own.
+    try t.expectEqual(@as(usize, 3), hints.len);
+    try t.expectEqualStrings("width:", str(hints[0], &.{"label"}));
+    try t.expectEqual(@as(i64, 2), int(hints[0], &.{"kind"}));
+    try t.expectEqual(@as(i64, 7), int(hints[0], &.{ "position", "line" }));
+    try t.expectEqual(@as(i64, 11), int(hints[0], &.{ "position", "character" }));
+    try t.expect(get(hints[0], &.{"paddingRight"}).?.bool);
+    try t.expectEqualStrings("radius:", str(hints[1], &.{"label"}));
+    try t.expectEqualStrings("turns:", str(hints[2], &.{"label"}));
+    try t.expectEqual(@as(i64, 16), int(hints[2], &.{ "position", "character" }));
 }
 
 /// The code actions for the diagnostics of `text`.

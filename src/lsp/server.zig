@@ -757,8 +757,9 @@ pub const Server = struct {
         try self.send(&b);
     }
 
-    /// Inlay hints: the type of `x := expr` after the name, unless the initializer already names it, and
-    /// `waits for fibers` after a statement that waits for the fibers of a `scope` block before it leaves.
+    /// Inlay hints: the type of `x := expr` after the name, unless the initializer already names it,
+    /// `waits for fibers` after a statement that waits for the fibers of a `scope` block before it leaves, and
+    /// the parameter names before the arguments of a call.
     fn onInlayHint(self: *Server, id: ?Value, params: Value) !void {
         const doc = try self.docOf(params);
         var start: usize = 0;
@@ -786,6 +787,8 @@ pub const Server = struct {
             var label: []const u8 = undefined;
             var at: usize = hint.end_pos;
             var kind: ?u8 = null;
+            var pad_left = true;
+            var label_buf: [128]u8 = undefined;
             switch (hint.kind) {
                 c.HintLocalType => {
                     // Only `x := init`: a declared type is in the source already.
@@ -804,6 +807,13 @@ pub const Server = struct {
                     at = @min(hint.end_pos, line_end);
                     while (at > hint.pos and std.ascii.isWhitespace(doc.text[at - 1])) at -= 1;
                 },
+                c.HintParamName => {
+                    // Before the argument: `add(first: 1, second: 2)`.
+                    label = std.fmt.bufPrint(&label_buf, "{s}:", .{detail}) catch continue;
+                    at = hint.pos;
+                    kind = 2;
+                    pad_left = false;
+                },
                 else => continue,
             }
             try jw.beginObject();
@@ -815,7 +825,7 @@ pub const Server = struct {
                 try jw.objectField("kind");
                 try jw.write(k);
             }
-            try jw.objectField("paddingLeft");
+            try jw.objectField(if (pad_left) "paddingLeft" else "paddingRight");
             try jw.write(true);
             try jw.endObject();
         }

@@ -1,6 +1,6 @@
 # LSP 서버 설계와 단계 계획
 
-2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 ~ P4 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P4 구현" 절), P5의 code action · inlay hint와 린트 진단(2026-11-18, 12절), 파서 복구(2026-11-18, 13절). 남은 것은 함수 · 타입 rename.
+2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 ~ P4 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P4 구현" 절), P5의 code action · inlay hint와 린트 진단(2026-11-18, 12절), 파서 복구(2026-11-18, 13절). 호출 자리의 매개변수 이름 inlay(2026-11-19, 12절). 남은 것은 함수 · 타입 rename.
 앞선 결정은 `docs/decisions/project_fmt.md`의 "내장 도구의 기준"(LSP는 CLI에 넣지 않고 라이브러리 위의 별도 프로그램),
 사실 근거는 `docs/study/01-pipeline-front-end.md` 6절과 `docs/decisions/project_compile_error_report.md`이다.
 
@@ -443,7 +443,8 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
 | 쓰지 않는 지역 · `use` | 진단(Warning, `Unnecessary` 태그) | 이번 |
 | quick fix | `codeAction` | 이번 |
 | 추론된 타입 | `inlayHint` | 이번 |
-| 함수 · 타입 rename, 매개변수 이름 inlay, call hierarchy, 범위 포맷 | | 하지 않음(아래) |
+| 호출 자리의 매개변수 이름 | `inlayHint` | 2026-11-19(아래 "매개변수 이름") |
+| 함수 · 타입 rename, call hierarchy, 범위 포맷 | | 하지 않음(아래) |
 
 ### 컴파일러: `cl_vm_symbol_hints`
 
@@ -494,6 +495,28 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
   자리를 가리켰다(위의 노드 위치 문제). 고친 뒤 지역 84건 · `use` 9건 · `scope` 출구 9건이고, 지역은 테스트가 `@deinit`을 보려고
   만든 값처럼 실제로 쓰지 않는 것이다. `use`는 모두 실제로 쓰지 않거나(주석에만 있는 이름 포함) 문서화된 예외다.
 
+### 매개변수 이름 (2026-11-19)
+
+`add(‹first:›1, ‹second:›2)`. 8절에서 하지 않은 "오버로드 중 고른 함수"를 호출마다 기록한다.
+
+- 기록: 런타임 호출 IR을 만드는 두 곳(`sema.sema_call_ir`, `sema_func.matchFuncSym2`)이 `refs.recordCall`로 노드와 고른 `*cy.Func`를
+  적는다(`Compiler.ref_calls`). 노드가 main 소스의 `callExpr`일 때만이다. 연산자 · 리터럴처럼 sema가 다른 노드를 위해 만드는 호출은
+  `callExpr`가 아니라 빠진다. 컴파일 타임 호출과 `host_builtin`은 IR 호출이 없어 빠진다.
+- 힌트: `CL_HINT_PARAM_NAME`, 범위는 인자, `detail`은 매개변수 이름. 이름은 함수 선언(`funcDecl`)의 매개변수에서 읽는다. 템플릿
+  매개변수와 `self`는 뺀다. 인자 수가 매개변수 수와 같으면 차례로, 하나 많으면 첫 인자를 수신자로 보고(`Box.grow(&b, 6, 8)`)
+  건너뛴다. 그 밖의 수는 힌트를 내지 않는다. 같은 호출 노드는 한 번만(반복문 · 템플릿 본문).
+- 잡음을 줄이는 규칙:
+  - 매개변수가 하나인 함수에는 내지 않는다. 차례를 헷갈릴 일이 없다(`print(x)`, `one(3)`).
+  - 인자가 이미 이름을 말하면 뺀다: 이름이나 이름 경로가 매개변수 이름으로 끝나고, 그 앞이 `.` · `_` · 시작이다(`width`,
+    `self.width`, `&width`, `old_width`. `bandwidth`는 아니다). `refs.argNamesParam`, 단위 테스트.
+  - `_`로 시작하는 매개변수는 뺀다.
+- 서버: inlay hint kind Parameter(2), 라벨 `이름:`, 인자 앞, `paddingRight`.
+- 오류가 있는 컴파일에서도 오류 전까지 해석된 호출의 것은 낸다(추론 타입과 같다).
+
+확인: lib 테스트 `cl_vm_symbol_hints names the parameters of the function that a call picked.`(오버로드마다 다른 이름, 메서드 두
+꼴, 매개변수 하나, 템플릿 함수, 반복문), 서버 테스트 `Inlay hints name the parameters at the arguments of a call.`, VS Code 테스트.
+저장소 `.cy` 284개를 서버 하나로 열어 inlay hint를 받았다. 죽는 것 없음, 매개변수 이름 10,803개(대부분 `t.eq(‹exp:›…, ‹act:›…)`).
+
 ### 다른 소스의 노드 (2026-11-19)
 
 main 소스의 식이 core의 템플릿을 쓰면(`[]int{1, 2}`, `s.len()`) 컴파일 타임 평가(`cte`)가 그 템플릿 선언의 노드를 main 청크에서
@@ -508,7 +531,7 @@ main 소스의 식이 core의 템플릿을 쓰면(`[]int{1, 2}`, `s.len()`) 컴�
 
 ### 하지 않은 것
 
-- 함수 · 타입 rename(11절과 같은 이유), 호출 자리의 매개변수 이름 inlay hint(오버로드 중 고른 함수를 기록하지 않는다, 8절),
+- 함수 · 타입 rename(11절과 같은 이유),
   call hierarchy, 범위 포맷.
 - 매개변수의 쓰지 않음: 콜백처럼 시그니처를 맞추느라 받는 매개변수가 많아 잡음이 크다.
 - 컴파일러 경고: 이 메모는 LSP · 호스트 질의로만 나온다. CLI의 컴파일 결과는 그대로다.

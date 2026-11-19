@@ -1622,6 +1622,87 @@ test "cl_vm_symbol_hints lists inferred types, scope exits and unused names." {
     }
 }
 
+test "cl_vm_symbol_hints names the parameters of the function that a call picked." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_symbol_info(vm, true);
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+
+    const src =
+        \\type Box:
+        \\    w int
+        \\
+        \\fn (&Box) grow(dw int, dh int) -> int:
+        \\    return self.w + dw + dh
+        \\
+        \\fn area(width int, height int) -> int:
+        \\    return width * height
+        \\
+        \\fn area(radius float, turns float) -> float:
+        \\    return radius * turns
+        \\
+        \\fn one(n int) -> int:
+        \\    return n
+        \\
+        \\fn pick[T Any](first T, second T) -> T:
+        \\    return first
+        \\
+        \\height := 2
+        \\old_width := 3
+        \\b := Box{w = 1}
+        \\print(area(7, height))
+        \\print(area(1.5, 2.5))
+        \\print(area(old_width, 9))
+        \\print(b.grow(4, 5))
+        \\print(Box.grow(&b, 6, 8))
+        \\print(one(11))
+        \\print(pick[int](12, 13))
+        \\for 0..2 |i|:
+        \\    print(area(i, 14))
+    ;
+    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
+    var hints: [*c]const C.Hint = null;
+    const len = C.vm_symbol_hints(vm, &hints);
+    const S = struct {
+        /// The parameter names at the occurrences of `needle`, in order.
+        fn names(src_: []const u8, hints_: []const C.Hint, needle: []const u8, buf: []u8) []const u8 {
+            const pos = std.mem.find(u8, src_, needle).?;
+            var n: usize = 0;
+            for (hints_) |hint| {
+                if (hint.kind != C.HintParamName or hint.pos < pos or hint.pos >= pos + needle.len) continue;
+                const name = C.from_bytes(hint.detail);
+                if (n > 0) {
+                    buf[n] = ' ';
+                    n += 1;
+                }
+                @memcpy(buf[n..][0..name.len], name);
+                n += name.len;
+            }
+            return buf[0..n];
+        }
+    };
+    var buf: [128]u8 = undefined;
+    const all = hints[0..len];
+    // The overload that the arguments picked, and not the name that is already written.
+    try zt.eqStr("width", S.names(src, all, "area(7, height)", &buf));
+    try zt.eqStr("radius turns", S.names(src, all, "area(1.5, 2.5)", &buf));
+    try zt.eqStr("height", S.names(src, all, "area(old_width, 9)", &buf));
+    // A method: not the receiver, whether it is before the `.` or the first argument.
+    try zt.eqStr("dw dh", S.names(src, all, "b.grow(4, 5)", &buf));
+    try zt.eqStr("dw dh", S.names(src, all, "Box.grow(&b, 6, 8)", &buf));
+    // One parameter: nothing to tell apart.
+    try zt.eqStr("", S.names(src, all, "one(11)", &buf));
+    try zt.eqStr("first second", S.names(src, all, "pick[int](12, 13)", &buf));
+    // A call in a loop body is listed once.
+    try zt.eqStr("width height", S.names(src, all, "area(i, 14)", &buf));
+    // The range is the argument.
+    for (all) |hint| {
+        if (hint.kind != C.HintParamName) continue;
+        if (hint.pos == std.mem.find(u8, src, "1.5").?) try zt.eq(hint.pos + 3, hint.end_pos);
+    }
+}
+
 test "The symbol queries find nothing when there is no recorded compile." {
     // They read the main chunk, which is undefined before the first compile and freed by a reset: a host that
     // asked then crashed (final review, 2026-11-13).

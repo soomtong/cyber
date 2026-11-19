@@ -248,7 +248,7 @@ test('Quick fixes for the lint diagnostics and for a compile error', async () =>
     await until('the lint diagnostics again', () => vscode.languages.getDiagnostics(hdoc.uri).length >= 3);
 });
 
-test('Inlay hints: inferred types and the statement that waits for fibers', async () => {
+test('Inlay hints: inferred types, the statement that waits for fibers and parameter names', async () => {
     const all = new vscode.Range(0, 0, hdoc.lineCount, 0);
     const hints = await vscode.commands.executeCommand('vscode.executeInlayHintProvider', hdoc.uri, all);
     const label = (h) => (typeof h.label === 'string' ? h.label : h.label.map((p) => p.value).join(''));
@@ -263,6 +263,13 @@ test('Inlay hints: inferred types and the statement that waits for fibers', asyn
     const waits = hints.find((h) => label(h).includes('waits for fibers'));
     assert.ok(waits, JSON.stringify(hints.map(label)));
     assert.deepStrictEqual(waits.position, positionOf(hdoc, 'return 1', 'return 1'.length));
+
+    // The parameter names before the arguments of `s.start(step, {1})`.
+    const func = at('step, {1}', 0);
+    assert.ok(func, JSON.stringify(hints.map(label)));
+    assert.strictEqual(label(func), 'func:');
+    assert.strictEqual(func.kind, vscode.InlayHintKind.Parameter);
+    assert.strictEqual(label(at('{1})', 0)), 'args:');
 });
 
 test('Hover shows the doc comment of the declaration', async () => {

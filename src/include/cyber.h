@@ -864,6 +864,10 @@ typedef enum {
     CL_HINT_UNUSED_LOCAL = 2,
     /// A `use` whose module is never named. The range is the statement, `detail` is the name of the module.
     CL_HINT_UNUSED_USE = 3,
+    /// An argument of a call to a function with two or more parameters. The range is the argument, `detail` is
+    /// the name of its parameter in the function that the call picked out of the overloads. Not listed when the
+    /// argument is a name that ends in the parameter's name (`width`, `self.width`, `old_width`).
+    CL_HINT_PARAM_NAME = 4,
 } CLHintKind;
 
 /// A note on the main source for an editor, see `cl_vm_symbol_hints`. `kind` is a `CLHintKind`.
@@ -875,7 +879,7 @@ typedef struct CLHint {
 } CLHint;
 
 /// Lists notes on the main source of the last compile: inferred types of locals, statements that wait for the
-/// fibers of a `scope` block, and, when the compile succeeded, the locals and `use`s that are never used.
+/// fibers of a `scope` block, the parameter names at the arguments of calls, and, when the compile succeeded, the locals and `use`s that are never used.
 /// A failed compile did not reach every use, so it lists no unused ones. Sorted by position. Needs
 /// `cl_vm_set_symbol_info`. Owned by the VM, valid until the next call of this function, eval, compile,
 /// validate or reset.

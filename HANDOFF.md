@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-19): LSP 다음 후보(VS Code 테스트, 위치 결함, 매개변수 이름 inlay, 선언 rename)
+# HANDOFF (2026-11-19): LSP 범위 포맷 · call hierarchy · 본문 안 문장 단위 복구
 
 ## 목표
 
@@ -7,6 +7,8 @@
 - 릴리스 뒤(2026-11-18): `/code-review` 0.4.14..HEAD의 10건을 모두 고치고, CI 시간을 줄이는 방법을 검토 · 적용
   (사용자: "10번까지 작업을 마치고 ... 전체 CI가 시간이 너무 긴데 줄일 수 있는 방법을 검토", 검토 승인은 위임).
 - 2026-11-19: HANDOFF "남은 작업"의 LSP 다음 후보 넷(사용자: "3번 진행해").
+- 2026-11-19: LSP 다음 후보 셋(사용자: "LSP 다음 후보(문장 단위 파서 복구, call hierarchy, 범위 포맷) 최적의 결정은 위임한다.
+  애매한 경우 상위 에이전트 호출하여 처리 (fable 5.2)").
 
 ## 현재 브랜치
 
@@ -68,14 +70,21 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - core `@eq`의 choice 지원(`?json.Value == none`).
   - 설계 원칙 검토(`docs/study/11-design-principles-review.md`) 1.7 · 2.7.
   - 0.5 범위: `spawn f(args)` 호출식 꼴, 임베딩 `CL_YIELD`. 빼면 0.5 릴리스 준비로 간다.
-- [ ] LSP 다음 후보: 본문 안 문장 단위 복구 · 선언 오류 복구(LSP 설계 문서 13절 앞), call hierarchy, 범위 포맷.
-  토크나이저의 `ignoreErrors` 모드는 닫히지 않은 문자열에서 끝없이 토큰을 만든다(쓰는 곳 없음, LSP 14절).
+- [x] LSP 범위 포맷 · call hierarchy · 본문 안 문장 단위 복구(2026-11-19). 설계 · 확인은 LSP 설계 문서 15 · 16절.
+  - 범위 포맷: `assist.lineEdits`(포맷터는 줄을 합치거나 나누지 않고 빈 줄만 줄인다).
+  - call hierarchy: 서버만(`onPrepareCallHierarchy` · `onIncomingCalls` · `onOutgoingCalls`), 해석 기록과 outline으로.
+  - 문장 단위 복구: `compiler.BodyRecover`가 실패한 문장을 건너뛰고 본문을 다시 검사(최대 10번), `sema.semaStmt`가 실패한 문장을
+    기록. 문장마다 되돌리는 방식은 fable 검토로 기각(16절). 겹치는 리포트는 `Compiler.dropRepeatedReports`.
+  - VS Code 테스트 18개 통과(두 항목 추가).
+- [ ] LSP 다음 후보: 선언 오류 복구(LSP 설계 문서 13절 앞). 토크나이저의 `ignoreErrors` 모드는 닫히지 않은 문자열에서 끝없이
+  토큰을 만든다(쓰는 곳 없음, LSP 14절).
 - [ ] 기술 부채(급하지 않음): carry 재시도 루프의 IR 되돌리기, `@destruct_span` 취소 keep 지점, `Scope.run`의 바퀴당 `waiting()`
   질의, 취소 불변식 panic. 기록은 `project_coroutines.md`.
 
 ## 핵심 파일
 
 - `src/refs.zig` "Hints" 절, `src/lsp/server.zig` `hintDiagnostics` · `onCodeAction` · `onInlayHint`, `src/lsp/assist.zig`.
+- `src/compiler.zig` `BodyRecover` · `semaChunkFuncsRecover`, `src/sema.zig` `semaStmts` · `semaStmt`(복구 경로).
 - `src/builtins/core.cy` `Slice` 절(`reserve_own` · `clone_copy` · `append` · `appended` 등, `rg -n "fn \(&&?Slice\[\]\)"`).
 - `src/sema.zig` `semaOpAssignMethod` · `checkSliceInPlaceResult` · `checkDroppedSliceResult`.
 - `src/parser.zig` `isForeignDeclKeyword` · `reportForeignDeclError` · `reportTypedDeclError`.

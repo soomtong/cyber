@@ -328,9 +328,56 @@ pub const ModFuncSigKey = cy.hash.KeyU128;
 const ObjectMemberKey = cy.hash.KeyU64;
 
 pub fn semaStmts(c: *cy.Chunk, stmts: []const *ast.Node) anyerror!void {
+    const comp = c.compiler;
+    if (comp.recover and comp.recover_chunk == c) {
+        // The first statements checked in a pass are those of the body.
+        if (comp.recover_stmt_depth == null) comp.recover_stmt_depth = c.resolve_stack.items.len;
+        if (comp.recover_skip.count() > 0) {
+            for (stmts) |stmt| {
+                try semaStmt(c, stmt);
+                // A skipped declaration ends the block: the rest would report its names as undeclared.
+                if (comp.recover_skip.contains(stmt) and declaresLocal(stmt)) return;
+            }
+            return;
+        }
+    }
     for (stmts) |stmt| {
         try semaStmt(c, stmt);
     }
+}
+
+/// Whether a statement declares a name for the statements after it in its block.
+fn declaresLocal(stmt: *ast.Node) bool {
+    return switch (stmt.type()) {
+        .var_decl => true,
+        .ct_stmt => stmt.cast(.ct_stmt).child.type() == .var_decl,
+        else => false,
+    };
+}
+
+/// With error recovery, a statement that failed in an earlier pass of the body is skipped (`BodyRecover`).
+/// The block is then taken as not reaching its end: a `return` that is skipped does not leave the function
+/// without one.
+/// When the statement fails, the innermost statement of the body that failed is recorded for the next pass.
+pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
+    const comp = c.compiler;
+    if (!comp.recover or comp.recover_chunk == null) return semaStmt2(c, node);
+    if (comp.recover_skip.contains(node)) {
+        if (c.semaBlocks.items.len > 0) c.block().endReachable = false;
+        return;
+    }
+    const lens = comp.refLens();
+    semaStmt2(c, node) catch |err| {
+        if (comp.recover_failed_stmt == null and comp.recover_chunk == c and node.src() == c.id and
+            comp.recover_stmt_depth == c.resolve_stack.items.len)
+        {
+            comp.recover_failed_stmt = node;
+            comp.recover_failed_lens = lens;
+        }
+        return err;
+    };
+    // A failure inside that was handled is not one of the body's.
+    comp.recover_failed_stmt = null;
 }
 
 fn popLocals(c: *cy.Chunk, var_start: usize, node: *ast.Node) !void {
@@ -634,7 +681,7 @@ fn semaExprStmtEnd(c: *cy.Chunk, expr: ExprResult, var_start: usize, node: *ast.
     try popLocals(c, var_start, node);
 }
 
-pub fn semaStmt(c: *cy.Chunk, node: *ast.Node) !void {
+fn semaStmt2(c: *cy.Chunk, node: *ast.Node) !void {
     c.curNode = node;
 
     // Expected start in `varStack` for each statement.

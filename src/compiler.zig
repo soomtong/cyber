@@ -74,10 +74,22 @@ pub const Compiler = struct {
     report_color: bool = false,
 
     /// Go on after a compile error where that is safe, to report more than one (`cl_vm_set_error_recovery`).
-    /// A body (the main block, a function, a method) that fails is abandoned at its first error and the
-    /// next body is checked. Errors outside of a body (syntax, declarations) still end the compile.
+    /// A body (the main block, a function, a method) that fails is checked again without the statement that
+    /// failed (`BodyRecover`), then the next body is checked. Errors outside of a body (syntax, declarations)
+    /// still end the compile.
     /// The compile fails as before, with every report in `reports`. Kept across `cl_vm_reset` like `report_color`.
     recover: bool = false,
+    /// The statements that the body being checked with recovery skips: each failed in an earlier pass.
+    recover_skip: std.AutoHashMapUnmanaged(*ast.Node, void) = .empty,
+    /// The chunk of that body. Null outside of one.
+    recover_chunk: ?*cy.Chunk = null,
+    /// The depth of the resolve stack at the statements of the body. A statement checked deeper (a template or
+    /// a compile-time call that the body expands) is not one of the body's.
+    recover_stmt_depth: ?usize = null,
+    /// The innermost statement of the body that failed in this pass.
+    recover_failed_stmt: ?*ast.Node = null,
+    /// The lengths of the lists of `refListNames` when that statement started.
+    recover_failed_lens: [4]usize = .{ 0, 0, 0, 0 },
 
     /// Record what the names of the main source refer to (`cl_vm_set_symbol_info`, `refs.zig`).
     /// Kept across `cl_vm_reset` like `report_color`. The references are those of the last compile.
@@ -244,6 +256,13 @@ pub const Compiler = struct {
         try self.reinitPerRun();    
     }
 
+    /// The lengths of the lists of the symbol info that a body adds to (`refListNames`).
+    pub fn refLens(self: *Compiler) [4]usize {
+        var lens: [4]usize = undefined;
+        inline for (refListNames, 0..) |name, i| lens[i] = @field(self, name).items.len;
+        return lens;
+    }
+
     pub fn deinit(self: *Compiler, comptime reset: bool) void {
         // The chunks own what the lists point to.
         if (reset) {
@@ -264,6 +283,7 @@ pub const Compiler = struct {
             self.ref_locals.deinit(self.alloc);
             self.ref_scope_exits.deinit(self.alloc);
             self.ref_calls.deinit(self.alloc);
+            self.recover_skip.deinit(self.alloc);
             self.ref_hints.deinit(self.alloc);
             self.ref_hint_text.deinit(self.alloc);
             self.reports.deinit(self.alloc);
@@ -371,6 +391,25 @@ pub const Compiler = struct {
 
     pub fn reinitPerRun(self: *Compiler) !void {
         self.clearReports();
+    }
+
+    /// With recovery a function template reports the error of its body once per instance, at the same place
+    /// and with the same message. The first is kept (with the calls that expanded its instance).
+    fn dropRepeatedReports(self: *Compiler) void {
+        var kept: usize = 0;
+        for (self.reports.items, 0..) |*report, i| {
+            const repeated = for (self.reports.items[0..kept]) |prev| {
+                if (prev.chunk == report.chunk and prev.loc == report.loc and prev.type == report.type and
+                    std.mem.eql(u8, prev.msg, report.msg)) break true;
+            } else false;
+            if (repeated) {
+                report.deinit(self.alloc);
+                continue;
+            }
+            self.reports.items[kept] = self.reports.items[i];
+            kept += 1;
+        }
+        self.reports.items.len = kept;
     }
 
     pub fn clearReports(self: *Compiler) void {
@@ -682,10 +721,16 @@ pub const Compiler = struct {
         if (self.recover) {
             var marks = try RecoverMarks.take(self);
             defer marks.deinit(self);
-            if (sema.sema_program(mainChunk, self.main_func)) |program_ir| {
-                self.program_ir = program_ir;
-            } else |err| {
-                try recoverBody(self, mainChunk, &marks, err);
+            var body = BodyRecover.begin(self, mainChunk);
+            defer body.end(self);
+            while (true) {
+                body.pass(self);
+                if (sema.sema_program(mainChunk, self.main_func)) |program_ir| {
+                    self.program_ir = program_ir;
+                    break;
+                } else |err| {
+                    if (!try body.retry(self, mainChunk, &marks, err)) break;
+                }
             }
         } else {
             self.program_ir = try sema.sema_program(mainChunk, self.main_func);
@@ -711,6 +756,7 @@ pub const Compiler = struct {
 
         // With recovery the bodies that failed were skipped. What follows needs all of them.
         if (self.reports.items.len > 0) {
+            self.dropRepeatedReports();
             return error.CompileError;
         }
 
@@ -995,17 +1041,85 @@ fn semaChunkFuncsRecover(c: *cy.Chunk) !void {
         }
         var marks = try RecoverMarks.take(self);
         defer marks.deinit(self);
-        const res = if (func.type == .userFunc and func.isMethod())
-            sema.semaMethodBody(c, func)
-        else
-            sema.semaFuncBody(c, func);
-        res catch |err| {
-            try recoverBody(self, c, &marks, err);
-            // The body is not checked again when something else refers to the function.
-            func.info.emitted = true;
-        };
+        var body = BodyRecover.begin(self, c);
+        defer body.end(self);
+        while (true) {
+            body.pass(self);
+            const res = if (func.type == .userFunc and func.isMethod())
+                sema.semaMethodBody(c, func)
+            else
+                sema.semaFuncBody(c, func);
+            res catch |err| {
+                // The body is not checked again when something else refers to the function.
+                func.info.emitted = true;
+                if (try body.retry(self, c, &marks, err)) {
+                    func.info.emitted = false;
+                    continue;
+                }
+            };
+            break;
+        }
     }
 }
+
+/// The lists of the symbol info that a body adds to (`refs.zig`). Each pass of `BodyRecover` adds to them.
+const refListNames = [_][]const u8{ "refs", "ref_locals", "ref_scope_exits", "ref_calls" };
+
+/// The checks of one body with error recovery. A pass that fails at a statement of the body is followed by
+/// another without that statement, until a pass gets through the body or fails where no statement of the body
+/// can be blamed: the next errors of the body are reported too. A skipped `x := ...` ends its block (the rest
+/// would only report `x` as undeclared). After any skipped statement the block is taken as not reaching its end
+/// (`Block.endReachable`), so a skipped `return` does not leave a function without one. Nothing is generated from
+/// a compile with a report, so the body that a pass got through with skipped statements is not used.
+const BodyRecover = struct {
+    passes: u32 = 0,
+    /// The lengths of the lists of `refListNames` that the next pass starts from.
+    lens: [4]usize,
+
+    /// Each pass checks the whole body again.
+    const max_passes = 10;
+
+    fn begin(self: *Compiler, c: *cy.Chunk) BodyRecover {
+        self.recover_skip.clearRetainingCapacity();
+        self.recover_chunk = c;
+        return .{ .lens = self.refLens() };
+    }
+
+    fn pass(_: *BodyRecover, self: *Compiler) void {
+        self.recover_failed_stmt = null;
+        self.recover_stmt_depth = null;
+    }
+
+    /// A pass failed with `err`. Reports it and drops what it left on the stacks (`recoverBody`), and returns
+    /// whether to check the body again without the statement that failed.
+    fn retry(body: *BodyRecover, self: *Compiler, c: *cy.Chunk, marks: *const RecoverMarks, err: anyerror) !bool {
+        try recoverBody(self, c, marks, err);
+        if (err != error.CompileError) return false;
+        const stmt = self.recover_failed_stmt orelse return false;
+        if (body.passes + 1 >= max_passes or self.recover_skip.contains(stmt)) return false;
+        try self.recover_skip.put(self.alloc, stmt, {});
+        body.passes += 1;
+        // The next pass records what is before the statement again: that is dropped. What the statement recorded
+        // before its error (the names that resolved) is kept, the next pass does not check it.
+        inline for (refListNames, 0..) |name, i| {
+            const list = &@field(self, name);
+            const start = @min(body.lens[i], list.items.len);
+            const stmt_start = @min(@max(self.recover_failed_lens[i], start), list.items.len);
+            const kept = list.items.len - stmt_start;
+            std.mem.copyForwards(@TypeOf(list.items[0]), list.items[start..][0..kept], list.items[stmt_start..]);
+            list.items.len = start + kept;
+            body.lens[i] = start + kept;
+        }
+        return true;
+    }
+
+    fn end(_: *BodyRecover, self: *Compiler) void {
+        self.recover_skip.clearRetainingCapacity();
+        self.recover_chunk = null;
+        self.recover_stmt_depth = null;
+        self.recover_failed_stmt = null;
+    }
+};
 
 fn emit_chunk_init_func(c: *cy.Chunk, init: *cy.Func) !void {
     log.tracev("emit @init.", .{});

@@ -834,7 +834,20 @@ test "A compile-time call with a string argument does not end the host." {
     try zt.eqStr("Could not find the symbol `nope`.", C.from_bytes(err.msg));
 }
 
-test "With error recovery every body reports its first error." {
+const ExpectedReport = struct { line: u32, msg: []const u8 };
+
+fn expectReports(vm: anytype, expected: []const ExpectedReport) !void {
+    var rep: C.Report = undefined;
+    for (expected, 0..) |exp, i| {
+        try zt.expect(C.vm_compile_report(vm, i, &rep));
+        try zt.eq(C.ReportCompileError, rep.kind);
+        try zt.eqStr(exp.msg, C.from_bytes(rep.msg));
+        try zt.eq(exp.line, rep.line);
+    }
+    try zt.eq(expected.len, C.vm_compile_report_count(vm));
+}
+
+test "With error recovery every body reports its errors." {
     // docs/specs/2026-11-12-lsp-design.md, P2.
     const vm = C.vm_init();
     defer C.vm_deinit(vm);
@@ -874,25 +887,20 @@ test "With error recovery every body reports its first error." {
     try zt.expect(C.vm_compile_report(vm, 0, &rep));
     try zt.eqStr("Undeclared variable `nope3`.", C.from_bytes(rep.msg));
 
-    // On: the main block and each function report their first error. A body is given up at that error,
-    // so `nope4` and `nope2b` are not reported. The setting is kept across a reset.
+    // On: the main block and then each function report their errors. A body is checked again without the
+    // statement that failed, so `nope4` and `nope2b` are reported too. The setting is kept across a reset.
     C.vm_set_error_recovery(vm, true);
     C.vm_reset(vm);
     try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
-    try zt.eq(@as(usize, 4), C.vm_compile_report_count(vm));
-    const expected = [_]struct { line: u32, msg: []const u8 }{
+    const expected = [_]ExpectedReport{
         .{ .line = 20, .msg = "Undeclared variable `nope3`." },
+        .{ .line = 21, .msg = "Undeclared variable `nope4`." },
         .{ .line = 1, .msg = "Undeclared variable `nope1`." },
         .{ .line = 6, .msg = "Undeclared variable `nope2`." },
+        .{ .line = 7, .msg = "Undeclared variable `nope2b`." },
         .{ .line = 14, .msg = "Field `zz` does not exist in `T`." },
     };
-    for (expected, 0..) |exp, i| {
-        try zt.expect(C.vm_compile_report(vm, i, &rep));
-        try zt.eq(C.ReportCompileError, rep.kind);
-        try zt.eq(exp.line, rep.line);
-        try zt.eqStr(exp.msg, C.from_bytes(rep.msg));
-    }
-    try zt.expect(!C.vm_compile_report(vm, 4, &rep));
+    try expectReports(vm, &expected);
     // The summary and `cl_vm_compile_error` describe the first one.
     try zt.expect(C.vm_compile_error(vm, &err));
     try zt.eqStr("Undeclared variable `nope3`.", C.from_bytes(err.msg));
@@ -901,6 +909,51 @@ test "With error recovery every body reports its first error." {
     try zt.eq(C.Success, C.vm_eval(vm, "fn main() -> int:\n    return 7", &res));
     try zt.eq(@as(i64, 7), @as(*i64, @ptrCast(@alignCast(res.res))).*);
     try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
+
+    // A failed declaration ends its block: the uses of its name after it are not reported as undeclared.
+    // A skipped `return` does not leave the function without one. Errors in other blocks of the body go on.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\fn f(n int) -> int:
+        \\    x := nope1
+        \\    print(x)
+        \\    return x
+        \\
+        \\fn g(n int) -> int:
+        \\    if n > 0:
+        \\        y := nope2
+        \\        print(y)
+        \\    else:
+        \\        print(nope3)
+        \\    print(nope4 + n)
+        \\    return nope5
+        \\
+        \\a := nope6
+        \\print(a)
+    , &res));
+    try expectReports(vm, &.{
+        .{ .line = 14, .msg = "Undeclared variable `nope6`." },
+        .{ .line = 1, .msg = "Undeclared variable `nope1`." },
+        .{ .line = 7, .msg = "Undeclared variable `nope2`." },
+        .{ .line = 10, .msg = "Undeclared variable `nope3`." },
+        .{ .line = 11, .msg = "Undeclared variable `nope4`." },
+        .{ .line = 12, .msg = "Undeclared variable `nope5`." },
+    });
+
+    // The body of a function template is checked per instance. Its error is reported once.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\fn add(%T type, a T, b T) -> T:
+        \\    print(nope1)
+        \\    return a + b
+        \\print(nope2)
+        \\print(add(int, 1, 2))
+        \\print(add(float, 1.0, 2.0))
+    , &res));
+    try expectReports(vm, &.{
+        .{ .line = 3, .msg = "Undeclared variable `nope2`." },
+        .{ .line = 1, .msg = "Undeclared variable `nope1`." },
+    });
 
     // `cl_vm_validate` recovers the same way.
     C.vm_reset(vm);
@@ -1789,9 +1842,10 @@ test "A method of a template instance whose signature fails is not found half bu
         var res: C.EvalResult = undefined;
         var rep: C.Report = undefined;
         try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
-        // Every body that calls one of them reports that its signature does not resolve.
-        try zt.eq(@as(usize, 4), C.vm_compile_report_count(vm));
-        for (0..4) |i| {
+        // Every body that calls one of them fails because its signature does not resolve. The error is the same
+        // for every body, at the signature: it is reported once per signature.
+        try zt.eq(@as(usize, 2), C.vm_compile_report_count(vm));
+        for (0..2) |i| {
             try zt.expect(C.vm_compile_report(vm, i, &rep));
             try zt.eqStr("Can not find the symbol `nope` in `int`.", C.from_bytes(rep.msg));
         }

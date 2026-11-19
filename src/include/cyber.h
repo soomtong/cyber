@@ -705,9 +705,12 @@ typedef struct CLReport {
 } CLReport;
 
 /// Whether the compiler goes on after a compile error to report more than one. Off by default.
-/// With it a body (the main block, a function, a method) that has an error is abandoned at its first error and
-/// the other bodies are still checked, so there is at most one error per body. A syntax error or an error in a
-/// declaration (a type, a signature, a global) still ends the compile at once.
+/// With it a body (the main block, a function, a method) that has an error is checked again without the statement
+/// that failed, so the errors of its other statements are reported too, and then the other bodies are checked.
+/// A statement that failed to declare a local (`x := ...`) ends its block, so the uses of the local after it are
+/// not reported as undeclared. A body is checked at most ten times. Every syntax error is reported, and a source
+/// with one is not checked further. An error in a declaration (a type, a signature, a global) still ends the
+/// compile at once.
 /// The result is `CL_ERROR_COMPILE` as before and nothing is run. `cl_vm_compile_error` and the summary describe
 /// the first error, `cl_vm_compile_report` gives all of them. The setting is kept across `cl_vm_reset`.
 void cl_vm_set_error_recovery(CLVM* vm, bool enabled);

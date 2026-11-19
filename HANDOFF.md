@@ -10,7 +10,8 @@
 
 ## 현재 브랜치
 
-`master`. `3da1f688`(리뷰 수정 · CI)까지 push돼 있다(2026-11-19 확인). 그 뒤 LSP 커밋 넷(`15ce5fa8` ~ `9768a272`)은 push하지 않았다.
+`master`. `3da1f688`(리뷰 수정 · CI)까지 push돼 있다(2026-11-19 확인). 그 뒤 커밋 여섯(`15ce5fa8` ~ `b99e0bcb`)은
+`lsp-followups`에서 만들어 master로 fast-forward 병합했고, push하지 않았다.
 
 ## 완료된 작업
 
@@ -51,6 +52,9 @@
   - 매개변수 이름 inlay(`e609c071`): `CL_HINT_PARAM_NAME`, `Compiler.ref_calls`, 훅은 `sema_call_ir` · `matchFuncSym2`.
   - 선언 rename(`9768a272`): 워크스페이스 전체, 모를 수 있으면 거절(컴파일 오류 · 해석 안 된 식별자 · 표준 모듈 · 모듈 이름).
     `refs.findAllTo`가 모듈 심볼을 맞추지 않게 고쳤다(첫 줄 선언과 모듈 위치 0이 겹침).
+  - `/code-review high` 6건 수정(`b99e0bcb`): 오버로드는 함께 rename(spec 14절을 바꿈), 키워드 이름 거절, `declAt`이
+    enum · choice · union case를 찾음, `@` 내장 호출(`fiber f(a)`)과 인스턴스마다 다른 오버로드의 호출은 inlay 없음.
+    목록은 `docs/releases/unreleased.md` "rename · 매개변수 이름 inlay의 리뷰 수정".
 - [ ] CI 시간 확인: Latest Build의 job별 시간을 전(`44236296335`, 21분 28초)과 비교해 `project_fork_release_ci.md`에 적는다.
   macOS arm64 Debug 테스트가 여전히 길면 그 step을 빼는 안이 다음 후보다.
 - [x] tars-agent `docs/TODO.md`에 다음 빌드에서 안내 105행을 고칠 항목(`4aae2ec`, tars-agent에 커밋됨).

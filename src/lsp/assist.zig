@@ -207,3 +207,85 @@ test identsNamed {
     // A source that does not tokenize.
     try std.testing.expect((try identsNamed(alloc, "print('twice)\n", "twice")) == null);
 }
+
+/// An edit that replaces `text[start..end]` of the old text with `new_text`, a slice of the new text.
+pub const LineEdit = struct {
+    start: usize,
+    end: usize,
+    new_text: []const u8,
+};
+
+/// The edits that turn the lines `first`..`last` (0-based, inclusive) of `old` into the formatted `new`, one edit
+/// per line that differs. The formatter never joins or splits a line (`format.zig`): it changes what is in a line
+/// and drops blank lines (a run of them becomes one, those at the start and the end go). So the lines of `new`
+/// are those of `old` in order, less some blank ones. A line break is not part of a line and `\r` before it is
+/// left as it is. A dropped line is deleted with its line break. Null if `new` is not such a copy of `old`.
+pub fn lineEdits(alloc: std.mem.Allocator, old: []const u8, new: []const u8, first: usize, last: usize) !?[]LineEdit {
+    var old_lines = std.mem.splitScalar(u8, old, '\n');
+    var new_lines = std.mem.splitScalar(u8, new, '\n');
+    var out: std.ArrayList(LineEdit) = .empty;
+    errdefer out.deinit(alloc);
+    var new_line = new_lines.next();
+    var line: usize = 0;
+    while (old_lines.next()) |old_line| : (line += 1) {
+        const line_start = if (old_lines.index) |next| next - old_line.len - 1 else old.len - old_line.len;
+        const line_end = old_lines.index orelse old.len;
+        const in_range = line >= first and line <= last;
+        const old_text = std.mem.trimEnd(u8, old_line, "\r");
+        const old_blank = std.mem.trim(u8, old_text, " \t").len == 0;
+        const dropped = old_blank and (new_line == null or std.mem.trim(u8, new_line.?, " \t\r").len != 0);
+        if (dropped) {
+            if (in_range) try out.append(alloc, .{ .start = line_start, .end = line_end, .new_text = "" });
+            continue;
+        }
+        const new_text = std.mem.trimEnd(u8, new_line orelse return null, "\r");
+        new_line = new_lines.next();
+        if (!in_range or std.mem.eql(u8, old_text, new_text)) continue;
+        try out.append(alloc, .{ .start = line_start, .end = line_start + old_text.len, .new_text = new_text });
+    }
+    // The rest of the output can only be its final line break.
+    if (new_line) |rest| {
+        if (rest.len > 0 or new_lines.next() != null) return null;
+    }
+    return try out.toOwnedSlice(alloc);
+}
+
+test lineEdits {
+    const alloc = std.testing.allocator;
+    const old = "fn add(a int,b int)->int:\r\n  return a+b\n\nprint(add(1,2))";
+    const new = "fn add(a int, b int) -> int:\r\n    return a + b\n\nprint(add(1, 2))\n";
+
+    const all = (try lineEdits(alloc, old, new, 0, 100)).?;
+    defer alloc.free(all);
+    try std.testing.expectEqual(@as(usize, 3), all.len);
+    // The `\r` of the first line stays.
+    try std.testing.expectEqualStrings("fn add(a int,b int)->int:", old[all[0].start..all[0].end]);
+    try std.testing.expectEqualStrings("fn add(a int, b int) -> int:", all[0].new_text);
+    try std.testing.expectEqualStrings("  return a+b", old[all[1].start..all[1].end]);
+    try std.testing.expectEqualStrings("    return a + b", all[1].new_text);
+    try std.testing.expectEqualStrings("print(add(1,2))", old[all[2].start..all[2].end]);
+
+    // Only the lines of the range.
+    const some = (try lineEdits(alloc, old, new, 1, 2)).?;
+    defer alloc.free(some);
+    try std.testing.expectEqual(@as(usize, 1), some.len);
+    try std.testing.expectEqualStrings("    return a + b", some[0].new_text);
+
+    // Blank lines that the formatter dropped: a run of them becomes one, those at the start go.
+    const blank = "\n\nx=1\n\n  \n\ny=2\n";
+    const dropped = (try lineEdits(alloc, blank, "x = 1\n\ny = 2\n", 0, 100)).?;
+    defer alloc.free(dropped);
+    try std.testing.expectEqual(@as(usize, 6), dropped.len);
+    try std.testing.expectEqualStrings("\n", blank[dropped[0].start..dropped[0].end]);
+    try std.testing.expectEqual(@as(usize, 1), dropped[1].start);
+    try std.testing.expectEqualStrings("x = 1", dropped[2].new_text);
+    // The first blank line after `x=1` stays, the next two go.
+    try std.testing.expectEqualStrings("  \n", blank[dropped[3].start..dropped[3].end]);
+    try std.testing.expectEqualStrings("\n", blank[dropped[4].start..dropped[4].end]);
+    try std.testing.expectEqual(blank.len - "\ny=2\n".len, dropped[4].start);
+    try std.testing.expectEqualStrings("y = 2", dropped[5].new_text);
+
+    // Lines that do not match.
+    try std.testing.expect((try lineEdits(alloc, "a\nb\nc", "a\nb", 0, 1)) == null);
+    try std.testing.expect((try lineEdits(alloc, "a\nb", "a\nb\nc", 0, 1)) == null);
+}

@@ -184,6 +184,7 @@ test "The server follows the lifecycle of the protocol." {
     try t.expectEqualStrings("utf-16", str(out[0], &.{ "result", "capabilities", "positionEncoding" }));
     try t.expectEqual(@as(i64, 1), int(out[0], &.{ "result", "capabilities", "textDocumentSync", "change" }));
     try t.expect(get(out[0], &.{ "result", "capabilities", "documentFormattingProvider" }).?.bool);
+    try t.expect(get(out[0], &.{ "result", "capabilities", "documentRangeFormattingProvider" }).?.bool);
     try t.expect(get(out[0], &.{ "result", "capabilities", "documentSymbolProvider" }).?.bool);
     try t.expect(get(out[0], &.{ "result", "capabilities", "foldingRangeProvider" }).?.bool);
     try t.expect(get(out[0], &.{ "result", "capabilities", "hoverProvider" }).?.bool);
@@ -464,6 +465,18 @@ test "Formatting returns one edit for the whole document." {
     try s.change(main_uri, 3, "fn add(a int:\n");
     reply = try s.request("textDocument/formatting", main_uri);
     try t.expect(get(reply, &.{"result"}).? == .null);
+
+    // Range formatting changes the lines of the range only. A range that ends at the start of a line leaves it out.
+    try s.change(main_uri, 4, "fn add(a int,b int)->int:\n  return a+b\nprint(add(1,2))\n");
+    reply = try s.requestWith("textDocument/rangeFormatting", main_uri, 0, 0, ",\"range\":{\"start\":{\"line\":1,\"character\":0},\"end\":{\"line\":2,\"character\":0}}");
+    var range_edits = items(reply, &.{"result"});
+    try t.expectEqual(@as(usize, 1), range_edits.len);
+    try expectRange(get(range_edits[0], &.{"range"}).?, 1, 0, 1, 12);
+    try t.expectEqualStrings("    return a + b", str(range_edits[0], &.{"newText"}));
+    reply = try s.requestWith("textDocument/rangeFormatting", main_uri, 0, 0, ",\"range\":{\"start\":{\"line\":0,\"character\":3},\"end\":{\"line\":2,\"character\":4}}");
+    range_edits = items(reply, &.{"result"});
+    try t.expectEqual(@as(usize, 3), range_edits.len);
+    try t.expectEqualStrings("print(add(1, 2))", str(range_edits[2], &.{"newText"}));
 }
 
 test "The outline and the folding ranges of a document." {
@@ -1081,6 +1094,86 @@ test "Rename of a declaration across the sources of the workspace." {
         try expectRange(get(edits[2], &.{"range"}).?, 6, 6, 6, 10);
         try expectRange(get(edits[3], &.{"range"}).?, 7, 6, 7, 10);
     }
+}
+
+test "Call hierarchy: the callers and the callees of a function across the workspace." {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "lib.cy", .data = "fn twice(a int) -> int:\n    return a * 2\n\nfn quad(a int) -> int:\n    return twice(twice(a))\n" });
+    const dir = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(dir);
+
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    const arena = s.arena.allocator();
+    const sep = std.Io.Dir.path.sep_str;
+    const root_uri = try lsp.pathToUri(arena, dir);
+    const lib_uri = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "lib.cy", .{dir}));
+    const a_uri = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "a.cy", .{dir}));
+    const init_reply = try s.send(try std.fmt.allocPrint(arena,
+        \\{{"jsonrpc":"2.0","id":0,"method":"initialize","params":{{"capabilities":{{}},
+        \\"workspaceFolders":[{{"uri":"{s}","name":"ws"}}]}}}}
+    , .{root_uri}));
+    try t.expect(get(init_reply[0], &.{ "result", "capabilities", "callHierarchyProvider" }).?.bool);
+    try s.open(a_uri, 1, "use lib './lib.cy'\n\nfn run() -> int:\n    return lib.quad(1) + lib.twice(2)\n\nprint(lib.twice(4))\n");
+
+    // At a call: the function in `lib.cy`.
+    var reply = try s.requestAt("textDocument/prepareCallHierarchy", a_uri, 5, 11);
+    const twice_item = items(reply, &.{"result"})[0];
+    try t.expectEqualStrings("twice", str(twice_item, &.{"name"}));
+    try t.expectEqual(@as(i64, 12), int(twice_item, &.{"kind"}));
+    try t.expectEqualStrings(lib_uri, str(twice_item, &.{"uri"}));
+    try expectRange(get(twice_item, &.{"selectionRange"}).?, 0, 3, 0, 8);
+
+    // Not a function.
+    reply = try s.requestAt("textDocument/prepareCallHierarchy", a_uri, 0, 5);
+    try t.expect(get(reply, &.{"result"}).? == .null);
+    // A function of a standard module.
+    reply = try s.requestAt("textDocument/prepareCallHierarchy", a_uri, 5, 1);
+    try t.expect(get(reply, &.{"result"}).? == .null);
+
+    const item_json = try std.json.Stringify.valueAlloc(arena, twice_item, .{});
+    const out = try s.send(try std.fmt.allocPrint(arena,
+        \\{{"jsonrpc":"2.0","id":3,"method":"callHierarchy/incomingCalls","params":{{"item":{s}}}}}
+    , .{item_json}));
+    // `run` and the top level of `a.cy`, `quad` in `lib.cy`.
+    const incoming = items(out[0], &.{"result"});
+    try t.expectEqual(@as(usize, 3), incoming.len);
+    try t.expectEqualStrings("run", str(incoming[0], &.{ "from", "name" }));
+    try t.expectEqual(@as(usize, 1), items(incoming[0], &.{"fromRanges"}).len);
+    try expectRange(items(incoming[0], &.{"fromRanges"})[0], 3, 29, 3, 34);
+    try t.expectEqualStrings("a.cy", str(incoming[1], &.{ "from", "name" }));
+    try t.expectEqual(@as(i64, 1), int(incoming[1], &.{ "from", "kind" }));
+    try expectRange(items(incoming[1], &.{"fromRanges"})[0], 5, 10, 5, 15);
+    try t.expectEqualStrings("quad", str(incoming[2], &.{ "from", "name" }));
+    try t.expectEqualStrings(lib_uri, str(incoming[2], &.{ "from", "uri" }));
+    try t.expectEqual(@as(usize, 2), items(incoming[2], &.{"fromRanges"}).len);
+
+    // The callees of `run`.
+    var calls = try outgoingCalls(&s, get(incoming[0], &.{"from"}).?);
+    try t.expectEqual(@as(usize, 2), calls.len);
+    try t.expectEqualStrings("quad", str(calls[0], &.{ "to", "name" }));
+    try t.expectEqualStrings(lib_uri, str(calls[0], &.{ "to", "uri" }));
+    try expectRange(items(calls[0], &.{"fromRanges"})[0], 3, 15, 3, 19);
+    try t.expectEqualStrings("twice", str(calls[1], &.{ "to", "name" }));
+    // Those of the top level leave out `run` and the standard `print`.
+    calls = try outgoingCalls(&s, get(incoming[1], &.{"from"}).?);
+    try t.expectEqual(@as(usize, 1), calls.len);
+    try t.expectEqualStrings("twice", str(calls[0], &.{ "to", "name" }));
+    // `quad` calls one function twice.
+    calls = try outgoingCalls(&s, get(incoming[2], &.{"from"}).?);
+    try t.expectEqual(@as(usize, 1), calls.len);
+    try t.expectEqual(@as(usize, 2), items(calls[0], &.{"fromRanges"}).len);
+}
+
+fn outgoingCalls(s: *Session, item: Value) ![]Value {
+    const arena = s.arena.allocator();
+    const json = try std.json.Stringify.valueAlloc(arena, item, .{});
+    const out = try s.send(try std.fmt.allocPrint(arena,
+        \\{{"jsonrpc":"2.0","id":4,"method":"callHierarchy/outgoingCalls","params":{{"item":{s}}}}}
+    , .{json}));
+    return items(out[0], &.{"result"});
 }
 
 const SemanticToken = struct {

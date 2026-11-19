@@ -195,6 +195,37 @@ test('Format Document', async () => {
     assert.strictEqual(doc.getText(), original);
 });
 
+test('Format Selection changes the selected lines only', async () => {
+    const messy = original
+        .replace('fn add(first int, second int) -> int:', 'fn add(first int,second int)->int:')
+        .replace('n := add(1, 2)', 'n := add(1,2)');
+    await edit(doc, messy);
+    const line = positionOf(doc, 'n := add').line;
+    const range = new vscode.Range(line, 0, line + 1, 0);
+    const edits = await vscode.commands.executeCommand('vscode.executeFormatRangeProvider', doc.uri, range, { tabSize: 4, insertSpaces: true });
+    const e = new vscode.WorkspaceEdit();
+    e.set(doc.uri, edits);
+    assert.ok(await vscode.workspace.applyEdit(e));
+    assert.strictEqual(doc.getText(), messy.replace('n := add(1,2)', 'n := add(1, 2)'));
+    await edit(doc, original);
+});
+
+test('Call hierarchy: callers across files and callees', async () => {
+    const items = await vscode.commands.executeCommand('vscode.prepareCallHierarchy', doc.uri, positionOf(doc, 'twice', 1));
+    assert.strictEqual(items.length, 1);
+    assert.strictEqual(items[0].name, 'twice');
+    assert.strictEqual(path.basename(items[0].uri.fsPath), 'lib.cy');
+    const incoming = await vscode.commands.executeCommand('vscode.provideIncomingCalls', items[0]);
+    assert.deepStrictEqual(incoming.map((c) => c.from.name), ['main.cy']);
+
+    const add = await vscode.commands.executeCommand('vscode.prepareCallHierarchy', doc.uri, positionOf(doc, 'add(1', 1));
+    const callers = await vscode.commands.executeCommand('vscode.provideIncomingCalls', add[0]);
+    assert.strictEqual(callers[0].fromRanges.length, 1);
+    // The top level of `main.cy` calls `add`, `lib.twice` and `Vec2.scale`. `print` is in a standard module.
+    const outgoing = await vscode.commands.executeCommand('vscode.provideOutgoingCalls', callers[0].from);
+    assert.deepStrictEqual(outgoing.map((c) => c.to.name).sort(), ['Vec2.scale', 'add', 'twice']);
+});
+
 let hdoc;
 
 test('Lint diagnostics: an unused module, an unused local and a scope exit', async () => {

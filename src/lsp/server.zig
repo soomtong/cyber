@@ -251,6 +251,8 @@ pub const Server = struct {
             try self.onDidClose(params);
         } else if (std.mem.eql(u8, method, "textDocument/formatting")) {
             try self.onFormatting(id, params);
+        } else if (std.mem.eql(u8, method, "textDocument/rangeFormatting")) {
+            try self.onRangeFormatting(arena, id, params);
         } else if (std.mem.eql(u8, method, "textDocument/documentSymbol")) {
             try self.onDocumentSymbol(arena, id, params);
         } else if (std.mem.eql(u8, method, "textDocument/foldingRange")) {
@@ -279,6 +281,12 @@ pub const Server = struct {
             try self.onCodeAction(arena, id, params);
         } else if (std.mem.eql(u8, method, "textDocument/inlayHint")) {
             try self.onInlayHint(id, params);
+        } else if (std.mem.eql(u8, method, "textDocument/prepareCallHierarchy")) {
+            try self.onPrepareCallHierarchy(arena, id, params);
+        } else if (std.mem.eql(u8, method, "callHierarchy/incomingCalls")) {
+            try self.onIncomingCalls(arena, id, params);
+        } else if (std.mem.eql(u8, method, "callHierarchy/outgoingCalls")) {
+            try self.onOutgoingCalls(arena, id, params);
         } else if (id != null) {
             try self.replyError(id, ErrorCode.method_not_found, "The method is not supported.");
         }
@@ -341,6 +349,10 @@ pub const Server = struct {
             try jw.write(true);
             try jw.endObject();
             try jw.objectField("documentFormattingProvider");
+            try jw.write(true);
+            try jw.objectField("documentRangeFormattingProvider");
+            try jw.write(true);
+            try jw.objectField("callHierarchyProvider");
             try jw.write(true);
             try jw.objectField("documentSymbolProvider");
             try jw.write(true);
@@ -1561,6 +1573,272 @@ pub const Server = struct {
         return null;
     }
 
+    // -----------------------------------
+    // [ Call hierarchy ]
+    // -----------------------------------
+
+    /// A function of the call hierarchy: a declaration in a source that the server can read, or the top level of
+    /// a source (`sym` is null), which calls but is not called.
+    const CallItem = struct {
+        path: []const u8,
+        uri: []const u8,
+        text: []const u8,
+        sym: ?symbols.Symbol,
+    };
+
+    /// A source by the path that the compiler names it: an open document or a file. Null for a standard module.
+    fn sourceByPath(self: *Server, arena: std.mem.Allocator, path: []const u8) !?Source {
+        if (self.docByPath(path)) |doc| return .{ .path = doc.path, .uri = doc.uri, .text = doc.text };
+        if (!std.Io.Dir.path.isAbsolute(path)) return null;
+        var src: Source = .{ .path = try arena.dupe(u8, path), .uri = "", .text = "" };
+        if (!try load(arena, &src)) return null;
+        return src;
+    }
+
+    /// Compiles a source as the main source. An open document is compiled like for its other requests.
+    fn compileSource(self: *Server, src: Source) c.ResultCode {
+        if (self.docByPath(src.path)) |doc| {
+            if (self.compiled == doc) return c.Success;
+            return self.compile(doc);
+        }
+        var config = c.defaultCompileConfig();
+        config.skip_codegen = true;
+        const code = c.vm_compile(self.vm, src.path, src.text, config);
+        self.compiled = null;
+        return code;
+    }
+
+    /// The function of the outline of `text` whose name is inside `pos`..`end`: the one that the compiler
+    /// reports as declared there.
+    fn functionDeclaredIn(arena: std.mem.Allocator, text: []const u8, pos: u32, end: u32) !?symbols.Symbol {
+        const outline = (try symbols.documentSymbols(arena, text)) orelse return null;
+        for (outline) |sym| {
+            if (sym.kind != .function and sym.kind != .method) continue;
+            if (sym.name_pos >= pos and sym.name_pos < end) return sym;
+        }
+        return null;
+    }
+
+    /// The function of the outline whose declaration holds `pos`. Null at the top level.
+    fn functionAround(outline: []const symbols.Symbol, pos: u32) ?symbols.Symbol {
+        for (outline) |sym| {
+            if (sym.kind != .function and sym.kind != .method) continue;
+            if (pos >= sym.pos and pos < sym.end) return sym;
+        }
+        return null;
+    }
+
+    fn writeCallItem(self: *Server, jw: *std.json.Stringify, item: CallItem) !void {
+        try jw.beginObject();
+        if (item.sym) |sym| {
+            try jw.objectField("name");
+            try jw.write(sym.name);
+            try jw.objectField("kind");
+            try jw.write(@intFromEnum(sym.kind));
+        } else {
+            try jw.objectField("name");
+            try jw.write(std.Io.Dir.path.basename(item.path));
+            // `File`.
+            try jw.objectField("kind");
+            try jw.write(1);
+        }
+        try jw.objectField("detail");
+        try jw.write(std.Io.Dir.path.basename(item.path));
+        try jw.objectField("uri");
+        try jw.write(item.uri);
+        const whole: c.Range = .{ .pos = 0, .end_pos = @intCast(item.text.len) };
+        const range: c.Range = if (item.sym) |sym| .{ .pos = sym.pos, .end_pos = sym.end } else whole;
+        const name_range: c.Range = if (item.sym) |sym| .{ .pos = sym.name_pos, .end_pos = sym.name_end } else .{ .pos = 0, .end_pos = 0 };
+        try jw.objectField("range");
+        try self.writeRangeOf(jw, item.text, range);
+        try jw.objectField("selectionRange");
+        try self.writeRangeOf(jw, item.text, name_range);
+        // What the next requests need to find it again: they come with the item only.
+        try jw.objectField("data");
+        try jw.beginObject();
+        try jw.objectField("path");
+        try jw.write(item.path);
+        try jw.objectField("name_pos");
+        if (item.sym) |sym| try jw.write(sym.name_pos) else try jw.write(-1);
+        try jw.endObject();
+        try jw.endObject();
+    }
+
+    fn writeRangeOf(self: *Server, jw: *std.json.Stringify, text: []const u8, range: c.Range) !void {
+        try writeRange(jw, .{
+            .start = position.fromOffset(text, range.pos, self.encoding),
+            .end = position.fromOffset(text, range.end_pos, self.encoding),
+        });
+    }
+
+    /// The function at the position: a call of it or its declaration. Null for a name that is not a function
+    /// or whose declaration is in a standard module.
+    fn onPrepareCallHierarchy(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
+        var info: c.SymbolInfo = undefined;
+        _ = (try self.symbolAt(params, &info)) orelse return self.replyNull(id);
+        if (info.kind != c.SymbolDecl or !info.has_def) return self.replyNull(id);
+        const def_path = try arena.dupe(u8, c.from_bytes(info.def_uri));
+        const src = (try self.sourceByPath(arena, def_path)) orelse return self.replyNull(id);
+        if (info.def_end_pos > src.text.len) return self.replyNull(id);
+        const sym = (try functionDeclaredIn(arena, src.text, info.def_pos, info.def_end_pos)) orelse return self.replyNull(id);
+
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginArray();
+        try self.writeCallItem(jw, .{ .path = src.path, .uri = src.uri, .text = src.text, .sym = sym });
+        try jw.endArray();
+        try jw.endObject();
+        try self.send(&b);
+    }
+
+    /// The item of a `callHierarchy/*` request, read again from its source. The source may have changed since
+    /// the item was made: its function is the one whose name is still at the same place.
+    fn callItemOf(self: *Server, arena: std.mem.Allocator, params: Value) !?CallItem {
+        const data = getPath(params, &.{ "item", "data" }) orelse return error.InvalidParams;
+        const path = getStr(data, "path") orelse return error.InvalidParams;
+        const name_pos = getInt(data, "name_pos") orelse return error.InvalidParams;
+        const src = (try self.sourceByPath(arena, path)) orelse return null;
+        var item: CallItem = .{ .path = src.path, .uri = src.uri, .text = src.text, .sym = null };
+        if (name_pos < 0) return item;
+        const outline = (try symbols.documentSymbols(arena, src.text)) orelse return null;
+        for (outline) |sym| {
+            if ((sym.kind == .function or sym.kind == .method) and sym.name_pos == name_pos) {
+                item.sym = sym;
+                return item;
+            }
+        }
+        return null;
+    }
+
+    const CallGroup = struct {
+        item: CallItem,
+        ranges: std.ArrayList(c.Range) = .empty,
+    };
+
+    fn writeCallGroups(self: *Server, id: ?Value, groups: []const CallGroup, field: []const u8, from_text: ?[]const u8) !void {
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginArray();
+        for (groups) |group| {
+            try jw.beginObject();
+            try jw.objectField(field);
+            try self.writeCallItem(jw, group.item);
+            try jw.objectField("fromRanges");
+            try jw.beginArray();
+            // Incoming calls are in the caller, outgoing calls in the item of the request.
+            const text = from_text orelse group.item.text;
+            for (group.ranges.items) |range| try self.writeRangeOf(jw, text, range);
+            try jw.endArray();
+            try jw.endObject();
+        }
+        try jw.endArray();
+        try jw.endObject();
+        try self.send(&b);
+    }
+
+    /// The functions that name the item, in every source of the workspace that has its name, like
+    /// `textDocument/references`. A name of the function that is not called (`map(twice)`) counts as a call.
+    /// A source with a compile error gives the uses before its error.
+    fn onIncomingCalls(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
+        const item = (try self.callItemOf(arena, params)) orelse return self.replyNull(id);
+        const sym = item.sym orelse return self.writeCallGroups(id, &.{}, "from", null);
+        _ = self.compileSource(.{ .path = item.path, .uri = item.uri, .text = item.text });
+        var info: c.SymbolInfo = undefined;
+        if (!c.vm_symbol_at(self.vm, sym.name_pos, &info) or info.kind != c.SymbolDecl or !info.has_def) {
+            return self.replyNull(id);
+        }
+        const def_path = try arena.dupe(u8, c.from_bytes(info.def_uri));
+        const def_pos = info.def_pos;
+        // The name in the source: `bar` for the method that the outline calls `Foo.bar`.
+        const word = item.text[sym.name_pos..sym.name_end];
+
+        var groups: std.ArrayList(CallGroup) = .empty;
+        var compiled: usize = 0;
+        for (try self.sources(arena)) |*src| {
+            if (compiled >= max_reference_compiles) break;
+            if (!try load(arena, src)) continue;
+            if (!workspace.hasWord(src.text, word)) continue;
+            _ = self.compileSource(src.*);
+            compiled += 1;
+            var ptr: [*c]const c.Range = null;
+            const len = c.vm_symbol_refs_to(self.vm, c.to_bytes(def_path), def_pos, &ptr);
+            if (len == 0 or ptr == null) continue;
+            const ranges = try arena.dupe(c.Range, ptr[0..len]);
+            const outline = (try symbols.documentSymbols(arena, src.text)) orelse &.{};
+            const declares = std.mem.eql(u8, src.path, def_path);
+            for (ranges) |range| {
+                if (range.end_pos > src.text.len) continue;
+                const caller = functionAround(outline, range.pos);
+                // The name in a declaration of the function is not a call.
+                if (declares and caller != null and caller.?.name_pos == range.pos) continue;
+                const group = for (groups.items) |*group| {
+                    if (!std.mem.eql(u8, group.item.path, src.path)) continue;
+                    const same = if (group.item.sym) |g| caller != null and caller.?.name_pos == g.name_pos else caller == null;
+                    if (same) break group;
+                } else blk: {
+                    try groups.append(arena, .{ .item = .{ .path = src.path, .uri = src.uri, .text = src.text, .sym = caller } });
+                    break :blk &groups.items[groups.items.len - 1];
+                };
+                try group.ranges.append(arena, range);
+            }
+        }
+        try self.writeCallGroups(id, groups.items, "from", null);
+    }
+
+    /// The functions that the item names in its body. For the top level of a source, the names outside of its
+    /// functions. Functions of the standard modules are left out: there is no source to go to.
+    fn onOutgoingCalls(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
+        const item = (try self.callItemOf(arena, params)) orelse return self.replyNull(id);
+        _ = self.compileSource(.{ .path = item.path, .uri = item.uri, .text = item.text });
+        var ptr: [*c]const c.Token = null;
+        const len = c.vm_symbol_tokens(self.vm, &ptr);
+        const tokens = if (len == 0 or ptr == null) &[_]c.Token{} else try arena.dupe(c.Token, ptr[0..len]);
+        const outline = (try symbols.documentSymbols(arena, item.text)) orelse &.{};
+
+        const Callee = struct {
+            def_path: []const u8,
+            def_pos: u32,
+            def_end: u32,
+            ranges: std.ArrayList(c.Range) = .empty,
+        };
+        var callees: std.ArrayList(Callee) = .empty;
+        for (tokens) |token| {
+            if (token.kind != c.ItemFunction and token.kind != c.ItemMethod) continue;
+            if (token.end_pos > item.text.len) continue;
+            if (item.sym) |sym| {
+                if (token.pos < sym.pos or token.pos >= sym.end or token.pos == sym.name_pos) continue;
+            } else if (functionAround(outline, token.pos) != null) continue;
+            var info: c.SymbolInfo = undefined;
+            if (!c.vm_symbol_at(self.vm, token.pos, &info) or info.kind != c.SymbolDecl or !info.has_def) continue;
+            const def_path = c.from_bytes(info.def_uri);
+            const range: c.Range = .{ .pos = token.pos, .end_pos = token.end_pos };
+            const callee = for (callees.items) |*callee| {
+                if (callee.def_pos == info.def_pos and std.mem.eql(u8, callee.def_path, def_path)) break callee;
+            } else blk: {
+                try callees.append(arena, .{ .def_path = try arena.dupe(u8, def_path), .def_pos = info.def_pos, .def_end = info.def_end_pos });
+                break :blk &callees.items[callees.items.len - 1];
+            };
+            try callee.ranges.append(arena, range);
+        }
+
+        var groups: std.ArrayList(CallGroup) = .empty;
+        for (callees.items) |callee| {
+            const src = (try self.sourceByPath(arena, callee.def_path)) orelse continue;
+            if (callee.def_end > src.text.len) continue;
+            const sym = (try functionDeclaredIn(arena, src.text, callee.def_pos, callee.def_end)) orelse continue;
+            try groups.append(arena, .{ .item = .{ .path = src.path, .uri = src.uri, .text = src.text, .sym = sym }, .ranges = callee.ranges });
+        }
+        try self.writeCallGroups(id, groups.items, "to", item.text);
+    }
+
     fn groupOf(arena: std.mem.Allocator, groups: *std.ArrayList(Group), uri: []const u8) !*Group {
         for (groups.items) |*group| {
             if (std.mem.eql(u8, group.uri, uri)) return group;
@@ -1720,6 +1998,50 @@ pub const Server = struct {
             });
             try jw.objectField("newText");
             try jw.write(text);
+            try jw.endObject();
+        }
+        try jw.endArray();
+        try jw.endObject();
+        try self.send(&b);
+    }
+
+    /// The whole document is formatted and only the lines of the range are changed: the formatter keeps the
+    /// lines, so a line of the output is the same line of the input. A range that ends at the start of a line
+    /// leaves that line out (a selection of whole lines).
+    fn onRangeFormatting(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
+        const doc = try self.docOf(params);
+        const range_v = getPath(params, &.{"range"}) orelse return error.InvalidParams;
+        const start_line = getInt(getPath(range_v, &.{"start"}) orelse return error.InvalidParams, "line") orelse return error.InvalidParams;
+        const end_v = getPath(range_v, &.{"end"}) orelse return error.InvalidParams;
+        const end_line = getInt(end_v, "line") orelse return error.InvalidParams;
+        const end_char = getInt(end_v, "character") orelse return error.InvalidParams;
+        if (start_line < 0 or end_line < start_line or end_char < 0) return error.InvalidParams;
+        const first: usize = @intCast(start_line);
+        const last: usize = if (end_char == 0 and end_line > start_line) @intCast(end_line - 1) else @intCast(end_line);
+
+        var out: c.Bytes = c.NullStr;
+        const res = c.c.cl_vm_format(self.vm, c.to_bytes(doc.text), &out);
+        defer if (out.ptr != null) c.vm_freeb(self.vm, c.from_bytes(out));
+        // A source with a syntax error is left as it is, like `formatting`.
+        if (res != c.FormatOk) return self.replyNull(id);
+        const edits = (try assist.lineEdits(arena, doc.text, c.from_bytes(out), first, last)) orelse return self.replyNull(id);
+
+        var b: Builder = undefined;
+        b.init(self.alloc);
+        defer b.deinit();
+        const jw = &b.jw;
+        try beginReply(jw, id);
+        try jw.objectField("result");
+        try jw.beginArray();
+        for (edits) |edit| {
+            try jw.beginObject();
+            try jw.objectField("range");
+            try writeRange(jw, .{
+                .start = position.fromOffset(doc.text, edit.start, self.encoding),
+                .end = position.fromOffset(doc.text, edit.end, self.encoding),
+            });
+            try jw.objectField("newText");
+            try jw.write(edit.new_text);
             try jw.endObject();
         }
         try jw.endArray();

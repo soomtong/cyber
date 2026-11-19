@@ -188,6 +188,104 @@ test('Format Document', async () => {
     assert.strictEqual(doc.getText(), original);
 });
 
+let hdoc;
+
+test('Lint diagnostics: an unused module, an unused local and a scope exit', async () => {
+    const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    hdoc = await vscode.workspace.openTextDocument(path.join(folder, 'hints.cy'));
+    await vscode.window.showTextDocument(hdoc);
+    const diags = await until('lint diagnostics', () => {
+        const d = vscode.languages.getDiagnostics(hdoc.uri);
+        return d.length >= 3 ? d : null;
+    });
+    const byCode = (code) => diags.find((d) => (d.code && d.code.value !== undefined ? d.code.value : d.code) === code);
+
+    const use = byCode('unused-use');
+    assert.strictEqual(use.message, 'The module `math` is never used.');
+    assert.strictEqual(use.severity, vscode.DiagnosticSeverity.Warning);
+    assert.deepStrictEqual(use.tags, [vscode.DiagnosticTag.Unnecessary]);
+
+    const local = byCode('unused-local');
+    assert.strictEqual(local.message, '`spare` is never used. Prefix it with `_` to keep it.');
+    assert.strictEqual(hdoc.getText(local.range), 'spare');
+
+    const exit = byCode('scope-exit');
+    assert.strictEqual(exit.severity, vscode.DiagnosticSeverity.Information);
+    assert.strictEqual(hdoc.getText(exit.range), 'return');
+    assert.strictEqual(exit.range.start.line, positionOf(hdoc, 'return 1').line);
+});
+
+test('Quick fixes for the lint diagnostics and for a compile error', async () => {
+    const fixesAt = async (needle) => {
+        const at = positionOf(hdoc, needle);
+        const actions = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', hdoc.uri, new vscode.Range(at, at));
+        return actions.filter((a) => a.kind && a.kind.value === 'quickfix');
+    };
+    let fixes = await fixesAt('spare');
+    assert.deepStrictEqual(fixes.map((a) => a.title), ['Prefix `spare` with `_`']);
+    let edits = fixes[0].edit.get(hdoc.uri);
+    assert.strictEqual(edits[0].newText, '_');
+    assert.deepStrictEqual(edits[0].range.start, positionOf(hdoc, 'spare'));
+
+    fixes = await fixesAt('use math');
+    assert.deepStrictEqual(fixes.map((a) => a.title), ['Remove `use math`']);
+    edits = fixes[0].edit.get(hdoc.uri);
+    assert.strictEqual(edits[0].newText, '');
+    assert.strictEqual(edits[0].range.start.line, 0);
+    assert.strictEqual(edits[0].range.end.line, 1);
+
+    // The compiler sends the fix with the error, and the editor applies it as it is.
+    const original = hdoc.getText();
+    await edit(hdoc, 'use math\nprint(math.isNaN(1.0))\n');
+    await until('the compile error', () => vscode.languages.getDiagnostics(hdoc.uri).some((d) => d.severity === vscode.DiagnosticSeverity.Error));
+    fixes = await fixesAt('isNaN');
+    assert.deepStrictEqual(fixes.map((a) => a.title), ['Change to `is_nan`']);
+    assert.ok(await vscode.workspace.applyEdit(fixes[0].edit));
+    assert.strictEqual(hdoc.getText(), 'use math\nprint(math.is_nan(1.0))\n');
+    await until('no errors after the fix', () => !vscode.languages.getDiagnostics(hdoc.uri).some((d) => d.severity === vscode.DiagnosticSeverity.Error));
+
+    await edit(hdoc, original);
+    await until('the lint diagnostics again', () => vscode.languages.getDiagnostics(hdoc.uri).length >= 3);
+});
+
+test('Inlay hints: inferred types and the statement that waits for fibers', async () => {
+    const all = new vscode.Range(0, 0, hdoc.lineCount, 0);
+    const hints = await vscode.commands.executeCommand('vscode.executeInlayHintProvider', hdoc.uri, all);
+    const label = (h) => (typeof h.label === 'string' ? h.label : h.label.map((p) => p.value).join(''));
+    const at = (needle, delta) => hints.find((h) => h.position.isEqual(positionOf(hdoc, needle, delta)));
+
+    const spare = at('spare', 'spare'.length);
+    assert.ok(spare, JSON.stringify(hints.map(label)));
+    assert.strictEqual(label(spare).trim(), 'int');
+    assert.strictEqual(spare.kind, vscode.InlayHintKind.Type);
+    assert.ok(at('total :=', 'total'.length));
+
+    const waits = hints.find((h) => label(h).includes('waits for fibers'));
+    assert.ok(waits, JSON.stringify(hints.map(label)));
+    assert.deepStrictEqual(waits.position, positionOf(hdoc, 'return 1', 'return 1'.length));
+});
+
+test('Hover shows the doc comment of the declaration', async () => {
+    const hovers = await vscode.commands.executeCommand('vscode.executeHoverProvider', hdoc.uri, positionOf(hdoc, 'halve(4', 1));
+    const text = hoverText(hovers);
+    assert.ok(text.includes('fn halve(n int) -> int'), text);
+    assert.ok(text.includes('Halves a number.'), text);
+});
+
+test('Every syntax error gets a diagnostic', async () => {
+    const original = hdoc.getText();
+    await edit(hdoc, 'fn a():\n    x := )\n\nfn b():\n    y := ]\n\nprint(1 +)\n');
+    const diags = await until('three syntax errors', () => {
+        const d = vscode.languages.getDiagnostics(hdoc.uri).filter((x) => x.severity === vscode.DiagnosticSeverity.Error);
+        return d.length >= 3 ? d : null;
+    });
+    assert.deepStrictEqual(diags.map((d) => d.range.start.line).sort(), [1, 4, 6]);
+    // The outline keeps the declarations that parse.
+    const syms = await vscode.commands.executeCommand('vscode.executeDocumentSymbolProvider', hdoc.uri);
+    assert.ok(syms.some((s) => s.name === 'a') && syms.some((s) => s.name === 'b'), JSON.stringify(syms.map((s) => s.name)));
+    await edit(hdoc, original);
+});
+
 test('The server is restarted by the command and answers again', async () => {
     await vscode.commands.executeCommand('cyber.restartServer');
     const hovers = await until('a hover after the restart', async () => {

@@ -1,7 +1,9 @@
 //! Code assists that are worked out from the text: quick fixes for diagnostics, the doc comment of a
-//! declaration, and whether a type hint would only repeat the source. Pure functions with unit tests.
+//! declaration, whether a type hint would only repeat the source, and the identifiers of a name. Pure functions
+//! with unit tests.
 
 const std = @import("std");
+const cy = @import("../cyber.zig");
 
 /// An edit of the document that fixes a diagnostic. Offsets are bytes. `title` and `new_text` are allocated.
 pub const Fix = struct {
@@ -157,4 +159,46 @@ test "A type hint is left out when the initializer already names the type." {
     try t.expect(!typeIsWritten("trueish()", "bool"));
     try t.expect(!typeIsWritten("make()", "Vec2"));
     try t.expect(typeIsWritten("fn() -> int:", "OpaqueFunc[fn() -> int]"));
+}
+
+/// The offsets of the identifiers `name` in `text`, from the tokenizer: not the words in comments and strings,
+/// but the names in the expressions of an interpolated string. Null if the text does not tokenize.
+pub fn identsNamed(alloc: std.mem.Allocator, text: []const u8, name: []const u8) !?[]u32 {
+    var tokenizer = cy.Tokenizer.init(alloc, text);
+    defer tokenizer.deinit();
+    // Not `ignoreErrors`: with it an unterminated string makes tokens without end.
+    tokenizer.tokenize() catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return null,
+    };
+    if (tokenizer.has_error) return null;
+    var out: std.ArrayList(u32) = .empty;
+    errdefer out.deinit(alloc);
+    for (tokenizer.tokens.items) |token| {
+        if (token.tag() != .ident) continue;
+        const pos = token.pos();
+        if (token.data.end > text.len or !std.mem.eql(u8, text[pos..token.data.end], name)) continue;
+        try out.append(alloc, pos);
+    }
+    return try out.toOwnedSlice(alloc);
+}
+
+test identsNamed {
+    const alloc = std.testing.allocator;
+    const text =
+        \\-- twice in a comment
+        \\fn twice(n int) -> int:
+        \\    return n * 2
+        \\print('twice %{twice(2)}')
+        \\print(twice2)
+        \\
+    ;
+    const found = (try identsNamed(alloc, text, "twice")).?;
+    defer alloc.free(found);
+    try std.testing.expectEqual(@as(usize, 2), found.len);
+    try std.testing.expectEqual(std.mem.find(u8, text, "twice(n").?, found[0]);
+    try std.testing.expectEqual(std.mem.find(u8, text, "twice(2)").?, found[1]);
+
+    // A source that does not tokenize.
+    try std.testing.expect((try identsNamed(alloc, "print('twice)\n", "twice")) == null);
 }

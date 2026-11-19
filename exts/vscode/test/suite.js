@@ -123,17 +123,24 @@ test('Semantic tokens', async () => {
     }
 });
 
-test('Rename of a local, and no rename of a function', async () => {
+test('Rename of a local, of a function across files, and no rename in a standard module', async () => {
     const edits = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', doc.uri, positionOf(doc, 'total :='), 'sum_');
     const changes = edits.entries();
     assert.strictEqual(changes.length, 1);
     assert.strictEqual(changes[0][1].length, 2);
     assert.ok(changes[0][1].every((e) => e.newText === 'sum_'));
 
-    // The editor asks whether the place can be renamed first, and the server says no for a function.
+    // `lib.twice`: the call here and the declaration in `lib.cy`, which is not open.
+    const fn = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', doc.uri, positionOf(doc, 'twice', 1), 'double');
+    const files = fn.entries().map(([uri, list]) => `${path.basename(uri.fsPath)}:${list.length}`).sort();
+    assert.deepStrictEqual(files, ['lib.cy:1', 'main.cy:1']);
+    const here = fn.get(doc.uri)[0];
+    assert.strictEqual(doc.getText(here.range), 'twice');
+
+    // The editor asks whether the place can be renamed first, and the server says why not.
     await assert.rejects(
-        () => vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', doc.uri, positionOf(doc, 'add(1', 1), 'plus'),
-        /can't be renamed|local variable or a parameter/
+        () => vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', doc.uri, positionOf(doc, 'print(lib', 1), 'show'),
+        /standard module `core`/
     );
 });
 

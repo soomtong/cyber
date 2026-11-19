@@ -272,9 +272,9 @@ pub const Server = struct {
         } else if (std.mem.eql(u8, method, "textDocument/documentHighlight")) {
             try self.onDocumentHighlight(id, params);
         } else if (std.mem.eql(u8, method, "textDocument/prepareRename")) {
-            try self.onPrepareRename(id, params);
+            try self.onPrepareRename(arena, id, params);
         } else if (std.mem.eql(u8, method, "textDocument/rename")) {
-            try self.onRename(id, params);
+            try self.onRename(arena, id, params);
         } else if (std.mem.eql(u8, method, "textDocument/codeAction")) {
             try self.onCodeAction(arena, id, params);
         } else if (std.mem.eql(u8, method, "textDocument/inlayHint")) {
@@ -1381,17 +1381,38 @@ pub const Server = struct {
         try self.send(&b);
     }
 
-    /// Only a local or a parameter that is declared in the document is renamed. All of its uses are in the
-    /// function that declares it. A function or a type can be used by modules that the server does not see
-    /// from here, and renaming it in one document would break them.
-    fn canRename(info: c.SymbolInfo) bool {
+    /// A local or a parameter: all of its uses are in the function that declares it.
+    fn isLocal(info: c.SymbolInfo) bool {
         return info.kind == c.SymbolLocal and info.has_def;
     }
 
-    fn onPrepareRename(self: *Server, id: ?Value, params: Value) !void {
+    /// Why a declaration can not be renamed across the workspace, or null if it can be tried. The uses are
+    /// only checked by `onRename`: they need a compile of every source that has the name.
+    fn declRenameRefusal(self: *Server, arena: std.mem.Allocator, doc: *Document, info: c.SymbolInfo) !?[]const u8 {
+        if (info.kind != c.SymbolDecl or !info.has_def) {
+            return "Only a local, a parameter or a declaration of the workspace can be renamed.";
+        }
+        const def_path = c.from_bytes(info.def_uri);
+        const name_ = doc.text[info.pos..info.end_pos];
+        if (std.mem.startsWith(u8, c.from_bytes(info.detail), "module ")) {
+            return try std.fmt.allocPrint(arena, "`{s}` names a module. Rename it in its `use` and where it is used by hand.", .{name_});
+        }
+        if (!(std.mem.eql(u8, def_path, doc.path) or std.Io.Dir.path.isAbsolute(def_path) or self.docByPath(def_path) != null)) {
+            return try std.fmt.allocPrint(arena, "`{s}` is declared in the standard module `{s}`, which can not be changed.", .{ name_, def_path });
+        }
+        return null;
+    }
+
+    fn onPrepareRename(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
         var info: c.SymbolInfo = undefined;
         const doc = (try self.symbolAt(params, &info)) orelse return self.replyNull(id);
-        if (!canRename(info)) return self.replyNull(id);
+        if (!isLocal(info)) {
+            if (try self.declRenameRefusal(arena, doc, info)) |msg| {
+                // A name that is not a local or a declaration (a literal, an expression) has nothing to say.
+                if (info.kind != c.SymbolDecl) return self.replyNull(id);
+                return self.replyError(id, ErrorCode.request_failed, msg);
+            }
+        }
 
         var b: Builder = undefined;
         b.init(self.alloc);
@@ -1403,17 +1424,31 @@ pub const Server = struct {
         try self.send(&b);
     }
 
-    fn onRename(self: *Server, id: ?Value, params: Value) !void {
+    const RenameEdits = struct {
+        uri: []const u8,
+        text: []const u8,
+        ranges: []const c.Range,
+    };
+
+    fn onRename(self: *Server, arena: std.mem.Allocator, id: ?Value, params: Value) !void {
         const new_name = getStr(params, "newName") orelse return error.InvalidParams;
         var info: c.SymbolInfo = undefined;
         const doc = (try self.symbolAt(params, &info)) orelse {
             return self.replyError(id, ErrorCode.request_failed, "There is nothing to rename here.");
         };
-        if (!canRename(info)) {
-            return self.replyError(id, ErrorCode.request_failed, "Only a local variable or a parameter can be renamed.");
-        }
         if (!isIdentifier(new_name)) {
             return self.replyError(id, ErrorCode.request_failed, "The new name is not an identifier.");
+        }
+        var files: std.ArrayList(RenameEdits) = .empty;
+        if (isLocal(info)) {
+            try files.append(arena, .{ .uri = doc.uri, .text = doc.text, .ranges = try arena.dupe(c.Range, self.rangesOf(info)) });
+        } else {
+            if (try self.declRenameRefusal(arena, doc, info)) |msg| {
+                return self.replyError(id, ErrorCode.request_failed, msg);
+            }
+            if (try self.renameEverywhere(arena, doc, info, &files)) |msg| {
+                return self.replyError(id, ErrorCode.request_failed, msg);
+            }
         }
 
         var b: Builder = undefined;
@@ -1425,21 +1460,89 @@ pub const Server = struct {
         try jw.beginObject();
         try jw.objectField("changes");
         try jw.beginObject();
-        try jw.objectField(doc.uri);
-        try jw.beginArray();
-        for (self.rangesOf(info)) |range| {
-            try jw.beginObject();
-            try jw.objectField("range");
-            try writeRange(jw, self.rangeIn(doc, range));
-            try jw.objectField("newText");
-            try jw.write(new_name);
-            try jw.endObject();
+        for (files.items) |file| {
+            if (file.ranges.len == 0) continue;
+            try jw.objectField(file.uri);
+            try jw.beginArray();
+            for (file.ranges) |range| {
+                try jw.beginObject();
+                try jw.objectField("range");
+                try writeRange(jw, .{
+                    .start = position.fromOffset(file.text, range.pos, self.encoding),
+                    .end = position.fromOffset(file.text, range.end_pos, self.encoding),
+                });
+                try jw.objectField("newText");
+                try jw.write(new_name);
+                try jw.endObject();
+            }
+            try jw.endArray();
         }
-        try jw.endArray();
         try jw.endObject();
         try jw.endObject();
         try jw.endObject();
         try self.send(&b);
+    }
+
+    /// The places of a declaration in every source of the workspace that has its name, like `onReferences`.
+    /// Returns why it can not be renamed instead when a source could hold a use that is not known: a source
+    /// with a compile error (nothing after the error is resolved), or the name as an identifier where the
+    /// compiler did not resolve it (a branch of `#if` that was not taken, a template without an instance).
+    /// The sources outside the workspace are not seen.
+    fn renameEverywhere(self: *Server, arena: std.mem.Allocator, doc: *Document, info: c.SymbolInfo, out: *std.ArrayList(RenameEdits)) !?[]const u8 {
+        // What the VM owns is copied: it compiles other sources below.
+        const def_path = try arena.dupe(u8, c.from_bytes(info.def_uri));
+        const def_pos = info.def_pos;
+        const def_end = info.def_end_pos;
+        const name_ = try arena.dupe(u8, doc.text[info.pos..info.end_pos]);
+        var renames_decl = false;
+        var compiled: usize = 0;
+        // A file made outside the editor since the last listing could use it. A rename is rare: list again.
+        self.files_listed = false;
+        for (try self.sources(arena)) |*src| {
+            if (!try load(arena, src)) continue;
+            const idents = (try assist.identsNamed(arena, src.text, name_)) orelse {
+                if (!workspace.hasWord(src.text, name_)) continue;
+                return try std.fmt.allocPrint(arena, "`{s}` does not tokenize, so the uses of `{s}` in it are not known.", .{ std.Io.Dir.path.basename(src.path), name_ });
+            };
+            if (idents.len == 0) continue;
+            if (compiled >= max_reference_compiles) {
+                return try std.fmt.allocPrint(arena, "More than {} sources have the name `{s}`.", .{ max_reference_compiles, name_ });
+            }
+            var config = c.defaultCompileConfig();
+            config.skip_codegen = true;
+            const code = c.vm_compile(self.vm, src.path, src.text, config);
+            self.compiled = null;
+            compiled += 1;
+            if (code != c.Success) {
+                return try std.fmt.allocPrint(arena, "`{s}` has a compile error, so not every use of `{s}` in it is known. Fix it first.", .{ std.Io.Dir.path.basename(src.path), name_ });
+            }
+            var ptr: [*c]const c.Range = null;
+            const len = c.vm_symbol_refs_to(self.vm, c.to_bytes(def_path), def_pos, &ptr);
+            const ranges = if (len == 0 or ptr == null) &[_]c.Range{} else try arena.dupe(c.Range, ptr[0..len]);
+            const declares = std.mem.eql(u8, src.path, def_path);
+            // The name of the declaration is the first identifier in it.
+            var decl_name_at: ?u32 = null;
+            // Every identifier with the name is one of the ranges or resolved to something else.
+            for (idents) |at| {
+                if (declares and decl_name_at == null and at >= def_pos and at < def_end) decl_name_at = at;
+                const in_ranges = for (ranges) |range| {
+                    if (range.pos == at) break true;
+                } else false;
+                if (in_ranges) {
+                    if (decl_name_at == at) renames_decl = true;
+                    continue;
+                }
+                var other: c.SymbolInfo = undefined;
+                if (c.vm_symbol_at(self.vm, at, &other) and other.pos == at and other.end_pos == at + name_.len) continue;
+                const line = std.mem.count(u8, src.text[0..at], "\n") + 1;
+                return try std.fmt.allocPrint(arena, "`{s}` is written at {s}:{} where the compiler did not resolve it (a branch of `#if` that was not taken, or a template that is not used), so it is not known what it names. Rename it by hand.", .{ name_, std.Io.Dir.path.basename(src.path), line });
+            }
+            try out.append(arena, .{ .uri = src.uri, .text = src.text, .ranges = ranges });
+        }
+        if (!renames_decl) {
+            return try std.fmt.allocPrint(arena, "The declaration of `{s}` is not in a source of the workspace.", .{name_});
+        }
+        return null;
     }
 
     fn groupOf(arena: std.mem.Allocator, groups: *std.ArrayList(Group), uri: []const u8) !*Group {

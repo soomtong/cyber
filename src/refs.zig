@@ -275,6 +275,12 @@ pub fn findAllTo(compiler: *cy.Compiler, def_uri: []const u8, def_pos: u32) ![]c
         // Most names refer to a few symbols: the last answers are remembered.
         if (sym != target) {
             if (sym == other) continue;
+            // A module is named by an alias of each source that uses it, so it has no uses in other sources. Its
+            // place is the start of its source, which is also the place of a declaration on the first line.
+            if (sym.type == .chunk or sym.type == .module_alias) {
+                other = sym;
+                continue;
+            }
             const def = defOf(compiler, sym);
             if (def == null or def.?.pos != def_pos or !std.mem.eql(u8, def.?.uri, def_uri)) {
                 other = sym;

@@ -17,7 +17,10 @@ With the language server running:
 * Inlay hints: the inferred type of `x := expr`, `waits for fibers` after a statement that waits, and the parameter
   names before the arguments of a call to a function with two or more parameters.
 * Go to Definition, within the document and into the modules it uses.
-* Find References across the workspace, highlights, and Go to Symbol in Workspace. Rename for locals and parameters.
+* Find References across the workspace, highlights, and Go to Symbol in Workspace.
+* Rename: a local or a parameter in its function, and a function, type, field or constant in every source of the
+  workspace. It is refused, with the reason, when a source that has the name does not compile or has it where the
+  compiler does not look (a branch of `#if` that was not taken), and for a name of a standard module.
 * Semantic highlighting of the names that the compiler resolved.
 * Completion: the members after a `.`, and the names in scope. Signature help inside a call.
 * Format Document, the same result as `cyber fmt`.

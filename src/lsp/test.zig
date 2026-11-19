@@ -653,12 +653,24 @@ test "References, highlights and the rename of a local." {
     try expectRange(get(edits[1], &.{"range"}).?, 2, 11, 2, 16);
     try t.expectEqualStrings("sum_", str(edits[1], &.{"newText"}));
 
-    // A function is not renamed: a module that uses it is not seen from here.
+    // A function of the document: its declaration and its calls.
     reply = try s.requestAt("textDocument/prepareRename", main_uri, 5, 7);
-    try t.expect(get(reply, &.{"result"}).? == .null);
+    try expectRange(get(reply, &.{"result"}).?, 5, 6, 5, 9);
     reply = try s.requestWith("textDocument/rename", main_uri, 5, 7, ",\"newName\":\"plus\"");
+    const fn_edits = items(reply, &.{ "result", "changes", main_uri });
+    try t.expectEqual(@as(usize, 3), fn_edits.len);
+    try expectRange(get(fn_edits[0], &.{"range"}).?, 0, 3, 0, 6);
+    try expectRange(get(fn_edits[1], &.{"range"}).?, 4, 17, 4, 20);
+    try expectRange(get(fn_edits[2], &.{"range"}).?, 5, 6, 5, 9);
+
+    // A function of a standard module is not renamed.
+    reply = try s.requestAt("textDocument/prepareRename", main_uri, 5, 1);
     try t.expectEqual(@as(i64, -32803), int(reply, &.{ "error", "code" }));
-    try t.expectEqualStrings("Only a local variable or a parameter can be renamed.", str(reply, &.{ "error", "message" }));
+    reply = try s.requestWith("textDocument/rename", main_uri, 5, 1, ",\"newName\":\"show\"");
+    try t.expectEqualStrings("`print` is declared in the standard module `core`, which can not be changed.", str(reply, &.{ "error", "message" }));
+    // A literal has nothing to rename.
+    reply = try s.requestAt("textDocument/prepareRename", main_uri, 5, 10);
+    try t.expect(get(reply, &.{"result"}).? == .null);
 
     // A new name has to be an identifier, and there has to be something to rename.
     reply = try s.requestWith("textDocument/rename", main_uri, 2, 12, ",\"newName\":\"my total\"");
@@ -989,6 +1001,62 @@ test "Workspace symbols and references across the sources of the workspace." {
     for (out) |msg| {
         try t.expectEqual(@as(usize, 0), items(msg, &.{ "params", "diagnostics" }).len);
     }
+}
+
+test "Rename of a declaration across the sources of the workspace." {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    // The declaration is on the first line: the start of the source is also where the module `lib` is.
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "lib.cy", .data = "fn twice(a int) -> int:\n    return a * 2\n\nfn quad(a int) -> int:\n    return twice(twice(a))\n" });
+    // Another function of the same name, and the name in a comment and a string.
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "own.cy", .data = "-- twice\nfn twice(a int) -> int:\n    return a + a\nprint('twice' + str(twice(2)))\n" });
+    const dir = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(dir);
+
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    const arena = s.arena.allocator();
+    const sep = std.Io.Dir.path.sep_str;
+    const root_uri = try lsp.pathToUri(arena, dir);
+    const lib_uri = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "lib.cy", .{dir}));
+    const a_uri = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "a.cy", .{dir}));
+    _ = try s.send(try std.fmt.allocPrint(arena,
+        \\{{"jsonrpc":"2.0","id":0,"method":"initialize","params":{{"capabilities":{{}},
+        \\"workspaceFolders":[{{"uri":"{s}","name":"ws"}}]}}}}
+    , .{root_uri}));
+    try s.open(a_uri, 1, "use lib './lib.cy'\nprint(lib.twice(4))\n");
+
+    // The calls here and in `lib.cy` and the declaration. Not the module name, not `own.cy`.
+    var reply = try s.requestAt("textDocument/prepareRename", a_uri, 1, 11);
+    try expectRange(get(reply, &.{"result"}).?, 1, 10, 1, 15);
+    reply = try s.requestWith("textDocument/rename", a_uri, 1, 11, ",\"newName\":\"double\"");
+    const changes = get(reply, &.{ "result", "changes" }).?.object;
+    try t.expectEqual(@as(usize, 2), changes.count());
+    const here = items(reply, &.{ "result", "changes", a_uri });
+    try t.expectEqual(@as(usize, 1), here.len);
+    try expectRange(get(here[0], &.{"range"}).?, 1, 10, 1, 15);
+    const there = items(reply, &.{ "result", "changes", lib_uri });
+    try t.expectEqual(@as(usize, 3), there.len);
+    try expectRange(get(there[0], &.{"range"}).?, 0, 3, 0, 8);
+    try expectRange(get(there[1], &.{"range"}).?, 4, 11, 4, 16);
+    try expectRange(get(there[2], &.{"range"}).?, 4, 17, 4, 22);
+    try t.expectEqualStrings("double", str(there[0], &.{"newText"}));
+
+    // The module name is not renamed.
+    reply = try s.requestWith("textDocument/rename", a_uri, 1, 7, ",\"newName\":\"m\"");
+    try t.expectEqualStrings("`lib` names a module. Rename it in its `use` and where it is used by hand.", str(reply, &.{ "error", "message" }));
+
+    // A source with a compile error could use it after the error.
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "broken.cy", .data = "use lib './lib.cy'\nprint(nope)\nprint(lib.twice(1))\n" });
+    reply = try s.requestWith("textDocument/rename", a_uri, 1, 11, ",\"newName\":\"double\"");
+    try t.expectEqualStrings("`broken.cy` has a compile error, so not every use of `twice` in it is known. Fix it first.", str(reply, &.{ "error", "message" }));
+    try tmp.dir.deleteFile(t.io, "broken.cy");
+
+    // A template body without an instance is not resolved.
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "gen.cy", .data = "use lib './lib.cy'\nfn gen[T Any](x T) -> int:\n    return lib.twice(1)\n" });
+    reply = try s.requestWith("textDocument/rename", a_uri, 1, 11, ",\"newName\":\"double\"");
+    try t.expectEqualStrings("`twice` is written at gen.cy:3 where the compiler did not resolve it (a branch of `#if` that was not taken, or a template that is not used), so it is not known what it names. Rename it by hand.", str(reply, &.{ "error", "message" }));
 }
 
 const SemanticToken = struct {

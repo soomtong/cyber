@@ -1,6 +1,6 @@
 # LSP 서버 설계와 단계 계획
 
-2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 ~ P4 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P4 구현" 절), P5의 code action · inlay hint와 린트 진단(2026-11-18, 12절), 파서 복구(2026-11-18, 13절). 호출 자리의 매개변수 이름 inlay(2026-11-19, 12절). 남은 것은 함수 · 타입 rename.
+2026-11-12 작성. 기준 버전 0.4.9(`03d24f4e`). 상태: P0 ~ P4 구현(2026-11-12 ~ 13, 아래 "P0 구현" ~ "P4 구현" 절), P5의 code action · inlay hint와 린트 진단(2026-11-18, 12절), 파서 복구(2026-11-18, 13절). 호출 자리의 매개변수 이름 inlay(2026-11-19, 12절), 선언의 워크스페이스 rename(2026-11-19, 14절).
 앞선 결정은 `docs/decisions/project_fmt.md`의 "내장 도구의 기준"(LSP는 CLI에 넣지 않고 라이브러리 위의 별도 프로그램),
 사실 근거는 `docs/study/01-pipeline-front-end.md` 6절과 `docs/decisions/project_compile_error_report.md`이다.
 
@@ -420,7 +420,7 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
 - 파서 복구(P2의 나머지): 2026-11-18에 했다(13절).
 - F-114(검사마다 느는 메모리)와 F-116(private 필드 struct의 `print`)은 2026-11-13에 고쳤다. F-114는 서버가 아니라
   컴파일러의 reset이 컴파일 타임 힙을 비우지 않던 것이다. 300번 검사에 RSS가 변하지 않는다.
-- P5의 나머지: 함수 · 타입의 rename(워크스페이스 references 위에서, 한계를 정한 뒤). code action · inlay hint는 12절.
+- P5의 나머지: 함수 · 타입의 rename은 2026-11-19에 했다(14절). code action · inlay hint는 12절.
 - Windows에서의 실행 확인.
 
 ## 12. P5: 코드 지원과 린트 (2026-11-18)
@@ -444,7 +444,8 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
 | quick fix | `codeAction` | 이번 |
 | 추론된 타입 | `inlayHint` | 이번 |
 | 호출 자리의 매개변수 이름 | `inlayHint` | 2026-11-19(아래 "매개변수 이름") |
-| 함수 · 타입 rename, call hierarchy, 범위 포맷 | | 하지 않음(아래) |
+| 함수 · 타입 · 필드 rename | `rename` | 2026-11-19(14절) |
+| call hierarchy, 범위 포맷 | | 하지 않음(아래) |
 
 ### 컴파일러: `cl_vm_symbol_hints`
 
@@ -531,7 +532,6 @@ main 소스의 식이 core의 템플릿을 쓰면(`[]int{1, 2}`, `s.len()`) 컴�
 
 ### 하지 않은 것
 
-- 함수 · 타입 rename(11절과 같은 이유),
   call hierarchy, 범위 포맷.
 - 매개변수의 쓰지 않음: 콜백처럼 시그니처를 맞추느라 받는 매개변수가 많아 잡음이 크다.
 - 컴파일러 경고: 이 메모는 LSP · 호스트 질의로만 나온다. CLI의 컴파일 결과는 그대로다.
@@ -570,3 +570,53 @@ main 소스의 식이 core의 템플릿을 쓰면(`[]int{1, 2}`, `s.len()`) 컴�
 - `zig build test` 통과. 서버 테스트 `Half-typed source never crashes the server.`가 소스의 모든 앞부분을 outline으로 파싱한다.
 - 저장소의 `.cy` 584개(`src/test` · `examples` · `src/tools`)와 파일마다 줄 세 곳에 `)` · `:` · `fn` · 들여쓰기 같은 조각을 심은
   변형 둘씩, 모두 1,736개를 Debug 서버 하나에 넣어 진단과 outline을 받았다. 죽거나 멈춘 것은 없고, 변형 525개가 진단을 둘 이상 냈다.
+
+## 14. 선언의 rename (2026-11-19)
+
+3절(P3)과 9절(P4)이 미룬 함수 · 타입 rename. 9절의 워크스페이스 references 위에 올리고, 미룬 까닭이던 한계를 이렇게 정한다:
+쓰임을 다 안다고 말할 수 없으면 고치지 않고 그 까닭을 말한다.
+
+대상: `cl_vm_symbol_at`이 `CL_SYMBOL_DECL`로 답하는 이름 가운데 선언이 워크스페이스나 열린 문서에 있는 것. 함수 · 메서드 · 타입 ·
+필드 · 상수 · 전역 · enum case. 지역 · 매개변수는 전처럼 문서 안에서만 고친다.
+
+순서(`Server.renameEverywhere`):
+
+1. 워크스페이스 파일을 다시 훑는다(편집기 밖에서 만든 파일도 쓸 수 있다). 열린 문서는 편집기의 본문.
+2. 소스마다 토크나이저로 이름과 같은 식별자를 찾는다(`assist.identsNamed`). 주석과 문자열 속 글자는 식별자가 아니다. 보간 식 속
+   이름은 식별자다. 없으면 건너뛴다.
+3. 있으면 그 소스를 main으로 컴파일한다. 실패하면 거절한다: 첫 오류 뒤는 해석되지 않아 쓰임을 모른다.
+4. `cl_vm_symbol_refs_to(def_uri, def_pos)`의 범위가 고칠 곳이다.
+5. 식별자 가운데 범위에도 없고 컴파일러가 다른 것으로 해석하지도 않은(`cl_vm_symbol_at`이 같은 범위로 답하지 않는) 것이 있으면
+   거절한다. 택하지 않은 `#if` 갈래, 인스턴스가 없는 템플릿 본문이다. 같은 이름의 다른 함수 · 지역은 다른 것으로 해석되므로 남는다.
+6. 선언하는 소스에서 선언 범위 안의 첫 식별자(선언의 이름)가 범위에 들었는지 본다. 아니면 거절한다(선언이 워크스페이스 밖).
+
+거절 문구:
+
+- 표준 모듈: '`print` is declared in the standard module `core`, which can not be changed.' prepareRename에서도 이 오류로 답해
+  편집기가 이름을 묻기 전에 보인다.
+- 모듈 이름(`use lib`의 `lib`): '`lib` names a module. Rename it in its `use` and where it is used by hand.' 소스마다 붙이는 별칭이다.
+- 컴파일 오류: '`broken.cy` has a compile error, so not every use of `twice` in it is known. Fix it first.'
+- 해석되지 않은 자리: '`twice` is written at gen.cy:3 where the compiler did not resolve it (...). Rename it by hand.'
+- 300개 넘는 소스, 토큰으로 나뉘지 않는 소스.
+
+한계:
+
+- 워크스페이스 밖의 소스(다른 프로젝트가 이 모듈을 쓰는 곳)는 모른다. 다른 언어 서버와 같다.
+- 새 이름이 같은 범위의 다른 이름과 겹치는지 보지 않는다(지역과 같다). 겹치면 다음 검사의 진단으로 나온다.
+- 오버로드는 고른 하나만 고친다(선언 위치로 맞춘다). 트레이트를 구현하는 메서드를 고치면 구현이 끊어지고, 진단으로 나온다.
+- 주석 속 이름은 고치지 않는다.
+
+같이 고친 것: `refs.findAllTo`가 모듈 심볼을 맞추지 않는다. 모듈의 선언 위치는 그 소스의 처음(0)이라, 첫 줄에 선언된 함수와
+위치가 같았다. `lib.cy`가 `fn twice`로 시작하면 `twice`의 파일을 넘는 references에 `lib.twice`의 `lib`가 섞였다. 모듈 이름은
+소스마다의 별칭이라 다른 소스의 쓰임이 없다. 문서 안 references(`cl_vm_symbol_refs`)는 포인터로 비교해 영향이 없다.
+
+확인: 서버 테스트 `Rename of a declaration across the sources of the workspace.`(첫 줄의 선언, 같은 이름의 다른 함수, 주석 · 문자열,
+모듈 이름, 컴파일 오류, 인스턴스 없는 템플릿), `References, highlights and the rename of a local.`(문서 안의 함수, 표준 모듈),
+`assist.identsNamed` 단위 테스트, VS Code 테스트(열지 않은 `lib.cy`까지 고침, `print` 거절).
+
+`src/test`를 워크스페이스로 두고 파일 40개의 첫 `fn` · `type` 선언 26개에 rename을 보냈다(Debug 서버). 죽는 것 없음. 8개가
+고쳐졌고, 15개는 이름이 든 소스의 컴파일 오류로 거절됐다(`*_error.cy` 테스트가 많은 폴더다). 한 요청에 최대 13초(Debug, 이름이 흔해
+컴파일이 많은 것). 처음 훑기에서 서버가 메모리를 다 쓰고 죽었다: `identsNamed`가 토크나이저에 `ignoreErrors`를 켰는데, 이 모드는
+닫히지 않은 문자열에서 앞으로 가지 못하고 토큰을 끝없이 쌓는다. 끄고 오류면 null을 돌려준다. `ignoreErrors`는 다른 곳에서 쓰지
+않는다(토크나이저의 이 결함은 그대로 둔다).
+

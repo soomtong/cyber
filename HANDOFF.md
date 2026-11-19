@@ -10,8 +10,8 @@
 
 ## 현재 브랜치
 
-`master`. `3da1f688`(리뷰 수정 · CI)까지 push돼 있다(2026-11-19 확인). 그 뒤 커밋 여섯(`15ce5fa8` ~ `b99e0bcb`)은
-`lsp-followups`에서 만들어 master로 fast-forward 병합했고, push하지 않았다.
+`master`. `c0a20593`까지 push돼 있다(2026-11-19, PR #8 병합). 그 Latest Build `44522794178`은 성공했다.
+PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지 못해 15분 뒤 취소된 탓이다(나머지 6개 통과).
 
 ## 완료된 작업
 
@@ -55,8 +55,9 @@
   - `/code-review high` 6건 수정(`b99e0bcb`): 오버로드는 함께 rename(spec 14절을 바꿈), 키워드 이름 거절, `declAt`이
     enum · choice · union case를 찾음, `@` 내장 호출(`fiber f(a)`)과 인스턴스마다 다른 오버로드의 호출은 inlay 없음.
     목록은 `docs/releases/unreleased.md` "rename · 매개변수 이름 inlay의 리뷰 수정".
-- [ ] CI 시간 확인: Latest Build의 job별 시간을 전(`44236296335`, 21분 28초)과 비교해 `project_fork_release_ci.md`에 적는다.
-  macOS arm64 Debug 테스트가 여전히 길면 그 step을 빼는 안이 다음 후보다.
+- [x] CI 시간 확인(2026-11-19): `project_fork_release_ci.md` "CI에서 잰 결과". 러너 사용 137 → 77분, 벽시계는 21분 그대로.
+  arm64 macOS Debug 테스트(약 13분, 3코어라 병렬화 효과 없음)가 벽시계를 정한다.
+- [ ] 사용자 결정: arm64 macOS의 Debug 테스트 step을 뺄지(예상 벽시계 11~13분, 같은 타깃의 Debug 검사를 CI에서 잃음).
 - [x] tars-agent `docs/TODO.md`에 다음 빌드에서 안내 105행을 고칠 항목(`4aae2ec`, tars-agent에 커밋됨).
 
 - [x] 0.4.15 릴리스(2026-11-18): 태그 `0.4.15` → `93a9ca4f`, `build-969-93a9ca4`, Latest, 에셋 15개(CI). `install.sh 0.4.15`를 임시

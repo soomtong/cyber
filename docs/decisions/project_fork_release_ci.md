@@ -230,6 +230,31 @@ zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Dd
   - ReleaseFast 테스트 · wasm의 두 모드 줄이기. 검사 범위가 준다.
 - 워크플로만 고친 커밋은 Latest Build를 트리거하지 않는다(위). 이번 커밋은 `build.zig`와 소스가 같이 바뀌어 push하면 돈다.
 
+### CI에서 잰 결과 (2026-11-19)
+
+Latest Build 세 번(전 `44236296335`, 후 `44329139922` · `44522794178`). 시간은 job의 시작에서 끝까지다.
+
+| | 전 | 후 1 | 후 2 |
+|---|---|---|---|
+| run 전체(벽시계) | 21분 28초 | 22분 42초 | 20분 43초 |
+| job 수 · 러너 사용 합 | 13개 · 137분 | 9개 · 81분 | 9개 · 77분 |
+| arm64 macOS job | 20분 56초 | 17분 8초 | 20분 18초 |
+| 그 안의 Debug 테스트 | 741초 | 600초 | 772초 |
+| `docs` job | 8분 29초 | 2분 55초 | 2분 33초 |
+
+- 러너 사용은 44% 줄었다(원인 2 · 3). 벽시계는 거의 그대로다. 정하는 것은 여전히 arm64 macOS job이고, 그 Debug 테스트가
+  줄지 않았다. 후 1의 22분 42초는 arm64 job이 러너를 5분 기다린 탓이다.
+- 원인 1(병렬화)은 CI에서 효과가 작다. arm64 Debug step의 로그에서 lib-test가 3.6분, lsp-test가 4.8분, trace-test가 6분,
+  behavior shard 넷이 7.5 · 10 · 10.8 · 12.9분에 끝났다. 3코어 러너에서 shard 넷과 lib · lsp가 CPU를 나눠 쓰므로 합이 그대로
+  남는다. 다른 job의 Debug 테스트도 linux 116 → 123 · 98초, macOS x64 235 → 332 · 255초로 흔들림 안이다.
+- 원인 4(캐시 순서)는 macOS 두 job과 selinux job에서 'Fetch Zig packages.'를 90 · 168 · 87초에서 0~7초로 줄였다. linux-gnu ·
+  windows-gnu · docs는 캐시가 주 키로 맞았는데도 63~96초가 걸린다(빌드 러너를 다시 컴파일). 같은 ubuntu인 selinux는 0초라
+  캐시 내용이 아니라 러너의 차이로 본다. 빌드 러너는 호스트 CPU(native)로 컴파일되므로, 캐시를 저장한 러너와 CPU 모델이 다르면
+  다시 만든다고 추정한다(확인하지 않음). 벽시계에 영향이 없어 두었다.
+- 다음 후보: 벽시계를 줄이려면 arm64 macOS의 Debug 테스트(약 13분)를 빼거나 줄여야 한다. 빼면 arm64는 ReleaseSafe ·
+  ReleaseFast만 남고 Debug 검사는 x64 macOS · linux · windows가 맡는다. 예상 벽시계는 macOS x64 · linux job 쯤인 11~13분이다.
+  개발 기기와 같은 타깃의 Debug(Trace) 검사를 CI에서 잃으므로 결정은 사용자에게 둔다.
+
 ## 번들에 언어 서버 (2026-11-13)
 
 - Linux · macOS 번들은 `cyber`와 `cyber-lsp` 둘을 담는다(0.4.9 다음 릴리스부터). `latest-build.yml`의 `cli` 작업이

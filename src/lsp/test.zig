@@ -1057,6 +1057,30 @@ test "Rename of a declaration across the sources of the workspace." {
     try tmp.dir.writeFile(t.io, .{ .sub_path = "gen.cy", .data = "use lib './lib.cy'\nfn gen[T Any](x T) -> int:\n    return lib.twice(1)\n" });
     reply = try s.requestWith("textDocument/rename", a_uri, 1, 11, ",\"newName\":\"double\"");
     try t.expectEqualStrings("`twice` is written at gen.cy:3 where the compiler did not resolve it (a branch of `#if` that was not taken, or a template that is not used), so it is not known what it names. Rename it by hand.", str(reply, &.{ "error", "message" }));
+    try tmp.dir.deleteFile(t.io, "gen.cy");
+
+    // A case of the same name in another source is resolved there.
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "ops.cy", .data = "type Op enum:\n    case twice\n    case half\n\nprint(Op.twice)\n" });
+    reply = try s.requestWith("textDocument/rename", a_uri, 1, 11, ",\"newName\":\"double\"");
+    try t.expectEqual(@as(usize, 2), get(reply, &.{ "result", "changes" }).?.object.count());
+    try tmp.dir.deleteFile(t.io, "ops.cy");
+
+    // A keyword can not be a name.
+    reply = try s.requestWith("textDocument/rename", a_uri, 1, 11, ",\"newName\":\"return\"");
+    try t.expectEqualStrings("`return` is a keyword.", str(reply, &.{ "error", "message" }));
+
+    // The overloads are one symbol: the names in both declarations are renamed with the calls.
+    const area_uri = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "area.cy", .{dir}));
+    try s.open(area_uri, 1, "fn area(w int, h int) -> int:\n    return w * h\n\nfn area(r float, n float) -> float:\n    return r * n\n\nprint(area(7, 3))\nprint(area(1.5, 2.5))\n");
+    for ([_]u32{ 0, 3 }) |line| {
+        reply = try s.requestWith("textDocument/rename", area_uri, line, 4, ",\"newName\":\"size\"");
+        const edits = items(reply, &.{ "result", "changes", area_uri });
+        try t.expectEqual(@as(usize, 4), edits.len);
+        try expectRange(get(edits[0], &.{"range"}).?, 0, 3, 0, 7);
+        try expectRange(get(edits[1], &.{"range"}).?, 3, 3, 3, 7);
+        try expectRange(get(edits[2], &.{"range"}).?, 6, 6, 6, 10);
+        try expectRange(get(edits[3], &.{"range"}).?, 7, 6, 7, 10);
+    }
 }
 
 const SemanticToken = struct {
@@ -1540,6 +1564,16 @@ test "Inlay hints name the parameters at the arguments of a call." {
         \\print(area(7, height))
         \\print(area(1.5, 2.5))
         \\
+        \\fn worker(a int, b int):
+        \\    pass
+        \\
+        \\fn gen[T Any](x T) -> T:
+        \\    return area(x, x)
+        \\
+        \\f := fiber worker(1, 2)
+        \\print(gen[int](3))
+        \\print(gen[float](1.5))
+        \\
     );
     _ = try s.flush();
     const body = try std.fmt.allocPrint(arena,
@@ -1547,7 +1581,14 @@ test "Inlay hints name the parameters at the arguments of a call." {
         \\"range":{{"start":{{"line":0,"character":0}},"end":{{"line":30,"character":0}}}}}}}}
     , .{main_uri});
     const out = try s.send(body);
-    const hints = items(out[0], &.{"result"});
+    // The names of the parameters, not the inferred types.
+    var hints_list: std.ArrayList(Value) = .empty;
+    for (items(out[0], &.{"result"})) |hint| {
+        if (int(hint, &.{"kind"}) == 2) try hints_list.append(arena, hint);
+    }
+    const hints = hints_list.items;
+    // `fiber worker(1, 2)` calls `@new_fiber`, whose parameters are not written. `area(x, x)` in the template calls
+    // a different overload in each instance.
     // `height` says its parameter already. The float overload has names of its own.
     try t.expectEqual(@as(usize, 3), hints.len);
     try t.expectEqualStrings("width:", str(hints[0], &.{"label"}));

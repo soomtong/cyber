@@ -57,6 +57,11 @@ pub fn isIdentifier(text: []const u8) bool {
     return true;
 }
 
+/// Whether `text` is a keyword of the language (`return`, `fn`, `type`), which can not name anything.
+pub fn isKeyword(text: []const u8) bool {
+    return cy.tokenizer.isKeyword(text);
+}
+
 /// The doc comment (`--|` lines) right above the line of `pos`, without the markers. Empty if there is none.
 pub fn docComment(alloc: std.mem.Allocator, src: []const u8, pos: usize) ![]const u8 {
     if (pos > src.len) return "";

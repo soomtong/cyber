@@ -48,6 +48,11 @@ const keywords = std.StaticStringMap(TokenType).initComptime(.{
     .{ "suspend", .suspend_k },
 });
 
+/// Whether `name` is a keyword, which can not be a name.
+pub fn isKeyword(name: []const u8) bool {
+    return keywords.has(name);
+}
+
 pub const TokenType = enum(u8) {
     /// Used to indicate no token.
     null,

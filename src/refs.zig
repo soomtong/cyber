@@ -169,22 +169,38 @@ fn declAt(compiler: *cy.Compiler, pos: u32) ?Ref {
                 return .{ .pos = range[0], .end = range[1], .kind = .sym, .data = .{ .sym = sym } };
             }
         }
-        // The fields are symbols of the type, found through its declaration.
+        // The fields and the cases are symbols of the type, found through its declaration.
         const decl = declOf(sym) orelse continue;
-        const fields = switch (decl.type()) {
-            .struct_decl => decl.cast(.struct_decl).fields.slice(),
-            .cstruct_decl => decl.cast(.cstruct_decl).fields.slice(),
-            else => continue,
-        };
         const mod = sym.getMod() orelse continue;
-        for (fields) |field| {
-            const range = nameRange(main, field.name, pos) orelse continue;
-            const field_sym = mod.getSym(main.src[range[0]..range[1]]) orelse continue;
-            if (field_sym.type != .field) continue;
-            return .{ .pos = range[0], .end = range[1], .kind = .sym, .data = .{ .sym = field_sym } };
+        switch (decl.type()) {
+            .struct_decl, .cstruct_decl => {
+                const fields = if (decl.type() == .struct_decl) decl.cast(.struct_decl).fields.slice() else decl.cast(.cstruct_decl).fields.slice();
+                for (fields) |field| {
+                    if (memberAt(main, mod, field.name, pos, &.{.field})) |ref| return ref;
+                }
+            },
+            .enumDecl => {
+                for (decl.cast(.enumDecl).members.slice()) |member| {
+                    if (memberAt(main, mod, member.name, pos, &.{ .enum_case, .choice_case })) |ref| return ref;
+                }
+            },
+            .cunion_decl => {
+                for (decl.cast(.cunion_decl).cases.slice()) |case| {
+                    if (memberAt(main, mod, case.name, pos, &.{.union_case})) |ref| return ref;
+                }
+            },
+            else => {},
         }
     }
     return null;
+}
+
+/// The symbol of the type module `mod` that the member name `name_n` declares, if `pos` is at the name.
+fn memberAt(main: *cy.Chunk, mod: *cy.Module, name_n: *ast.Node, pos: u32, sym_types: []const cy.sym.SymType) ?Ref {
+    const range = nameRange(main, name_n, pos) orelse return null;
+    const member = mod.getSym(main.src[range[0]..range[1]]) orelse return null;
+    if (std.mem.findScalar(cy.sym.SymType, sym_types, member.type) == null) return null;
+    return .{ .pos = range[0], .end = range[1], .kind = .sym, .data = .{ .sym = member } };
 }
 
 /// The range of a name node of the main source if `pos` is in it or right after it.
@@ -794,9 +810,11 @@ pub const Call = struct {
 };
 
 /// A call `f(a, b)` or `x.f(a, b)` of the main source. Calls that sema makes for other nodes (operators,
-/// literals) are not `callExpr` nodes and are skipped.
+/// literals) are not `callExpr` nodes and are skipped. A call that sema makes as a `callExpr` names an `@` builtin
+/// (`fiber f(a)` is `@new_fiber(f, {a})`): its parameters are not what the source passes.
 pub fn recordCall(c: *cy.Chunk, node: *ast.Node, func: *cy.Func) void {
     if (node.type() != .callExpr) return;
+    if (node.cast(.callExpr).callee.type() == .at_lit) return;
     _ = rangeOf(c, node) orelse return;
     c.compiler.ref_calls.append(c.compiler.alloc, .{ .node = node, .func = func }) catch {};
 }
@@ -910,30 +928,39 @@ pub fn hints(compiler: *cy.Compiler, complete: bool) ![]const Hint {
 /// The names of the parameters at the arguments of the calls in the main source.
 fn paramNames(compiler: *cy.Compiler, main: *cy.Chunk, text: *std.ArrayList(u8), pending: anytype) !void {
     const alloc = compiler.alloc;
-    // A call in a template body or a loop is recorded more than once.
-    var seen: std.AutoHashMapUnmanaged(*ast.Node, void) = .empty;
-    defer seen.deinit(alloc);
+    // A call in a template body or a loop is recorded more than once. In a template body each instance can call
+    // another overload, with other names: such a call has no hints. The instances of one template share a declaration.
+    var decls: std.AutoArrayHashMapUnmanaged(*ast.Node, ?*ast.Node) = .empty;
+    defer decls.deinit(alloc);
     for (compiler.ref_calls.items) |call_rec| {
-        if ((try seen.fetchPut(alloc, call_rec.node, {})) != null) continue;
-        const decl_n = call_rec.func.decl orelse continue;
+        const entry = try decls.getOrPut(alloc, call_rec.node);
+        if (!entry.found_existing) {
+            entry.value_ptr.* = call_rec.func.decl;
+        } else if (entry.value_ptr.* != call_rec.func.decl) {
+            entry.value_ptr.* = null;
+        }
+    }
+    outer: for (decls.keys(), decls.values()) |call_node, opt_decl| {
+        const decl_n = opt_decl orelse continue;
         if (decl_n.type() != .funcDecl) continue;
         const decl = decl_n.cast(.funcDecl);
 
         // The parameters that the arguments are written for: not the receiver, not the template parameters.
+        // A parameter without a name or more parameters than the buffer: the arguments can not be matched.
         var names_buf: [32][]const u8 = undefined;
         var nparams: usize = 0;
         for (decl.params.slice()) |param| {
             if (param.template_param) continue;
-            const name = param.name_type.nameOrNull() orelse break;
+            const name = param.name_type.nameOrNull() orelse continue :outer;
             if (std.mem.eql(u8, name, "self")) continue;
-            if (nparams == names_buf.len) break;
+            if (nparams == names_buf.len) continue :outer;
             names_buf[nparams] = name;
             nparams += 1;
         }
         const names = names_buf[0..nparams];
         if (names.len < 2) continue;
 
-        const args = call_rec.node.cast(.callExpr).args.slice();
+        const args = call_node.cast(.callExpr).args.slice();
         // `Vec2.scale(v, 2.0)` passes the receiver as the first argument.
         const skip: usize = if (args.len == names.len) 0 else if (args.len == names.len + 1) 1 else continue;
         for (args[skip..], names) |arg, name| {

@@ -1436,8 +1436,11 @@ pub const Server = struct {
         const doc = (try self.symbolAt(params, &info)) orelse {
             return self.replyError(id, ErrorCode.request_failed, "There is nothing to rename here.");
         };
-        if (!isIdentifier(new_name)) {
+        if (!assist.isIdentifier(new_name)) {
             return self.replyError(id, ErrorCode.request_failed, "The new name is not an identifier.");
+        }
+        if (assist.isKeyword(new_name)) {
+            return self.replyError(id, ErrorCode.request_failed, try std.fmt.allocPrint(arena, "`{s}` is a keyword.", .{new_name}));
         }
         var files: std.ArrayList(RenameEdits) = .empty;
         if (isLocal(info)) {
@@ -1518,14 +1521,16 @@ pub const Server = struct {
             }
             var ptr: [*c]const c.Range = null;
             const len = c.vm_symbol_refs_to(self.vm, c.to_bytes(def_path), def_pos, &ptr);
-            const ranges = if (len == 0 or ptr == null) &[_]c.Range{} else try arena.dupe(c.Range, ptr[0..len]);
+            var ranges: std.ArrayList(c.Range) = .empty;
+            if (len > 0 and ptr != null) try ranges.appendSlice(arena, ptr[0..len]);
+            const found = ranges.items.len;
             const declares = std.mem.eql(u8, src.path, def_path);
             // The name of the declaration is the first identifier in it.
             var decl_name_at: ?u32 = null;
             // Every identifier with the name is one of the ranges or resolved to something else.
             for (idents) |at| {
                 if (declares and decl_name_at == null and at >= def_pos and at < def_end) decl_name_at = at;
-                const in_ranges = for (ranges) |range| {
+                const in_ranges = for (ranges.items[0..found]) |range| {
                     if (range.pos == at) break true;
                 } else false;
                 if (in_ranges) {
@@ -1533,11 +1538,22 @@ pub const Server = struct {
                     continue;
                 }
                 var other: c.SymbolInfo = undefined;
-                if (c.vm_symbol_at(self.vm, at, &other) and other.pos == at and other.end_pos == at + name_.len) continue;
+                if (c.vm_symbol_at(self.vm, at, &other) and other.pos == at and other.end_pos == at + name_.len) {
+                    // The name of another overload: the overloads are one symbol, whose uses are renamed together.
+                    if (other.kind == c.SymbolDecl and other.has_def and other.def_pos == def_pos and std.mem.eql(u8, c.from_bytes(other.def_uri), def_path)) {
+                        try ranges.append(arena, .{ .pos = at, .end_pos = at + @as(u32, @intCast(name_.len)) });
+                    }
+                    continue;
+                }
                 const line = std.mem.count(u8, src.text[0..at], "\n") + 1;
                 return try std.fmt.allocPrint(arena, "`{s}` is written at {s}:{} where the compiler did not resolve it (a branch of `#if` that was not taken, or a template that is not used), so it is not known what it names. Rename it by hand.", .{ name_, std.Io.Dir.path.basename(src.path), line });
             }
-            try out.append(arena, .{ .uri = src.uri, .text = src.text, .ranges = ranges });
+            std.mem.sort(c.Range, ranges.items, {}, struct {
+                fn lessThan(_: void, x: c.Range, y: c.Range) bool {
+                    return x.pos < y.pos;
+                }
+            }.lessThan);
+            try out.append(arena, .{ .uri = src.uri, .text = src.text, .ranges = ranges.items });
         }
         if (!renames_decl) {
             return try std.fmt.allocPrint(arena, "The declaration of `{s}` is not in a source of the workspace.", .{name_});
@@ -1894,15 +1910,6 @@ fn isNotification(method: []const u8) bool {
         if (std.mem.eql(u8, method, name_)) return true;
     }
     return false;
-}
-
-/// The tokenizer takes ASCII letters, digits and `_` in a name.
-fn isIdentifier(text: []const u8) bool {
-    if (text.len == 0 or std.ascii.isDigit(text[0])) return false;
-    for (text) |ch| {
-        if (!std.ascii.isAlphanumeric(ch) and ch != '_') return false;
-    }
-    return true;
 }
 
 /// Opens the object of a reply. The caller writes `result` or `error` and closes it.

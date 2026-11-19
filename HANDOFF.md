@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-18): 0.4.15 뒤 코드 리뷰 수정 10건과 CI 시간 줄이기
+# HANDOFF (2026-11-19): LSP 다음 후보(VS Code 테스트, 위치 결함, 매개변수 이름 inlay, 선언 rename)
 
 ## 목표
 
@@ -6,10 +6,11 @@
   LSP 확장은 사용자 요청(2026-11-18): "기본으로 탑재할 수 있는 LSP 기능을 목록화하고 구현, 패치 버전 릴리스".
 - 릴리스 뒤(2026-11-18): `/code-review` 0.4.14..HEAD의 10건을 모두 고치고, CI 시간을 줄이는 방법을 검토 · 적용
   (사용자: "10번까지 작업을 마치고 ... 전체 CI가 시간이 너무 긴데 줄일 수 있는 방법을 검토", 검토 승인은 위임).
+- 2026-11-19: HANDOFF "남은 작업"의 LSP 다음 후보 넷(사용자: "3번 진행해").
 
 ## 현재 브랜치
 
-`master`. 0.4.15 릴리스(`93a9ca4f`) 뒤 기록 커밋까지 push. 그 뒤의 리뷰 수정 · CI 커밋은 push하지 않았다(push는 지시 때만).
+`master`. `3da1f688`(리뷰 수정 · CI)까지 push돼 있다(2026-11-19 확인). 그 뒤 LSP 커밋 넷(`15ce5fa8` ~ `9768a272`)은 push하지 않았다.
 
 ## 완료된 작업
 
@@ -43,9 +44,16 @@
 
 ## 남은 작업
 
-- [ ] 리뷰 수정 · CI 커밋 push(사용자 지시 때). push 뒤 Latest Build의 job별 시간을 전(`44236296335`, 21분 28초)과 비교해
-  `project_fork_release_ci.md`에 적는다. macOS arm64 Debug 테스트가 여전히 길면 그 step을 빼는 안이 다음 후보다.
-- [ ] tars-agent `docs/TODO.md`에 다음 빌드에서 안내 105행을 고칠 항목을 적었다(커밋 안 함).
+- [x] LSP 다음 후보(2026-11-19). 설계 · 확인은 `docs/specs/2026-11-12-lsp-design.md` 12절 "매개변수 이름" · "다른 소스의 노드", 14절.
+  - VS Code 테스트에 다섯 항목(`15ce5fa8`): 린트 진단, quick fix, inlay, 문서 주석 hover, 여러 구문 오류. 16개 통과.
+  - 이름 노드 `pos()` 어긋남의 원인(`f926cbaf`): cte가 core 템플릿 노드를 main 청크에서 해석해, core의 위치가 main 위치로 기록됐다.
+    긴 문서의 주석 위 hover에 `void` 등이 떴다. `refs.rangeOf`가 `node.src() != c.id`를 버린다.
+  - 매개변수 이름 inlay(`e609c071`): `CL_HINT_PARAM_NAME`, `Compiler.ref_calls`, 훅은 `sema_call_ir` · `matchFuncSym2`.
+  - 선언 rename(`9768a272`): 워크스페이스 전체, 모를 수 있으면 거절(컴파일 오류 · 해석 안 된 식별자 · 표준 모듈 · 모듈 이름).
+    `refs.findAllTo`가 모듈 심볼을 맞추지 않게 고쳤다(첫 줄 선언과 모듈 위치 0이 겹침).
+- [ ] CI 시간 확인: Latest Build의 job별 시간을 전(`44236296335`, 21분 28초)과 비교해 `project_fork_release_ci.md`에 적는다.
+  macOS arm64 Debug 테스트가 여전히 길면 그 step을 빼는 안이 다음 후보다.
+- [x] tars-agent `docs/TODO.md`에 다음 빌드에서 안내 105행을 고칠 항목(`4aae2ec`, tars-agent에 커밋됨).
 
 - [x] 0.4.15 릴리스(2026-11-18): 태그 `0.4.15` → `93a9ca4f`, `build-969-93a9ca4`, Latest, 에셋 15개(CI). `install.sh 0.4.15`를 임시
   경로에 설치해 버전 · 스크립트 · `cyber-lsp`의 여러 구문 오류 진단을 확인했다. `/usr/local`의 설치는 사용자가 다시 한다.
@@ -55,11 +63,10 @@
   - core `@eq`의 choice 지원(`?json.Value == none`).
   - 설계 원칙 검토(`docs/study/11-design-principles-review.md`) 1.7 · 2.7.
   - 0.5 범위: `spawn f(args)` 호출식 꼴, 임베딩 `CL_YIELD`. 빼면 0.5 릴리스 준비로 간다.
-- [ ] LSP 다음 후보: 함수 · 타입 rename, 호출 자리 매개변수 이름 inlay, VS Code 테스트(`task test:vscode`)에 새 항목 추가(이번에는
-  돌리지 않았다), 본문 안 문장 단위 복구 · 선언 오류 복구(LSP 설계 문서 13절 앞).
+- [ ] LSP 다음 후보: 본문 안 문장 단위 복구 · 선언 오류 복구(LSP 설계 문서 13절 앞), call hierarchy, 범위 포맷.
+  토크나이저의 `ignoreErrors` 모드는 닫히지 않은 문자열에서 끝없이 토큰을 만든다(쓰는 곳 없음, LSP 14절).
 - [ ] 기술 부채(급하지 않음): carry 재시도 루프의 IR 되돌리기, `@destruct_span` 취소 keep 지점, `Scope.run`의 바퀴당 `waiting()`
-  질의, 취소 불변식 panic. 기록은 `project_coroutines.md`. 반복문 본문을 다시 볼 때 이름 노드의 `pos()`가 어긋나는 현상(LSP 12절)은
-  원인을 보지 않았다(힌트는 이름 슬라이스로 우회).
+  질의, 취소 불변식 panic. 기록은 `project_coroutines.md`.
 
 ## 핵심 파일
 

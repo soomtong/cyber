@@ -60,3 +60,9 @@
 
 - `CLReport`에 `has_fix` · `fix_pos` · `fix_end_pos` · `fix_text`가 생겼다(구조체 끝에 추가). 컴파일러가 고칠 편집을 아는
   오류에 선다: 철자가 틀린 멤버('Did you mean ...?'), 같은 모듈에서 이름이 바뀐 함수(`os.read_file_str`), `xs = xs.append(v)`.
+
+## cyber-lsp: 긴 문서의 주석 위에 뜨던 hover (2026-11-19)
+
+- core의 템플릿을 쓰는 식(`[]int{1, 2}`, `s.len()`)이 있으면, core 소스의 위치가 이 문서의 위치로 기록됐다. 문서가 길면 주석이나
+  관계없는 자리에서 hover가 `void` · `int` · `str` 같은 타입을 보였다. 이제 다른 소스의 노드는 기록하지 않는다.
+  `cl_vm_symbol_at` · `cl_vm_symbol_refs`도 같다.

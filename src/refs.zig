@@ -34,6 +34,9 @@ fn rangeOf(c: *cy.Chunk, node: *ast.Node) ?[2]u32 {
     const compiler = c.compiler;
     if (!compiler.record_refs or c != compiler.main_chunk) return null;
     if (node.type() == .null) return null;
+    // Compile-time evaluation in the main chunk also goes over nodes of other sources (the declarations of a
+    // template in `core`). Their positions are in another source.
+    if (node.src() != c.id) return null;
     const pos = node.pos();
     if (pos == cy.NullId) return null;
     const end = node.end();
@@ -803,8 +806,9 @@ pub fn recordDeclaredLocal(c: *cy.Chunk, name_n: *ast.Node, inferred: ?*cy.Type)
     const compiler = c.compiler;
     if (!compiler.record_refs or c != compiler.main_chunk) return;
     if (name_n.type() != .ident) return;
-    // The position comes from the name, a slice of the source, like `recordLocalDecl`. The position of the node
-    // is not reliable for a body that sema goes over again (a loop).
+    // The position comes from the name, a slice of the source, like `recordLocalDecl`. A declaration in a template
+    // of another source can be checked in the main chunk (compile-time evaluation), and its name is not in the
+    // main source.
     const name = name_n.cast(.ident).name.slice();
     const pos = declPos(c, name);
     if (pos == cy.NullId) return;

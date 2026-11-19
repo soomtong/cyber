@@ -1155,6 +1155,34 @@ test "cl_vm_symbol_at describes the names of the main source." {
     try zt.expect(!C.vm_symbol_at(vm, 40, &info));
 }
 
+test "cl_vm_symbol_at finds nothing in the comments of a long source." {
+    // A list literal and a string method evaluate templates of `core` in the main chunk. The positions of their
+    // nodes are in `core`, and in a source as long as `core` they fell on the comments here.
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_symbol_info(vm, true);
+
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    for (0..4000) |_| try buf.appendSlice(std.testing.allocator, "-- padding ...................................................\n");
+    const code_start = buf.items.len;
+    try buf.appendSlice(std.testing.allocator, "xs := []int{1, 2}\nprint(xs[0])\ns := 'abc'\nprint(s.len())\n");
+
+    var config = C.defaultCompileConfig();
+    config.skip_codegen = true;
+    try zt.eq(C.Success, C.vm_compile(vm, "main", buf.items, config));
+    var info: C.SymbolInfo = undefined;
+    var pos: u32 = 0;
+    while (pos < code_start) : (pos += 1) {
+        if (C.vm_symbol_at(vm, pos, &info)) {
+            std.debug.print("A symbol at {}: {s}\n", .{ pos, C.from_bytes(info.detail) });
+            return error.TestUnexpectedResult;
+        }
+    }
+    try zt.expect(C.vm_symbol_at(vm, @intCast(code_start), &info));
+    try zt.eqStr("xs []int", C.from_bytes(info.detail));
+}
+
 test "cl_vm_symbol_refs finds the places that name the same thing." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

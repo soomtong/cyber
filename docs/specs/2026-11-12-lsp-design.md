@@ -450,8 +450,8 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
 해석 기록(8절)에 두 표를 더하고, 질의 하나로 편집기에 줄 "메모"를 낸다. `CLHint{pos, end_pos, kind, detail}`, 위치순.
 
 - `CL_HINT_LOCAL_TYPE`: `x := expr`의 추론된 타입. `sema.localDecl`이 타입이 정해진 뒤 `refs.recordDeclaredLocal`로 적는다
-  (`Compiler.ref_locals`). 위치는 이름 슬라이스의 주소에서 얻는다(`recordLocalDecl`과 같다). 반복문 본문을 다시 분석할 때
-  이름 노드의 `pos()`가 소스의 다른 자리를 가리키는 경우가 있었다(저장소 훑기에서 `heap.cy`).
+  (`Compiler.ref_locals`). 위치는 이름 슬라이스의 주소에서 얻는다(`recordLocalDecl`과 같다). 처음에는 반복문 본문을 다시
+  분석할 때 이름 노드의 `pos()`가 어긋난다고 봤으나, 원인은 다른 소스의 노드였다(아래 "다른 소스의 노드", 2026-11-19).
 - `CL_HINT_SCOPE_EXIT`: 합류를 넣는 출구 문장. `semaScopeExitJoin`이 첫 블록을 합류할 때 적는다(`ref_scope_exits`).
   블록 안의 반복문 안에 있는 `break`는 블록을 떠나지 않으므로 없다.
 - `CL_HINT_UNUSED_LOCAL`: 선언(`x := ...`, `var x T = ...`)은 있고 쓰임이 없는 지역. 쓰임은 기존 해석 기록의 지역 참조다.
@@ -493,6 +493,18 @@ sema가 이름을 해석하는 자리에서 "이 범위는 이것을 가리킨�
 - 저장소 `.cy` 306개(오류 테스트 제외)를 서버로 열어 힌트 진단을 모았다. 처음에는 쓰지 않은 지역 210건 중 상당수가 엉뚱한
   자리를 가리켰다(위의 노드 위치 문제). 고친 뒤 지역 84건 · `use` 9건 · `scope` 출구 9건이고, 지역은 테스트가 `@deinit`을 보려고
   만든 값처럼 실제로 쓰지 않는 것이다. `use`는 모두 실제로 쓰지 않거나(주석에만 있는 이름 포함) 문서화된 예외다.
+
+### 다른 소스의 노드 (2026-11-19)
+
+main 소스의 식이 core의 템플릿을 쓰면(`[]int{1, 2}`, `s.len()`) 컴파일 타임 평가(`cte`)가 그 템플릿 선언의 노드를 main 청크에서
+해석한다. 해석 기록은 청크만 보고 노드의 소스는 보지 않아서, core의 위치가 main 소스의 위치로 적혔다. main 소스보다 뒤인 위치는
+`end > c.src.len`으로 걸러졌지만, 긴 문서(core의 위치가 문서 안에 들어올 만큼)에서는 주석 위에서 hover가 `void` · `int` · `str`을
+보였다. 3,000줄 문서에서 225곳. 12절의 "이름 노드의 `pos()`가 어긋남"도 같은 것이다(`localDecl`도 템플릿을 펼칠 때 main 청크에서
+불린다).
+
+- 고친 것: `refs.rangeOf`가 `node.src() != c.id`인 노드를 버린다.
+- 확인: lib 테스트 `cl_vm_symbol_at finds nothing in the comments of a long source.`(고치기 전에는 6651에서 `void`). 저장소 `.cy`
+  284개의 진단과 semantic tokens는 고치기 전과 같다.
 
 ### 하지 않은 것
 

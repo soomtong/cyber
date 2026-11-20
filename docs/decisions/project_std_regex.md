@@ -135,7 +135,7 @@
 
 ## API
 
-```cy
+```text
 use regex
 
 re := regex.compile(`(?P<key>\w+)=(\d+)`)!

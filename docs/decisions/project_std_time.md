@@ -148,7 +148,7 @@
 
 ## API
 
-```cy
+```text
 use time
 
 -- 시계
@@ -319,7 +319,7 @@ time.format_offset(330)             --> str             +05:30
 
 ### API(추가)
 
-```cy
+```text
 time.zone('Asia/Seoul')                 --> !Zone           시스템 DB, 없으면 error.NotFound
 time.local()                            --> !Zone
 time.zone_from_tzif(name, bytes)        --> !Zone

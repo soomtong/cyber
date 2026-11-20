@@ -91,3 +91,11 @@
 - `fiber worker(1, 2)`에 `worker` 앞 `func:`, `(` 앞 `args:` inlay가 붙었다. sema가 만든 `@new_fiber` 호출이라 이제 빼낸다.
 - 템플릿 본문의 호출이 인스턴스마다 다른 오버로드를 고르면 첫 인스턴스의 매개변수 이름만 보였다. 이제 그 호출에는 이름을
   보이지 않는다. 매개변수가 32개를 넘으면 이름이 한 칸씩 밀리던 것도 고쳤다(힌트를 내지 않는다).
+
+## 매뉴얼 예제 코드 (2026-11-20)
+
+- `docs/docs.md`의 예제 중 구문 오류라 그대로 실행되지 않던 일곱 곳을 고쳤다: 타입 없는 `var v = ...`(`v := ...`), 보간의 닫는
+  `}` 누락 두 줄, `self.radius^2`(`**`), `fn sum(...) -> int` 끝의 `:` 누락, `use Vec2 -> eng.Vector2`(별칭은
+  `use Vec2 = eng.Vector2`), `fnsym` 절의 `IntMap`. `IntMap`은 const 매개변수 자리에 `fnsym(K) -> int`를 바로 쓸 수 없어
+  (`Expected type specifier.`) `type HashFn[K Any] = fnsym(K) -> int`를 거치게 바꾸고 실행되는 예제로 다시 썼다.
+- 코드가 아닌데 `cy`로 표시돼 있던 블록(API 요약 표, 발췌, 좌우 비교) 다섯 개를 `text`로 바꿨다(decisions · study 문서).

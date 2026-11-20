@@ -1221,7 +1221,7 @@ generator: 159.9 ms (12499997500000), plain loop: 15.1 ms (12499997500000)      
 
 세 변종을 릴리스 CLI 와 트레이스 빌드(`trace-out/bin/cyber`, `zig build -Dtrace=true`)로 각각 실행한다.
 
-```cy
+```text
 -- st4.cy (-> int)                          -- st3.cy (-> ^int)
 generator fn walker() -> int:               generator fn walker() -> ^int:
     panic('first next panics')                  panic('first next panics')

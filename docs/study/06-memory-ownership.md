@@ -638,7 +638,7 @@ Slice[T] (32바이트)                                   버퍼 (^RawBuffer[byte
 `Array[T]`는 `buf Ptr[T]`, `length`, `header`(용량 + 상위 2비트는 `Ex` 빌림 표식) 세 칸의 구조체이고 `with NoCopy`다(`core.cy:1662`). 버퍼는 위에서 본 `alloc`이고 `@deinit`이 원소를 `@destruct`한 뒤 `free(self.buf)`한다(1672).
 크기를 바꾸는 메서드는 `&&Array[]` 수신자다. 성장 방식이 이 장의 다른 컨테이너와 다르다.
 
-```cy
+```text
 // core.cy:1846~1853  Array.ensure_cap (일부)
         new_buf := alloc(T, final_cap).ptr
         -- TODO: Move old elements to new buffer.

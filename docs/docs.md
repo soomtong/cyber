@@ -942,7 +942,7 @@ v = opt.?
 The `?else` operator either returns the unwrapped value or a default value when the optional is `none`:
 ```cy
 var opt ?int = none
-var v = opt ?else 123
+v := opt ?else 123
 print(v)     --> 123
 ```
 
@@ -1083,11 +1083,11 @@ Once cloned, the slice will no longer point to the same elements as the original
 arr := []int{1, 2, 3}
 slice := arr[0..1]
 slice[0] = 100
-print('%{arr[0]} %{slice[0]')   --> 100 100
+print('%{arr[0]} %{slice[0]}')   --> 100 100
 
 slice += 4
 slice[0] = 101
-print('%{arr[0]} %{slice[0]')   --> 100 101
+print('%{arr[0]} %{slice[0]}')   --> 100 101
 ```
 
 The `+..` invokes the slice operator with an end position that is an increment from the start: *Planned Feature*
@@ -1571,7 +1571,7 @@ fn (&Node) inc(n int):
 fn (&Node) inc_one():
     self.value += 1
 
-var n = Node{value=123, next=none}
+n := Node{value=123, next=none}
 n.inc(321)    --> 445
 ```
 
@@ -1901,7 +1901,7 @@ type Circle:
     radius float
 
 fn (&Circle) area() -> float:
-    return 3.14 * self.radius^2
+    return 3.14 * self.radius ** 2
 
 type Rectangle:
     with Shape
@@ -2350,7 +2350,7 @@ Overloads must differ in their parameter types. Declaring two functions with the
 ## Parameter groups.
 When multiple parameters share the same type they can be declared together in a sequence:
 ```cy
-fn sum(a, b, c int) -> int
+fn sum(a, b, c int) -> int:
     return a + b + c
 ```
 
@@ -4198,18 +4198,20 @@ A `type` represents a compiler type symbol and only exists at compile-time.
 ### `fnsym` type.
 An `fnsym` represents a compiler function symbol that can be expanded to a runtime function pointer or a function call. They can be used as parameterized values:
 ```cy
-type IntMap[K Any, const HASH fnsym(K)->int]
-    ptr [*]int
-    len int
+type HashFn[K Any] = fnsym(K) -> int
+
+type IntMap[K Any, const HASH HashFn[K]]:
+    slots []int
 
 fn (&IntMap[]) get(key K) -> int:
-    slot := HASH(key) % self.len
-    return self.ptr[slot]
+    slot := HASH(key) % self.slots.len()
+    return self.slots[slot]
 
 fn my_hash(s str) -> int:
     return s.len()
 
-m := IntMap[str, my_hash]{}
+m := IntMap[str, my_hash]{slots = {10, 20, 30}}
+print(m.get('abcd'))   --> 20
 ```
 
 ### `EvalStr` type.
@@ -4803,7 +4805,7 @@ The prefix applies to functions and methods, globals, constants, types (includin
 ```cy
 use eng 'lib/engine.cy'
 
-use Vec2 -> eng.Vector2
+use Vec2 = eng.Vector2
 ```
 
 # FFI.

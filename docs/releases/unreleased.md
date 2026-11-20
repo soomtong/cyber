@@ -102,4 +102,7 @@
   `Vec2{x=1}` → `Vec2{x = 1}`. 동작은 같다.
   본문 인라인 코드의 소스 꼴(`` `Info{a = 1, b = 2}` ``, `` `json.ParseOptions{exact = true}` `` 등 14곳)도 같은 모양으로 바꿨다.
   `print` 출력(`Point{x=1, y=2}`)과 `Range{start=0, end=4}` 같은 값 표기는 런타임 형식이라 그대로다.
+- `zig build test`가 매뉴얼 · 에이전트 가이드의 모든 `cy` 블록이 파싱되고 `cyber fmt` 모양인지 검사한다. 일부러 파싱되지 않는
+  예제는 `` ```cy syntax-error ``, 쓴 그대로 둘 예제는 `` ```cy fmt-off ``로 표시한다(`docs/contributing.md`). `cyber doc` 출력에도
+  이 표시가 보인다.
 - 코드가 아닌데 `cy`로 표시돼 있던 블록(API 요약 표, 발췌, 좌우 비교) 다섯 개를 `text`로 바꿨다(decisions · study 문서).

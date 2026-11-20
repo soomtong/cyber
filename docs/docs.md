@@ -133,7 +133,7 @@ for items |it|:
 ```
 
 A block with a single statement can be written in a single line:
-```cy
+```cy syntax-error
 -- A single line block.
 if true: print(123)
 
@@ -617,7 +617,7 @@ s := `abc🦊xyz🐶`
 ```
 
 Since raw strings interprets the sequence of characters as is, the backtick character can not be escaped:
-```cy
+```cy syntax-error
 -- ParseError.
 s := `abc`xyz`
 ```
@@ -835,7 +835,7 @@ This has several properties:
 * Allows comments in between adjacent lines.
 * The starting whitespace for each line is made explicit.
 
-```cy
+```cy syntax-error
 paragraph := {
     \`raw string literal
     \hello\nworld
@@ -953,14 +953,14 @@ value := opt ?else:
 ```
 
 A value can be returned with `break`: *Planned Feature*
-```cy
+```cy syntax-error
 value := opt ?else:
     break 'empty'
 ```
 
 ### Optional chaining.
 Given the last member's type `T` in a chain of `?.` operators, the expression will evaluate to `?T(none)` upon the first encounter of `none` or the value of the last member as `?T`: *Planned Feature*
-```cy
+```cy syntax-error
 last := root?.a?.b?.c?.last
 ```
 
@@ -1092,7 +1092,7 @@ print('%{arr[0]} %{slice[0]}')   --> 100 101
 
 The `+..` invokes the slice operator with an end position that is an increment from the start: *Planned Feature*
 
-```cy
+```cy fmt-off
 arr := []int{1, 2, 3, 4, 5}
 print(arr[2+..2])   --> {3, 4}
 ```
@@ -2308,7 +2308,7 @@ print(p.a + p.b)    --> 3
 A return type that lists several types, `-> (int, int)`, and `return 1, 2` are parse errors that say so.
 
 The returned value can also be destructured: *Planned Feature*
-```cy
+```cy syntax-error
 use math
 
 fn compute(rad float) -> [2]float:
@@ -2476,7 +2476,7 @@ d := dist(100, 100, 200, 200)
 
 Named arguments are required for named parameters:
 > _Planned Feature_
-```cy
+```cy syntax-error
 d := dist(x0=10, x1=20, y0=30, y1=40)
 ```
 
@@ -3124,7 +3124,7 @@ To return details with a failure, return a struct or a choice type that describe
 
 ### `error` set type.
 An error set type is an exhaustive type of possible error values: *Planned Feature*
-```cy
+```cy syntax-error
 type MyError error:
     case Boom
     case BadArgument
@@ -3576,7 +3576,7 @@ _ = t.resume()         -- log: step 1, step 2
 
 ### Fiber entry rules.
 The rules of a fiber entry are checked at the `fiber` expression:
-```cy
+```cy syntax-error
 generator fn countdown(n int) -> int:
     yield n
 f := fiber countdown(3)    --> CompileError: A generator cannot be a fiber entry.
@@ -4763,7 +4763,7 @@ However, this doesn't imply that circular symbol dependencies are allowed. Diffe
 ### Destructure import.
 Modules can also be destructured using the following syntax:
 > _Planned Feature_
-```cy
+```cy syntax-error
 use { cos, pi } 'math'
 
 print(cos(pi))
@@ -5696,7 +5696,7 @@ cat main.cy | cyber fmt      # Read stdin, write stdout.
 ```
 
 The formatter changes whitespace only. It never joins or splits lines, and it never moves or rewrites a token or a comment:
-```cy
+```cy fmt-off
 -- Before.
 use   math
 nouns:=[]str{'World','mundo'}   -- Trailing comment.

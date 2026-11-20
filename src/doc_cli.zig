@@ -5,6 +5,7 @@ const std = @import("std");
 const stdx = @import("stdx");
 const C = @import("capi.zig");
 const cli = @import("cli.zig");
+const format = @import("format.zig");
 
 pub const docs_md = @embedFile("docs_md");
 pub const agents_md = @embedFile("agents_md");
@@ -613,6 +614,182 @@ test "doc: every example of the guide for agents runs." {
     }
     try t.expect(num >= 10);
     try t.expectEqual(@as(usize, 0), failed);
+}
+
+/// What a `cy` block promises, from the words after `cy` in its fence (`` ```cy syntax-error ``). Like rustdoc's
+/// `compile_fail`, a mark is checked too: a `syntax-error` block that starts to parse fails, so the mark can not go stale.
+const BlockMode = enum {
+    /// No mark: the block parses and is already in the `cyber fmt` style.
+    formatted,
+    /// The block must not parse: an example of a syntax error, or a planned feature.
+    syntax_error,
+    /// The block parses but is kept as written: the "before" of the formatter's example, or a planned form that the
+    /// formatter would respace (`arr[2+..2]`, F-162).
+    fmt_off,
+};
+
+const BlockCheck = struct {
+    blocks: usize = 0,
+    failed: usize = 0,
+};
+
+/// Checks every `cy` block of `doc` against `cyber fmt` and writes a line to `out` for each failure.
+fn checkCyBlocks(alloc: std.mem.Allocator, out: *std.ArrayList(u8), name: []const u8, doc: []const u8) !BlockCheck {
+    // Debug builds print the error return trace of every syntax error unless silent.
+    const was_silent = C.silent();
+    C.setSilent(true);
+    defer C.setSilent(was_silent);
+
+    var res: BlockCheck = .{};
+    // The fence that is open, a code block of any language: a `cy` fence inside a `text` block is not a block.
+    var fence: ?[]const u8 = null;
+    var mode: ?BlockMode = null;
+    var block_line: usize = 0;
+    var block_start: usize = 0;
+    var line_num: usize = 0;
+    var pos: usize = 0;
+    while (pos < doc.len) {
+        const line_end = std.mem.indexOfScalarPos(u8, doc, pos, '\n') orelse doc.len;
+        const line = std.mem.trimEnd(u8, doc[pos..line_end], " \r");
+        const next = @min(line_end + 1, doc.len);
+        line_num += 1;
+        defer pos = next;
+
+        if (fence) |f| {
+            if (!std.mem.eql(u8, line, f)) continue;
+            fence = null;
+            const m = mode orelse continue;
+            res.blocks += 1;
+            if (!try checkCyBlock(alloc, out, name, block_line, m, doc[block_start..pos])) res.failed += 1;
+            continue;
+        }
+        if (!std.mem.startsWith(u8, line, "```") and !std.mem.startsWith(u8, line, "~~~")) continue;
+        fence = line[0..3];
+        mode = null;
+        var words = std.mem.tokenizeScalar(u8, line[3..], ' ');
+        if (!std.mem.eql(u8, words.next() orelse "", "cy")) continue;
+        block_line = line_num;
+        block_start = next;
+        const mark = words.next() orelse {
+            mode = .formatted;
+            continue;
+        };
+        if (std.mem.eql(u8, mark, "syntax-error")) {
+            mode = .syntax_error;
+        } else if (std.mem.eql(u8, mark, "fmt-off")) {
+            mode = .fmt_off;
+        } else {
+            res.failed += 1;
+            try out.print(alloc, "{s}:{}: unknown mark `{s}` after `cy`: use `syntax-error` or `fmt-off`.\n", .{ name, line_num, mark });
+        }
+        if (words.next()) |extra| {
+            mode = null;
+            res.failed += 1;
+            try out.print(alloc, "{s}:{}: one mark after `cy` at most, found `{s}`.\n", .{ name, line_num, extra });
+        }
+    }
+    if (fence != null) {
+        res.failed += 1;
+        try out.print(alloc, "{s}: the code block that starts at line {} is not closed.\n", .{ name, block_line });
+    }
+    return res;
+}
+
+fn checkCyBlock(alloc: std.mem.Allocator, out: *std.ArrayList(u8), name: []const u8, fence_line: usize, mode: BlockMode, src: []const u8) !bool {
+    var diag: format.Diagnostic = .{};
+    defer diag.deinit(alloc);
+    const res = format.format(alloc, src, &diag) catch |err| switch (err) {
+        error.OutOfMemory => return err,
+        error.ParseError => {
+            if (mode == .syntax_error) return true;
+            try out.print(alloc, "{s}:{}: the cy block does not parse: {s} Fix it, or mark the fence `cy syntax-error` if it shows an error or a planned feature.\n", .{ name, fence_line + 1 + diag.line, diag.msg });
+            return false;
+        },
+        error.VerifyError => {
+            try out.print(alloc, "{s}:{}: cyber fmt could not verify the cy block: {s}\n", .{ name, fence_line + 1 + diag.line, diag.msg });
+            return false;
+        },
+    };
+    defer alloc.free(res);
+    switch (mode) {
+        .fmt_off => return true,
+        .syntax_error => {
+            try out.print(alloc, "{s}:{}: the cy block marked `syntax-error` parses now. Remove the mark.\n", .{ name, fence_line });
+            return false;
+        },
+        .formatted => {
+            if (std.mem.eql(u8, res, src)) return true;
+            // Name the first line that cyber fmt changes.
+            var a = std.mem.splitScalar(u8, src, '\n');
+            var b = std.mem.splitScalar(u8, res, '\n');
+            var i: usize = 1;
+            while (true) : (i += 1) {
+                const la = a.next() orelse "";
+                const lb = b.next() orelse "";
+                if (!std.mem.eql(u8, la, lb)) {
+                    try out.print(alloc, "{s}:{}: the cy block is not in the cyber fmt style.\n  was: {s}\n  fmt: {s}\n", .{ name, fence_line + i, la, lb });
+                    return false;
+                }
+            }
+        },
+    }
+}
+
+test "doc: the cy blocks of the manual and the guide for agents are in the cyber fmt style." {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(t.allocator);
+    const a = try checkCyBlocks(t.allocator, &out, "docs/docs.md", docs_md);
+    const b = try checkCyBlocks(t.allocator, &out, "docs/agent-guide.md", agents_md);
+    if (out.items.len > 0) std.debug.print("{s}", .{out.items});
+    try t.expect(a.blocks >= 300);
+    try t.expect(b.blocks >= 10);
+    try t.expectEqual(@as(usize, 0), a.failed + b.failed);
+}
+
+test "doc: the cy block check reads the marks." {
+    const doc =
+        \\```cy
+        \\a := 1
+        \\```
+        \\```text
+        \\```cy
+        \\a:=1
+        \\```
+        \\~~~cy syntax-error
+        \\a := (
+        \\~~~
+        \\```cy fmt-off
+        \\a:=1
+        \\```
+        \\```cy
+        \\a:=1
+        \\```
+        \\```cy syntax-error
+        \\a := 1
+        \\```
+        \\```cy fmt-off
+        \\a := (
+        \\```
+        \\```cy nofmt
+        \\a := 1
+        \\```
+        \\
+    ;
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(t.allocator);
+    const res = try checkCyBlocks(t.allocator, &out, "x.md", doc);
+    // The `cy` inside the `text` block and the block with an unknown mark are not checked.
+    try t.expectEqual(@as(usize, 6), res.blocks);
+    try t.expectEqual(@as(usize, 4), res.failed);
+    try t.expectEqualStrings(
+        \\x.md:15: the cy block is not in the cyber fmt style.
+        \\  was: a:=1
+        \\  fmt: a := 1
+        \\x.md:17: the cy block marked `syntax-error` parses now. Remove the mark.
+        \\x.md:22: the cy block does not parse: Expected expression. Fix it, or mark the fence `cy syntax-error` if it shows an error or a planned feature.
+        \\x.md:23: unknown mark `nofmt` after `cy`: use `syntax-error` or `fmt-off`.
+        \\
+    , out.items);
 }
 
 test "doc: --api prints a module of the embedded api.json." {

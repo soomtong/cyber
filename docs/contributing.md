@@ -12,6 +12,13 @@ The next step you might take is building Cyber on your own machine. You'll learn
 
 Cyber is written in Zig and C. One way to learn Zig is to fix some [problem sets](https://github.com/ratfactor/ziglings). If you know C, you'll pick up Zig quickly.
 
+## Code examples in the docs.
+Every `cy` code block in `docs/docs.md` and `docs/agent-guide.md` must parse and be in the `cyber fmt` style. `zig build test` checks this (`doc_cli.zig`), so run `cyber fmt` on a new example before you add it. A word after `cy` in the fence marks a block that is an exception:
+* ```` ```cy syntax-error ````: the block must not parse. Use it for an example of a syntax error or a planned feature. The test fails once the block parses, so remove the mark when the feature lands.
+* ```` ```cy fmt-off ````: the block must parse but is kept as written, such as the "before" example of the formatter.
+
+The examples in `docs/agent-guide.md` (`~~~cy` blocks) are also run.
+
 ## Language Design.
 After v1.0 of Cyber, the language won't be changing much, at least that is the goal. So if you have a feature idea for the language or you don't like how something is designed, now would be a good time to propose it. You can use the [docs](https://fubark.github.io/cyber) as a canonical reference to the current language features.
 

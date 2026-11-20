@@ -144,3 +144,19 @@ Cyber로 쓴 토큰 기반 포매터다(758줄). AST 없이 같은 규칙을 휴
   보여 주는 예(`P(name='a', n=1)`, `f(a=1)`), 포맷 규칙 설명은 그대로다. decisions · study · releases 문서의 인라인 코드(소스 꼴
   약 40곳)는 날짜가 있는 기록이라 두었다.
 - 저장소 `.cy` 파일은 이번에 바꾸지 않았다.
+
+## 문서 예제의 포맷 검사(2026-11-20)
+
+- `doc_cli.zig`의 테스트가 `docs.md` · `agent-guide.md`의 모든 `cy` 블록을 `format.format`에 넣는다. 둘 다 바이너리에 들어 있는
+  문서라 `zig build test`(cli-test)로 충분하고, 따로 스크립트나 verify 단계를 두지 않았다.
+- 예외는 펜스의 `cy` 뒤 한 단어로 적는다. rustdoc의 `` ```rust,compile_fail `` · `ignore`를 따랐다.
+  - `syntax-error`: 파싱되지 않아야 한다(오류 예시 · *Planned Feature*). 파싱되기 시작하면 실패한다. 기능이 들어왔는데 표시가
+    남는 일을 막는다. rustdoc의 `compile_fail`과 같은 방향이고, `ignore`처럼 검사를 끄는 표시는 두지 않았다.
+  - `fmt-off`: 파싱은 되어야 하고 모양은 쓴 그대로 둔다("Format source." 절의 Before, F-162의 `arr[2+..2]`).
+  - 표시가 없으면 파싱되고 포맷된 상태여야 한다. 모르는 표시 · 두 단어 이상은 실패다.
+- 표시는 정보 문자열의 둘째 단어라 언어는 그대로 `cy`다. gen-docs(md4c의 `lang`), GitHub, highlight.js가 첫 단어만 쓴다.
+  `cyber doc`은 원문을 출력하므로 표시가 보인다.
+- 지금 docs.md의 표시: `syntax-error` 10개, `fmt-off` 2개. 오류 위치는 `cyber fmt`와 같은 줄 번호로 문서 줄을 가리킨다.
+- Debug 빌드의 파서는 구문 오류마다 error return trace를 출력한다(`dumpParseErrorStackTrace`). 검사 동안 `C.setSilent(true)`로
+  끈다.
+- study · specs · decisions 문서는 바이너리 밖이고 지난 기록이 많아 검사하지 않는다. 사용 방법은 `docs/contributing.md`.

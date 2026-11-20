@@ -39,7 +39,8 @@
 - [x] 매뉴얼 예제 포맷(2026-11-20, 사용자: "A+B 진행해줘"): `docs.md` · `agent-guide.md`의 `cy` 블록을 `cyber fmt`로(A),
   구문 오류였던 매뉴얼 예제 일곱 곳과 코드가 아닌 `cy` 블록 다섯 개(B). 기록은 `project_fmt.md` "매뉴얼 예제에 적용",
   `unreleased.md` "매뉴얼 예제 코드". 이어서 C(study · specs · decisions 블록)와 D-좁음(두 문서 인라인 코드 14곳)도 했다.
-  하지 않은 것: decisions · study의 인라인 코드, 문서 블록 `fmt --check` 검사(E).
+  E: `doc_cli.zig` 테스트가 두 문서의 `cy` 블록을 검사한다. 예외 표시 `cy syntax-error` · `cy fmt-off`(`project_fmt.md` "문서 예제의 포맷 검사").
+  하지 않은 것: decisions · study의 인라인 코드.
 
 ## 시도했으나 실패한 접근
 

@@ -140,4 +140,7 @@ Cyber로 쓴 토큰 기반 포매터다(758줄). AST 없이 같은 규칙을 휴
 - 같은 날 study · specs · decisions 문서의 `cy` 블록도 포맷했다(23개 블록). 저장소 소스를 그대로 인용한 두 블록(study/07의
   `core.cy` `Generator`, study/11의 `os.cy` `fromErrno`)은 원본과 어긋나지 않게 두었다. 저장소 `.cy`를 다시 포맷할 때 같이 바꾼다.
   API 요약 표인 `project_std_peg.md`의 블록은 `text`로 바꿨다. releases · history 문서는 지난 기록이라 두었다.
+- 본문 인라인 코드는 `docs.md` · `agent-guide.md`의 소스 꼴 14곳만 바꿨다. 런타임 · REPL 출력, 정규식(`\p{sc=Latin}`), 틀린 꼴을
+  보여 주는 예(`P(name='a', n=1)`, `f(a=1)`), 포맷 규칙 설명은 그대로다. decisions · study · releases 문서의 인라인 코드(소스 꼴
+  약 40곳)는 날짜가 있는 기록이라 두었다.
 - 저장소 `.cy` 파일은 이번에 바꾸지 않았다.

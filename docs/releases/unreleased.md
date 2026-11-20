@@ -100,4 +100,6 @@
   (`Expected type specifier.`) `type HashFn[K Any] = fnsym(K) -> int`를 거치게 바꾸고 실행되는 예제로 다시 썼다.
 - `docs/docs.md` · `docs/agent-guide.md`의 예제를 `cyber fmt` 모양으로 바꿨다(70개 블록). 대부분 리터럴 필드의 `=` 양쪽 공백이다:
   `Vec2{x=1}` → `Vec2{x = 1}`. 동작은 같다.
+  본문 인라인 코드의 소스 꼴(`` `Info{a = 1, b = 2}` ``, `` `json.ParseOptions{exact = true}` `` 등 14곳)도 같은 모양으로 바꿨다.
+  `print` 출력(`Point{x=1, y=2}`)과 `Range{start=0, end=4}` 같은 값 표기는 런타임 형식이라 그대로다.
 - 코드가 아닌데 `cy`로 표시돼 있던 블록(API 요약 표, 발췌, 좌우 비교) 다섯 개를 `text`로 바꿨다(decisions · study 문서).

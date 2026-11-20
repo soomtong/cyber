@@ -50,13 +50,13 @@ Syntax. Each line is Python, then the Cyber form.
 - `import math` becomes `use math`. For a file: `use g 'geo.cy'`
 - A function is declared only at the top level, not inside `if`, `for` or another function.
 - `class P:` becomes `type P:` with fields such as `name str` below it. A method is `fn (&P) m():` and uses `self` inside. A method that changes the value is `fn (&&P) m():`.
-- `P(name='a', n=1)` becomes `P{name='a', n=1}`. A field is set with `=`, not `:`.
+- `P(name='a', n=1)` becomes `P{name = 'a', n = 1}`. A field is set with `=`, not `:`.
 - `print(a, b)` becomes `print(x)`. It takes exactly one argument. Join values with interpolation.
 - `len(xs)` becomes `xs.len()`. It is a method. `xs.len` is an error.
 - `xs.append(1)` stays `xs.append(1)` (or `xs += 1`). It changes `xs` in place and returns nothing.
 - `x in xs` becomes `xs.contains(x)`, and for a Map `m.contains(k)`
 - `[1, 2, 3]` becomes `{1, 2, 3}`. The list takes the type of its first element (`[]int`), and every other element must have that type. An empty list needs the type: `[]int{}`. You can always write the type: `[]str{'a', 'b'}`.
-- `{"a": 1, "b": 2}` becomes `Map[str, int]{a=1, b=2}`. A bare name is a string key. Put an expression key in parentheses: `Map[str, int]{(k)=1}`. An empty Map is `Map[str, int]{}`.
+- `{"a": 1, "b": 2}` becomes `Map[str, int]{a = 1, b = 2}`. A bare name is a string key. Put an expression key in parentheses: `Map[str, int]{(k) = 1}`. An empty Map is `Map[str, int]{}`.
 - `(1, 2)` tuple becomes `type Pt(x, y float)` for a named tuple, or a struct
 - `None` becomes `none`. Only inside a `?T` type.
 - `assert` becomes `use test`, then `test.eq(expected, actual)`
@@ -184,7 +184,7 @@ An embedding host can refuse a module. Then `use name` fails with 'Failed to loa
 ## Values, references, borrows
 
 - Struct assignment copies. It is not shared like a Python object. `q := p; q.age = 9` does not change p.
-- To share, lift the value to the heap with `^`: `p := ^P{name='a', age=3}`. Read and write fields as `p.age`, and use `p.*` for the whole value.
+- To share, lift the value to the heap with `^`: `p := ^P{name = 'a', age = 3}`. Read and write fields as `p.age`, and use `p.*` for the whole value.
 - An operator on a reference works on the value it points to only through `.*`: `n.* += 2`, `out.* += 'x'` for `out := ^[]str{}`.
 - To let a function modify an argument, declare `fn inc(p &int)` and call `inc(&a)`.
 - `Array[T]` cannot be copied. Use `move a` to pass or relocate it. Using the original after a move is an error. For an ordinary list use `[]T`.

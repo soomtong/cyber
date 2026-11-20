@@ -1224,14 +1224,14 @@ The initializer literal can infer the target map type:
 var map Map[str, int] = {a = 123, b = 234}
 ```
 
-A key is written `key=value`, not `key: value`. A name as a key is a string (`{a=1}` has the key `'a'`). A key in parentheses is an expression:
+A key is written `key = value`, not `key: value`. A name as a key is a string (`{a = 1}` has the key `'a'`). A key in parentheses is an expression:
 ```cy
 k := 'name'
 map := Map[str, int]{(k) = 1, (k + '2') = 2, 'my key' = 3}
 ids := Map[int, str]{1 = 'one', (1 + 1) = 'two'}
 ```
 
-A map literal needs a target type. `{a=1}` alone is a compile error.
+A map literal needs a target type. `{a = 1}` alone is a compile error.
 
 ### Map operations.
 Here are some common map operations:
@@ -1454,7 +1454,7 @@ type Info:
     -b int
     -secret str
 ```
-The module is the file that declares the type. From another module, reading, assigning or initializing a private field (`Info{a=1, b=2}`), also through a borrow or pointer, is a compile error: `Can not access the private field `b` in `Info`.` A type that other modules need to initialize gives its private fields a default value. A `persist_main` session (the REPL) counts as one module.
+The module is the file that declares the type. From another module, reading, assigning or initializing a private field (`Info{a = 1, b = 2}`), also through a borrow or pointer, is a compile error: `Can not access the private field `b` in `Info`.` A type that other modules need to initialize gives its private fields a default value. A `persist_main` session (the REPL) counts as one module.
 
 ### Circular references.
 Field declarations may have circular type references if the struct can be initialized:
@@ -1543,7 +1543,7 @@ arr := MyArray{1, 2, 3}
 ```
 
 ### `@init_record`.
-`@init_record` overrides the record literal `T{_=_, _=_, ...}` which can contain a varying number of record pairs:
+`@init_record` overrides the record literal `T{_ = _, _ = _, ...}` which can contain a varying number of record pairs:
 ```cy
 type MyMap
 
@@ -1665,7 +1665,7 @@ A function name that starts with `@` is a hook: a function that the compiler cal
 | -- | -- |
 | [`@init`](#@init) | `T(...)` |
 | [`@init_sequence`](#@init_sequence) | `T{a, b}` |
-| [`@init_record`](#@init_record) | `T{k=v}` |
+| [`@init_record`](#@init_record) | `T{k = v}` |
 | `@deinit` | The value is [deinitialized](#deinitializers). |
 | `@copy` | The value is copied. |
 | `@clone` | `clone` |
@@ -4345,7 +4345,7 @@ print(toon.encode(v)!)
 print(json.stringify(toon.decode('tags[2]: a,b')!))   --> {"tags":["a","b"]}
 ```
 
-`json.Value` is a choice: `null`, `bool`, `int`, `float`, `number`, `str`, `array` (`[]Value`) and `object` (`json.Object`). A number without a fraction or an exponent that fits `int` parses as `int`, and another number as `float`. A number that neither holds without loss, an integer beyond `int` or a number beyond the `float` range, parses as `number`, which keeps its JSON text. `json.parse(src, json.ParseOptions{exact=true})` also keeps every number with a fraction or an exponent as `number`:
+`json.Value` is a choice: `null`, `bool`, `int`, `float`, `number`, `str`, `array` (`[]Value`) and `object` (`json.Object`). A number without a fraction or an exponent that fits `int` parses as `int`, and another number as `float`. A number that neither holds without loss, an integer beyond `int` or a number beyond the `float` range, parses as `number`, which keeps its JSON text. `json.parse(src, json.ParseOptions{exact = true})` also keeps every number with a fraction or an exponent as `number`:
 ```cy
 v := json.parse('[9223372036854775808, 0.1000000000000000055511151231257827]')!
 print(json.stringify(v))            --> [9223372036854775808,0.1]
@@ -4393,7 +4393,7 @@ else |err|:
 
 `toon.encode(v)` follows the spec's forms: `key: value`, nested objects by indentation, inline primitive arrays (`tags[2]: a,b`), a table for an array of uniform objects (`users[2]{id,name}:`), a keyed table for an object whose values are uniform objects (`env[2:]{region}:`), and `- ` items otherwise. `toon.EncodeOptions` sets `indent` (2) and `delim` (`.comma`, `.tab` or `.pipe`). It returns `error.Unicode` for a string that is not UTF-8.
 
-`toon.decode(src)` checks declared lengths, table widths, indentation and duplicate keys. `toon.DecodeOptions{strict=false}` applies the spec's non-strict recoveries. Errors are `error.Syntax` with a `json.Diag` (line and column). An unquoted token that matches the JSON number grammar is a number, others are strings (`05` stays `"05"`); numbers decode as `json.parse` reads them, and `toon.DecodeOptions{exact=true}` keeps them as text like `json.ParseOptions`. A `number` encodes in the canonical form of `json.fmt_number`. `toon.from_json(src)` and `toon.to_json(src)` convert text directly. The implementation passes the spec's 564 conformance fixtures (`src/test/assets/toon-spec`).
+`toon.decode(src)` checks declared lengths, table widths, indentation and duplicate keys. `toon.DecodeOptions{strict = false}` applies the spec's non-strict recoveries. Errors are `error.Syntax` with a `json.Diag` (line and column). An unquoted token that matches the JSON number grammar is a number, others are strings (`05` stays `"05"`); numbers decode as `json.parse` reads them, and `toon.DecodeOptions{exact = true}` keeps them as text like `json.ParseOptions`. A `number` encodes in the canonical form of `json.fmt_number`. `toon.from_json(src)` and `toon.to_json(src)` convert text directly. The implementation passes the spec's 564 conformance fixtures (`src/test/assets/toon-spec`).
 
 ### Regular expressions.
 The `regex` module searches text with regular expressions. Matching never backtracks: a search takes time linear in the length of the input, whatever the pattern. The syntax is a subset of the Rust `regex` crate's, which is the default syntax of [ripgrep](https://github.com/BurntSushi/ripgrep). A pattern that compiles here matches what it matches there:
@@ -5429,7 +5429,7 @@ bool resolver(CLVM* vm, CLResolverParams params, size_t* res_uri_len) {
 Before returning false, the resolver can give its own message with `clReportApiError`. The compiler's own lookups of the builtin modules it needs (`c` for a module with `#[extern]` functions such as `math`, `meta`) do not call the resolver, so it sees only the `use` declarations of the sources. Modules to keep from an untrusted script include `c` (raw memory and foreign calls), `os` (files and processes, when the host's loader provides it), `cy` (`cy.eval` runs code in a new VM that has none of the host's settings) and `meta` (`meta.load` reads a file at compile time).
 
 ### Denying raw pointers.
-A host that runs untrusted scripts can set `deny_raw_ptrs` in `CLEvalConfig` or `CLCompileConfig`. Every chunk that is not a standard module (`core`, `meta`, `math`, `cy`, `c`, `io`, `test`) then gets a compile error for any expression of a raw pointer type: `Ptr[T]`, `PtrSpan[T]` or an option of them. That covers `as[Ptr[int]] 8`, `Ptr[int](8)`, `as[Ptr[int]] &x`, `alloc(int)` and `PtrSpan[int]{length=4}`, so a script can not read or write an arbitrary address. Slices, spans, maps, strings and borrows keep working; the core library uses raw pointers for them internally. The default is false. The CLI does not set it.
+A host that runs untrusted scripts can set `deny_raw_ptrs` in `CLEvalConfig` or `CLCompileConfig`. Every chunk that is not a standard module (`core`, `meta`, `math`, `cy`, `c`, `io`, `test`) then gets a compile error for any expression of a raw pointer type: `Ptr[T]`, `PtrSpan[T]` or an option of them. That covers `as[Ptr[int]] 8`, `Ptr[int](8)`, `as[Ptr[int]] &x`, `alloc(int)` and `PtrSpan[int]{length = 4}`, so a script can not read or write an arbitrary address. Slices, spans, maps, strings and borrows keep working; the core library uses raw pointers for them internally. The default is false. The CLI does not set it.
 ```c
 CLEvalConfig cfg = clDefaultEvalConfig();
 cfg.deny_raw_ptrs = true;

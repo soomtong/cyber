@@ -305,6 +305,80 @@ test "fmt: string contents are never touched." {
     );
 }
 
+test "fmt: the lines between `-- fmt: off` and `-- fmt: on` are kept as written." {
+    try eqFormat(
+        \\fn main():
+        \\    -- fmt: off
+        \\    m := []int{
+        \\        1,  0,  0,
+        \\        0,  1,  0,
+        \\    }
+        \\
+        \\
+        \\    x:=1
+        \\    -- fmt: on
+        \\    y := 2
+        \\
+    ,
+        // The region moves with the `-- fmt: off` line from 2 to 4 spaces and keeps its relative indentation.
+        // Its trailing whitespace is dropped.
+        "fn main():\n" ++
+            "  -- fmt: off   \n" ++
+            "  m := []int{\n" ++
+            "      1,  0,  0,   \n" ++
+            "      0,  1,  0,\n" ++
+            "  }\n" ++
+            "\n" ++
+            "\n" ++
+            "  x:=1\n" ++
+            "  -- fmt: on\n" ++
+            "  y:=2\n",
+    );
+    // Without `-- fmt: on` the region ends with the file. Line ends become `\n`, tabs of an indentation spaces.
+    try eqFormat("-- fmt: off\nm := {1,  2}\n\n\nn:={3}\n", "-- fmt: off\r\nm := {1,  2}\r\n\r\n\r\nn:={3}\r\n");
+    try eqFormat("if true:\n    -- fmt: off\n    m := {1,  2}\n    -- fmt: on\n    a := 1\n", "if true:\n\t-- fmt: off\n\tm := {1,  2}\n\t-- fmt: on\n\ta:=1\n");
+    // Blank lines before `-- fmt: on` are outside the region. An empty region.
+    try eqFormat("-- fmt: off\na:=1\n\n-- fmt: on\nb := 2\n", "-- fmt: off\na:=1\n\n\n-- fmt: on\nb:=2\n");
+    try eqFormat("-- fmt: off\n-- fmt: on\na := 1\n", "-- fmt: off\n-- fmt: on\na:=1\n");
+    // A space after `--` is optional. A trailing `-- fmt: off` and other words are ordinary comments.
+    try eqFormat("--fmt: off\na:=1\n--   fmt: on\nb := 2\n", "--fmt: off\na:=1\n--   fmt: on   \nb:=2\n");
+    try eqFormat("a := 1 -- fmt: off\nb := 2\n", "a:=1 -- fmt: off\nb:=2\n");
+    try eqFormat("-- fmt: off now\na := 1\n", "-- fmt: off now\na:=1\n");
+}
+
+test "fmt: a line that ends with `-- fmt: skip` keeps its spacing." {
+    try eqFormat(
+        \\if true:
+        \\    z  :=  3  --  fmt: skip
+        \\    s:='a%{1+2}b'  -- fmt: skip
+        \\    t := 1
+        \\
+    ,
+        // The indentation still follows the block.
+        \\if true:
+        \\  z  :=  3  --  fmt: skip
+        \\  s:='a%{1+2}b'  -- fmt: skip
+        \\  t:=1
+        \\
+    );
+    // A `-- fmt: skip` on its own line skips nothing.
+    try eqFormat("-- fmt: skip\na := 1\n", "-- fmt: skip\na:=1\n");
+}
+
+test "fmt: a `-- fmt: off` region that does not fit its block is a verification error." {
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    const alloc = std.testing.allocator;
+    var diag: format.Diagnostic = .{};
+    defer diag.deinit(alloc);
+    // The region starts in the inner block and moves by its shift, which is too much for `b`.
+    const src = "if true:\n  if true:\n    -- fmt: off\n    a:=1\n  b:=2\n  -- fmt: on\n";
+    try std.testing.expectError(error.VerifyError, format.format(alloc, src, &diag));
+    try zt.eq(format.ErrorKind.verify, diag.kind);
+    try std.testing.expect(std.mem.indexOf(u8, diag.msg, "`-- fmt: off` region") != null);
+}
+
 test "fmt: a syntax error is reported with its position." {
     // The parser prints an error trace in debug builds unless silenced.
     C.setSilent(true);

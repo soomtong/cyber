@@ -41,6 +41,8 @@
   `unreleased.md` "매뉴얼 예제 코드". 이어서 C(study · specs · decisions 블록)와 D-좁음(두 문서 인라인 코드 14곳)도 했다.
   E: `doc_cli.zig` 테스트가 두 문서의 `cy` 블록을 검사한다. 예외 표시 `cy syntax-error` · `cy fmt-off`(`project_fmt.md` "문서 예제의 포맷 검사").
   하지 않은 것: decisions · study의 인라인 코드.
+- [x] `cyber fmt` 건너뛰기 표식(2026-11-20, 사용자: "A+B 진행해줘"): `-- fmt: off` · `-- fmt: on` 구간, 줄 끝 `-- fmt: skip`.
+  `format.zig` `emitVerbatim` · `lineEndsWithSkip`, 결정 `project_fmt.md` "건너뛰기 표식", lib 테스트 3개.
 
 ## 시도했으나 실패한 접근
 

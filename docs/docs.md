@@ -5724,7 +5724,23 @@ for nouns |n|:
 * Trailing whitespace is removed, several blank lines become one, and the file ends with one new line.
 * The contents of strings, including multi-line strings and the expressions in a string template, are not touched.
 
-A file with a syntax error is reported as `path:line:col: error: message` and left alone. Before anything is written, the result is parsed again and compared with the original syntax tree and comments. If they differ the file is left alone and an internal error is reported.
+Code that is laid out by hand, such as a matrix or columns aligned for reading, can be kept as written:
+```cy
+-- fmt: off
+weights := []int{
+    10,   200,  3,
+    4,    50,   600,
+}
+-- fmt: on
+x  := 1   -- fmt: skip
+yy := 2   -- fmt: skip
+```
+
+* The lines between a `-- fmt: off` and a `-- fmt: on` comment keep the spaces inside them and their blank lines. Without `-- fmt: on` this lasts to the end of the file. Both comments must be on their own lines.
+* The lines of such a region move together with the `-- fmt: off` line when its block is indented again, so they keep their indentation relative to that line. Trailing whitespace is still removed.
+* A line that ends with the comment `-- fmt: skip` keeps the spaces between its tokens. Its indentation still follows its block.
+
+A file with a syntax error is reported as `path:line:col: error: message` and left alone. Before anything is written, the result is parsed again and compared with the original syntax tree and comments. If they differ the file is left alone and an internal error is reported. A `-- fmt: off` region whose lines no longer fit the block around them after the move is reported this way too, with a note about the region.
 
 A directory search skips directories whose name starts with `.` (such as `.git` and `.zig-cache`), `zig-out` and `node_modules`, and it does not follow symbolic links. A path that is named on the command line is always formatted. A file or directory that can not be read or written is reported as `path: error: Name`, the other files are still formatted, and the exit code is 1.
 

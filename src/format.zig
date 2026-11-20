@@ -81,8 +81,12 @@ pub fn format(alloc: std.mem.Allocator, src: []const u8, diag: *Diagnostic) Erro
         error.OutOfMemory => return error.OutOfMemory,
         else => {
             defer check_diag.deinit(alloc);
-            const msg = try std.fmt.allocPrint(alloc, "Formatted output does not parse at {}:{}: {s}\n    {s}", .{
-                check_diag.line + 1, check_diag.col + 1, check_diag.msg, lineText(out, check_diag.pos),
+            const msg = try std.fmt.allocPrint(alloc, "Formatted output does not parse at {}:{}: {s}\n    {s}{s}", .{
+                check_diag.line + 1,
+                check_diag.col + 1,
+                check_diag.msg,
+                lineText(out, check_diag.pos),
+                if (f.has_verbatim) verbatim_hint else "",
             });
             diag.* = .{ .kind = .verify, .msg = msg };
             return error.VerifyError;
@@ -92,13 +96,18 @@ pub fn format(alloc: std.mem.Allocator, src: []const u8, diag: *Diagnostic) Erro
 
     var cmp = Comparer{ .a_src = src, .b_src = out };
     if (!cmp.eqNode(@ptrCast(input.root), @ptrCast(output.root))) {
-        return fail(alloc, diag, .verify, src, cmp.a_pos, "Formatted output parses to a different syntax tree.");
+        const msg = "Formatted output parses to a different syntax tree.";
+        return fail(alloc, diag, .verify, src, cmp.a_pos, if (f.has_verbatim) msg ++ verbatim_hint else msg);
     }
     if (!eqComments(src, input.comments(), out, output.comments())) {
         return fail(alloc, diag, .verify, src, 0, "Formatted output has different comments.");
     }
     return out;
 }
+
+/// A `-- fmt: off` region is the likely cause of a verification failure: its lines are not re-indented one by one.
+const verbatim_hint = "\n    The lines of a `-- fmt: off` region move with the `-- fmt: off` line and keep their indentation " ++
+    "relative to it. Check that they fit the block around them.";
 
 fn fail(alloc: std.mem.Allocator, diag: *Diagnostic, kind: ErrorKind, src: []const u8, pos: u32, msg: []const u8) Error {
     var line: u32 = 0;
@@ -450,6 +459,8 @@ const Formatter = struct {
     out: std.ArrayList(u8) = .empty,
     /// Bytes before the first token: UTF-8 BOM and shebang line.
     prefix_end: u32 = 0,
+    /// Lines of a `-- fmt: off` region were copied as written.
+    has_verbatim: bool = false,
 
     const RunError = error{ OutOfMemory, Malformed };
 
@@ -968,9 +979,14 @@ const Formatter = struct {
             try self.out.appendSlice(self.alloc, prefix);
         }
 
-        for (atoms, 0..) |atom, i| {
+        // The line ends with `-- fmt: skip`: its atoms keep the whitespace between them.
+        var skip_line = false;
+        var i: usize = 0;
+        while (i < atoms.len) : (i += 1) {
+            const atom = atoms[i];
             if (atom.line_start) {
                 const line = self.lines.items[atom.line];
+                skip_line = self.lineEndsWithSkip(atom.line);
                 if (i == 0) {
                     if (atom.blank_before) {
                         // A blank line after the shebang line.
@@ -990,6 +1006,8 @@ const Formatter = struct {
                     }
                 }
                 try self.out.appendNTimes(self.alloc, ' ', line.new_width);
+            } else if (skip_line) {
+                try self.out.appendSlice(self.alloc, self.src[atoms[i - 1].end..atom.pos]);
             } else {
                 const prev = atoms[i - 1];
                 const prev_prev: ?Atom = if (i >= 2 and !prev.line_start) atoms[i - 2] else null;
@@ -997,10 +1015,64 @@ const Formatter = struct {
                 try self.out.appendNTimes(self.alloc, ' ', num_spaces);
             }
             try self.out.appendSlice(self.alloc, self.src[atom.pos..atom.end]);
+
+            if (atom.line_start and self.isDirective(atom, "fmt: off")) {
+                i = try self.emitVerbatim(i);
+            }
         }
         if (atoms.len > 0) {
             try self.out.append(self.alloc, '\n');
         }
+    }
+
+    /// Whether the atom is the comment `-- <name>`, such as `-- fmt: off`.
+    fn isDirective(self: *Formatter, atom: Atom, comptime name: []const u8) bool {
+        if (!atom.is_comment) {
+            return false;
+        }
+        const text = self.src[atom.pos..atom.end];
+        if (!std.mem.startsWith(u8, text, "--")) {
+            return false;
+        }
+        return std.mem.eql(u8, std.mem.trim(u8, text[2..], " \t"), name);
+    }
+
+    /// Whether the line ends with a trailing `-- fmt: skip`.
+    fn lineEndsWithSkip(self: *Formatter, line: u32) bool {
+        const lines = self.lines.items;
+        const end = if (line + 1 < lines.len) lines[line + 1].head else self.atoms.items.len;
+        const last = self.atoms.items[end - 1];
+        return !last.line_start and self.isDirective(last, "fmt: skip");
+    }
+
+    /// Copies the lines after the `-- fmt: off` atom at `off` up to the line of the next `-- fmt: on`, or to the end
+    /// of the file. The whitespace inside a line and the blank lines are kept as written. The indentation moves with
+    /// the `-- fmt: off` line, so the lines keep their indentation relative to it and stay in the block that is
+    /// re-indented around them. Trailing whitespace is dropped and an indentation is written with spaces.
+    /// Returns the index of the last copied atom.
+    fn emitVerbatim(self: *Formatter, off: usize) !usize {
+        const atoms = self.atoms.items;
+        const lines = self.lines.items;
+        const off_line = lines[atoms[off].line];
+        const shift = @as(i64, off_line.new_width) - @as(i64, off_line.width);
+        self.has_verbatim = true;
+        var i = off + 1;
+        while (i < atoms.len) : (i += 1) {
+            const atom = atoms[i];
+            const gap = self.src[atoms[i - 1].end..atom.pos];
+            if (atom.line_start) {
+                if (self.isDirective(atom, "fmt: on")) {
+                    break;
+                }
+                try self.out.appendNTimes(self.alloc, '\n', std.mem.count(u8, gap, "\n"));
+                const width = @as(i64, lines[atom.line].width) + shift;
+                try self.out.appendNTimes(self.alloc, ' ', @intCast(@max(width, 0)));
+            } else {
+                try self.out.appendSlice(self.alloc, gap);
+            }
+            try self.out.appendSlice(self.alloc, self.src[atom.pos..atom.end]);
+        }
+        return i - 1;
     }
 
     /// Number of spaces between two atoms on the same line.

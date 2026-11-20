@@ -213,6 +213,8 @@ fn foo():
     print(a)    --> 123
 ```
 
+A global can not have a borrow type (`&T`, `?&T`, a borrow container such as `OpaqueFunc[F]`), since it would outlive the local it borrows. Use an owned type such as `^T`.
+
 The initializer of a global variable can use the global variables that are initialized before it:
 ```cy
 global a int = 123
@@ -2426,12 +2428,24 @@ f := fn() -> int:
 print(f())     --> 3
 ```
 
-When a closure captures a local variable that is not a reference `^T`, it becomes a pinned closure. A pinned closure cannot be copied or moved: *Still experimental*
+A local that is not a reference `^T` or a borrow `&T` can not be captured. Borrow it before the lambda and capture the borrow. A closure that captures a borrow becomes a pinned closure of the type `OpaqueFunc[F]`:
 ```cy
 a := 1
+b := &a
 f := fn() -> int:
-    return a + 2
+    return b.* + 2
 print(f())     --> 3
+```
+
+A pinned closure keeps its captured values without a reference, so it is a [borrow container](#scope-parameter): it can not outlive the locals it captures, it is returned only through a `scope` return type, and it can not be lifted with `^` or stored in a global:
+```cy
+type F = fn() -> int
+
+fn make() -> OpaqueFunc[F]:
+    x := 42
+    b := &x
+    return fn() -> int => b.* + 1
+--> error: Returning a borrow container requires a `scope` modifier.
 ```
 
 ### Function pointer types.
@@ -2970,6 +2984,19 @@ fn (scope &FooArray) iterator() -> scope FooIterator:
         rec = self,
         idx = 0,
     }
+```
+
+A borrow container value lives only as long as the shortest lived local it borrows. Assigning it to a local of an outer block is a compile error:
+```cy
+type Ref:
+    p &int
+
+z := 1
+var r Ref = Ref{p=&z}
+begin:
+    y := 2
+    r = Ref{p=&y}
+--> error: `r` can not outlive `y`.
 ```
 
 ### `sink` parameter.

@@ -262,6 +262,11 @@ fn test_memory(run: *Runner) void {
     run.case("memory/return_moves_rvalue.cy");
     run.case("memory/return_borrow_scope_missing_error.cy");
     run.case("memory/return_borrow_container_scope_missing_error.cy");
+    run.case("memory/closure_borrow_return_error.cy");
+    run.case("memory/closure_borrow_outlive_error.cy");
+    run.case("memory/closure_borrow_scope.cy");
+    run.case("memory/borrow_struct_lit_outlive_error.cy");
+    run.case("memory/global_borrow_error.cy");
     run.case("memory/scope_param_missing_error.cy");
     run.case("memory/scope_too_many_params_error.cy");
     run.case("memory/scope_return_error.cy");

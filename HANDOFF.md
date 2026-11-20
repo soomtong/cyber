@@ -140,7 +140,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-161까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-163까지, 열린 것 없음).
 
 ## 작업 방식
 

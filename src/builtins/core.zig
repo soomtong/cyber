@@ -94,6 +94,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"@cmp",           zErrBuiltinFunc(cmp, null)},
     .{"@copyStruct",    zErrBuiltinFunc(copyStruct, null)},
     .{"@freeObject",    cFunc(freeObject)},
+    .{"@freePinnedClosure", cFunc(freePinnedClosure)},
     .{"@getDeinitObject", zErrFunc(getDeinitObject)},
     .{"@getTypeDtor",   zErrFunc(getTypeDtor)},
     .{"@new_object_undef", zErrFunc(new_object_undef)},
@@ -485,6 +486,9 @@ fn createOpaqueFuncType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c)
     const sig = fn_t.cast(.func_ptr).sig;
 
     const new_t = c.sema.createType(.func, .{ .sig = sig, .opaque_ = true }) catch |err| return cy.compiler.failCreateType(c, err);
+    // It can hold a pinned closure that captures borrows of locals, so it is a borrow container. Set here and not when
+    // the type info resolves: a return type spec is checked before that.
+    new_t.info.borrow_only = true;
     return @ptrCast(new_t);
 }
 
@@ -1336,6 +1340,23 @@ pub fn freeObject(t: *cy.Thread) callconv(.c) C.Ret {
     const size: usize = @intCast(t.getR64(1));
     logger.tracev("free type={}({s}) {*} {}", .{ obj.getTypeId(), t.heap.getType(obj.getTypeId()).name(), obj, size });
     t.heap.freeObject(obj, size);
+    return C.RetOk;
+}
+
+/// Frees `obj` if it is a pinned closure and returns whether it was. A pinned closure holds its captured values
+/// without a reference, and the heap keeps it in `pinned_closures` to patch them when the stack moves.
+pub fn freePinnedClosure(t: *cy.Thread) callconv(.c) C.Ret {
+    const ret = t.ret(bool);
+    const obj = t.param(*cy.HeapObject);
+    if (obj.func.kind != .pinned_closure) {
+        ret.* = false;
+        return C.RetOk;
+    }
+    _ = t.heap.pinned_closures.remove(obj);
+    const num_captured: usize = @intCast(obj.func.data.closure.numCaptured);
+    // The size that `Heap.allocClosure` allocated: a pool object for at most one capture.
+    t.heap.freeObject(obj, (3 + num_captured) * @sizeOf(cy.Value));
+    ret.* = true;
     return C.RetOk;
 }
 
@@ -2363,7 +2384,7 @@ pub fn Ptr_add_eval(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
 fn Func_size(t: *cy.Thread) callconv(.c) C.Ret {
     const ret = t.ret(i64);
     const func = t.getPtr(*cy.heap.Func, 0);
-    if (func.kind == .closure) {
+    if (func.kind == .closure or func.kind == .pinned_closure) {
         ret.* = @intCast(24 + func.data.closure.numCaptured * 8);
         return C.RetOk;
     } else {

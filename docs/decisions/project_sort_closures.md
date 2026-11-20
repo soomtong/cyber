@@ -176,3 +176,8 @@ master `1bc5426e` Debug CLI로 확인했다.
 - 고칠 방향: `OpaqueFunc`를 빌림 컨테이너(`borrow_only`)로 두고, 빌림을 캡처한 람다 값의 `parent_local`을 캡처한 빌림의 주인으로
   잇는다(`borrowOwner`). 반환 · lift · 전역 · 바깥 블록 대입이 기존 검사로 막힌다. 캡처가 없거나 `^T`만 캡처한 람다는 `Func`라
   영향이 없다. findings register에 올리고 0.5에서 고친다.
+- 고쳤다(2026-11-20, F-162): `OpaqueFunc`는 생성 때 `borrow_only`(`core.zig` `createOpaqueFuncType`, 반환 타입 검사가 타입 정보 해석보다
+  먼저라 그 자리에 둔다). `sema.popLambdaProc`가 pinned closure의 결과에 캡처한 지역 중 먼저 끝나는 주인을
+  `parent_local`로 단다(`shorterOwner`). 구조체 · 튜플 리터럴도 빌림 필드로 같게 한다. 빌림 타입 전역은 `resolveUserVar`에서 거절한다.
+  그 테스트를 쓰다 캡처 둘 이상인 pinned closure의 누수(F-163)도 고쳤다. 이제 안 A의 남은 일은 필요한 것 1(일반 지역의 주소를
+  담는 캡처)과 문서뿐이다.

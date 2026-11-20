@@ -3170,6 +3170,9 @@ fn @intToEnumResult(%T type, val int) -> !T:
 -- Frees the object given its byte size.
 #[bind] fn @freeObject(ref Ptr[void], size int)
 
+-- Frees the object if it is a pinned closure and returns whether it was.
+#[bind] fn @freePinnedClosure(obj Ptr[void]) -> bool
+
 -- Exposed for VM. Assumes `obj` has rc=0.
 fn @deinitObject[T Any](obj Ptr[void]):
     @nop('destruct object: ' + type.name(T))
@@ -3182,16 +3185,18 @@ fn @deinitObject[T Any](obj Ptr[void]):
                 #case .ptr:
                     @freeObject(obj, 8)
                 #case .union:
-                    if meta.get_closure_data(obj) |data|:
-                        captured := as[Ptr[r64]] *data.captured
-                        for 0..data.numCaptured |i|:
-                            captured_ptr := (as[Ptr[Ptr[void]]] *captured[i]).*
-                            if @releaseOnly(captured_ptr):
-                                if @getDeinitObject(captured_ptr) |deinit|:
-                                    deinit(captured_ptr)
-                        @freeObject(obj, 24 + data.numCaptured * 8)
-                    else:
-                        @freeObject(obj, 24)
+                    -- A pinned closure does not own its captured values.
+                    if !@freePinnedClosure(obj):
+                        if meta.get_closure_data(obj) |data|:
+                            captured := as[Ptr[r64]] *data.captured
+                            for 0..data.numCaptured |i|:
+                                captured_ptr := (as[Ptr[Ptr[void]]] *captured[i]).*
+                                if @releaseOnly(captured_ptr):
+                                    if @getDeinitObject(captured_ptr) |deinit|:
+                                        deinit(captured_ptr)
+                            @freeObject(obj, 24 + data.numCaptured * 8)
+                        else:
+                            @freeObject(obj, 24)
                 #case .stack_union:
                     @freeObject(obj, @unsafeCast(Ptr[T], obj).@size())
                 #else:

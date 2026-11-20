@@ -399,6 +399,19 @@ pub fn borrowOwnerOf(c: *cy.Chunk, local: LocalId) LocalId {
     return owner;
 }
 
+/// Of two borrow owners, the one that goes out of scope first. A value that borrows from both (a borrow container
+/// literal, a pinned closure) lives only as long as that one.
+pub fn shorterOwner(c: *cy.Chunk, cur: ?LocalId, next: ?LocalId) ?LocalId {
+    const b = next orelse return cur;
+    const a = cur orelse return b;
+    const la = c.varStack.items[a].lifetime;
+    const lb = c.varStack.items[b].lifetime;
+    if (la.kind == .temp) return a;
+    if (lb.kind == .temp) return b;
+    if (lb.kind == .block and (la.kind != .block or lb.block_depth > la.block_depth)) return b;
+    return a;
+}
+
 /// Records that the local `var_idx` holds the borrow `init` until it goes out of scope.
 fn bindBorrowLocal(c: *cy.Chunk, var_idx: LocalId, init: ExprResult) void {
     const decl_t = c.varStack.items[var_idx].decl_t;
@@ -426,6 +439,37 @@ fn unbindBorrowLocal(c: *cy.Chunk, local: *Local) void {
     }
     local.parent_local = cy.NullId;
     local.ex_borrow = false;
+}
+
+/// The borrow counts of the owner of `local`, without the binding of `local` itself. A borrow taken through a local that
+/// holds a borrow (a borrow container such as `h := Holder{r=&&f}`) reborrows from it, so its own binding is no conflict.
+fn otherBorrows(c: *cy.Chunk, local: LocalId) struct { owner: LocalId, shared: u8, ex: u8 } {
+    const owner = borrowOwnerOf(c, local);
+    var shared = c.varStack.items[owner].active_borrows;
+    var ex = c.varStack.items[owner].active_ex_borrows;
+    const l = c.varStack.items[local];
+    if (local != owner and l.parent_local == owner) {
+        if (l.ex_borrow) ex -= 1 else shared -= 1;
+    }
+    return .{ .owner = owner, .shared = shared, .ex = ex };
+}
+
+/// `checkSharedBorrow` for a borrow of `local` (`&local`, `&local.field`).
+pub fn checkSharedBorrowOf(c: *cy.Chunk, local: LocalId, node: *ast.Node) !void {
+    const b = otherBorrows(c, local);
+    if (b.ex > 0) {
+        const name = c.varStack.items[b.owner].name();
+        return c.reportErrorFmt("Cannot borrow `{}`. There is an active exclusive borrow to it.", &.{v(name)}, node);
+    }
+}
+
+/// `checkExclusiveBorrow` for a borrow of `local` (`&&local`, `&&local.field`).
+pub fn checkExclusiveBorrowOf(c: *cy.Chunk, local: LocalId, node: *ast.Node) !void {
+    const b = otherBorrows(c, local);
+    if (b.shared > 0 or b.ex > 0) {
+        const name = c.varStack.items[b.owner].name();
+        return c.reportErrorFmt("Expected exclusive access. There is another active borrow to `{}`.", &.{v(name)}, node);
+    }
 }
 
 /// A shared borrow (`&a`, `&self`) is not allowed while a local holds an exclusive borrow of the owner.
@@ -4561,6 +4605,12 @@ pub fn resolveUserVar(c: *cy.Chunk, sym: *cy.sym.UserVar) !void {
 
     const decl_n = sym.decl.?;
     const var_t = try cte.eval_type2(c, true, decl_n.typeSpec);
+    if (var_t.info.borrow_only) {
+        // A global outlives every local that a borrow in it could point to.
+        const type_name = try c.sema.allocTypeName(var_t);
+        defer c.alloc.free(type_name);
+        return c.reportErrorFmt("A global cannot hold the borrow type `{}`. Use an owned type such as `^T`.", &.{v(type_name)}, decl_n.typeSpec);
+    }
 
     c.resolveUserVarType(sym, var_t);
     sym.resolving_init = false;
@@ -7754,6 +7804,7 @@ pub fn semaTupleInit(c: *cy.Chunk, type_: *cy.Type, fields: []const cy.types.Fie
     }
 
     const args = try c.ir.allocArray(*ir.Expr, fields.len);
+    var owner: ?LocalId = null;
     {
         // An element is evaluated before a statement that a later element adds (`seqFlush`).
         const seq_start = c.seq_pending.items.len;
@@ -7761,6 +7812,9 @@ pub fn semaTupleInit(c: *cy.Chunk, type_: *cy.Type, fields: []const cy.types.Fie
         const record_borrows = c.scope_start_lit == @as(*ast.Node, @ptrCast(lit));
         for (fields, 0..) |field, i| {
             var arg = try c.semaExprCstr(lit.args.ptr[i], field.type);
+            if (field.type.info.borrow_only) {
+                owner = shorterOwner(c, owner, borrowOwner(c, arg));
+            }
             if (record_borrows and field.type.info.borrow_only) {
                 try c.scope_start_borrows.append(c.alloc, .{
                     .owner = borrowOwner(c, arg),
@@ -7777,7 +7831,9 @@ pub fn semaTupleInit(c: *cy.Chunk, type_: *cy.Type, fields: []const cy.types.Fie
     const init = try c.ir.newExpr(.init, type_, @ptrCast(lit), .{
         .nargs = @as(u32, @intCast(fields.len)), .args = args.ptr,
     });
-    return ExprResult.initOwned(init);
+    var res = ExprResult.initOwned(init);
+    res.data.value.parent_local = owner;
+    return res;
 }
 
 pub fn semaInitPartialVector(c: *cy.Chunk, vector_t: *cy.types.PartialVector, init_n: *ast.InitLit) !ExprResult {
@@ -7866,6 +7922,8 @@ pub fn semaInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, initializer: *as
     // The order is the order of the fields in the type.
     const seq_start = c.seq_pending.items.len;
     errdefer seqPop(c, seq_start);
+    // The local that the borrow fields keep alive the shortest.
+    var owner: ?LocalId = null;
     for (0..fieldNodes.len) |i| {
         const item = c.listDataStack.items[fieldsDataStart+i];
         const fieldT = struct_t.fields_ptr[i].type;
@@ -7880,6 +7938,9 @@ pub fn semaInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, initializer: *as
             }
         } else {
             var arg = try c.semaExprCstr(item.node.?, fieldT);
+            if (fieldT.info.borrow_only) {
+                owner = shorterOwner(c, owner, borrowOwner(c, arg));
+            }
             arg = try semaOwn(c, arg, item.node.?);
             ir_args[i] = arg.ir;
             try seqPush(c, &ir_args[i], true, item.node.?);
@@ -7891,7 +7952,9 @@ pub fn semaInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, initializer: *as
         .nargs = @as(u32, @intCast(struct_t.fields_len)),
         .args = ir_args.ptr,
     });
-    return ExprResult.initOwned(loc);
+    var res = ExprResult.initOwned(loc);
+    res.data.value.parent_local = owner;
+    return res;
 }
 
 /// `initializerId` is a record literal node.
@@ -9485,8 +9548,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
 
                 _ = try semaReturnExprStmt(c, lambda.expr, func.sig.ret, lambda.expr);
 
-                const lambda_ir = try popLambdaProc(c);
-                return ExprResult.initOwned(lambda_ir);
+                return popLambdaProc(c);
             } else {
                 const start = c.func_param_stack.items.len;
                 defer c.func_param_stack.items.len = start;
@@ -9511,8 +9573,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                 const sig = try c.sema.ensureFuncSig(@ptrCast(params), func_ret_t);
                 try c.resolveUserLambda(func, sig);
 
-                const lambda_ir = try popLambdaProc(c);
-                return ExprResult.initOwned(lambda_ir);
+                return popLambdaProc(c);
             }
         },
         .lambda_cont => {
@@ -11155,8 +11216,7 @@ fn semaLambdaMulti(c: *cy.Chunk, lambda: *ast.LambdaMulti, stmts: []const *ast.N
         // Generate function body.
         try semaStmts(c, stmts);
 
-        const lambda_ir = try popLambdaProc(c);
-        return ExprResult.initOwned(lambda_ir);
+        return popLambdaProc(c);
     } else {
         const start = c.func_param_stack.items.len;
         defer c.func_param_stack.items.len = start;
@@ -11175,8 +11235,7 @@ fn semaLambdaMulti(c: *cy.Chunk, lambda: *ast.LambdaMulti, stmts: []const *ast.N
         // Generate function body.
         try semaStmts(c, stmts);
 
-        const lambda_ir = try popLambdaProc(c);
-        return ExprResult.initOwned(lambda_ir);
+        return popLambdaProc(c);
     }
 }
 
@@ -11430,7 +11489,7 @@ pub fn sema_ex_borrow2(c: *cy.Chunk, child: ExprResult, ex_borrow_t: *cy.Type, n
         }
     };
 
-    try checkExclusiveBorrow(c, borrowOwnerOf(c, parent_local), node);
+    try checkExclusiveBorrowOf(c, parent_local, node);
 
     const addr_of = try c.ir.newExpr(.address_of, ex_borrow_t, node, .{
         .expr = eff_child.ir,
@@ -11456,7 +11515,7 @@ fn semaBorrow(c: *cy.Chunk, child: ExprResult, node: *ast.Node) !ExprResult {
     var res = ExprResult.init2(addr_of);
     if (eff_child.recParentLocal()) |parent_local| {
         // Counted only when stored in a local (`bindBorrowLocal`). A temporary borrow ends with its statement.
-        try checkSharedBorrow(c, borrowOwnerOf(c, parent_local), node);
+        try checkSharedBorrowOf(c, parent_local, node);
         res.data.value.parent_local = parent_local;
     } else {
         res.data.value.parent_local = null;
@@ -11786,7 +11845,9 @@ const VarResult = struct {
     fromParentBlock: bool,
 };
 
-fn popLambdaProc(c: *cy.Chunk) !*ir.Expr {
+/// A pinned closure keeps its captured values without a reference (`Heap.allocClosure`), so the result borrows from
+/// the captured local that goes out of scope first (`shorterOwner`).
+fn popLambdaProc(c: *cy.Chunk) !ExprResult {
     const proc = c.proc();
     const params = c.getProcParams(proc);
     
@@ -11807,6 +11868,7 @@ fn popLambdaProc(c: *cy.Chunk) !*ir.Expr {
     var captures_data: []u8 = &.{};
     var type_: *cy.Type = undefined;
     var captures_scope_locals = false;
+    var owner: ?LocalId = null;
     if (captures.len > 0) {
         captures_data = try c.ir.allocArray(u8, captures.len);
         for (captures, 0..) |info, i| {
@@ -11816,6 +11878,7 @@ fn popLambdaProc(c: *cy.Chunk) !*ir.Expr {
             if (!info.val_t.isRefPointer()) {
                 captures_scope_locals = true;
             }
+            owner = shorterOwner(c, owner, borrowOwnerOf(c, pId));
         }
         c.alloc.free(captures);
         const funcptr_t = try getFuncPtrType(c, proc.func.?.sig);
@@ -11841,12 +11904,17 @@ fn popLambdaProc(c: *cy.Chunk) !*ir.Expr {
         .func_block_ir = proc.ir,
         .is_closure = captures.len > 0,
     }};
-    return c.ir.newExpr(.lambda, type_, proc.node, .{
+    const expr = try c.ir.newExpr(.lambda, type_, proc.node, .{
         .func = proc.func.?,
         .numCaptures = @as(u8, @intCast(captures.len)),
         .captures = captures_data.ptr,
         .pinned_closure = captures_scope_locals,
     });
+    var res = ExprResult.initOwned(expr);
+    if (captures_scope_locals) {
+        res.data.value.parent_local = owner;
+    }
+    return res;
 }
 
 pub fn procPrologue(c: *cy.Chunk) !void {

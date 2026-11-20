@@ -158,3 +158,19 @@
   슬라이스는 참조 비교다.
 - 그래서 `?json.Value == none`이 된다(`v.get('a') == none`). `json.Value`의 `==`는 case와 payload 비교라 `Value.int(1) ==
   Value.float(1.0)`은 false이고 `array` · `object`는 참조 비교다. JSON 모델의 비교는 전처럼 `Value.eq`.
+
+## 빌림을 담은 값이 빌린 지역보다 오래 살던 결함 (2026-11-20)
+
+- `&T`를 캡처한 클로저(`OpaqueFunc`)를 반환 · 구조체 필드 · `^` · 전역으로 내보낼 수 있었고, 부르면 해제된 스택을 읽었다(쓰레기
+  값). `OpaqueFunc`는 문서상 복사 · 이동이 막힌 값이지만 sema가 강제하지 않았다. 이제 빌림 컨테이너다: 반환은 `scope` 반환
+  타입으로만('Returning a borrow container requires a `scope` modifier.'), `^`는 'Cannot lift the borrow container type ...'.
+- 클로저와 빌림 필드를 가진 구조체 · 튜플 리터럴을 바깥 블록의 지역에 대입하면 빌린 지역보다 오래 살 수 있었다. 이제
+  '`r` can not outlive `y`.' 컴파일 오류다(빌림 하나를 대입할 때와 같은 검사). 클로저는 캡처한 지역 중, 리터럴은 빌림 필드가 빌린
+  지역 중 먼저 끝나는 것을 주인으로 본다. 그 주인이 빌림 중으로 기록되므로 클로저가 사는 동안 주인의 배타 빌림(`&&x`)은 막힌다.
+  빌림을 담은 지역을 다시 빌리는 것(`h := Holder{r=&&f}` 뒤 `&&self` 메서드 `h.push(1)`)은 그 지역 자신의 기록을 빼고
+  검사한다(`sema.otherBorrows`).
+- 전역에 빌림 타입(`&T`, `?&T`, 빌림 컨테이너)을 쓸 수 없다: 'A global cannot hold the borrow type `?&int`. Use an owned type
+  such as `^T`.' 전에는 선언이 통과했다.
+- 캡처가 둘 이상인 pinned closure가 해제되지 않고 샜다. core `@deinitObject`가 `.closure`만 알아 pinned closure를 24바이트 pool
+  객체로 놓았고, `Heap.pinned_closures`에서 빼지도 않았다(스택이 옮겨지면 해제된 객체에 쓸 수 있는 낡은 항목). 이제
+  `@freePinnedClosure`가 표에서 빼고 할당한 크기로 놓는다.

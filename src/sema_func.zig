@@ -1023,7 +1023,7 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
                         const rec = try sema.semaManage(c, arg.data.receiver, node);
                         const addressable = try sema.semaEnsureAddressable(c, rec, node);
                         if (addressable.recParentLocal()) |parent_local| {
-                            try sema.checkSharedBorrow(c, sema.borrowOwnerOf(c, parent_local), node);
+                            try sema.checkSharedBorrowOf(c, parent_local, node);
                         }
                         return sema.semaAddressOf(c, addressable, target_t, node);
                     }

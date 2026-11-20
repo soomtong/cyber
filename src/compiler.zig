@@ -75,8 +75,9 @@ pub const Compiler = struct {
 
     /// Go on after a compile error where that is safe, to report more than one (`cl_vm_set_error_recovery`).
     /// A body (the main block, a function, a method) that fails is checked again without the statement that
-    /// failed (`BodyRecover`), then the next body is checked. Errors outside of a body (syntax, declarations)
-    /// still end the compile.
+    /// failed (`BodyRecover`), then the next body is checked. A declaration that fails (a signature, the fields
+    /// of a type, the type of a global) is marked in `failed_decls` and the next one is resolved; with an error in
+    /// a declaration no body is checked. Syntax errors and the other errors outside of a body end the compile.
     /// The compile fails as before, with every report in `reports`. Kept across `cl_vm_reset` like `report_color`.
     recover: bool = false,
     /// The statements that the body being checked with recovery skips: each failed in an earlier pass.
@@ -90,6 +91,9 @@ pub const Compiler = struct {
     recover_failed_stmt: ?*ast.Node = null,
     /// The lengths of the lists of `refListNames` when that statement started.
     recover_failed_lens: [4]usize = .{ 0, 0, 0, 0 },
+    /// With recovery, the declarations (`*cy.Sym`, `*cy.Func` or `*cy.Type`) that failed to resolve in this
+    /// compile. Asked for again, one fails without another report (`sema.declFailed`).
+    failed_decls: std.AutoHashMapUnmanaged(*const anyopaque, void) = .empty,
 
     /// Record what the names of the main source refer to (`cl_vm_set_symbol_info`, `refs.zig`).
     /// Kept across `cl_vm_reset` like `report_color`. The references are those of the last compile.
@@ -284,6 +288,7 @@ pub const Compiler = struct {
             self.ref_scope_exits.deinit(self.alloc);
             self.ref_calls.deinit(self.alloc);
             self.recover_skip.deinit(self.alloc);
+            self.failed_decls.deinit(self.alloc);
             self.ref_hints.deinit(self.alloc);
             self.ref_hint_text.deinit(self.alloc);
             self.reports.deinit(self.alloc);
@@ -579,6 +584,7 @@ pub const Compiler = struct {
     /// Wrap compile so all errors can be handled in one place.
     fn compileInner(self: *Compiler, uri: []const u8, src_opt: ?[]const u8, config: C.CompileConfig) !CompileResult {
         self.config = config;
+        self.failed_decls.clearRetainingCapacity();
 
         if (!self.cont) {
             try reserveCoreTypes(self);
@@ -684,6 +690,12 @@ pub const Compiler = struct {
             }
             try loadChunk(chunk);
             try resolveChunkSyms(chunk);
+        }
+
+        // With recovery the declarations that failed were skipped. A body could reach one that is half resolved.
+        if (self.reports.items.len > 0) {
+            self.dropRepeatedReports();
+            return error.CompileError;
         }
 
         // Functions that a failed compile left behind are checked again in this compile's main chunk.
@@ -1817,6 +1829,17 @@ fn resolveSym(c: *cy.Chunk, sym: *cy.Sym) !void {
     }
 }
 
+/// Whether a declaration that fails to resolve can be given up with recovery, and the next one resolved. Each
+/// marks itself failed (`sema.markDeclFailed`), so a later declaration that refers to it fails quietly. The
+/// others run compile-time code or host callbacks that can leave a module half loaded: they end the compile.
+fn recoverableDecl(sym: *cy.Sym) bool {
+    return switch (sym.type) {
+        .userVar, .const_, .func, .type => true,
+        .type_alias => if (sym.cast(.type_alias).decl) |decl| decl.target.type() != .void_lit else false,
+        else => false,
+    };
+}
+
 // Resolves symbol signatures:
 // - Variable types are resolved.
 // - Function signatures are resolved.
@@ -1827,6 +1850,12 @@ fn resolveChunkSyms(c: *cy.Chunk) !void {
     // Evaluate any top level ct stmts.
     try sema.semaChunkTopCtStmts(c, null);
 
+    // With recovery a declaration that fails is reported and the next one is resolved (`recoverDecl`).
+    const recover = c.compiler.recover and c != c.compiler.builtins_chunk;
+    var marks: ?RecoverMarks = if (recover) try RecoverMarks.take(c.compiler) else null;
+    defer if (marks) |*m| m.deinit(c.compiler);
+    var failed = false;
+
     var cur_sym: usize = 0;
     var cur_func: usize = 0;
     while (true) {
@@ -1835,7 +1864,11 @@ fn resolveChunkSyms(c: *cy.Chunk) !void {
         // Iterate with explicit index since unnamed types could be appended.
         while (cur_sym < c.syms.items.len) : (cur_sym += 1) {
             const sym = c.syms.items[cur_sym];
-            try resolveSym(c, sym);
+            resolveSym(c, sym) catch |err| {
+                if (marks == null or !recoverableDecl(sym)) return err;
+                try recoverBody(c.compiler, c, &marks.?, err);
+                failed = true;
+            };
         }
 
         // _ = try sema.popProc(chunk);
@@ -1843,13 +1876,20 @@ fn resolveChunkSyms(c: *cy.Chunk) !void {
         while (cur_func < c.funcs.items.len) : (cur_func += 1) {
             const func = c.funcs.items[cur_func];
             log.tracev("resolve: {s}", .{func.name()});
-            try sema.ensure_resolved_func(c, func, false, null);
+            sema.ensure_resolved_func(c, func, false, null) catch |err| {
+                if (marks == null) return err;
+                try recoverBody(c.compiler, c, &marks.?, err);
+                failed = true;
+            };
         }
 
         if (cur_sym == c.syms.items.len) {
             break;
         }
     }
+
+    // The module is not complete. The compile ends after the declarations of every chunk are resolved.
+    if (failed) return;
 
     if (c.on_load) |onLoad| {
         onLoad(@ptrCast(c.vm), @ptrCast(c.sym));

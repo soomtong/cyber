@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-19): LSP 범위 포맷 · call hierarchy · 본문 안 문장 단위 복구
+# HANDOFF (2026-11-20): LSP 선언의 오류 복구
 
 ## 목표
 
@@ -9,6 +9,7 @@
 - 2026-11-19: HANDOFF "남은 작업"의 LSP 다음 후보 넷(사용자: "3번 진행해").
 - 2026-11-19: LSP 다음 후보 셋(사용자: "LSP 다음 후보(문장 단위 파서 복구, call hierarchy, 범위 포맷) 최적의 결정은 위임한다.
   애매한 경우 상위 에이전트 호출하여 처리 (fable 5.2)").
+- 2026-11-20: 남은 LSP 후보인 선언 오류 복구(사용자: "continue", 같은 위임 아래).
 
 ## 현재 브랜치
 
@@ -76,15 +77,19 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - 문장 단위 복구: `compiler.BodyRecover`가 실패한 문장을 건너뛰고 본문을 다시 검사(최대 10번), `sema.semaStmt`가 실패한 문장을
     기록. 문장마다 되돌리는 방식은 fable 검토로 기각(16절). 겹치는 리포트는 `Compiler.dropRepeatedReports`.
   - VS Code 테스트 18개 통과(두 항목 추가).
-- [ ] LSP 다음 후보: 선언 오류 복구(LSP 설계 문서 13절 앞). 토크나이저의 `ignoreErrors` 모드는 닫히지 않은 문자열에서 끝없이
-  토큰을 만든다(쓰는 곳 없음, LSP 14절).
+- [x] LSP 선언 오류 복구(2026-11-20, LSP 설계 문서 17절). fable 검토로 안 A: 서로 관계없는 선언의 오류를 모두 보고하고, 선언에
+  오류가 있으면 본문은 검사하지 않는다. `Compiler.failed_decls` · `sema.declFailed` · `markDeclFailed`, `resolveChunkSyms`의
+  `recoverableDecl`. 최상위 컴파일 타임 문장 · `use` · 타입 상수 · 템플릿 머리는 그대로 컴파일을 끝낸다.
+- [ ] 남은 것(LSP): 템플릿 머리 · `use`의 선언 오류 복구(17절의 둘째 단계). 토크나이저의 `ignoreErrors` 모드는 닫히지 않은
+  문자열에서 끝없이 토큰을 만든다(쓰는 곳 없음, LSP 14절).
 - [ ] 기술 부채(급하지 않음): carry 재시도 루프의 IR 되돌리기, `@destruct_span` 취소 keep 지점, `Scope.run`의 바퀴당 `waiting()`
   질의, 취소 불변식 panic. 기록은 `project_coroutines.md`.
 
 ## 핵심 파일
 
 - `src/refs.zig` "Hints" 절, `src/lsp/server.zig` `hintDiagnostics` · `onCodeAction` · `onInlayHint`, `src/lsp/assist.zig`.
-- `src/compiler.zig` `BodyRecover` · `semaChunkFuncsRecover`, `src/sema.zig` `semaStmts` · `semaStmt`(복구 경로).
+- `src/compiler.zig` `BodyRecover` · `semaChunkFuncsRecover` · `resolveChunkSyms` · `recoverableDecl`, `src/sema.zig` `semaStmts` ·
+  `semaStmt` · `declFailed`(복구 경로).
 - `src/builtins/core.cy` `Slice` 절(`reserve_own` · `clone_copy` · `append` · `appended` 등, `rg -n "fn \(&&?Slice\[\]\)"`).
 - `src/sema.zig` `semaOpAssignMethod` · `checkSliceInPlaceResult` · `checkDroppedSliceResult`.
 - `src/parser.zig` `isForeignDeclKeyword` · `reportForeignDeclError` · `reportTypedDeclError`.

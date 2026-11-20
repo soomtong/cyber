@@ -4087,10 +4087,28 @@ pub fn resolveFuncVariant(c: *cy.Chunk, func: *cy.Func, resolve_new_types: bool,
     }
 }
 
+/// With recovery, whether the declaration `decl` failed to resolve earlier in this compile. Its error was
+/// reported there, so the caller fails with `error.CompileError` and no report of its own. It is marked failed
+/// too, and the declaration that asked for it does not report an error caused by the first.
+pub fn declFailed(c: *cy.Chunk, decl: *const anyopaque) bool {
+    const compiler = c.compiler;
+    return compiler.recover and compiler.reports.items.len > 0 and compiler.failed_decls.contains(decl);
+}
+
+/// With recovery, marks the declaration `decl` that failed to resolve (`declFailed`). Its state is half set:
+/// a struct still resolving, a const without a value.
+pub fn markDeclFailed(c: *cy.Chunk, decl: *const anyopaque) void {
+    if (!c.compiler.recover) return;
+    // Without memory the compile ends anyway, with the error that the caller returns.
+    c.compiler.failed_decls.put(c.alloc, decl, {}) catch {};
+}
+
 pub fn ensure_resolved_func(c: *cy.Chunk, func: *cy.Func, resolve_new_types: bool, node: ?*ast.Node) !void {
     if (func.isResolved()) {
         return;
     }
+    if (declFailed(c, func)) return error.CompileError;
+    errdefer markDeclFailed(c, func);
 
     switch (func.type) {
         .unresolved,
@@ -4480,6 +4498,8 @@ pub fn resolveConst(c: *cy.Chunk, sym: *cy.sym.Const) !void {
     if (sym.isResolved()) {
         return;
     }
+    if (declFailed(c, sym)) return error.CompileError;
+    errdefer markDeclFailed(c, sym);
     try pushSymResolveContext(c, @ptrCast(sym), null);
     defer popResolveContext(c);
 
@@ -4528,6 +4548,8 @@ pub fn resolveUserVar(c: *cy.Chunk, sym: *cy.sym.UserVar) !void {
     if (sym.isResolved()) {
         return;
     }
+    if (declFailed(c, sym)) return error.CompileError;
+    errdefer markDeclFailed(c, sym);
 
     try pushSymResolveContext(c, @ptrCast(sym), null);
     defer popResolveContext(c);

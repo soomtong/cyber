@@ -998,13 +998,112 @@ test "With error recovery every body reports its errors." {
     C.vm_reset(vm);
     try zt.eq(C.ErrorCompile, C.vm_eval(vm, syntax_src, &res));
     try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+}
+
+test "With error recovery every declaration reports its error." {
+    // docs/specs/2026-11-12-lsp-design.md, section 17.
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
     C.vm_set_error_recovery(vm, true);
 
-    // An error in a declaration still ends the compile.
+    var res: C.EvalResult = undefined;
 
+    // Signatures, fields and the types of globals and consts. With an error in a declaration no body is checked.
+    const src =
+        \\fn a(x Nope1) -> int:
+        \\    return 1
+        \\
+        \\fn b() -> Nope2:
+        \\    return nope_body
+        \\
+        \\type T:
+        \\    v Nope3
+        \\
+        \\global g Nope4 = 1
+        \\const C Nope5 = 1
+        \\type Al = Nope6
+        \\
+        \\fn ok() -> int:
+        \\    return 1
+        \\print(nope_main)
+    ;
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
+    try expectReports(vm, &.{
+        .{ .line = 7, .msg = "Could not find the symbol `Nope3`." },
+        .{ .line = 9, .msg = "Could not find the symbol `Nope4`." },
+        .{ .line = 10, .msg = "Could not find the symbol `Nope5`." },
+        .{ .line = 11, .msg = "Could not find the symbol `Nope6`." },
+        .{ .line = 0, .msg = "Could not find the symbol `Nope1`." },
+        .{ .line = 3, .msg = "Could not find the symbol `Nope2`." },
+    });
+
+    // Without recovery the first one ends the compile.
+    C.vm_set_error_recovery(vm, false);
     C.vm_reset(vm);
-    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "fn a(x Nope) -> int:\n    return 1\nfn b() -> int:\n    return nope2", &res));
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, src, &res));
     try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+    C.vm_set_error_recovery(vm, true);
+
+    // A declaration that refers to one that failed fails without a report of its own, in either order: no
+    // false circular dependency. `f` takes the failed type and its body is not checked.
+    for ([_][]const u8{
+        "type A:\n    x Nope\ntype B:\n    a A\nfn f(a A) -> int:\n    return a.x\nprint(f(A{x=1}))",
+        "type B:\n    a A\ntype A:\n    x Nope\nfn f(a A) -> int:\n    return a.x\nprint(f(A{x=1}))",
+    }, [_]u32{ 1, 3 }) |cascade_src, line| {
+        C.vm_reset(vm);
+        try zt.eq(C.ErrorCompile, C.vm_eval(vm, cascade_src, &res));
+        try expectReports(vm, &.{.{ .line = line, .msg = "Could not find the symbol `Nope`." }});
+    }
+
+    // A choice with a duplicate case: its tag enum has the same cases and is not reported again.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "type Shape enum:\n    case circle float\n    case circle int", &res));
+    try expectReports(vm, &.{.{ .line = 2, .msg = "`circle` has already been declared as a `choice_case`" }});
+
+    // A true cycle is reported once.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "type A:\n    b B\ntype B:\n    a A\nfn bad() -> Nope:\n    return 1", &res));
+    try expectReports(vm, &.{
+        .{ .line = 3, .msg = "Structs can not contain a circular dependency." },
+        .{ .line = 4, .msg = "Could not find the symbol `Nope`." },
+    });
+
+    // A trait method and a method of a type.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\type Tr trait:
+        \\    fn m() -> Nope1
+        \\
+        \\type S:
+        \\    v int
+        \\
+        \\fn (&S) n(x Nope2) -> int:
+        \\    return 1
+    , &res));
+    try expectReports(vm, &.{
+        .{ .line = 1, .msg = "Could not find the symbol `Nope1`." },
+        .{ .line = 6, .msg = "Could not find the symbol `Nope2`." },
+    });
+
+    // An error in a top level compile-time statement still ends the compile.
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, "#if nope_ct:\n    pass\nfn a(x Nope) -> int:\n    return 1", &res));
+    try zt.eq(@as(usize, 1), C.vm_compile_report_count(vm));
+
+    // The reports stop at the cap.
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(zt.alloc);
+    for (0..150) |i| {
+        try buf.print(zt.alloc, "fn f{}(x Nope{}) -> int:\n    return 1\n", .{ i, i });
+    }
+    C.vm_reset(vm);
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm, buf.items, &res));
+    try zt.eq(@as(usize, 100), C.vm_compile_report_count(vm));
+
+    // Nothing ran, and the next compile starts clean.
+    C.vm_reset(vm);
+    try zt.eq(C.Success, C.vm_eval(vm, "fn main() -> int:\n    return 7", &res));
+    try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
 }
 
 test "With error recovery a template that failed to expand is reported once." {

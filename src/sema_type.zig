@@ -136,6 +136,9 @@ pub fn ensure_resolved_type(c: *cy.Chunk, type_: *cy.Type, node: *ast.Node) anye
     if (type_.isResolved()) {
         return;
     }
+    // Before the check of a struct that is still resolving: a struct that failed is one.
+    if (sema.declFailed(c, type_)) return error.CompileError;
+    errdefer sema.markDeclFailed(c, type_);
     if (cy.Trace) {
         const name = try c.sema.allocTypeName(type_);
         defer c.alloc.free(name);
@@ -263,6 +266,8 @@ pub fn resolve_type_alias(c: *cy.Chunk, sym: *cy.sym.TypeAlias) anyerror!void {
     if (sym.resolved) {
         return;
     }
+    if (sema.declFailed(c, sym)) return error.CompileError;
+    errdefer sema.markDeclFailed(c, sym);
     try sema.pushSymResolveContext(c, @ptrCast(sym), @ptrCast(sym.decl));
     defer sema.popResolveContext(c);
 
@@ -443,9 +448,10 @@ pub fn resolve_choice_type(c: *cy.Chunk, choice_t: *cy.types.Choice, node: *ast.
     defer sema.popResolveContext(c);
 
     const decl = sym.decl.?.cast(.enumDecl);
-    try declare_choice_cases(c, choice_t, decl);
-
     const tag_t = sym.getMod().getSym("Tag").?.cast(.type).type;
+    // The tag has the same cases. Resolved on its own after a failure, it would report the same error again.
+    errdefer sema.markDeclFailed(c, tag_t);
+    try declare_choice_cases(c, choice_t, decl);
     try declare_enum_cases(c, tag_t.cast(.enum_t), decl);
 }
 

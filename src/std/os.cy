@@ -75,7 +75,7 @@ fn access_file(path str, mode AccessMode) -> !void:
         cpath := str.initz(path)
         code := lc.access(cpath.ptr, mode)
         if code != 0:
-            return from_errno()
+            return last_error()
 
 --| Returns the command line arguments.
 fn args() -> []str:
@@ -93,7 +93,7 @@ fn copy_file(src_path str, dst_path str) -> !void:
         src := open_file(src_path)!
         dst := create_file(dst_path)!
         if lc.macos.fcopyfile(src.fd, dst.fd, none, lc.macos.COPYFILE_DATA) != 0:
-            return from_errno()
+            return last_error()
 
     #else meta.system() == .windows:
         src16 := windows.utf8ToUtf16Le(src_path)!
@@ -113,7 +113,7 @@ fn create_dir(path str) -> !void:
     #else:
         cpath := str.initz(path)
         if lc.mkdir(cpath.ptr, lc.DefaultDirMode) != 0:
-            return from_errno()
+            return last_error()
 
 fn create_file(path str) -> !File:
     return create_file(path, true)
@@ -129,7 +129,7 @@ fn create_file(path str, truncate bool) -> !File:
         cpath := str.initz(path)
         fd := lc.open(cpath.ptr, flags, lc.DefaultFileMode)
         if fd == -1:
-            return from_errno()
+            return last_error()
         return {fd=fd}
 
 --| Returns the current working directory.
@@ -139,7 +139,7 @@ fn cwd() -> !str:
     #else:
         buf := [lc.PATH_MAX]byte(0)
         if lc.getcwd(*buf[0], as buf.len()) == none:
-            return from_errno()
+            return last_error()
         return c.from_strz(*buf[0])
 
 --| Change the current working directory.
@@ -149,7 +149,7 @@ fn chdir(path str) -> !void:
     #else:
         cpath := str.initz(path)
         if lc.chdir(cpath.ptr) == -1:
-            return from_errno()
+            return last_error()
 
 --| Runs a shell command and returns the stdout/stderr.
 fn exec(args AsSpan[str]) -> ExecResult:
@@ -187,7 +187,7 @@ fn file_info(path str) -> !FileInfo:
     #else meta.system() == .macos:
         cstat := lc.Stat{}
         if lc.stat(cpath.ptr, &cstat) != 0:
-            return from_errno()
+            return last_error()
         return file_info(&cstat)
 
     #else meta.system() == .windows:
@@ -221,20 +221,69 @@ fn free(ptr Ptr[void]):
     #else:
         lc.free(ptr)
 
-fn from_errno() -> error:
+--| The error of the last failed OS call, from `errno` (POSIX) or `GetLastError` (Windows). Read it right after the
+--| call: a later call can change it. `last_os_error` gives the code itself.
+fn last_error() -> error:
     #if meta.system() == .windows:
-        panic('unsupported')
+        return windows.fromWin32Error()
     #else:
-        switch lc.errno:
-            case lc.EPERM : return error.OperationDenied
-            case lc.ENOENT: return error.FileNotFound
-            case lc.EFAULT: return error.BadAddress
-            case lc.EBADF : return error.BadFile
-            case lc.EACCES: return error.AccessDenied
-            case lc.EINVAL: return error.InvalidArgument
-            else:
-                eprint("errno: %{lc.errno}")
-                return error.Unknown
+        return from_errno(int(lc.errno))
+
+--| The code of the last failed OS call: `errno` (POSIX) or `GetLastError` (Windows).
+fn last_os_error() -> int:
+    #if meta.system() == .windows:
+        return int(kernel32.GetLastError())
+    #else:
+        return int(lc.errno)
+
+--| Converts a Windows error code (`GetLastError`) to the standard error name. See `from_errno`.
+--| Off Windows it gives `error.Unknown`.
+fn from_win32_error(code int) -> error:
+    #if meta.system() == .windows:
+        return windows.from_win32_error(code)
+    #else:
+        return error.Unknown
+
+--| Converts an `errno` code to the standard error name. Codes without a name give `error.Unknown`, and so does
+--| every code on Windows.
+--| The names are the same on every platform (`from_win32_error` for Windows codes):
+--| `NotFound`, `PermissionDenied`, `AlreadyExists`, `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty`, `NoSpace`,
+--| `ReadOnly`, `NameTooLong`, `TooManyOpenFiles`, `Busy`, `CrossesDevices`, `Interrupted`, `WouldBlock`, `TimedOut`,
+--| `BrokenPipe`, `ConnectionRefused`, `OutOfMemory`, `InvalidArgument`, `Unsupported`, `Unknown`.
+fn from_errno(code int) -> error:
+    #if meta.system() == .windows:
+        return error.Unknown
+    #else:
+        e := lc.c_int(code)
+        if e == lc.ENOENT: return error.NotFound
+        if e == lc.EPERM or e == lc.EACCES: return error.PermissionDenied
+        if e == lc.EEXIST: return error.AlreadyExists
+        if e == lc.ENOTDIR: return error.NotADirectory
+        if e == lc.EISDIR: return error.IsADirectory
+        if e == lc.ENOSPC: return error.NoSpace
+        if e == lc.EROFS: return error.ReadOnly
+        if e == lc.EMFILE or e == lc.ENFILE: return error.TooManyOpenFiles
+        if e == lc.EBUSY: return error.Busy
+        if e == lc.EXDEV: return error.CrossesDevices
+        if e == lc.EINTR: return error.Interrupted
+        if e == lc.EPIPE: return error.BrokenPipe
+        if e == lc.ENOMEM: return error.OutOfMemory
+        if e == lc.EINVAL or e == lc.EBADF or e == lc.EFAULT: return error.InvalidArgument
+        #if meta.system() == .macos:
+            if e == lc.macos.ENOTEMPTY: return error.DirectoryNotEmpty
+            if e == lc.macos.ENAMETOOLONG: return error.NameTooLong
+            if e == lc.macos.EAGAIN: return error.WouldBlock
+            if e == lc.macos.ETIMEDOUT: return error.TimedOut
+            if e == lc.macos.ECONNREFUSED: return error.ConnectionRefused
+            if e == lc.macos.ENOSYS or e == lc.macos.ENOTSUP: return error.Unsupported
+        #else meta.system() == .linux:
+            if e == lc.linux.ENOTEMPTY: return error.DirectoryNotEmpty
+            if e == lc.linux.ENAMETOOLONG: return error.NameTooLong
+            if e == lc.linux.EAGAIN: return error.WouldBlock
+            if e == lc.linux.ETIMEDOUT: return error.TimedOut
+            if e == lc.linux.ECONNREFUSED: return error.ConnectionRefused
+            if e == lc.linux.ENOSYS or e == lc.linux.ENOTSUP: return error.Unsupported
+        return error.Unknown
 
 --| Returns an environment variable by key.
 fn get_env(key str) -> ?str:
@@ -265,7 +314,7 @@ fn malloc(size int) -> !Ptr[void]:
     #else:
         ptr := lc.malloc(size)
         if ptr == none:
-            return from_errno()
+            return last_error()
         return ptr
 
 --| Returns the number of CPU cores on the current machine.
@@ -275,12 +324,12 @@ fn num_cpus() -> int:
         var count_len c.size_t = type.size(c.c_int)
         res := lc.macos.sysctlbyname('hw.logicalcpu', &count, &count_len, none, 0)
         if res == -1:
-            return from_errno()
+            return last_error()
         return count
     #else meta.system() == .linux:
         var cpu_set lc.cpu_set_t = undef
         if lc.linux.sched_getaffinity(0, type.size(lc.cpu_set_t), *cpu_set) != 0:
-            return from_errno()
+            return last_error()
         sum := 0
         for cpu_set |x|:
             --sum += @pop_count(x)
@@ -319,7 +368,7 @@ fn open_dir(path str, iterable bool) -> !Dir:
         cpath := str.initz(path)
         fd := lc.open(cpath.ptr, lc.O_RDONLY || lc.O_DIRECTORY || lc.O_CLOEXEC, lc.mode_t(0))
         if fd == -1:
-            return from_errno()
+            return last_error()
         return {fd=fd}
 
 --| Returns the current time in nanoseconds since the Epoch.
@@ -327,12 +376,12 @@ fn nano_time() -> !int:
     #if meta.system() == .macos:
         tp := lc.timespec{}
         if lc.clock_gettime(lc.macos.CLOCK_REALTIME, *tp) != 0:
-            return from_errno()
+            return last_error()
         return tp.sec * ns_per_s + tp.nsec
     #else meta.system() == .linux:
         tp := lc.timespec{}
         if lc.clock_gettime(lc.linux.CLOCK_REALTIME, *tp) != 0:
-            return from_errno() 
+            return last_error() 
         return tp.sec * ns_per_s + tp.nsec
     #else meta.system() == .windows:
         ft := kernel32.FILETIME{dwLowDateTime=undef, dwHighDateTime=undef}
@@ -350,13 +399,13 @@ fn now() -> !int:
     #if meta.system() == .macos:
         tp := lc.timespec{}
         if lc.clock_gettime(lc.macos.CLOCK_UPTIME_RAW, *tp) != 0:
-            return from_errno()
+            return last_error()
         return tp.sec * ns_per_s + tp.nsec
 
     #else meta.system() == .linux:
         tp := lc.timespec{}
         if lc.clock_gettime(lc.linux.CLOCK_BOOTTIME, *tp) != 0:
-            return from_errno()
+            return last_error()
         return tp.sec * ns_per_s + tp.nsec
 
     #else meta.system() == .windows:
@@ -392,7 +441,7 @@ fn open_file(path str, mode OpenMode) -> !File:
             case .read_write => lc.O_RDWR
         fd := lc.open(pathz.ptr, access || lc.O_CLOEXEC, lc.mode_t(0))
         if fd == -1:
-            return from_errno()
+            return last_error()
         return {fd=fd}
 
 --| Returns a result that can be used to query args. 
@@ -445,7 +494,7 @@ fn remove_dir(path str) -> !void:
     #else:
         cpath := str.initz(path)
         if lc.rmdir(cpath.ptr) != 0:
-            return from_errno()
+            return last_error()
 
 --| Removes the file at `path`.
 fn remove_file(path str) -> !void:
@@ -456,7 +505,7 @@ fn remove_file(path str) -> !void:
     #else:
         cpath := str.initz(path)
         if lc.unlink(cpath.ptr) != 0:
-            return from_errno()
+            return last_error()
 
 --| Returns the current executable's path.
 fn resolve_exe_path() -> !str:
@@ -466,7 +515,7 @@ fn resolve_exe_path() -> !str:
         buf := [lc.PATH_MAX]byte(0)
         len := i32(buf.len())
         if lc.macos._NSGetExecutablePath(*buf[0], *len) != 0:
-            return from_errno()
+            return last_error()
         path := c.from_strz(*buf[0])
         return resolve_path(path)
     #else:
@@ -492,18 +541,18 @@ fn resolve_path(path str) -> !str:
         pathz := str.initz(path)
         fd := lc.open(pathz.ptr, lc.O_RDONLY || lc.O_CLOEXEC || lc.O_NONBLOCK, lc.mode_t(0))
         if fd == -1:
-            return from_errno()
+            return last_error()
 
         #if meta.system() == .macos:
             file := File{fd=fd}
             if lc.fcntl(file.fd, lc.macos.F_GETPATH, *buf[0]) != 0:
-                return from_errno()
+                return last_error()
             return c.from_strz(*buf[0])
         #else meta.system() == .linux:
             proc_path := str.initz('/proc/self/fd/%{fd}')
             len := lc.readlink(proc_path.ptr, *buf[0], lc.PATH_MAX)
             if len < 0:
-                return from_errno()
+                return last_error()
             return str(buf[0..len])
         #else:
             panic('resolve_path not supported on this platform')
@@ -520,7 +569,7 @@ fn set_env(key str, val str) -> !void:
         ckey := str.initz(key)
         cval := str.initz(val)
         if lc.setenv(ckey.ptr, cval.ptr, 1) != 0:
-            return from_errno()
+            return last_error()
 
 --| Pauses the current thread for `nsecs` nanoseconds.
 fn sleep(nsecs int) -> !void:
@@ -540,7 +589,7 @@ fn sleep(nsecs int) -> !void:
         }
         rem := lc.timespec{}
         if lc.nanosleep(*req, *rem) != 0:
-            return from_errno()
+            return last_error()
 
 --| Removes an environment variable by key.
 fn unset_env(key str) -> !void:
@@ -553,7 +602,7 @@ fn unset_env(key str) -> !void:
     #else:
         ckey := str.initz(key)
         if lc.unsetenv(ckey.ptr) != 0:
-            return from_errno()
+            return last_error()
 
 --| Writes the text `contents` to a file. Write bytes with `write_file_bytes`.
 fn write_file(path str, contents str) -> !void:
@@ -614,7 +663,7 @@ fn (&File) close() -> void:
             panic("Unexpected. %{windows.fromWin32Error()}")
     #else:
         if lc.close(self.fd) != 0:
-            panic("Unexpected. %{from_errno()}")
+            panic("Unexpected. %{last_error()}")
 
     self.closed = true
 
@@ -625,7 +674,7 @@ fn (&File) info() -> !FileInfo:
     #else meta.system() == .macos:
         cstat := lc.Stat{}
         if lc.fstat(self.fd, &cstat) != 0:
-            return from_errno()
+            return last_error()
         return file_info(&cstat)
     #else meta.system() == .windows:
         info := kernel32.BY_HANDLE_FILE_INFORMATION{
@@ -652,7 +701,7 @@ fn (&File) read(buf [&]byte) -> !int:
     #else:
         read := lc.read(self.fd, as buf.base, buf.length)
         if read == -1:
-            return from_errno()
+            return last_error()
         return read
 
 fn (&File) read(bytes int) -> ![]byte:
@@ -700,7 +749,7 @@ fn (&File) seek(n int) -> !void:
     #else:
         res := lc.lseek(self.fd, lc.off_t(n), lc.SEEK_CUR)
         if res == -1:
-            return from_errno()
+            return last_error()
 
 --| Seeks the read/write position by `pos` bytes from the end. Positive `pos` is invalid.
 fn (&File) seek_from_end(n int) -> !void:
@@ -709,7 +758,7 @@ fn (&File) seek_from_end(n int) -> !void:
     #else:
         res := lc.lseek(self.fd, lc.off_t(n), lc.SEEK_END)
         if res == -1:
-            return from_errno()
+            return last_error()
 
 --| Seeks the read/write position to `pos` bytes from the start. Negative `pos` is invalid.
 fn (&File) seek_from_start(n int) -> !void:
@@ -718,7 +767,7 @@ fn (&File) seek_from_start(n int) -> !void:
     #else:
         res := lc.lseek(self.fd, lc.off_t(n), lc.SEEK_SET)
         if res == -1:
-            return from_errno()
+            return last_error()
 
 --| Writes a string to the current file position.
 fn (&File) write(val str) -> !int:
@@ -732,7 +781,7 @@ fn (&File) write(val str) -> !int:
     #else:
         written := lc.write(self.fd, as val.ptr, val.len())
         if written == -1:
-            return from_errno()
+            return last_error()
         return written
 
 --| Writes the span `buf` to the file and returns the number of bytes written. Implements `io.Writer`.
@@ -747,7 +796,7 @@ fn (&File) write(buf [&]byte) -> !int:
     #else:
         written := lc.write(self.fd, as buf.base, buf.length)
         if written == -1:
-            return from_errno()
+            return last_error()
         return written
 
 --| Writes `buf` to the file and returns the number of bytes written.
@@ -762,7 +811,7 @@ fn (&File) write(buf []byte) -> !int:
     #else:
         written := lc.write(self.fd, as buf.ptr, buf.len())
         if written == -1:
-            return from_errno()
+            return last_error()
         return written
 
 fn (&File) write_all(val str) -> !void:
@@ -800,7 +849,7 @@ fn (&Dir) close():
     #else:
         res := lc.close(self.fd)
         if res != 0:
-            panic("Unexpected. %{from_errno()}")
+            panic("Unexpected. %{last_error()}")
 
     self.closed = true
 
@@ -811,7 +860,7 @@ fn (&Dir) info() -> !FileInfo:
     #else meta.system() == .macos:
         cstat := lc.Stat{}
         if lc.fstat(self.fd, &cstat) != 0:
-            return from_errno()
+            return last_error()
         return file_info(&cstat)
     #else meta.system() == .windows:
         -- Use path to get directory info

@@ -56,12 +56,12 @@ fn (&DirIteratorImpl) next(dir &os.Dir) -> !?os.DirEntry:
             if !self.init:
                 res := lc.lseek(dir.fd, lc.off_t(0), lc.SEEK_SET)
                 if res == -1:
-                    return os.from_errno()
+                    return os.last_error()
                 self.init = true
             if self.idx >= self.end:
                 rc := lc.macos.__getdirentries64(dir.fd, *self.buf[0], as self.buf.len(), *self.seek)
                 if rc == 0: return none
-                if rc == -1: return os.from_errno()
+                if rc == -1: return os.last_error()
                 self.idx = 0
                 self.end = rc
 

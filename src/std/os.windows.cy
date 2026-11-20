@@ -23,19 +23,32 @@ type WCHAR = core.WCHAR
 type LARGE_INTEGER = core.LARGE_INTEGER
 const FALSE = core.FALSE
 
--- Convert Windows error codes to Cyber errors
+-- The error of the last failed Windows call. See `os.from_win32_error`.
 fn fromWin32Error() -> error:
     err := kernel32.GetLastError()
-    return switch err:
-        case core.ERROR_SUCCESS => panic('expected error')
-        case core.ERROR_FILE_NOT_FOUND => error.FileNotFound
-        case core.ERROR_PATH_NOT_FOUND => error.FileNotFound
-        case core.ERROR_ACCESS_DENIED => error.AccessDenied
-        case core.ERROR_INVALID_HANDLE => error.BadFile
-        case core.ERROR_NOT_ENOUGH_MEMORY => error.OutOfMemory
-        case core.ERROR_INVALID_PARAMETER => error.InvalidArgument
-        case core.ERROR_SHARING_VIOLATION => error.AccessDenied
-        case core.ERROR_ALREADY_EXISTS => error.FileExists
+    if err == core.ERROR_SUCCESS:
+        panic('expected error')
+    return from_win32_error(int(err))
+
+--| Converts a Windows error code (`GetLastError`) to the standard error name. See `os.from_errno`.
+fn from_win32_error(code int) -> error:
+    return switch DWORD(code):
+        case core.ERROR_FILE_NOT_FOUND, core.ERROR_PATH_NOT_FOUND => error.NotFound
+        case core.ERROR_ACCESS_DENIED, core.ERROR_SHARING_VIOLATION => error.PermissionDenied
+        case core.ERROR_ALREADY_EXISTS, core.ERROR_FILE_EXISTS => error.AlreadyExists
+        case core.ERROR_DIRECTORY => error.NotADirectory
+        case core.ERROR_DIR_NOT_EMPTY => error.DirectoryNotEmpty
+        case core.ERROR_DISK_FULL, core.ERROR_HANDLE_DISK_FULL => error.NoSpace
+        case core.ERROR_WRITE_PROTECT => error.ReadOnly
+        case core.ERROR_FILENAME_EXCED_RANGE => error.NameTooLong
+        case core.ERROR_TOO_MANY_OPEN_FILES => error.TooManyOpenFiles
+        case core.ERROR_BUSY => error.Busy
+        case core.ERROR_NOT_SAME_DEVICE => error.CrossesDevices
+        case core.ERROR_TIMEOUT => error.TimedOut
+        case core.ERROR_BROKEN_PIPE, core.ERROR_NO_DATA => error.BrokenPipe
+        case core.ERROR_NOT_ENOUGH_MEMORY, core.ERROR_OUTOFMEMORY => error.OutOfMemory
+        case core.ERROR_INVALID_PARAMETER, core.ERROR_INVALID_HANDLE, core.ERROR_INVALID_NAME => error.InvalidArgument
+        case core.ERROR_NOT_SUPPORTED, core.ERROR_CALL_NOT_IMPLEMENTED => error.Unsupported
         else => error.Unknown
 
 -- Convert UTF-8 string to UTF-16LE for Windows APIs

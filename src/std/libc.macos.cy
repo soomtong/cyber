@@ -105,3 +105,12 @@ const F_GETPATH = c_int(50)
 
 #[extern]
 fn sysctlbyname(name Ptr[byte], oldp Ptr[void], oldlenp Ptr[c.size_t], newp Ptr[void], newlen c.size_t) -> c.c_int
+
+-- errno numbers that differ from Linux to macOS (`lc.EPERM` and the others up to 34 are in `libc.cy`).
+const EAGAIN = c_int(35)
+const ENAMETOOLONG = c_int(63)
+const ENOSYS = c_int(78)
+const ENOTEMPTY = c_int(66)
+const ENOTSUP = c_int(45)
+const ETIMEDOUT = c_int(60)
+const ECONNREFUSED = c_int(61)

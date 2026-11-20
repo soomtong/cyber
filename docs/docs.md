@@ -3171,6 +3171,33 @@ type MyError error:
 err := MyError.NameTooLong
 ```
 
+### OS errors.
+A failed OS call in `os` returns one of a fixed set of error names, the same on every platform:
+
+| Error | Cause (POSIX / Windows) |
+|---|---|
+| `NotFound` | `ENOENT` / `ERROR_FILE_NOT_FOUND`, `ERROR_PATH_NOT_FOUND` |
+| `PermissionDenied` | `EPERM`, `EACCES` / `ERROR_ACCESS_DENIED`, `ERROR_SHARING_VIOLATION` |
+| `AlreadyExists` | `EEXIST` / `ERROR_ALREADY_EXISTS`, `ERROR_FILE_EXISTS` |
+| `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty` | `ENOTDIR`, `EISDIR`, `ENOTEMPTY` / `ERROR_DIRECTORY`, `ERROR_DIR_NOT_EMPTY` |
+| `NoSpace`, `ReadOnly`, `NameTooLong`, `TooManyOpenFiles`, `Busy`, `CrossesDevices` | `ENOSPC`, `EROFS`, `ENAMETOOLONG`, `EMFILE`, `EBUSY`, `EXDEV` and the Windows codes of the same causes |
+| `Interrupted`, `WouldBlock`, `TimedOut`, `BrokenPipe`, `ConnectionRefused` | `EINTR`, `EAGAIN`, `ETIMEDOUT`, `EPIPE`, `ECONNREFUSED` |
+| `OutOfMemory`, `InvalidArgument`, `Unsupported` | `ENOMEM`, `EINVAL`, `EBADF`, `ENOSYS`, ... |
+| `Unknown` | any other code |
+
+```cy
+use os
+
+fn load_config() -> !str:
+    data := os.read_file('config.txt') !else |err|:
+        if err == error.NotFound:
+            return ''
+        return err
+    return data
+```
+
+`os.last_os_error()` gives the code of the last failed OS call (`errno`, or `GetLastError` on Windows). `os.from_errno(code)` and `os.from_win32_error(code)` convert a code to its name, for example after a call through the C FFI.
+
 ## Results.
 A result value forces the call site to unwrap it in order to use the payload.
 
@@ -4365,7 +4392,7 @@ fn main() -> !void:
     src := os.read_file('missing.txt')!
     print(src)
 
---> panic: Unwrapped error `error.FileNotFound`.
+--> panic: Unwrapped error `error.NotFound`.
 ```
 
 ## Builtin modules.

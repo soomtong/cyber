@@ -11,7 +11,7 @@ os.unset_env('testfoo')!
 t.assert(os.get_env('testfoo') == none)
 
 -- access_file()
-t.eq(error.FileNotFound, os.access_file('src/test/assets/missing.txt', os.AccessExists).unwrap_error())
+t.eq(error.NotFound, os.access_file('src/test/assets/missing.txt', os.AccessExists).unwrap_error())
 os.access_file('src/test/assets/file.txt', os.AccessExists)!
 
 -- args()
@@ -183,5 +183,29 @@ if meta.cpu() != 'wasm32':
     os.write_file('test.txt', s)!
     file := os.open_file('test.txt', .read)!
     t.eq('hello', str(file.read_all()!))
+
+
+-- Standard error names.
+t.eq(error.NotFound, os.from_errno(2))
+t.eq(error.PermissionDenied, os.from_errno(1))
+t.eq(error.PermissionDenied, os.from_errno(13))
+t.eq(error.AlreadyExists, os.from_errno(17))
+t.eq(error.NotADirectory, os.from_errno(20))
+t.eq(error.InvalidArgument, os.from_errno(22))
+t.eq(error.Unknown, os.from_errno(9999))
+t.eq(error.Unknown, os.from_win32_error(2))
+if meta.system() == .macos:
+    t.eq(error.DirectoryNotEmpty, os.from_errno(66))
+    t.eq(error.TimedOut, os.from_errno(60))
+if meta.system() == .linux:
+    t.eq(error.DirectoryNotEmpty, os.from_errno(39))
+    t.eq(error.TimedOut, os.from_errno(110))
+if meta.cpu() != 'wasm32':
+    try:
+        os.create_dir('src')!
+        t.fail()
+    else |err|:
+        t.eq(error.AlreadyExists, err)
+        t.eq(17, os.last_os_error())
 
 --cytest: pass

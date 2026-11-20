@@ -6,13 +6,13 @@ use c
 fn file_info(fd lc.fd_t) -> !os.FileInfo:
     stat := linux_lc.statx_t{}
     if linux_lc.statx(fd, '', linux_lc.AT_EMPTY_PATH, linux_lc.STATX_TYPE || linux_lc.STATX_MODE || linux_lc.STATX_ATIME || linux_lc.STATX_MTIME || linux_lc.STATX_CTIME, *stat) != 0:
-        return os.from_errno()
+        return os.last_error()
     return from_statx(*stat)
 
 fn file_info(path Ptr[byte]) -> !os.FileInfo:
     stat := linux_lc.statx_t{}
     if linux_lc.statx(linux_lc.AT_FDCWD, path, 0, linux_lc.STATX_TYPE || linux_lc.STATX_MODE || linux_lc.STATX_ATIME || linux_lc.STATX_MTIME || linux_lc.STATX_CTIME, *stat) != 0:
-        return os.from_errno()
+        return os.last_error()
     return from_statx(*stat)
 
 fn from_statx(stat Ptr[linux_lc.statx_t]) -> os.FileInfo:
@@ -59,12 +59,12 @@ fn (&DirIteratorImpl) next(dir &os.Dir) -> !?os.DirEntry:
         if !self.init:
             res := lc.lseek(dir.fd, lc.off_t(0), lc.SEEK_SET)
             if res == -1:
-                return os.from_errno()
+                return os.last_error()
             self.init = true
         if self.idx >= self.end:
             rc := linux_lc.getdents64(dir.fd, *self.buf[0], as self.buf.len())
             if rc == 0: return none
-            if rc == -1: return os.from_errno()
+            if rc == -1: return os.last_error()
             self.idx = 0
             self.end = rc
 

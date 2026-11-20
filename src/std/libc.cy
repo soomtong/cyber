@@ -139,12 +139,25 @@ type timespec = switch meta.system():
 #[extern]
 global errno c_int
 
+-- The numbers up to 34 are the same on Linux and macOS. The others are in `libc.linux.cy` and `libc.macos.cy`.
 const EPERM  = c_int(1)
 const ENOENT = c_int(2)
+const EINTR  = c_int(4)
 const EBADF  = c_int(9)
+const ENOMEM = c_int(12)
 const EACCES = c_int(13)
 const EFAULT = c_int(14)
+const EBUSY  = c_int(16)
+const EEXIST = c_int(17)
+const EXDEV  = c_int(18)
+const ENOTDIR = c_int(20)
+const EISDIR = c_int(21)
 const EINVAL = c_int(22)
+const ENFILE = c_int(23)
+const EMFILE = c_int(24)
+const ENOSPC = c_int(28)
+const EROFS  = c_int(30)
+const EPIPE  = c_int(32)
 
 const SEEK_SET = c_int(0)
 const SEEK_CUR = c_int(1)

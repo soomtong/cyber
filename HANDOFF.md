@@ -97,8 +97,10 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - [x] 그 조사에서 찾은 F-162 · F-163(`17bf7879`): `OpaqueFunc`를 빌림 컨테이너로, 람다 · 구조체 · 튜플 리터럴에 주인
   (`sema.shorterOwner`), 빌림 타입 전역 거절, 빌림 지역 재빌림은 자기 기록을 뺌(`sema.otherBorrows`), pinned closure 해제
   (`@freePinnedClosure`).
-- [ ] 1.7 C 1단계: 템플릿 특수화 중 난 오류에 인스턴스화 경로(어디서 특수화했는지)를 붙인다.
-- [ ] 1.7 A: 표준 오류 어휘(`errors` 모듈 가칭, `from_errno` 등, `os.fromErrno`의 `eprint` 제거). 옛 이름은 호환성 절로.
+- [x] 1.7 C 1단계(`80762140`): 'While specializing `inner[int]` here:' 주석. `Instance.site` · `site_parent`,
+  `Compiler.compile_seq`(세션의 앞 컴파일 노드를 쓰지 않게), `Chunk.appendInstanceTrace`, `sema.bodyInstance`.
+- [x] 1.7 A 표준 OS 오류 이름(결정 `project_os_error_names.md`): `os.from_errno` · `from_win32_error` · `last_error` ·
+  `last_os_error`. 깨지는 변경(옛 이름 표는 `unreleased.md`). Windows 매핑은 실행 확인 못 함.
 - [ ] 0.5 릴리스(사용자 지시 때).
 - [ ] 기술 부채(급하지 않음): `@destruct_span` 취소 keep 지점(쓰게 되면), `Scope.run`의 바퀴당 `waiting()` 질의(준비 큐 ·
   futex식 대기 표, fiber 수 비용이 문제가 되면), 취소 불변식 panic(닿는 경로 없음). 기록은 `project_coroutines.md`.

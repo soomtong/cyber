@@ -110,3 +110,12 @@ const DT_SOCK    = byte(12)
 
 #[extern]
 fn sched_getaffinity(pid lc.pid_t, cpusetsize c.size_t, mask Ptr[cpu_set_t]) -> c.c_int
+
+-- errno numbers that differ from Linux to macOS (`lc.EPERM` and the others up to 34 are in `libc.cy`).
+const EAGAIN = c_int(11)
+const ENAMETOOLONG = c_int(36)
+const ENOSYS = c_int(38)
+const ENOTEMPTY = c_int(39)
+const ENOTSUP = c_int(95)
+const ETIMEDOUT = c_int(110)
+const ECONNREFUSED = c_int(111)

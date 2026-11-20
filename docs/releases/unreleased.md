@@ -184,3 +184,17 @@
   가리키면 다시 달지 않는다. libcyber에서는 `cl_vm_compile_report_note`의 메시지 있는 note다.
 - 고친 곳: `Instance.site` · `site_parent`(`template.createInstance`), `Compiler.compile_seq`, `Chunk.appendInstanceTrace`,
   `sema.bodyInstance`. 설계 원칙 검토 1.4 C의 1단계다.
+
+## OS 오류의 표준 이름 (2026-11-20, 깨지는 변경)
+
+- `os`의 실패한 OS 호출이 플랫폼과 함수에 관계없이 같은 이름을 돌려준다. 결정은 `docs/decisions/project_os_error_names.md`.
+  전에는 errno 여섯 개만 이름이 있었고(`EEXIST` · `ENOTDIR` · `ENOSPC` 등은 모두 `error.Unknown`), 거부가 `AccessDenied` ·
+  `OperationDenied` 둘이었고, Windows는 다른 표를 썼다. `Unknown`일 때 stderr에 'errno: N'을 찍던 것도 뺐다.
+- 옛 이름 → 새 이름(호환성): `FileNotFound` → `NotFound`, `AccessDenied` · `OperationDenied` → `PermissionDenied`,
+  `FileExists` → `AlreadyExists`, `BadFile` · `BadAddress` → `InvalidArgument`. 언어 별칭은 없다. `== error.FileNotFound`로
+  비교하는 스크립트는 조용히 false가 되니 고쳐야 한다.
+- 새 이름: `IsADirectory` · `DirectoryNotEmpty` · `NoSpace` · `ReadOnly` · `NameTooLong` · `TooManyOpenFiles` · `Busy` ·
+  `CrossesDevices` · `Interrupted` · `WouldBlock` · `TimedOut` · `BrokenPipe` · `ConnectionRefused` · `Unsupported`.
+  `NotADirectory` · `OutOfMemory` · `InvalidArgument` · `Unknown`은 그대로다.
+- 새 함수: `os.last_os_error()`(원래 코드), `os.from_errno(code)`, `os.from_win32_error(code)`, `os.last_error()`.
+- Windows 매핑은 실행으로 확인하지 못했다(빌드 · 테스트 환경 없음).

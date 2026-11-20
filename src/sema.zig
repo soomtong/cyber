@@ -9559,6 +9559,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
         .fiber_expr => {
             return semaFiberExpr(c, node);
         },
+        .spawn_expr => {
+            return semaSpawnExpr(c, node);
+        },
         .move_expr => {
             const child = node.cast(.move_expr).expr;
             var res = try semaExpr(c, child, .{});
@@ -9657,52 +9660,78 @@ fn semaFiberExpr(c: *cy.Chunk, node: *ast.Node) !ExprResult {
         return semaExpr(c, @ptrCast(new_call), .{});
     }
     const call = child.cast(.callExpr);
-
-    if (call.callee.type() == .accessExpr) {
-        // `fiber obj.work()` has no place for the receiver. Name the method through its type instead.
-        const access = call.callee.cast(.accessExpr);
-        if (access.left.type() == .ident) {
-            const left = try c.semaExprSkipSym(access.left, .{});
-            if (left.resType != .sym) {
-                if (try c.accessResolvedSym(left.type, access.right.as_name(), access.right)) |sym| {
-                    if (sym.type == .func) {
-                        return c.reportErrorFmt("A fiber entry cannot be a method call on a value. Pass the receiver as the first argument: `fiber T.{}(obj)`.", &.{v(sym.name())}, node);
-                    }
-                }
-            }
-        }
-    }
+    try checkEntryMethodCall(c, call, "fiber", "fiber", node);
 
     // Report the role and lifetime rules at the `fiber` expression instead of inside `@new_fiber`.
     // A path (`T.method`, `mod.func`) is checked too: a `&T` receiver is a borrow like any parameter.
-    if (call.callee.type() == .ident or call.callee.type() == .accessExpr) {
-        const callee_res = try c.semaExpr(call.callee, .{});
-        const opt_sig: ?*cy.FuncSig = switch (callee_res.type.kind()) {
-            .func_ptr => callee_res.type.cast(.func_ptr).sig,
-            .func_sym => callee_res.type.cast(.func_sym).sig,
-            else => null,
-        };
-        if (opt_sig) |sig| {
-            if (sig.ret.kind() == .pointer and sig.ret.cast(.pointer).child_t.isInstanceOf(c.sema.generator_tmpl)) {
-                return c.reportError("A generator cannot be a fiber entry.", node);
-            }
-            if (sig.ret.id() != bt.Void) {
-                return c.reportError("A fiber entry function must return `void`.", node);
-            }
-            for (sig.params()) |param| {
-                const param_t = param.get_type();
-                if (param_t.info.borrow_only) {
-                    // The fiber's stack moves when it grows, and the resumer's frame can be gone at the next resume.
-                    const type_name = try c.sema.allocTypeName(param_t);
-                    defer c.alloc.free(type_name);
-                    return c.reportErrorFmt("Cannot borrow a stack value across fibers. The parameter type is `{}`. Use `^T`.", &.{v(type_name)}, node);
-                }
+    if (try entrySig(c, call)) |sig| {
+        if (sig.ret.kind() == .pointer and sig.ret.cast(.pointer).child_t.isInstanceOf(c.sema.generator_tmpl)) {
+            return c.reportError("A generator cannot be a fiber entry.", node);
+        }
+        if (sig.ret.id() != bt.Void) {
+            return c.reportError("A fiber entry function must return `void`.", node);
+        }
+        for (sig.params()) |param| {
+            const param_t = param.get_type();
+            if (param_t.info.borrow_only) {
+                // The fiber's stack moves when it grows, and the resumer's frame can be gone at the next resume.
+                const type_name = try c.sema.allocTypeName(param_t);
+                defer c.alloc.free(type_name);
+                return c.reportErrorFmt("Cannot borrow a stack value across fibers. The parameter type is `{}`. Use `^T`.", &.{v(type_name)}, node);
             }
         }
     }
 
+    return semaEntryCall(c, "@new_fiber", call, node);
+}
+
+/// The signature of the entry function of `fiber f(..)` or `spawn f(..)` when the callee is a name or a path.
+fn entrySig(c: *cy.Chunk, call: *ast.CallExpr) !?*cy.FuncSig {
+    if (call.callee.type() != .ident and call.callee.type() != .accessExpr) return null;
+    const callee_res = try c.semaExpr(call.callee, .{});
+    return switch (callee_res.type.kind()) {
+        .func_ptr => callee_res.type.cast(.func_ptr).sig,
+        .func_sym => callee_res.type.cast(.func_sym).sig,
+        else => null,
+    };
+}
+
+/// `fiber obj.work()` and `spawn obj.work()` have no place for the receiver. Name the method through its type instead.
+fn checkEntryMethodCall(c: *cy.Chunk, call: *ast.CallExpr, keyword: []const u8, entry: []const u8, node: *ast.Node) !void {
+    if (call.callee.type() != .accessExpr) return;
+    const access = call.callee.cast(.accessExpr);
+    if (access.left.type() != .ident) return;
+    const left = try c.semaExprSkipSym(access.left, .{});
+    if (left.resType == .sym) return;
+    if (try c.accessResolvedSym(left.type, access.right.as_name(), access.right)) |sym| {
+        if (sym.type == .func) {
+            return c.reportErrorFmt("A {} entry cannot be a method call on a value. Pass the receiver as the first argument: `{} T.{}(obj)`.", &.{ v(entry), v(keyword), v(sym.name()) }, node);
+        }
+    }
+}
+
+/// `spawn f(a, b)` is the call `@spawn(f, {a, b})` of the core module: the arguments are evaluated and sent now,
+/// and `f` is called on the new thread.
+fn semaSpawnExpr(c: *cy.Chunk, node: *ast.Node) !ExprResult {
+    const call = node.cast(.spawn_expr).child.cast(.callExpr);
+    try checkEntryMethodCall(c, call, "spawn", "thread", node);
+    if (try entrySig(c, call)) |sig| {
+        for (sig.params()) |param| {
+            const param_t = param.get_type();
+            if (param_t.info.borrow_only) {
+                // The arguments are sent to the thread's heap. A borrow would point into the spawning thread.
+                const type_name = try c.sema.allocTypeName(param_t);
+                defer c.alloc.free(type_name);
+                return c.reportErrorFmt("Cannot borrow a value across threads. The parameter type is `{}`. Take the value instead.", &.{v(type_name)}, node);
+            }
+        }
+    }
+    return semaEntryCall(c, "@spawn", call, node);
+}
+
+/// Sema of `name(call.callee, {call.args})`, a builtin that takes the entry function and its arguments as a tuple.
+fn semaEntryCall(c: *cy.Chunk, name: []const u8, call: *ast.CallExpr, node: *ast.Node) !ExprResult {
     const tree = &c.parser.ast;
-    const name = "@new_fiber";
     const callee = try tree.newNode(.at_lit, .{
         .src = node.src(),
         .pos = node.pos(),

@@ -133,6 +133,7 @@ pub const NodeType = enum(u8) {
     fiber_expr,
     scope_stmt,
     suspend_stmt,
+    spawn_expr,
 };
 
 pub fn ConstSlice(T: type) type {
@@ -694,6 +695,13 @@ pub const FiberExpr = struct {
     pos: u32,
 };
 
+/// `spawn f(args)`. `child` is the call expression.
+pub const SpawnExpr = struct {
+    child: *Node align(8),
+    src: u32,
+    pos: u32,
+};
+
 pub const YieldStmt = struct {
     child: ?*Node align(8),
     src: u32,
@@ -1048,6 +1056,7 @@ pub fn NodeData(comptime node_t: NodeType) type {
         .fiber_expr     => FiberExpr,
         .scope_stmt     => ScopeStmt,
         .suspend_stmt   => Token,
+        .spawn_expr     => SpawnExpr,
     };
 }
 
@@ -1255,6 +1264,7 @@ pub const Node = struct {
             .fiber_expr     => self.cast(.fiber_expr).src,
             .scope_stmt     => self.cast(.scope_stmt).name.src(),
             .suspend_stmt   => self.cast(.suspend_stmt).src,
+            .spawn_expr     => self.cast(.spawn_expr).src,
         };
     }
 
@@ -1383,6 +1393,7 @@ pub const Node = struct {
             .fiber_expr     => self.cast(.fiber_expr).pos,
             .scope_stmt     => self.cast(.scope_stmt).pos,
             .suspend_stmt   => self.cast(.suspend_stmt).pos,
+            .spawn_expr     => self.cast(.spawn_expr).pos,
         };
     }
 
@@ -1744,6 +1755,7 @@ pub const Node = struct {
                 return stmts[stmts.len-1].end();
             },
             .suspend_stmt   => self.cast(.suspend_stmt).pos + 7,
+            .spawn_expr     => self.cast(.spawn_expr).child.end(),
         };
     }
 };
@@ -1816,7 +1828,7 @@ pub const UnaryOp = enum(u8) {
 };
 
 test "ast internals." {
-    try t.eq(123, std.enums.values(NodeType).len);
+    try t.eq(124, std.enums.values(NodeType).len);
     try t.eq(1, @sizeOf(NodeHeader));
 }
 

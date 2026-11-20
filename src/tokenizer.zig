@@ -46,6 +46,7 @@ const keywords = std.StaticStringMap(TokenType).initComptime(.{
     .{ "yield", .yield_k },
     .{ "fiber", .fiber_k },
     .{ "suspend", .suspend_k },
+    .{ "spawn", .spawn_k },
 });
 
 /// Whether `name` is a keyword, which can not be a name.
@@ -168,6 +169,7 @@ pub const TokenType = enum(u8) {
     yield_k,
     fiber_k,
     suspend_k,
+    spawn_k,
 };
 
 pub const Token = extern struct {
@@ -1209,8 +1211,8 @@ test "tokenizer internals." {
     try tt.eq(@alignOf(Token), 4);
     try tt.eq(@sizeOf(TokenizeState), 5);
 
-    try tt.eq(112, std.enums.values(TokenType).len);
-    try tt.eq(41, keywords.kvs.len);
+    try tt.eq(113, std.enums.values(TokenType).len);
+    try tt.eq(42, keywords.kvs.len);
 }
 
 /// The tags of the tokens of `src` with `ignoreErrors`, one letter each. `err_end` is where the last error token ends.

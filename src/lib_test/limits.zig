@@ -255,8 +255,8 @@ test "cl_vm_set_memory_limit covers spawned threads." {
         \\    a << i
         \\  return a.len()
         \\use test
-        \\test.eq(1000, spawn(grow, {1000}).await())
-        \\_ = spawn(grow, {100000000}).await()
+        \\test.eq(1000, spawn grow(1000).await())
+        \\_ = spawn grow(100000000).await()
     ;
     C.vm_set_memory_limit(vm, @intCast(C.vm_memory_used(vm) + 4 * 1024 * 1024));
     try zt.eq(C.ErrorPanic, C.vm_eval(vm, src, &res));
@@ -272,7 +272,7 @@ test "cl_vm_set_memory_limit covers spawned threads." {
         \\  for 0..n |i|:
         \\    a << i
         \\  return a.len()
-        \\test.eq(1000, spawn(grow, {1000}).await())
+        \\test.eq(1000, spawn grow(1000).await())
     , &res));
 }
 
@@ -634,7 +634,7 @@ test "Spawned threads stop with the eval and do not abort the host." {
     C.vm_set_loader(vm, @ptrCast(&S.loader));
     var res: C.EvalResult = undefined;
 
-    // The spawned functions take an argument: `spawn(f, {})` with no arguments crashes at compile time in
+    // The spawned functions take an argument: `spawn f()` with no arguments crashes at compile time in
     // ReleaseSafe when it is not the process's first VM (also before this change).
     // A spawned thread inherits the fuel limit.
     C.vm_set_fuel(vm, 10000);
@@ -644,7 +644,7 @@ test "Spawned threads stop with the eval and do not abort the host." {
         \\  while true:
         \\    i += 1
         \\  return i
-        \\_ = spawn(spin, {0}).await()
+        \\_ = spawn spin(0).await()
     , &res));
     C.vm_set_fuel(vm, 0);
 
@@ -658,7 +658,7 @@ test "Spawned threads stop with the eval and do not abort the host." {
         \\  while true:
         \\    i += 1
         \\  return i
-        \\_ = spawn(spin, {0}).await()
+        \\_ = spawn spin(0).await()
     , &res));
     thread.join();
 
@@ -667,7 +667,7 @@ test "Spawned threads stop with the eval and do not abort the host." {
         \\fn boom(n int) -> int:
         \\  panic('boom')
         \\  return n
-        \\_ = spawn(boom, {1}).await()
+        \\_ = spawn boom(1).await()
     , &res));
     {
         const report = C.vm_error_summary(vm);
@@ -682,8 +682,8 @@ test "Spawned threads stop with the eval and do not abort the host." {
         \\  panic('boom')
         \\  return n
         \\fn mid(n int) -> int:
-        \\  return spawn(boom, {n}).await() + 1
-        \\_ = spawn(mid, {1}).await()
+        \\  return spawn boom(n).await() + 1
+        \\_ = spawn mid(1).await()
     , &res));
     {
         const report = C.vm_error_summary(vm);
@@ -700,8 +700,8 @@ test "Spawned threads stop with the eval and do not abort the host." {
         \\    i += 1
         \\  return i
         \\fn mid(n int) -> int:
-        \\  return spawn(spin, {n}).await() + 1
-        \\_ = spawn(mid, {0}).await()
+        \\  return spawn spin(n).await() + 1
+        \\_ = spawn mid(0).await()
     , &res));
     C.vm_set_fuel(vm, 0);
 
@@ -710,10 +710,10 @@ test "Spawned threads stop with the eval and do not abort the host." {
         \\fn add(a int, b int) -> int:
         \\  return a + b
         \\fn mid(a int) -> int:
-        \\  return spawn(add, {a, 3}).await() * 10
+        \\  return spawn add(a, 3).await() * 10
         \\use test
-        \\test.eq(5, spawn(add, {2, 3}).await())
-        \\test.eq(50, spawn(mid, {2}).await())
+        \\test.eq(5, spawn add(2, 3).await())
+        \\test.eq(50, spawn mid(2).await())
     , &res));
 }
 
@@ -729,7 +729,7 @@ test "Spawn without args works in every VM." {
             \\fn zero() -> int:
             \\  return 7
             \\use test
-            \\test.eq(7, spawn(zero, {}).await())
+            \\test.eq(7, spawn zero().await())
         , &res));
     }
 }
@@ -775,10 +775,10 @@ test "A thread that awaits a spawned thread sleeps instead of spinning." {
         \\fn work(n int) -> int:
         \\  mod.nap(400)
         \\  return n
-        \\f := spawn(work, {1})
+        \\f := spawn work(1)
         \\mod.nap(30)
         \\test.eq(1, f.await())
-        \\fs := {spawn(work, {2})}
+        \\fs := {spawn work(2)}
         \\mod.nap(30)
         \\test.eq(0, Future.wait_any(fs.span()))
     , &res));

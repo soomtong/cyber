@@ -167,6 +167,7 @@ type Node enum:
     case fiber_expr          void
     case scope_stmt          void
     case suspend_stmt        void
+    case spawn_expr          void
 
 fn (&Node) decl_name() -> str:
     return switch self.*:

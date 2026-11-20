@@ -578,6 +578,7 @@ module.exports = grammar({
         $.unwrap_choice,
         $.dereference,
         $.special_string,
+        $.spawn_expression,
         $.comptime_expression,
         $.template_parameter,
         $.function_type,
@@ -781,6 +782,9 @@ module.exports = grammar({
         PREC.lambda,
         seq('fiber', choice(field('call', $.call_expression), seq(':', field('body', $._expression_suite)))),
       ),
+
+    // `spawn work(a, b)` takes the first call only: `spawn f(x).await()` awaits the future.
+    spawn_expression: ($) => prec(PREC.call + 1, seq('spawn', field('call', $.call_expression))),
 
     function_type: ($) =>
       prec.right(PREC.lambda - 1, seq('fn', field('parameters', $.parameters), optional(field('return_type', $.return_type)))),

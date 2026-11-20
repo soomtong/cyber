@@ -484,6 +484,9 @@ if (!aot) {
     if (!is_wasm) {
         run.case("concurrency/spawn.cy");
     }
+    run.case("concurrency/spawn_old_form_error.cy");
+    run.case("concurrency/spawn_method_entry_error.cy");
+    run.case("concurrency/spawn_borrow_param_error.cy");
 }
 }
 

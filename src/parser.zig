@@ -3874,6 +3874,9 @@ pub const Parser = struct {
                         break;
                     }
                     left = @ptrCast(try self.parseCallExpression(left));
+                    if (config.stop_after_call) {
+                        break;
+                    }
                 },
                 .sq_string => {
                     if (left.type() == .ident) {
@@ -3991,6 +3994,15 @@ pub const Parser = struct {
     }
 
     /// An expression term doesn't contain a unary/binary expression at the top.
+    /// The call after `fiber` or `spawn`, up to its first argument list: `fiber f(x).resume()` resumes the fiber.
+    /// Null when the term is not a call.
+    fn parseEntryCall(self: *Parser) anyerror!?*ast.Node {
+        const left = (try self.parseTightTermLeft(.{})) orelse return null;
+        const term = try self.parseTightTermWithLeft(left, .{ .stop_after_call = true });
+        if (term.type() != .callExpr) return null;
+        return term;
+    }
+
     fn parseTightTermOpt(self: *Parser, config: ParseTermConfig) anyerror!?*ast.Node {
         const left = (try self.parseTightTermLeft(config)) orelse return null;
         return try self.parseTightTermWithLeft(left, config);
@@ -4461,20 +4473,37 @@ pub const Parser = struct {
                         .pos = self.tokenPos(start),
                     });
                 }
-                const child = (try self.parseTermExpr(.{})) orelse {
-                    return self.reportError("Expected a function call after `fiber`.", &.{});
-                };
-                if (child.type() != .callExpr) {
+                const child = (try self.parseEntryCall()) orelse {
                     return self.reportErrorAt("Expected a function call after `fiber`.", &.{}, start);
-                }
+                };
                 if (child.cast(.callExpr).hasNamedArg) {
                     return self.reportErrorAt("A `fiber` call can not have named arguments.", &.{}, start);
                 }
-                return self.ast.newNodeErase(.fiber_expr, .{
+                const node = try self.ast.newNodeErase(.fiber_expr, .{
                     .child = child,
                     .src = self.ast.src_id,
                     .pos = self.tokenPos(start),
                 });
+                return try self.parseTightTermWithLeft(node, .{});
+            },
+            .spawn_k => {
+                self.advance();
+                if (self.peek().tag() == .left_paren) {
+                    // The old form `spawn(f, {a, b})` was a function that took the arguments as a tuple.
+                    return self.reportErrorAt("Expected a function call after `spawn`: `spawn f(a, b)`. The form `spawn(f, {a, b})` was replaced.", &.{}, start);
+                }
+                const child = (try self.parseEntryCall()) orelse {
+                    return self.reportErrorAt("Expected a function call after `spawn`.", &.{}, start);
+                };
+                if (child.cast(.callExpr).hasNamedArg) {
+                    return self.reportErrorAt("A `spawn` call can not have named arguments.", &.{}, start);
+                }
+                const node = try self.ast.newNodeErase(.spawn_expr, .{
+                    .child = child,
+                    .src = self.ast.src_id,
+                    .pos = self.tokenPos(start),
+                });
+                return try self.parseTightTermWithLeft(node, .{});
             },
             .move_k => {
                 self.advance();
@@ -5325,6 +5354,8 @@ const ParseTermConfig = struct {
     parse_call_expr: bool = true,
     parse_record_expr: bool = true,
     parse_infer_lambda: bool = true,
+    /// Stop after the first call: `spawn f(x).await()` is `(spawn f(x)).await()`.
+    stop_after_call: bool = false,
 };
 
 const list_literal_hint = "A list literal uses braces: `{a, b}` or `[]T{a, b}`.";

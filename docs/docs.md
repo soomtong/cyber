@@ -3338,7 +3338,7 @@ fn fib(n int) -> int:
 
 fn compute(n int, out &int) -> !void:
     -- The fiber is suspended while the thread computes.
-    out.* = spawn(fib, {n}).await()
+    out.* = spawn fib(n).await()
 
 fn main() -> !void:
     a := 0
@@ -3356,9 +3356,9 @@ Threads are light-weight virtual threads that have their own execution context a
 Threads are isolated from one another and can communicate by message passing or by sharing memory safely.
 
 ### Spawn threads.
-The builtin `spawn` creates and starts a new thread with a function as the entry point:
+`spawn` followed by a function call creates and starts a new thread. The arguments are evaluated and sent now, and the function is called on the new thread:
 ```cy
-task := spawn(fib, {40})
+task := spawn fib(40)
 
 fn fib(n int) -> int:
     if n < 2:
@@ -3366,11 +3366,15 @@ fn fib(n int) -> int:
     return fib(n - 1) + fib(n - 2)
 ```
 
-The entry point can be a lambda. It can not capture variables, because a closure is not `Sendable`:
+`spawn` takes the first call only, so `spawn fib(40).await()` waits for the thread, like `(spawn fib(40)).await()`.
+
+The entry point can be a lambda in a variable. It can not capture variables, because a closure is not `Sendable`:
 ```cy
-task := spawn(fn(n int) -> int => n + 1, {3})
-print(task.await())    --> 4
+inc := fn(n int) -> int => n + 1
+print(spawn inc(3).await())    --> 4
 ```
+
+A method is named through its type, with the receiver as the first argument: `spawn Job.run(job)`. `spawn job.run()` is a compile error, and so is an entry function that takes a borrow (`&T`): the arguments are sent to the new thread.
 
 `spawn` returns a `Future[T]` where `T` is the return type of the entry function. If the runtime could not dispatch the thread, a panic is raised.
 The `Future` contains the asynchronous result of the new thread.
@@ -3399,7 +3403,7 @@ fn (&Point) @send(dst Thread) -> Point:
 fn sum(p Point) -> int:
     return p.x + p.y
 
-print(spawn(sum, {Point{x = 1, y = 2}}).await())    --> 3
+print(spawn sum(Point{x = 1, y = 2}).await())    --> 3
 ```
 
 These types are not `Sendable` yet: *Planned Feature*
@@ -3448,7 +3452,7 @@ I/O bound work can be delegated to the operating system and CPU bound work can b
 
 `spawn` returns a `Future`, and so does a host function that answers later:
 ```cy
-work := spawn(fib, {30})
+work := spawn fib(30)
 -- `work` is a `Future[int]`. The main block continues while `fib` runs.
 print(work.await())    --> 832040
 ```
@@ -3474,8 +3478,8 @@ A future that no spawned thread completes (one from a host function, or from `Fu
 
 When `await` returns, the expression evaluates to the completed value of the `Future`:
 ```cy
-a := spawn(fib, {20})
-b := spawn(fib, {25})
+a := spawn fib(20)
+b := spawn fib(25)
 print(a.await() + b.await())    --> 81790
 ```
 
@@ -3522,6 +3526,8 @@ _ = f.resume()         --> a: first
 _ = f.resume()         --> a: last
 print(f.status())      --> FiberStatus.done
 ```
+
+`fiber` takes the first call only: `fiber f(x).resume()` resumes the new fiber.
 
 Each fiber starts with a stack of 512 bytes that grows on demand like the thread's stack. A spawned thread can create fibers of its own. Fibers are not available when compiling AOT.
 
@@ -3635,7 +3641,7 @@ In the root context, outside of any fiber, `await` waits as before.
 A loop that resumes fibers calls `Fiber.wait_ready()` when every fiber waits. It blocks the root context until a future that a suspended fiber awaits is done and returns `true`. It returns `false` at once when no fiber awaits a future:
 ```cy
 fn fetch(name str, n int, log ^ArrayStore[str]):
-    res := spawn(compute, {n}).await()
+    res := spawn compute(n).await()
     log << '%{name}: %{res}'
 
 log := ^ArrayStore[str]{}
@@ -3666,7 +3672,7 @@ Structured concurrency ties the lifetime of a group of fibers to a block of code
 A `scope` block runs a group of fibers and does that loop itself. The name between the bars is a `Scope` that lives for the block. `start` adds a fiber: the arguments are evaluated at once, and the fibers run when the body is done. A fiber that stops at `suspend` gives the others a turn, and when every fiber waits for a future the block waits like `Fiber.wait_ready()`:
 ```cy
 fn fetch(name str, n int, log ^ArrayStore[str]) -> !void:
-    res := spawn(compute, {n}).await()
+    res := spawn compute(n).await()
     if res < 0:
         return error.Negative
     log << '%{name}: %{res}'
@@ -5444,7 +5450,7 @@ cl_vm_evalx(vm, CL_BYTES("turn"), src, cfg, &res);
 ```
 
 ### Denying threads.
-`spawn` runs a function on another thread, and a host function that the function calls runs on that thread too. A host whose functions only work on the thread of the eval sets `deny_spawn` in `CLEvalConfig` or `CLCompileConfig`. A call to `spawn` in a chunk that is not a standard module is then a compile error. Fibers and `scope` blocks stay available: they run on the thread of the eval.
+`spawn` runs a function on another thread, and a host function that the function calls runs on that thread too. A host whose functions only work on the thread of the eval sets `deny_spawn` in `CLEvalConfig` or `CLCompileConfig`. A `spawn` in a chunk that is not a standard module is then a compile error. Fibers and `scope` blocks stay available: they run on the thread of the eval.
 ```c
 CLEvalConfig cfg = clDefaultEvalConfig();
 cfg.deny_spawn = true;

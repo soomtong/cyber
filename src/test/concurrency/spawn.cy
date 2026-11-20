@@ -1,33 +1,33 @@
 use test
 
 -- No args.
-test.eq(123, spawn(entry, {}).await())
+test.eq(123, spawn entry().await())
 
 -- Sending primitive.
-test.eq(45, spawn(entry2, {10}).await())
+test.eq(45, spawn entry2(10).await())
 
 -- `Future.wait_any` returns the index of a thread that is done. Both are awaited afterwards.
-any_futs := []Future[int]{spawn(entry2, {10}), spawn(entry2, {20})}
+any_futs := []Future[int]{spawn entry2(10), spawn entry2(20)}
 any_i := Future.wait_any(any_futs.span())
 test.eq(any_futs[any_i].await() + any_futs[1 - any_i].await(), 235)
 
 -- Sending `str`.
-test.eq('xyz', spawn(entry3, {'abc'}).await())
+test.eq('xyz', spawn entry3('abc').await())
 
 -- Sending and returning value types without references.
-test.eq(true, spawn(echo_bool, {true}).await())
-test.eq(1.5, spawn(echo_float, {1.5}).await())
-test.eq(f32(2.5), spawn(echo_f32, {f32(2.5)}).await())
-test.eq(byte(200), spawn(echo_byte, {byte(200)}).await())
-test.eq(r64(0xffffffffffffffff), spawn(echo_r64, {~r64(0)}).await())
-test.eq(i8(-5), spawn(echo_i8, {i8(-5)}).await())
-test.eq(symbol.red, spawn(echo_symbol, {symbol.red}).await())
-test.eq(error.NotFound, spawn(echo_error, {error.NotFound}).await())
-test.eq(Color.green, spawn(echo_enum, {Color.green}).await())
+test.eq(true, spawn echo_bool(true).await())
+test.eq(1.5, spawn echo_float(1.5).await())
+test.eq(f32(2.5), spawn echo_f32(f32(2.5)).await())
+test.eq(byte(200), spawn echo_byte(byte(200)).await())
+test.eq(r64(0xffffffffffffffff), spawn echo_r64(~r64(0)).await())
+test.eq(i8(-5), spawn echo_i8(i8(-5)).await())
+test.eq(symbol.red, spawn echo_symbol(symbol.red).await())
+test.eq(error.NotFound, spawn echo_error(error.NotFound).await())
+test.eq(Color.green, spawn echo_enum(Color.green).await())
 
 -- A spawned thread can `await` a future it spawned.
-test.eq(41, spawn(nested, {20}).await())
-test.eq('hi?!.', spawn(nested_str, {'hi'}).await())
+test.eq(41, spawn nested(20).await())
+test.eq('hi?!.', spawn nested_str('hi').await())
 
 -- A chain of awaiting threads deeper than the worker pool. Waiting threads run queued tasks themselves.
 test.eq(30, chain(30))
@@ -35,11 +35,31 @@ test.eq(30, chain(30))
 -- Several threads awaiting their own children at once.
 futs := Array[Future[int]]{}
 for 0..8 |i|:
-    futs.append(spawn(fan, {i}))
+    futs.append(spawn fan(i))
 sum := 0
 for futs |f|:
     sum += f.await()
 test.eq(3132, sum)
+
+-- `spawn` takes the first call only: `spawn f(x).await()` awaits the future.
+f1 := spawn entry2(10)
+test.eq(45, f1.await())
+test.eq(55, (spawn entry2(11)).await())
+test.eq(90, spawn entry2(10).await() * 2)
+
+-- A method through its type, and a lambda in a local.
+test.eq(12, spawn Job.work(Job{n = 3}, 4).await())
+inc := fn(n int) -> int => n + 1
+test.eq(4, spawn inc(3).await())
+
+type Job:
+    n int
+
+fn (&Job) @send(dst Thread) -> Job:
+    return Job{n = self.n}
+
+fn (Job) work(k int) -> int:
+    return self.n * k
 
 fn entry() -> int:
     return 123
@@ -57,26 +77,26 @@ fn double(n int) -> int:
     return n * 2
 
 fn nested(n int) -> int:
-    return spawn(double, {n}).await() + 1
+    return spawn double(n).await() + 1
 
 fn bang(s str) -> str:
     return s + '!'
 
 fn nested_str(s str) -> str:
-    return spawn(bang, {s + '?'}).await() + '.'
+    return spawn bang(s + '?').await() + '.'
 
 fn chain(n int) -> int:
     if n == 0:
         return 0
-    return spawn(chain, {n - 1}).await() + 1
+    return spawn chain(n - 1).await() + 1
 
 fn inc(n int) -> int:
     return n + 1
 
 fn fan(n int) -> int:
-    a := spawn(inc, {n})
-    b := spawn(inc, {n * 10})
-    c := spawn(inc, {n * 100})
+    a := spawn inc(n)
+    b := spawn inc(n * 10)
+    c := spawn inc(n * 100)
     return a.await() + b.await() + c.await()
 
 type Color enum:

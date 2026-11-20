@@ -168,6 +168,9 @@ type TokenType enum:
     case while_k
     case with_k
     case yield_k
+    case fiber_k
+    case suspend_k
+    case spawn_k
 
 type Token:
     -- First 8 bits is the TokenType, last 24 bits is the start pos.
@@ -286,6 +289,9 @@ fn Tokenizer :: @init(src str) -> Tokenizer:
         'while'    = .while_k,
         'with'     = .with_k,
         'yield'    = .yield_k,
+        'fiber'    = .fiber_k,
+        'suspend'  = .suspend_k,
+        'spawn'    = .spawn_k,
     }
     return {
         src = src,

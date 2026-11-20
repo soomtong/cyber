@@ -745,7 +745,7 @@ test "A future that only the script could complete suspends too, and a spawned t
         \\use host
         \\fn wait() -> int:
         \\    return host.ask(1).await()
-        \\_ = spawn(wait, {}).await()
+        \\_ = spawn wait().await()
     , &res));
     {
         const report = C.vm_error_summary(vm);
@@ -850,7 +850,7 @@ test "Future.wait_any suspends the eval until the host completes one of the futu
         \\use test
         \\fn work(n int) -> int:
         \\    return n * 2
-        \\futs := []Future[int]{host.ask(1), spawn(work, {21})}
+        \\futs := []Future[int]{host.ask(1), spawn work(21)}
         \\test.eq(Future.wait_any(futs.span()), 1)
         \\test.eq(futs[1].await(), 42)
     , &res));

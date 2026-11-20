@@ -134,3 +134,19 @@
   다시 검사한다(최대 8번). 소스는 한 번만 컴파일한다.
 - libcyber: `CLModuleLoaderFn` 주석과 매뉴얼의 세션 절에서 "다시 시작한다"는 설명을 뺐다. 실패한 컴파일이 처음 불러온 모듈을
   다음 `use`가 다시 불러오는 것은 그대로다.
+
+## `spawn f(args)`: 스레드 생성도 키워드 + 호출식 (2026-11-20, 깨지는 변경)
+
+- `spawn`이 `fiber`와 같은 키워드가 됐다. `spawn(fib, {40})`은 `spawn fib(40)`으로 쓴다. 인자는 그 자리에서 평가해 새 스레드로
+  보내고, 함수는 새 스레드에서 부른다. 돌려주는 것은 전과 같이 `Future[T]`다.
+- 옛 꼴은 ParseError다: 'Expected a function call after `spawn`: `spawn f(a, b)`. The form `spawn(f, {a, b})` was replaced.'
+  `spawn`을 이름(지역 · 함수 · 필드)으로 쓸 수 없다.
+- `spawn`은 첫 호출까지만 받는다: `spawn fib(40).await()`는 `(spawn fib(40)).await()`다. `fiber`도 같게 바꿨다(`fiber f(x).resume()`은
+  새 fiber를 resume한다. 전에는 `f(x).resume()`의 결과를 진입점으로 보려다 오류였다).
+- 람다를 바로 넘기는 꼴(`spawn(fn(n int) -> int => n + 1, {3})`)은 없다. 지역에 담아 `inc := fn(...) ...` 뒤 `spawn inc(3)`.
+- 메서드는 타입으로 부른다(`spawn Job.run(job)`). `spawn job.run()`은 'A thread entry cannot be a method call on a value. ...'
+  컴파일 오류다. 빌림(`&T`) 매개변수를 받는 진입 함수는 'Cannot borrow a value across threads. ...' 컴파일 오류다(전에는
+  `@send` 쪽의 타입 오류였다).
+- 고친 곳: core의 `spawn` 함수는 `@spawn`(builtin 모듈만)으로 이름을 바꾸고, `spawn` 식이 `@spawn(f, {args})`로 풀린다
+  (`fiber`의 `@new_fiber`와 같은 경로, `sema.semaEntryCall`). `deny_spawn`은 그대로 동작한다. tree-sitter `spawn_expression`,
+  VS Code · 플레이그라운드 키워드 목록, `tokenizer.cy`(빠져 있던 `fiber` · `suspend`도 더함).

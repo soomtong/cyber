@@ -12,7 +12,7 @@ fn slow(n int) -> int:
     return sum
 
 fn worker(name str, n int, log ^ArrayStore[str]):
-    f := spawn(slow, {n})
+    f := spawn slow(n)
     log << '%{name} start'
     res := f.await()
     log << '%{name} got %{res}'

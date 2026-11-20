@@ -2077,7 +2077,7 @@ test "deny_spawn rejects spawn in script chunks." {
     const src =
         \\fn work(a int) -> int:
         \\    return a * 2
-        \\f := spawn(work, {21})
+        \\f := spawn work(21)
         \\if f.await() != 42: panic('spawn')
         \\
     ;
@@ -2095,7 +2095,7 @@ test "deny_spawn rejects spawn in script chunks." {
         try zt.expect(std.mem.indexOf(u8, summary, "`spawn` is not allowed. The host disabled threads for this script (`deny_spawn`).") != null);
         try zt.expect(std.mem.indexOf(u8, summary, "t:3:6") != null);
         // Inside a function and a generic function too.
-        try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "t", "fn w() -> int:\n    return 1\nfn g(x %T) -> T:\n    f := spawn(w, {})\n    return x\ng(1)\n", config, &res));
+        try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "t", "fn w() -> int:\n    return 1\nfn g(x %T) -> T:\n    f := spawn w()\n    return x\ng(1)\n", config, &res));
         try zt.eq(C.ErrorCompile, C.vm_validate(vm, src));
         // Fibers are not threads.
         try zt.eq(C.Success, C.vm_evalx(vm, "t",

@@ -777,3 +777,22 @@ https://git.openjdk.org/loom/commit/ef84eca96d7ac8929b0dd5ba9d9d56f7722fd274
   걸리지 않는다. 매뉴얼과 `core.cy` 문서 주석에 적었다.
 - 결과: 마지막 그룹부터 완료하는 M=400이 2728ms → 227ms, 첫 그룹부터는 236ms → 224ms. 테스트 `concurrency/fiber_wait_owner.cy`
   (수정 전에는 다른 그룹의 Future에 `waiting()`이 `false`가 됐다).
+
+## 0.5 범위: `spawn f(args)`는 넣고 `CL_YIELD`는 뺀다 (2026-11-20)
+
+사용자가 권고대로 정했다.
+
+`spawn f(args)`(위 2026-11-07 결정 7의 후속).
+1. `spawn`은 키워드다. 식은 `@spawn(f, {args})`로 풀린다(core의 `spawn` 함수를 `@spawn`으로 바꿈). 런타임은 그대로다.
+2. 옛 꼴 `spawn(f, {a})`는 새 꼴을 알려 주는 ParseError로 둔다(호환 유지 없음, 0.5가 깨지는 변경을 묶는 자리).
+3. 블록 꼴(`spawn:`)은 넣지 않는다. 스레드로 보내는 캡처는 Sendable 검사가 필요하고, 지금 요구가 없다. 람다는 지역에 담아 부른다.
+4. 메서드는 fiber와 같이 `spawn T.m(obj)`만 받는다. 빌림 매개변수는 진입 식에서 오류로 알린다.
+5. `spawn` · `fiber`는 첫 호출까지만 받는다(JS의 `new`와 같다). `spawn f(x).await()`가 흔한 꼴이라서다. 이 때문에
+   `fiber get()(x)`처럼 호출 결과를 진입점으로 쓰는 꼴은 없어졌다(쓰는 곳 없음).
+
+`CL_YIELD`(루트 맥락의 `suspend`를 호스트로 돌려주기).
+1. 넣지 않는다. 요구하는 임베딩 사용자가 없고(tars-agent의 요구는 `CL_AWAIT`로 끝남), 호스트 함수가 미완료 Future를 돌려주고
+   다음 틱에 완료하는 방식으로 같은 효과를 낼 수 있다. 나중에 넣어도 결과 코드 추가라 호환을 깨지 않는다.
+2. 다른 언어: Lua는 루트 yield가 오류이고 호스트가 `lua_newthread`에서 돌려 `LUA_YIELD`로 받는다. Squirrel은 `suspend()`가 VM을
+   호스트로 돌려준다(`sq_wakeupvm`). Ruby · Python · Kotlin은 오류다. 지금 우리의 no-op은 어느 쪽도 아니지만 바꿀 이유가 생길 때까지
+   둔다.

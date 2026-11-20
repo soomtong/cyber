@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-20): carry 재시도 루프를 사전 단계로
+# HANDOFF (2026-11-20): `spawn f(args)` 호출식 꼴
 
 ## 목표
 
@@ -12,10 +12,11 @@
 - 2026-11-20: 남은 LSP 후보인 선언 오류 복구(사용자: "continue", 같은 위임 아래).
 - 2026-11-20: 남은 LSP 항목인 토크나이저 `ignoreErrors` 결함(사용자: "continue").
 - 2026-11-20: 기술 부채 중 carry 재시도 루프의 IR 되돌리기(사용자가 넷 중에서 고름).
+- 2026-11-20: 0.5 범위 결정(사용자: "권고대로 진행해"): `spawn f(args)`는 넣고 `CL_YIELD`는 뺀다.
 
 ## 현재 브랜치
 
-`master`. `c0a20593`까지 push돼 있다(2026-11-19, PR #8 병합). 그 Latest Build `44522794178`은 성공했다.
+`master`. `76b91218`까지 push돼 있다(2026-11-20). 그 Latest Build `44723475654`는 Intel macOS job이 "Clone repo."에서 45분 멈춰 실패(러너 문제, 나머지 7개 통과, 재실행 안 함).
 PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지 못해 15분 뒤 취소된 탓이다(나머지 6개 통과).
 
 ## 완료된 작업
@@ -72,7 +73,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - 정렬: pinned closure(안 A), 키 정렬, 인자 없는 `sort()`의 원소 조건. `project_sort_closures.md` "결정할 것".
   - core `@eq`의 choice 지원(`?json.Value == none`).
   - 설계 원칙 검토(`docs/study/11-design-principles-review.md`) 1.7 · 2.7.
-  - 0.5 범위: `spawn f(args)` 호출식 꼴, 임베딩 `CL_YIELD`. 빼면 0.5 릴리스 준비로 간다.
+  - (0.5 범위는 2026-11-20 결정: `spawn f(args)` 넣음, `CL_YIELD` 뺌. `project_coroutines.md` 끝 절)
 - [x] LSP 범위 포맷 · call hierarchy · 본문 안 문장 단위 복구(2026-11-19). 설계 · 확인은 LSP 설계 문서 15 · 16절.
   - 범위 포맷: `assist.lineEdits`(포맷터는 줄을 합치거나 나누지 않고 빈 줄만 줄인다).
   - call hierarchy: 서버만(`onPrepareCallHierarchy` · `onIncomingCalls` · `onOutgoingCalls`), 해석 기록과 outline으로.
@@ -90,6 +91,10 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   인스턴스를 failed로 두고 `RecoverMarks`(`StackMark`가 `ir.func_blocks`까지 되돌림)로 되돌린 뒤 남은 본문을 다시 검사(최대 8번).
   소스를 다시 컴파일하던 `compile`의 루프 · `carried_failed`를 지웠다. lib 테스트 `A carried template instance that does not
   compile is dropped ...`(전에는 로더 5번, 이제 1번). `cyber.h` 로더 주석 · docs.md 세션 절 · F-120에 적음.
+- [x] `spawn f(args)`(2026-11-20, 깨지는 변경): `spawn`은 키워드, `sema.semaSpawnExpr`가 core `@spawn(f, {args})`로 푼다.
+  `spawn` · `fiber`는 첫 호출까지만 받는다(`Parser.parseEntryCall`, `stop_after_call`). 결정은 `project_coroutines.md` 끝 절,
+  사용자 문구는 `unreleased.md` 끝 절. tars-agent에는 옛 꼴이 `spike/s1`에만 있어 쓰지 않았다.
+- [ ] 0.5 릴리스 준비(사용자 지시 때). 남은 사용자 결정(정렬 · `@eq` choice · 설계 원칙 1.7 · 2.7 · CI arm64 Debug step)을 먼저 묻는다.
 - [ ] 기술 부채(급하지 않음): `@destruct_span` 취소 keep 지점(쓰게 되면), `Scope.run`의 바퀴당 `waiting()` 질의(준비 큐 ·
   futex식 대기 표, fiber 수 비용이 문제가 되면), 취소 불변식 panic(닿는 경로 없음). 기록은 `project_coroutines.md`.
 

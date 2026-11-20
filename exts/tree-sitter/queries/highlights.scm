@@ -165,6 +165,7 @@
 
 [
   "fiber"
+  "spawn"
   (suspend_statement)
 ] @keyword.coroutine
 

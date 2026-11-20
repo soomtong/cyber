@@ -1691,7 +1691,6 @@
     {"module": "core", "name": "pad_count", "sig": "pad_count(s str, width int, fill str) -> int"},
     {"module": "core", "name": "min", "sig": "min(a %T, b T) -> T", "doc": "Returns the smallest of two values."},
     {"module": "core", "name": "max", "sig": "max(a %T, b T) -> T", "doc": "Returns the largest of two values."},
-    {"module": "core", "name": "spawn", "sig": "spawn(func funcptr_t[%Sig], args FnTuple[Sig]) -> Future[Sig.ret()]"},
     {"module": "cy", "name": "eval", "sig": "eval(src str) -> !Object", "doc": "Evaluates source code in an isolated VM. If the last statement is an expression, a primitive or a string can be returned."},
     {"module": "cy", "name": "is_adjacent_stmt", "sig": "is_adjacent_stmt(src str, a_end int, b_start int) -> bool"},
     {"module": "cy", "name": "from_znodes", "sig": "from_znodes(znodes ZNodes) -> []^Node"},

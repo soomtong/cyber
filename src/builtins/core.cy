@@ -5134,7 +5134,7 @@ type Dyn[T Any] _
 #[bind]
 type Thread _
 
-fn spawn(func funcptr_t[%Sig], args FnTuple[Sig]) -> Future[Sig.ret()]:
+fn @spawn(func funcptr_t[%Sig], args FnTuple[Sig]) -> Future[Sig.ret()]:
     thread := @new_thread()
 
     -- TODO: Keep `thread_args` on the stack.

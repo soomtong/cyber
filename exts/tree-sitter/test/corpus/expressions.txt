@@ -324,6 +324,36 @@ t := fiber:
         (suspend_statement)))))
 
 ============================================================
+Spawn expression
+============================================================
+
+f := spawn work(1, 2)
+n := spawn work(3).await()
+
+------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (spawn_expression
+      (call_expression
+        (identifier)
+        (arguments
+          (number)
+          (number)))))
+  (variable_declaration
+    (identifier)
+    (call_expression
+      (member_expression
+        (spawn_expression
+          (call_expression
+            (identifier)
+            (arguments
+              (number))))
+        (identifier))
+      (arguments))))
+
+============================================================
 Slice without a start
 ============================================================
 

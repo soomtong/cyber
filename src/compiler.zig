@@ -1389,7 +1389,7 @@ fn loadBuiltinChunk(c: *cy.Chunk) !void {
     c.sema.scope_abort_fn = core.getSym("@scope_abort").?.cast(.func).first;
     c.sema.scope_join_fn = core.getSym("@scope_join").?.cast(.func).first;
     c.sema.scope_start_sym = core.getSym("Scope").?.getMod().?.getSym("start").?.cast(.func);
-    c.sema.spawn_sym = core.getSym("spawn").?.cast(.func);
+    c.sema.spawn_sym = core.getSym("@spawn").?.cast(.func);
     c.sema.print_syms = .{
         core.getSym("print").?.cast(.func),
         core.getSym("prints").?.cast(.func),

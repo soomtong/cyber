@@ -32,6 +32,9 @@ fn fromWin32Error() -> error:
 
 --| Converts a Windows error code (`GetLastError`) to the standard error name. See `os.from_errno`.
 fn from_win32_error(code int) -> error:
+    -- A Windows error code is a `DWORD`. A code outside it has no name.
+    if code < 0 or code > 0xffffffff:
+        return error.Unknown
     return switch DWORD(code):
         case core.ERROR_FILE_NOT_FOUND, core.ERROR_PATH_NOT_FOUND => error.NotFound
         case core.ERROR_ACCESS_DENIED, core.ERROR_SHARING_VIOLATION => error.PermissionDenied

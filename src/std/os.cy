@@ -254,6 +254,9 @@ fn from_errno(code int) -> error:
     #if meta.system() == .windows:
         return error.Unknown
     #else:
+        -- An `errno` is a C `int`. A code outside it has no name.
+        if code < -0x80000000 or code > 0x7fffffff:
+            return error.Unknown
         e := lc.c_int(code)
         if e == lc.ENOENT: return error.NotFound
         if e == lc.EPERM or e == lc.EACCES: return error.PermissionDenied

@@ -477,6 +477,28 @@ test "Formatting returns one edit for the whole document." {
     range_edits = items(reply, &.{"result"});
     try t.expectEqual(@as(usize, 3), range_edits.len);
     try t.expectEqualStrings("print(add(1, 2))", str(range_edits[2], &.{"newText"}));
+
+    // The blank lines at the end go, as with `formatting`: one line break is left after the last line.
+    try s.change(main_uri, 5, "x=1\n\n\n");
+    reply = try s.request("textDocument/formatting", main_uri);
+    try t.expectEqualStrings("x = 1\n", str(items(reply, &.{"result"})[0], &.{"newText"}));
+    reply = try s.requestWith("textDocument/rangeFormatting", main_uri, 0, 0, ",\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":3,\"character\":0}}");
+    range_edits = items(reply, &.{"result"});
+    try t.expectEqual(@as(usize, 3), range_edits.len);
+    try expectRange(get(range_edits[0], &.{"range"}).?, 0, 0, 0, 3);
+    try t.expectEqualStrings("x = 1", str(range_edits[0], &.{"newText"}));
+    try expectRange(get(range_edits[1], &.{"range"}).?, 1, 0, 2, 0);
+    try t.expectEqualStrings("", str(range_edits[1], &.{"newText"}));
+    try expectRange(get(range_edits[2], &.{"range"}).?, 2, 0, 3, 0);
+    try t.expectEqualStrings("", str(range_edits[2], &.{"newText"}));
+
+    // A last line without a line break gets one, as with `formatting`.
+    try s.change(main_uri, 6, "x=1\ny=2");
+    reply = try s.requestWith("textDocument/rangeFormatting", main_uri, 0, 0, ",\"range\":{\"start\":{\"line\":1,\"character\":0},\"end\":{\"line\":1,\"character\":3}}");
+    range_edits = items(reply, &.{"result"});
+    try t.expectEqual(@as(usize, 1), range_edits.len);
+    try expectRange(get(range_edits[0], &.{"range"}).?, 1, 0, 1, 3);
+    try t.expectEqualStrings("y = 2\n", str(range_edits[0], &.{"newText"}));
 }
 
 test "The outline and the folding ranges of a document." {

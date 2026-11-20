@@ -219,12 +219,16 @@ pub const LineEdit = struct {
 /// per line that differs. The formatter never joins or splits a line (`format.zig`): it changes what is in a line
 /// and drops blank lines (a run of them becomes one, those at the start and the end go). So the lines of `new`
 /// are those of `old` in order, less some blank ones. A line break is not part of a line and `\r` before it is
-/// left as it is. A dropped line is deleted with its line break. Null if `new` is not such a copy of `old`.
+/// left as it is. A dropped line is deleted with its line break. What follows the last line break of `new` is
+/// not a line when it is empty, so every blank line at the end of `old` is dropped, and a last line of `old`
+/// without a line break gets the one of `new`: the edits of every line give `new`, like a format of the whole
+/// document. Null if `new` is not such a copy of `old`.
 pub fn lineEdits(alloc: std.mem.Allocator, old: []const u8, new: []const u8, first: usize, last: usize) !?[]LineEdit {
     var old_lines = std.mem.splitScalar(u8, old, '\n');
-    var new_lines = std.mem.splitScalar(u8, new, '\n');
+    var new_lines: NewLines = .{ .iter = std.mem.splitScalar(u8, new, '\n') };
     var out: std.ArrayList(LineEdit) = .empty;
-    errdefer out.deinit(alloc);
+    // Also when the lines do not match.
+    defer out.deinit(alloc);
     var new_line = new_lines.next();
     var line: usize = 0;
     while (old_lines.next()) |old_line| : (line += 1) {
@@ -235,20 +239,40 @@ pub fn lineEdits(alloc: std.mem.Allocator, old: []const u8, new: []const u8, fir
         const old_blank = std.mem.trim(u8, old_text, " \t").len == 0;
         const dropped = old_blank and (new_line == null or std.mem.trim(u8, new_line.?, " \t\r").len != 0);
         if (dropped) {
-            if (in_range) try out.append(alloc, .{ .start = line_start, .end = line_end, .new_text = "" });
+            // The empty end of the text after its last line break has nothing to delete.
+            if (in_range and line_end > line_start) try out.append(alloc, .{ .start = line_start, .end = line_end, .new_text = "" });
             continue;
         }
-        const new_text = std.mem.trimEnd(u8, new_line orelse return null, "\r");
+        const new_raw = new_line orelse return null;
+        const new_text = std.mem.trimEnd(u8, new_raw, "\r");
+        // The last line of `old` has no line break and its line in `new` has one.
+        const adds_break = old_lines.index == null and new_lines.has_break;
         new_line = new_lines.next();
-        if (!in_range or std.mem.eql(u8, old_text, new_text)) continue;
-        try out.append(alloc, .{ .start = line_start, .end = line_start + old_text.len, .new_text = new_text });
+        if (!in_range) continue;
+        if (adds_break) {
+            const at = @intFromPtr(new_raw.ptr) - @intFromPtr(new.ptr);
+            try out.append(alloc, .{ .start = line_start, .end = line_end, .new_text = new[at .. at + new_raw.len + 1] });
+        } else if (!std.mem.eql(u8, old_text, new_text)) {
+            try out.append(alloc, .{ .start = line_start, .end = line_start + old_text.len, .new_text = new_text });
+        }
     }
-    // The rest of the output can only be its final line break.
-    if (new_line) |rest| {
-        if (rest.len > 0 or new_lines.next() != null) return null;
-    }
+    if (new_line != null) return null;
     return try out.toOwnedSlice(alloc);
 }
+
+/// The lines of the formatted text. The empty text after its last line break is not a line.
+const NewLines = struct {
+    iter: std.mem.SplitIterator(u8, .scalar),
+    /// Whether a line break follows the line that `next` returned last.
+    has_break: bool = false,
+
+    fn next(self: *NewLines) ?[]const u8 {
+        const line = self.iter.next() orelse return null;
+        self.has_break = self.iter.index != null;
+        if (!self.has_break and line.len == 0) return null;
+        return line;
+    }
+};
 
 test lineEdits {
     const alloc = std.testing.allocator;
@@ -284,6 +308,44 @@ test lineEdits {
     try std.testing.expectEqualStrings("\n", blank[dropped[4].start..dropped[4].end]);
     try std.testing.expectEqual(blank.len - "\ny=2\n".len, dropped[4].start);
     try std.testing.expectEqualStrings("y = 2", dropped[5].new_text);
+
+    // The edits of every line give the output: the blank lines at the end go, and a last line without a line
+    // break gets one.
+    const cases = [_][2][]const u8{
+        .{ "x=1\n\n\n", "x = 1\n" },
+        .{ "x=1\n\n  ", "x = 1\n" },
+        .{ "x=1\n", "x = 1\n" },
+        .{ "x=1", "x = 1\n" },
+        .{ "x = 1", "x = 1\n" },
+        .{ "x=1\r\n\r\n", "x = 1\r\n" },
+        .{ "\n\n", "" },
+        .{ "  ", "" },
+        .{ "", "" },
+        .{ blank, "x = 1\n\ny = 2\n" },
+        .{ old, new },
+    };
+    for (cases) |case| {
+        const edits = (try lineEdits(alloc, case[0], case[1], 0, 100)).?;
+        defer alloc.free(edits);
+        var applied: std.ArrayList(u8) = .empty;
+        defer applied.deinit(alloc);
+        var at: usize = 0;
+        for (edits) |edit| {
+            try std.testing.expect(edit.start >= at and edit.end >= edit.start);
+            // An edit changes something.
+            try std.testing.expect(!std.mem.eql(u8, case[0][edit.start..edit.end], edit.new_text));
+            try applied.appendSlice(alloc, case[0][at..edit.start]);
+            try applied.appendSlice(alloc, edit.new_text);
+            at = edit.end;
+        }
+        try applied.appendSlice(alloc, case[0][at..]);
+        try std.testing.expectEqualStrings(case[1], applied.items);
+    }
+    // A range that leaves out the last line leaves the end as it is.
+    const head = (try lineEdits(alloc, "x=1\ny=2", "x = 1\ny = 2\n", 0, 0)).?;
+    defer alloc.free(head);
+    try std.testing.expectEqual(@as(usize, 1), head.len);
+    try std.testing.expectEqualStrings("x = 1", head[0].new_text);
 
     // Lines that do not match.
     try std.testing.expect((try lineEdits(alloc, "a\nb\nc", "a\nb", 0, 1)) == null);

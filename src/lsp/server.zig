@@ -1412,6 +1412,19 @@ pub const Server = struct {
         if (!(std.mem.eql(u8, def_path, doc.path) or std.Io.Dir.path.isAbsolute(def_path) or self.docByPath(def_path) != null)) {
             return try std.fmt.allocPrint(arena, "`{s}` is declared in the standard module `{s}`, which can not be changed.", .{ name_, def_path });
         }
+        // An alias (`use tw = lib.twice`, `type Alias = Foo`) is another name for a declaration: a use of it is
+        // recorded as a use of that declaration, so the uses of the alias are not told apart from the others.
+        const def_src = (try self.sourceByPath(arena, def_path)) orelse return null;
+        if (info.def_pos > info.def_end_pos or info.def_end_pos > def_src.text.len) return null;
+        const decl = def_src.text[info.def_pos..info.def_end_pos];
+        // A source that does not tokenize is refused by `renameEverywhere`.
+        const named = (try assist.identsNamed(arena, decl, name_)) orelse return null;
+        if (named.len == 0) {
+            return try std.fmt.allocPrint(arena, "`{s}` is an alias of `{s}`. Rename it in its declaration and where it is used by hand.", .{ name_, c.from_bytes(info.detail) });
+        }
+        if (try assist.isTypeAlias(arena, decl, name_)) {
+            return try std.fmt.allocPrint(arena, "`{s}` is a type alias, whose uses are not told apart from those of its target. Rename it in its declaration and where it is used by hand.", .{name_});
+        }
         return null;
     }
 
@@ -1534,7 +1547,14 @@ pub const Server = struct {
             var ptr: [*c]const c.Range = null;
             const len = c.vm_symbol_refs_to(self.vm, c.to_bytes(def_path), def_pos, &ptr);
             var ranges: std.ArrayList(c.Range) = .empty;
-            if (len > 0 and ptr != null) try ranges.appendSlice(arena, ptr[0..len]);
+            if (len > 0 and ptr != null) {
+                for (ptr[0..len]) |range| {
+                    // A use that is written with another name (an alias: `use tw = lib.twice`, `type Alias = Foo`)
+                    // keeps that name. The name in the declaration of the alias is renamed.
+                    if (range.end_pos > src.text.len or !std.mem.eql(u8, src.text[range.pos..range.end_pos], name_)) continue;
+                    try ranges.append(arena, range);
+                }
+            }
             const found = ranges.items.len;
             const declares = std.mem.eql(u8, src.path, def_path);
             // The name of the declaration is the first identifier in it.

@@ -1118,6 +1118,61 @@ test "Rename of a declaration across the sources of the workspace." {
     }
 }
 
+test "Rename leaves the names of an alias as they are." {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "lib.cy", .data = "fn twice(n int) -> int:\n    return n * 2\n\ntype Foo:\n    n int\n" });
+    const dir = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(dir);
+
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    const arena = s.arena.allocator();
+    const sep = std.Io.Dir.path.sep_str;
+    const root_uri = try lsp.pathToUri(arena, dir);
+    const lib_uri = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "lib.cy", .{dir}));
+    const a_uri = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "a.cy", .{dir}));
+    _ = try s.send(try std.fmt.allocPrint(arena,
+        \\{{"jsonrpc":"2.0","id":0,"method":"initialize","params":{{"capabilities":{{}},
+        \\"workspaceFolders":[{{"uri":"{s}","name":"ws"}}]}}}}
+    , .{root_uri}));
+    try s.open(a_uri, 1, "use lib './lib.cy'\nuse tw = lib.twice\ntype Alias = lib.Foo\nprint(tw(2))\nprint(lib.twice(3))\na := Alias{n=1}\nb := lib.Foo{n=2}\nprint(a.n + b.n)\n");
+    // `twice` at its call: the name in the alias declaration and the call are renamed. `tw(2)` keeps its name.
+    var reply = try s.requestWith("textDocument/rename", a_uri, 4, 11, ",\"newName\":\"double\"");
+    var here = items(reply, &.{ "result", "changes", a_uri });
+    try t.expectEqual(@as(usize, 2), here.len);
+    try expectRange(get(here[0], &.{"range"}).?, 1, 13, 1, 18);
+    try expectRange(get(here[1], &.{"range"}).?, 4, 10, 4, 15);
+    var there = items(reply, &.{ "result", "changes", lib_uri });
+    try t.expectEqual(@as(usize, 1), there.len);
+    try expectRange(get(there[0], &.{"range"}).?, 0, 3, 0, 8);
+
+    // `Foo` at `lib.Foo{n=2}`: `Alias{n=1}` keeps its name.
+    reply = try s.requestWith("textDocument/rename", a_uri, 6, 9, ",\"newName\":\"Bar\"");
+    here = items(reply, &.{ "result", "changes", a_uri });
+    try t.expectEqual(@as(usize, 2), here.len);
+    try expectRange(get(here[0], &.{"range"}).?, 2, 17, 2, 20);
+    try expectRange(get(here[1], &.{"range"}).?, 6, 9, 6, 12);
+    there = items(reply, &.{ "result", "changes", lib_uri });
+    try t.expectEqual(@as(usize, 1), there.len);
+    try expectRange(get(there[0], &.{"range"}).?, 3, 5, 3, 8);
+
+    // An alias is not renamed, at a use or at its declaration: its uses are recorded as uses of its target.
+    // `prepareRename` says so before the client asks for a name.
+    const refusals = [_]struct { line: u32, char: u32, msg: []const u8 }{
+        .{ .line = 3, .char = 6, .msg = "`tw` is an alias of `fn twice(n int) -> int`. Rename it in its declaration and where it is used by hand." },
+        .{ .line = 5, .char = 5, .msg = "`Alias` is an alias of `type Foo`. Rename it in its declaration and where it is used by hand." },
+        .{ .line = 2, .char = 5, .msg = "`Alias` is a type alias, whose uses are not told apart from those of its target. Rename it in its declaration and where it is used by hand." },
+    };
+    for (refusals) |r| {
+        reply = try s.requestAt("textDocument/prepareRename", a_uri, r.line, r.char);
+        try t.expectEqualStrings(r.msg, str(reply, &.{ "error", "message" }));
+        reply = try s.requestWith("textDocument/rename", a_uri, r.line, r.char, ",\"newName\":\"zz\"");
+        try t.expectEqualStrings(r.msg, str(reply, &.{ "error", "message" }));
+    }
+}
+
 test "Call hierarchy: the callers and the callees of a function across the workspace." {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();

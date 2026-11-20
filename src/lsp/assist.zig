@@ -208,6 +208,50 @@ test identsNamed {
     try std.testing.expect((try identsNamed(alloc, "print('twice)\n", "twice")) == null);
 }
 
+/// Whether `decl`, the text of a declaration, is the type alias `type name = target` (also with template
+/// parameters). False if the text does not tokenize.
+pub fn isTypeAlias(alloc: std.mem.Allocator, decl: []const u8, name: []const u8) !bool {
+    var tokenizer = cy.Tokenizer.init(alloc, decl);
+    defer tokenizer.deinit();
+    tokenizer.tokenize() catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return false,
+    };
+    if (tokenizer.has_error) return false;
+    const tokens = tokenizer.tokens.items;
+    // Attributes can come before `type`.
+    var i: usize = 0;
+    while (i < tokens.len and tokens[i].tag() != .type_k) i += 1;
+    i += 1;
+    if (i >= tokens.len or tokens[i].tag() != .ident) return false;
+    if (tokens[i].data.end > decl.len or !std.mem.eql(u8, decl[tokens[i].pos()..tokens[i].data.end], name)) return false;
+    i += 1;
+    if (i < tokens.len and tokens[i].tag() == .left_bracket) {
+        var depth: usize = 0;
+        while (i < tokens.len) : (i += 1) {
+            if (tokens[i].tag() == .left_bracket) depth += 1;
+            if (tokens[i].tag() == .right_bracket) {
+                depth -= 1;
+                if (depth == 0) break;
+            }
+        }
+        i += 1;
+    }
+    return i < tokens.len and tokens[i].tag() == .equal;
+}
+
+test isTypeAlias {
+    const alloc = std.testing.allocator;
+    try std.testing.expect(try isTypeAlias(alloc, "type Alias = lib.Foo", "Alias"));
+    try std.testing.expect(try isTypeAlias(alloc, "type Pair[T Any] = Tuple[T, T]", "Pair"));
+    try std.testing.expect(try isTypeAlias(alloc, "type Op = fn(int) -> int", "Op"));
+    try std.testing.expect(!try isTypeAlias(alloc, "type Foo:\n    n int\n", "Foo"));
+    try std.testing.expect(!try isTypeAlias(alloc, "type Color enum:\n    case red\n", "Color"));
+    try std.testing.expect(!try isTypeAlias(alloc, "fn twice(n int) -> int:\n    return n * 2\n", "twice"));
+    // Another name than the one of the declaration.
+    try std.testing.expect(!try isTypeAlias(alloc, "type Alias = lib.Foo", "Foo"));
+}
+
 /// An edit that replaces `text[start..end]` of the old text with `new_text`, a slice of the new text.
 pub const LineEdit = struct {
     start: usize,

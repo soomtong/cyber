@@ -1880,6 +1880,17 @@ switch 1:
 --> error: Only a case of a choice can capture a payload.
 ```
 
+### Compare choices.
+`==` compares the active cases first. Two values of the same case compare their payloads with `==`, and a case without a payload is equal to itself:
+```cy
+Shape.line(20) == Shape.line(20)   --> true
+Shape.line(20) == Shape.line(30)   --> false
+Shape.line(20) == Shape.point      --> false
+Shape.point == Shape.point         --> true
+```
+
+A payload compares by the rules of its type, so a slice payload compares by reference (see [Comparison operators](#comparison-operators)). An optional choice can be compared with `none`.
+
 ### Unwrap choice.
 A choice can be unwrapped with the `.!` operator. This will either return the payload or signals a thread panic if the expected case is not active:
 ```cy
@@ -4361,7 +4372,7 @@ print(x[1].number_text().?)         --> 1.5
 `number_text()` returns any number in one form (`1.50` and `1.5` give `1.5`, `1e2` gives `100`), and `json.fmt_number(text)` does the same for a token. `json.stringify` writes a `number` as it is, so its text must match the JSON number grammar. An object keeps its keys in insertion order, and a duplicate key keeps its first position and takes the last value.
 
 - Read: `v['key']` and `v[idx]` return `Value.null` when the member is missing. `get(key)` and `at(idx)` return an option. `as_bool`, `as_int`, `as_float` (also converts an `int` and a `number`, `none` beyond the `float` range), `as_str`, `as_array` and `as_object` return an option of the payload. `kind()` returns the JSON type name.
-- Compare: `a.eq(b)` compares by the JSON model (`1` equals `1.0`, key order does not matter). A `number` compares by `number_text()`. `==` does not support `Value`, so test an option with `?else` or `if ... |x|` instead of `== none`.
+- Compare: `a.eq(b)` compares by the JSON model (`1` equals `1.0`, key order does not matter). A `number` compares by `number_text()`. `==` compares the case and payload as for any choice, so `1 == 1.0` is false and an `array` or `object` compares by reference. An option can be tested with `== none`.
 - Build: `json.Object` has `set`, `get`, `remove`, `contains`, `keys` and `len`. `json.object` and `json.array` make values from lists.
 - Write: `json.stringify(v)` is compact and `json.stringify(v, 2)` puts each element on its own line. NaN and infinities become `null`. A float uses the shortest digits that read back as the same value, without a trailing `.0`, and an exponent below `1e-6` or from `1e21` (`1e+21`).
 - Convert: `json.encode(x)` and `json.from(x)` take a Cyber value: numbers, `bool`, `str`, slices, structs (fields in order), optionals (`none` is `null`), enums (the case name), choices (`{"case": payload}`) and `Map` with `str` keys (sorted). An `r64` from 2^63, which does not fit `int`, becomes a `number` with its unsigned digits (`18446744073709551615`). Pass a borrow for a value that can not be copied: `json.encode(&map)`.

@@ -150,3 +150,11 @@
 - 고친 곳: core의 `spawn` 함수는 `@spawn`(builtin 모듈만)으로 이름을 바꾸고, `spawn` 식이 `@spawn(f, {args})`로 풀린다
   (`fiber`의 `@new_fiber`와 같은 경로, `sema.semaEntryCall`). `deny_spawn`은 그대로 동작한다. tree-sitter `spawn_expression`,
   VS Code · 플레이그라운드 키워드 목록, `tokenizer.cy`(빠져 있던 `fiber` · `suspend`도 더함).
+
+## choice의 `==` (2026-11-20)
+
+- choice 값을 `==` · `!=`로 비교할 수 있다. 전에는 core `@eq`가 choice를 몰라 'Unsupported: ...' 컴파일 오류였다.
+  활성 case가 다르면 다르고, 같으면 payload를 `==`로 비교한다(payload 없는 case는 같다). payload 비교는 그 타입의 규칙을 따른다:
+  슬라이스는 참조 비교다.
+- 그래서 `?json.Value == none`이 된다(`v.get('a') == none`). `json.Value`의 `==`는 case와 payload 비교라 `Value.int(1) ==
+  Value.float(1.0)`은 false이고 `array` · `object`는 참조 비교다. JSON 모델의 비교는 전처럼 `Value.eq`.

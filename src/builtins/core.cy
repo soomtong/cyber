@@ -2966,6 +2966,18 @@ fn @eq(a &%T, b &T) -> bool:
                 return false
             return meta.access_result_payload(a.*) == meta.access_result_payload(b.*)
 
+        #case .choice |choice_t|:
+            tag := meta.choice_tag(a.*)
+            if tag != meta.choice_tag(b.*):
+                return false
+            switch tag:
+                #for meta.enum_values(T.Tag) |Tag|:
+                    case Tag:
+                        #if meta.CasePayload[T, Tag] == void:
+                            return true
+                        #else:
+                            return meta.access_choice_case(a.*, Tag) == meta.access_choice_case(b.*, Tag)
+
         #case .int:
             return a.* == b.*
 

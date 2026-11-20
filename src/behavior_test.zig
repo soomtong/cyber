@@ -292,6 +292,7 @@ fn test_types(run: *Runner) void {
     // }}.func);
     run.case("types/choice_access_error.cy");
     run.case("types/choice_dup_case_error.cy");
+    run.case("types/choice_eq.cy");
     run.case("types/choice_type.cy");
     run.case("types/choice_unwrap_panic.cy");
     run.case("types/cstructs.cy");

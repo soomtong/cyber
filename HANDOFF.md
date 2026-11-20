@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-20): LSP 선언의 오류 복구
+# HANDOFF (2026-11-20): 토크나이저 ignoreErrors 결함
 
 ## 목표
 
@@ -10,6 +10,7 @@
 - 2026-11-19: LSP 다음 후보 셋(사용자: "LSP 다음 후보(문장 단위 파서 복구, call hierarchy, 범위 포맷) 최적의 결정은 위임한다.
   애매한 경우 상위 에이전트 호출하여 처리 (fable 5.2)").
 - 2026-11-20: 남은 LSP 후보인 선언 오류 복구(사용자: "continue", 같은 위임 아래).
+- 2026-11-20: 남은 LSP 항목인 토크나이저 `ignoreErrors` 결함(사용자: "continue").
 
 ## 현재 브랜치
 
@@ -82,8 +83,8 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `recoverableDecl`. 최상위 컴파일 타임 문장 · `use` · 타입 상수 · 템플릿 머리는 그대로 컴파일을 끝낸다.
 - [x] 17절의 둘째 단계(템플릿 머리 · `use`) 검토(2026-11-20): 하지 않기로 했다(이득이 없거나 위험이 큼, 17절 끝). 그 길에
   `use os.read_file`의 'TODO' 문구를 고쳤다.
-- [ ] 남은 것(LSP, 급하지 않음): 토크나이저의 `ignoreErrors` 모드는 닫히지 않은 문자열에서 끝없이 토큰을 만든다(쓰는 곳 없음,
-  LSP 14절).
+- [x] 토크나이저 `ignoreErrors` 결함(2026-11-20, LSP 설계 문서 14절 끝): 닫히지 않은 문자열은 줄 끝 · 소스 끝까지 `err` 토큰 하나.
+  raw 문자열도 같다. 쓰지 않던 `tokenize*RawString`을 지웠다. `tokenizer.zig` · `tokenizer.cy` 둘 다, 테스트도 둘 다.
 - [ ] 기술 부채(급하지 않음): carry 재시도 루프의 IR 되돌리기, `@destruct_span` 취소 keep 지점, `Scope.run`의 바퀴당 `waiting()`
   질의, 취소 불변식 panic. 기록은 `project_coroutines.md`.
 

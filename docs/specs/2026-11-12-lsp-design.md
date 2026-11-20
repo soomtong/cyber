@@ -625,7 +625,15 @@ main 소스의 식이 core의 템플릿을 쓰면(`[]int{1, 2}`, `s.len()`) 컴�
 고쳐졌고, 15개는 이름이 든 소스의 컴파일 오류로 거절됐다(`*_error.cy` 테스트가 많은 폴더다). 한 요청에 최대 13초(Debug, 이름이 흔해
 컴파일이 많은 것). 처음 훑기에서 서버가 메모리를 다 쓰고 죽었다: `identsNamed`가 토크나이저에 `ignoreErrors`를 켰는데, 이 모드는
 닫히지 않은 문자열에서 앞으로 가지 못하고 토큰을 끝없이 쌓는다. 끄고 오류면 null을 돌려준다. `ignoreErrors`는 다른 곳에서 쓰지
-않는다(토크나이저의 이 결함은 그대로 둔다).
+않는다.
+
+토크나이저의 이 결함은 2026-11-20에 고쳤다. 한 줄 문자열의 줄바꿈 · 소스 끝의 `\`에서 위치를 여는
+따옴표로 되돌려 같은 문자열을 다시 읽은 것이 원인이다(소스 끝에서는 따옴표 뒤로 되돌려 문자열 내용을 코드로 다시 읽었다).
+이제 닫히지 않은 문자열은 여는 따옴표부터 그 줄 끝(한 줄 문자열 · 한 줄 raw 문자열)이나 소스 끝(여러 줄 문자열, 소스가 끝난
+경우)까지가 `err` 토큰 하나가 되고, 그 뒤에서 이어 간다. 줄바꿈은 다음 토큰으로 남긴다. 닫히지 않은 raw 문자열(`` ` ``)도 오류
+보고 대신 `err` 토큰이 된다. 쓰지 않던 `tokenizeSingleLineRawString` · `tokenizeMultiLineRawString`(같은 결함, `return` 없이 돈다)은
+지웠다. `tokenizer.cy` 미러도 같이 고쳤다. `identsNamed`는 계속 `ignoreErrors`를 쓰지 않는다(토큰 오류가 있는 소스의 rename은
+거절이 맞다). 확인: 단위 테스트 `Unterminated strings with ignoreErrors end in one error token.`, `tokenizer.cy`의 같은 검사.
 
 ## 15. 범위 포맷과 call hierarchy (2026-11-19)
 

@@ -20,6 +20,41 @@ for 1..tokenizer.tokens.len() |i|:
     if tokenizer.tokens[i - 1].tag() == .colon_equal and tokenizer.tokens[i].tag() == .equal:
         panic('Expected one token for `:=`.')
 
+-- With `ignore_errors`, an unterminated string is one `err` token to the end of its line, or of the source.
+fn ignoredErrorTags(src str) -> !str:
+    t := Tokenizer(src)
+    t.ignore_errors = true
+    t.tokenize()!
+    out := ''
+    for t.tokens |token|:
+        switch token.tag():
+            case .err: out = out + 'E%{token.data}'
+            case .ident: out = out + 'i'
+            case .new_line: out = out + 'n'
+            case .equal: out = out + '='
+            else: out = out + '?'
+    return out
+
+pct := '%'
+ignored_cases := []str{
+    "a = \"abc", 'i=E8',
+    "a = 'abc", 'i=E8',
+    "a = \"abc\nb", 'i=E8ni',
+    "a = 'abc\nb", 'i=E8ni',
+    "a = \"abc\\", 'i=E9',
+    "a = \"\"\"abc\nb", 'i=E12',
+    "a = '''abc", 'i=E10',
+    "a = \"x" + pct + "{b}", 'i=??i?E10',
+    "a = `abc", 'i=E8',
+    "a = `abc\nb", 'i=E8ni',
+    "a = ```abc\nb", 'i=E12',
+    'a = $', 'i=E5',
+}
+for 0..ignored_cases.len() / 2 |i|:
+    tags := ignoredErrorTags(ignored_cases[i * 2])!
+    if tags != ignored_cases[i * 2 + 1]:
+        panic('Tags of `%{ignored_cases[i * 2]}` with ignore_errors: %{tags}')
+
 type TokenType enum:
     -- Used to indicate no token.
     case null
@@ -553,14 +588,12 @@ fn (&Tokenizer) tokenizeOne(state TokenizeState) -> !TokenizeState:
                 if self.isNext('`', 1):
                     self.advance()
                     self.advance()
-                    self.consumeRawStringMulti()!
-                    self.pushToken(.raw_string_multi, start)
+                    self.pushToken(if (self.consumeRawStringMulti()!) .raw_string_multi else .err, start)
                 else:
                     self.advance()
                     self.pushToken(.raw_string, start)
             else:
-                self.consumeRawString()!
-                self.pushToken(.raw_string, start)
+                self.pushToken(if (self.consumeRawString()!) .raw_string else .err, start)
 
         case '"':
             if self.peek() == '"':
@@ -583,13 +616,10 @@ fn (&Tokenizer) tokenizeOne(state TokenizeState) -> !TokenizeState:
                     if ch2 == '\'':
                         self.advance()
                         self.advance()
-                        -- self.tokenizeMultiLineRawString(start)!
-                        -- return state
                         return self.tokenizeStringOne(start, {
                             tag = state.tag,
                             string_delim = .sq_triple,
                         })
-            -- self.tokenizeSingleLineRawString(start)!
             return self.tokenizeStringOne(start, {
                 tag = state.tag,
                 string_delim = .sq_single,
@@ -669,11 +699,8 @@ fn (&Tokenizer) tokenizeStringOne(start int, state TokenizeState) -> !TokenizeSt
     while:
         if self.isAtEnd():
             if self.ignore_errors:
-                self.next_pos = save
-                self.pushToken(.err, save)
-                return {tag=.token}
-            else:
-                return self.reportErrorAt('UnterminatedString', save)
+                return self.unterminatedString(start)
+            return self.reportErrorAt('UnterminatedString', save)
 
         switch self.peek():
             case '"':
@@ -780,23 +807,16 @@ fn (&Tokenizer) tokenizeStringOne(start int, state TokenizeState) -> !TokenizeSt
                 self.advance()
                 if self.isAtEnd():
                     if self.ignore_errors:
-                        self.next_pos = start
-                        self.pushToken(.err, start)
-                        return {tag=.token}
-
-                    else:
-                        return self.reportErrorAt('UnterminatedString', start)
+                        return self.unterminatedString(start)
+                    return self.reportErrorAt('UnterminatedString', start)
 
                 self.advance()
 
             case '\n':
                 if state.string_delim == .single or state.string_delim == .sq_single:
                     if self.ignore_errors:
-                        self.next_pos = start
-                        self.pushToken(.err, start)
-                        return {tag=.token}
-                    else:
-                        return self.reportErrorAt('Encountered new line in single line literal.', self.next_pos)
+                        return self.unterminatedString(start)
+                    return self.reportErrorAt('Encountered new line in single line literal.', self.next_pos)
                 self.advance()
 
             else:
@@ -826,9 +846,18 @@ fn (&Tokenizer) consumeIdent():
             else:
                 return
 
-fn (&Tokenizer) consumeRawStringMulti() -> !void:
+-- With `ignore_errors`, an unterminated string becomes one `err` token from its quote to the end of the line or the
+-- source, and tokenizing goes on after it. The new line is left for the next token.
+fn (&Tokenizer) unterminatedString(start int) -> TokenizeState:
+    self.pushToken(.err, start)
+    return {tag=.token}
+
+-- Returns false if the string does not end and `ignore_errors` is set.
+fn (&Tokenizer) consumeRawStringMulti() -> !bool:
     while:
         if self.isAtEnd():
+            if self.ignore_errors:
+                return false
             return self.reportError('Expected raw string.')
         switch self.peek():
             case '`':
@@ -840,19 +869,24 @@ fn (&Tokenizer) consumeRawStringMulti() -> !void:
 
                 if self.isNext('`', 0):
                     self.advance()
-                    return
+                    return true
             else:
                 self.advance()
 
-fn (&Tokenizer) consumeRawString() -> !void:
+-- Returns false if the string does not end on its line and `ignore_errors` is set.
+fn (&Tokenizer) consumeRawString() -> !bool:
     while:
         if self.isAtEnd():
+            if self.ignore_errors:
+                return false
             return self.reportError('Expected raw string.')
         switch self.peek():
             case '`':
                 self.advance()
-                return
+                return true
             case '\n':
+                if self.ignore_errors:
+                    return false
                 return self.reportError('Expected raw string on a single line.')
             else:
                 self.advance()
@@ -868,54 +902,6 @@ fn (&Tokenizer) tokenizeKeywordOrIdent(start int):
         self.pushToken(token_t, start)
     else:
         self.pushToken(.ident, start)
-
-fn (&Tokenizer) tokenizeSingleLineRawString(start int) -> !void:
-    save := self.next_pos
-    while:
-        if self.isAtEnd():
-            if self.ignore_errors:
-                self.next_pos = save
-                self.pushToken(.err, start)
-            else: return self.reportErrorAt('UnterminatedString', start)
-
-        if self.peek() == '\'':
-            self.advance()
-            self.pushToken(.sq_string, start)
-            return
-        else self.peek() == '\n':
-            return self.reportErrorAt('Encountered new line in single line literal.', self.next_pos)
-        else:
-            self.advance()
-
-fn (&Tokenizer) tokenizeMultiLineRawString(start int) -> !void:
-    save := self.next_pos
-    while:
-        if self.isAtEnd():
-            if self.ignore_errors:
-                self.next_pos = save
-                self.pushToken(.err, start)
-            else: return self.reportErrorAt('UnterminatedString', start)
-
-        if self.peek() == '\'':
-            ch := self.peekAhead(1) ?else:
-                self.advance()
-                continue
-
-            ch2 := self.peekAhead(2) ?else:
-                self.advance()
-                continue
-
-            if ch == '\'' and ch2 == '\'':
-                self.advance()
-                self.advance()
-                self.advance()
-                self.pushToken(.sq_string_multi, start)
-                return
-            else:
-                self.advance()
-                continue
-        else:
-            self.advance()
 
 -- Assumes first digit is consumed.
 fn (&Tokenizer) tokenizeNumber(start int) -> !void:

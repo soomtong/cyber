@@ -171,7 +171,7 @@ test "A type hint is left out when the initializer already names the type." {
 pub fn identsNamed(alloc: std.mem.Allocator, text: []const u8, name: []const u8) !?[]u32 {
     var tokenizer = cy.Tokenizer.init(alloc, text);
     defer tokenizer.deinit();
-    // Not `ignoreErrors`: with it an unterminated string makes tokens without end.
+    // Not `ignoreErrors`: a rename is refused for a source that does not tokenize.
     tokenizer.tokenize() catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return null,

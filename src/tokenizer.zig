@@ -564,15 +564,15 @@ pub const Tokenizer = struct {
                     if (t.isNext('`', 1)) {
                         _ = t.consume();
                         _ = t.consume();
-                        try t.consumeRawStringMulti();
-                        try t.pushToken(.raw_string_multi, start);
+                        const tag: TokenType = if (try t.consumeRawStringMulti()) .raw_string_multi else .err;
+                        try t.pushToken(tag, start);
                     } else {
                         _ = t.consume();
                         try t.pushToken(.raw_string, start);
                     }
                 } else {
-                    try t.consumeRawString();
-                    try t.pushToken(.raw_string, start);
+                    const tag: TokenType = if (try t.consumeRawString()) .raw_string else .err;
+                    try t.pushToken(tag, start);
                 }
             },
             '"' => {
@@ -599,8 +599,6 @@ pub const Tokenizer = struct {
                         if (ch2 == '\'') {
                             _ = consume(t);
                             _ = consume(t);
-                            // try tokenizeMultiLineRawString(t, start);
-                            // return state;
                             return tokenizeStringOne(t, start, .{
                                 .stateT = state.stateT,
                                 .string_delim = .sq_triple,
@@ -608,7 +606,6 @@ pub const Tokenizer = struct {
                         }
                     }
                 }
-                // try tokenizeSingleLineRawString(t, start);
                 return tokenizeStringOne(t, start, .{
                     .stateT = state.stateT,
                     .string_delim = .sq_single,
@@ -762,13 +759,8 @@ pub const Tokenizer = struct {
         const save = t.nextPos;
         while (true) {
             if (isAtEnd(t)) {
-                if (t.ignoreErrors) {
-                    t.nextPos = save;
-                    try t.pushToken(.err, save);
-                    return .{ .stateT = .token };
-                } else {
-                    try t.reportErrorAt("UnterminatedString", &.{}, save);
-                }
+                if (t.ignoreErrors) return t.unterminatedString(start);
+                try t.reportErrorAt("UnterminatedString", &.{}, save);
             }
 
             switch (t.peek()) {
@@ -897,28 +889,18 @@ pub const Tokenizer = struct {
                     // Escape the next character.
                     advance(t);
                     if (isAtEnd(t)) {
-                        if (t.ignoreErrors) {
-                            t.nextPos = start;
-                            try t.pushToken(.err, start);
-                            return .{ .stateT = .token };
-                        } else {
-                            try t.reportErrorAt("UnterminatedString", &.{}, start);
-                        }
+                        if (t.ignoreErrors) return t.unterminatedString(start);
+                        try t.reportErrorAt("UnterminatedString", &.{}, start);
                     }
                     advance(t);
                 },
                 '\n' => {
                     if (state.string_delim == .single or state.string_delim == .sq_single) {
-                        if (t.ignoreErrors) {
-                            t.nextPos = start;
-                            try t.pushToken(.err, start);
-                            return .{ .stateT = .token };
+                        if (t.ignoreErrors) return t.unterminatedString(start);
+                        if (state.string_delim == .sq_single) {
+                            try t.reportErrorAt("Encountered new line in single line literal. Write `\\n` for a line break, or use a multi-line string: `\'\'\'...\'\'\'`.", &.{}, t.nextPos);
                         } else {
-                            if (state.string_delim == .sq_single) {
-                                try t.reportErrorAt("Encountered new line in single line literal. Write `\\n` for a line break, or use a multi-line string: `\'\'\'...\'\'\'`.", &.{}, t.nextPos);
-                            } else {
-                                try t.reportErrorAt("Encountered new line in single line literal. Write `\\n` for a line break, or use a multi-line string: `\"\"\"...\"\"\"`.", &.{}, t.nextPos);
-                            }
+                            try t.reportErrorAt("Encountered new line in single line literal. Write `\\n` for a line break, or use a multi-line string: `\"\"\"...\"\"\"`.", &.{}, t.nextPos);
                         }
                     }
                     advance(t);
@@ -928,7 +910,14 @@ pub const Tokenizer = struct {
                 }
             }
         }
-    } 
+    }
+
+    /// With `ignoreErrors`, an unterminated string becomes one `err` token from its quote to the end of the line or
+    /// the source, and tokenizing goes on after it. The new line is left for the next token.
+    fn unterminatedString(t: *Tokenizer, start: u32) !TokenizeState {
+        try t.pushToken(.err, start);
+        return .{ .stateT = .token };
+    }
 
     /// Assume first character is consumed already.
     fn consumeIdent(t: *Tokenizer) void {
@@ -947,9 +936,11 @@ pub const Tokenizer = struct {
         }
     }
 
-    fn consumeRawStringMulti(t: *Tokenizer) !void {
+    /// Returns false if the string does not end and `ignoreErrors` is set.
+    fn consumeRawStringMulti(t: *Tokenizer) !bool {
         while (true) {
             if (isAtEnd(t)) {
+                if (t.ignoreErrors) return false;
                 try t.reportError("Expected raw string.", &.{});
             }
             switch (peek(t)) {
@@ -962,7 +953,7 @@ pub const Tokenizer = struct {
                     }
                     if (t.isNext('`', 0)) {
                         _ = t.consume();
-                        return;
+                        return true;
                     }
                 },
                 else => {
@@ -972,17 +963,20 @@ pub const Tokenizer = struct {
         }
     }
 
-    fn consumeRawString(t: *Tokenizer) !void {
+    /// Returns false if the string does not end on its line and `ignoreErrors` is set.
+    fn consumeRawString(t: *Tokenizer) !bool {
         while (true) {
             if (isAtEnd(t)) {
+                if (t.ignoreErrors) return false;
                 try t.reportError("Expected raw string.", &.{});
             }
             switch (peek(t)) {
                 '`' => {
                     _ = t.consume();
-                    return;
+                    return true;
                 },
                 '\n' => {
+                    if (t.ignoreErrors) return false;
                     try t.reportError("Expected raw string on a single line.", &.{});
                 },
                 else => {
@@ -998,61 +992,6 @@ pub const Tokenizer = struct {
             try t.pushToken(token_t, start);
         } else {
             try t.pushToken(.ident, start);
-        }
-    }
-
-    fn tokenizeSingleLineRawString(t: *Tokenizer, start: u32) !void {
-        const save = t.nextPos;
-        while (true) {
-            if (isAtEnd(t)) {
-                if (t.ignoreErrors) {
-                    t.nextPos = save;
-                    try t.pushToken(.err, start);
-                } else return t.reportErrorAt("UnterminatedString", &.{}, start);
-            }
-            if (peek(t) == '\'') {
-                advance(t);
-                try t.pushToken(.sq_string, start);
-                return;
-            } else if (peek(t) == '\n') {
-                return t.reportErrorAt("Encountered new line in single line literal.", &.{}, t.nextPos);
-            } else {
-                advance(t);
-            }
-        }
-    }
-
-    fn tokenizeMultiLineRawString(t: *Tokenizer, start: u32) !void {
-        const save = t.nextPos;
-        while (true) {
-            if (isAtEnd(t)) {
-                if (t.ignoreErrors) {
-                    t.nextPos = save;
-                    try t.pushToken(.err, start);
-                } else return t.reportErrorAt("UnterminatedString", &.{}, start);
-            }
-            if (peek(t) == '\'') {
-                const ch = peekAhead(t, 1) orelse {
-                    advance(t);
-                    continue;
-                };
-                const ch2 = peekAhead(t, 2) orelse {
-                    advance(t);
-                    continue;
-                };
-                if (ch == '\'' and ch2 == '\'') {
-                    advance(t);
-                    advance(t);
-                    advance(t);
-                    try t.pushToken(.sq_string_multi, start);
-                    return;
-                } else {
-                    advance(t);
-                    continue;
-                }
-            } else {
-                advance(t);
-            }
         }
     }
 
@@ -1272,4 +1211,54 @@ test "tokenizer internals." {
 
     try tt.eq(112, std.enums.values(TokenType).len);
     try tt.eq(41, keywords.kvs.len);
+}
+
+/// The tags of the tokens of `src` with `ignoreErrors`, one letter each. `err_end` is where the last error token ends.
+fn ignoredErrorTags(src: []const u8, err_end: *u32) ![]const u8 {
+    var t = Tokenizer.init(tt.alloc, src);
+    defer t.deinit();
+    t.ignoreErrors = true;
+    try t.tokenize();
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(tt.alloc);
+    for (t.tokens.items) |token| {
+        const ch: u8 = switch (token.tag()) {
+            .err => 'E',
+            .ident => 'i',
+            .new_line => 'n',
+            .equal => '=',
+            .indent => '>',
+            else => '?',
+        };
+        try out.append(tt.alloc, ch);
+        if (token.tag() == .err) err_end.* = token.data.end;
+    }
+    return out.toOwnedSlice(tt.alloc);
+}
+
+test "Unterminated strings with ignoreErrors end in one error token." {
+    // The source, the tags, and the end of the error token: the end of a single line string's line, or the end of
+    // the source.
+    const cases = [_]struct { []const u8, []const u8, u32 }{
+        .{ "a = \"abc", "i=E", 8 },
+        .{ "a = 'abc", "i=E", 8 },
+        .{ "a = \"abc\nb", "i=Eni", 8 },
+        .{ "a = 'abc\nb", "i=Eni", 8 },
+        .{ "a = \"abc\\", "i=E", 9 },
+        .{ "a = \"\"\"abc\nb", "i=E", 12 },
+        .{ "a = '''abc", "i=E", 10 },
+        .{ "a = \"x%{b}", "i=???i?E", 10 },
+        .{ "a = `abc", "i=E", 8 },
+        .{ "a = `abc\nb", "i=Eni", 8 },
+        .{ "a = ```abc\nb", "i=E", 12 },
+        .{ "a = $", "i=E", 5 },
+    };
+    for (cases) |case| {
+        var err_end: u32 = 0;
+        const tags = try ignoredErrorTags(case[0], &err_end);
+        defer tt.alloc.free(tags);
+        errdefer std.debug.print("source: {s}, tags: {s}, error end: {}\n", .{ case[0], tags, err_end });
+        try tt.eqStr(case[1], tags);
+        try tt.eq(case[2], err_end);
+    }
 }

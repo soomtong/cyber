@@ -117,12 +117,12 @@ fn bump_borrow(c &Counter):             -- 빌림: 호출자의 값을 직접 �
 fn bump_ref(c ^Counter):                -- 공유 참조: 모든 소유자가 같은 객체를 본다
     c.n += 1
 
-a := Counter{n=0}
+a := Counter{n = 0}
 r := bump_value(a)
 print('value : a.n=%{a.n} r.n=%{r.n}')
 bump_borrow(&a)
 print('borrow: a.n=%{a.n}')
-shared := ^Counter{n=0}
+shared := ^Counter{n = 0}
 alias := shared
 bump_ref(alias)
 print('ref   : shared.n=%{shared.n} alias.n=%{alias.n}')
@@ -174,13 +174,13 @@ type Buf:
     data []int
 fn (&Buf) @copy() -> Buf:
     print('@copy Buf %{self.id}')
-    return Buf{id=self.id + 1, data=self.data}
+    return Buf{id = self.id + 1, data = self.data}
 fn (&Buf) @deinit():
     print('deinit Buf %{self.id}')
 fn take(b Buf):
     print('take %{b.id}')
 
-a := Buf{id=1, data=[]int{1, 2}}
+a := Buf{id = 1, data = []int{1, 2}}
 b := a
 print('b.id=%{b.id}')
 take(a)
@@ -842,7 +842,7 @@ type Foo:
     a int
     b str
 
-f := Foo{a=123, b='abc'}
+f := Foo{a = 123, b = 'abc'}
 b := move f.b
 print(b)
 ```
@@ -873,22 +873,22 @@ fn (&Pair) @deinit():
     print('deinit Pair')
 
 fn scope_demo():
-    x := Res{name='x'}
-    y := Res{name='y'}
+    x := Res{name = 'x'}
+    y := Res{name = 'y'}
     print('end of scope_demo')
 scope_demo()
 print('--- reassign')
-r := Res{name='first'}
-r = Res{name='second'}
+r := Res{name = 'first'}
+r = Res{name = 'second'}
 print('after reassign')
 print('--- struct fields')
 fn pair_demo():
-    p := Pair{a=Res{name='pa'}, b=Res{name='pb'}}
+    p := Pair{a = Res{name = 'pa'}, b = Res{name = 'pb'}}
     print('end of pair_demo')
 pair_demo()
 print('--- temp')
 fn make(n str) -> Res:
-    return Res{name=n}
+    return Res{name = n}
 _ = make('temp')
 print('after temp')
 print('--- end of main')
@@ -1006,10 +1006,10 @@ after: ref=777 c=999 d=777
 
 ```cy
 fn f(p ^Node, q &^Node):
-    q.* = ^Node{v=2, pad1=0, pad2=0, pad3=0, pad4=0}
+    q.* = ^Node{v = 2, pad1 = 0, pad2 = 0, pad3 = 0, pad4 = 0}
     print('p.v=%{p.v}')
 
-a := ^Node{v=1, pad1=0, pad2=0, pad3=0, pad4=0}
+a := ^Node{v = 1, pad1 = 0, pad2 = 0, pad3 = 0, pad4 = 0}
 f(a, &a)
 print('a.v=%{a.v}')
 ```
@@ -1039,7 +1039,7 @@ a := Array[Res]{}
 for 0..9 |i|:
     if i >= 7:
         print('append r%{i} (cap=%{a.cap()} len=%{a.len()})')
-    a.append(Res{name='r%{i}'})
+    a.append(Res{name = 'r%{i}'})
 print('--- end of main')
 ```
 
@@ -1065,7 +1065,7 @@ append r8 (cap=8 len=8)
 m := Map[int, V]{}
 for 0..8 |i|:
     print('insert %{i} (size=%{m.size()})')
-    m[i] = V{name='v%{i}'}
+    m[i] = V{name = 'v%{i}'}
 print('--- end of main')
 ```
 
@@ -1111,8 +1111,8 @@ fn (&Node) @deinit():
     print('deinit %{self.name}')
 
 fn make_cycle():
-    a := ^Node{next=none, name='a'}
-    b := ^Node{next=a, name='b'}
+    a := ^Node{next = none, name = 'a'}
+    b := ^Node{next = a, name = 'b'}
     a.next = b
     print('end of make_cycle')
 make_cycle()

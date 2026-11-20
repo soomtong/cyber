@@ -653,7 +653,7 @@ fn (&Vec2) `+`(o Vec2) -> Vec2:
 fn Vec2 :: origin() -> Vec2:
     return Vec2{}
 
-v := Vec2{x=3, y=4}
+v := Vec2{x = 3, y = 4}
 print(v.len2())
 v.scale(2)
 print(v.x)
@@ -711,7 +711,7 @@ fn area(s Shape) -> float:
         case .point: return 0
 
 print(area(Shape.circle(2)))
-print(area(Shape.rect({x=2, y=5})))
+print(area(Shape.rect({x = 2, y = 5})))
 print(area(.point))
 print(Shape.circle(7).!circle)
 ```
@@ -839,7 +839,7 @@ print('%{ref.*} %{i}')
 type P:
     x int
     y int
-pos := ^P{x=4, y=5}
+pos := ^P{x = 4, y = 5}
 pos2 := pos             -- 같은 힙 값을 공유
 pos2.y = 50
 print(pos.y)
@@ -855,11 +855,11 @@ type Res:
 fn (&Res) @deinit():
     print('release %{self.name}')
 begin:
-    r1 := Res{name='A'}
+    r1 := Res{name = 'A'}
     print('in scope')
 print('after scope')
-r2 := Res{name='B'}
-r2 = Res{name='C'}
+r2 := Res{name = 'B'}
+r2 = Res{name = 'C'}
 print('end of main')
 ```
 
@@ -904,11 +904,11 @@ fn zero(%T type) -> T:
 print(zero(int))
 
 type Box[T Any]:
-    id    int
+    id int
     value T
 fn (&Box[]) get() -> T:
     return self.value
-print(Box[str]{id=1, value='abc'}.get())
+print(Box[str]{id = 1, value = 'abc'}.get())
 
 fn describe(x %T) -> str:
     #if T == int:
@@ -1024,7 +1024,7 @@ generator fn squares(s ^State) -> int:
         yield s.cur * s.cur
         s.cur += 1
 
-st := ^State{cur=1, limit=5}
+st := ^State{cur = 1, limit = 5}
 g := squares(st)
 while g.next() |v|:
     print(v)
@@ -1160,8 +1160,8 @@ fn (&Vec2) `*`(k float) -> Vec2:
 fn (&Vec2) len2() -> float:
     return self.x * self.x + self.y * self.y
 
-a := Vec2{x=1, y=2}
-b := Vec2{x=3, y=4}
+a := Vec2{x = 1, y = 2}
+b := Vec2{x = 3, y = 4}
 c := (a + b) * 2
 print(c.x)
 print(c.y)
@@ -1258,12 +1258,12 @@ fn (&Rect) name() -> str:
 fn describe(s ^Dyn[Shape]):
     print('%{s.name()} area=%{s.area()}')
 
-describe(^Circle{r=2})
-describe(^Rect{w=3, h=4})
+describe(^Circle{r = 2})
+describe(^Rect{w = 3, h = 4})
 
-var cur ^Dyn[Shape] = ^Circle{r=1}
+var cur ^Dyn[Shape] = ^Circle{r = 1}
 print(cur.area())
-cur = ^Rect{w=2, h=5}
+cur = ^Rect{w = 2, h = 5}
 print(cur.area())
 ```
 
@@ -1294,7 +1294,7 @@ fn (^Stack[]) pop() -> ?T:
 fn (^Stack[]) size() -> int:
     return self.items.len()
 
-s := ^Stack[int]{items={}}
+s := ^Stack[int]{items = {}}
 s.push(1)
 s.push(2)
 print(s.size())
@@ -1414,7 +1414,7 @@ type D:
 fn (&&D) push(x int):
     self.items << x
 
-d := D{items=Array[int]{}}
+d := D{items = Array[int]{}}
 d.push(1)
 d.push(2)
 d.push(3)

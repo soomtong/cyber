@@ -199,7 +199,7 @@
 
 ## API
 
-```cy
+```text
 use peg
 
 p := peg.compile(`

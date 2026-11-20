@@ -185,7 +185,7 @@ for countdown(3) |x|:
 
 -- 재귀 순회. 위임 문법(yield*)은 두지 않고 루프로 넘긴다.
 type Tree:
-    val  int
+    val int
     kids []^Tree
 
 generator fn walk(t ^Tree) -> int:
@@ -213,7 +213,7 @@ fn summarize(path str) -> str:
     return tool('llm', 'summarize: ' + text).await()
 
 fn main():
-    gen := chunks(^Cursor{i=0}, files)
+    gen := chunks(^Cursor{i = 0}, files)
     while gen.next() |p|:
         print(summarize(p))
 ~~~

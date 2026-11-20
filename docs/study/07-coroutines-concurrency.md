@@ -980,7 +980,7 @@ fn deep(n int) -> int:
     x := n * 1000
     return deep(n - 1) + x - x + n
 
-cur := ^Cursor{n=0}
+cur := ^Cursor{n = 0}
 g := count_to(cur, 4)
 total := 0
 while g.next() |v|:

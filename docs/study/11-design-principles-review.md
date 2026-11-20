@@ -337,7 +337,7 @@ for는 같은 보장을 스레드에 준다. 사이버로 옮기면 "스레드�
 같은 `scores` 예제는 사이버에서 Python과 거의 같다.
 
 ~~~cy
-scores := Map[str, int]{alice=100, bob=85}
+scores := Map[str, int]{alice = 100, bob = 85}
 scores['charlie'] = 92
 ~~~
 

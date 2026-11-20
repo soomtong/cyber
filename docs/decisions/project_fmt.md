@@ -137,4 +137,7 @@ Cyber로 쓴 토큰 기반 포매터다(758줄). AST 없이 같은 규칙을 휴
   건드리지 않는 곳이라 손으로 같은 모양으로). `-->` 뒤의 출력(`Point{x=1, y=2}`)은 런타임 형식이라 그대로 둔다.
 - 포맷하지 않은 블록은 docs.md에 10개 남는다. 오류 예시와 *Planned Feature* 문법이라 구문 오류인 것이다. 그 전에 구문 오류였던
   일곱 곳은 문서 버그여서 고쳤다(`unreleased.md` "매뉴얼 예제 코드").
-- 본문 인라인 코드의 `` `Vec2{x=1}` ``, study · decisions · releases 문서의 블록, 저장소 `.cy` 파일은 이번에 바꾸지 않았다.
+- 같은 날 study · specs · decisions 문서의 `cy` 블록도 포맷했다(23개 블록). 저장소 소스를 그대로 인용한 두 블록(study/07의
+  `core.cy` `Generator`, study/11의 `os.cy` `fromErrno`)은 원본과 어긋나지 않게 두었다. 저장소 `.cy`를 다시 포맷할 때 같이 바꾼다.
+  API 요약 표인 `project_std_peg.md`의 블록은 `text`로 바꿨다. releases · history 문서는 지난 기록이라 두었다.
+- 저장소 `.cy` 파일은 이번에 바꾸지 않았다.

@@ -74,7 +74,7 @@ Rust:
 준다.
 
 ```cy
-counts := Map[str, int]{app=7, db=8, web=23}
+counts := Map[str, int]{app = 7, db = 8, web = 23}
 names := counts.keys()
 names.sort(|a, b| counts[a] > counts[b])
 ```
@@ -99,7 +99,7 @@ names.sort(|a, b| counts[a] > counts[b])
 - 일반 지역 캡처 오류에 안내: "Declare `c := &counts` before the lambda and use `c`."
 
 ```cy
-counts := Map[str, int]{app=7, db=8, web=23}
+counts := Map[str, int]{app = 7, db = 8, web = 23}
 c := &counts
 names := counts.keys()
 names.sort(|a, b| c[a] > c[b])

@@ -563,6 +563,52 @@ test "A template instance that a failed compile left behind and that does not co
     }
 }
 
+test "A carried template instance that does not compile is dropped without compiling the source again." {
+    // The compile that dropped such an instance used to start over, so the module loader was called again for a
+    // module that the first attempt had loaded. The instances are now checked before the source is resolved.
+    const S = struct {
+        var loads: u32 = 0;
+        fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+            if (std.mem.eql(u8, C.from_bytes(uri), "mymod")) {
+                loads += 1;
+                res[0].src = C.to_bytes(
+                    \\fn two() -> int:
+                    \\    return 2
+                );
+                return true;
+            }
+            return C.default_loader(vm_, mod, uri, res);
+        }
+    };
+    C.setSilent(true);
+    defer C.setSilent(false);
+    var res: C.EvalResult = undefined;
+    for ([_]bool{ true, false }) |persist| {
+        var config = C.defaultEvalConfig();
+        config.persist_main = persist;
+        const vm = C.vm_initx(zt.alloc);
+        defer C.vm_deinit(vm);
+        C.vm_set_loader(vm, @ptrCast(&S.loader));
+        try zt.eq(C.Success, C.vm_evalx(vm, "main", "_ = 1", config, &res));
+        // Two instances whose bodies do not compile, behind an error: two passes drop them.
+        try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main",
+            \\m := Map[[]int, int]{}
+            \\n := Map[[]float, str]{}
+            \\_ = nope
+        , config, &res));
+        S.loads = 0;
+        try zt.eq(C.Success, C.vm_evalx(vm, "main",
+            \\use test
+            \\use mymod
+            \\counts := Map[str, int]{a=1}
+            \\test.eq(mymod.two() + counts['a'], 3)
+        , config, &res));
+        try zt.eq(1, S.loads);
+        try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "m := Map[[]int, int]{}", config, &res));
+        try zt.eq(C.Success, C.vm_evalx(vm, "main", "_ = 2", config, &res));
+    }
+}
+
 test "An invalid escape sequence is a compile error that keeps the session." {
     // F-131. The escape error used to leave the compiler as a bare Zig error, which was taken for an allocation
     // failure: the next eval reset the VM and lost every local, function and `use` of the session.

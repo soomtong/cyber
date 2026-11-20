@@ -250,9 +250,8 @@ typedef struct CLLoaderResult {
 } CLLoaderResult;
 
 // Given the resolved import specifier of the module, return the module source code.
-// It can be called more than once for the same module in one eval: after a failed compile the module is loaded
-// again, and a compile that drops a template instance a failed compile left behind starts over. Return the same
-// source for the same module.
+// After a failed compile the next `use` of a module that the failed compile loaded first calls it again for that
+// module. Return the same source for the same module.
 typedef bool (*CLModuleLoaderFn)(CLVM* vm, CLSym* mod, CLBytes resolved_uri, CLLoaderResult* res);
 
 // Handler for printing. The builtin `print` would invoke this.

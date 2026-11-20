@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-20): 토크나이저 ignoreErrors 결함
+# HANDOFF (2026-11-20): carry 재시도 루프를 사전 단계로
 
 ## 목표
 
@@ -11,6 +11,7 @@
   애매한 경우 상위 에이전트 호출하여 처리 (fable 5.2)").
 - 2026-11-20: 남은 LSP 후보인 선언 오류 복구(사용자: "continue", 같은 위임 아래).
 - 2026-11-20: 남은 LSP 항목인 토크나이저 `ignoreErrors` 결함(사용자: "continue").
+- 2026-11-20: 기술 부채 중 carry 재시도 루프의 IR 되돌리기(사용자가 넷 중에서 고름).
 
 ## 현재 브랜치
 
@@ -85,13 +86,17 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `use os.read_file`의 'TODO' 문구를 고쳤다.
 - [x] 토크나이저 `ignoreErrors` 결함(2026-11-20, LSP 설계 문서 14절 끝): 닫히지 않은 문자열은 줄 끝 · 소스 끝까지 `err` 토큰 하나.
   raw 문자열도 같다. 쓰지 않던 `tokenize*RawString`을 지웠다. `tokenizer.zig` · `tokenizer.cy` 둘 다, 테스트도 둘 다.
-- [ ] 기술 부채(급하지 않음): carry 재시도 루프의 IR 되돌리기, `@destruct_span` 취소 keep 지점, `Scope.run`의 바퀴당 `waiting()`
-  질의, 취소 불변식 panic. 기록은 `project_coroutines.md`.
+- [x] carry 재시도 루프(2026-11-20): `compiler.semaCarriedFuncs`가 소스를 해석하기 전에 carry 본문을 검사한다. 실패하면
+  인스턴스를 failed로 두고 `RecoverMarks`(`StackMark`가 `ir.func_blocks`까지 되돌림)로 되돌린 뒤 남은 본문을 다시 검사(최대 8번).
+  소스를 다시 컴파일하던 `compile`의 루프 · `carried_failed`를 지웠다. lib 테스트 `A carried template instance that does not
+  compile is dropped ...`(전에는 로더 5번, 이제 1번). `cyber.h` 로더 주석 · docs.md 세션 절 · F-120에 적음.
+- [ ] 기술 부채(급하지 않음): `@destruct_span` 취소 keep 지점(쓰게 되면), `Scope.run`의 바퀴당 `waiting()` 질의(준비 큐 ·
+  futex식 대기 표, fiber 수 비용이 문제가 되면), 취소 불변식 panic(닿는 경로 없음). 기록은 `project_coroutines.md`.
 
 ## 핵심 파일
 
 - `src/refs.zig` "Hints" 절, `src/lsp/server.zig` `hintDiagnostics` · `onCodeAction` · `onInlayHint`, `src/lsp/assist.zig`.
-- `src/compiler.zig` `BodyRecover` · `semaChunkFuncsRecover` · `resolveChunkSyms` · `recoverableDecl`, `src/sema.zig` `semaStmts` ·
+- `src/compiler.zig` `semaCarriedFuncs` · `carryFailedCompile`(실패 뒤 carry), `BodyRecover` · `semaChunkFuncsRecover` · `resolveChunkSyms` · `recoverableDecl`, `src/sema.zig` `semaStmts` ·
   `semaStmt` · `declFailed`(복구 경로).
 - `src/builtins/core.cy` `Slice` 절(`reserve_own` · `clone_copy` · `append` · `appended` 등, `rg -n "fn \(&&?Slice\[\]\)"`).
 - `src/sema.zig` `semaOpAssignMethod` · `checkSliceInPlaceResult` · `checkDroppedSliceResult`.

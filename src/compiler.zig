@@ -204,8 +204,6 @@ pub const Compiler = struct {
     /// The next compile checks and generates them in its main chunk. The chunks that own them still destroy them.
     carry_funcs: std.ArrayListUnmanaged(*cy.Func) = .empty,
     carry_syms: std.ArrayListUnmanaged(*cy.Sym) = .empty,
-    /// The body of a carried function failed in this compile (`semaCarriedFuncs`).
-    carried_failed: bool = false,
 
     c_includes: std.ArrayList([]const u8),
     c_flags: std.ArrayList([]const u8),
@@ -464,58 +462,45 @@ pub const Compiler = struct {
         const failed_allocs = if (acct) |a| a.failed.load(.monotonic) else 0;
         self.failed_allocs_at_start = failed_allocs;
         self.host_error = null;
-        var attempts: u32 = 0;
-        const res = while (true) {
-            self.chunk_start = @intCast(self.chunks.items.len);
-            self.type_start = @intCast(self.sema.types.items.len);
-            self.carried_failed = false;
-            break self.compileInner2(uri, src, config) catch |err_| {
-                // A callback that could not return its error ended the compile with a bare `CompileError` or null.
-                const err = self.host_error orelse err_;
-                self.last_compile_failed = true;
-                // A refused allocation can surface as any error, including a compile error reported by a comptime
-                // function (`error.OutOfMemory`), so the allocator is asked rather than the error. Another error
-                // that is not a compile error (an internal error of the compiler) unwinds like a compile error
-                // does and keeps the session.
-                if (err == error.OutOfMemory or err == error.WriteFailed or (acct != null and acct.?.failed.load(.monotonic) != failed_allocs)) {
+        self.chunk_start = @intCast(self.chunks.items.len);
+        self.type_start = @intCast(self.sema.types.items.len);
+        const res = self.compileInner2(uri, src, config) catch |err_| {
+            // A callback that could not return its error ended the compile with a bare `CompileError` or null.
+            const err = self.host_error orelse err_;
+            self.last_compile_failed = true;
+            // A refused allocation can surface as any error, including a compile error reported by a comptime
+            // function (`error.OutOfMemory`), so the allocator is asked rather than the error. Another error
+            // that is not a compile error (an internal error of the compiler) unwinds like a compile error
+            // does and keeps the session.
+            if (err == error.OutOfMemory or err == error.WriteFailed or (acct != null and acct.?.failed.load(.monotonic) != failed_allocs)) {
+                self.alloc_failed = true;
+            }
+            // A failed first compile leaves core types, the core chunk and a main chunk half built while `cont`
+            // stays false. Compiling again on top of that loaded core twice (SIGSEGV after a syntax error,
+            // `@program_init has already been declared` after a sema error, F-04). `VM.eval` resets the VM first.
+            if (first_compile) {
+                self.first_compile_failed = true;
+            } else if (!self.alloc_failed) {
+                // The session goes on. What the failed compile left in caches is completed by the next compile.
+                self.carryFailedCompile() catch {
                     self.alloc_failed = true;
-                }
-                // A failed first compile leaves core types, the core chunk and a main chunk half built while `cont`
-                // stays false. Compiling again on top of that loaded core twice (SIGSEGV after a syntax error,
-                // `@program_init has already been declared` after a sema error, F-04). `VM.eval` resets the VM first.
-                if (first_compile) {
-                    self.first_compile_failed = true;
-                } else if (!self.alloc_failed) {
-                    // The session goes on. What the failed compile left in caches is completed by the next compile.
-                    self.carryFailedCompile() catch {
-                        self.alloc_failed = true;
-                    };
-                    // The body of a template instance that an earlier failed compile left behind does not compile
-                    // (`Map[[]int, int]` after an error ahead of it). The instance is marked failed and no longer
-                    // carried. The error is not this source's, so the source is compiled again without it. Each
-                    // attempt fails at least one more instance, and only instances that failed compiles made.
-                    if (self.carried_failed and !self.alloc_failed and attempts < max_carry_attempts) {
-                        attempts += 1;
-                        self.clearReports();
-                        continue;
-                    }
-                }
-                if (dumpCompileErrorStackTrace and !C.silent()) {
-                    std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);
-                }
-                if (err == error.CompileError) {
-                    return err;
-                }
-                // Without memory for the report the compile still ends in a compile error. Its summary is empty.
-                if (self.chunks.items.len > 0) {
-                    // Report other errors using the main chunk.
-                    _ = self.main_chunk.addReportFmt("Error: {}", &.{v(err)}, null) catch 0;
-                    return error.CompileError;
-                } else {
-                    _ = self.addReportFmt(.compile_err, "Error: {}", &.{v(err)}, null, 0) catch 0;
-                    return error.CompileError;
-                }
-            };
+                };
+            }
+            if (dumpCompileErrorStackTrace and !C.silent()) {
+                std.debug.dumpErrorReturnTrace(@errorReturnTrace().?);
+            }
+            if (err == error.CompileError) {
+                return err;
+            }
+            // Without memory for the report the compile still ends in a compile error. Its summary is empty.
+            if (self.chunks.items.len > 0) {
+                // Report other errors using the main chunk.
+                _ = self.main_chunk.addReportFmt("Error: {}", &.{v(err)}, null) catch 0;
+                return error.CompileError;
+            } else {
+                _ = self.addReportFmt(.compile_err, "Error: {}", &.{v(err)}, null, 0) catch 0;
+                return error.CompileError;
+            }
         };
 
         // Successful.
@@ -569,6 +554,27 @@ pub const Compiler = struct {
         self.carry_funcs = funcs;
         self.carry_syms.deinit(self.alloc);
         self.carry_syms = syms;
+    }
+
+    /// Leaves out of the carried functions and types those that belong to an instance that failed since they
+    /// were carried (`semaCarriedFuncs`).
+    fn dropFailedCarries(self: *Compiler) void {
+        var keep: usize = 0;
+        for (self.carry_funcs.items) |func| {
+            if (carryFunc(func, self.chunk_start, self.type_start)) {
+                self.carry_funcs.items[keep] = func;
+                keep += 1;
+            }
+        }
+        self.carry_funcs.items.len = keep;
+        keep = 0;
+        for (self.carry_syms.items) |sym| {
+            if (survives(sym, self.chunk_start, self.type_start, 0)) {
+                self.carry_syms.items[keep] = sym;
+                keep += 1;
+            }
+        }
+        self.carry_syms.items.len = keep;
     }
 
     fn compileInner2(self: *Compiler, uri: []const u8, src_opt: ?[]const u8, config: C.CompileConfig) !CompileResult {
@@ -682,6 +688,9 @@ pub const Compiler = struct {
             try resolveChunkSyms(self.builtins_chunk);
         }
 
+        // Before this compile resolves anything of its own, so that none of it takes an instance that is dropped.
+        try semaCarriedFuncs(self, mainChunk);
+
         var id: u32 = self.chunk_start;
         while (id < self.chunks.items.len) : (id += 1) {
             const chunk = self.chunks.items[id];
@@ -696,12 +705,6 @@ pub const Compiler = struct {
         if (self.reports.items.len > 0) {
             self.dropRepeatedReports();
             return error.CompileError;
-        }
-
-        // Functions that a failed compile left behind are checked again in this compile's main chunk.
-        for (self.carry_funcs.items) |func| {
-            func.info.emitted = false;
-            func.info.bc_inline = 0;
         }
 
         // Clear the previous eval's `main`, otherwise a later eval without one is rejected.
@@ -747,9 +750,6 @@ pub const Compiler = struct {
         } else {
             self.program_ir = try sema.sema_program(mainChunk, self.main_func);
         }
-
-        // Before the chunks: what these bodies expand is appended to the main chunk and checked with it.
-        try semaCarriedFuncs(self, mainChunk);
 
         // Perform sema on all chunks.
         log.tracev("Perform sema.", .{});
@@ -941,8 +941,8 @@ fn performChunkSema(c: *cy.Chunk) !void {
     try semaChunkFuncs(c);
 }
 
-/// Compiles of one source after carried bodies failed (`Compiler.compile`).
-const max_carry_attempts = 8;
+/// Passes over the carried bodies (`semaCarriedFuncs`). Each pass after the first drops one more instance.
+const max_carry_passes = 8;
 
 /// Reports after which recovery stops. A compile that is this wrong gains nothing from more of them.
 const max_recover_reports = 100;
@@ -971,11 +971,8 @@ fn recoverBody(self: *Compiler, c: *cy.Chunk, marks: *const RecoverMarks, err: a
     // Without memory there is nothing to go on with. A refused allocation can arrive as any error, a compile
     // error included, so the allocator is asked like `compile` does. What an allocation failure abandoned half
     // built is not something the next body can be checked against.
-    if (err == error.OutOfMemory or self.alloc_failed or self.host_error != null) {
+    if (err == error.OutOfMemory or !canGoOn(self)) {
         return err;
-    }
-    if (cy.MemAccount.of(self.alloc)) |acct| {
-        if (acct.failed.load(.monotonic) != self.failed_allocs_at_start) return err;
     }
     if (err != error.CompileError) {
         // Wrap all other errors as a CompileError.
@@ -987,6 +984,16 @@ fn recoverBody(self: *Compiler, c: *cy.Chunk, marks: *const RecoverMarks, err: a
     for (marks.marks, 0..) |mark, i| {
         mark.restore(self.chunks.items[i]);
     }
+}
+
+/// Whether nothing that a failed body abandoned half built stands in the way of checking the next one: no refused
+/// allocation, which can arrive as any error (a compile error included), and no failed host callback.
+fn canGoOn(self: *Compiler) bool {
+    if (self.alloc_failed or self.host_error != null) return false;
+    if (cy.MemAccount.of(self.alloc)) |acct| {
+        if (acct.failed.load(.monotonic) != self.failed_allocs_at_start) return false;
+    }
+    return true;
 }
 
 fn semaChunkFuncs(c: *cy.Chunk) !void {
@@ -2122,27 +2129,55 @@ fn resolveImplFuncs(self: *Compiler, type_: *cy.Type) !void {
 }
 
 /// Checks the bodies that a failed compile left unchecked or without code (`Compiler.carry_funcs`) in the
-/// main chunk of this compile, so that their code is generated with it.
+/// main chunk of this compile, so that their code is generated with it. What these bodies expand is appended to
+/// the main chunk and checked with it.
+///
+/// The body of a template instance that a failed compile left behind may not compile (`Map[[]int, int]` after an
+/// error ahead of it). The error is not this source's: the instance is marked failed, so it is no longer handed
+/// out or carried, and what the pass checked is dropped (`StackMark` takes back the function blocks). The next pass
+/// checks the rest again, since a body that was checked may call into the dropped instance. Before 2026-11-20 the
+/// whole source was compiled again instead, which called the module loader and the resolvers again.
 fn semaCarriedFuncs(self: *Compiler, main: *cy.Chunk) !void {
-    for (self.carry_funcs.items) |func| {
-        const has_body = switch (func.type) {
-            .userFunc => !func.info.const_eval_only,
-            .extern_ => func.data.extern_.has_impl,
-            else => false,
-        };
-        if (!has_body or func.info.emitted or !func.isResolved()) {
-            continue;
+    var passes: u32 = 0;
+    pass: while (true) {
+        for (self.carry_funcs.items) |func| {
+            func.info.emitted = false;
+            func.info.bc_inline = 0;
         }
-        const res = if (func.type == .userFunc and func.isMethod())
-            sema.semaMethodBody(main, func)
-        else
-            sema.semaFuncBody(main, func);
-        res catch |err| {
-            // The instance is not handed out or carried again, and the compile starts over (`Compiler.compile`).
-            if (ownerInstance(func)) |inst| inst.failed = true;
-            if (err == error.CompileError) self.carried_failed = true;
-            return err;
-        };
+        var marks = try RecoverMarks.take(self);
+        defer marks.deinit(self);
+        const report_start = self.reports.items.len;
+        for (self.carry_funcs.items) |func| {
+            const has_body = switch (func.type) {
+                .userFunc => !func.info.const_eval_only,
+                .extern_ => func.data.extern_.has_impl,
+                else => false,
+            };
+            if (!has_body or func.info.emitted or !func.isResolved()) {
+                continue;
+            }
+            const res = if (func.type == .userFunc and func.isMethod())
+                sema.semaMethodBody(main, func)
+            else
+                sema.semaFuncBody(main, func);
+            res catch |err| {
+                // A function that belongs to no instance can not be dropped. Its error is reported.
+                const inst = ownerInstance(func) orelse return err;
+                inst.failed = true;
+                if (err != error.CompileError or passes + 1 >= max_carry_passes or !canGoOn(self)) return err;
+                passes += 1;
+                for (self.reports.items[report_start..]) |*report| {
+                    report.deinit(self.alloc);
+                }
+                self.reports.items.len = report_start;
+                for (marks.marks, 0..) |mark, i| {
+                    mark.restore(self.chunks.items[i]);
+                }
+                self.dropFailedCarries();
+                continue :pass;
+            };
+        }
+        return;
     }
 }
 

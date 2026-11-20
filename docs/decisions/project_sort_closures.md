@@ -150,3 +150,29 @@ cs.sort_by_key(|c| c.n)                       -- []Count, 오름차순
 
 결정(2026-11-20, 사용자): A는 구현하지 않고 조사만 먼저 한다. 갈림길인 "`&T` 캡처가 fiber 스택 이동에 이미 안전한가"를 확인해
 아래 절에 적는다. A 구현과 `sort_by_key`는 0.5 뒤에 다시 정한다.
+
+## 안 A 조사 (2026-11-20)
+
+master `1bc5426e` Debug CLI로 확인했다.
+
+- 갈림길이던 "`&T` 캡처가 fiber 스택 이동에 안전한가"는 이미 풀려 있다. F-136(`a80b07ee`)이 pinned closure를 `Heap.pinned_closures`에
+  등록하고, `Thread.growStackPrecise`가 스택을 옮길 때 `Heap.patchPinnedClosures`가 캡처 값 중 옛 스택 범위를 가리키는 것을 새
+  주소로 고친다. heap은 스레드에 하나라 fiber 스택이 옮겨질 때도 같은 경로를 탄다. 테스트 `functions/closure_borrow_stack_grow.cy`가
+  main 스택 · `sort` 비교자 안 · fiber 스택의 이동을 덮는다. 안 A의 필요한 것 3(스택 이동)은 남은 일이 없다.
+- 대신 필요한 것 2(새지 않음)가 지켜지지 않는다. `OpaqueFunc`는 문서상 "Cannot be moved or copied"지만 sema가 강제하지 않는다.
+  `&T`를 캡처한 클로저(안 B의 꼴)가 지금도 그 지역보다 오래 산다:
+
+  | 꼴 | 결과 |
+  |---|---|
+  | `fn mk() -> OpaqueFunc[F]`에서 `c := &x` 캡처 클로저를 `return f` | 컴파일되고 `mk()()`가 쓰레기 값(해제된 스택) |
+  | 구조체 필드 `f OpaqueFunc[F]`에 담아 반환 | 같음 |
+  | `-> ^OpaqueFunc[F]`로 `^fn() ...` 반환 | 같음, 끝에 'unreleased refcount: 1' |
+  | 전역 `gf = move f` | 컴파일된다 |
+  | `fn keep(f &OpaqueFunc[F]) -> OpaqueFunc[F]: return f.*` | 컴파일된다(복사) |
+  | 같은 블록의 `g := f` | 컴파일된다(복사) |
+
+  빌림(`&T`)과 빌림 컨테이너는 `TypeInfo.borrow_only`로 반환(`scope` 필요) · lift · 바깥 블록 대입이 막히는데, `OpaqueFunc`는 그
+  표시가 없다. 그래서 안 A 이전에 이것부터 고쳐야 한다. 안 A는 같은 제약 위에 "일반 지역의 주소를 담는 캡처"만 더한다.
+- 고칠 방향: `OpaqueFunc`를 빌림 컨테이너(`borrow_only`)로 두고, 빌림을 캡처한 람다 값의 `parent_local`을 캡처한 빌림의 주인으로
+  잇는다(`borrowOwner`). 반환 · lift · 전역 · 바깥 블록 대입이 기존 검사로 막힌다. 캡처가 없거나 `^T`만 캡처한 람다는 `Func`라
+  영향이 없다. findings register에 올리고 0.5에서 고친다.

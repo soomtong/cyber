@@ -1179,8 +1179,8 @@ print(log.len())        --> 2
 print(log.pop().?)      --> !
 ```
 - The value is not copied, so a loop that grows a global list stays fast.
-- An argument is evaluated before the value moves out, so it reads the global as it was: `g.append(g.len())` and
-  `g.append(next())` with a `next` that reads `g` both work. An argument that leaves the call (`g += f()!` when `f`
+- An argument is evaluated before the value moves out, so it reads the global as it was: `g.append(g.len())`,
+  `g.append(g[0])` and `g.append(next())` with a `next` that reads `g` all work. An argument that leaves the call (`g += f()!` when `f`
   returns an error) leaves the global as it was.
 - An argument that borrows the same global can not be evaluated first: `g.append(g.span())` is the compile error 'The
   method takes `g` out while it runs, so this argument can not read `g`. Read it into a local first.' Another field of
@@ -2885,6 +2885,19 @@ if true:
 
 A borrow stored in a local variable is alive until the end of the block that declares the variable. A borrow that is only passed as an argument or used inside an expression ends with its statement. The compiler does not shorten a borrow to its last use.
 
+A local that holds a borrow can be borrowed again for one statement. The new borrow can not be kept in another local when it conflicts with the one the first local holds:
+```cy
+type Foo:
+    xs []int
+
+f := Foo{xs={1, 2, 3}}
+r := &&f
+r.xs.append(4)      -- Reborrows `f` through `r` for this statement.
+print(r.xs.len())   --> 4
+s := &r.xs[0]
+--> error: Cannot borrow `f`. There is an active exclusive borrow to it.
+```
+
 Some dynamic data structure types allow borrowing a reference to an inner element:
 ```cy
 a := Array[int]{1, 2, 3}
@@ -2998,6 +3011,8 @@ begin:
     r = Ref{p=&y}
 --> error: `r` can not outlive `y`.
 ```
+
+The same holds when the value is wrapped in an option (`var o ?Ref`), comes from an `if` expression, or is assigned to a field or an element (`o.r = Ref{p=&y}`). A method can not store a borrow of one of its own locals behind a parameter: `self.r = Ref{p=&y}` is the compile error 'The value behind `self` can not outlive `y`.'
 
 ### `sink` parameter.
 The `sink` modifier accepts and consumes a value argument: *This is not much different from a `move` operation, so this feature may be removed.*
@@ -3196,7 +3211,7 @@ fn load_config() -> !str:
     return data
 ```
 
-`os.last_os_error()` gives the code of the last failed OS call (`errno`, or `GetLastError` on Windows). `os.from_errno(code)` and `os.from_win32_error(code)` convert a code to its name, for example after a call through the C FFI.
+`os.last_os_error()` gives the code of the last failed OS call (`errno`, or `GetLastError` on Windows). `os.from_errno(code)` and `os.from_win32_error(code)` convert a code to its name, for example after a call through the C FFI. A code without a name, or one outside the range of the C type (`int`, `DWORD`), is `error.Unknown`.
 
 ## Results.
 A result value forces the call site to unwrap it in order to use the payload.
@@ -3431,7 +3446,7 @@ fn fib(n int) -> int:
     return fib(n - 1) + fib(n - 2)
 ```
 
-`spawn` takes the first call only, so `spawn fib(40).await()` waits for the thread, like `(spawn fib(40)).await()`.
+`spawn` takes the first call only, so `spawn fib(40).await()` waits for the thread, like `(spawn fib(40)).await()`. A prefix operator takes the whole term: `-spawn fib(40).await()` is `-(spawn fib(40).await())`. `fiber` is read the same way.
 
 The entry point can be a lambda in a variable. It can not capture variables, because a closure is not `Sendable`:
 ```cy

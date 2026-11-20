@@ -126,6 +126,22 @@ t.eq(6, pair.xs.len())
 t.eq(7, pair.xs[1])
 t.eq(6, pair.xs[5])
 
+-- An element of the same global is read before the value is taken, in the order of the arguments.
+global elems []int = {3, 1, 2}
+fn bump() -> int:
+    elems[0] = 100
+    return 7
+elems.append(elems[0])
+t.eq(3, elems[3])
+elems.insert(elems[1], elems[2])
+t.eq(2, elems[1])
+elems.insert(elems[0], bump())
+t.eq(100, elems[0])
+t.eq(7, elems[3])
+global words []str = {'a', 'b'}
+words.append(words[0])
+t.eq('a', words[2])
+
 -- Through a pointer.
 fn push(p Ptr[[]str], s str):
     p.*.append(s)

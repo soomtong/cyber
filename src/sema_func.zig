@@ -241,6 +241,8 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
             const arg_res = final_arg.res.rt;
             if (arg_res.resType == .value and !arg_res.addressable) {
                 try sema.seqPush(c, &args[arg_idx], arg_res.owned, arg.node);
+            } else {
+                try sema.seqPushTakeArg(c, &args[arg_idx], arg.node);
             }
             arg_nodes[arg_idx] = arg.node;
             arg_idx += 1;
@@ -589,6 +591,8 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         args[arg_idx] = arg_res.ir;
         if (arg_res.resType == .value and !arg_res.addressable) {
             try sema.seqPush(c, &args[arg_idx], arg_res.owned, arg.node);
+        } else {
+            try sema.seqPushTakeArg(c, &args[arg_idx], arg.node);
         }
         arg_idx += 1;
     }
@@ -1047,7 +1051,10 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
                         if (rec_t.kind() == .ex_borrow) {
                             const borrow = rec_t.cast(.ex_borrow);
                             if (borrow.child_t == target_child_t) {
-                                return sema.ExprResult.init(arg.data.receiver.ir, target_t);
+                                // Keeps the local it borrows from, so a `scope` result is bound to the owner.
+                                var new_rec = arg.data.receiver;
+                                new_rec.type = target_t;
+                                return new_rec;
                             }
                         }
                     }
@@ -1422,7 +1429,7 @@ fn refReceiverHint(c: *cy.Chunk, param_t: *cy.Type, arg_t: *cy.Type, rec_n: *ast
     if (param_t.kind() != .ex_borrow or arg_t.kind() != .pointer) return "";
     const pointer = arg_t.cast(.pointer);
     if (!pointer.ref or pointer.child_t != param_t.cast(.ex_borrow).child_t) return "";
-    const rec_src = c.ast.nodeString(rec_n);
+    const rec_src = c.nodeString(rec_n);
     if (!isShortSrc(rec_src)) return "";
     return std.fmt.bufPrint(buf, " To change the value that `{s}` points to, write `{s}.*.{s}(...)`.", .{rec_src, rec_src, func_name}) catch "";
 }
@@ -1502,8 +1509,8 @@ fn reportCallFuncMismatch3(c: *cy.Chunk, pre_args: []const Argument, end_args: [
             const left_name = try c.sema.allocTypeName(left_t);
             defer c.alloc.free(left_name);
             var hint: []const u8 = " Convert one side so that both have the same type.";
-            const left_src = c.ast.nodeString(left_n);
-            const right_src = c.ast.nodeString(err_node);
+            const left_src = c.nodeString(left_n);
+            const right_src = c.nodeString(err_node);
             if (left_t.id() == bt.Str and isNumberType(match_err.arg_t) and isShortSrc(left_src) and isShortSrc(right_src)) {
                 if (std.mem.eql(u8, func_name, "+")) {
                     hint = std.fmt.bufPrint(&op_hint_buf, " To join them, write `'%{{{s}}}%{{{s}}}'`.", .{left_src, right_src}) catch hint;

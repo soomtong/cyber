@@ -687,6 +687,12 @@ pub const Chunk = struct {
         return self.compiler.addReport(.compile_err, msg, chunk_id, @intFromPtr(opt_node));
     }
 
+    /// The source text of `node`, read from the chunk that the node belongs to. The body of a template from another
+    /// module is checked with the chunk of the caller, so `self.ast` is not always the source of the node.
+    pub fn nodeString(self: *Chunk, node: *ast.Node) []const u8 {
+        return self.compiler.chunks.items[node.src()].ast.nodeString(node);
+    }
+
     pub fn reportErrorFmt(self: *Chunk, format: []const u8, args: []const fmt.FmtValue, opt_node: ?*ast.Node) error{CompileError, OutOfMemory, FormatError, WriteFailed} {
         const id = try self.addReportFmt(format, args, opt_node);
         try self.appendErrorTrace(&self.compiler.reports.items[id]);

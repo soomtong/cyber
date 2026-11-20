@@ -468,8 +468,33 @@ fn unbindBorrowLocal(c: *cy.Chunk, local: *Local) void {
     local.ex_borrow = false;
 }
 
+/// A local can not start to hold a borrow that conflicts with the one that another local holds. A borrow taken through
+/// a local that is a borrow (`&r.xs[0]` of `r := &&f`, `r.first()`) passes `otherBorrows` as a reborrow, which is sound
+/// only while it lasts no longer than its statement. Kept in a local it would live next to `r`, and `r` could free what
+/// it points to. Call before `bindBorrowLocal`, when the local holds no borrow.
+fn checkBindBorrow(c: *cy.Chunk, var_idx: LocalId, init: ExprResult, node: *ast.Node) !void {
+    const decl_t = c.varStack.items[var_idx].decl_t;
+    if (!decl_t.info.borrow_only) return;
+    // A copy of a borrow local (`r2 := r`) is no new borrow.
+    if (init.resType == .value_local) return;
+    const via = init.recParentLocal() orelse return;
+    const owner = borrowOwnerOf(c, via);
+    if (via == owner or owner == var_idx) return;
+    switch (c.varStack.items[via].decl_t.kind()) {
+        .borrow, .ex_borrow => {},
+        // A borrow of a borrow container (`&h` of `h := Holder{r=&&f}`) borrows the container.
+        else => return,
+    }
+    if (decl_t.kind() == .ex_borrow) {
+        try checkExclusiveBorrow(c, owner, node);
+    } else {
+        try checkSharedBorrow(c, owner, node);
+    }
+}
+
 /// The borrow counts of the owner of `local`, without the binding of `local` itself. A borrow taken through a local that
-/// holds a borrow (a borrow container such as `h := Holder{r=&&f}`) reborrows from it, so its own binding is no conflict.
+/// holds a borrow (`r := &&f`, a borrow container such as `h := Holder{r=&&f}`) reborrows from it, so its own binding is
+/// no conflict. The reborrow can not be kept in a local (`checkBindBorrow`).
 fn otherBorrows(c: *cy.Chunk, local: LocalId) struct { owner: LocalId, shared: u8, ex: u8 } {
     const owner = borrowOwnerOf(c, local);
     var shared = c.varStack.items[owner].active_borrows;
@@ -519,6 +544,43 @@ pub fn checkExclusiveBorrow(c: *cy.Chunk, owner: LocalId, node: *ast.Node) !void
 fn checkBorrowOutlives(c: *cy.Chunk, var_idx: LocalId, right: ExprResult, node: *ast.Node) !void {
     if (!c.varStack.items[var_idx].decl_t.info.borrow_only) return;
     const owner = borrowOwner(c, right) orelse return;
+    return checkOwnerOutlives(c, var_idx, owner, node);
+}
+
+/// `checkBorrowOutlives` for a borrow assigned to a field or an element (`o.v = View{a=&z}`, `vs[0] = View{a=&z}`,
+/// `h.cb = fn() -> int => b.*`). `left` is the left side or the value that has the field or the element. The value
+/// lives where the local at the root of the left side keeps it: in the local, or behind the borrow that the local holds.
+fn checkFieldBorrowOutlives(c: *cy.Chunk, left: ExprResult, right: ExprResult, node: *ast.Node) !void {
+    if (!right.type.info.borrow_only) return;
+    const owner = borrowOwner(c, right) orelse return;
+    var root = left.recParentLocal() orelse return;
+    // Through a local that is a borrow (`r := &&o`), the value is in the local it borrows. A borrow container
+    // (`o := Outer{v=View{a=&x}}`) keeps the value itself.
+    while (c.varStack.items[root].parent_local != cy.NullId) {
+        switch (c.varStack.items[root].decl_t.kind()) {
+            .borrow, .ex_borrow => root = c.varStack.items[root].parent_local,
+            else => break,
+        }
+    }
+    const root_local = c.varStack.items[root];
+    const owner_local = c.varStack.items[owner];
+    const owner_is_param = owner_local.type == .local and owner_local.inner.local.isParam;
+    if (owner != root and root_local.type == .local and root_local.inner.local.isParam and !owner_is_param) {
+        switch (root_local.decl_t.kind()) {
+            .borrow, .ex_borrow, .pointer => {
+                // The value behind a parameter is still there after the call.
+                if (owner_local.lifetime.kind == .temp) {
+                    return c.reportError("The result can not borrow from a temporary value.", node);
+                }
+                return c.reportErrorFmt("The value behind `{}` can not outlive `{}`.", &.{v(root_local.name()), v(owner_local.name())}, node);
+            },
+            else => {},
+        }
+    }
+    return checkOwnerOutlives(c, root, owner, node);
+}
+
+fn checkOwnerOutlives(c: *cy.Chunk, var_idx: LocalId, owner: LocalId, node: *ast.Node) !void {
     if (owner == var_idx) return;
     const owner_local = c.varStack.items[owner];
     const local = c.varStack.items[var_idx];
@@ -612,8 +674,8 @@ fn checkDroppedSliceResult(c: *cy.Chunk, expr_t: *cy.Type, node: *ast.Node) !voi
     if (instance.getSymTemplate() != c.sema.slice_tmpl) return;
     for (slice_new_value_methods) |pair| {
         if (!std.mem.eql(u8, mc.method, pair[0])) continue;
-        const recv = c.ast.nodeString(mc.recv);
-        if (renameMethodSrc(&rename_buf, c.ast.nodeString(node), recv, pair[0], pair[1])) |fixed| {
+        const recv = c.nodeString(mc.recv);
+        if (renameMethodSrc(&rename_buf, c.nodeString(node), recv, pair[0], pair[1])) |fixed| {
             if (recv.len <= 40) {
                 return c.reportErrorFmt("`{}` returns a new list and leaves `{}` as it was. To change `{}` in place, write `{}`.", &.{v(pair[0]), v(recv), v(recv), v(fixed)}, node);
             }
@@ -657,13 +719,13 @@ fn checkSliceInPlaceResult(c: *cy.Chunk, res_t: *cy.Type, node: *ast.Node, left:
     // The receiver is a `Slice`, so the message can name the method that returns a new list.
     const slice_recv = isSliceVoidCall(c, node);
     if (must_be_slice and !slice_recv) return;
-    const recv = c.ast.nodeString(mc.recv);
-    const call_src = c.ast.nodeString(node);
+    const recv = c.nodeString(mc.recv);
+    const call_src = c.nodeString(node);
     if (recv.len > 40 or call_src.len > 80) {
         return c.reportErrorFmt("`{}` changes the receiver in place and returns nothing. Call it as a statement.", &.{v(mc.method)}, node);
     }
     if (left) |left_n| {
-        if (std.mem.eql(u8, c.ast.nodeString(left_n), recv)) {
+        if (std.mem.eql(u8, c.nodeString(left_n), recv)) {
             // The fix replaces the assignment `xs = xs.append(v)` with the call.
             return c.reportErrorFix("`{}` changes `{}` in place and returns nothing. Write `{}` as a statement.", &.{v(mc.method), v(recv), v(call_src)}, node, .{
                 .pos = left_n.pos(),
@@ -2233,7 +2295,7 @@ fn producerCall(c: *cy.Chunk, node: *ast.Node) ?struct { []const u8, []const u8 
             .unwrap_res => cur = cur.cast(.unwrap_res).res,
             .ident => {
                 if (c.semaProcs.items.len == 0) return null;
-                const name = c.ast.nodeString(cur);
+                const name = c.nodeString(cur);
                 const entry = c.proc().var_cache_entries.get(name) orelse return null;
                 if (entry.type != .local) return null;
                 const local = &c.varStack.items[entry.data.local.varId];
@@ -2247,7 +2309,7 @@ fn producerCall(c: *cy.Chunk, node: *ast.Node) ?struct { []const u8, []const u8 
                 if (callee.type() != .accessExpr) return null;
                 const access = callee.cast(.accessExpr);
                 if (access.left.type() != .ident or access.right.type() != .ident) return null;
-                return .{ c.ast.nodeString(access.left), c.ast.nodeString(access.right) };
+                return .{ c.nodeString(access.left), c.nodeString(access.right) };
             },
             else => return null,
         }
@@ -2274,7 +2336,6 @@ pub fn resultTypeHint(c: *cy.Chunk, exp_t: *cy.Type, act_t: *cy.Type, node: *ast
 /// A hint for a symbol that the module `mod_sym` does not have: ` Did you mean `x`?`, or an empty string.
 /// Like `suggestMember`, names from other languages are mapped first, then a camelCase name is tried as snake_case.
 pub fn suggestModuleSym(c: *cy.Chunk, mod_sym: *cy.Sym, name: []const u8, node: *ast.Node) ![]const u8 {
-    suggest_new = "";
     suggest_new = "";
     if (name.len == 0 or name.len > 64) return "";
     if (mod_sym.type == .chunk) {
@@ -2596,6 +2657,7 @@ fn semaAssignToIndexStmt(c: *cy.Chunk, left: *ast.IndexExpr, right: *ast.Node, n
     const ptr_t = ptr.type;
     const target_t = ptr_t.getRefLikeChild().?;
     var val = try c.semaExprCstr(right, target_t);
+    try checkFieldBorrowOutlives(c, rec, val, right);
     val = try semaOwn(c, val, right);
 
     if (target_t.isManaged()) {
@@ -2716,6 +2778,7 @@ fn semaAssignToAccessStmt(c: *cy.Chunk, var_start: usize, rec_n: *ast.Node, rec:
 
     const cstr = Cstr.initRequire(field_s.type);
     var right_res = try c.semaExprOrOpAssignBinExpr(right, cstr, opts.rhsOpAssignBinExpr);
+    try checkFieldBorrowOutlives(c, rec, right_res, right);
     right_res = try semaOwn(c, right_res, right);
 
     if (revive) |rv| {
@@ -3003,6 +3066,7 @@ fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.
 
                 // The local now holds a different borrow.
                 unbindBorrowLocal(c, local);
+                try checkBindBorrow(c, leftRes.data.value_local, borrow_init, right);
                 bindBorrowLocal(c, leftRes.data.value_local, borrow_init);
 
                 _ = try c.ir.pushStmt(.set_local, node, .{
@@ -3017,6 +3081,7 @@ fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.
             } else if (leftRes.resType == .value_field) {
                 const expr = Cstr.initRequire(leftT);
                 right_res = try c.semaExprOrOpAssignBinExpr(right, expr, opts.rhsOpAssignBinExpr);
+                try checkFieldBorrowOutlives(c, leftRes, right_res, right);
                 right_res = try semaOwn(c, right_res, right);
                 _ = try c.ir.pushStmt(.set_field, left_n, .{
                     .field = leftRes.ir,
@@ -3859,9 +3924,9 @@ pub fn declareUseImport(c: *cy.Chunk, node: *ast.ImportStmt) !void {
             specPath = node.name.cast(.ident).name.slice();
         } else {
             // `use os.read_file`: a symbol of a module is used through an alias.
-            const path = c.ast.nodeString(node.name);
+            const path = c.nodeString(node.name);
             if (node.name.type() == .accessExpr) {
-                const last = c.ast.nodeString(node.name.cast(.accessExpr).right);
+                const last = c.nodeString(node.name.cast(.accessExpr).right);
                 return c.reportErrorFmt("Expected a module name. A symbol of a module is used through an alias: `use {} = {}`.", &.{v(last), v(path)}, @ptrCast(node));
             }
             return c.reportErrorFmt("Expected a module name, found `{}`.", &.{v(path)}, @ptrCast(node));
@@ -4998,6 +5063,7 @@ fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
     svar = &c.varStack.items[var_idx];
     svar.type = .local;
     if (c.compiler.record_refs) cy.refs.recordDeclaredLocal(c, node.name, if (has_target_type) null else var_t);
+    try checkBindBorrow(c, @intCast(var_idx), right, node.right);
     bindBorrowLocal(c, @intCast(var_idx), right);
     if (var_start == c.varStack.items.len and !init_after_aux) {
         declare.cast(.declare_local).init = right.ir;
@@ -8008,23 +8074,23 @@ pub fn semaInitExpr(c: *cy.Chunk, node: *ast.InitExpr, cstr: Cstr) !ExprResult {
             return semaInitLitTarget(c, node.lit, type_, false, cstr.assign_to_local);
         },
         .enum_case => {
-            const str = c.ast.nodeString(node.left);
+            const str = c.nodeString(node.left);
             return c.reportErrorFmt("Can not initialize enum case `{}`.", &.{v(str)}, node.left);
         },
         .union_case => {
-            const str = c.ast.nodeString(node.left);
+            const str = c.nodeString(node.left);
             return c.reportErrorFmt("Can not initialize cunion case `{}`.", &.{v(str)}, node.left);
         },
         .choice_case => {
-            const str = c.ast.nodeString(node.left);
+            const str = c.nodeString(node.left);
             return c.reportErrorFmt("Can not initialize choice case `{}`.", &.{v(str)}, node.left);
         },
         .template => {
-            const str = c.ast.nodeString(node.left);
+            const str = c.nodeString(node.left);
             return c.reportErrorFmt("Expected a type, found type template. Expand `{}` to a type.", &.{v(str)}, node.left);
         },
         else => {
-            const str = c.ast.nodeString(node.left);
+            const str = c.nodeString(node.left);
             return c.reportErrorFmt("Can not initialize `{}`.", &.{v(str)}, node.left);
         }
     }
@@ -8799,6 +8865,8 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
 
             // Turn into if statement that writes to a result local.
             const res_local = try declareHiddenLocal(c, "_temp", cstr.target_t orelse c.sema.void_t, null, node);
+            // A borrow result lives as long as the owner of either branch that goes out of scope first.
+            var if_owner: ?LocalId = null;
 
             const outer = try pushBlock(c, node);
             {
@@ -8817,6 +8885,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
                         c.varStack.items[res_local.id].inner.local.declIrStart.cast(.declare_local).decl_t = target_t;
                         c.varStack.items[res_local.id].decl_t = target_t;
                     }
+                    if (target_t.info.borrow_only) {
+                        if_owner = shorterOwner(c, if_owner, borrowOwner(c, body));
+                    }
                     body = try semaOwn(c, body, if_expr.body);
                     _ = try c.ir.pushStmt(.set_local, if_expr.body, .{
                         .id = @intCast(res_local.ir_id),
@@ -8832,6 +8903,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
 
                 // Else.
                 var else_body = try c.semaExprCstr(if_expr.else_expr, target_t);
+                if (target_t.info.borrow_only) {
+                    if_owner = shorterOwner(c, if_owner, borrowOwner(c, else_body));
+                }
                 else_body = try semaOwn(c, else_body, if_expr.else_expr);
                 _ = try c.ir.pushStmt(.set_local, if_expr.else_expr, .{
                     .id = @intCast(res_local.ir_id),
@@ -8845,7 +8919,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
 
             const res = (try semaLocal(c, res_local.id, node)).ir;
             c.varStack.items[res_local.id].type = .dead;
-            return ExprResult.initOwned(res);
+            var if_res = ExprResult.initOwned(res);
+            if_res.data.value.parent_local = if_owner;
+            return if_res;
         },
         .as_expr => {
             const as_expr = node.cast(.as_expr);
@@ -10003,7 +10079,7 @@ pub fn semaExprOrOpAssignBinExpr(c: *cy.Chunk, node: *ast.Node, cstr: Cstr, opAs
                     const op = try c.sema.allocTypeName(res.type);
                     defer c.alloc.free(op);
                     return c.reportErrorFmt("Expected type `{}`, got `{}`. To change the value that `{}` points to, write `{}.* {}= ...`.", &.{
-                        v(name), v(op), v(c.ast.nodeString(stmt.left)), v(c.ast.nodeString(stmt.left)), v(stmt.op.name()),
+                        v(name), v(op), v(c.nodeString(stmt.left)), v(c.nodeString(stmt.left)), v(stmt.op.name()),
                     }, node);
                 }
             }
@@ -10834,7 +10910,7 @@ fn checkRefOperand(c: *cy.Chunk, left_t: *cy.Type, op: cy.BinaryExprOp, left_n: 
     }
     const name = try c.sema.allocTypeName(left_t);
     defer c.alloc.free(name);
-    const left_s = c.ast.nodeString(left_n);
+    const left_s = c.nodeString(left_n);
     if (node.type() == .op_assign_stmt) {
         return c.reportErrorFmt("Can not use `{}` on `{}`. To change the value that `{}` points to, write `{}.* {}= ...`.", &.{
             v(op.name()), v(name), v(left_s), v(left_s), v(op.name()),
@@ -10968,7 +11044,7 @@ fn checkNoneCompare(c: *cy.Chunk, left_t: *cy.Type, left_n: *ast.Node, right_n: 
     if (left_t.id() == bt.Never) return;
     const type_name = try c.sema.allocTypeName(left_t);
     defer c.alloc.free(type_name);
-    const left_src = c.ast.nodeString(left_n);
+    const left_src = c.nodeString(left_n);
     const short = left_src.len <= 40 and std.mem.indexOfScalar(u8, left_src, '\n') == null;
     var example: []const u8 = "";
     if (left_t.id() == bt.Str and short) {
@@ -11436,11 +11512,24 @@ fn addrOfLocal(expr: *ir.Expr) bool {
     };
 }
 
+/// A place argument (`g[0]`) is read where the call takes it, inside the call. While a call holds a taken place
+/// (`takeGlobal`), the place is empty there, so a place that is not part of a local is registered as a pending operand:
+/// `finishGlobalTake` then reads it into a local before the value moves (`g.append(g[0])`). Only for a value that
+/// needs no copy and no destructor. A borrow can not be held in a local (`seqPush`).
+pub fn seqPushTakeArg(c: *cy.Chunk, slot: **ir.Expr, node: *ast.Node) !void {
+    const take = c.global_take orelse return;
+    if (take.done) return;
+    if (argReadsNoGlobal(slot.*)) return;
+    if (slot.*.type.isManaged()) return;
+    try seqPush(c, slot, false, node);
+}
+
 /// Called when the arguments of the call that took a place (`takeGlobal`) are matched, while they are still pending
 /// operands: the statements here evaluate them into locals first (`seqFlush`). Then the value of the place and the
 /// empty value of the hidden local change places.
 /// `args` and `nodes` are the arguments after the receiver. An argument that can not be held in a local (a borrow,
-/// a place) is evaluated inside the call, where the place is empty: it is an error for it to read the place.
+/// a place of a managed value) is evaluated inside the call, where the place is empty: it is an error for it to read
+/// the place.
 pub fn finishGlobalTake(c: *cy.Chunk, args: []const *ir.Expr, nodes: []const *ast.Node) !void {
     var take = c.global_take orelse return;
     if (take.done) return;
@@ -11461,11 +11550,11 @@ pub fn finishGlobalTake(c: *cy.Chunk, args: []const *ir.Expr, nodes: []const *as
     take.done = true;
     c.global_take = take;
 
-    const path = placePath(c.ast.nodeString(node));
+    const path = placePath(c.nodeString(node));
     for (args, nodes) |arg, arg_n| {
         if (argReadsNoGlobal(arg)) continue;
-        if (mentionsPlace(c.ast.nodeString(arg_n), path)) {
-            return c.reportErrorFmt("The method takes `{}` out while it runs, so this argument can not read `{}`. Read it into a local first.", &.{v(c.ast.nodeString(node)), v(path)}, arg_n);
+        if (mentionsPlace(c.nodeString(arg_n), path)) {
+            return c.reportErrorFmt("The method takes `{}` out while it runs, so this argument can not read `{}`. Read it into a local first.", &.{v(c.nodeString(node)), v(path)}, arg_n);
         }
     }
 }
@@ -11796,15 +11885,21 @@ pub fn semaNop(c: *cy.Chunk, label: []const u8, node: *ast.Node) !void {
 }
 
 pub fn semaWrapSome(c: *cy.Chunk, option_t: *cy.types.Option, res: ExprResult, node: *ast.Node) !ExprResult {
-    var owned = try semaOwn(c, res, node);
+    // `?&T` and an option of a borrow container borrow from what the payload borrows from.
+    const owner: ?LocalId = if (option_t.base.info.borrow_only) borrowOwner(c, res) else null;
+    const owned = try semaOwn(c, res, node);
+    var some: ExprResult = undefined;
     if (option_t.zero_union) {
-        owned = try semaBitcast(c, owned, &option_t.base, node);
-        owned.owned = true;
-        return owned;
+        some = try semaBitcast(c, owned, &option_t.base, node);
+        some.owned = true;
     } else {
         const tag = try c.semaConst(1, c.sema.i64_t, node);
-        return semaInit2(c, &option_t.base, tag, owned, node);
+        some = try semaInit2(c, &option_t.base, tag, owned, node);
     }
+    if (owner != null and some.resType == .value) {
+        some.data.value.parent_local = owner;
+    }
+    return some;
 }
 
 pub fn semaInitCunionCase(c: *cy.Chunk, union_t: *cy.Type, case: u32, payload: ExprResult, node: *ast.Node) !ExprResult {
@@ -13532,7 +13627,7 @@ fn semaExprTemplate(c: *cy.Chunk, node: *ast.Node, template: *cy.sym.Template, e
             hint = std.fmt.bufPrint(&suggest_buf, " `.?` and `?else` handle a `?T`. For `{s}`, use `!` or `!else`.", .{type_name}) catch "";
         } else if (else_ctx != null and res.type.id() != bt.Never) {
             // `s.ends_with('a') ?else false`: the value can not be `none`, so the default is never used.
-            const default_src: []const u8 = if (else_ctx.?.default_n) |n| c.ast.nodeString(n) else "";
+            const default_src: []const u8 = if (else_ctx.?.default_n) |n| c.nodeString(n) else "";
             if (default_src.len > 0 and default_src.len <= 40 and std.mem.indexOfScalar(u8, default_src, '\n') == null) {
                 hint = std.fmt.bufPrint(&suggest_buf, " This value is `{s}`, not an option. Remove `?else {s}`.", .{type_name, default_src}) catch "";
             } else if (else_ctx.?.default_n != null) {

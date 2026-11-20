@@ -198,3 +198,59 @@
   `NotADirectory` · `OutOfMemory` · `InvalidArgument` · `Unknown`은 그대로다.
 - 새 함수: `os.last_os_error()`(원래 코드), `os.from_errno(code)`, `os.from_win32_error(code)`, `os.last_error()`.
 - Windows 매핑은 실행으로 확인하지 못했다(빌드 · 테스트 환경 없음).
+
+## 0.4.15..HEAD 코드 리뷰에서 나온 수정 (2026-11-21)
+
+리뷰 범위는 `git diff 0.4.15...HEAD`. 재현한 결함 아홉(이번 범위에서 생긴 것 셋, 0.4.15부터 있던 것 셋, 사소한 것 셋)과, 고치며
+찾은 같은 계열 둘.
+
+### 빌림 검사
+
+- 배타 빌림을 담은 지역을 거쳐 만든 빌림을 지역에 담을 수 있었고, 해제된 메모리를 읽었다(이번 범위의 회귀). `r := &&f` 뒤
+  `s := &r.xs[0]`, `r.grow()`, `print(s.*)`가 쓰레기 값이었다. `q := &&r.xs`도 통과해 `r`과 `q`가 같은 값을 함께 바꿨다. 이제
+  0.4.15처럼 'Cannot borrow `f`. There is an active exclusive borrow to it.' · 'Expected exclusive access. There is another
+  active borrow to `f`.' 컴파일 오류다.
+- 규칙: 빌림 지역을 거친 재빌림은 그 문장 동안만 허용한다. `r.xs.append(1)`, `r.grow()`, `r.xs.len()`, `for r.xs |x|:`는 된다
+  (0.4.15에서는 `r.xs.append(1)`도 오류였다). 지역에 담으면(`s := ...`, `s = ...`) `r` 자신의 기록도 충돌로 센다
+  (`sema.checkBindBorrow`). 공유 빌림을 거친 공유 빌림(`a := &f` 뒤 `c := &a.xs[0]`), 빌림의 복사(`r2 := r`), 빌림 컨테이너의
+  빌림(`h := Holder{r=&&f}` 뒤 `p := &&h`)은 그대로 된다.
+- `scope` 메서드의 결과가 배타 빌림 지역을 거치면 주인을 잃었다(0.4.15부터). `fn (scope &Foo) first() -> scope &int`에서
+  `r := &&f` 뒤 `s := r.first()`의 `s`가 아무것도 빌리지 않은 것으로 기록돼 `r.grow()` 뒤에 읽혔다. `&&T → &T` 수신자 변환이
+  부모 지역을 버렸다(`sema_func.resolveRtArg`). 이제 위와 같은 오류다.
+- 빌림을 담은 값이 빌린 지역보다 오래 사는 길이 남아 있었다(0.4.15부터). 이제 모두 '`o` can not outlive `y`.' 컴파일 오류다:
+  - option으로 감싼 대입: `var o ?View = none` 뒤 안쪽 블록의 `o = View{a=&y}`, `var p ?&int` 뒤 `p = &z`.
+  - `if` 식의 결과: `r = if (c) &z else &x`. 두 갈래 중 먼저 끝나는 지역을 주인으로 본다.
+  - 필드 · 원소 대입: `o.v = View{a=&z}`, `o.a = &z`, `h.cb = fn() -> int => bz.* + 1`(`OpaqueFunc` 필드).
+  - 매개변수가 가리키는 값의 필드에 함수 안 지역의 빌림을 넣는 것: `fn (&&Outer) set(): z := 4; self.v = View{a=&z}`는
+    'The value behind `self` can not outlive `z`.' `scope` 매개변수의 빌림을 넣는 것(`self.v = View{a=p}`)은 된다.
+- 남은 한계는 `docs/decisions/project_borrow_model.md` "남은 것"에 적었다(빌림 컨테이너 안의 배타 빌림을 거친 빌림, 빌려 둔
+  채로 `&&T` 지역 · 매개변수를 값으로 넘기는 것, 빌려 둔 지역의 필드 대입).
+
+### 전역의 제자리 메서드
+
+- 다른 모듈의 템플릿 본문에서 전역이나 포인터 대상에 제자리 메서드를 부르면 컴파일러가 죽었다(0.4.15부터).
+  'panic: index out of bounds: index 508, len 132'. 템플릿 본문은 부른 쪽 chunk로 검사하는데, 오류 문구에 쓸 소스 조각을 그
+  chunk의 소스에서 잘랐다. 이제 노드가 속한 소스에서 자른다(`Chunk.nodeString`). sema의 다른 문구 · 힌트도 같은 함수를 쓴다.
+- `g.append(g[0])`이 컴파일 오류였다(0.4.15부터, 위 0.4.14..0.4.15 절의 규칙과 어긋남). 같은 전역의 원소 · 필드를 값으로 읽는
+  인자는 이제 꺼내기 전에 인자 순서대로 읽는다: `g.append(g[0])`, `g.insert(g[1], g[2])`. 오류로 남는 것은 전과 같이 같은
+  전역의 빌림(`g.append(g.span())`)뿐이다.
+
+### 표준 라이브러리 · 구문
+
+- `os.from_errno`가 C `int`에 들어가지 않는 코드에서 panic했다. `os.from_errno(4294967298)`이 'Lossy conversion from
+  `4294967298` to `i32`'였다. 이제 문서대로 `error.Unknown`이다. Windows의 `os.from_win32_error`도 `DWORD` 범위(0 ~
+  0xffffffff) 밖의 코드에 `error.Unknown`을 돌려준다(Windows 실행은 확인하지 못했다).
+- `spawn`과 `fiber` 식이 `-` · `!` · `~`의 피연산자가 되지 못했다. `-spawn add(1, 2).await()`가 'Expected term expr. Got:
+  spawn_k.'였다. 이제 `-(spawn add(1, 2).await())`로 읽는다(`not spawn ...`과 같다).
+
+### cyber-lsp
+
+- 워크스페이스 rename이 별칭으로 쓴 자리까지 새 이름으로 덮어썼다. `use tw = lib.twice` 뒤에 `twice`를 `double`로 바꾸면
+  `tw(2)`가 `double(2)`가 되어 'Undeclared variable `double`'이었다. `type Alias = Foo`의 `Alias{n=1}`도 같았다. 이제 옛
+  이름으로 쓴 자리만 바꾼다.
+- 별칭은 rename하지 않는다. 별칭의 쓰임에서는 '`tw` is an alias of `fn twice(n int) -> int`. Rename it in its declaration and
+  where it is used by hand.', type 별칭의 선언에서는 '`Alias` is a type alias, whose uses are not told apart from those of its
+  target. Rename it in its declaration and where it is used by hand.'로 `prepareRename`부터 거절한다. 전에는 type 별칭의 선언만
+  바뀌고 쓰임이 남았다.
+- 범위 포맷이 문서 끝의 빈 줄을 하나 남겼다(`x=1\n\n\n` → `x = 1\n\n`). 이제 전체 포맷처럼 모두 지우고, 줄바꿈 없이 끝나는
+  마지막 줄이 범위에 들면 줄바꿈을 붙인다.

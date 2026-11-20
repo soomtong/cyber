@@ -266,6 +266,16 @@ fn test_memory(run: *Runner) void {
     run.case("memory/closure_borrow_outlive_error.cy");
     run.case("memory/closure_borrow_scope.cy");
     run.case("memory/borrow_struct_lit_outlive_error.cy");
+    run.case("memory/borrow_store_outlive.cy");
+    run.case("memory/borrow_option_outlive_error.cy");
+    run.case("memory/borrow_if_expr_outlive_error.cy");
+    run.case("memory/borrow_field_outlive_error.cy");
+    run.case("memory/borrow_param_field_outlive_error.cy");
+    run.case("memory/closure_borrow_field_outlive_error.cy");
+    run.case("memory/reborrow_temp.cy");
+    run.case("memory/reborrow_bind_error.cy");
+    run.case("memory/reborrow_ex_bind_error.cy");
+    run.case("memory/reborrow_scope_result_bind_error.cy");
     run.case("memory/global_borrow_error.cy");
     run.case("memory/scope_param_missing_error.cy");
     run.case("memory/scope_too_many_params_error.cy");
@@ -364,6 +374,7 @@ fn test_modules(run: *Runner) void {
         run.case("modules/import_not_found_error.cy");
         run.case("modules/import_missing_sym_error.cy");
         run.case("modules/import_rel_path.cy");
+        run.case("modules/import_template_take.cy");
         run.case("modules/import_implied_rel_path.cy");
         run.case("modules/import_stmt_error.cy");
         run.case("modules/import_unresolved_rel_path.cy");

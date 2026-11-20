@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-20): 0.5 결정과 그 작업
+# HANDOFF (2026-11-21): 0.5 결정과 그 작업, 0.4.15..HEAD 리뷰 수정
 
 ## 목표
 
@@ -67,6 +67,10 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - [x] CI 시간 확인(2026-11-19): `project_fork_release_ci.md` "CI에서 잰 결과". 러너 사용 137 → 77분, 벽시계는 21분 그대로.
   arm64 macOS Debug 테스트(약 13분, 3코어라 병렬화 효과 없음)가 벽시계를 정한다.
 - [x] tars-agent `docs/TODO.md`에 다음 빌드에서 안내 105행을 고칠 항목(`4aae2ec`, tars-agent에 커밋됨).
+- [x] `/code-review high` 0.4.15..HEAD의 9건 수정(2026-11-21, 사용자: "결정을 위임합니다 ... 자잘한 거 모두 수정 ... 다음 패치
+  버전을 준비"). 목록과 동작 변화는 `docs/releases/unreleased.md` "0.4.15..HEAD 코드 리뷰에서 나온 수정", 발견 이슈 F-164 ~ F-166.
+  빌림 검사에 남긴 구멍(0.5 후보)은 `docs/decisions/project_borrow_model.md` "남은 것" 끝. tars-agent는 `docs/TODO.md` 31행에
+  덧붙였고 커밋하지 않았다.
 
 - [x] 0.4.15 릴리스(2026-11-18): 태그 `0.4.15` → `93a9ca4f`, `build-969-93a9ca4`, Latest, 에셋 15개(CI). `install.sh 0.4.15`를 임시
   경로에 설치해 버전 · 스크립트 · `cyber-lsp`의 여러 구문 오류 진단을 확인했다. `/usr/local`의 설치는 사용자가 다시 한다.

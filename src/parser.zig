@@ -4319,6 +4319,66 @@ pub const Parser = struct {
                     });
                 }
             },
+            // `fiber` and `spawn` are tight terms, so that a prefix operator takes one: `-spawn f(x).await()` is
+            // `-(spawn f(x).await())`.
+            .fiber_k => {
+                self.advance();
+                if (self.peek().tag() == .colon) {
+                    // `fiber:` with a body. The body is a lambda with no parameters.
+                    const sig_end = self.next_pos;
+                    self.advance();
+
+                    try self.pushBlock();
+                    const stmts = try self.parseSingleOrIndentedBodyStmts();
+                    _ = self.popBlock();
+
+                    const lambda = try self.ast.newNodeErase(.lambda_multi, .{
+                        .params = &.{},
+                        .sig_t = .func,
+                        .stmts = stmts,
+                        .src = self.ast.src_id,
+                        .pos = self.tokenPos(start),
+                        .ret = null,
+                        .sig_end = self.tokenPos(sig_end) + 1,
+                    });
+                    return self.ast.newNodeErase(.fiber_expr, .{
+                        .child = lambda,
+                        .src = self.ast.src_id,
+                        .pos = self.tokenPos(start),
+                    });
+                }
+                const child = (try self.parseEntryCall()) orelse {
+                    return self.reportErrorAt("Expected a function call after `fiber`.", &.{}, start);
+                };
+                if (child.cast(.callExpr).hasNamedArg) {
+                    return self.reportErrorAt("A `fiber` call can not have named arguments.", &.{}, start);
+                }
+                const node = try self.ast.newNodeErase(.fiber_expr, .{
+                    .child = child,
+                    .src = self.ast.src_id,
+                    .pos = self.tokenPos(start),
+                });
+                return try self.parseTightTermWithLeft(node, .{});
+            },
+            .spawn_k => {
+                self.advance();
+                if (self.peek().tag() == .left_paren) {
+                    // The old form `spawn(f, {a, b})` was a function that took the arguments as a tuple.
+                    return self.reportErrorAt("Expected a function call after `spawn`: `spawn f(a, b)`. The form `spawn(f, {a, b})` was replaced.", &.{}, start);
+                }
+                const child = (try self.parseEntryCall()) orelse {
+                    return self.reportErrorAt("Expected a function call after `spawn`.", &.{}, start);
+                };
+                if (child.cast(.callExpr).hasNamedArg) {
+                    return self.reportErrorAt("A `spawn` call can not have named arguments.", &.{}, start);
+                }
+                const node = try self.ast.newNodeErase(.spawn_expr, .{
+                    .child = child,
+                    .src = self.ast.src_id,
+                    .pos = self.tokenPos(start),
+                });
+                return try self.parseTightTermWithLeft(node, .{});
+            },
             .minus => {
                 self.advance();
                 const child = try self.parseTightTerm(.{});
@@ -4446,64 +4506,6 @@ pub const Parser = struct {
                     .expr = expr,
                     .pos = self.tokenPos(start),
                 });
-            },
-            .fiber_k => {
-                self.advance();
-                if (self.peek().tag() == .colon) {
-                    // `fiber:` with a body. The body is a lambda with no parameters.
-                    const sig_end = self.next_pos;
-                    self.advance();
-
-                    try self.pushBlock();
-                    const stmts = try self.parseSingleOrIndentedBodyStmts();
-                    _ = self.popBlock();
-
-                    const lambda = try self.ast.newNodeErase(.lambda_multi, .{
-                        .params = &.{},
-                        .sig_t = .func,
-                        .stmts = stmts,
-                        .src = self.ast.src_id,
-                        .pos = self.tokenPos(start),
-                        .ret = null,
-                        .sig_end = self.tokenPos(sig_end) + 1,
-                    });
-                    return self.ast.newNodeErase(.fiber_expr, .{
-                        .child = lambda,
-                        .src = self.ast.src_id,
-                        .pos = self.tokenPos(start),
-                    });
-                }
-                const child = (try self.parseEntryCall()) orelse {
-                    return self.reportErrorAt("Expected a function call after `fiber`.", &.{}, start);
-                };
-                if (child.cast(.callExpr).hasNamedArg) {
-                    return self.reportErrorAt("A `fiber` call can not have named arguments.", &.{}, start);
-                }
-                const node = try self.ast.newNodeErase(.fiber_expr, .{
-                    .child = child,
-                    .src = self.ast.src_id,
-                    .pos = self.tokenPos(start),
-                });
-                return try self.parseTightTermWithLeft(node, .{});
-            },
-            .spawn_k => {
-                self.advance();
-                if (self.peek().tag() == .left_paren) {
-                    // The old form `spawn(f, {a, b})` was a function that took the arguments as a tuple.
-                    return self.reportErrorAt("Expected a function call after `spawn`: `spawn f(a, b)`. The form `spawn(f, {a, b})` was replaced.", &.{}, start);
-                }
-                const child = (try self.parseEntryCall()) orelse {
-                    return self.reportErrorAt("Expected a function call after `spawn`.", &.{}, start);
-                };
-                if (child.cast(.callExpr).hasNamedArg) {
-                    return self.reportErrorAt("A `spawn` call can not have named arguments.", &.{}, start);
-                }
-                const node = try self.ast.newNodeErase(.spawn_expr, .{
-                    .child = child,
-                    .src = self.ast.src_id,
-                    .pos = self.tokenPos(start),
-                });
-                return try self.parseTightTermWithLeft(node, .{});
             },
             .move_k => {
                 self.advance();

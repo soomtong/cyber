@@ -294,4 +294,9 @@ f17 := fiber grow_with_borrow(grown)
 test.eq(f17.resume(), .done)
 test.eq(grown.*, 4)
 
+-- A prefix operator takes the whole `fiber` term: `!fiber f().waiting()` is `!(fiber f().waiting())`.
+fn idle():
+    pass
+test.eq(true, !fiber idle().waiting())
+
 --cytest: pass

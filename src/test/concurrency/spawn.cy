@@ -47,6 +47,12 @@ test.eq(45, f1.await())
 test.eq(55, (spawn entry2(11)).await())
 test.eq(90, spawn entry2(10).await() * 2)
 
+-- A prefix operator takes the whole `spawn` term: `-spawn f(x).await()` is `-(spawn f(x).await())`.
+test.eq(-45, -spawn entry2(10).await())
+test.eq(false, !spawn echo_bool(true).await())
+test.eq(false, not spawn echo_bool(true).await())
+test.eq(10, 100 - spawn entry2(10).await() * 2)
+
 -- A method through its type, and a lambda in a local.
 test.eq(12, spawn Job.work(Job{n = 3}, 4).await())
 inc := fn(n int) -> int => n + 1

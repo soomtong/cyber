@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-20): `spawn f(args)` 호출식 꼴
+# HANDOFF (2026-11-20): 0.5 결정과 그 작업
 
 ## 목표
 
@@ -13,6 +13,9 @@
 - 2026-11-20: 남은 LSP 항목인 토크나이저 `ignoreErrors` 결함(사용자: "continue").
 - 2026-11-20: 기술 부채 중 carry 재시도 루프의 IR 되돌리기(사용자가 넷 중에서 고름).
 - 2026-11-20: 0.5 범위 결정(사용자: "권고대로 진행해"): `spawn f(args)`는 넣고 `CL_YIELD`는 뺀다.
+- 2026-11-20: 남은 사용자 결정(사용자가 질문에 답함): 정렬 안 A는 조사만, core `@eq` choice는 0.5에, CI arm64 macOS Debug step은
+  뺌, 표준 오류 어휘(설계 원칙 1.7 A)는 0.5에 호환성 절로(언어 별칭 없음), 1.7 C는 1단계(인스턴스화 경로 오류 문구)만 0.5 전,
+  2.7은 권고대로(정체성 문서화, 마지막 사용 분석은 0.5 뒤 첫 과제, 첫 소비자 C). 기록은 각 결정 문서의 "결정(2026-11-20" 줄.
 
 ## 현재 브랜치
 
@@ -63,17 +66,11 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
     목록은 `docs/releases/unreleased.md` "rename · 매개변수 이름 inlay의 리뷰 수정".
 - [x] CI 시간 확인(2026-11-19): `project_fork_release_ci.md` "CI에서 잰 결과". 러너 사용 137 → 77분, 벽시계는 21분 그대로.
   arm64 macOS Debug 테스트(약 13분, 3코어라 병렬화 효과 없음)가 벽시계를 정한다.
-- [ ] 사용자 결정: arm64 macOS의 Debug 테스트 step을 뺄지(예상 벽시계 11~13분, 같은 타깃의 Debug 검사를 CI에서 잃음).
 - [x] tars-agent `docs/TODO.md`에 다음 빌드에서 안내 105행을 고칠 항목(`4aae2ec`, tars-agent에 커밋됨).
 
 - [x] 0.4.15 릴리스(2026-11-18): 태그 `0.4.15` → `93a9ca4f`, `build-969-93a9ca4`, Latest, 에셋 15개(CI). `install.sh 0.4.15`를 임시
   경로에 설치해 버전 · 스크립트 · `cyber-lsp`의 여러 구문 오류 진단을 확인했다. `/usr/local`의 설치는 사용자가 다시 한다.
 - [ ] tars-agent 의존을 0.4.15로 올리기는 tars-agent 쪽 일(TODO 항목).
-- [ ] 사용자 결정 대기(이전부터):
-  - 정렬: pinned closure(안 A), 키 정렬, 인자 없는 `sort()`의 원소 조건. `project_sort_closures.md` "결정할 것".
-  - core `@eq`의 choice 지원(`?json.Value == none`).
-  - 설계 원칙 검토(`docs/study/11-design-principles-review.md`) 1.7 · 2.7.
-  - (0.5 범위는 2026-11-20 결정: `spawn f(args)` 넣음, `CL_YIELD` 뺌. `project_coroutines.md` 끝 절)
 - [x] LSP 범위 포맷 · call hierarchy · 본문 안 문장 단위 복구(2026-11-19). 설계 · 확인은 LSP 설계 문서 15 · 16절.
   - 범위 포맷: `assist.lineEdits`(포맷터는 줄을 합치거나 나누지 않고 빈 줄만 줄인다).
   - call hierarchy: 서버만(`onPrepareCallHierarchy` · `onIncomingCalls` · `onOutgoingCalls`), 해석 기록과 outline으로.
@@ -94,7 +91,15 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - [x] `spawn f(args)`(2026-11-20, 깨지는 변경): `spawn`은 키워드, `sema.semaSpawnExpr`가 core `@spawn(f, {args})`로 푼다.
   `spawn` · `fiber`는 첫 호출까지만 받는다(`Parser.parseEntryCall`, `stop_after_call`). 결정은 `project_coroutines.md` 끝 절,
   사용자 문구는 `unreleased.md` 끝 절. tars-agent에는 옛 꼴이 `spike/s1`에만 있어 쓰지 않았다.
-- [ ] 0.5 릴리스 준비(사용자 지시 때). 남은 사용자 결정(정렬 · `@eq` choice · 설계 원칙 1.7 · 2.7 · CI arm64 Debug step)을 먼저 묻는다.
+- [x] 결정 기록 · CI arm64 Debug step 뺌(`1bc5426e`, 벽시계는 다음 push의 run에서 본다).
+- [x] core `@eq`의 choice(`064afc9f`): case 비교 뒤 payload `==`. `?json.Value == none`이 된다.
+- [x] 정렬 안 A 조사(`9fe2d097`, `project_sort_closures.md` "안 A 조사"): 스택 이동은 F-136으로 이미 안전.
+- [x] 그 조사에서 찾은 F-162 · F-163(`17bf7879`): `OpaqueFunc`를 빌림 컨테이너로, 람다 · 구조체 · 튜플 리터럴에 주인
+  (`sema.shorterOwner`), 빌림 타입 전역 거절, 빌림 지역 재빌림은 자기 기록을 뺌(`sema.otherBorrows`), pinned closure 해제
+  (`@freePinnedClosure`).
+- [ ] 1.7 C 1단계: 템플릿 특수화 중 난 오류에 인스턴스화 경로(어디서 특수화했는지)를 붙인다.
+- [ ] 1.7 A: 표준 오류 어휘(`errors` 모듈 가칭, `from_errno` 등, `os.fromErrno`의 `eprint` 제거). 옛 이름은 호환성 절로.
+- [ ] 0.5 릴리스(사용자 지시 때).
 - [ ] 기술 부채(급하지 않음): `@destruct_span` 취소 keep 지점(쓰게 되면), `Scope.run`의 바퀴당 `waiting()` 질의(준비 큐 ·
   futex식 대기 표, fiber 수 비용이 문제가 되면), 취소 불변식 panic(닿는 경로 없음). 기록은 `project_coroutines.md`.
 

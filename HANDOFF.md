@@ -36,6 +36,10 @@
   - 확인: `zig build test` Debug · ReleaseSafe 통과(behavior 558개, LSP 41개).
 - [x] CI 시간 줄이기(2026-11-18). 원인 넷과 고친 것은 `project_fork_release_ci.md` "CI 시간 줄이기". CI에서의 수치는 push 뒤에 본다.
 
+- [x] 매뉴얼 예제 포맷(2026-11-20, 사용자: "A+B 진행해줘"): `docs.md` · `agent-guide.md`의 `cy` 블록을 `cyber fmt`로(A),
+  구문 오류였던 매뉴얼 예제 일곱 곳과 코드가 아닌 `cy` 블록 다섯 개(B). 기록은 `project_fmt.md` "매뉴얼 예제에 적용",
+  `unreleased.md` "매뉴얼 예제 코드". 하지 않은 것(C · D · E): study · specs · decisions 블록, 본문 인라인 코드, 문서 블록 `fmt --check` 검사.
+
 ## 시도했으나 실패한 접근
 
 - `+=` 경로에서 받는 쪽을 `semaExpr`로 읽으면 복사본에 append한다(이중 해제). 메서드 호출처럼 `semaExprSkipSym`을 써야 한다.
@@ -113,7 +117,7 @@
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-161까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-163까지, 열린 것은 F-162 `+..` 포맷 · F-163 비ASCII 오류 메시지).
 
 ## 작업 방식
 

@@ -98,4 +98,6 @@
   `}` 누락 두 줄, `self.radius^2`(`**`), `fn sum(...) -> int` 끝의 `:` 누락, `use Vec2 -> eng.Vector2`(별칭은
   `use Vec2 = eng.Vector2`), `fnsym` 절의 `IntMap`. `IntMap`은 const 매개변수 자리에 `fnsym(K) -> int`를 바로 쓸 수 없어
   (`Expected type specifier.`) `type HashFn[K Any] = fnsym(K) -> int`를 거치게 바꾸고 실행되는 예제로 다시 썼다.
+- `docs/docs.md` · `docs/agent-guide.md`의 예제를 `cyber fmt` 모양으로 바꿨다(70개 블록). 대부분 리터럴 필드의 `=` 양쪽 공백이다:
+  `Vec2{x=1}` → `Vec2{x = 1}`. 동작은 같다.
 - 코드가 아닌데 `cy`로 표시돼 있던 블록(API 요약 표, 발췌, 좌우 비교) 다섯 개를 `text`로 바꿨다(decisions · study 문서).

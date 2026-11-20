@@ -240,7 +240,7 @@ for 'the cat and the hat'.split(' ') |w|:
 
 rows := []WordCount{}
 for counts |e|:
-    rows += WordCount{word=e.key, n=e.value}
+    rows += WordCount{word = e.key, n = e.value}
 rows.sort(|a, b| a.n > b.n or (a.n == b.n and a.word < b.word))
 for rows |r|:
     print('%{r.word}: %{r.n}')
@@ -259,7 +259,7 @@ fn (&&Account) deposit(n int):
 fn (&Account) summary() -> str:
     return '%{self.name}: %{self.balance}'
 
-a := Account{name='kim'}
+a := Account{name = 'kim'}
 a.deposit(50)
 b := a
 b.deposit(1)

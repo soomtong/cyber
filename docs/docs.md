@@ -195,7 +195,7 @@ fn foo():
         -- New `a` declared.
         a := 345
 
-        print(a) 
+        print(a)
         --> 345
 
     print(a)
@@ -415,7 +415,7 @@ a || b
 -- exclusive or: any underlying bits that are set in either integer a or integer b but not both are set in the new integer.
 a ~ b
 
--- logical right shift: a's bits are shifted b bits to the least significant end. 
+-- logical right shift: a's bits are shifted b bits to the least significant end.
 a >> b
 
 -- arithmetic right shift: like `>>` but the sign bit fills the vacated bits. `(-8).asr(1)` is `-4`, `-8 >> 1` is a large positive integer.
@@ -557,7 +557,7 @@ var b byte = 'a'
 Strings and other values can be converted to a `int` using the type as a function:
 ```cy
 a := '123'
-b := int(a) 
+b := int(a)
 ```
 `int(s)` gives 0 for a string that is not a number. To check the string, use `int.parse`, which returns `!int` and gives
 `error.InvalidCharacter` or `error.Overflow`:
@@ -588,7 +588,7 @@ var a float = 123
 Strings and other values can be converted to a `float` using the type as a function:
 ```cy
 a := '12.3'
-b := float(a) 
+b := float(a)
 ```
 `float(s)` also gives 0 for a string that is not a number. `float.parse` (and `f32.parse`) returns `!float` and gives
 `error.InvalidCharacter` instead. It reads `'1.5'`, `'-2'`, `'1e3'`, `'inf'` and `'nan'`, and does not allow spaces around the number:
@@ -773,17 +773,17 @@ type Point:
 type Shape enum:
     case circle int
     case empty
-print(Point{x=1, y=2})              --> Point{x=1, y=2}
-print(Shape.circle(5))              --> Shape.circle(5)
-print(Shape.empty)                  --> Shape.empty
-print([]str{'a', 'b'})              --> {'a', 'b'}
-print('%{[]Point{Point{x=1, y=2}}}') --> {Point{x=1, y=2}}
+print(Point{x = 1, y = 2})               --> Point{x=1, y=2}
+print(Shape.circle(5))                   --> Shape.circle(5)
+print(Shape.empty)                       --> Shape.empty
+print([]str{'a', 'b'})                   --> {'a', 'b'}
+print('%{[]Point{Point{x = 1, y = 2}}}') --> {Point{x=1, y=2}}
 ```
 A reference prints its type name (`^Point`) and a `Ptr` prints its address.
 
 `Map` and `Array` can not be passed by value, so pass a borrow. A borrowed `Map` renders its entries, a borrowed `Array` or `ArrayStore` its elements, and any other borrow the value it borrows:
 ```cy
-m := Map[str, int]{a=1}
+m := Map[str, int]{a = 1}
 a := Array[int]{1, 2}
 print(&m)                           --> {'a': 1}
 print(&a)                           --> {1, 2}
@@ -792,7 +792,7 @@ print('%{&Point{x=1, y=2}}')        --> Point{x=1, y=2}
 
 `dump` and `dump_str` render the same values over several lines for inspection. Each struct field or sequence element takes its own line, slices and vectors carry their type name, and scalars render like `print`:
 ```cy
-dump([]Point{Point{x=1, y=2}})
+dump([]Point{Point{x = 1, y = 2}})
 --> []Point{
 -->   Point{
 -->     x: 1
@@ -882,7 +882,7 @@ print(ref.*)      --> 123
 
 If a value was intended to be initialized on the heap, it's usually constructed with the lift operator `^`. This avoids a copy of the underlying value:
 ```cy
-pos := ^Vec2{x=4, y=5}
+pos := ^Vec2{x = 4, y = 5}
 ```
 
 ## Optionals.
@@ -1216,19 +1216,19 @@ The default functions accept these key types: `str`, integers (`Int` and `Raw` o
 
 Maps are constructed with the initializer expression:
 ```cy
-map := Map[str, int]{a=123, b=234}
+map := Map[str, int]{a = 123, b = 234}
 ```
 
 The initializer literal can infer the target map type:
 ```cy
-var map Map[str, int] = {a=123, b=234}
+var map Map[str, int] = {a = 123, b = 234}
 ```
 
 A key is written `key=value`, not `key: value`. A name as a key is a string (`{a=1}` has the key `'a'`). A key in parentheses is an expression:
 ```cy
 k := 'name'
-map := Map[str, int]{(k)=1, (k + '2')=2, 'my key'=3}
-ids := Map[int, str]{1='one', (1 + 1)='two'}
+map := Map[str, int]{(k) = 1, (k + '2') = 2, 'my key' = 3}
+ids := Map[int, str]{1 = 'one', (1 + 1) = 'two'}
 ```
 
 A map literal needs a target type. `{a=1}` alone is a compile error.
@@ -1408,24 +1408,24 @@ Field names are unique in a type. Declaring a second field with the same name is
 ### Initialize struct.
 Structs are constructed from an initializer expression:
 ```cy
-v := Vec2{x=30, y=40}
+v := Vec2{x = 30, y = 40}
 print(v.x)      --> 30
 ```
 
 An initializer literal can infer the target struct type:
 ```cy
-var v Vec2 = {x=30, y=40}
+var v Vec2 = {x = 30, y = 40}
 ```
 
 Every entry of a struct initializer is a `name = value` pair. An entry without a field name is a compile error:
 ```cy
-v := Vec2{x=30, 40}
+v := Vec2{x = 30, 40}
 --> error: Expected key value pair.
 ```
 
 Structs by default are copyable (unless a child member is not):
 ```cy
-v := Vec2{x=30, y=40}
+v := Vec2{x = 30, y = 40}
 w := v
 v.x = 100
 print(w.x)     --> 30
@@ -1450,8 +1450,8 @@ Unlike a `struct`, a `cstruct` can default to their [zero values](#zero-values).
 Fields have public visibility by default. However, when a field is declared with a `-` prefix, the field can only be accessed within the same module (although metaprogramming can get around this constraint):
 ```cy
 type Info:
-    a       int
-    -b      int
+    a int
+    -b int
     -secret str
 ```
 The module is the file that declares the type. From another module, reading, assigning or initializing a private field (`Info{a=1, b=2}`), also through a borrow or pointer, is a compile error: `Can not access the private field `b` in `Info`.` A type that other modules need to initialize gives its private fields a default value. A `persist_main` session (the REPL) counts as one module.
@@ -1460,17 +1460,17 @@ The module is the file that declares the type. From another module, reading, ass
 Field declarations may have circular type references if the struct can be initialized:
 ```cy
 type Node:
-    val  int
+    val int
     next ?^Node
 
-n := Node{val=123, next=none}
+n := Node{val = 123, next = none}
 ```
 In the above example, `next` has an optional `?^Node` reference type so it can be initialized to `none` when creating a new `Node` instance.
 
 The following `Node` type reports an error because it can not be initialized:
 ```cy
 type Node:
-    val  int
+    val int
     next Node     --> CompileError. Circular reference.
 ```
 
@@ -1487,7 +1487,7 @@ fn (&Base) double() -> int:
 type Container:
     b use Base
 
-c := Container{b = Base{a=123}}
+c := Container{b = Base{a = 123}}
 print(c.a)
 --> 123
 print(c.double())
@@ -1503,7 +1503,7 @@ type Container:
     a int
     b use Base
 
-c := Container{a=999, b = Base{a=123}}
+c := Container{a = 999, b = Base{a = 123}}
 print(c.a)
 --> 999
 print(c.double())
@@ -1524,7 +1524,7 @@ type Vec2:
     y float
 
 fn Vec2 :: @init(x int, y int) -> Self:
-    return Vec2{x=x, y=y}
+    return Vec2{x = x, y = y}
 
 v := Vec2(1, 2)
 ```
@@ -1551,7 +1551,7 @@ fn MyMap :: @init_record(init [&]Pair[str, int]) -> Self:
     print(init.len())
     return meta.init_type(MyMap, {})
 
-map := MyMap{a=123, b=234, c=345}
+map := MyMap{a = 123, b = 234, c = 345}
 --> 3
 ```
 
@@ -1562,7 +1562,7 @@ They are declared by specifying the receiver's type before the function name and
 ```cy
 type Node:
     value int
-    next  ?^Node
+    next ?^Node
 
 fn (&Node) inc(n int):
     self.value += n
@@ -1571,7 +1571,7 @@ fn (&Node) inc(n int):
 fn (&Node) inc_one():
     self.value += 1
 
-n := Node{value=123, next=none}
+n := Node{value = 123, next = none}
 n.inc(321)    --> 445
 ```
 
@@ -1634,10 +1634,10 @@ fn (&Vec2) `+`(o Vec2) -> Vec2:
     }
 
 fn (&Vec2) `-`() -> Vec2:
-    return {x=-self.x, y=-self.y}
+    return {x = -self.x, y = -self.y}
 
-a := Vec2{x=1, y=2}
-b := a + Vec2{x=3, y=4}
+a := Vec2{x = 1, y = 2}
+b := a + Vec2{x = 3, y = 4}
 c := -a
 ```
 
@@ -1650,9 +1650,9 @@ fn (&MyCollection) @index(idx int) -> int:
     return self.arr[idx * 2]
 
 fn (&MyCollection) @set_index(idx int, value int):
-    self.arr[idx * 2] = val 
+    self.arr[idx * 2] = val
 
-a := MyCollection{arr={1, 2, 3, 4}}
+a := MyCollection{arr = {1, 2, 3, 4}}
 print(a[1])
 --> 3
 ```
@@ -1746,7 +1746,7 @@ var v Vec2 = {3, 4}
 
 Tuples can still be initialized with explicit field names:
 ```cy
-v := Vec2{x=3, y=4}
+v := Vec2{x = 3, y = 4}
 ```
 
 ## Type namespace.
@@ -1755,10 +1755,10 @@ Functions and other symbols (except types) can be declared within the type's nam
 ```cy
 type Node:
     value int
-    next  ?^Node
+    next ?^Node
 
 fn Node :: @init() -> Self:
-    return Node{value=123, next=none}
+    return Node{value = 123, next = none}
 
 const Node :: DefaultValue = 100
 
@@ -1777,7 +1777,7 @@ type Vec2:
 
 type Pos2 = Vec2
 
-pos := Pos2{x=3, y=4}
+pos := Pos2{x = 3, y = 4}
 ```
 
 ## Enums.
@@ -1825,10 +1825,10 @@ A choice type is an exhaustive type where only one defined case can be active. E
 ```cy
 type Shape enum:
     case rectangle Rectangle
-    case circle    Circle
-    case triangle  Triangle
-    case line      float
-    case point 
+    case circle Circle
+    case triangle Triangle
+    case line float
+    case point
 
 type Circle(radius float)
 type Rectangle(width, height float)
@@ -1838,11 +1838,11 @@ type Triangle(base, height float)
 ### Initialize choice.
 A choice can be initialized with the case payload as an argument:
 ```cy
-rect := Rectangle{width=10, height=20}
+rect := Rectangle{width = 10, height = 20}
 s := Shape.rectangle(rect)
 
 -- Alternatively.
-s = Shape.rectangle({width=10, height=20})
+s = Shape.rectangle({width = 10, height = 20})
 
 s = Shape.line(20)
 ```
@@ -1905,7 +1905,7 @@ fn (&Circle) area() -> float:
 
 type Rectangle:
     with Shape
-    width  float
+    width float
     height float
 
 fn (&Rectangle) area() -> float:
@@ -1916,10 +1916,10 @@ A type that intends to implement a trait but does not satisfy the trait's interf
 ### Dynamic dispatch.
 Since traits are a generic type, they need to be wrapped in a `Dyn` container to be materialized into a dynamic dispatch value. Implementing types become assignable to a `Dyn` reference type:
 ```cy
-var s ^Dyn[Shape] = ^Circle{radius=2}
+var s ^Dyn[Shape] = ^Circle{radius = 2}
 print(s.area())       --> 12.57
 
-s = ^Rectangle{width=4, height=5}
+s = ^Rectangle{width = 4, height = 5}
 print(s.area())       --> 20
 ```
 
@@ -1939,7 +1939,7 @@ Type declarations can include template parameters.
 Unlike function parameters, template parameters accept types rather than values of types by default. The type provided is constrained by a **generic** type specifier. The `Any` generic type allows any type:
 ```cy
 type MyContainer[T Any]:
-    id    int
+    id int
     value T
 
 fn (&MyContainer[]) get() -> T:
@@ -1948,7 +1948,7 @@ fn (&MyContainer[]) get() -> T:
 
 When the type template is expanded, a variant of the type is generated:
 ```cy
-a := MyContainer[str]{id=123, value='abc'}
+a := MyContainer[str]{id = 123, value = 'abc'}
 print(a.get())     --> abc
 ```
 Expanding the template with the same parameters returns the same generated type. In other words, the generated type is always memoized from the input parameters.
@@ -1973,7 +1973,7 @@ fn (&Tag[]) name() -> str:
     #else:
         return S
 
-t := Tag['warn', .high]{v=1}
+t := Tag['warn', .high]{v = 1}
 print(t.name())               --> warn!
 print(type.name(Tag['warn', .high]))   --> Tag['warn', Lvl.high]
 ```
@@ -2066,7 +2066,7 @@ false or true    --> true
 false or false   --> false
 
 a := 10
-if a == 20 or a == 10: 
+if a == 20 or a == 10:
     print('a is 10 or 20')
 ```
 
@@ -2097,7 +2097,7 @@ while running:
 `for` loops can iterate over a range that starts at an `int` (inclusive) to a target `int` (exclusive):
 ```cy
 for 0..4:
-    performAction() 
+    performAction()
 ```
 
 The loop's counter variable can be captured:
@@ -2132,7 +2132,7 @@ The values come first and the name goes in `|_|`. `for n |{1, 2}|:` is a parse e
 
 Iterating a `Map` yields `MapEntry` values:
 ```cy
-map := Map[str, int]{a=123, b=234}
+map := Map[str, int]{a = 123, b = 234}
 
 for map |entry|:
     print(entry.key)
@@ -2194,7 +2194,7 @@ A switch statement requires an `else` case unless the type is [`exhaustive`](#en
 ### `case` range.
 Case ranges can be declared for integer types. Unlike other range clauses, a case range's last value is inclusive:
 ```cy
-val := 50 
+val := 50
 switch val:
     case 0..100:
         print('at or between 0 and 100')
@@ -2221,10 +2221,10 @@ switch val:
 The result of a `switch` statement can be assigned to a variable. Each case must return an expression:
 ```cy
 shu := switch pepper:
-    case 'bell'     => 0
-    case 'anaheim'  => 500
+    case 'bell' => 0
+    case 'anaheim' => 500
     case 'jalapeño' => 2000
-    case 'serrano'  => 10000
+    case 'serrano' => 10000
     else => -1
 ```
 
@@ -2236,7 +2236,7 @@ a := 123
 begin:
     a := 234
     print(a)
-    --> 234    
+    --> 234
 
 print(a)
 --> 123
@@ -2284,7 +2284,7 @@ use math
 fn dist(x0, y0, x1, y1 float) -> float:
     dx := x0 - x1
     dy := y0 - y1
-    return math.sqrt(dx**2 + dy**2)
+    return math.sqrt(dx ** 2 + dy ** 2)
 ```
 
 Functions can not reference outside local variables unless it's a [lambda](#lambdas):
@@ -2368,12 +2368,12 @@ print(sq_dist(dist, 30))
 
 type DistFn = fn(float, float, float, float) -> float
 fn sq_dist(dist DistFn, size float) -> float:
-    return dist(0, 0, size, size) 
+    return dist(0, 0, size, size)
 
 fn dist(x0, y0, x1, y1 float) -> float:
     dx := x0 - x1
     dy := y0 - y1
-    return math.sqrt(dx**2 + dy**2)    
+    return math.sqrt(dx ** 2 + dy ** 2)
 ```
 
 ### Lambdas.
@@ -2462,7 +2462,7 @@ func(10, 20)       --> 35
 
 A parameter of type `&OpaqueFunc[FN]` (such as the `less` function of `sort`) takes a function, a lambda, or a closure that captures `^T` or `&T` variables. A local variable that is not a reference can not be captured yet: borrow it first.
 ```cy
-counts := Map[str, int]{app=7, db=8, web=23}
+counts := Map[str, int]{app = 7, db = 8, web = 23}
 c := &counts
 names := counts.keys()
 names.sort(|a, b| c[a] > c[b])    -- {'web', 'db', 'app'}
@@ -2625,7 +2625,7 @@ a := 123
 -- Deinit `a`.
 a = 234
 
-b := Foo{a=123}
+b := Foo{a = 123}
 
 -- Deinit `b.a`.
 b.a = 234
@@ -2665,7 +2665,7 @@ type MyArray:
 fn (&MyArray) @copy() -> Self:
     new_buf := alloc(byte, self.len)
     c.memcpy(new_buf.ptr, self.ptr, self.len)
-    return {ptr=new_buf.ptr, len=self.len}
+    return {ptr = new_buf.ptr, len = self.len}
 ```
 
 A type that implements the `NoCopy` trait prevents implicit copying:
@@ -2675,7 +2675,7 @@ type Foo:
 
     a int
 
-f := Foo{a=123}
+f := Foo{a = 123}
 
 g := f
 --> error: `Foo` is not copyable.
@@ -2683,10 +2683,10 @@ g := f
 
 An `Array` can hold elements that are not copyable. The elements are moved into the array, read by borrow and deinitialized once:
 ```cy
-a := Array[Foo]{Foo{a=1}, Foo{a=2}}   -- A literal moves its elements.
-f := Foo{a=3}
-a << move f                           -- A variable is moved explicitly.
-a[0] = Foo{a=4}                       -- The old element is deinitialized.
+a := Array[Foo]{Foo{a = 1}, Foo{a = 2}}   -- A literal moves its elements.
+f := Foo{a = 3}
+a << move f                               -- A variable is moved explicitly.
+a[0] = Foo{a = 4}                         -- The old element is deinitialized.
 
 print(a[1].a)       --> 2
 r := &a[0]          -- Borrow an element.
@@ -2721,7 +2721,7 @@ type Foo:
     a int
 
 fn (&Foo) @clone() -> Self:
-    return {a=self.a}
+    return {a = self.a}
 ```
 
 ### Moving.
@@ -2755,7 +2755,7 @@ type Foo:
     a int
     b str
 
-f := Foo{a=123, b='abc'}
+f := Foo{a = 123, b = 'abc'}
 b := move f.b
 print(f.a)
 --> 123
@@ -2770,7 +2770,7 @@ type Outer:
     inner Inner
     x str
 
-o := Outer{inner=Inner{s='s', t='t'}, x='x'}
+o := Outer{inner = Inner{s = 's', t = 't'}, x = 'x'}
 s := move o.inner.s
 print(o.inner.t)     -- Ok. Sibling member is still alive.
 ```
@@ -2784,14 +2784,14 @@ type Pair:
     a Res
     b Res
 
-p := Pair{a=Res{name='a'}, b=Res{name='b'}}
+p := Pair{a = Res{name = 'a'}, b = Res{name = 'b'}}
 a := move p.a           -- Ok.
 n := move p.b.name
 --> error: Cannot move a member out of `Res`. The type has a custom `@deinit`.
 ```
 A partially moved value can not be used as a whole. Copying it, borrowing it, or moving it is a compile error until it is reassigned (in the same block):
 ```cy
-f := Foo{a=123, b='abc'}
+f := Foo{a = 123, b = 'abc'}
 b := move f.b
 g := f
 --> error: Cannot copy a partially moved value.
@@ -2799,18 +2799,18 @@ peek(&f)
 --> error: Cannot borrow a partially moved value.
 h := move f
 --> error: Cannot move a partially moved value.
-f = Foo{a=1, b='x'}     -- Ok. `f` is whole again.
+f = Foo{a = 1, b = 'x'}     -- Ok. `f` is whole again.
 ```
 Assigning to a moved member revives that member. The old value is not deinitialized since it belongs to its new owner. Once every member is alive again, the value can be used as a whole:
 ```cy
-f := Foo{a=123, b='abc'}
+f := Foo{a = 123, b = 'abc'}
 b := move f.b
 f.b = 'xyz'             -- Ok. `f.b` is alive again.
 h := move f             -- Ok. `f` is whole again.
 ```
 Like reassigning the whole value, a member can only be revived in the block that declared the variable, so the state at the end of the block is known without runtime flags:
 ```cy
-f := Foo{a=123, b='abc'}
+f := Foo{a = 123, b = 'abc'}
 b := move f.b
 if cond:
     f.b = 'xyz'
@@ -2935,7 +2935,7 @@ fn (&Foo) mutate():
 
 Invoking methods automatically attempts to obtain the correct borrow type as specified by the method:
 ```cy
-f := Foo{a=1}
+f := Foo{a = 1}
 f.mutate()
 -- Obtain borrow to `f`.
 ```
@@ -2970,7 +2970,7 @@ fn (sink Array[]) as_buffer() -> Buffer[T]:
     cap := self.cap()
     meta.consume(self)    -- `self` ends here without its `@deinit`.
     return {
-        base   = buf,
+        base = buf,
         length = length,
         header = cap,
     }
@@ -3000,7 +3000,7 @@ type Res:
 fn (&Res) @deinit():
     log.write('deinit %{self.name}')   -- `log` is still alive.
 
-r := Res{name='r'}
+r := Res{name = 'r'}
 -- End of program: `r.@deinit()`, then `log.@deinit()`.
 ```
 Locals of a function are deinitialized when the function returns, before the program ends.
@@ -3039,8 +3039,8 @@ Invoking the cycle detector manually with `@check_cycles` is not available yet: 
 ```cy
 fn foo():
     -- Create a reference cycle.
-    a := ^Foo{child=none}
-    b := ^Foo{child=none}
+    a := ^Foo{child = none}
+    b := ^Foo{child = none}
     a.child = b
     b.child = a
 
@@ -3604,7 +3604,7 @@ fn (^Job) work(by int):
     suspend
     self.n += by
 
-job := ^Job{n=0}
+job := ^Job{n = 0}
 f := fiber Job.work(job, 2)
 _ = f.resume()
 print(job.n)               --> 2
@@ -3871,7 +3871,7 @@ generator fn (^Bag) items() -> int:
     for 0..self.n |i|:
         yield i
 
-b := ^Bag{n=3}
+b := ^Bag{n = 3}
 for b.items() |v|:
     print(v)
 ```
@@ -4011,9 +4011,9 @@ Inside a compile-time body, locals (`t := 0`), compound assignment (`t += 1`), `
 ### Inline type creation.
 Types can be created from inline evaluation. Currently, only structs can be created with `meta.new_struct`:
 ```cy
-type MyType[T Any] const: 
+type MyType[T Any] const:
     struct_t := type.info(T).!struct
-    fields := [struct_t.fields.length]meta.StructField({name='', type=void, offset=0, state_offset=0})
+    fields := [struct_t.fields.length]meta.StructField({name = '', type = void, offset = 0, state_offset = 0})
     for 0..struct_t.fields.length |i|:
         field := struct_t.fields[i]
         fields[i] = {
@@ -4304,7 +4304,7 @@ An imported module containing top-level statements returns an error:
 print('ok')
 
 -- foo.cy
-print('not ok')         
+print('not ok')
 -- error: Top-level statement not allowed.
 ```
 
@@ -4350,7 +4350,7 @@ print(json.stringify(toon.decode('tags[2]: a,b')!))   --> {"tags":["a","b"]}
 v := json.parse('[9223372036854775808, 0.1000000000000000055511151231257827]')!
 print(json.stringify(v))            --> [9223372036854775808,0.1]
 print(v[0].kind())                  --> number
-x := json.parse('[0.1000000000000000055511151231257827, 1.50]', json.ParseOptions{exact=true})!
+x := json.parse('[0.1000000000000000055511151231257827, 1.50]', json.ParseOptions{exact = true})!
 print(json.stringify(x))            --> [0.1000000000000000055511151231257827,1.50]
 print(x[1].number_text().?)         --> 1.5
 ```
@@ -4365,8 +4365,8 @@ print(x[1].number_text().?)         --> 1.5
 `json.to(T, v)` converts a `Value` back to a Cyber type, and `json.decode(T, src)` parses and converts in one step. It takes the same types as `from`, except `Array` and fixed size arrays. A struct field must be present unless it is an optional (a missing member is `none`), and members that are not fields are ignored. An integer type takes a whole float such as `3e2`, a float type takes an integer, and `str` takes any number as its text, so a large ID can be read whole whatever its size. On failure it returns `error.Type` (another kind of value or an unknown case name), `error.MissingField` or `error.Overflow` (a number out of the type's range), and a `json.Diag` tells where through `path`:
 ```cy
 type User:
-    id    int
-    name  str
+    id int
+    name str
     email ?str
 
 u := json.decode(User, '{"id": 7, "name": "Ada"}')!
@@ -4772,7 +4772,7 @@ print(cos(pi))
 ## Exporting.
 All symbols are exported by default without any additional modifiers:
 ```cy
-fn foo():          
+fn foo():
     pass
 
 global state int = 234
@@ -4920,7 +4920,7 @@ type Vec2 cstruct:
     x float
     y float
 
-v := Vec2{x=30, y=40}
+v := Vec2{x = 30, y = 40}
 ptr := *v
 print(ptr.x)   --> 30
 ```
@@ -4998,8 +4998,8 @@ sz := str.initz('c string')
 A `cstruct` type mimics the memory layout of a C struct type:
 ```cy
 type Data cstruct:
-    x   float
-    y   float
+    x float
+    y float
     ptr Ptr[int]
 ```
 

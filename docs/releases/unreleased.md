@@ -119,3 +119,9 @@
 - 선언에 오류가 있으면 본문은 검사하지 않는다. 본문의 오류는 선언을 고친 뒤에 보인다.
 - 최상위 컴파일 타임 문장(`#if` 등), `use`, 템플릿 머리의 오류는 그대로 컴파일을 끝낸다.
 - libcyber: `cl_vm_set_error_recovery`가 위처럼 동작한다. CLI(복구 꺼짐)는 그대로다.
+
+## `use os.read_file`의 오류 문구 (2026-11-20)
+
+- 점이 있는 이름을 `use`하면 'TODO'라는 문구만 냈다. 이제 별칭으로 쓰는 법을 알려 준다: 'Expected a module name. A symbol of a
+  module is used through an alias: `use read_file = os.read_file`.'
+

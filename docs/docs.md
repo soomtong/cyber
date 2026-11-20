@@ -4728,6 +4728,15 @@ use rl 'https://mycdn.com/raylib'
 
 When importing a URL without a file name, Cyber's CLI will look for a `mod.cy` from the path instead.
 
+### Import a symbol.
+A symbol of an imported module is bound to a local name with an alias. `use os.read_file` is a compile error, since `use` takes a module name:
+```cy
+use os
+use read_file = os.read_file
+
+print(read_file('bar.cy'))
+```
+
 ### Import all.
 If the alias name is the wildcard character, all symbols from the module are imported into the using namespace: *This feature is experimental and may be removed in a future version.*
 ```cy

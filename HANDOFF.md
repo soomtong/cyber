@@ -80,8 +80,10 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - [x] LSP 선언 오류 복구(2026-11-20, LSP 설계 문서 17절). fable 검토로 안 A: 서로 관계없는 선언의 오류를 모두 보고하고, 선언에
   오류가 있으면 본문은 검사하지 않는다. `Compiler.failed_decls` · `sema.declFailed` · `markDeclFailed`, `resolveChunkSyms`의
   `recoverableDecl`. 최상위 컴파일 타임 문장 · `use` · 타입 상수 · 템플릿 머리는 그대로 컴파일을 끝낸다.
-- [ ] 남은 것(LSP): 템플릿 머리 · `use`의 선언 오류 복구(17절의 둘째 단계). 토크나이저의 `ignoreErrors` 모드는 닫히지 않은
-  문자열에서 끝없이 토큰을 만든다(쓰는 곳 없음, LSP 14절).
+- [x] 17절의 둘째 단계(템플릿 머리 · `use`) 검토(2026-11-20): 하지 않기로 했다(이득이 없거나 위험이 큼, 17절 끝). 그 길에
+  `use os.read_file`의 'TODO' 문구를 고쳤다.
+- [ ] 남은 것(LSP, 급하지 않음): 토크나이저의 `ignoreErrors` 모드는 닫히지 않은 문자열에서 끝없이 토큰을 만든다(쓰는 곳 없음,
+  LSP 14절).
 - [ ] 기술 부채(급하지 않음): carry 재시도 루프의 IR 되돌리기, `@destruct_span` 취소 keep 지점, `Scope.run`의 바퀴당 `waiting()`
   질의, 취소 불변식 panic. 기록은 `project_coroutines.md`.
 

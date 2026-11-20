@@ -370,6 +370,7 @@ fn test_modules(run: *Runner) void {
         run.case("modules/import.cy");
         run.case("modules/import_all.cy");
         run.case("modules/import_sym_alias.cy");
+        run.case("modules/use_dotted_name_error.cy");
         run.case("modules/visibility.cy");
         run.case("modules/visibility_import_all.cy");
         run.case("modules/private_field_meta.cy");

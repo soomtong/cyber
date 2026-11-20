@@ -3787,8 +3787,13 @@ pub fn declareUseImport(c: *cy.Chunk, node: *ast.ImportStmt) !void {
             // Single ident import.
             specPath = node.name.cast(.ident).name.slice();
         } else {
-            // use path.
-            return c.reportErrorFmt("TODO", &.{}, @ptrCast(node));
+            // `use os.read_file`: a symbol of a module is used through an alias.
+            const path = c.ast.nodeString(node.name);
+            if (node.name.type() == .accessExpr) {
+                const last = c.ast.nodeString(node.name.cast(.accessExpr).right);
+                return c.reportErrorFmt("Expected a module name. A symbol of a module is used through an alias: `use {} = {}`.", &.{v(last), v(path)}, @ptrCast(node));
+            }
+            return c.reportErrorFmt("Expected a module name, found `{}`.", &.{v(path)}, @ptrCast(node));
         }
     }
 

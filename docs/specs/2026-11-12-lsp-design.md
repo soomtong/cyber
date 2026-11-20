@@ -744,3 +744,14 @@ main 소스의 식이 core의 템플릿을 쓰면(`[]int{1, 2}`, `s.len()`) 컴�
   원본의 진단 수는 모두 같다(처음에는 `choice_dup_case_error.cy`가 하나 늘었다. 위의 `Tag`). 진단이 둘 이상인 변형이 2개에서
   101개로 늘었고, 줄어든 하나는 전에 같은 진단이 두 번 나던 것이다. 16절의 본문 변형 탐침도 다시 돌렸다. 진단 수가 다른 문서는 16절에서 고친 겹친 진단 하나뿐이다.
 
+둘째 단계 검토(2026-11-20): 하지 않는다.
+
+- 템플릿 머리: sema가 내는 오류('Expected parameter type.', 'Expected name, found ...')는 파서가 먼저 막는다(`fn id[T](x T)`는
+  'Expected type specifier.' 구문 오류). 소스로 닿는 경우를 찾지 못해 복구할 이득이 없다.
+- `use`: 흔한 오류는 없는 모듈('Import path does not exist')인데, 선언을 예약하는 단계(`loadChunk` → `declareUseImport`)에서 난다.
+  건너뛰면 별칭이 없어 그 모듈을 쓰는 선언마다 'Could not find the symbol'이 연쇄로 난다. 막으려면 실패로 표시한 가짜 별칭을
+  예약해야 하는데, `alias.sym`을 해석 없이 읽는 경로가 있으면 서버가 죽는다. 이득(모듈 경로를 고치는 동안 다른 선언의 오류를
+  미리 보기)에 비해 위험이 크다.
+- 이 검토에서 `use os.read_file`(점이 있는 이름)이 'TODO'라는 문구만 내는 것을 찾아 고쳤다. 이제 'Expected a module name. A
+  symbol of a module is used through an alias: `use read_file = os.read_file`.'(`modules/use_dotted_name_error.cy`).
+

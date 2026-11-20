@@ -214,6 +214,9 @@ pub const Compiler = struct {
     /// Useful for custom panic handler to indicate whether it failed at compile-time or runtime.
     compiling: bool,
 
+    /// Counts the compiles of this compiler. `Instance.site` is valid only in the compile that set it.
+    compile_seq: u32 = 0,
+
     pub fn init(self: *Compiler, vm: *cy.VM) !void {
         self.* = .{
             .alloc = vm.alloc,
@@ -448,6 +451,7 @@ pub const Compiler = struct {
     pub fn compile(self: *Compiler, uri: []const u8, src: ?[]const u8, config: C.CompileConfig) !CompileResult {
         self.compiling = true;
         defer self.compiling = false;
+        self.compile_seq +%= 1;
         
         // The copy-and-patch JIT was removed. See docs/decisions/project_direction.md.
         if (config.backend == C.BackendJIT) {
@@ -2181,7 +2185,7 @@ fn semaCarriedFuncs(self: *Compiler, main: *cy.Chunk) !void {
     }
 }
 
-fn ownerInstance(func: *cy.Func) ?*cy.Instance {
+pub fn ownerInstance(func: *cy.Func) ?*cy.Instance {
     if (func.instance) |inst| return inst;
     var cur: ?*cy.Sym = func.parent;
     while (cur) |s| : (cur = s.parent) {

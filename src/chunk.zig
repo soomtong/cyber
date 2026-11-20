@@ -627,6 +627,42 @@ pub const Chunk = struct {
                 last = trace;
             }
         }
+        try self.appendInstanceTrace(report, last);
+    }
+
+    fn traceHas(report: *cy.compiler.Report, node: *ast.Node) bool {
+        var cur: ?*cy.compiler.Report = report;
+        while (cur) |r| : (cur = r.next) {
+            if (r.loc == @intFromPtr(node)) return true;
+        }
+        return false;
+    }
+
+    /// An error in the body of a template instance names the instance and where it was asked for, then the
+    /// instances that asked for that one. Instances asked for by the template's own source (core types used by
+    /// core) end the trace where the site is not in the running compile.
+    fn appendInstanceTrace(self: *Chunk, report: *cy.compiler.Report, tail: *cy.compiler.Report) error{OutOfMemory}!void {
+        var last = tail;
+        var opt_inst = sema.bodyInstance(self);
+        var depth: u32 = 0;
+        while (opt_inst) |inst| : (opt_inst = inst.site_parent) {
+            const site = inst.siteIn(self.compiler) orelse return;
+            // The resolve contexts may already point there (a template expanded as part of a declaration).
+            if (traceHas(report, site)) continue;
+            depth += 1;
+            if (depth > 8) return;
+            var buf: std.Io.Writer.Allocating = .init(self.alloc);
+            defer buf.deinit();
+            const w = &buf.writer;
+            // The trace is a hint: a name that fails to print ends it.
+            w.writeAll("While specializing `") catch return;
+            switch (inst.type) {
+                .func => cy.sym.writeFuncName(self.sema, w, inst.data.func.func, .{ .from = self }) catch return,
+                .sym => cy.sym.writeSymName(self.sema, w, inst.data.sym.sym, .{ .from = self }) catch return,
+            }
+            w.writeAll("` here:") catch return;
+            last = try self.appendContextTrace(last, buf.written(), site);
+        }
     }
 
     pub fn reportError(self: *Chunk, msg: []const u8, opt_node: ?*ast.Node) error{OutOfMemory, CompileError} {

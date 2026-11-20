@@ -174,3 +174,13 @@
 - 캡처가 둘 이상인 pinned closure가 해제되지 않고 샜다. core `@deinitObject`가 `.closure`만 알아 pinned closure를 24바이트 pool
   객체로 놓았고, `Heap.pinned_closures`에서 빼지도 않았다(스택이 옮겨지면 해제된 객체에 쓸 수 있는 낡은 항목). 이제
   `@freePinnedClosure`가 표에서 빼고 할당한 크기로 놓는다.
+
+## 템플릿 특수화 중 오류에 특수화 경로 (2026-11-20)
+
+- 템플릿 인스턴스의 본문 · 선언에서 난 컴파일 오류에, 그 인스턴스를 처음 요청한 자리를 'While specializing `inner[int]` here:'
+  주석으로 붙인다. 그 자리가 다른 인스턴스 안이면 바깥으로 이어 사용자 코드까지 보인다(`Map[[]int, int]{}`의 오류는
+  `AutoHash[[]int]` → `Map[[]int, int]`의 자리까지). 전에는 본문의 위치만 짚어 어느 호출이 원인인지 알 수 없었다.
+- 주석은 그 컴파일에서 만든 인스턴스만 단다(세션의 앞 컴파일이 남긴 인스턴스는 자리가 없다). 해석 문맥이 이미 같은 자리를
+  가리키면 다시 달지 않는다. libcyber에서는 `cl_vm_compile_report_note`의 메시지 있는 note다.
+- 고친 곳: `Instance.site` · `site_parent`(`template.createInstance`), `Compiler.compile_seq`, `Chunk.appendInstanceTrace`,
+  `sema.bodyInstance`. 설계 원칙 검토 1.4 C의 1단계다.

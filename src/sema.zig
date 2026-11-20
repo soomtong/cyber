@@ -399,6 +399,33 @@ pub fn borrowOwnerOf(c: *cy.Chunk, local: LocalId) LocalId {
     return owner;
 }
 
+/// The template instance whose declaration or body is being checked, if any: the innermost resolve context that
+/// belongs to one, else the innermost proc. A lambda in a body belongs to no instance, so the procs are walked outward.
+pub fn bodyInstance(c: *cy.Chunk) ?*cy.Instance {
+    var j = c.resolve_stack.items.len;
+    while (j > 0) {
+        j -= 1;
+        const ctx = c.resolve_stack.items[j];
+        switch (ctx.type) {
+            .chunk => {},
+            .func => if (cy.compiler.ownerInstance(ctx.data.func)) |inst| return inst,
+            .sym => {
+                var cur: ?*cy.Sym = ctx.data.sym;
+                while (cur) |sym| : (cur = sym.parent) {
+                    if (sym.instance()) |inst| return inst;
+                }
+            },
+        }
+    }
+    var i = c.semaProcs.items.len;
+    while (i > 0) {
+        i -= 1;
+        const func = c.semaProcs.items[i].func orelse continue;
+        if (cy.compiler.ownerInstance(func)) |inst| return inst;
+    }
+    return null;
+}
+
 /// Of two borrow owners, the one that goes out of scope first. A value that borrows from both (a borrow container
 /// literal, a pinned closure) lives only as long as that one.
 pub fn shorterOwner(c: *cy.Chunk, cur: ?LocalId, next: ?LocalId) ?LocalId {

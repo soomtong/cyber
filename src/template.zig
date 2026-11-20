@@ -29,6 +29,14 @@ pub const Instance = struct {
     /// `releaseValues` ran. The params are still there but own nothing.
     values_released: bool = false,
 
+    /// The node that first asked for this instance, for the error trace of its body ("While specializing ...").
+    /// Valid only in the compile `site_seq` (`Compiler.compile_seq`): an instance outlives the source of a session's
+    /// earlier compile.
+    site: ?*ast.Node = null,
+    site_seq: u32 = 0,
+    /// The instance whose body asked for this one.
+    site_parent: ?*Instance = null,
+
     map: union {
         two: struct {
             first: []const u8,
@@ -50,6 +58,12 @@ pub const Instance = struct {
             func: *cy.Func,
         },
     },
+
+    /// `site` if it belongs to the running compile.
+    pub fn siteIn(self: *const Instance, compiler: *const cy.Compiler) ?*ast.Node {
+        if (self.site_seq != compiler.compile_seq) return null;
+        return self.site;
+    }
 
     pub fn initFuncParams(self: *Instance, alloc: std.mem.Allocator, params: []const cy.Value, template_params: []const cy.sym.FuncTemplateParam) !void {
         self.params = params;
@@ -326,7 +340,7 @@ pub const VariantKeyContext = struct {
 
 /// Copies the arguments into a new instance. `type` and `data` are the caller's to set. The instance is not in a
 /// template's `instances` yet, a caller that fails before that releases it with `destroyInstance`.
-fn createInstance(c: *cy.Chunk, arg_types: []const *cy.Type, args: []const cy.Value) !*Instance {
+fn createInstance(c: *cy.Chunk, arg_types: []const *cy.Type, args: []const cy.Value, site: ?*ast.Node) !*Instance {
     const params = try c.alloc.alloc(cy.Value, args.len);
     errdefer c.alloc.free(params);
     var ncopied: usize = 0;
@@ -347,6 +361,9 @@ fn createInstance(c: *cy.Chunk, arg_types: []const *cy.Type, args: []const cy.Va
         .params = params,
         // What `deinitValues` expects for this number of params.
         .map = if (params.len > 2) .{ .map = .empty } else .{ .two = undefined },
+        .site = site,
+        .site_seq = c.compiler.compile_seq,
+        .site_parent = if (site != null) cy.sema.bodyInstance(c) else null,
         .data = undefined,
     };
     return instance;
@@ -373,7 +390,7 @@ pub fn expand_template2(c: *cy.Chunk, template: *cy.sym.Template, arg_types: []c
             // The new slot's key still points at the caller's arguments. It leaves the cache unless an instance fills it.
             errdefer template.instance_cache.removeByPtr(res.key_ptr);
             try template.instances.ensureUnusedCapacity(c.alloc, 1);
-            const instance = try createInstance(c, arg_types, args);
+            const instance = try createInstance(c, arg_types, args, node);
             errdefer destroyInstance(c, instance);
             instance.type = .sym;
             instance.data = .{ .sym = .{
@@ -643,7 +660,7 @@ pub fn expandResolvedFuncTemplate(
             try template.instances.ensureUnusedCapacity(c.alloc, 1);
 
             // Generate variant type.
-            const variant = try createInstance(c, arg_types, args);
+            const variant = try createInstance(c, arg_types, args, node);
             errdefer destroyInstance(c, variant);
 
             if (template.with_cstrs.len > 0) {

@@ -1231,6 +1231,15 @@ fn semaOpAssignMethod(c: *cy.Chunk, node: *ast.Node) !bool {
     const sym = (try c.accessResolvedSym(left.type, name, node)) orelse return false;
     const func_sym = try requireFuncSym(c, sym, node);
     const res = try c.semaCallFuncSymRec(func_sym, stmt.left, left, &.{ stmt.right }, false, node);
+    const is_void = res.resType == .ct_value and res.data.ct_value.type.id() == bt.Void;
+    if (!is_void and res.type.id() != bt.Void and res.type.id() != bt.Never) {
+        // The statement has no place for a value, and `_ = x op= y` is not a statement.
+        const ret_name = try c.sema.allocTypeName(res.type);
+        defer c.alloc.free(ret_name);
+        const rec_name = try c.sema.allocTypeName(left.type);
+        defer c.alloc.free(rec_name);
+        return c.reportErrorFmt("The `{}` method of `{}` returns `{}`, and an `x {} y` statement can not use or drop the value. Declare the method without a return type.", &.{v(name), v(rec_name), v(ret_name), v(name)}, node);
+    }
     try semaExprStmtEnd(c, res, var_start, node);
     return true;
 }

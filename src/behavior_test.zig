@@ -664,6 +664,7 @@ fn test_core(run: *Runner) void {
     run.case("core/index_option_error.cy");
     run.case("core/set_index_value_error.cy");
     run.case("core/set_index_value_option_error.cy");
+    run.case("core/op_assign_method_value_error.cy");
 }
 
 fn test_vars(run: *Runner) void {

@@ -189,6 +189,18 @@ zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Dd
   `limits.zig`의 CPU 시간 검사(`A thread that awaits a spawned thread sleeps instead of spinning.`, `used < 200000`)로 실패했다.
   다른 플랫폼 cli job은 같은 테스트를 통과했다. 태그 run을 `gh run rerun <run> --failed`로 다시 돌려 통과했고 Release job이 이어서
   릴리스를 만들었다(`build-969-93a9ca4`, 에셋 15개). CPU 시간 검사는 부하 걸린 x64 러너에서 흔들릴 수 있다.
+- 0.4.16(2026-11-21): 태그 `0.4.16` → `ca000225`, `build-1010-ca00022`, 에셋 15개, 재실행 없이 통과. 그 앞의 master run은 두 번
+  실패했다. 로컬 14단계 검증은 macOS에서 돌아 Linux · Windows에서만 읽히는 소스를 보지 못한다.
+  - `7943c648`: `src/std/libc.linux.cy`의 `const EAGAIN = c_int(11)`이 'Could not find the symbol `c_int`.'(`a76e5aea`에서 넣은
+    상수, macOS 파일에만 `-type c_int = c.c_int`가 있었다). `os`를 쓰는 Linux의 모든 스크립트가 컴파일되지 않았다. Windows는
+    `modules/os.cy`가 `os.from_errno(2)`를 `NotFound`로 기대했다(Windows에서는 설계대로 `Unknown`).
+  - `39f0af08`: Windows에서 `os.last_os_error()`는 `GetLastError`의 코드라 이미 있는 디렉터리가 17이 아니라 183이다.
+  - 플랫폼별 std 파일(`libc.linux.cy`, `os.windows.cy`, `windows/*.cy`)을 고쳤으면 push 전에 Linux는 교차 빌드로 확인한다:
+    `zig build cli -Dtarget=x86_64-linux-gnu -Dcpu=baseline -Doptimize=ReleaseSafe -p <dir>` 뒤
+    `docker run --rm --platform linux/amd64 -v "$PWD":/repo:ro -v <dir>:/cy:ro debian:stable-slim`에서 저장소 사본의 루트로 가
+    `/cy/bin/cyber src/test/modules/<name>.cy`. Windows는 로컬에서 돌릴 수단이 없어 master run으로 본다(태그는 그 뒤).
+  - arm64 Linux(릴리스 대상 아님)에서는 `os.open_dir`가 `error.InvalidArgument`다. `lc.O_DIRECTORY`가 system으로만 갈리고
+    아키텍처로는 갈리지 않는 것으로 보인다(원인은 확인하지 않았다).
 
 ## CI 시간 줄이기 (2026-11-18)
 

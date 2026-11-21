@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-21): 0.5 결정과 그 작업, 0.4.15..HEAD 리뷰 수정
+# HANDOFF (2026-11-21): 0.4.16 릴리스 뒤
 
 ## 목표
 
@@ -19,7 +19,7 @@
 
 ## 현재 브랜치
 
-`master`. `76b91218`까지 push돼 있다(2026-11-20, 그 뒤 커밋은 push하지 않음). 그 Latest Build `44723475654`는 Intel macOS job이 "Clone repo."에서 45분 멈춰 실패(러너 문제, 나머지 7개 통과, 재실행 안 함).
+`master`. 모두 push돼 있다(2026-11-21, 0.4.16 태그 `ca000225`와 그 뒤의 기록 커밋).
 PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지 못해 15분 뒤 취소된 탓이다(나머지 6개 통과).
 
 ## 완료된 작업
@@ -88,7 +88,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 - [x] 0.4.15 릴리스(2026-11-18): 태그 `0.4.15` → `93a9ca4f`, `build-969-93a9ca4`, Latest, 에셋 15개(CI). `install.sh 0.4.15`를 임시
   경로에 설치해 버전 · 스크립트 · `cyber-lsp`의 여러 구문 오류 진단을 확인했다. `/usr/local`의 설치는 사용자가 다시 한다.
-- [ ] tars-agent 의존을 0.4.15로 올리기는 tars-agent 쪽 일(TODO 항목).
+- [ ] tars-agent 의존을 0.4.16으로 올리기는 tars-agent 쪽 일(TODO 항목).
 - [x] LSP 범위 포맷 · call hierarchy · 본문 안 문장 단위 복구(2026-11-19). 설계 · 확인은 LSP 설계 문서 15 · 16절.
   - 범위 포맷: `assist.lineEdits`(포맷터는 줄을 합치거나 나누지 않고 빈 줄만 줄인다).
   - call hierarchy: 서버만(`onPrepareCallHierarchy` · `onIncomingCalls` · `onOutgoingCalls`), 해석 기록과 outline으로.
@@ -119,7 +119,11 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `Compiler.compile_seq`(세션의 앞 컴파일 노드를 쓰지 않게), `Chunk.appendInstanceTrace`, `sema.bodyInstance`.
 - [x] 1.7 A 표준 OS 오류 이름(결정 `project_os_error_names.md`): `os.from_errno` · `from_win32_error` · `last_error` ·
   `last_os_error`. 깨지는 변경(옛 이름 표는 `docs/releases/0.4.16.md`). Windows 매핑은 실행 확인 못 함.
-- [ ] 0.5 릴리스(사용자 지시 때).
+- [x] 0.4.16 릴리스(2026-11-21, 사용자: "release patch version 0.4.16"): 0.5로 모으던 변경을 수정 버전으로 냈다. 태그 `0.4.16` →
+  `ca000225`, `build-1010-ca00022`, Latest, 에셋 15개. `install.sh 0.4.16`을 임시 경로에 설치해 버전 · 새 규칙의 오류 ·
+  `&&diag` · `spawn f(args)` · 예제 · `cyber-lsp initialize`를 확인했다. `/usr/local`의 설치는 사용자가 다시 한다.
+  master run이 Linux · Windows에서 두 번 실패해 고쳤다(`39f0af08`, `0b8115fe`). 경위와 push 전 Linux 확인법은
+  `project_fork_release_ci.md` "0.4.16".
 - [ ] 기술 부채(급하지 않음): `@destruct_span` 취소 keep 지점(쓰게 되면), `Scope.run`의 바퀴당 `waiting()` 질의(준비 큐 ·
   futex식 대기 표, fiber 수 비용이 문제가 되면), 취소 불변식 panic(닿는 경로 없음). 기록은 `project_coroutines.md`.
 
@@ -137,7 +141,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 ## 다음 에이전트에게
 
-1. 0.4.15가 마지막 릴리스다.
+1. 0.4.16이 마지막 릴리스다. 0.5 범위로 정했던 것은 모두 여기에 들어갔다.
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 

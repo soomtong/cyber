@@ -1146,6 +1146,11 @@ Assigning the result of an in-place method (`arr = arr.append(1)`, `rest := arr.
 names the method to use. So is dropping the result of a method that returns a new slice (`arr.appended(1)` as a
 statement, `_ = arr.removed(0)`), because it changes nothing.
 
+When the receiver is a variable and this is its last use (the only use of the name in the statement, and no later
+statement of the block names it), `appended`, `inserted`, `removed` and `+` take its buffer instead of copying it, like
+`move` followed by the in-place method. The result is the same; the variable can not be used after that anyway.
+`ys := xs.appended(4)` as the last use of `xs` then costs no copy.
+
 Copies of a slice share its buffer until one of them resizes: an in-place resize of a slice whose buffer another value
 also holds (`ys := xs`, a sub-slice) first copies the buffer, so the other value keeps its elements and its length. Writing
 an element (`xs[0] = v`, `sort`, `reverse`) does not copy: every value that shares the buffer sees it.

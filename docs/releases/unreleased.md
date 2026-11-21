@@ -47,3 +47,9 @@ the same block.' 오류였다.
 - 반복 본문은 반복문 밖의 변수를 옮기지 못한다(다음 반복이 읽는다). 새 문구 'Cannot move `a` here: it is declared in an outer
   block. ...'. 갈래 안에서도 바깥 변수의 멤버는 옮기지 못한다.
 - 결정 `docs/decisions/project_last_use.md`, 매뉴얼 Moving 절.
+
+## 새 목록 메서드는 마지막 사용에서 버퍼를 재사용한다
+
+`Slice`의 `appended` · `inserted` · `removed` · `+`는 받는 쪽이 변수이고 그 사용이 마지막이면(그 문장에 이름이 한 번만 나오고 블록의
+뒤 문장에 나오지 않음) 복사하지 않고 그 버퍼를 넘겨받는다. `move` 뒤 제자리 메서드와 같다. 결과는 전과 같고 복사만 줄어든다.
+다른 값이 버퍼를 나눠 갖고 있으면 제자리 메서드가 전처럼 먼저 복사한다. 결정 `docs/decisions/project_last_use.md` "B 구현".

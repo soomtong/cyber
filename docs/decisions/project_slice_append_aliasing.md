@@ -172,6 +172,8 @@ tars-agent 요청(`cyber-0.4.12-spike-defects.md` (a))에서 `remove` · `clear`
     버퍼를 다시 써서 빨랐으니 성능 후퇴였고, 사용자가 take-and-restore를 택했다.
 - 버린 안: 마지막 사용 분석으로 `xs = xs.remove(i)`를 제자리로 바꾸는 것(Lean · Koka). 성능만 바꾸는 최적화라 의미 문제를 풀지
   않고, 이동을 의미로 넣는 것은 뒤 줄 하나가 앞 줄의 동작을 바꾸는 원격 작용이라 사용자가 반대했다.
+  다시 넣음(2026-11-21, 사용자): 새 목록 메서드가 마지막 사용에서 버퍼를 재사용한다. 의미는 바뀌지 않는다(뒤에서 쓰지 않는
+  지역만). `project_last_use.md` "B 구현".
 - 함께 드러난 결함: `self.* = res`(관리 대상 지역을 포인터 · 빌림으로 대입)가 복사 없이 넣어 이중 해제였다(F-161, 기존 결함).
   `&&T`로의 `.deref` 대입도 막혀 있었다.
 - 구현: `src/builtins/core.cy`의 `owns_buffer` · `owns_room` · `drop_tail` · `reserve_own`과 각 메서드, `src/sema.zig`의

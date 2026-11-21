@@ -241,6 +241,7 @@ fn test_memory(run: *Runner) void {
     run.case("memory/move_branch.cy");
     run.case("memory/move_branch_use_after_error.cy");
     run.case("memory/move_loop_error.cy");
+    run.case("memory/slice_reuse_last_use.cy");
     run.case("memory/array_append_move.cy");
     run.case("memory/array_nocopy_elem.cy");
     run.case("memory/array_nocopy_index_copy_error.cy");

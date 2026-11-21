@@ -86,6 +86,8 @@ pub const Chunk = struct {
 
     /// The last method call of a `Slice` that returned nothing (`sema.semaCallFuncSymRec`).
     slice_void_call: ?*ast.Node = null,
+    /// The statement being checked (`sema.semaStmts`).
+    stmt_ctx: cy.sema.StmtCtx = .{},
 
     /// The receiver node and the argument nodes of the method call that sema is matching (`semaCallFuncSymRec`). An
     /// exclusive borrow of a global for this receiver takes the global's value out for the call (`takeGlobal`).

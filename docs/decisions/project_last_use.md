@@ -50,3 +50,16 @@
   경로의 상태가 갈라져 반복문 뒤에도 합류 처리가 필요하다. `switch` · `if` 언랩 · `if` 식의 갈래도 아직이다.
 - 테스트: `memory/move_implicit.cy` · `move_branch.cy`(소멸 순서를 로그로 비교) · `move_branch_use_after_error.cy` ·
   `move_loop_error.cy`.
+
+## B 구현 (2026-11-21)
+
+- `sema.reuseSliceBuffer`(`semaCallFuncSymRec` 첫머리): `Slice`의 `appended` · `inserted` · `removed` · `+`이고 수신자가 이
+  블록에서 선언한 지역 이름 하나(`Slice` 값 자체, 참조 · 빌림 아님, 빌려진 상태 아님)이면, 지금 문장의 텍스트에 그 이름이 한 번만
+  나오고 블록의 뒤 문장이 그 이름을 말하지 않을 때 `_reuse := move xs`, `_reuse.append(v)`, 결과 `move _reuse`로 바꾼다. 제자리
+  메서드는 버퍼가 유일하지 않으면 먼저 복사하므로(결정 3) 다른 값과 나눈 버퍼는 그대로다.
+- "마지막 사용"은 C와 같은 텍스트 조사(`stmtText` · `countNames` · `lastNamingStmt`)다. 지금 문장과 그 블록은 `Chunk.stmt_ctx`
+  (`semaStmts`가 문장마다 둔다)로 안다. 지역이 이 블록 것이어야 하므로 반복문이 사이에 끼지 않는다.
+- 빼는 것: `xs = xs.appended(v)`(이름이 두 번, 그리고 이동한 지역에 다시 대입하는 것이 아직 안 된다), REPL 최상위, 멤버
+  수신자(`s.xs.appended(v)`).
+- 확인: `xs.removed(0)` 결과의 `ptr`이 `xs`의 것과 같다(`memory/slice_reuse_last_use.cy`). 성능 수치는 재지 않았다(복사 하나가
+  빠진다).

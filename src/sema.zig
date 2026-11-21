@@ -366,7 +366,16 @@ pub const Proc = struct {
 pub const ModFuncSigKey = cy.hash.KeyU128;
 const ObjectMemberKey = cy.hash.KeyU64;
 
+/// The statement being checked and its block, for `reuseSliceBuffer`.
+pub const StmtCtx = struct {
+    stmts: []const *ast.Node = &.{},
+    idx: usize = 0,
+    block: usize = 0,
+};
+
 pub fn semaStmts(c: *cy.Chunk, stmts: []const *ast.Node) anyerror!void {
+    const saved_ctx = c.stmt_ctx;
+    defer c.stmt_ctx = saved_ctx;
     const comp = c.compiler;
     if (comp.recover and comp.recover_chunk == c) {
         // The first statements checked in a pass are those of the body.
@@ -376,6 +385,7 @@ pub fn semaStmts(c: *cy.Chunk, stmts: []const *ast.Node) anyerror!void {
             defer ends.deinit(c.alloc);
             for (stmts, 0..) |stmt, i| {
                 const var_start = c.varStack.items.len;
+                c.stmt_ctx = .{ .stmts = stmts, .idx = i, .block = c.semaBlocks.items.len - 1 };
                 try semaStmt(c, stmt);
                 // A skipped declaration ends the block: the rest would report its names as undeclared.
                 if (comp.recover_skip.contains(stmt) and declaresLocal(stmt)) return;
@@ -388,6 +398,7 @@ pub fn semaStmts(c: *cy.Chunk, stmts: []const *ast.Node) anyerror!void {
     defer ends.deinit(c.alloc);
     for (stmts, 0..) |stmt, i| {
         const var_start = c.varStack.items.len;
+        c.stmt_ctx = .{ .stmts = stmts, .idx = i, .block = c.semaBlocks.items.len - 1 };
         try semaStmt(c, stmt);
         try endBorrowsAfter(c, &ends, stmts, i, var_start);
     }
@@ -435,31 +446,24 @@ fn endBorrowsAfter(c: *cy.Chunk, ends: *BorrowEnds, stmts: []const *ast.Node, i:
 /// The index of the last statement from `i` on whose source text names `name`, or null when it can not be told.
 fn lastNamingStmt(c: *cy.Chunk, stmts: []const *ast.Node, i: usize, name: []const u8) ?usize {
     const src_id = stmts[i].src();
-    const src = c.compiler.chunks.items[src_id].src;
     var last = i;
     var k = i + 1;
     while (k < stmts.len) : (k += 1) {
-        const stmt = stmts[k];
-        if (stmt.src() != src_id) return null;
-        const start = stmt.pos();
-        var end: usize = undefined;
-        if (k + 1 < stmts.len) {
-            if (stmts[k + 1].src() != src_id) return null;
-            end = stmts[k + 1].pos();
-        } else {
-            end = stmt.end();
-            if (end == cy.NullId) return null;
-            // To the end of the line, for a node whose end is short of its text.
-            while (end < src.len and src[end] != '\n') end += 1;
-        }
-        if (start == cy.NullId or start > end or end > src.len) return null;
-        if (namesWord(src[start..end], name)) last = k;
+        if (stmts[k].src() != src_id) return null;
+        const text = stmtText(c, stmts, k) orelse return null;
+        if (namesWord(text, name)) last = k;
     }
     return last;
 }
 
 /// Whether `text` has `name` as a word. A word after one `.` is a member (`h.r`), not a local. One after `..` is.
 fn namesWord(text: []const u8, name: []const u8) bool {
+    return countNames(text, name) > 0;
+}
+
+/// How many times `text` has `name` as a word (`namesWord`).
+fn countNames(text: []const u8, name: []const u8) usize {
+    var n: usize = 0;
     var pos: usize = 0;
     while (std.mem.indexOfPos(u8, text, pos, name)) |idx| {
         pos = idx + 1;
@@ -470,9 +474,27 @@ fn namesWord(text: []const u8, name: []const u8) bool {
             if (isIdentChar(prev)) continue;
             if (prev == '.' and !(idx > 1 and text[idx - 2] == '.')) continue;
         }
-        return true;
+        n += 1;
     }
-    return false;
+    return n;
+}
+
+/// The source text of the statement `stmts[i]`, up to the next statement or the end of its last line.
+fn stmtText(c: *cy.Chunk, stmts: []const *ast.Node, i: usize) ?[]const u8 {
+    const stmt = stmts[i];
+    const src = c.compiler.chunks.items[stmt.src()].src;
+    const start = stmt.pos();
+    var end: usize = undefined;
+    if (i + 1 < stmts.len) {
+        if (stmts[i + 1].src() != stmt.src()) return null;
+        end = stmts[i + 1].pos();
+    } else {
+        end = stmt.end();
+        if (end == cy.NullId) return null;
+        while (end < src.len and src[end] != '\n') end += 1;
+    }
+    if (start == cy.NullId or start > end or end > src.len) return null;
+    return src[start..end];
 }
 
 /// Whether a statement declares a name for the statements after it in its block.
@@ -8796,6 +8818,7 @@ pub fn semaCallFuncSymRec(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, re
         c.global_take_args = saved_args;
         c.global_take = saved_take;
     }
+    if (try reuseSliceBuffer(c, sym, rec, rec_res, args, node)) |res| return res;
     const res = try semaCallFuncSymRecInner(c, sym, rec, rec_res, args, req_value, node);
     if (res.type.id() == bt.Void and isSliceMethodSym(c, sym)) {
         c.slice_void_call = node;
@@ -8804,6 +8827,52 @@ pub fn semaCallFuncSymRec(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, re
         return restoreGlobal(c, take, res, node);
     }
     return res;
+}
+
+/// A new-list method of `Slice` (`appended`, `inserted`, `removed`, `+`) on the last use of a local reuses its buffer:
+/// `xs.appended(v)` becomes `_reuse := move xs` and `_reuse.append(v)`, which copies only when another value shares the
+/// buffer. The result is the same, without the copy. The last use is the only name of the local in its statement, and
+/// no later statement of the block names it. See `docs/decisions/project_last_use.md` "B".
+fn reuseSliceBuffer(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, rec_res: ExprResult, args: []const *ast.Node,
+    node: *ast.Node) anyerror!?ExprResult {
+    const name = sym.head.name();
+    const in_place: []const u8 = if (std.mem.eql(u8, name, "appended"))
+        "append"
+    else if (std.mem.eql(u8, name, "inserted"))
+        "insert"
+    else if (std.mem.eql(u8, name, "removed"))
+        "remove"
+    else if (std.mem.eql(u8, name, "+"))
+        "+="
+    else
+        return null;
+    if (!isSliceMethodSym(c, sym)) return null;
+    if (rec.type() != .ident or rec_res.resType != .value_local or rec_res.ir.code != .local) return null;
+    const id = rec_res.data.value_local;
+    const local = c.varStack.items[id];
+    if (local.type != .local or local.inner.local.hidden) return null;
+    // A `Slice` value, not a reference or a borrow of one.
+    if (local.decl_t != rec_res.type or local.decl_t.isObjectLike() or local.decl_t.info.borrow_only) return null;
+    if (local.active_borrows > 0 or local.active_ex_borrows > 0 or local.has_inactive_struct_fields) return null;
+    if (c.vm.config.persist_main and c.proc().func == null and c.semaBlocks.items.len == 1) return null;
+    // The local is of this block, and this statement of the block is its last use.
+    if (id < c.block().varStart) return null;
+    const ctx = c.stmt_ctx;
+    if (ctx.stmts.len == 0 or ctx.block != c.semaBlocks.items.len - 1) return null;
+    const text = stmtText(c, ctx.stmts, ctx.idx) orelse return null;
+    if (countNames(text, local.name()) != 1) return null;
+    if ((lastNamingStmt(c, ctx.stmts, ctx.idx, local.name()) orelse return null) != ctx.idx) return null;
+
+    const in_sym = (try c.accessResolvedSym(rec_res.type, in_place, node)) orelse return null;
+    if (in_sym.type != .func) return null;
+    const moved = try semaMove(c, rec_res, rec);
+    const tmp = try declareHiddenLocal(c, "_reuse", rec_res.type, moved, rec);
+    const tmp_res = try semaLocal(c, tmp.id, rec);
+    const saved_void = c.slice_void_call;
+    const call = try c.semaCallFuncSymRec(in_sym.cast(.func), rec, tmp_res, args, false, node);
+    c.slice_void_call = saved_void;
+    _ = try c.ir.pushStmt(.discard, node, .{ .expr = call.ir });
+    return try semaMove(c, try semaLocal(c, tmp.id, rec), rec);
 }
 
 fn semaCallFuncSymRecInner(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, rec_res: ExprResult,

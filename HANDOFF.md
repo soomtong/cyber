@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-21): 0.4.16 릴리스 뒤, 마지막 사용(C · D · E · B) · 코드 리뷰 수정 · 이동한 지역에 다시 대입
+# HANDOFF (2026-11-21): 0.4.16 릴리스 뒤, 마지막 사용(C · D · E · B) · 코드 리뷰 수정 · 다시 대입 · 갈래 종류와 반복 본문
 
 ## 목표
 
@@ -22,11 +22,13 @@
 - 2026-11-21(사용자: `/code-review high from 0.4.16` 뒤 "step by step 수정해주세요. 결정을 위임합니다. 서브 에이전트(최대 3개)를
   사용할 수 있으니 병렬 실행 가능한 업무는 함께 진행"): 리뷰 9건(중요 5, 사소 4)을 모두 고쳤다.
 - 2026-11-21(사용자: "continue"): 마지막 사용의 남은 것 중 이동한 지역에 다시 대입과 `xs = xs.appended(v)`의 버퍼 재사용.
+- 2026-11-21(사용자: "continue"): 마지막 사용의 남은 것 중 같은 갈래에서 옮긴 뒤 대입, `if` 언랩 · `switch` · `begin:` 갈래의 이동,
+  반복 본문에서 옮긴 뒤 `break` · `return`, `if` · `while` 언랩의 `NoCopy` payload.
 
 ## 현재 브랜치
 
 `master`. 0.4.16 태그 `ca000225`와 `5e5765f9`까지 push돼 있다. 그 뒤 커밋(`7e8c5782` CI 기록, `90b55104` 비어휘적
-수명, `6e2a0206` D · E, `4149c6b8` B, 코드 리뷰 수정 `5fca44c6` · `ad24ee2c` · `a63c63c3`과 `if` 갈래 수정, 이동한 지역에 다시 대입, HANDOFF 커밋들)은
+수명, `6e2a0206` D · E, `4149c6b8` B, 코드 리뷰 수정 `5fca44c6` · `ad24ee2c` · `a63c63c3`과 `if` 갈래 수정, 이동한 지역에 다시 대입, 갈래 종류와 반복 본문, HANDOFF 커밋들)은
 push하지 않았다.
 PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지 못해 15분 뒤 취소된 탓이다(나머지 6개 통과).
 
@@ -70,6 +72,17 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
     (`checkAssignMoveJump`). 문장 전에 옮긴 지역은 선언한 블록에서만, REPL 최상위는 안 됨.
   - `xs = xs.appended(v)`가 버퍼를 재사용한다(반복 본문 포함, `reuseSliceBuffer`의 `assignsToName` 갈래).
   - `?else`가 새 값인 `NoCopy` 옵션을 푼다(`unwrap_or` · `unwrap_or_block`).
+  - tars-agent `docs/TODO.md`의 "다음 cyber 빌드" 항목에 덧붙였다(커밋 안 함).
+
+- [x] 갈래 종류와 반복 본문(2026-11-21). 결정 `project_last_use.md` "갈래 종류와 반복 본문", `unreleased.md` "갈래 · 반복 본문에서
+  바깥 변수를 옮기는 자리가 늘었다" · "`if` · `while` 언랩이 `NoCopy` payload를 꺼낸다".
+  - `MoveBranch.plain`(`begin:` · 반복문의 블록들), `Block.moves_start`, 같은 블록에서 옮긴 뒤 대입(`sema.movedInBlock`).
+  - `if` 언랩 문과 `switch` 문의 case가 `if` 문과 같은 합류를 쓴다(`IfBranch.body`, `CaseMoves`, `pushCaseBlock` · `popCaseBlock`).
+  - 반복문마다 감싸는 블록(`pushLoopWrap` · `popLoopWrap`): 옮긴 뒤 `break`는 그 끝으로 뛰고(`semaMovedBreak`), 다른 길은 반복문
+    뒤의 소멸을 지난다. 옮긴 채 다음 반복으로 가면 오류(`checkLoopMoves`).
+  - `semaCaptureUnwrap`이 `NoCopy` payload를 `_opt`에서 꺼낸다.
+  - 확인: 14단계 검증 rc=0. 첫 실행은 `memory/array_nocopy_for_copy_error.cy`가 실패했다(`for a |r|`의 오류가 core의
+    `Array.next`로 옮겨 감). `for` 순회는 캡처 전에 전의 복사 오류를 내게 했다.
   - tars-agent `docs/TODO.md`의 "다음 cyber 빌드" 항목에 덧붙였다(커밋 안 함).
 
 ## 시도했으나 실패한 접근
@@ -162,8 +175,8 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `endIfBranch` · `joinBranchMoves` · `spliceBranchEnd`. 반복 본문 밖 지역은 'Cannot move `a` here: ...'.
 - [x] B(`4149c6b8`): `appended` · `inserted` · `removed` · `+`가 마지막 사용에서 버퍼 재사용(`sema.reuseSliceBuffer`,
   `Chunk.stmt_ctx`). 원래의 B 버그는 slice 결정 3에서 이미 없어졌다. A(IR 활성 분석)는 만들지 않기로 했다.
-  - 남은 것(결정 문서 "이동한 지역에 다시 대입" 끝): 반복 본문에서 옮긴 뒤 `break` · `return`, `switch` · `if` 언랩 · `if` 식
-    갈래의 이동, 같은 갈래에서 옮긴 뒤 대입, 멤버 수신자 재사용, 변수에 담긴 `NoCopy` 옵션의 `?else`. 성능 수치는 재지 않았다.
+  - 남은 것(결정 문서 "갈래 종류와 반복 본문" 끝): `if` 식 · `switch` 식 갈래의 이동, `try` 블록의 이동, 옮긴 집합이 다른
+    `break`들, 멤버 수신자 재사용, 변수에 담긴 `NoCopy` 옵션의 `?else`. 성능 수치는 재지 않았다.
   - tars-agent 프롬프트 `prompt/cyber-subset.md` · `.en.md` 168 · 347행이 "`move a`로 넘긴다", "Cannot copy ... `move`"라고 안내한다.
     이제 `move` 없이 이동한다. 그 저장소에는 쓰지 않았다(다른 세션의 미추적 파일 `spike/s2/out/0.4.16/`이 있음).
 - [x] tars-agent 요청 `docs/requests/cyber-0.4.16-messages-from-codeact-round.md`의 문구 넷(2026-11-21, 사용자: "update tars-agent
@@ -194,7 +207,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 ## 알려진 한계
 
 - 이동(2026-11-21 코드 리뷰 뒤): `and` · `or`의 왼쪽과 `if (c) a else b`의 조건은 늘 평가되지만 이동이 막힌다(같은 내부 블록).
-  `while` 조건식과 `if` 언랩 조건식의 이동은 옛 문구('declared in an outer block')로 막힌다. 버퍼를 재사용한 호출의 런타임
+  `while` 조건식의 이동은 반복문 문구('the next iteration reads it')로 막힌다. `if` 언랩의 옵션 식은 옮길 수 있다. 버퍼를 재사용한 호출의 런타임
   stack trace에는 제자리 메서드(`Slice.remove`)가 나온다. REPL에서 `move a` 뒤 다음 입력의 `a`는 일반 'Undeclared variable'이다.
 - 양보만 하는 fiber와 Future를 기다리는 fiber가 섞이면 `Scope.run`이 쉬지 않고 돈다(설계대로).
 - 실행으로 확인하지 못한 경로: Windows `FallbackReadLine`. 시작한 자식이 멈춘 동안 부모 스택이 옮겨지는 경우는 지금 구조에서

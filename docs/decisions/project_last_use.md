@@ -46,8 +46,7 @@
   블록에서 돌므로 바로 넣는다. `else`가 없으면 마지막 갈래 끝에 `break`를 더해 암시적 `else` 자리로 흘러 들지 않게 하고, 그 자리에
   소멸을 넣는다. 그 뒤 지역을 `.dead`로 둔다. 더 바깥 블록의 지역이면 다시 `branch_moves`에 올려 바깥 `if` 문이 합친다.
 - 런타임 플래그가 없다. 어느 경로로 합류해도 지역이 죽어 있으므로 블록 끝 상태가 컴파일 때 정해진다.
-- 남은 것: 반복 본문에서 옮긴 바로 뒤 `break` · `return`이 오는 꼴(2.4 E의 허용 조건)은 아직 막혀 있다. `break` 경로와 정상 종료
-  경로의 상태가 갈라져 반복문 뒤에도 합류 처리가 필요하다. `switch` · `if` 언랩 · `if` 식의 갈래도 아직이다.
+- 남은 것(반복 본문에서 옮긴 뒤 `break` · `return`, `switch` · `if` 언랩 갈래)은 아래 "갈래 종류와 반복 본문"에서 했다.
 - 테스트: `memory/move_implicit.cy` · `move_branch.cy`(소멸 순서를 로그로 비교) · `move_branch_use_after_error.cy` ·
   `move_loop_error.cy`.
 - 코드 리뷰 수정(2026-11-21):
@@ -112,5 +111,46 @@ E · B 절의 "남은 것" 가운데 "이동한 지역에 다시 대입"과 `xs 
   payload가 풀린다.
 - 테스트: `memory/move_assign.cy`(소멸 순서 로그) · `move_assign_outer_error.cy` · `move_assign_break_error.cy` ·
   `move_assign_try_error.cy` · `slice_reuse_assign.cy` · `unwrap_else_nocopy.cy`, lib 테스트 `session.zig`의 persist_main 이동.
-- 남은 것: 반복 본문에서 옮긴 바로 뒤 `break` · `return`, `switch` · `if` 언랩 · `if` 식 갈래의 이동, 같은 갈래에서 옮긴 뒤 대입,
-  멤버 수신자 재사용(`s.xs = s.xs.appended(v)`), 변수에 담긴 `NoCopy` 옵션의 `?else`.
+- 남은 것은 아래 "갈래 종류와 반복 본문"에서 대부분 했다. 그 절의 끝에 남은 것이 있다.
+
+## 갈래 종류와 반복 본문 (2026-11-21)
+
+위 절의 "남은 것" 가운데 같은 갈래에서 옮긴 뒤 대입, `if` 언랩 · `switch` 갈래의 이동, 반복 본문에서 옮긴 뒤 `break` · `return`을
+했다(사용자: "continue"). 모두 런타임 플래그 없이 sema의 앞방향 상태로 한다.
+
+- 블록 종류: `MoveBranch.plain`을 더했다. 문장이 순서대로 도는 블록(`begin:`, 반복문의 블록들)이고, 그 안의 바깥 지역 이동은
+  둘러싼 블록의 이동이다. `canMoveAcross`는 지역의 블록까지 `.none`이 아닌 블록만 있으면 받는다. `.none`으로 남은 것은 `try`
+  블록과 `else` 블록, `switch` 식의 case, `?else` · `!else` 블록, `and` · `or` · `if` 식의 내부 블록이다.
+- `Block.moves_start`(블록이 시작할 때의 `branch_moves` 길이): 그 뒤의 항목은 이 블록에서 한 이동이거나 이 블록의 문장이 갈래를
+  합친 결과다. 즉 여기까지 오는 모든 경로에서 죽어 있다.
+- 같은 블록에서 옮긴 뒤 대입(`movedInBlock`): 죽은 바깥 지역이 지금 블록의 `moves_start` 뒤에 있으면 대입이 되살리고
+  (`reviveLocal`) 그 항목을 `branch_moves`에서 뺀다. 블록은 그 지역을 옮기지 않은 것으로 끝난다. overload 후보 되돌리기는
+  `MoveUndo.branch_taken`으로 뺀 만큼 다시 넣는다.
+- `if` 언랩 문: `semaIfStmt`와 같은 틀(`IfBranch` · `endIfBranch` · `joinBranchMoves`)을 쓴다. 옵션 식은 첫 조건식처럼
+  `.if_cond`에서 평가된다. `IfBranch`는 `if_block` 문장 대신 본문 머리의 포인터(`body`)를 갖는다.
+- `switch` 문: case 본문 블록이 `.branch`다(`pushCaseBlock` · `popCaseBlock`, `SwitchInfo.moves`). `switch`는 빠짐없이 다루므로
+  암시적 `else`가 없다. fallthrough case는 본문이 없어 갈래로 세지 않는다. case 조건은 컴파일 타임 값이라 이동이 없다. `switch`
+  식은 식 안에서 평가되므로 하지 않았다.
+- 반복문: 반복문마다 감싸는 블록 W를 둔다(`pushLoopWrap` · `popLoopWrap`, IR은 `block { loop }`). 반복 블록 L은
+  `Block.loop_wrap`으로 W를 안다.
+  - 반복 본문의 이동은 `branch_moves`의 L의 `moves_start` 뒤에 쌓인다. 지금 경로에서 죽어 있는 것만 남는다(끝에 닿지 않는
+    `if` 갈래는 `endIfBranch`가 되돌리고 뺀다).
+  - `continue`(본문 끝의 암시적인 것 포함, `checkLoopMoves`): W 밖 지역의 항목이 남아 있으면 옮긴 자리의 오류다.
+  - `break`(`semaMovedBreak`): 남은 항목이 없으면 전처럼 L로 간다. 있으면 그 집합을 W에 적고(`Chunk.break_moves`,
+    `Block.moved_break`) W의 끝으로 뛴다. 둘째부터는 집합이 같아야 한다(다르면 오류). 집합이 달라도 되게 하려면 앞서 만든
+    `break` 앞에 소멸을 끼워 넣어야 해서 하지 않았다.
+  - `return`은 그 시점 상태로 소멸을 만들므로 손대지 않는다.
+  - L이 끝나면 남은 항목을 모두 되살린다(`restoreMoves`): 다음 반복에 닿지 않는 경로의 것뿐이다.
+  - `popLoopWrap`: L 뒤, W 안에 `break`가 옮긴 지역들의 소멸을 넣는다. 반복이 끝나서 나오는 길과 옮기지 않은 `break`가 여기를
+    지나고, 옮긴 `break`는 건너뛴다. 그 뒤 지역은 죽어 있고, 더 바깥 블록의 지역이면 둘러싼 갈래 · 반복의 이동으로 올린다.
+  - `while:`(무한 반복)에 옮긴 `break`만 있으면 L 뒤가 닿지 않으므로 소멸을 넣지 않고, 반복문 뒤는 닿는다고 본다.
+- `if` · `while` 언랩의 캡처가 `NoCopy` payload를 꺼낸다(`semaCaptureUnwrap`): 숨은 `_opt`를 갈래 안에서 죽은 것으로 두고
+  payload를 캡처 지역이 갖는다. 뒤 갈래에서는 `_opt`가 `none`이라 다시 살려 둔다. 변수에서 읽은 옵션은 `.if_cond`의 암시적
+  이동으로 `_opt`에 들어온다. "변수에 담긴 `NoCopy` 옵션"을 `if` 언랩 쪽에서 푼 셈이다.
+  `for a |r|`는 캡처 전에 원소 타입을 보고 전의 복사 오류를 낸다(`reportNoCopy`): 캡처가 payload를 가져가면 오류가 core의
+  `Array.next` 본문에서 나기 때문이다.
+- 테스트: `memory/move_branch_kinds.cy` · `move_loop.cy`(소멸 순서 로그) · `move_loop_error.cy` · `move_loop_continue_error.cy` ·
+  `move_loop_break_error.cy` · `move_loop_after_error.cy` · `move_try_error.cy` · `unwrap_nocopy_capture.cy` ·
+  `move_unwrap_after_error.cy`.
+- 남은 것: `if` 식 · `switch` 식 갈래의 이동, `try` 블록의 이동, 옮긴 집합이 다른 `break`들, 멤버 수신자 재사용
+  (`s.xs = s.xs.appended(v)`), 변수에 담긴 `NoCopy` 옵션의 `?else`(`o ?else ...`).

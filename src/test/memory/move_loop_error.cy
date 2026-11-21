@@ -1,4 +1,4 @@
--- A loop body can not move a local of an outer block: the next iteration reads it.
+-- A loop body that moves a local of an outer block can not reach its end: the next iteration reads the local.
 type R struct:
     with NoCopy
     id int
@@ -12,7 +12,7 @@ for 0..2 |i|:
         take(a)
 
 --cytest: error
---CompileError: Cannot move `a` here: it is declared in an outer block. A branch of an `if` statement can move it, a loop body can not (the next iteration reads it). Borrow it with `&a`.
+--CompileError: Cannot move `a` here: it is declared outside the loop, and the next iteration reads it. A loop body can move it where it then leaves the loop with `break` or `return`, or gives it a value again. Borrow it with `&a`.
 --
 --@MainPath():12:14:
 --        take(a)

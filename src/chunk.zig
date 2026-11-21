@@ -149,6 +149,9 @@ pub const Chunk = struct {
     /// The outer locals that a branch of an `if` statement moved, until the statement joins its branches
     /// (`sema.semaIfStmt`).
     branch_moves: std.ArrayList(u32) = .empty,
+    /// The outer locals that the `break` statements of a loop moved, from `Block.break_moves_start` of the wrap block
+    /// of the loop (`sema.semaBreak`).
+    break_moves: std.ArrayList(u32) = .empty,
     /// The moves made while an overload candidate is matched, so that a candidate that does not match leaves the
     /// locals as they were (`sema.undoMoves`). Recorded only while `move_undo_depth` is not 0.
     move_undo: std.ArrayList(cy.sema.MoveUndo) = .empty,
@@ -390,6 +393,7 @@ pub const Chunk = struct {
         self.borrow_loans.deinit(self.alloc);
         self.moved_sites.deinit(self.alloc);
         self.branch_moves.deinit(self.alloc);
+        self.break_moves.deinit(self.alloc);
         self.move_undo.deinit(self.alloc);
         self.scope_start_borrows.deinit(self.alloc);
         self.scope_borrows.deinit(self.alloc);

@@ -43,6 +43,11 @@ const Root = @This();
 
 pub var debug = false;
 
+pub const PendingBufferArg = struct {
+    inst_t: *cy.Type,
+    arg_t: *cy.Type,
+};
+
 pub const Compiler = struct {
     alloc: std.mem.Allocator,
     vm: *cy.VM,
@@ -94,6 +99,10 @@ pub const Compiler = struct {
     /// With recovery, the declarations (`*cy.Sym`, `*cy.Func` or `*cy.Type`) that failed to resolve in this
     /// compile. Asked for again, one fails without another report (`sema.declFailed`).
     failed_decls: std.AutoHashMapUnmanaged(*const anyopaque, void) = .empty,
+    /// Template instances that keep a type argument in a buffer and were resolved before that argument was
+    /// (`type Tree: kids []Tree`). Checked when the argument turns out to be a borrow type
+    /// (`sema_type.resolveStructFields`). Of this compile only.
+    pending_buffer_args: std.ArrayListUnmanaged(PendingBufferArg) = .empty,
 
     /// Record what the names of the main source refer to (`cl_vm_set_symbol_info`, `refs.zig`).
     /// Kept across `cl_vm_reset` like `report_color`. The references are those of the last compile.
@@ -290,6 +299,7 @@ pub const Compiler = struct {
             self.ref_calls.deinit(self.alloc);
             self.recover_skip.deinit(self.alloc);
             self.failed_decls.deinit(self.alloc);
+            self.pending_buffer_args.deinit(self.alloc);
             self.ref_hints.deinit(self.alloc);
             self.ref_hint_text.deinit(self.alloc);
             self.reports.deinit(self.alloc);
@@ -595,6 +605,7 @@ pub const Compiler = struct {
     fn compileInner(self: *Compiler, uri: []const u8, src_opt: ?[]const u8, config: C.CompileConfig) !CompileResult {
         self.config = config;
         self.failed_decls.clearRetainingCapacity();
+        self.pending_buffer_args.clearRetainingCapacity();
 
         if (!self.cont) {
             try reserveCoreTypes(self);

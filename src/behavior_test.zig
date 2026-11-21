@@ -293,6 +293,7 @@ fn test_memory(run: *Runner) void {
     run.case("memory/borrow_container_two_owners_error.cy");
     run.case("memory/borrow_container_field_store_error.cy");
     run.case("memory/borrow_in_buffer_error.cy");
+    run.case("memory/borrow_in_buffer_recursive_error.cy");
     run.case("memory/assign_in_loop_while_borrowed_error.cy");
     run.case("memory/global_borrow_error.cy");
     run.case("memory/scope_param_missing_error.cy");

@@ -856,6 +856,17 @@ fn indexOfTypedField(fields: []const *ast.Field, start: usize) ?usize {
 }
 
 /// Explicit `decl` node for distinct type declarations. Must belong to `c`.
+/// `inst_t` is a template instance without a borrow field whose type argument `arg_t` is a borrow type.
+fn reportBorrowInBuffer(c: *cy.Chunk, inst_t: *cy.Type, arg_t: *cy.Type, fallback: *ast.Node) anyerror {
+    // Reported where the type is asked for, not at the template in another module.
+    const at: *ast.Node = inst_t.sym().instance.?.siteIn(c.compiler) orelse fallback;
+    const name = try c.sema.allocTypeName(inst_t);
+    defer c.alloc.free(name);
+    const arg_name = try c.sema.allocTypeName(arg_t);
+    defer c.alloc.free(arg_name);
+    return c.reportErrorFmt("`{}` keeps values of the borrow type `{}` in a buffer, where a borrow is not checked. Use an owned type, `^T` or a vector `[N]T`.", &.{cy.fmt.v(name), cy.fmt.v(arg_name)}, at);
+}
+
 pub fn resolveStructFields(c: *cy.Chunk, struct_t: *cy.types.Struct, decl: *ast.StructDecl) !void {
     struct_t.resolving_struct = true;
     std.debug.assert(!struct_t.base.isResolved());
@@ -996,17 +1007,25 @@ pub fn resolveStructFields(c: *cy.Chunk, struct_t: *cy.types.Struct, decl: *ast.
             for (inst.params, 0..) |param, i| {
                 if (inst.param_types[i].id() != bt.Type) continue;
                 const arg_t = param.asPtr(*cy.Type);
+                if (arg_t.kind() == .struct_t and !arg_t.isResolved()) {
+                    // Not known yet (`type Tree: kids []Tree`). Checked when the argument is resolved.
+                    try c.compiler.pending_buffer_args.append(c.alloc, .{ .inst_t = &struct_t.base, .arg_t = arg_t });
+                    continue;
+                }
                 const is_borrow = arg_t.kind() == .borrow or arg_t.kind() == .ex_borrow or
                     (arg_t.isResolved() and arg_t.info.borrow_only);
                 if (!is_borrow) continue;
-                // Reported where the type is asked for, not at the template in another module.
-                const at: *ast.Node = inst.siteIn(c.compiler) orelse @ptrCast(decl);
-                const name = try c.sema.allocTypeName(&struct_t.base);
-                defer c.alloc.free(name);
-                const arg_name = try c.sema.allocTypeName(arg_t);
-                defer c.alloc.free(arg_name);
-                return c.reportErrorFmt("`{}` keeps values of the borrow type `{}` in a buffer, where a borrow is not checked. Use an owned type, `^T` or a vector `[N]T`.", &.{cy.fmt.v(name), cy.fmt.v(arg_name)}, at);
+                return reportBorrowInBuffer(c, &struct_t.base, arg_t, @ptrCast(decl));
             }
+        }
+    } else {
+        // The last one is the outermost (`Map[int, Tree]`, not the `HashMap` it is made of).
+        var i = c.compiler.pending_buffer_args.items.len;
+        while (i > 0) {
+            i -= 1;
+            const pending = c.compiler.pending_buffer_args.items[i];
+            if (pending.arg_t != &struct_t.base) continue;
+            return reportBorrowInBuffer(c, pending.inst_t, &struct_t.base, @ptrCast(decl));
         }
     }
     struct_t.base.info.borrow_only = has_borrow_child;

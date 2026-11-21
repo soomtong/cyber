@@ -19,7 +19,7 @@
 
 ## 현재 브랜치
 
-`master`. `76b91218`까지 push돼 있다(2026-11-20). 그 Latest Build `44723475654`는 Intel macOS job이 "Clone repo."에서 45분 멈춰 실패(러너 문제, 나머지 7개 통과, 재실행 안 함).
+`master`. `76b91218`까지 push돼 있다(2026-11-20, 그 뒤 커밋은 push하지 않음). 그 Latest Build `44723475654`는 Intel macOS job이 "Clone repo."에서 45분 멈춰 실패(러너 문제, 나머지 7개 통과, 재실행 안 함).
 PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지 못해 15분 뒤 취소된 탓이다(나머지 6개 통과).
 
 ## 완료된 작업
@@ -78,6 +78,10 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   "남은 구멍 조사", 발견 이슈 F-168. 남은 것: `&self` 메서드의 관리형 필드 대입(언어 결정, std 59곳 이상).
   빌림 검사에 남긴 구멍(0.5 후보)은 `docs/decisions/project_borrow_model.md` "남은 것" 끝. tars-agent는 `docs/TODO.md` 31행에
   덧붙였고 커밋하지 않았다.
+- [x] 재귀 타입의 버퍼 속 빌림(2026-11-21, 사용자: "continue"): `type Tree: kids []Tree`에 빌림 필드가 있으면 그 필드 자리에서
+  거절한다(`Compiler.pending_buffer_args`). 전에는 core의 `PtrSpan[Tree]`를 가리켰다.
+- [ ] R6(`&T`를 거친 쓰기)는 사용자 결정 대기. 다시 재니 `self.xs.append(v)` 꼴도 같은 구멍이고 저장소에서 179곳 이상이다.
+  안 셋과 추천(Rust식 규칙을 0.5 뒤 첫 언어 결정으로, 경고 먼저)은 `project_borrow_model.md` "R6 다시 재기".
 
 - [x] 0.4.15 릴리스(2026-11-18): 태그 `0.4.15` → `93a9ca4f`, `build-969-93a9ca4`, Latest, 에셋 15개(CI). `install.sh 0.4.15`를 임시
   경로에 설치해 버전 · 스크립트 · `cyber-lsp`의 여러 구문 오류 진단을 확인했다. `/usr/local`의 설치는 사용자가 다시 한다.
@@ -158,7 +162,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-163까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-168까지, 열린 것 없음).
 
 ## 작업 방식
 

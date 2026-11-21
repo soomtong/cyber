@@ -310,7 +310,9 @@
 ### 남은 구멍
 
 `&self` 메서드 안의 관리형 필드 대입(`fn (&Foo) reset(): self.xs = {7}`에 `s := &f.xs[0]`을 둔 채 `f.reset()`)은 그대로다.
-`&T`로 값을 바꿀 수 있다는 언어 규칙에서 오고, 막으면 표준 라이브러리의 59곳 이상이 걸린다. 나머지는 아래 절에서 고쳤다.
+`&self` 메서드 안에서 필드에 제자리 메서드를 부르는 것(`self.xs.append(v)`)도 같다. `&T`로 값을 바꿀 수 있다는 언어 규칙에서
+오고, 막으면 표준 라이브러리 · 도구 · 테스트의 179곳 이상이 걸린다(`project_borrow_model.md` "R6 다시 재기"). 값을 바꾸는
+메서드의 수신자를 `&&T`로 선언하면 부르는 자리에서 검사된다. 나머지는 아래 절에서 고쳤다.
 
 ## 배타 빌림을 담은 값 · 버퍼 속 빌림 · 주인이 여럿인 컨테이너 (2026-11-21, 깨지는 변경)
 
@@ -330,6 +332,8 @@
 - 버퍼에 원소를 두는 타입의 타입 인자가 빌림 타입인 것: `[]&int`, `[]Holder`, `Array[&T]`. '`[]&int` keeps values of the
   borrow type `&int` in a buffer, where a borrow is not checked. Use an owned type, `^T` or a vector `[N]T`.' 전에는
   `fn mk() -> []&int: x := 41; return {&x}`가 컴파일되고 죽은 스택을 읽었다. inline vector `[3]&int`와 option은 그대로 된다.
+  자기 자신을 원소로 두는 타입(`type Tree: kids []Tree`에 빌림 필드)도 그 필드의 자리에서 같은 오류다. 처음에는 core 안의
+  `PtrSpan[Tree]`를 가리켰다.
 - 빌림 컨테이너의 둘째 주인: `p := Pair{a=&&x, b=&&y}` 뒤 `t := &y.xs[0]`. 전에는 한 주인만 셌다. 필드에 나중에 넣은 빌림도
   센다: `h.r = &&f` 뒤 `s := &f.xs[0]`.
 

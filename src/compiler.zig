@@ -1414,6 +1414,7 @@ fn loadBuiltinChunk(c: *cy.Chunk) !void {
         core.getSym("to_print_string").?.cast(.func),
     };
     c.sema.track_main_local_fn = core.getSym("@trackMainLocal").?.cast(.func).first;
+    c.sema.untrack_main_local_fn = core.getSym("@untrackMainLocal").?.cast(.func).first;
     c.sema.main_result_fn = core.getSym("@mainResult").?.cast(.func).first;
 
     const float_tmpl = c.sema.float_tmpl;

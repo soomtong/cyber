@@ -7064,6 +7064,7 @@ pub fn sema_program(c: *cy.Chunk, opt_main_func: ?*cy.Func) !*ir.Stmt {
         } else {
             try semaStmts(c, stmts);
         }
+        if (c.vm.config.persist_main and c.block().endReachable) try semaUntrackMovedMainLocals(c);
 
         var destruct_locals = true;
         if (c.block().endReachable) {
@@ -8511,6 +8512,7 @@ pub fn semaOwn(c: *cy.Chunk, expr: ExprResult, node: *ast.Node) !ExprResult {
         return expr;
     }
     if (expr.type.info.no_copy and canMoveImplicitly(c, expr)) {
+        if (isPersistedMainLocal(c, expr.recParentLocal().?)) return reportCopyPersistedLocal(c, expr, node);
         return semaMove(c, expr, node);
     }
     if (expr.type.info.no_copy and expr.ir.code == .local) {
@@ -8542,6 +8544,48 @@ fn canMoveImplicitly(c: *cy.Chunk, expr: ExprResult) bool {
     if (id < c.block().varStart and (cur != expr.ir or !canMoveAcross(c, id))) return false;
     if (cur == expr.ir and local.has_inactive_struct_fields) return false;
     return true;
+}
+
+/// Whether the local `id` is declared in the top level block of the REPL's main (`persist_main`). The next input reads
+/// it again from a new main chunk, which does not know what the earlier inputs moved. A local of a nested block or of
+/// a function ends with the input.
+fn isPersistedMainLocal(c: *cy.Chunk, id: LocalId) bool {
+    if (!c.vm.config.persist_main) return false;
+    const proc = c.proc();
+    if (proc.func != null or id < proc.varStart) return false;
+    const nested = proc.block_start + 1;
+    return nested >= c.semaBlocks.items.len or id < c.semaBlocks.items[nested].varStart;
+}
+
+/// A `NoCopy` value read from a top level local of the REPL does not move without `move`: the local would be gone for
+/// the later inputs without a word in the source. `move x` says so, and `semaUntrackMovedMainLocals` then forgets `x`.
+fn reportCopyPersistedLocal(c: *cy.Chunk, expr: ExprResult, node: *ast.Node) anyerror {
+    const type_name = try c.sema.allocTypeName(expr.type);
+    defer c.alloc.free(type_name);
+    const name = c.varStack.items[expr.recParentLocal().?].name();
+    if (expr.ir.code != .local) {
+        return c.reportErrorFmt("Cannot copy `{}`, a `NoCopy` type. A member of the top level variable `{}` of the REPL does not move: later inputs read `{}`. Borrow it, or move the whole variable with `move {}`.", &.{v(type_name), v(name), v(name), v(name)}, node);
+    }
+    return c.reportErrorFmt("Cannot copy `{}`, a `NoCopy` type. The top level variable `{}` of the REPL does not move without `move`: later inputs read it. Write `move {}` to give it away (later inputs can not use `{}` then), or borrow it.", &.{v(type_name), v(name), v(name), v(name)}, node);
+}
+
+/// REPL (`persist_main`), at the end of the main block: a top level local that was moved (`ys := move xs`, also from a
+/// branch of an `if` statement) is not carried over to the next input. Its value has another owner, so the next input
+/// would read a value that is freed or owned twice.
+fn semaUntrackMovedMainLocals(c: *cy.Chunk) !void {
+    const proc = c.proc();
+    var id: usize = proc.varStart;
+    while (id < c.varStack.items.len) : (id += 1) {
+        const local = c.varStack.items[id];
+        if (local.type != .dead or local.inner.local.hidden or local.inner.local.isParam) continue;
+        // A local that was declared again under the name (a restored one can be) keeps the name.
+        const entry = proc.var_cache_entries.get(local.name()) orelse continue;
+        if (entry.type != .local or entry.data.local.varId != id) continue;
+        const name = try c.semaRawString(local.name(), c.ast.null_node);
+        const arg = sema_func.Argument.initPreResolved(c.ast.null_node, name);
+        const call = try c.semaCallFunc2(c.sema.untrack_main_local_fn, &.{arg}, &.{}, c.ast.null_node);
+        try sema_discard(c, call, c.ast.null_node);
+    }
 }
 
 fn reportMoveAcross(c: *cy.Chunk, id: LocalId, node: *ast.Node) anyerror {
@@ -10498,7 +10542,14 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
         .move_expr => {
             const child = node.cast(.move_expr).expr;
             const res = try semaExpr(c, child, .{});
-            return semaMove(c, res, child);
+            const moved = try semaMove(c, res, child);
+            const owner = c.temp_access_path.var_id;
+            if (c.varStack.items[owner].type == .local and isPersistedMainLocal(c, owner)) {
+                // The moved state of a member is not carried over to the next input, which reads the whole local.
+                const name = c.varStack.items[owner].name();
+                return c.reportErrorFmt("Cannot move a member of the top level variable `{}` of the REPL: later inputs read `{}`. Move the whole variable with `move {}`, or do it inside a function.", &.{v(name), v(name), v(name)}, child);
+            }
+            return moved;
         },
         else => {
             return c.reportErrorFmt("Unsupported node: {}", &.{v(node.type())}, node);
@@ -13159,6 +13210,7 @@ pub const Sema = struct {
     panic_fn: *cy.Func = undefined,
     panic_unwrap_error_fn: *cy.Func = undefined,
     track_main_local_fn: *cy.Func = undefined,
+    untrack_main_local_fn: *cy.Func = undefined,
     main_result_fn: *cy.Func = undefined,
     scope_new_fn: *cy.Func = undefined,
     scope_abort_fn: *cy.Func = undefined,

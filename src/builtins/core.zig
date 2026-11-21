@@ -115,6 +115,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"@await_any", zErrFunc(await_any)},
     .{"@await_",        zErrBuiltinFunc(await_, null)},
     .{"@trackMainLocal", zErrFunc(trackMainLocal)},
+    .{"@untrackMainLocal", zErrFunc(untrackMainLocal)},
     .{"@mainResult",     zErrFunc(mainResult)},
     .{"@compute_int_max", zErrConstEvalFunc(compute_int_max)},
     .{"@compute_int_min", zErrConstEvalFunc(compute_int_min)},
@@ -1664,6 +1665,22 @@ pub fn mainResult(t: *cy.Thread) !C.Ret {
         .reg_size = (val_t.size() + 7) >> 3,
         .borrowed = borrowed,
     };
+    return C.RetOk;
+}
+
+/// Drops the save of a main local that the program moved. The value has another owner, so only the bookkeeping is
+/// freed.
+pub fn untrackMainLocal(t: *cy.Thread) !C.Ret {
+    _ = t.ret(void);
+    const name_s = t.param(cy.heap.Str);
+    defer t.heap.destructStr(&name_s);
+    const vm = t.c.vm;
+    const removed = vm.env_local_saves_map.fetchRemove(name_s.slice()) orelse return C.RetOk;
+    vm.env_local_saves.orderedRemove(removed.value).deinit(t.alloc);
+    var iter = vm.env_local_saves_map.valueIterator();
+    while (iter.next()) |idx| {
+        if (idx.* > removed.value) idx.* -= 1;
+    }
     return C.RetOk;
 }
 

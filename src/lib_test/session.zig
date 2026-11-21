@@ -390,6 +390,87 @@ test "persist_main keeps main locals across evals." {
     try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "print(x)", config, &res));
 }
 
+test "persist_main: a top level local moves with `move` only, and a moved one is gone for the next eval." {
+    // The next eval restores every tracked main local and does not know what the earlier evals moved. An implicit
+    // move (`eat(a)`) left `a` readable after its buffer was freed. Leak-checking allocator.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\use test
+        \\type Box:
+        \\    xs Array[str]
+        \\    n int
+        \\fn eat(x Array[str]) -> int:
+        \\    return x.len()
+        \\fn long(n int) -> str:
+        \\    return 'abcdefghijklmnopqrstuvwxyz' + str(n)
+        \\a := Array[str]{long(1), long(2)}
+        \\bx := Box{xs=Array[str]{long(3)}, n=1}
+    , config, &res));
+
+    // No implicit move of a top level local: as an argument, as an initializer, from a branch, of a member.
+    const implicit = [_][]const u8{
+        "test.eq(2, eat(a))",
+        "b := a",
+        "if a.len() == 2:\n    test.eq(2, eat(a))",
+    };
+    for (implicit) |src| {
+        try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", src, config, &res));
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, "The top level variable `a` of the REPL does not move without `move`: later inputs read it. Write `move a`") != null);
+    }
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "test.eq(1, eat(bx.xs))", config, &res));
+    {
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, "A member of the top level variable `bx` of the REPL does not move") != null);
+    }
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "c := move bx.xs", config, &res));
+    {
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, "Cannot move a member of the top level variable `bx` of the REPL") != null);
+    }
+    // The failed inputs moved nothing.
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "test.eq(2, a.len())\ntest.eq(27, a[0].len())\ntest.eq(1, bx.xs.len())", config, &res));
+
+    // A local of a function or of a nested block ends with the input and moves as in a script.
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\fn f() -> int:
+        \\    q := Array[str]{long(4)}
+        \\    return eat(q)
+        \\test.eq(1, f())
+        \\if a.len() == 2:
+        \\    q := Array[str]{long(5), long(6)}
+        \\    test.eq(2, eat(q))
+    , config, &res));
+
+    // `move` gives the value away. The local is not restored: the later evals do not know the name.
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "b := move a\ntest.eq(2, b.len())", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "test.eq(2, a.len())", config, &res));
+    {
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, "Undeclared variable `a`.") != null);
+    }
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "test.eq(27, b[0].len())\ntest.eq(1, bx.n)", config, &res));
+    // A restored local that a branch moves is gone as well. The other branch destructs it.
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "if bx.n == 1:\n    test.eq(2, eat(move b))", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "test.eq(2, b.len())", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "d := Array[str]{long(7)}\nif bx.n == 2:\n    test.eq(1, eat(move d))", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "test.eq(1, d.len())", config, &res));
+    // The name can be declared again, and the other locals are kept.
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "a := Array[str]{long(8)}\ne := move a\na := 3", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "test.eq(3, a)\ntest.eq(1, e.len())\ntest.eq(1, bx.xs.len())", config, &res));
+}
+
 test "Multiple evals with same VM." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

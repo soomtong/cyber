@@ -4830,6 +4830,9 @@ fn (&PtrSpan[]) set_backwards(o Self):
 -- For REPL.
 #[bind] fn @trackMainLocal(name str, type_id int, addr Ptr[void])
 
+--| REPL: the main local `name` was moved, so the next eval does not restore it.
+#[bind] fn @untrackMainLocal(name str)
+
 --| REPL: reports the hidden local that holds the eval result.
 #[bind] fn @mainResult(type_id int, addr Ptr[void], borrowed bool)
 

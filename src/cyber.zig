@@ -13,12 +13,25 @@ pub const Parser = parser.Parser;
 pub const ParseResultView = parser.ResultView;
 
 pub const sema = @import("sema.zig");
+pub const sema_stmt = @import("sema_stmt.zig");
+pub const sema_local = @import("sema_local.zig");
+pub const sema_borrow = @import("sema_borrow.zig");
+pub const sema_call = @import("sema_call.zig");
+pub const sema_expr = @import("sema_expr.zig");
+pub const sema_hint = @import("sema_hint.zig");
+pub const sema_assign = @import("sema_assign.zig");
+pub const sema_access = @import("sema_access.zig");
+pub const sema_resolve = @import("sema_resolve.zig");
+pub const sema_switch = @import("sema_switch.zig");
+pub const sema_move = @import("sema_move.zig");
+pub const sema_init = @import("sema_init.zig");
+pub const sema_lit = @import("sema_lit.zig");
 pub const sema_func = @import("sema_func.zig");
 pub const global_init = @import("global_init.zig");
 pub const sema_type = @import("sema_type.zig");
 pub const ct_inline = @import("ct_inline.zig");
 pub const Sema = sema.Sema;
-pub const unescapeString = sema.unescapeString;
+pub const unescapeString = sema_lit.unescapeString;
 pub const FuncSig = sema.FuncSig;
 
 pub const cte = @import("cte.zig");

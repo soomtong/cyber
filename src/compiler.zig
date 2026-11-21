@@ -11,6 +11,10 @@ const fmt = @import("fmt.zig");
 const v = fmt.v;
 const vmc = @import("vmc");
 const sema = cy.sema;
+const sema_call = cy.sema_call;
+const sema_expr = cy.sema_expr;
+const sema_local = cy.sema_local;
+const sema_resolve = cy.sema_resolve;
 const sema_type = cy.sema_type;
 const bt = cy.types.BuiltinTypes;
 const core_mod = @import("builtins/core.zig");
@@ -58,7 +62,7 @@ pub const Compiler = struct {
     // Compile-time heap.
     heap: cy.Heap,
 
-    /// The value of a REPL eval's last top level expression (`sema.semaMainResultStmt`), copied after the run.
+    /// The value of a REPL eval's last top level expression (`sema_local.semaMainResultStmt`), copied after the run.
     /// Kept here rather than in `VM`, whose field layout `vm.h` mirrors with measured padding.
     main_res: ?cy.vm.MainResult = null,
 
@@ -97,7 +101,7 @@ pub const Compiler = struct {
     /// The lengths of the lists of `refListNames` when that statement started.
     recover_failed_lens: [4]usize = .{ 0, 0, 0, 0 },
     /// With recovery, the declarations (`*cy.Sym`, `*cy.Func` or `*cy.Type`) that failed to resolve in this
-    /// compile. Asked for again, one fails without another report (`sema.declFailed`).
+    /// compile. Asked for again, one fails without another report (`sema_resolve.declFailed`).
     failed_decls: std.AutoHashMapUnmanaged(*const anyopaque, void) = .empty,
     /// Template instances that keep a type argument in a buffer and were resolved before that argument was
     /// (`type Tree: kids []Tree`). Checked when the argument turns out to be a borrow type
@@ -265,7 +269,7 @@ pub const Compiler = struct {
         self.heap.sema = &self.sema;
 
         self.api_chunk = try createModuleUnmanaged(self, "api", "");
-        self.api_chunk.resolve_name_fn = sema.apiResolveName;
+        self.api_chunk.resolve_name_fn = sema_resolve.apiResolveName;
 
         try self.reinitPerRun();    
     }
@@ -942,8 +946,8 @@ pub fn performChunkParse(self: *Compiler, chunk: *cy.Chunk) !void {
 /// Sema pass.
 /// Symbol resolving, type checking, and builds the model for codegen.
 fn performChunkSema(c: *cy.Chunk) !void {
-    // try sema.pushChunkResolveContext(chunk, null);
-    // defer sema.popResolveContext(chunk);
+    // try sema_resolve.pushChunkResolveContext(chunk, null);
+    // defer sema_resolve.popResolveContext(chunk);
 
     if (c.has_static_init) {
         const init = c.sym.getMod().getSym("@init").?.cast(.func).first;
@@ -1036,9 +1040,9 @@ fn semaChunkFuncs(c: *cy.Chunk) !void {
                     inst.failed = true;
                 };
                 if (func.isMethod()) {
-                    try sema.semaMethodBody(c, func);
+                    try sema_local.semaMethodBody(c, func);
                 } else {
-                    try sema.semaFuncBody(c, func);
+                    try sema_local.semaFuncBody(c, func);
                 }
             },
             .extern_ => {
@@ -1048,7 +1052,7 @@ fn semaChunkFuncs(c: *cy.Chunk) !void {
                 if (func.info.emitted) {
                     continue;
                 }
-                try sema.semaFuncBody(c, func);
+                try sema_local.semaFuncBody(c, func);
             },
             else => {},
         }
@@ -1080,9 +1084,9 @@ fn semaChunkFuncsRecover(c: *cy.Chunk) !void {
         while (true) {
             body.pass(self);
             const res = if (func.type == .userFunc and func.isMethod())
-                sema.semaMethodBody(c, func)
+                sema_local.semaMethodBody(c, func)
             else
-                sema.semaFuncBody(c, func);
+                sema_local.semaFuncBody(c, func);
             res catch |err| {
                 // The body is not checked again when something else refers to the function.
                 func.info.emitted = true;
@@ -1158,38 +1162,38 @@ const BodyRecover = struct {
 fn emit_chunk_init_func(c: *cy.Chunk, init: *cy.Func) !void {
     log.tracev("emit @init.", .{});
 
-    try sema.pushChunkResolveContext(c, null);
-    defer sema.popResolveContext(c);
+    try sema_resolve.pushChunkResolveContext(c, null);
+    defer sema_resolve.popResolveContext(c);
 
-    _ = try sema.pushFuncProc(c, init);
+    _ = try sema_local.pushFuncProc(c, init);
 
     // Emit in correct dependency order.
     for (0..c.syms.items.len) |i| {
         const sym = c.syms.items[i];
         switch (sym.type) {
             .hostVar => {
-                try sema.semaTraceNopFmt(c, "init {s}", .{sym.name()}, init.decl.?);
+                try sema_expr.semaTraceNopFmt(c, "init {s}", .{sym.name()}, init.decl.?);
             },
             .userVar => {
-                try sema.semaTraceNopFmt(c, "init {s}", .{sym.name()}, init.decl.?);
+                try sema_expr.semaTraceNopFmt(c, "init {s}", .{sym.name()}, init.decl.?);
                 const user_var = sym.cast(.userVar);
-                try sema.semaUserVarInit(c, user_var, null);
+                try sema_resolve.semaUserVarInit(c, user_var, null);
             },
             else => {},
         }
     }
 
-    try sema.procPrologue(c);
-    try sema.popFuncBlock(c);
+    try sema_local.procPrologue(c);
+    try sema_local.popFuncBlock(c);
 }
 
 /// Invoke any chunk init functions.
 /// Invoke @initBindLib if necessary.
 fn emit_program_init_func(c: *cy.Chunk, start: *cy.Func) !void {
-    try sema.pushChunkResolveContext(c, null);
-    defer sema.popResolveContext(c);
+    try sema_resolve.pushChunkResolveContext(c, null);
+    defer sema_resolve.popResolveContext(c);
 
-    _ = try sema.pushFuncProc(c, start);
+    _ = try sema_local.pushFuncProc(c, start);
 
     // A chunk is initialized after the chunks that it imports (`global_init.initOrder`).
     var order: std.ArrayListUnmanaged(*cy.Chunk) = .empty;
@@ -1213,8 +1217,8 @@ fn emit_program_init_func(c: *cy.Chunk, start: *cy.Func) !void {
         else
             try reserve_hidden_func(chunk, "@init");
 
-        const call = try sema.sema_call_ir(c, init, &.{}, c.ast.null_node);
-        try sema.sema_discard(c, call, c.ast.null_node);
+        const call = try sema_call.sema_call_ir(c, init, &.{}, c.ast.null_node);
+        try sema_local.sema_discard(c, call, c.ast.null_node);
     }
 
     if (has_extern_func) {
@@ -1222,12 +1226,12 @@ fn emit_program_init_func(c: *cy.Chunk, start: *cy.Func) !void {
             return c.reportError("An `#[extern]` function needs the `c` module. Add `use c`.", null);
         };
         const init_bind_lib = c_chunk.sym.getMod().getSym("@initBindLib").?.cast(.func).first;
-        const expr = try sema.sema_call_ir(c, init_bind_lib, &.{}, c.ast.null_node);
-        try sema.sema_discard(c, expr, c.ast.null_node);
+        const expr = try sema_call.sema_call_ir(c, init_bind_lib, &.{}, c.ast.null_node);
+        try sema_local.sema_discard(c, expr, c.ast.null_node);
     }
 
-    try sema.procPrologue(c);
-    try sema.popFuncBlock(c);
+    try sema_local.procPrologue(c);
+    try sema_local.popFuncBlock(c);
 }
 
 fn reserve_hidden_func(c: *cy.Chunk, name: []const u8) !*cy.Func {
@@ -1265,10 +1269,10 @@ fn reserve_hidden_func(c: *cy.Chunk, name: []const u8) !*cy.Func {
 
 // Chunk destructor.
 fn emit_chunk_deinit_func(c: *cy.Chunk, deinit_fn: *cy.Func) !void {
-    try sema.pushChunkResolveContext(c, null);
-    defer sema.popResolveContext(c);
+    try sema_resolve.pushChunkResolveContext(c, null);
+    defer sema_resolve.popResolveContext(c);
 
-    _ = try sema.pushFuncProc(c, deinit_fn);
+    _ = try sema_local.pushFuncProc(c, deinit_fn);
 
     for (0..c.syms.items.len) |i| {
         const sym = c.syms.items[i];
@@ -1277,7 +1281,7 @@ fn emit_chunk_deinit_func(c: *cy.Chunk, deinit_fn: *cy.Func) !void {
                 // Binded globals are managed by the host. No destruction needed.
                 const host_var = sym.cast(.hostVar);
                 const node: *ast.Node = @ptrCast(host_var.decl.?);
-                try sema.semaTraceNopFmt(c, "deinit global {s} -- skip", .{host_var.head.name()}, node);
+                try sema_expr.semaTraceNopFmt(c, "deinit global {s} -- skip", .{host_var.head.name()}, node);
             },
             .userVar => {
                 const user_var = sym.cast(.userVar);
@@ -1286,32 +1290,32 @@ fn emit_chunk_deinit_func(c: *cy.Chunk, deinit_fn: *cy.Func) !void {
                 }
 
                 const node: *ast.Node = @ptrCast(user_var.decl.?);
-                try sema.semaNopFmt(c, "deinit global {s}", .{user_var.head.name()}, node);
-                const static = try sema.symbol(c, sym, false, node);
+                try sema_expr.semaNopFmt(c, "deinit global {s}", .{user_var.head.name()}, node);
+                const static = try sema_expr.symbol(c, sym, false, node);
                 const ptr_t = try sema.getPtrType(c, user_var.type);
-                const addr = try sema.semaAddressOf(c, static, ptr_t, node);
+                const addr = try sema_expr.semaAddressOf(c, static, ptr_t, node);
                 const move_ir = try c.ir.newExpr(.deref, user_var.type, node, .{
                     .expr = addr.ir,
                 });
                 const move = sema.ExprResult.init2(move_ir);
-                const temp_local = try sema.declareHiddenLocal(c, "_temp", user_var.type, move, node);
+                const temp_local = try sema_local.declareHiddenLocal(c, "_temp", user_var.type, move, node);
                 const temp = &c.varStack.items[temp_local.id];
-                try sema.semaDestructLocal(c, temp, node);
+                try sema_local.semaDestructLocal(c, temp, node);
                 c.varStack.items[temp_local.id].type = .dead;
             },
             else => {},
         }
     }
 
-    try sema.procPrologue(c);
-    try sema.popFuncBlock(c);
+    try sema_local.procPrologue(c);
+    try sema_local.popFuncBlock(c);
 }
 
 fn emit_program_deinit_func(c: *cy.Chunk, end_fn: *cy.Func) !void {
-    try sema.pushChunkResolveContext(c, null);
-    defer sema.popResolveContext(c);
+    try sema_resolve.pushChunkResolveContext(c, null);
+    defer sema_resolve.popResolveContext(c);
 
-    _ = try sema.pushFuncProc(c, end_fn);
+    _ = try sema_local.pushFuncProc(c, end_fn);
     // Same chunks as `emit_program_init_func`, in the reverse order: a chunk is deinitialized before the
     // chunks that it imports.
     var order: std.ArrayListUnmanaged(*cy.Chunk) = .empty;
@@ -1333,12 +1337,12 @@ fn emit_program_deinit_func(c: *cy.Chunk, end_fn: *cy.Func) !void {
             try reserve_hidden_func(chunk, "@deinit");
 
         // Invoke chunk destructor.
-        const call = try sema.sema_call_ir(c, deinit, &.{}, c.ast.null_node);
-        try sema.sema_discard(c, call, c.ast.null_node);
+        const call = try sema_call.sema_call_ir(c, deinit, &.{}, c.ast.null_node);
+        try sema_local.sema_discard(c, call, c.ast.null_node);
     }
     
-    try sema.procPrologue(c);
-    try sema.popFuncBlock(c);
+    try sema_local.procPrologue(c);
+    try sema_local.popFuncBlock(c);
 }
 
 fn resolveTypeSym(c: *cy.Chunk, mod: *cy.Module, name: []const u8) !*cy.Type {
@@ -1352,12 +1356,12 @@ fn resolveFirstFunc(c: *cy.Chunk, mod: *cy.Module, name: []const u8) !*cy.Func {
     if (sym.type == .use_alias) {
         const alias = sym.cast(.use_alias);
         if (!alias.resolved) {
-            try sema.resolveUseAlias(c, alias);
+            try sema_resolve.resolveUseAlias(c, alias);
         }
         sym = alias.sym;
     }
     const func = sym.cast(.func).first;
-    try sema.ensure_resolved_func(c, func, false, null);
+    try sema_resolve.ensure_resolved_func(c, func, false, null);
     return func;
 }
 
@@ -1666,14 +1670,14 @@ fn reserveChunkSyms(c: *cy.Chunk) anyerror!void {
         return;
     }
 
-    try sema.pushChunkResolveContext(c, null);
-    defer sema.popResolveContext(c);
+    try sema_resolve.pushChunkResolveContext(c, null);
+    defer sema_resolve.popResolveContext(c);
 
     // Process static declarations.
     for (c.ast.root.?.stmts.slice()) |stmt| {
         switch (stmt.type()) {
             .import_stmt => {
-                try sema.declareUseImport(c, stmt.cast(.import_stmt));
+                try sema_resolve.declareUseImport(c, stmt.cast(.import_stmt));
             },
             .type_alias_decl => {
                 _ = try sema_type.reserve_type_alias(c, stmt.cast(.type_alias_decl));
@@ -1682,7 +1686,7 @@ fn reserveChunkSyms(c: *cy.Chunk) anyerror!void {
                 _ = try sema_type.reserve_type_const(c, stmt.cast(.type_const_decl));
             },
             .use_alias => {
-                _ = try sema.reserveUseAlias(c, stmt.cast(.use_alias));
+                _ = try sema_resolve.reserveUseAlias(c, stmt.cast(.use_alias));
             },
             .cstruct_decl => {
                 const decl = stmt.cast(.cstruct_decl);
@@ -1718,24 +1722,24 @@ fn reserveChunkSyms(c: *cy.Chunk) anyerror!void {
                 const decl = stmt.cast(.template);
                 if (decl.child_decl.type() == .funcDecl) {
                     const func_decl = decl.child_decl.cast(.funcDecl);
-                    const decl_path = try sema.ensureDeclNamePath(c, @ptrCast(c.sym), func_decl.parent, func_decl.name);
-                    _ = try sema.reserveFuncTemplateSym(c, decl_path.parent, decl_path.name.name, decl);
+                    const decl_path = try sema_resolve.ensureDeclNamePath(c, @ptrCast(c.sym), func_decl.parent, func_decl.name);
+                    _ = try sema_resolve.reserveFuncTemplateSym(c, decl_path.parent, decl_path.name.name, decl);
                 } else {
-                    _ = try sema.reserveTemplate(c, decl);
+                    _ = try sema_resolve.reserveTemplate(c, decl);
                 }
             },
             .const_decl => {
                 const decl = stmt.cast(.const_decl);
-                const decl_path = try sema.ensureDeclNamePath(c, @ptrCast(c.sym), decl.parent, decl.name);
+                const decl_path = try sema_resolve.ensureDeclNamePath(c, @ptrCast(c.sym), decl.parent, decl.name);
                 if (decl_path.variant) {
                     _ = try c.reserveVariantMember(decl_path.parent, decl_path.name.name, @ptrCast(decl));
                     continue;
                 }
 
-                _ = try sema.reserveConst(c, decl_path.parent, decl_path.name.name, stmt.cast(.const_decl));
+                _ = try sema_resolve.reserveConst(c, decl_path.parent, decl_path.name.name, stmt.cast(.const_decl));
             },
             .global_decl => {
-                _ = try sema.reserveGlobal(c, stmt.cast(.global_decl));
+                _ = try sema_resolve.reserveGlobal(c, stmt.cast(.global_decl));
                 c.has_static_init = true;
             },
             .funcDecl => {
@@ -1744,7 +1748,7 @@ fn reserveChunkSyms(c: *cy.Chunk) anyerror!void {
                 if (parent == null and decl.sig_t == .method) {
                     parent = decl.params.ptr[0].type;
                 }
-                const decl_path = try sema.ensureDeclNamePath(c, @ptrCast(c.sym), parent, decl.name);
+                const decl_path = try sema_resolve.ensureDeclNamePath(c, @ptrCast(c.sym), parent, decl.name);
                 if (decl_path.variant) {
                     _ = try c.reserveVariantFunc(decl_path.parent, decl_path.name.name, decl);
                     continue;
@@ -1817,16 +1821,16 @@ fn resolveSym(c: *cy.Chunk, sym: *cy.Sym) !void {
     log.tracev("resolve: {s} {}", .{sym.name(), sym.type});
     switch (sym.type) {
         .extern_var => {
-            try sema.resolveExternVar(c, sym.cast(.extern_var));
+            try sema_resolve.resolveExternVar(c, sym.cast(.extern_var));
         },
         .hostVar => {
-            try sema.resolveHostVar(c, sym.cast(.hostVar));
+            try sema_resolve.resolveHostVar(c, sym.cast(.hostVar));
         },
         .userVar => {
-            try sema.resolveUserVar(c, sym.cast(.userVar));
+            try sema_resolve.resolveUserVar(c, sym.cast(.userVar));
         },
         .const_ => {
-            try sema.resolveConst(c, sym.cast(.const_));
+            try sema_resolve.resolveConst(c, sym.cast(.const_));
         },
         .func => {},
         .type => {
@@ -1834,7 +1838,7 @@ fn resolveSym(c: *cy.Chunk, sym: *cy.Sym) !void {
             try sema_type.ensure_resolved_type(c, type_sym.type, type_sym.decl.?);
         },
         .use_alias => {
-            try sema.resolveUseAlias(c, @ptrCast(sym));
+            try sema_resolve.resolveUseAlias(c, @ptrCast(sym));
         },
         .type_alias => {
             try sema_type.resolve_type_alias(c, @ptrCast(sym));
@@ -1843,17 +1847,17 @@ fn resolveSym(c: *cy.Chunk, sym: *cy.Sym) !void {
             try sema_type.resolve_type_const(c, @ptrCast(sym));
         },
         .template => {
-            try sema.ensureResolvedTemplate(c, @ptrCast(sym));
+            try sema_resolve.ensureResolvedTemplate(c, @ptrCast(sym));
         },
         .func_template => {
-            try sema.ensureResolvedFuncTemplate(c, @ptrCast(sym));
+            try sema_resolve.ensureResolvedFuncTemplate(c, @ptrCast(sym));
         },
         else => {},
     }
 }
 
 /// Whether a declaration that fails to resolve can be given up with recovery, and the next one resolved. Each
-/// marks itself failed (`sema.markDeclFailed`), so a later declaration that refers to it fails quietly. The
+/// marks itself failed (`sema_resolve.markDeclFailed`), so a later declaration that refers to it fails quietly. The
 /// others run compile-time code or host callbacks that can leave a module half loaded: they end the compile.
 fn recoverableDecl(sym: *cy.Sym) bool {
     return switch (sym.type) {
@@ -1871,7 +1875,7 @@ fn resolveChunkSyms(c: *cy.Chunk) !void {
     log.tracev("resolve chunk syms: {s}", .{c.srcUri});
 
     // Evaluate any top level ct stmts.
-    try sema.semaChunkTopCtStmts(c, null);
+    try sema_resolve.semaChunkTopCtStmts(c, null);
 
     // With recovery a declaration that fails is reported and the next one is resolved (`recoverDecl`).
     const recover = c.compiler.recover and c != c.compiler.builtins_chunk;
@@ -1882,7 +1886,7 @@ fn resolveChunkSyms(c: *cy.Chunk) !void {
     var cur_sym: usize = 0;
     var cur_func: usize = 0;
     while (true) {
-        // _ = try sema.pushProc(chunk, null);
+        // _ = try sema_local.pushProc(chunk, null);
 
         // Iterate with explicit index since unnamed types could be appended.
         while (cur_sym < c.syms.items.len) : (cur_sym += 1) {
@@ -1894,12 +1898,12 @@ fn resolveChunkSyms(c: *cy.Chunk) !void {
             };
         }
 
-        // _ = try sema.popProc(chunk);
+        // _ = try sema_local.popProc(chunk);
 
         while (cur_func < c.funcs.items.len) : (cur_func += 1) {
             const func = c.funcs.items[cur_func];
             log.tracev("resolve: {s}", .{func.name()});
-            sema.ensure_resolved_func(c, func, false, null) catch |err| {
+            sema_resolve.ensure_resolved_func(c, func, false, null) catch |err| {
                 if (marks == null) return err;
                 try recoverBody(c.compiler, c, &marks.?, err);
                 failed = true;
@@ -2117,8 +2121,8 @@ fn resolveImplFuncs(self: *Compiler, type_: *cy.Type) !void {
     const chunk = self.getSymChunk(&type_.sym().head);
     const sym = type_.sym();
 
-    try sema.pushSymResolveContext(chunk, &sym.head, sym.decl.?);
-    defer sema.popResolveContext(chunk);
+    try sema_resolve.pushSymResolveContext(chunk, &sym.head, sym.decl.?);
+    defer sema_resolve.popResolveContext(chunk);
 
     for (impls, 0..) |*impl, j| {
         const trait_members = impl.trait.members();
@@ -2173,9 +2177,9 @@ fn semaCarriedFuncs(self: *Compiler, main: *cy.Chunk) !void {
                 continue;
             }
             const res = if (func.type == .userFunc and func.isMethod())
-                sema.semaMethodBody(main, func)
+                sema_local.semaMethodBody(main, func)
             else
-                sema.semaFuncBody(main, func);
+                sema_local.semaFuncBody(main, func);
             res catch |err| {
                 // A function that belongs to no instance can not be dropped. Its error is reported.
                 const inst = ownerInstance(func) orelse return err;

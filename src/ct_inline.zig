@@ -3,6 +3,10 @@ const cy = @import("cyber.zig");
 const C = @import("capi.zig");
 const ast = cy.ast;
 const sema = cy.sema;
+const sema_expr = cy.sema_expr;
+const sema_lit = cy.sema_lit;
+const sema_resolve = cy.sema_resolve;
+const sema_stmt = cy.sema_stmt;
 const cte = cy.cte;
 const v = cy.fmt.v;
 const Value = cy.Value;
@@ -101,7 +105,7 @@ pub fn value(c: *cy.Chunk, val_: cy.TypeValue, target_opt: ?*cy.Type, node: *ast
                     const vector_t = val.type.cast(.partial_vector);
                     const len = val.value.asPtr(*usize).*;
                     const args = try c.ir.allocArray(*ir.Expr, len + 1);
-                    args[0] = (try sema.semaConst(c, len, c.sema.i64_t, node)).ir;
+                    args[0] = (try sema_lit.semaConst(c, len, c.sema.i64_t, node)).ir;
                     const src = val.value.asPtr([*]const u8) + 8;
 
                     for (0..len) |i| {
@@ -110,7 +114,7 @@ pub fn value(c: *cy.Chunk, val_: cy.TypeValue, target_opt: ?*cy.Type, node: *ast
                         const arg = try value(c, cy.TypeValue.init(vector_t.elem_t, copy), null, node);
                         args[i+1] = arg.ir;
                     }
-                    return sema.semaPartialVector(c, val.type, args, node);
+                    return sema_expr.semaPartialVector(c, val.type, args, node);
                 },
                 .vector => {
                     const vector_t = val.type.cast(.vector);
@@ -123,7 +127,7 @@ pub fn value(c: *cy.Chunk, val_: cy.TypeValue, target_opt: ?*cy.Type, node: *ast
                         const arg = try value(c, cy.TypeValue.init(vector_t.elem_t, copy), null, node);
                         args[i] = arg.ir;
                     }
-                    return sema.semaVector(c, val.type, args, node);
+                    return sema_expr.semaVector(c, val.type, args, node);
                 },
                 .enum_t => {
                     return c.semaConst(val.value.val, val.type, node);
@@ -220,7 +224,7 @@ pub fn evalTopStmts(c: *cy.Chunk, stmts: []const *ast.Node) !void {
 }
 
 pub fn evalStmts(c: *cy.Chunk, stmts: []const *ast.Node) anyerror!void {
-    const ctx = sema.getResolveContext(c);
+    const ctx = sema_resolve.getResolveContext(c);
     if (ctx.allow_rt_stmts) {
         // Function body evaluation.
         for (stmts) |stmt| {
@@ -241,7 +245,7 @@ pub fn evalStmts(c: *cy.Chunk, stmts: []const *ast.Node) anyerror!void {
                     return c.reportError("Declaration statement is not allowed here.", stmt);
                 },
                 else => {
-                    try sema.semaStmt(c, stmt);
+                    try sema_stmt.semaStmt(c, stmt);
                 },
             }
         }
@@ -268,7 +272,7 @@ pub fn evalStmts(c: *cy.Chunk, stmts: []const *ast.Node) anyerror!void {
                     try evalStmt(c, ct_stmt);
                 },
                 .import_stmt => {
-                    try sema.declareUseImport(c, stmt.cast(.import_stmt));
+                    try sema_resolve.declareUseImport(c, stmt.cast(.import_stmt));
                 },
                 else => {
                     return c.reportError("Only compile-time statements are allowed in this context.", stmt);
@@ -285,7 +289,7 @@ pub fn switchCaseInner(c: *cy.Chunk, case_stmt: *ast.CaseStmt, _: ?*anyopaque, _
 
 fn forRangeInner(c: *cy.Chunk, for_range: *ast.ForRangeStmt, _: ?*anyopaque) anyerror!void {
     // The body is checked once for each iteration in the same block, so no statement of it is the last use of a
-    // local of the block (`sema.reuseSliceBuffer`).
+    // local of the block (`sema_call.reuseSliceBuffer`).
     const saved_ctx = c.stmt_ctx;
     c.stmt_ctx = .{};
     defer c.stmt_ctx = saved_ctx;
@@ -381,12 +385,12 @@ fn elseBlocks(c: *cy.Chunk, else_blocks: []*ast.Node) !void {
 
 fn pushCtBlock(c: *cy.Chunk, node: *ast.Node) !usize {
     _ = node;
-    const ctx = sema.getResolveContext(c);
+    const ctx = sema_resolve.getResolveContext(c);
     return ctx.pushCtBlock();
 }
 
 fn popInlineCtBlock(c: *cy.Chunk, local_start: usize) !void {
-    const ctx = sema.getResolveContext(c);
+    const ctx = sema_resolve.getResolveContext(c);
     ctx.popCtBlock(c, local_start);
 }
 

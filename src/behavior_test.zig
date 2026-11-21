@@ -782,7 +782,7 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/try_block_capture_error.cy");
     run.case("control_flow/try_panic.cy");
     run.case("control_flow/unreachable.cy");
-    // Disabled: statements after an unreachable statement are allowed (sema.zig `semaStmt`).
+    // Disabled: statements after an unreachable statement are allowed (sema_stmt.zig `semaStmt`).
     // run.case("control_flow/unreachable_error.cy");
     run.case("control_flow/while_cond.cy");
     run.case("control_flow/while_inf.cy");

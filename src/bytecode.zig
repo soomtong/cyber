@@ -866,7 +866,7 @@ pub const InlineSite = struct {
 pub const PcCancelPad = extern struct {
     pc: u32,
     /// The pc of the pad: it destructs the frame's locals and returns. `keep`: the frame has no pad and keeps
-    /// running (a destruction routine, `sema.CancelPad.keep`).
+    /// running (a destruction routine, `sema_call.CancelPad.keep`).
     pad: u32,
 
     pub const keep: u32 = std.math.maxInt(u32);

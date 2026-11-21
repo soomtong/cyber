@@ -219,7 +219,7 @@ pub const VM = struct {
         // sweep below frees them.
         self.dropMainResult(true);
         if (self.config.single_run or self.config.persist_main) {
-            // Release ops for the main block were skipped (`sema.shouldGenMainScopeReleaseOps`), so its
+            // Release ops for the main block were skipped (`sema_local.shouldGenMainScopeReleaseOps`), so its
             // locals still own heap objects and raw buffers. Sweep them like the panic path does, before
             // the compiler deinit frees the types that give each object's size.
             _ = cy.thread.freeHeapPages(self.main_thread) catch cy.fatal();
@@ -811,8 +811,8 @@ pub const VM = struct {
         c.src = src;
         try parseTypeExpr(vm.compiler, c);
 
-        try cy.sema.pushChunkResolveContext(c, null);
-        defer cy.sema.popResolveContext(c);
+        try cy.sema_resolve.pushChunkResolveContext(c, null);
+        defer cy.sema_resolve.popResolveContext(c);
 
         const expr_stmt = c.ast.root.?.stmts.ptr[0].cast(.exprStmt);
         // A spec that does not name a type is "not found". A failed allocation is not: a caller that knows the type

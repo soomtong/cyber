@@ -2,6 +2,8 @@ const std = @import("std");
 const stdx = @import("stdx");
 const cy = @import("cyber.zig");
 const sema = cy.sema;
+const sema_local = cy.sema_local;
+const sema_resolve = cy.sema_resolve;
 const cte = cy.cte;
 const ast = cy.ast;
 const ct_inline = cy.ct_inline;
@@ -15,10 +17,10 @@ pub fn resolve_type_const(c: *cy.Chunk, sym: *cy.sym.TypeConst) !void {
     if (sym.resolved) {
         return;
     }
-    try sema.pushSymResolveContext(c, @ptrCast(sym), @ptrCast(sym.decl));
-    defer sema.popResolveContext(c);
+    try sema_resolve.pushSymResolveContext(c, @ptrCast(sym), @ptrCast(sym.decl));
+    defer sema_resolve.popResolveContext(c);
 
-    sema.getResolveContext(c).is_inline_eval = true;
+    sema_resolve.getResolveContext(c).is_inline_eval = true;
 
     const syms_before = c.syms.items.len;
     const res = try cte.evalFuncBody(c, sym.decl.stmts.slice(), c.sema.type_t, @ptrCast(sym.decl));
@@ -68,8 +70,8 @@ pub fn resolve_custom_type(c: *cy.Chunk, decl: *ast.CustomTypeDecl, opt_variant:
     const type_sym = try c.createTypeSym(&src_c.sym.head, decl_name, null, @ptrCast(decl));
     type_sym.instance = opt_variant;
 
-    try sema.pushSymResolveContext(c, @ptrCast(type_sym), null);
-    defer sema.popResolveContext(c);
+    try sema_resolve.pushSymResolveContext(c, @ptrCast(type_sym), null);
+    defer sema_resolve.popResolveContext(c);
 
     log.tracev("Invoke type loader for: {s}", .{bind_name});
     const binding = src_c.host_types.get(bind_name) orelse {
@@ -95,8 +97,8 @@ fn resolveCustomTypeResult(c: *cy.Chunk, decl: *ast.CustomTypeDecl, binding: C.B
 
 pub fn resolve_trait_type(c: *cy.Chunk, trait_t: *cy.types.GenericTrait, node: *ast.Node) !void {
     const sym = trait_t.base.sym();
-    try sema.pushSymResolveContext(c, @ptrCast(sym), node);
-    defer sema.popResolveContext(c);
+    try sema_resolve.pushSymResolveContext(c, @ptrCast(sym), node);
+    defer sema_resolve.popResolveContext(c);
 
     const decl = sym.decl.?.cast(.trait_decl);
 
@@ -110,12 +112,12 @@ pub fn resolve_trait_type(c: *cy.Chunk, trait_t: *cy.types.GenericTrait, node: *
         trait_t.members_cap = @intCast(members.len);
     }
     for (decl.funcs.slice(), 0..) |func_decl, i| {
-        const func = try sema.reserveImplicitTraitMethod(c, @ptrCast(sym), func_decl, i);
+        const func = try sema_resolve.reserveImplicitTraitMethod(c, @ptrCast(sym), func_decl, i);
         members[i] = .{
             .func = func,
         };
         num_members += 1;
-        try sema.ensure_resolved_func(c, func, false, @ptrCast(func_decl));
+        try sema_resolve.ensure_resolved_func(c, func, false, @ptrCast(func_decl));
     }
 
     if (sym.getMod().getSym("@predicate")) |func_sym| {
@@ -137,8 +139,8 @@ pub fn ensure_resolved_type(c: *cy.Chunk, type_: *cy.Type, node: *ast.Node) anye
         return;
     }
     // Before the check of a struct that is still resolving: a struct that failed is one.
-    if (sema.declFailed(c, type_)) return error.CompileError;
-    errdefer sema.markDeclFailed(c, type_);
+    if (sema_resolve.declFailed(c, type_)) return error.CompileError;
+    errdefer sema_resolve.markDeclFailed(c, type_);
     if (cy.Trace) {
         const name = try c.sema.allocTypeName(type_);
         defer c.alloc.free(name);
@@ -259,7 +261,7 @@ pub fn reserve_type_const(c: *cy.Chunk, node: *ast.TypeConstDecl) !*cy.sym.TypeC
 
 pub fn reserve_type_alias(c: *cy.Chunk, node: *ast.TypeAliasDecl) !*cy.sym.TypeAlias {
     const name = node.name.as_name();
-    const decl_path = try sema.ensureDeclNamePath(c, @ptrCast(c.sym), node.parent, node.name);
+    const decl_path = try sema_resolve.ensureDeclNamePath(c, @ptrCast(c.sym), node.parent, node.name);
     return c.reserveTypeAlias(decl_path.parent, name, node);
 }
 
@@ -267,10 +269,10 @@ pub fn resolve_type_alias(c: *cy.Chunk, sym: *cy.sym.TypeAlias) anyerror!void {
     if (sym.resolved) {
         return;
     }
-    if (sema.declFailed(c, sym)) return error.CompileError;
-    errdefer sema.markDeclFailed(c, sym);
-    try sema.pushSymResolveContext(c, @ptrCast(sym), @ptrCast(sym.decl));
-    defer sema.popResolveContext(c);
+    if (sema_resolve.declFailed(c, sym)) return error.CompileError;
+    errdefer sema_resolve.markDeclFailed(c, sym);
+    try sema_resolve.pushSymResolveContext(c, @ptrCast(sym), @ptrCast(sym.decl));
+    defer sema_resolve.popResolveContext(c);
 
     if (sym.decl.?.target.type() != .void_lit) {
         const type_ = try cte.evalType(c, sym.decl.?.target);
@@ -296,7 +298,7 @@ pub fn resolveCustomTypeAlias(c: *cy.Chunk, sym: *cy.sym.TypeAlias) anyerror!voi
     const bind_name = name orelse b: {
         c.tempBufU8.clearRetainingCapacity();
         const w = stdx.listWriter(&c.tempBufU8, c.alloc);
-        try sema.writeBindName(w, &sym.head);
+        try sema_resolve.writeBindName(w, &sym.head);
         break :b c.tempBufU8.items;
     };
 
@@ -327,8 +329,8 @@ pub fn reserve_enum(c: *cy.Chunk, decl: *ast.EnumDecl) !*cy.sym.TypeSym {
 
 pub fn resolve_enum_type(c: *cy.Chunk, enum_t: *cy.types.Enum, node: *ast.Node) !void {
     const sym = enum_t.base.sym();
-    try sema.pushSymResolveContext(c, @ptrCast(sym), node);
-    defer sema.popResolveContext(c);
+    try sema_resolve.pushSymResolveContext(c, @ptrCast(sym), node);
+    defer sema_resolve.popResolveContext(c);
 
     const decl = sym.decl.?.cast(.enumDecl);
     try declare_enum_cases(c, enum_t, decl);
@@ -381,8 +383,8 @@ pub fn resolve_cunion_type(c: *cy.Chunk, c_union: *cy.types.CUnion, node: *ast.N
     }
 
     const sym = c_union.base.sym();
-    try sema.pushSymResolveContext(c, @ptrCast(sym), node);
-    defer sema.popResolveContext(c);
+    try sema_resolve.pushSymResolveContext(c, @ptrCast(sym), node);
+    defer sema_resolve.popResolveContext(c);
 
     var alignment: u8 = 1;
     var max_payload_size: usize = 0;
@@ -445,13 +447,13 @@ pub fn resolve_cunion_type(c: *cy.Chunk, c_union: *cy.types.CUnion, node: *ast.N
 
 pub fn resolve_choice_type(c: *cy.Chunk, choice_t: *cy.types.Choice, node: *ast.Node) !void {
     const sym = choice_t.base.sym();
-    try sema.pushSymResolveContext(c, @ptrCast(sym), node);
-    defer sema.popResolveContext(c);
+    try sema_resolve.pushSymResolveContext(c, @ptrCast(sym), node);
+    defer sema_resolve.popResolveContext(c);
 
     const decl = sym.decl.?.cast(.enumDecl);
     const tag_t = sym.getMod().getSym("Tag").?.cast(.type).type;
     // The tag has the same cases. Resolved on its own after a failure, it would report the same error again.
-    errdefer sema.markDeclFailed(c, tag_t);
+    errdefer sema_resolve.markDeclFailed(c, tag_t);
     try declare_choice_cases(c, choice_t, decl);
     try declare_enum_cases(c, tag_t.cast(.enum_t), decl);
 }
@@ -733,7 +735,7 @@ pub fn reifyStructType(c: *cy.Chunk, struct_t: *cy.types.Struct, user_fields: []
     var has_managed_child = false;
     var alignment: u8 = 1;
     var field_state_len: usize = 0;
-    try sema.checkFieldLimit(c, user_fields.len, node);
+    try sema_local.checkFieldLimit(c, user_fields.len, node);
     const fields = try c.alloc.alloc(cy.types.Field, user_fields.len);
     errdefer c.alloc.free(fields);
 
@@ -825,8 +827,8 @@ pub fn resolveStructType(c: *cy.Chunk, struct_t: *cy.types.Struct, node: *ast.No
         return;
     }
     const sym = struct_t.base.sym();
-    try sema.pushSymResolveContext(c, @ptrCast(sym), node);
-    defer sema.popResolveContext(c);
+    try sema_resolve.pushSymResolveContext(c, @ptrCast(sym), node);
+    defer sema_resolve.popResolveContext(c);
 
     var decl: *ast.StructDecl = undefined;
     if (struct_t.cstruct) {
@@ -882,8 +884,8 @@ pub fn resolveStructFields(c: *cy.Chunk, struct_t: *cy.types.Struct, decl: *ast.
     var has_ct_child = false;
     var alignment: u8 = 1;
     var field_state_len: usize = 0;
-    if (decl.fields.len > sema.max_struct_fields) {
-        try sema.checkFieldLimit(c, decl.fields.len, @ptrCast(decl.fields.ptr[sema.max_struct_fields]));
+    if (decl.fields.len > sema_local.max_struct_fields) {
+        try sema_local.checkFieldLimit(c, decl.fields.len, @ptrCast(decl.fields.ptr[sema_local.max_struct_fields]));
     }
     const fields = try c.alloc.alloc(cy.types.Field, decl.fields.len);
     errdefer c.alloc.free(fields);
@@ -1133,7 +1135,7 @@ pub fn resolveFuncType(c: *cy.Chunk, func_type: *ast.FuncType) !*cy.FuncSig {
 
     // Get return type.
     const ret_t = try resolveReturnType(c, func_type.ret);
-    try sema.checkParamLimit(c, c.func_param_stack.items.len - start, @ptrCast(func_type));
+    try sema_local.checkParamLimit(c, c.func_param_stack.items.len - start, @ptrCast(func_type));
     return c.sema.ensureFuncSig2(@ptrCast(c.func_param_stack.items[start..]), ret_t, func_type.extern_ != null, null);
 }
 
@@ -1290,7 +1292,7 @@ fn findInferParams(c: *cy.Chunk, node: *ast.Node) !void {
     switch (node.type()) {
         .infer_param => {
             const name = node.cast(.infer_param).name.as_name();
-            const ctx = sema.getResolveContext(c);
+            const ctx = sema_resolve.getResolveContext(c);
 
             // Building template params for `resolveFuncSig`.
             try c.func_template_param_stack.append(c.alloc, .{
@@ -1368,7 +1370,7 @@ pub fn resolveAnyParamType(c: *cy.Chunk, param_idx: usize, resolve_new_type: boo
             // Lookup anonymous parameter.
             var buf: [20]u8 = undefined;
             const anonymous_name = try std.mem.print(&buf, "{}", .{param_idx});
-            const ctx = sema.getResolveContext(c);
+            const ctx = sema_resolve.getResolveContext(c);
             const param = b: {
                 if (ctx.type == .func) {
                     if (ctx.data.func.instance) |instance| {

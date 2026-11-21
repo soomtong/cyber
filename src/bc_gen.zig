@@ -4,6 +4,7 @@ const cy = @import("cyber.zig");
 const log = cy.log.scoped(.bc_gen);
 const ir = cy.ir;
 const sema = cy.sema;
+const sema_resolve = cy.sema_resolve;
 const cc = @import("capi.zig");
 const types = cy.types;
 const bt = types.BuiltinTypes;
@@ -122,8 +123,8 @@ pub fn genAll(c: *cy.Compiler) !void {
     for (c.newChunks()) |chunk| {
         log.tracev("Perform codegen for chunk{}: {s}", .{chunk.id, chunk.srcUri});
 
-        try sema.pushChunkResolveContext(chunk, @ptrCast(chunk.ast.root));
-        defer sema.popResolveContext(chunk);
+        try sema_resolve.pushChunkResolveContext(chunk, @ptrCast(chunk.ast.root));
+        defer sema_resolve.popResolveContext(chunk);
 
         try genChunk(chunk);
         log.tracev("Done. performChunkCodegen {s}", .{chunk.srcUri});
@@ -1801,7 +1802,7 @@ pub const CancelSite = struct {
     /// The pad of the site, then the pad of each inlined call that the site is inside of, innermost first.
     parts: [inline_max_depth + 1]Part,
     num_parts: u8,
-    /// The frame keeps running when the fiber is cancelled (`sema.CancelPad.keep`). No pad is generated and
+    /// The frame keeps running when the fiber is cancelled (`sema_call.CancelPad.keep`). No pad is generated and
     /// `parts` is empty.
     keep: bool = false,
 
@@ -1828,13 +1829,13 @@ const inline_max_reg_end = 160;
 /// A self call (recursion) is unrolled one level: the site is hot, and the copy's own calls stay calls
 /// because the inline context chain already holds the function.
 /// Whether the frame at this point of the generation is a destruction routine all the way, including the bodies
-/// that are inlined into it (`sema.isCancelKeepFunc`). A cancel lets such a frame finish.
+/// that are inlined into it (`sema_call.isCancelKeepFunc`). A cancel lets such a frame finish.
 fn keep_chain(c: *Chunk) bool {
     const proc_func = c.funcs_debug.items[c.cur_proc.id].func orelse return false;
-    if (!cy.sema.isCancelKeepFunc(c.compiler, proc_func)) return false;
+    if (!cy.sema_call.isCancelKeepFunc(c.compiler, proc_func)) return false;
     var cur = c.inline_ctx;
     while (cur) |cx| : (cur = cx.parent) {
-        if (!cy.sema.isCancelKeepFunc(c.compiler, cx.func)) return false;
+        if (!cy.sema_call.isCancelKeepFunc(c.compiler, cx.func)) return false;
     }
     return true;
 }
@@ -1844,15 +1845,15 @@ fn keep_chain(c: *Chunk) bool {
 /// run a script's `@deinit` stays a call from other code, and a script's function stays a call from a
 /// destruction routine.
 fn inline_keeps_cancel(c: *Chunk, func: *cy.Func) bool {
-    const callee_keep = cy.sema.isCancelKeepFunc(c.compiler, func);
+    const callee_keep = cy.sema_call.isCancelKeepFunc(c.compiler, func);
     if (keep_chain(c)) {
         if (callee_keep) return true;
         const decl = func.decl orelse return true;
         return c.compiler.chunks.items[decl.src()].is_builtin;
     }
     if (!callee_keep) return true;
-    const subject = cy.sema.cancelKeepSubject(c, func) orelse return false;
-    return !cy.sema.destructMayRunScript(c, subject, 0);
+    const subject = cy.sema_call.cancelKeepSubject(c, func) orelse return false;
+    return !cy.sema_call.destructMayRunScript(c, subject, 0);
 }
 
 fn inline_cost_fits(c: *Chunk, func: *cy.Func) ?u32 {
@@ -3893,14 +3894,14 @@ fn pushCall(c: *cy.Chunk, base: Reg, func: *cy.Func, node: *ast.Node) !void {
     try push_site_ptr_layout(c, start);
 }
 
-/// Records a site with a cancel pad (`sema.semaCancelPad`): a call, a `suspend` or an `await`. `key` is the
+/// Records a site with a cancel pad (`sema_call.semaCancelPad`): a call, a `suspend` or an `await`. `key` is the
 /// address of the IR node and `pc` is what a frame at this site is found with: the pc of a call inst for a
 /// frame under a callee frame, and the pc that `Fiber.pc` holds for the frame that suspended the fiber.
 /// A site inside inlined code runs the pads of the inlined calls around it as well: the frame is the caller's.
 /// The pad of the IR node at `key`. The node belongs to the chunk that is generated, or to the chunk of a
 /// function that is inlined here (a `core` method in a user function): the pad is kept by the chunk that
 /// analyzed the node.
-fn find_cancel_pad(c: *cy.Chunk, key: usize) ?cy.sema.CancelPad {
+fn find_cancel_pad(c: *cy.Chunk, key: usize) ?cy.sema_call.CancelPad {
     if (c.cancel_pads.get(key)) |pad| return pad;
     if (c.inline_ctx == null) return null;
     for (c.compiler.chunks.items) |chunk| {

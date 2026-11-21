@@ -941,7 +941,7 @@ const FuncInfo = packed struct {
     /// The function is used as a value, so a call through a function value can reach it (`global_init.zig`).
     escaped: bool = false,
 
-    /// `sema.isCancelKeepFunc` cache: 0 unknown, 1 a destruction routine, 2 not one.
+    /// `sema_call.isCancelKeepFunc` cache: 0 unknown, 1 a destruction routine, 2 not one.
     cancel_keep: u2 = 0,
 };
 

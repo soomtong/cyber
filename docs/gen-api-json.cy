@@ -16,7 +16,7 @@
 -- `methods` take a receiver (`recv` is its type, `&str`). `funcs` of a type are called on the type (`str.fromRune`).
 -- `syntax` is how a program writes the type (`[]T` for `Slice`). `cond` is the `#[cond=...]` attribute: the method
 -- exists only for the instances where it holds. `aliases` maps names from other languages to the members of the
--- type, the table that the compiler uses for `Did you mean ...?` (`sema.zig` `member_aliases`).
+-- type, the table that the compiler uses for `Did you mean ...?` (`sema_hint.zig` `member_aliases`).
 -- Members whose name starts with `_` or `@` and declarations hidden with `-` are left out. Operators (`+`, `<`)
 -- are methods whose name is not an identifier.
 
@@ -171,7 +171,7 @@ fn type_decl_info(stmt ^cy.Node) -> ?TypeEntry:
         else:
             return none
 
--- Reads the pairs of `member_aliases` from `sema.zig`: `.{ "startswith", "starts_with" }`.
+-- Reads the pairs of `member_aliases` from `sema_hint.zig`: `.{ "startswith", "starts_with" }`.
 fn read_aliases(path str) -> ![]Alias:
     src := os.read_file(path)!
     start := src.index('const member_aliases') ?else:
@@ -306,7 +306,7 @@ for {core_mods, std_mods} |mods|:
             else:
                 types[idx].funcs += f
 
-aliases := read_aliases('%{cur_dir}/../src/sema.zig')!
+aliases := read_aliases('%{cur_dir}/../src/sema_hint.zig')!
 
 type_lines := []str{}
 for types |t|:

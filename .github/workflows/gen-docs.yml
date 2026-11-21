@@ -9,7 +9,7 @@ on:
       - 'docs/**'
       - 'src/builtins/**'
       # `member_aliases` for api.json.
-      - 'src/sema.zig'
+      - 'src/sema_hint.zig'
       - 'examples/web-playground/**'
       - 'src/lsp/**'
       - '.github/workflows/gen-docs.yml'

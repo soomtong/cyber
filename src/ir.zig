@@ -442,7 +442,7 @@ pub const Local = extern struct {
     base: Expr = undefined,
     id: u8,
     /// The read of `move x`: the local is dead from here on and the value is owned by the consumer
-    /// (`sema.seqPush`).
+    /// (`sema_move.seqPush`).
     moved: bool = false,
 };
 
@@ -816,7 +816,7 @@ pub const Buffer = struct {
     func_blocks: std.ArrayList(*Stmt),
 
     /// Number of pending operands in `Chunk.seq_pending`. A statement that is added while operands are pending
-    /// runs before the expression they belong to, so they are evaluated first (`sema.seqFlush`).
+    /// runs before the expression they belong to, so they are evaluated first (`sema_move.seqFlush`).
     seq_pending: usize = 0,
 
     pub fn init(self: *Buffer, alloc: std.mem.Allocator) void {
@@ -842,7 +842,7 @@ pub const Buffer = struct {
     }
 
     pub fn pushStmtBlock(self: *Buffer, alloc: std.mem.Allocator) !void {
-        if (self.seq_pending > 0) try cy.sema.seqFlush(@fieldParentPtr("ir", self));
+        if (self.seq_pending > 0) try cy.sema_move.seqFlush(@fieldParentPtr("ir", self));
         try self.stmtBlockStack.append(alloc, .{
             .first = null,
             .last = null,
@@ -850,7 +850,7 @@ pub const Buffer = struct {
     }
 
     pub fn pushStmtBlock2(self: *Buffer, alloc: std.mem.Allocator, block: StmtBlock) !void {
-        if (self.seq_pending > 0) try cy.sema.seqFlush(@fieldParentPtr("ir", self));
+        if (self.seq_pending > 0) try cy.sema_move.seqFlush(@fieldParentPtr("ir", self));
         try self.stmtBlockStack.append(alloc, block);
     }
 
@@ -891,7 +891,7 @@ pub const Buffer = struct {
     }
 
     pub fn pushStmt(self: *Buffer, comptime code: StmtCode, node: *ast.Node, data: StmtImpl(code)) !*Stmt {
-        if (self.seq_pending > 0) try cy.sema.seqFlush(@fieldParentPtr("ir", self));
+        if (self.seq_pending > 0) try cy.sema_move.seqFlush(@fieldParentPtr("ir", self));
         const stmt = try self.newStmt(code, node, data);
         self.appendStmt(stmt);
         return stmt;

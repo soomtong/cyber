@@ -2,6 +2,12 @@ const std = @import("std");
 const cy = @import("cyber.zig");
 const bt = cy.types.BuiltinTypes;
 const sema = cy.sema;
+const sema_access = cy.sema_access;
+const sema_call = cy.sema_call;
+const sema_expr = cy.sema_expr;
+const sema_lit = cy.sema_lit;
+const sema_local = cy.sema_local;
+const sema_resolve = cy.sema_resolve;
 const sema_type = cy.sema_type;
 const sema_func = cy.sema_func;
 const v = cy.fmt.v;
@@ -21,14 +27,14 @@ const EvalStmtResult = struct {
 };
 
 pub fn evalFunc(c: *cy.Chunk, func: *cy.Func, args: []const Value, node: *ast.Node) !Value {
-    try sema.pushFuncResolveContext(c, func, node);
-    const ctx = sema.getResolveContext(c);
+    try sema_resolve.pushFuncResolveContext(c, func, node);
+    const ctx = sema_resolve.getResolveContext(c);
     ctx.has_ct_params = true;
     ctx.is_inline_eval = true;
     const start = push_ct_block(c);
     defer {
         pop_ct_block(c, start);
-        sema.popResolveContext(c);
+        sema_resolve.popResolveContext(c);
     }
 
     // Push param arguments.
@@ -87,7 +93,7 @@ pub fn localDecl(c: *cy.Chunk, node: *ast.VarDecl) !void {
 }
 
 pub fn localDecl2(c: *cy.Chunk, name: []const u8, val_t: *cy.Type, val: Value, node: *ast.Node) !void {
-    const ctx = sema.getResolveContext(c);
+    const ctx = sema_resolve.getResolveContext(c);
     if (ctx.hasCtParam(name)) {
         return c.reportErrorFmt("Redeclaration of compile-time variable `{}`.", &.{v(name)}, node);
     }    
@@ -181,13 +187,13 @@ pub fn switchStmt(c: *cy.Chunk, switch_stmt: *ast.SwitchBlock, req_ct_case: bool
 
                     // Obtain iterator.
                     const iterator_sym = try c.accessResolvedSymOrFail(iterable.type, "iterator", iter_n);
-                    var func_sym = try sema.requireFuncSym(c, iterator_sym, iter_n);
+                    var func_sym = try sema_call.requireFuncSym(c, iterator_sym, iter_n);
                     var iter = try cte.callFuncSymRec(c, func_sym, iter_n, sema.ExprResult.initCtValue(iterable), &.{}, iter_n);
                     defer c.heap.destructValue(iter);
 
                     // while iter.next()
                     const next_sym = try c.accessResolvedSymOrFail(iterable.type, "next", iter_n);
-                    func_sym = try sema.requireFuncSym(c, next_sym, iter_n);
+                    func_sym = try sema_call.requireFuncSym(c, next_sym, iter_n);
                     const borrow_t = try sema.getBorrowType(c, iter.type);
                     var iter_borrow: TypeValue = undefined;
                     if (iter.type.is_cte_boxed()) {
@@ -210,12 +216,12 @@ pub fn switchStmt(c: *cy.Chunk, switch_stmt: *ast.SwitchBlock, req_ct_case: bool
 
                         // NOTE: Only one variable before case block so avoid pushing another ct block.
                         if (for_stmt.each) |each| {
-                            const cx = sema.getResolveContext(c);
+                            const cx = sema_resolve.getResolveContext(c);
                             try cx.initCtVar2(c.alloc, each.as_name(), value_t, value);
                         }
                         defer {
                             if (for_stmt.each) |each| {
-                                const cx = sema.getResolveContext(c);
+                                const cx = sema_resolve.getResolveContext(c);
                                 cx.unsetCtParam(c.heap, each.as_name());
                             }
                         }
@@ -343,12 +349,12 @@ pub fn forRangeStmt(c: *cy.Chunk, node: *ast.ForRangeStmt, cb: *const fn(*cy.Chu
 }
 
 pub fn push_ct_block(c: *cy.Chunk) usize {
-    const cx = sema.getResolveContext(c);
+    const cx = sema_resolve.getResolveContext(c);
     return cx.pushCtBlock();
 }
 
 pub fn pop_ct_block(c: *cy.Chunk, local_start: usize) void {
-    const cx = sema.getResolveContext(c);
+    const cx = sema_resolve.getResolveContext(c);
     cx.popCtBlock(c, local_start);
 }
 
@@ -420,7 +426,7 @@ fn eval_assign_right(c: *cy.Chunk, right: *ast.Node, rec_op_opt: ?RecOp, target_
 }
 
 /// Checks a compile-time vector index and returns the element address.
-fn ct_vector_elem_ptr(c: *cy.Chunk, ct_var: *sema.CtParam, vector_t: *cy.types.Vector, idx_n: *ast.Node) ![*]u8 {
+fn ct_vector_elem_ptr(c: *cy.Chunk, ct_var: *sema_resolve.CtParam, vector_t: *cy.types.Vector, idx_n: *ast.Node) ![*]u8 {
     const idx_val = try evalCheck(c, idx_n, c.sema.i64_t);
     const idx = idx_val.value.asInt();
     if (idx < 0 or idx >= vector_t.n) {
@@ -434,7 +440,7 @@ fn eval_assign(c: *cy.Chunk, left_n: *ast.Node, right_n: *ast.Node, op_opt: ?ast
     switch (left_n.type()) {
         .ident => {
             const name = left_n.as_name();
-            const left = try sema.lookupStaticIdent(c, name, left_n) orelse {
+            const left = try sema_local.lookupStaticIdent(c, name, left_n) orelse {
                 return c.reportErrorFmt("Could not find the symbol `{}`.", &.{v(name)}, left_n);
             };
             switch (left) {
@@ -446,7 +452,7 @@ fn eval_assign(c: *cy.Chunk, left_n: *ast.Node, right_n: *ast.Node, op_opt: ?ast
                     const var_t = ct_var.getType();
                     const right = try eval_assign_right(c, right_n, rec_op, var_t);
                     c.heap.destructValue2(var_t, ct_var.value);
-                    ct_var.* = sema.CtParam.initVar(right);
+                    ct_var.* = sema_resolve.CtParam.initVar(right);
                 },
                 else => {
                     return c.reportErrorFmt("Unsupported {}", &.{v(@tagName(left))}, left_n);
@@ -527,9 +533,9 @@ fn evalStmt(c: *cy.Chunk, ctx: EvalContext, stmt: *ast.Node) !EvalStmtResult {
             const if_stmt = stmt.cast(.if_stmt);
             var cond_res = try cte.evalCheck(c, if_stmt.cond, c.sema.bool_t);
             if (cond_res.value.asBool()) {
-                // const start = try sema.getResolveContext(c).pushCtBlock(c, @ptrCast(if_stmt));
+                // const start = try sema_resolve.getResolveContext(c).pushCtBlock(c, @ptrCast(if_stmt));
                 return evalStmts(c, ctx, if_stmt.stmts);
-                // try sema.getResolveContext(c).popCtBlock(c, start);
+                // try sema_resolve.getResolveContext(c).popCtBlock(c, start);
             } else {
                 for (if_stmt.else_blocks) |block_| {
                     var block = block_;
@@ -674,7 +680,7 @@ fn evalCallExpr(c: *cy.Chunk, call: *ast.CallExpr) !Expr {
                 const right_name = callee.right.as_name();
                 const right_sym = try c.getResolvedSymOrFail(sym, right_name, callee.right);
 
-                const res = try sema.callSym(c, right_sym, callee.right, call.args.slice(), true, node);
+                const res = try sema_call.callSym(c, right_sym, callee.right, call.args.slice(), true, node);
                 return Expr.initValue(res.data.ct_value);
             },
             .value => {
@@ -708,10 +714,10 @@ fn evalCallExpr(c: *cy.Chunk, call: *ast.CallExpr) !Expr {
 
         const name = call.callee.as_name();
         if (call.callee.type() == .at_lit) {
-            try sema.checkIntrinsicUse(c, call.callee);
+            try sema_expr.checkIntrinsicUse(c, call.callee);
         }
 
-        const callee = try sema.lookupStaticIdent(c, name, node) orelse {
+        const callee = try sema_local.lookupStaticIdent(c, name, node) orelse {
             return c.reportErrorFmt("Could not find the symbol `{}`.", &.{v(name)}, node);
         };
         switch (callee) {
@@ -720,7 +726,7 @@ fn evalCallExpr(c: *cy.Chunk, call: *ast.CallExpr) !Expr {
                 @panic("Unexpected.");
             },
             .static => |sym| {
-                const res = try sema.callSym(c, sym, call.callee, call.args.slice(), true, node);
+                const res = try sema_call.callSym(c, sym, call.callee, call.args.slice(), true, node);
                 return Expr.initValue(res.data.ct_value);
             },
             // .ct_value => |ct_value| {
@@ -768,7 +774,7 @@ fn evalCallExpr(c: *cy.Chunk, call: *ast.CallExpr) !Expr {
                 if (sym.isValue()) {
                     return c.reportErrorFmt("Unsupported.", &.{}, call.callee);
                 }
-                const res = try sema.callSym(c, sym, call.callee, call.args.slice(), true, node);
+                const res = try sema_call.callSym(c, sym, call.callee, call.args.slice(), true, node);
                 return Expr.initValue(res.data.ct_value);
             },
             .func => {
@@ -934,7 +940,7 @@ pub fn exprToValue(c: *cy.Chunk, expr: Expr, node: *ast.Node) !TypeValue {
                     if (func_sym.numFuncs == 1) {
                         // A constant is evaluated when the declarations are resolved, which can be before the
                         // function that it names: `const z = h` read the signature of `h` before it had one.
-                        try sema.ensure_resolved_func(c, func_sym.first, true, node);
+                        try sema_resolve.ensure_resolved_func(c, func_sym.first, true, node);
                         const func_t = try cy.sema.getFuncSymType(c, func_sym.first.sig);
                         return TypeValue{
                             .type = func_t,
@@ -1189,13 +1195,13 @@ const ExprKind = enum(u8) {
 const Expr = struct {
     kind: ExprKind,
     data: union {
-        ct_var: *sema.CtParam,
+        ct_var: *sema_resolve.CtParam,
         value: TypeValue,
         sym: *cy.Sym,
         func: *cy.Func,
     },    
 
-    fn initCtVar(ptr: *sema.CtParam) Expr {
+    fn initCtVar(ptr: *sema_resolve.CtParam) Expr {
         return .{ .kind = .ct_var, .data = .{ .ct_var = ptr }};
     }
 
@@ -1250,7 +1256,7 @@ pub fn evalInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, init_lit: *ast.I
         const fieldName = pair.key.nameOrNull() orelse {
             return c.reportError("Expected field name.", pair.key);
         };
-        const info = try sema.checkSymInitField(c, @ptrCast(sym), fieldName, pair.key);
+        const info = try sema_access.checkSymInitField(c, @ptrCast(sym), fieldName, pair.key);
         fieldNodes[info.idx] = .{ .node = pair.value };
     }
 
@@ -1678,13 +1684,13 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
         .infer_param => {
             const name = node.cast(.infer_param).name.as_name();
 
-            const ctx = sema.getResolveContext(c);
+            const ctx = sema_resolve.getResolveContext(c);
             if (ctx.type != .func) {
                 return c.reportErrorFmt("`%{}` can only be declared in the signature of a function.", &.{v(name)}, node);
             }
             if (ctx.data.func.instance != null) {
                 // Resolving variant func.
-                const res = try sema.lookupStaticIdent(c, name, node) orelse {
+                const res = try sema_local.lookupStaticIdent(c, name, node) orelse {
                     return c.reportErrorFmt("Could not find the symbol `{}`.", &.{v(name)}, node);
                 };
                 switch (res) {
@@ -1708,7 +1714,7 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
             }
         },
         .generic_expand => {
-            const ctx = sema.getResolveContext(c);
+            const ctx = sema_resolve.getResolveContext(c);
             if (ctx.getSelfSym()) |sym| {
                 return Expr.initSym(sym);
             }
@@ -1822,13 +1828,13 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
                     }
 
                     if (try c.accessResolvedSym(rec.type, "@index", node)) |sym| {
-                        const func_sym = try sema.requireFuncSym(c, sym, node);
+                        const func_sym = try sema_call.requireFuncSym(c, sym, node);
                         const res = try callFuncSymRec(c, func_sym, index_expr.left, sema.ExprResult.initCtValue(rec), &.{ index_expr.args.ptr[0] }, node);
                         return Expr.initValue(res);
                     }
 
                     if (try c.accessResolvedSym(rec.type, "@index_addr", node)) |sym| {
-                        const func_sym = try sema.requireFuncSym(c, sym, node);
+                        const func_sym = try sema_call.requireFuncSym(c, sym, node);
                         const addr = try callFuncSymRec(c, func_sym, index_expr.left, sema.ExprResult.initCtValue(rec), &.{ index_expr.args.ptr[0] }, node);
 
                         if (addr.type.isPointer() or addr.type.kind() == .borrow) {
@@ -1943,7 +1949,7 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
                     try c.checkResolvedSymIsDistinct(sym, access_expr.right);
                     if (sym.type == .const_) {
                         const const_ = sym.cast(.const_);
-                        try sema.resolveConst(c, const_);
+                        try sema_resolve.resolveConst(c, const_);
                         const dupe = try c.heap.copyValue2(const_.type, const_.value);
                         return Expr.initValue2(const_.type, dupe);
                     }
@@ -1993,7 +1999,7 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
 }
 
 fn eval_ident(c: *cy.Chunk, name: []const u8, node: *ast.Node) !Expr {
-    const res = try sema.lookupStaticIdent(c, name, node) orelse {
+    const res = try sema_local.lookupStaticIdent(c, name, node) orelse {
         return c.reportErrorFmt("Could not find the symbol `{}`.", &.{v(name)}, node);
     };
     switch (res) {
@@ -2004,7 +2010,7 @@ fn eval_ident(c: *cy.Chunk, name: []const u8, node: *ast.Node) !Expr {
         .static => |sym| {
             if (sym.type == .const_) {
                 const const_ = sym.cast(.const_);
-                try sema.resolveConst(c, const_);
+                try sema_resolve.resolveConst(c, const_);
                 const dupe = try c.heap.copyValue2(const_.type, const_.value);
                 return Expr.initValue2(const_.type, dupe);
             }
@@ -2034,7 +2040,7 @@ fn eval_un_expr(c: *cy.Chunk, opt_target: ?*cy.Type, unary: *ast.Unary) !Expr {
                         return res;
                     }
                 }
-                const val = try sema.semaParseInt(c, i64, neg_literal, 10, node);
+                const val = try sema_lit.semaParseInt(c, i64, neg_literal, 10, node);
                 return Expr.initValue(.{
                     .type = c.sema.i64_t,
                     .value = Value.initInt(val),
@@ -2077,7 +2083,7 @@ fn eval_un_expr(c: *cy.Chunk, opt_target: ?*cy.Type, unary: *ast.Unary) !Expr {
             // Look for sym under child type's module.
             const childTypeSym = child.type.sym();
             const sym = try c.getResolvedSymOrFail(@ptrCast(childTypeSym), unary.op.name(), node);
-            const func_sym = try sema.requireFuncSym(c, sym, node);
+            const func_sym = try sema_call.requireFuncSym(c, sym, node);
             const res = try callFuncSym(c, func_sym, &.{arg}, &.{}, node);
             return Expr.initValue(res);
         },
@@ -2100,7 +2106,7 @@ fn eval_un_expr(c: *cy.Chunk, opt_target: ?*cy.Type, unary: *ast.Unary) !Expr {
             const arg = cy.sema_func.Argument.initPreResolved(unary.child, sema.ExprResult.initCtValue(child));
 
             const sym = try c.getResolvedSymOrFail(&child.type.sym().head, unary.op.name(), node);
-            const func_sym = try sema.requireFuncSym(c, sym, node);
+            const func_sym = try sema_call.requireFuncSym(c, sym, node);
             const res = try callFuncSym(c, func_sym, &.{arg}, &.{}, node);
             return Expr.initValue(res);
         },
@@ -2127,7 +2133,7 @@ fn eval_un_expr(c: *cy.Chunk, opt_target: ?*cy.Type, unary: *ast.Unary) !Expr {
 
             const childTypeSym = child.type.sym();
             const sym = try c.getResolvedSymOrFail(@ptrCast(childTypeSym), unary.op.name(), node);
-            const func_sym = try sema.requireFuncSym(c, sym, node);
+            const func_sym = try sema_call.requireFuncSym(c, sym, node);
             const res = try callFuncSym(c, func_sym, &.{arg}, &.{}, node);
             return Expr.initValue(res);
         },
@@ -2423,7 +2429,7 @@ fn eval_bin_expr2(c: *cy.Chunk, left: cy.TypeValue, left_n: *ast.Node, right: cy
         else => {
             const leftTypeSym = left.type.sym();
             const sym = try c.getResolvedSymOrFail(@ptrCast(leftTypeSym), op.name(), node);
-            const func_sym = try sema.requireFuncSym(c, sym, node);
+            const func_sym = try sema_call.requireFuncSym(c, sym, node);
             const args = [_]sema_func.Argument{
                 sema_func.Argument.initReceiver(left_n, sema.ExprResult.initCtValue(left)),
                 sema_func.Argument.initPreResolved(right_n, sema.ExprResult.initCtValue(right)),
@@ -2482,7 +2488,7 @@ fn eval_bin_expr(c: *cy.Chunk, left_n: *ast.Node, op: ast.BinaryExprOp, right_n:
 
             const leftTypeSym = left.type.sym();
             const sym = try c.getResolvedSymOrFail(@ptrCast(leftTypeSym), op.name(), node);
-            const func_sym = try sema.requireFuncSym(c, sym, node);
+            const func_sym = try sema_call.requireFuncSym(c, sym, node);
             return callFuncSymRec(c, func_sym, left_n, sema.ExprResult.initCtValue(left), &.{ right_n }, node);
         },
         .or_op => {
@@ -2518,7 +2524,7 @@ fn evalStringLiteral(c: *cy.Chunk, str: []const u8, opt_target: ?*cy.Type, node:
         // }
 
         if (target_t.id() == bt.EvalInt) {
-            if (try sema.semaTryStringLitCodepoint(c, str, 64, node)) |val| {
+            if (try sema_lit.semaTryStringLitCodepoint(c, str, 64, node)) |val| {
                 return Expr.initValue(.{
                     .type = c.sema.eval_int_t,
                     .value = val,
@@ -2530,14 +2536,14 @@ fn evalStringLiteral(c: *cy.Chunk, str: []const u8, opt_target: ?*cy.Type, node:
         if (target_t.id() == bt.Type) {
             // Falls through to `EvalStr`.
         } else if (target_t.kind() == .int) {
-            if (try sema.semaTryStringLitCodepoint(c, str, target_t.cast(.int).bits, node)) |val| {
+            if (try sema_lit.semaTryStringLitCodepoint(c, str, target_t.cast(.int).bits, node)) |val| {
                 return Expr.initValue(.{
                     .type = target_t,
                     .value = val,
                 });
             }
         } else if (target_t.kind() == .raw) {
-            if (try sema.semaTryStringLitCodepoint(c, str, target_t.cast(.raw).bits, node)) |val| {
+            if (try sema_lit.semaTryStringLitCodepoint(c, str, target_t.cast(.raw).bits, node)) |val| {
                 return Expr.initValue(.{
                     .type = target_t,
                     .value = val,
@@ -2694,49 +2700,49 @@ pub fn evalCZero(c: *cy.Chunk, type_: *cy.Type, node: *ast.Node) !Value {
 fn evalSignedLiteral(c: *cy.Chunk, literal: []const u8, target_t: *cy.Type, base: u8, node: *ast.Node) !?Expr {
     switch (target_t.id()) {
         bt.R8 => {
-            const val = try sema.semaParseInt(c, u8, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, u8, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.r8_t,
                 .value = Value.initR8(val),
             });
         },
         bt.I8 => {
-            const val = try sema.semaParseInt(c, i8, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, i8, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.i8_t,
                 .value = Value.initInt8(val),
             });
         },
         bt.R16 => {
-            const val = try sema.semaParseInt(c, u16, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, u16, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.r16_t,
                 .value = Value.initR16(val),
             });
         },
         bt.I16 => {
-            const val = try sema.semaParseInt(c, i16, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, i16, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.i16_t,
                 .value = Value.initInt16(val),
             });
         },
         bt.R32 => {
-            const val = try sema.semaParseInt(c, u32, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, u32, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.r32_t,
                 .value = Value.initR32(val),
             });
         },
         bt.I32 => {
-            const val = try sema.semaParseInt(c, i32, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, i32, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.i32_t,
                 .value = Value.initInt32(val),
             });
         },
         bt.EvalInt => {
-            const val = try sema.semaParseInt(c, u64, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, u64, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.eval_int_t,
                 .value = Value.init_eval_int(@bitCast(val)),
@@ -2757,7 +2763,7 @@ fn evalSignedLiteral(c: *cy.Chunk, literal: []const u8, target_t: *cy.Type, base
             });
         },
         bt.R64 => {
-            const val = try sema.semaParseInt(c, u64, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, u64, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.r64_t,
                 .value = Value.initR64(val),
@@ -2772,49 +2778,49 @@ fn evalSignedLiteral(c: *cy.Chunk, literal: []const u8, target_t: *cy.Type, base
 fn evalUnsignedLiteral(c: *cy.Chunk, literal: []const u8, target_t: *cy.Type, base: u8, node: *ast.Node) !?Expr {
     switch (target_t.id()) {
         bt.R8 => {
-            const val = try sema.semaParseInt(c, u8, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, u8, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.r8_t,
                 .value = Value.initR8(val),
             });
         },
         bt.I8 => {
-            const val = try sema.semaParseInt(c, u8, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, u8, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.i8_t,
                 .value = Value.initR8(val),
             });
         },
         bt.R16 => {
-            const val = try sema.semaParseInt(c, u16, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, u16, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.r16_t,
                 .value = Value.initR16(val),
             });
         },
         bt.I16 => {
-            const val = try sema.semaParseInt(c, u16, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, u16, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.i16_t,
                 .value = Value.initR16(val),
             });
         },
         bt.R32 => {
-            const val = try sema.semaParseInt(c, u32, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, u32, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.r32_t,
                 .value = Value.initR32(val),
             });
         },
         bt.I32 => {
-            const val = try sema.semaParseInt(c, u32, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, u32, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.i32_t,
                 .value = Value.initR32(val),
             });
         },
         bt.EvalInt => {
-            const val = try sema.semaParseInt(c, u64, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, u64, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.eval_int_t,
                 .value = Value.init_eval_int(@bitCast(val)),
@@ -2824,7 +2830,7 @@ fn evalUnsignedLiteral(c: *cy.Chunk, literal: []const u8, target_t: *cy.Type, ba
             if (base != 10) {
                 return null;
             }
-            const val = try sema.semaParseFloat(c, f32, literal, node);
+            const val = try sema_lit.semaParseFloat(c, f32, literal, node);
             return Expr.initValue(.{
                 .type = c.sema.f32_t,
                 .value = Value.initFloat32(val),
@@ -2834,14 +2840,14 @@ fn evalUnsignedLiteral(c: *cy.Chunk, literal: []const u8, target_t: *cy.Type, ba
             if (base != 10) {
                 return null;
             }
-            const val = try sema.semaParseFloat(c, f64, literal, node);
+            const val = try sema_lit.semaParseFloat(c, f64, literal, node);
             return Expr.initValue(.{
                 .type = c.sema.f64_t,
                 .value = Value.initFloat64(val),
             });
         },
         bt.R64 => {
-            const val = try sema.semaParseInt(c, u64, literal, base, node);
+            const val = try sema_lit.semaParseInt(c, u64, literal, base, node);
             return Expr.initValue(.{
                 .type = c.sema.r64_t,
                 .value = Value.initR64(val),

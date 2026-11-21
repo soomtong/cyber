@@ -3,6 +3,7 @@ const cy = @import("cyber.zig");
 const bt = cy.types.BuiltinTypes;
 const ast = cy.ast;
 const sema = cy.sema;
+const sema_resolve = cy.sema_resolve;
 const sema_type = cy.sema_type;
 const cte = cy.cte;
 const v = cy.fmt.v;
@@ -363,7 +364,7 @@ fn createInstance(c: *cy.Chunk, arg_types: []const *cy.Type, args: []const cy.Va
         .map = if (params.len > 2) .{ .map = .empty } else .{ .two = undefined },
         .site = site,
         .site_seq = c.compiler.compile_seq,
-        .site_parent = if (site != null) cy.sema.bodyInstance(c) else null,
+        .site_parent = if (site != null) cy.sema_borrow.bodyInstance(c) else null,
         .data = undefined,
     };
     return instance;
@@ -379,7 +380,7 @@ pub fn expand_template(c: *cy.Chunk, template: *cy.sym.Template, arg_types: []co
 }
 
 pub fn expand_template2(c: *cy.Chunk, template: *cy.sym.Template, arg_types: []const *cy.Type, args: []const cy.Value, resolve_new_types: bool, node: ?*ast.Node) !*cy.Sym {
-    try sema.ensureResolvedTemplate(c, template);
+    try sema_resolve.ensureResolvedTemplate(c, template);
 
     // Ensure variant type.
     const key = VariantKey{ .param_types = arg_types, .params = args };
@@ -441,7 +442,7 @@ fn failedInstance(c: *cy.Chunk, node: *ast.Node) anyerror {
     return c.reportError("The template could not be expanded with these arguments because of an earlier error.", node);
 }
 
-pub fn resolveTemplateArgs(c: *cy.Chunk, args: []const *ast.Node, template: *cy.sym.Template, template_ctx: *sema.ResolveContext, node: *ast.Node) !void {
+pub fn resolveTemplateArgs(c: *cy.Chunk, args: []const *ast.Node, template: *cy.sym.Template, template_ctx: *sema_resolve.ResolveContext, node: *ast.Node) !void {
     if (args.len != template.params.len) {
         return c.reportErrorFmt("Expected {} template parameters.", &.{v(template.params.len)}, node);
     }
@@ -453,14 +454,14 @@ pub fn resolveTemplateArgs(c: *cy.Chunk, args: []const *ast.Node, template: *cy.
         var param_t: *cy.Type = undefined;
         var eff_param: *ast.FuncParam = undefined;
         {
-            try sema.pushSavedResolveContext(c, template_ctx.*);
-            defer template_ctx.* = sema.saveResolveContext(c);
+            try sema_resolve.pushSavedResolveContext(c, template_ctx.*);
+            defer template_ctx.* = sema_resolve.saveResolveContext(c);
 
             const param = template.decl.params[i];
             if (param.type == null) {
                 if (param_group_t == null or i > param_group_end) {
                     // Attempt to find group type.
-                    param_group_end = sema.indexOfTypedParam(template.decl.params, i + 1) orelse {
+                    param_group_end = sema_resolve.indexOfTypedParam(template.decl.params, i + 1) orelse {
                         return c.reportError("Expected parameter type.", @ptrCast(param));
                     };
                     param_group_t = try cte.eval_type2(c, false, template.decl.params[param_group_end].type.?);
@@ -564,11 +565,11 @@ pub fn expand_template_ast(c: *cy.Chunk, template: *cy.sym.Template, args: []con
 }
 
 pub fn expand_template_ast2(c: *cy.Chunk, template: *cy.sym.Template, args: []const *ast.Node, resolve_new_type: bool, node: *ast.Node) !*cy.Sym {
-    try sema.ensureResolvedTemplate(c, template);
+    try sema_resolve.ensureResolvedTemplate(c, template);
 
     // Prepare template context.
-    try sema.pushSymResolveContext(c, @ptrCast(template), @ptrCast(template.decl));
-    var template_ctx = sema.saveResolveContext(c);
+    try sema_resolve.pushSymResolveContext(c, @ptrCast(template), @ptrCast(template.decl));
+    var template_ctx = sema_resolve.saveResolveContext(c);
     template_ctx.has_ct_params = true;
     template_ctx.prefer_ct_type = true;
     defer template_ctx.deinit(c);
@@ -594,7 +595,7 @@ pub fn expand_template_ast2(c: *cy.Chunk, template: *cy.sym.Template, args: []co
 }
 
 pub fn expandTemplateFuncForArgs(c: *cy.Chunk, template: *cy.sym.FuncTemplate, args: []const *ast.Node, node: *ast.Node) !*cy.Func {
-    try sema.ensureResolvedFuncTemplate(c, template);
+    try sema_resolve.ensureResolvedFuncTemplate(c, template);
 
     if (template.params.len != args.len) {
         return c.reportErrorFmt("Expected {} arguments. Found {}.", &.{v(template.params.len), v(args.len)}, node);
@@ -642,7 +643,7 @@ pub fn expandTemplateFuncForArgs(c: *cy.Chunk, template: *cy.sym.FuncTemplate, a
 }
 
 pub fn expandFuncTemplate(c: *cy.Chunk, template: *cy.sym.FuncTemplate, param_types: []const *cy.Type, args: []const cy.Value, node: ?*ast.Node) !*cy.Func {
-    try sema.ensureResolvedFuncTemplate(c, template);
+    try sema_resolve.ensureResolvedFuncTemplate(c, template);
     return expandResolvedFuncTemplate(c, template, param_types, args, true, node);
 }
 
@@ -685,7 +686,7 @@ pub fn expandResolvedFuncTemplate(
             }};
             try variant.initFuncParams(c.alloc, variant.params, template.params);
 
-            variant.data.func.func = try sema.reserve_func_instance(c, template, variant);
+            variant.data.func.func = try sema_resolve.reserve_func_instance(c, template, variant);
             break :blk variant;
         };
         const new_func = variant.data.func.func;
@@ -696,7 +697,7 @@ pub fn expandResolvedFuncTemplate(
         template.instances.appendAssumeCapacity(variant);
         errdefer variant.failed = true;
 
-        try sema.resolveFuncVariant(c, new_func, resolve_new_types, node);
+        try sema_resolve.resolveFuncVariant(c, new_func, resolve_new_types, node);
 
         return new_func;
     } 

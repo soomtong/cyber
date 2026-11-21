@@ -17,6 +17,13 @@ const ir = cy.ir;
 const cte = cy.cte;
 const bt = cy.types.BuiltinTypes;
 const sema = cy.sema;
+const sema_access = cy.sema_access;
+const sema_call = cy.sema_call;
+const sema_expr = cy.sema_expr;
+const sema_init = cy.sema_init;
+const sema_lit = cy.sema_lit;
+const sema_move = cy.sema_move;
+const sema_resolve = cy.sema_resolve;
 const sema_type = cy.sema_type;
 const vmc = cy.vmc;
 const string = @import("string.zig");
@@ -460,7 +467,7 @@ fn createFuncSymType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.instance().?;
     const sig = instance.getParamValue("SIG").?.asPtr(*cy.FuncSig);
 
@@ -474,7 +481,7 @@ fn createOpaqueFuncType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c)
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.instance().?;
 
     if (instance.getParam("SIG").?.type.id() != bt.Type) {
@@ -499,7 +506,7 @@ fn createFuncType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.T
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.instance().?;
 
     if (instance.getParam("SIG").?.type.id() != bt.Type) {
@@ -521,7 +528,7 @@ fn createExternFuncPtrType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.instance().?;
     const sig = instance.getParamValue("SIG").?.asPtr(*cy.FuncSig);
 
@@ -553,7 +560,7 @@ fn createFuncPtrType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.instance().?;
     const sig = instance.getParamValue("SIG").?.asPtr(*cy.FuncSig);
 
@@ -566,7 +573,7 @@ fn create_dyn_type(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.
     const node: *ast.Node = @ptrCast(@alignCast(decl));
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.instance().?;
     const child_t = instance.getParamValue("T").?.asPtr(*cy.Type);
     if (child_t.kind() != .generic_trait) {
@@ -583,7 +590,7 @@ fn createRefType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Ty
     _ = vm;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.instance().?;
     const child_t = instance.getParamValue("T").?.asPtr(*cy.Type);
     if (child_t.kind() == .dyn_trait) {
@@ -600,7 +607,7 @@ fn createExBorrowType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?
     _ = vm;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.instance().?;
     const child_t = instance.getParamValue("T").?.asPtr(*cy.Type);
     if (child_t.kind() == .generic_trait) {
@@ -616,7 +623,7 @@ fn createBorrowType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C
     _ = vm;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.instance().?;
     const child_t = instance.getParamValue("T").?.asPtr(*cy.Type);
     if (child_t.kind() == .dyn_trait) {
@@ -633,7 +640,7 @@ fn createPtrType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Ty
     _ = vm;
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.instance().?;
     const child_t = instance.getParamValue("T").?.asPtr(*cy.Type);
 
@@ -647,7 +654,7 @@ fn createRawType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Ty
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.cast(.type).instance.?;
     const bits = instance.getParamValue("Bits").?.as_eval_int();
     const type_id = switch (bits) {
@@ -687,7 +694,7 @@ fn createIntType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Ty
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.cast(.type).instance.?;
     const bits = instance.getParamValue("Bits").?.as_eval_int();
     const type_id = switch (bits) {
@@ -742,7 +749,7 @@ fn createFloatType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.cast(.type).instance.?;
     const bits = instance.getParamValue("Bits").?.as_eval_int();
     const type_id = switch (bits) {
@@ -826,7 +833,7 @@ fn createResultType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.instance().?;
     const child_t = instance.getParamValue("T").?.asPtr(*cy.Type);
 
@@ -842,7 +849,7 @@ fn createOptionType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.instance().?;
     const child_t = instance.getParamValue("T").?.asPtr(*cy.Type);
 
@@ -860,7 +867,7 @@ fn createGenericVectorType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.cast(.type).instance.?;
     const elem_t = instance.getParamValue("T").?.asPtr(*cy.Type);
     const new_t = c.sema.createType(.generic_vector, .{ .elem_t = elem_t }) catch |err| return cy.compiler.failCreateType(c, err);
@@ -874,7 +881,7 @@ fn createPartialVectorType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.cast(.type).instance.?;
     const n: usize = @intCast(instance.getParamValue("N").?.asInt());
     const elem_t = instance.getParamValue("T").?.asPtr(*cy.Type);
@@ -889,7 +896,7 @@ fn createVectorType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C
     const chunk_sym = cy.Sym.fromC(c_mod).cast(.chunk);
     const c = chunk_sym.chunk;
 
-    var ctx = sema.getResolveContext(c);
+    var ctx = sema_resolve.getResolveContext(c);
     const instance = ctx.data.sym.cast(.type).instance.?;
     const n: usize = @intCast(instance.getParamValue("N").?.asInt());
     const elem_t = instance.getParamValue("T").?.asPtr(*cy.Type);
@@ -904,12 +911,12 @@ pub fn copyStruct(c: *cy.Chunk, ctx: *cy.BuiltinContext, res: *sema.ExprResult) 
     const ptr_n = ctx.args[1];
     const ptr = try c.sema_expr_cstr_template(ptr_n, c.sema.ptr_tmpl);
 
-    var b: sema.InitBuilder = .{ .c = c };
+    var b: sema_init.InitBuilder = .{ .c = c };
     const fields = struct_t.fields();
     try b.begin(@ptrCast(struct_t), fields.len, ctx.node);
     for (fields, 0..) |field, i| {
-        var arg = try sema.semaField(c, ptr, ptr_n, i, field.type, ctx.node);
-        arg = try sema.semaOwn(c, arg, ctx.node);
+        var arg = try sema_access.semaField(c, ptr, ptr_n, i, field.type, ctx.node);
+        arg = try sema_move.semaOwn(c, arg, ctx.node);
         try b.pushArg(arg, ctx.node);
     }
     const loc = b.end();
@@ -977,7 +984,7 @@ pub fn sext(c: *cy.Chunk, ctx: *cy.BuiltinContext, res: *sema.ExprResult) !void 
         return c.reportError("Expected `Int` or `Raw` target type.", ctx.node);
     }
 
-    const src = try sema.semaExpr(c, ctx.args[1], .{});
+    const src = try sema_expr.semaExpr(c, ctx.args[1], .{});
     var src_bits: u32 = undefined;
     if (src.type.kind() == .int) {
         src_bits = src.type.cast(.int).bits;
@@ -1000,7 +1007,7 @@ pub fn intToFloat(c: *cy.Chunk, ctx: *cy.BuiltinContext, res: *sema.ExprResult) 
     }
     const int_n = ctx.args[1];
     const int = try c.semaExprCstr(int_n, c.sema.i64_t);
-    res.* = try sema.semaIntToFloat(c, target_t, int, ctx.node);
+    res.* = try sema_lit.semaIntToFloat(c, target_t, int, ctx.node);
 }
 
 pub fn floatToInt(c: *cy.Chunk, ctx: *cy.BuiltinContext, res: *sema.ExprResult) !void {
@@ -1051,7 +1058,7 @@ pub fn cmp(c: *cy.Chunk, ctx: *cy.BuiltinContext, res: *sema.ExprResult) !void {
 pub fn nop(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     const label = ctx.args[0].asPtr(*cy.heap.EvalStr).slice();
     defer c.heap.release(ctx.args[0]);
-    try sema.semaNop(c, label, ctx.node);
+    try sema_expr.semaNop(c, label, ctx.node);
     return cy.TypeValue.init(c.sema.void_t, Value.Void);
 }
 
@@ -1184,7 +1191,7 @@ pub fn bitCast(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !vo
     }
 
     if (can_bitcast) {
-        out.* = try sema.semaBitcast(c, src, target_t, ctx.node);
+        out.* = try sema_expr.semaBitcast(c, src, target_t, ctx.node);
         out.owned = true;
         return;
     } else {
@@ -1204,13 +1211,13 @@ pub fn unsafeCast(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) 
     if (cast_t.kind() == .int) {
         if (src.type.kind() == .borrow) {
             if (src.type.size() < cast_t.size()) {
-                out.* = try sema.semaZext(c, cast_t, @intCast(src.type.size() * 8), src, ctx.node);
+                out.* = try sema_lit.semaZext(c, cast_t, @intCast(src.type.size() * 8), src, ctx.node);
                 return;
             }
         }
     }
 
-    out.* = try sema.semaBitcast(c, src, cast_t, ctx.node);
+    out.* = try sema_expr.semaBitcast(c, src, cast_t, ctx.node);
     out.*.owned = true;
 }
 
@@ -1319,8 +1326,8 @@ pub fn result_unwrap(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResul
         .tag = 1,
     });
     out.* = sema.ExprResult.init(loc, ptr_t);
-    out.* = try sema.semaDeref(c, out.*, ctx.node);
-    out.* = try sema.semaOwn(c, out.*, ctx.node);
+    out.* = try sema_expr.semaDeref(c, out.*, ctx.node);
+    out.* = try sema_move.semaOwn(c, out.*, ctx.node);
 }
 
 pub fn result_unwrap_error(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !void {
@@ -1331,8 +1338,8 @@ pub fn result_unwrap_error(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.Exp
         .tag = 0,
     });
     out.* = sema.ExprResult.init2(loc);
-    out.* = try sema.semaDeref(c, out.*, ctx.node);
-    out.* = try sema.semaOwn(c, out.*, ctx.node);
+    out.* = try sema_expr.semaDeref(c, out.*, ctx.node);
+    out.* = try sema_move.semaOwn(c, out.*, ctx.node);
 }
 
 pub fn freeObject(t: *cy.Thread) callconv(.c) C.Ret {
@@ -1504,13 +1511,13 @@ pub fn call(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !void 
     if (tuple_t.cast(.struct_t).base.sym().instance.?.params[0].asPtr(*cy.FuncSig) != sig) {
         return c.reportError("Function signature mismatch.", ctx.args[1]);
     }
-    args = try sema.semaEnsureAddressable(c, args, ctx.args[1]);
+    args = try sema_move.semaEnsureAddressable(c, args, ctx.args[1]);
 
     const ir_args = try c.ir.allocArray(*ir.Expr, sig.params_len);
     for (sig.params(), 0..) |param, i| {
-        var arg = try sema.semaField(c, args, ctx.node, i, param.get_type(), ctx.node);
+        var arg = try sema_access.semaField(c, args, ctx.node, i, param.get_type(), ctx.node);
         arg = try cy.sema_func.ownOrManageArg(c, arg, ctx.node);
-        // arg = try sema.semaOwn(c, arg, ctx.node);
+        // arg = try sema_move.semaOwn(c, arg, ctx.node);
         ir_args[i] = arg.ir;
     }
 
@@ -1520,7 +1527,7 @@ pub fn call(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !void 
         .args = ir_args.ptr,
     });
     // The entry frame of a fiber is at this call while the fiber's function runs.
-    try sema.semaCancelPad(c, @intFromPtr(expr), ctx.node);
+    try sema_call.semaCancelPad(c, @intFromPtr(expr), ctx.node);
     out.* = sema.ExprResult.initOwned(expr);
 }
 
@@ -1560,7 +1567,7 @@ pub fn start_thread(t: *cy.Thread) !C.Ret {
 pub fn await_(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !void {
     const fut = try c.semaExpr(ctx.args[0], .{});
     const stmt = try c.ir.pushStmt(.await_, ctx.node, .{ .expr = fut.ir });
-    try sema.semaCancelPad(c, @intFromPtr(stmt), ctx.node);
+    try sema_call.semaCancelPad(c, @intFromPtr(stmt), ctx.node);
     out.* = try c.semaVoid(ctx.node);
 }
 
@@ -1906,7 +1913,7 @@ fn scope_ptr_to_borrow(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprRes
     const ptr = try c.sema_expr_cstr_template(ctx.args[1], c.sema.ptr_tmpl);
     const borrow_t = try sema.getBorrowType(c, ptr.type.cast(.pointer).child_t);
 
-    out.* = try sema.semaBitcast(c, ptr, borrow_t, ctx.node);
+    out.* = try sema_expr.semaBitcast(c, ptr, borrow_t, ctx.node);
     out.*.data.value.parent_local = res.data.local.varId;
 }
 
@@ -2093,36 +2100,36 @@ fn str_fmt_bytes(t: *cy.Thread) anyerror!C.Ret {
 
 pub fn gen_next(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !void {
     var gen = try c.sema_expr_cstr_template(ctx.args[0], c.sema.generator_tmpl);
-    gen = try sema.semaEnsureAddressable(c, gen, ctx.args[0]);
+    gen = try sema_move.semaEnsureAddressable(c, gen, ctx.args[0]);
 
     const ptr_t = try sema.getPtrType(c, gen.type);
-    const addr = try sema.semaAddressOf(c, gen, ptr_t, ctx.args[0]);
+    const addr = try sema_expr.semaAddressOf(c, gen, ptr_t, ctx.args[0]);
 
     const fn_ptr_t = gen.type.cast(.struct_t).base.sym().instance.?.params[0].asPtr(*cy.Type);
     const ret_t = try sema.getOptionType(c, fn_ptr_t.cast(.func_ptr).sig.ret);
     try cy.global_init.recordIndirectCall(c);
     // The generator body runs under this frame like a callee. A fiber can be cancelled while it is there.
-    try sema.semaCancelHoist(c);
+    try sema_call.semaCancelHoist(c);
     const next = try c.ir.newExpr(.gen_next, ret_t, ctx.node, .{
         .gen = addr.ir,
     });
-    try sema.semaCancelPad(c, @intFromPtr(next), ctx.node);
+    try sema_call.semaCancelPad(c, @intFromPtr(next), ctx.node);
     out.* = sema.ExprResult.initOwned(next);
 }
 
 pub fn gen_end(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !void {
     var gen = try c.sema_expr_cstr_template(ctx.args[0], c.sema.generator_tmpl);
-    gen = try sema.semaEnsureAddressable(c, gen, ctx.args[0]);
+    gen = try sema_move.semaEnsureAddressable(c, gen, ctx.args[0]);
 
     const ptr_t = try sema.getPtrType(c, gen.type);
-    const addr = try sema.semaAddressOf(c, gen, ptr_t, ctx.args[0]);
+    const addr = try sema_expr.semaAddressOf(c, gen, ptr_t, ctx.args[0]);
 
     // The deinit block of the generator body runs under this frame. A fiber can be cancelled in a `@deinit` there.
-    try sema.semaCancelHoist(c);
+    try sema_call.semaCancelHoist(c);
     const end = try c.ir.newExpr(.gen_end, c.sema.void_t, ctx.node, .{
         .gen = addr.ir,
     });
-    try sema.semaCancelPad(c, @intFromPtr(end), ctx.node);
+    try sema_call.semaCancelPad(c, @intFromPtr(end), ctx.node);
     out.* = sema.ExprResult.init2(end);
 }
 
@@ -2381,7 +2388,7 @@ pub fn ptr_init(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !v
     // const elem_t = ctx.func.parent.parent.?.cast(.type).type.cast(.pointer).child_t;
     const ptr = try c.semaExpr(ctx.args[0], .{});
     var right = try c.semaExpr(ctx.args[1], .{});
-    right = try sema.semaOwn(c, right, right.ir.node);
+    right = try sema_move.semaOwn(c, right, right.ir.node);
 
     _ = try c.ir.pushStmt(.set_deref, ctx.node, .{
         .ptr = ptr.ir,

@@ -4,6 +4,13 @@ const C = @import("capi.zig");
 const bt = cy.types.BuiltinTypes;
 const ast = cy.ast;
 const sema = cy.sema;
+const sema_borrow = cy.sema_borrow;
+const sema_call = cy.sema_call;
+const sema_expr = cy.sema_expr;
+const sema_hint = cy.sema_hint;
+const sema_local = cy.sema_local;
+const sema_move = cy.sema_move;
+const sema_resolve = cy.sema_resolve;
 const sema_type = cy.sema_type;
 const cte = cy.cte;
 const log = cy.log.scoped(.sema_func);
@@ -115,7 +122,7 @@ pub fn matchGenericFuncCt(c: *cy.Chunk, template: *cy.sym.FuncTemplate,
     pre_args: []const Argument, end_args: []const *ast.Node, cstr: cte.CallCstr,
     match_err: *FuncMatchError, node: *ast.Node) !?MatchGenericFuncCtResult {
 
-    try sema.ensureResolvedFuncTemplate(c, template);
+    try sema_resolve.ensureResolvedFuncTemplate(c, template);
 
     const nargs = pre_args.len + end_args.len;
     
@@ -125,8 +132,8 @@ pub fn matchGenericFuncCt(c: *cy.Chunk, template: *cy.sym.FuncTemplate,
     }
 
     // Prepare template context.
-    try sema.pushSymResolveContext(c, @ptrCast(template), node);
-    var template_ctx = sema.saveResolveContext(c);
+    try sema_resolve.pushSymResolveContext(c, @ptrCast(template), node);
+    var template_ctx = sema_resolve.saveResolveContext(c);
     template_ctx.has_ct_params = true;
     defer template_ctx.deinit(c);
 
@@ -205,7 +212,7 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
 
     const template = func.data.generic;
 
-    try sema.ensureResolvedFuncTemplate(c, template);
+    try sema_resolve.ensureResolvedFuncTemplate(c, template);
 
     const nargs = pre_args.len + end_args.len;
     
@@ -215,17 +222,17 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
     }
 
     // Prepare template context.
-    try sema.pushFuncResolveContext(c, func, node);
-    var template_ctx = sema.saveResolveContext(c);
+    try sema_resolve.pushFuncResolveContext(c, func, node);
+    var template_ctx = sema_resolve.saveResolveContext(c);
     template_ctx.has_ct_params = true;
     defer template_ctx.deinit(c);
 
     var arg_idx: u32 = 0;
     var arg_nodes: [256]*ast.Node = undefined;
 
-    // An argument is evaluated before a statement that a later argument adds (`sema.seqFlush`).
+    // An argument is evaluated before a statement that a later argument adds (`sema_move.seqFlush`).
     const seq_start = c.seq_pending.items.len;
-    defer sema.seqPop(c, seq_start);
+    defer sema_move.seqPop(c, seq_start);
 
     const params = template.sig.params();
     for (0..nargs) |i| {
@@ -242,13 +249,13 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
             if (arg_res.type.kind() == .ex_borrow) {
                 // Like `matchFuncSig`: an exclusive borrow that a local holds is checked where it is passed on.
                 if (arg_res.recParentLocal()) |via| {
-                    try sema.checkExclusiveBorrowOfField(c, via, sema.borrowField(c, arg_res), false, arg.node);
+                    try sema_borrow.checkExclusiveBorrowOfField(c, via, sema_borrow.borrowField(c, arg_res), false, arg.node);
                 }
             }
             if (arg_res.resType == .value and !arg_res.addressable) {
-                try sema.seqPush(c, &args[arg_idx], arg_res.owned, arg.node);
+                try sema_move.seqPush(c, &args[arg_idx], arg_res.owned, arg.node);
             } else {
-                try sema.seqPushTakeArg(c, &args[arg_idx], arg.node);
+                try sema_move.seqPushTakeArg(c, &args[arg_idx], arg.node);
             }
             arg_nodes[arg_idx] = arg.node;
             arg_idx += 1;
@@ -261,7 +268,7 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
     }
 
     if (tookReceiver(c, pre_args) and arg_idx > 0) {
-        try sema.finishGlobalTake(c, args[1..arg_idx], arg_nodes[1..arg_idx]);
+        try sema_move.finishGlobalTake(c, args[1..arg_idx], arg_nodes[1..arg_idx]);
     }
 
     const func_instance = try genFunc(c, template, &template_ctx, node);
@@ -300,7 +307,7 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
 //     }
 // }
 
-fn genFunc(c: *cy.Chunk, template: *cy.sym.FuncTemplate, template_ctx: *sema.ResolveContext, node: *ast.Node) !*cy.Func {
+fn genFunc(c: *cy.Chunk, template: *cy.sym.FuncTemplate, template_ctx: *sema_resolve.ResolveContext, node: *ast.Node) !*cy.Func {
     // Build template args from context.
     const arg_start = c.valueStack.items.len;
     const argt_start = c.typeStack.items.len;
@@ -337,7 +344,7 @@ fn getVmCVariantFunc(c: *cy.Chunk, extern_func: *cy.Func, args: []*ir.Expr, node
     for (args[params.len-1..]) |varg| {
         try c.func_param_stack.append(c.alloc, sema.FuncParam.init(varg.type));
     }
-    try sema.checkArgLimit(c, args.len, node);
+    try sema_local.checkArgLimit(c, args.len, node);
     const sig = try c.sema.ensureFuncSig(c.func_param_stack.items[param_start..], extern_func.sig.ret);
 
     const res = try c.sema.vm_c_variadic_funcs.getOrPut(c.alloc, .{ .func = extern_func, .sig = sig });
@@ -354,7 +361,7 @@ fn getVmCVariantFunc(c: *cy.Chunk, extern_func: *cy.Func, args: []*ir.Expr, node
 
         try c.funcs.append(c.alloc, func);
 
-        try sema.resolveFuncVariant(c, func, false, node);
+        try sema_resolve.resolveFuncVariant(c, func, false, node);
         res.value_ptr.* = func;
 
         if (!c.has_extern_func) {
@@ -561,9 +568,9 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
 
     var arg_idx: u32 = 0;
 
-    // An argument is evaluated before a statement that a later argument adds (`sema.seqFlush`).
+    // An argument is evaluated before a statement that a later argument adds (`sema_move.seqFlush`).
     const seq_start = c.seq_pending.items.len;
-    defer sema.seqPop(c, seq_start);
+    defer sema_move.seqPop(c, seq_start);
 
     for (0..nargs) |i| {
         var arg: Argument = undefined;
@@ -594,13 +601,13 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         if (capture_param_scope and sig.scope_param_idx == i) {
             ret_parent_scope_local = arg_res.recParentLocal();
         }
-        arg_owners[arg_idx] = sema.borrowOwner(c, arg_res);
+        arg_owners[arg_idx] = sema_borrow.borrowOwner(c, arg_res);
         if (!arg_res.type.isManaged() and !arg_res.type.info.borrow_only and !arg_res.type.isPointer()) {
             // A plain value (`self.pos`) is copied into the call. It borrows nothing.
             arg_owners[arg_idx] = null;
         }
         arg_ex[arg_idx] = arg_res.type.kind() == .ex_borrow;
-        if (arg_ex[arg_idx] and param.get_type().kind() == .ex_borrow and sema.readThroughShared(arg_res.ir)) {
+        if (arg_ex[arg_idx] and param.get_type().kind() == .ex_borrow and sema_borrow.readThroughShared(arg_res.ir)) {
             return c.reportError("Cannot use an exclusive borrow that is read through a shared borrow.", arg.node);
         }
         // A value that contains an exclusive borrow (`Holder{r=&&f}`) gives the callee the same access.
@@ -608,14 +615,14 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
             (arg_res.type.kind() != .ex_borrow and arg_res.type.info.ex_borrow))
         {
             arg_ex_via[arg_idx] = arg_res.recParentLocal();
-            arg_ex_field[arg_idx] = sema.borrowField(c, arg_res);
+            arg_ex_field[arg_idx] = sema_borrow.borrowField(c, arg_res);
         }
         arg_nodes[arg_idx] = arg.node;
         args[arg_idx] = arg_res.ir;
         if (arg_res.resType == .value and !arg_res.addressable) {
-            try sema.seqPush(c, &args[arg_idx], arg_res.owned, arg.node);
+            try sema_move.seqPush(c, &args[arg_idx], arg_res.owned, arg.node);
         } else {
-            try sema.seqPushTakeArg(c, &args[arg_idx], arg.node);
+            try sema_move.seqPushTakeArg(c, &args[arg_idx], arg.node);
         }
         arg_idx += 1;
     }
@@ -624,14 +631,14 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
     for (0..arg_idx) |i| {
         if (!arg_ex[i]) {
             if (arg_ex_via[i]) |via| {
-                try sema.checkExclusiveBorrowOfField(c, via, arg_ex_field[i], false, arg_nodes[i]);
+                try sema_borrow.checkExclusiveBorrowOfField(c, via, arg_ex_field[i], false, arg_nodes[i]);
             }
             continue;
         }
         // The callee can change the value, so no other local can hold a borrow of it. An exclusive borrow that is
         // already in a local or a field (`r.grow()` of `r := &&f`, `h.r.grow()`) is checked here, where it is used.
         if (arg_ex_via[i]) |via| {
-            try sema.checkExclusiveBorrowOfField(c, via, arg_ex_field[i], false, arg_nodes[i]);
+            try sema_borrow.checkExclusiveBorrowOfField(c, via, arg_ex_field[i], false, arg_nodes[i]);
         }
         const owner = arg_owners[i] orelse continue;
         for (0..arg_idx) |j| {
@@ -644,7 +651,7 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
     }
 
     if (tookReceiver(c, pre_args) and arg_idx > 0) {
-        try sema.finishGlobalTake(c, args[1..arg_idx], arg_nodes[1..arg_idx]);
+        try sema_move.finishGlobalTake(c, args[1..arg_idx], arg_nodes[1..arg_idx]);
     }
 
     return .{
@@ -652,7 +659,7 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
     };
 }
 
-/// Whether the receiver of this call is the one that `sema.takeGlobal` took a place for.
+/// Whether the receiver of this call is the one that `sema_move.takeGlobal` took a place for.
 fn tookReceiver(c: *cy.Chunk, pre_args: []const Argument) bool {
     if (c.global_take == null) return false;
     if (pre_args.len == 0 or pre_args[0].type != .receiver) return false;
@@ -662,7 +669,7 @@ fn tookReceiver(c: *cy.Chunk, pre_args: []const Argument) bool {
 pub fn matchFuncSym2(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const Argument, end_args: []const *ast.Node,
     req_value: bool, node: *ast.Node) anyerror!sema.ExprResult {
 
-    try sema.referenceSym(c, @ptrCast(func_sym), node);
+    try sema_local.referenceSym(c, @ptrCast(func_sym), node);
 
     const res = try matchFuncSym(c, func_sym, pre_args, end_args, req_value, node);
     if (res.kind == .ct) {
@@ -675,22 +682,22 @@ pub fn matchFuncSym2(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const 
         },
         else => {
             if (func_sym == c.sema.scope_start_sym) {
-                try sema.checkScopeStartCall(c, res.func, node);
+                try sema_hint.checkScopeStartCall(c, res.func, node);
             }
-            try sema.checkPrintCall(c, func_sym, res.func, node);
+            try sema_hint.checkPrintCall(c, func_sym, res.func, node);
             if (c.compiler.config.deny_spawn and func_sym == c.sema.spawn_sym and !c.is_builtin) {
                 return c.reportErrorFmt("`spawn` is not allowed. The host disabled threads for this script (`deny_spawn`). Use `fiber` or a `scope` block for concurrent work.", &.{}, node);
             }
             if (c.compiler.record_refs) cy.refs.recordCall(c, node, res.func);
-            sema.markHotCall(c, res.func);
+            sema_call.markHotCall(c, res.func);
             try cy.global_init.recordCall(c, res.func);
-            try sema.semaCancelHoist(c);
+            try sema_call.semaCancelHoist(c);
             const expr = try c.ir.newExpr(.call, res.func.sig.ret, node, .{ 
                 .func = res.func,
                 .numArgs = @as(u8, @intCast(res.data.rt.nargs)),
                 .args = res.data.rt.args,
             });
-            try sema.semaCancelPad(c, @intFromPtr(expr), node);
+            try sema_call.semaCancelPad(c, @intFromPtr(expr), node);
             var expr_res = sema.ExprResult.initOwned(expr);
             expr_res.data.value.parent_local = res.data.rt.ret_parent_scope_local;
             return expr_res;
@@ -798,14 +805,14 @@ fn matchRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end
     }
 
     // A local that an argument moved is alive again for the next candidate.
-    sema.undoMoves(c, undo_start, var_start);
+    sema_move.undoMoves(c, undo_start, var_start);
 
     // Discard any locals created during matching.
     if (var_start < c.varStack.items.len) {
-        sema.truncateBorrowLoans(c, var_start);
+        sema_borrow.truncateBorrowLoans(c, var_start);
         c.varStack.items.len = var_start;
     }
-    // The hidden locals of a take (`sema.takeGlobal`) went with them. The next candidate takes again.
+    // The hidden locals of a take (`sema_move.takeGlobal`) went with them. The next candidate takes again.
     c.global_take = saved_take;
 
     if (start_stmt != null) {
@@ -819,7 +826,7 @@ fn matchRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end
 }
 
 pub fn matchFuncCt(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end_args: []const *ast.Node, cstr: cte.CallCstr, node: *ast.Node) !FuncResult {
-    try sema.ensure_resolved_func(c, func, true, node);
+    try sema_resolve.ensure_resolved_func(c, func, true, node);
     switch (func.type) {
         .generic => {
             var match_err: FuncMatchError = undefined;
@@ -891,7 +898,7 @@ pub fn matchFuncCt(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end
 }
 
 fn matchOverloadedFuncCt(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end_args: []const *ast.Node, req_value: bool, match_err: *FuncMatchError, node: *ast.Node) !?FuncResult {
-    try sema.ensure_resolved_func(c, func, true, node);
+    try sema_resolve.ensure_resolved_func(c, func, true, node);
     const call_cstr = cte.CallCstr{
         .req_value = req_value,
     };
@@ -979,11 +986,11 @@ pub fn ownOrManageArg(c: *cy.Chunk, arg: sema.ExprResult, node: *ast.Node) !sema
         if (arg.resType == .value_local) {
             return arg;
         } else {
-            const res = try sema.semaOwn(c, arg, node);
-            return sema.semaManage(c, res, node);
+            const res = try sema_move.semaOwn(c, arg, node);
+            return sema_move.semaManage(c, res, node);
         }
     } else {
-        return sema.semaOwn(c, arg, node);
+        return sema_move.semaOwn(c, arg, node);
     }
 }
 
@@ -1008,7 +1015,7 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
                 if (target.sink) {
                     if (res.resType == .value_local) {
                         // move owner.
-                        try sema.noteMove(c, res.data.value_local);
+                        try sema_move.noteMove(c, res.data.value_local);
                         c.varStack.items[res.data.value_local].type = .dead;
                     }
                     res.owned = true;
@@ -1031,7 +1038,7 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
                     if (arg.data.receiver.type.id() == target.get_type().id()) {
                         if (arg.data.receiver.resType == .value_local) {
                             // move owner.
-                            try sema.noteMove(c, arg.data.receiver.data.value_local);
+                            try sema_move.noteMove(c, arg.data.receiver.data.value_local);
                             c.varStack.items[arg.data.receiver.data.value_local].type = .dead;
                         }
                         var res = arg.data.receiver;
@@ -1069,12 +1076,12 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
                     const target_child_t = target_t.cast(.borrow).child_t;
                     if (arg.data.receiver.type == target_child_t) {
                         // Implicit T -> &T
-                        const rec = try sema.semaManage(c, arg.data.receiver, node);
-                        const addressable = try sema.semaEnsureAddressable(c, rec, node);
+                        const rec = try sema_move.semaManage(c, arg.data.receiver, node);
+                        const addressable = try sema_move.semaEnsureAddressable(c, rec, node);
                         if (addressable.recParentLocal()) |parent_local| {
-                            try sema.checkSharedBorrowOf(c, parent_local, node);
+                            try sema_borrow.checkSharedBorrowOf(c, parent_local, node);
                         }
-                        return sema.semaAddressOf(c, addressable, target_t, node);
+                        return sema_expr.semaAddressOf(c, addressable, target_t, node);
                     }
                     if (arg.data.receiver.type != target_t) {
                         // Not the exact pointer type but matches a distinct pointer type.
@@ -1084,7 +1091,7 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
                         if (rec_t.kind() == .pointer) {
                             const rec_pt = rec_t.cast(.pointer);
                             if (rec_pt.child_t == target_child_t) {
-                                var new_rec = try sema.semaManage(c, arg.data.receiver, node);
+                                var new_rec = try sema_move.semaManage(c, arg.data.receiver, node);
                                 new_rec.type = target_t;
                                 return new_rec;
                             }
@@ -1107,8 +1114,8 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
                     const target_child_t = target_t.cast(.ex_borrow).child_t;
                     if (arg.data.receiver.type == target_child_t) {
                         // T -> &>T
-                        const rec = try sema.semaManage(c, arg.data.receiver, node);
-                        return sema.sema_ex_borrow2(c, rec, target_t, node);
+                        const rec = try sema_move.semaManage(c, arg.data.receiver, node);
+                        return sema_borrow.sema_ex_borrow2(c, rec, target_t, node);
                     }
                     if (arg.data.receiver.type.kind() == .pointer) {
                         const pointer = arg.data.receiver.type.cast(.pointer);
@@ -1116,7 +1123,7 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
                         if (pointer.child_t == target_child_t) {
                             if (!pointer.ref) {
                                 // *T -> &>T
-                                var new_rec = try sema.semaManage(c, arg.data.receiver, node);
+                                var new_rec = try sema_move.semaManage(c, arg.data.receiver, node);
                                 new_rec.type = target_t;
                                 return new_rec;
                             }
@@ -1145,20 +1152,20 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
     }
 }
 
-fn getFuncTemplateParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *sema.ResolveContext, idx: usize) !*cy.Type {
+fn getFuncTemplateParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *sema_resolve.ResolveContext, idx: usize) !*cy.Type {
     if (idx == 0 and std.mem.eql(u8, template.func_params[idx].name_type.as_name(), "self")) {
         return template.head.parent.?.getStaticType().?;
     } else {
-        const spec_idx = sema.indexOfTypedParam(template.func_params, idx).?;
-        try sema.pushSavedResolveContext(c, ctx.*);
-        defer ctx.* = sema.saveResolveContext(c);
+        const spec_idx = sema_resolve.indexOfTypedParam(template.func_params, idx).?;
+        try sema_resolve.pushSavedResolveContext(c, ctx.*);
+        defer ctx.* = sema_resolve.saveResolveContext(c);
 
         return try cte.eval_type2(c, true, template.func_params[spec_idx].type.?);
     }
 }
 
 fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template: *cy.sym.FuncTemplate,
-    template_ctx: *sema.ResolveContext, param_idx: usize, ct_return: bool) !Argument {
+    template_ctx: *sema_resolve.ResolveContext, param_idx: usize, ct_return: bool) !Argument {
 
     _ = ct_return;
 
@@ -1169,9 +1176,9 @@ fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, templa
         // (%T type)
         var tparam_t: *cy.Type = undefined;
         {
-            try sema.pushSavedResolveContext(c, template_ctx.*);
-            defer template_ctx.* = sema.saveResolveContext(c);
-            const type_idx = sema.indexOfTypedParam(template.func_params, param_idx).?;
+            try sema_resolve.pushSavedResolveContext(c, template_ctx.*);
+            defer template_ctx.* = sema_resolve.saveResolveContext(c);
+            const type_idx = sema_resolve.indexOfTypedParam(template.func_params, param_idx).?;
             tparam_t = try cte.eval_type2(c, false, template.func_params[type_idx].type.?);
         }
 
@@ -1247,7 +1254,7 @@ fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, templa
 }
 
 fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template: *cy.sym.FuncTemplate,
-    template_ctx: *sema.ResolveContext, param_idx: usize, comptime sema_func: bool) !Argument {
+    template_ctx: *sema_resolve.ResolveContext, param_idx: usize, comptime sema_func: bool) !Argument {
 
     const param_t = param.get_type();
     const ast_param = template.func_params[param_idx];
@@ -1255,9 +1262,9 @@ fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template
     if (ast_param.template_param) {
         var tparam_t: *cy.Type = undefined;
         {
-            try sema.pushSavedResolveContext(c, template_ctx.*);
-            defer template_ctx.* = sema.saveResolveContext(c);
-            const type_idx = sema.indexOfTypedParam(template.func_params, param_idx).?;
+            try sema_resolve.pushSavedResolveContext(c, template_ctx.*);
+            defer template_ctx.* = sema_resolve.saveResolveContext(c);
+            const type_idx = sema_resolve.indexOfTypedParam(template.func_params, param_idx).?;
             tparam_t = try cte.eval_type2(c, false, template.func_params[type_idx].type.?);
         }
 
@@ -1265,7 +1272,7 @@ fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template
         if (arg.type == .pre_resolved and arg.data.pre_resolved.resType == .ct_value) {
             ct_value = arg.data.pre_resolved.data.ct_value;
             if (ct_value.type.id() != tparam_t.id()) {
-                return sema.reportIncompatType(c, tparam_t, ct_value.type, arg.node);
+                return sema_expr.reportIncompatType(c, tparam_t, ct_value.type, arg.node);
             }
             ct_value = try c.heap.copy_value(ct_value);
         } else {
@@ -1309,7 +1316,7 @@ fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template
         const idx = template.indexOfParam(anonymous_name).?;
         try template_ctx.initCtParam2(c.alloc, template.params[idx].name, c.sema.type_t, Value.initPtr(res.type));
         if (!try sema_type.implements(c, res.type, param.get_type().cast(.generic_trait), arg.node)) {
-            return sema.reportIncompatType(c, param.get_type(), res.type, arg.node);
+            return sema_expr.reportIncompatType(c, param.get_type(), res.type, arg.node);
         }
     } else {
         const ct_compat = cy.types.isTypeCompat(c.compiler, res.type, target.?.get_type());
@@ -1325,7 +1332,7 @@ fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template
                     return c.reportErrorFmt("Expected type `{}`. Found `{}`.{}", &.{v(exp_name), v(act_name), v(hint)}, arg.node);
                 }
             }
-            return sema.reportIncompatType(c, target.?.get_type(), res.type, arg.node);
+            return sema_expr.reportIncompatType(c, target.?.get_type(), res.type, arg.node);
         }
     }
 
@@ -1587,13 +1594,13 @@ fn reportCallFuncMismatch3(c: *cy.Chunk, pre_args: []const Argument, end_args: [
     }
     // A text and bytes pair (`os.write_file` and `os.write_file_bytes`): name the other function.
     // A value from the other function of the pair (`os.read_file(p)!` for `[]byte`) is named first.
-    var hint = try sema.resultTypeHint(c, match_err.param.get_type(), match_err.arg_t, err_node);
+    var hint = try sema_hint.resultTypeHint(c, match_err.param.get_type(), match_err.arg_t, err_node);
     var rec_hint_buf: [256]u8 = undefined;
     if (hint.len == 0 and arg_idx == 0 and pre_args.len > 0 and pre_args[0].type == .receiver) {
         hint = refReceiverHint(c, match_err.param.get_type(), match_err.arg_t, err_node, func_name, &rec_hint_buf);
     }
     if (hint.len == 0) {
-        if (func) |f| hint = try sema.callArgHint(c, f, match_err.arg_t);
+        if (func) |f| hint = try sema_hint.callArgHint(c, f, match_err.arg_t);
     }
     return c.reportErrorFmt("Expected argument `{}`, found `{}`, when calling `fn {}{}`.{}", &.{v(paramt_name), v(argt_name), v(func_name), v(sig_str), v(hint)}, err_node);
 }
@@ -1637,7 +1644,7 @@ fn expectTypeFromTemplate(c: *cy.Chunk, type_: *cy.Type, exp: *cy.sym.Template, 
 }
 
 /// CtInfer types are extracted from `arg_t`.
-fn inferCtArgs(c: *cy.Chunk, arg: cy.TypeValue, template: *cy.sym.FuncTemplate, template_ctx: *sema.ResolveContext, template_n: *ast.Node, node: *ast.Node) !void {
+fn inferCtArgs(c: *cy.Chunk, arg: cy.TypeValue, template: *cy.sym.FuncTemplate, template_ctx: *sema_resolve.ResolveContext, template_n: *ast.Node, node: *ast.Node) !void {
     switch (template_n.type()) {
         .infer_param => {
             const name = template_n.cast(.infer_param).name.as_name();
@@ -1646,8 +1653,8 @@ fn inferCtArgs(c: *cy.Chunk, arg: cy.TypeValue, template: *cy.sym.FuncTemplate, 
         },
         .ident => {
             // Resolve `template_n` from the template's context.
-            try sema.pushSavedResolveContext(c, template_ctx.*);
-            defer template_ctx.* = sema.saveResolveContext(c);
+            try sema_resolve.pushSavedResolveContext(c, template_ctx.*);
+            defer template_ctx.* = sema_resolve.saveResolveContext(c);
 
             const act_v = try cte.eval(c, template_n);
             defer c.heap.destructValue(act_v);
@@ -1732,14 +1739,14 @@ fn inferCtArgs(c: *cy.Chunk, arg: cy.TypeValue, template: *cy.sym.FuncTemplate, 
 
 fn assertValueEq(c: *cy.Chunk, exp: cy.TypeValue, act: cy.TypeValue, node: *ast.Node) !void {
     if (exp.type.id() != act.type.id()) {
-        return sema.reportIncompatType(c, exp.type, act.type, node);
+        return sema_expr.reportIncompatType(c, exp.type, act.type, node);
     }
 
     switch (exp.type.id()) {
         bt.Type => {
             const act_t = act.value.asPtr(*cy.Type);
             if (exp.value.asPtr(*cy.Type).id() != act_t.id()) {
-                return sema.reportIncompatType(c, exp.value.asPtr(*cy.Type), act_t, node);
+                return sema_expr.reportIncompatType(c, exp.value.asPtr(*cy.Type), act_t, node);
             }
         },
         else => {

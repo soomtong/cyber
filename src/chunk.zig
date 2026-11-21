@@ -7,6 +7,13 @@ const C = @import("capi.zig");
 const fmt = cy.fmt;
 const v = fmt.v;
 const sema = cy.sema;
+const sema_borrow = cy.sema_borrow;
+const sema_call = cy.sema_call;
+const sema_expr = cy.sema_expr;
+const sema_init = cy.sema_init;
+const sema_lit = cy.sema_lit;
+const sema_move = cy.sema_move;
+const sema_resolve = cy.sema_resolve;
 const types = cy.types;
 const log = cy.log.scoped(.chunk);
 const bc = @import("bc_gen.zig");
@@ -80,16 +87,16 @@ pub const Chunk = struct {
     assign_left: ?*ast.Node = null,
 
     /// The variable and the right side of the assignment `x = right` while sema analyzes the right side, for the
-    /// error of `xs = xs.append(v)` (`sema.checkSliceInPlaceAssign`).
+    /// error of `xs = xs.append(v)` (`sema_call.checkSliceInPlaceAssign`).
     assign_target: ?*ast.Node = null,
     assign_right: ?*ast.Node = null,
 
-    /// The assignments to a local whose right side is being checked, innermost first (`sema.AssignRevive`).
-    assign_revive: ?*const cy.sema.AssignRevive = null,
+    /// The assignments to a local whose right side is being checked, innermost first (`sema_assign.AssignRevive`).
+    assign_revive: ?*const cy.sema_assign.AssignRevive = null,
 
-    /// The last method call of a `Slice` that returned nothing (`sema.semaCallFuncSymRec`).
+    /// The last method call of a `Slice` that returned nothing (`sema_call.semaCallFuncSymRec`).
     slice_void_call: ?*ast.Node = null,
-    /// The statement being checked (`sema.semaStmts`).
+    /// The statement being checked (`sema_stmt.semaStmts`).
     stmt_ctx: cy.sema.StmtCtx = .{},
 
     /// The receiver node and the argument nodes of the method call that sema is matching (`semaCallFuncSymRec`). An
@@ -97,7 +104,7 @@ pub const Chunk = struct {
     global_take_rec: ?*ast.Node = null,
     global_take_args: []const *ast.Node = &.{},
     /// The global that the current method call took, to be put back after the call (`restoreGlobal`).
-    global_take: ?sema.GlobalTake = null,
+    global_take: ?sema_move.GlobalTake = null,
 
     /// The current expr that has a continuation body, otherwise null.
     cur_cont_expr: ?*ast.LambdaContExpr,
@@ -133,10 +140,10 @@ pub const Chunk = struct {
     varShadowStack: std.ArrayList(cy.sema.VarShadow),
 
     /// Operands of the expression being analyzed that are done but not consumed yet, in evaluation order.
-    /// See `sema.seqFlush`.
-    seq_pending: std.ArrayList(cy.sema.SeqEntry) = .empty,
+    /// See `sema_move.seqFlush`.
+    seq_pending: std.ArrayList(cy.sema_move.SeqEntry) = .empty,
 
-    /// Owners that the borrow values of the current statement borrow from (`sema.noteBorrowOwner`). A local that is
+    /// Owners that the borrow values of the current statement borrow from (`sema_borrow.noteBorrowOwner`). A local that is
     /// bound in the statement takes those that are not its `parent_local` as loans.
     borrow_pending: std.ArrayList(cy.sema.BorrowOwner) = .empty,
     borrow_pending_start: u32 = 0,
@@ -147,46 +154,46 @@ pub const Chunk = struct {
     /// error of a later use. Cleared when the id is given to a new local.
     moved_sites: std.AutoHashMapUnmanaged(u32, *cy.ast.Node) = .empty,
     /// The outer locals that a branch of an `if` statement moved, until the statement joins its branches
-    /// (`sema.semaIfStmt`).
+    /// (`sema_stmt.semaIfStmt`).
     branch_moves: std.ArrayList(u32) = .empty,
     /// The outer locals that the `break` statements of a loop moved, from `Block.break_moves_start` of the wrap block
-    /// of the loop (`sema.semaBreak`).
+    /// of the loop (`sema_stmt.semaBreak`).
     break_moves: std.ArrayList(u32) = .empty,
     /// The `break` statements that left a loop after they moved outer locals, from `Block.moved_breaks_start` of the
     /// wrap block of the loop.
     moved_breaks: std.ArrayList(sema.MovedBreak) = .empty,
     /// The failing `!` of the body of a `try` statement and the outer locals that the body moved before each
-    /// (`sema.semaTryExit`), until the body ends.
+    /// (`sema_stmt.semaTryExit`), until the body ends.
     try_exits: std.ArrayList(sema.MovedBreak) = .empty,
     try_moves: std.ArrayList(u32) = .empty,
     /// The moves made while an overload candidate is matched, so that a candidate that does not match leaves the
-    /// locals as they were (`sema.undoMoves`). Recorded only while `move_undo_depth` is not 0.
-    move_undo: std.ArrayList(cy.sema.MoveUndo) = .empty,
+    /// locals as they were (`sema_move.undoMoves`). Recorded only while `move_undo_depth` is not 0.
+    move_undo: std.ArrayList(cy.sema_move.MoveUndo) = .empty,
     move_undo_depth: u32 = 0,
-    /// The call that `sema.reuseSliceBuffer` turned into an in-place method, for the error of a mismatch
+    /// The call that `sema_call.reuseSliceBuffer` turned into an in-place method, for the error of a mismatch
     /// (`sema_func.reportCallFuncMismatch2` names the method that the script wrote).
-    reuse_call: ?cy.sema.ReuseCall = null,
+    reuse_call: ?cy.sema_call.ReuseCall = null,
     seq_flushing: bool = false,
 
     /// The `s.start(func, {args})` call of a `scope` block that is being analyzed, and its argument literal.
-    /// `semaTupleInit` records the borrows of that literal in `scope_start_borrows`. See `sema.semaScopeStart`.
+    /// `semaTupleInit` records the borrows of that literal in `scope_start_borrows`. See `sema_stmt.semaScopeStart`.
     scope_start_call: ?*cy.ast.Node = null,
     scope_start_lit: ?*cy.ast.Node = null,
-    scope_start_borrows: std.ArrayList(cy.sema.ScopeBorrow) = .empty,
+    scope_start_borrows: std.ArrayList(cy.sema_stmt.ScopeBorrow) = .empty,
     /// The `scope` blocks whose body is being analyzed, outermost first. `return`, `break` and `continue`
-    /// join the blocks they leave (`sema.semaScopeExitJoin`).
-    scope_blocks: std.ArrayList(cy.sema.OpenScopeBlock) = .empty,
+    /// join the blocks they leave (`sema_stmt.semaScopeExitJoin`).
+    scope_blocks: std.ArrayList(cy.sema_stmt.OpenScopeBlock) = .empty,
     /// The borrows that the fibers of the open `scope` blocks hold. They end with their block.
-    scope_borrows: std.ArrayList(cy.sema.ScopeBorrow) = .empty,
+    scope_borrows: std.ArrayList(cy.sema_stmt.ScopeBorrow) = .empty,
 
     /// Cancel pads by the address of the IR node they belong to: a call expr, a `suspend_` stmt or an
     /// `await_` stmt. A pad is a statement list that destructs the locals that are alive at the node and
     /// returns. A fiber that is cancelled while one of its frames is at the node continues there.
-    /// See `sema.semaCancelPad` and `bc_gen.push_cancel_site`.
-    cancel_pads: std.AutoHashMapUnmanaged(usize, cy.sema.CancelPad) = .empty,
+    /// See `sema_call.semaCancelPad` and `bc_gen.push_cancel_site`.
+    cancel_pads: std.AutoHashMapUnmanaged(usize, cy.sema_call.CancelPad) = .empty,
     /// A pad is being analyzed. Its own calls (destructors) get no pad.
     cancel_pad_building: bool = false,
-    /// While the locals of a block are destructed from the youngest down (`sema.semaDestructBlock2`): the index
+    /// While the locals of a block are destructed from the youngest down (`sema_local.semaDestructBlock2`): the index
     /// of the local that is destructed now, and the proc depth it belongs to. The locals from here up are
     /// destructed or being destructed, so the pad of the destructor call only destructs the older ones.
     cancel_pad_var_end: ?usize = null,
@@ -228,7 +235,7 @@ pub const Chunk = struct {
     on_load: C.ModuleOnLoadFn = null,
 
     /// Reference the current resolve context.
-    resolve_stack: std.ArrayList(sema.ResolveContext),
+    resolve_stack: std.ArrayList(sema_resolve.ResolveContext),
 
     has_pending_ct_stmts: bool,
     resolving_ct_stmts: bool,
@@ -288,7 +295,7 @@ pub const Chunk = struct {
     indent: u32,
 
     /// Fallback for name resolving. Used by libcyber's `clFindType`.
-    resolve_name_fn: ?*const fn(c: *Chunk, name: []const u8) ?sema.NameResult = null,
+    resolve_name_fn: ?*const fn(c: *Chunk, name: []const u8) ?sema_resolve.NameResult = null,
 
     reserved_syms: bool = false,
 
@@ -638,7 +645,7 @@ pub const Chunk = struct {
 
     pub fn unescapeString(self: *Chunk, literal: []const u8) ![]const u8 {
         try self.tempBufU8.resize(self.alloc, literal.len);
-        return cy.sema.unescapeString(self.tempBufU8.items, literal, false);
+        return cy.sema_lit.unescapeString(self.tempBufU8.items, literal, false);
     }
 
     pub fn appendContextTrace(self: *Chunk, report: *cy.compiler.Report, msg: []const u8, ctx_n: *ast.Node) !*cy.compiler.Report {
@@ -690,7 +697,7 @@ pub const Chunk = struct {
     /// core) end the trace where the site is not in the running compile.
     fn appendInstanceTrace(self: *Chunk, report: *cy.compiler.Report, tail: *cy.compiler.Report) error{OutOfMemory}!void {
         var last = tail;
-        var opt_inst = sema.bodyInstance(self);
+        var opt_inst = sema_borrow.bodyInstance(self);
         var depth: u32 = 0;
         while (opt_inst) |inst| : (opt_inst = inst.site_parent) {
             const site = inst.siteIn(self.compiler) orelse return;
@@ -725,7 +732,7 @@ pub const Chunk = struct {
         } else {
             // Reports from module loading arrive before any resolve context exists.
             if (self.resolve_stack.items.len > 0) {
-                const ctx = sema.getResolveContext(self);
+                const ctx = sema_resolve.getResolveContext(self);
                 chunk_id = ctx.chunk.id;
             } else {
                 chunk_id = self.id;
@@ -768,7 +775,7 @@ pub const Chunk = struct {
             chunk_id = node.src();
         } else {
             if (self.resolve_stack.items.len > 0) {
-                const ctx = sema.getResolveContext(self);
+                const ctx = sema_resolve.getResolveContext(self);
                 chunk_id = ctx.chunk.id;
             } else {
                 chunk_id = self.id;
@@ -942,55 +949,55 @@ pub const Chunk = struct {
     pub const getResolvedSym = cy.module.getResolvedSym;
     pub const getResolvedSymOrFail = cy.module.getResolvedSymOrFail;
 
-    pub const semaInitExpr = sema.semaInitExpr;
-    pub const semaObjectInit2 = sema.semaObjectInit2;
-    pub const semaInitStruct = sema.semaInitStruct;
-    pub const semaInitFixedArray = sema.semaInitVector;
-    pub const semaTupleInit = sema.semaTupleInit;
-    pub const semaPtrOrType = sema.semaPtrOrType;
-    pub const semaRefOrType = sema.semaRefOrType;
-    pub const semaBorrowOrType = sema.semaBorrowOrType;
-    pub const semaBinExpr = sema.semaBinExpr;
-    pub const semaUnExpr = sema.semaUnExpr;
-    pub const semaIsError = sema.semaIsError;
-    pub const semaIsNone = sema.semaIsNone;
-    pub const semaIsZero = sema.semaIsZero;
-    pub const semaConst = sema.semaConst;
-    pub const semaConst8 = sema.semaConst8;
-    pub const semaConst16 = sema.semaConst16;
-    pub const semaConst32 = sema.semaConst32;
-    pub const semaNone = sema.semaNone;
-    pub const semaFalse = sema.semaFalse;
-    pub const semaString = sema.semaString;
-    pub const semaStringTarget = sema.semaStringTarget;
-    pub const semaRawString = sema.semaRawString;
-    pub const semaRawStringAs = sema.semaRawStringAs;
-    pub const semaStringAs = sema.semaStringAs;
-    pub const semaTrue = sema.semaTrue;
-    pub const semaVoid = sema.semaVoid;
-    pub const semaExprOrOpAssignBinExpr = sema.semaExprOrOpAssignBinExpr;
-    pub const semaExprSkipSym = sema.semaExprSkipSym;
-    pub const semaExpr = sema.semaExpr;
-    pub const semaExprHint = sema.semaExprHint;
-    pub const semaExprCstr = sema.semaExprCstr;
-    pub const semaExprNoCheck = sema.semaExprNoCheck;
-    pub const semaExprTarget = sema.semaExprTarget;
-    pub const semaCallExpr = sema.semaCallExpr;
-    pub const semaCallValue = sema.semaCallValue;
-    pub const semaCallUnion = sema.semaCallUnion;
-    pub const semaCallPtr = sema.semaCallPtr;
-    pub const semaCallFunc = sema.semaCallFunc;
-    pub const semaCallFunc2 = sema.semaCallFunc2;
-    pub const semaCallFuncResult = sema.semaCallFuncResult;
-    pub const semaCallFuncSym = sema.semaCallFuncSym;
-    pub const semaCallFuncSym1 = sema.semaCallFuncSym1;
-    pub const semaCallFuncSym2 = sema.semaCallFuncSym2;
-    pub const semaCallFuncSymRec = sema.semaCallFuncSymRec;
-    pub const semaCallFuncSymRec2 = sema.semaCallFuncSymRec2;
+    pub const semaInitExpr = sema_init.semaInitExpr;
+    pub const semaObjectInit2 = sema_init.semaObjectInit2;
+    pub const semaInitStruct = sema_init.semaInitStruct;
+    pub const semaInitFixedArray = sema_init.semaInitVector;
+    pub const semaTupleInit = sema_init.semaTupleInit;
+    pub const semaPtrOrType = sema_expr.semaPtrOrType;
+    pub const semaRefOrType = sema_expr.semaRefOrType;
+    pub const semaBorrowOrType = sema_expr.semaBorrowOrType;
+    pub const semaBinExpr = sema_expr.semaBinExpr;
+    pub const semaUnExpr = sema_expr.semaUnExpr;
+    pub const semaIsError = sema_expr.semaIsError;
+    pub const semaIsNone = sema_expr.semaIsNone;
+    pub const semaIsZero = sema_expr.semaIsZero;
+    pub const semaConst = sema_lit.semaConst;
+    pub const semaConst8 = sema_lit.semaConst8;
+    pub const semaConst16 = sema_lit.semaConst16;
+    pub const semaConst32 = sema_lit.semaConst32;
+    pub const semaNone = sema_expr.semaNone;
+    pub const semaFalse = sema_lit.semaFalse;
+    pub const semaString = sema_lit.semaString;
+    pub const semaStringTarget = sema_lit.semaStringTarget;
+    pub const semaRawString = sema_lit.semaRawString;
+    pub const semaRawStringAs = sema_lit.semaRawStringAs;
+    pub const semaStringAs = sema_lit.semaStringAs;
+    pub const semaTrue = sema_lit.semaTrue;
+    pub const semaVoid = sema_lit.semaVoid;
+    pub const semaExprOrOpAssignBinExpr = sema_expr.semaExprOrOpAssignBinExpr;
+    pub const semaExprSkipSym = sema_expr.semaExprSkipSym;
+    pub const semaExpr = sema_expr.semaExpr;
+    pub const semaExprHint = sema_expr.semaExprHint;
+    pub const semaExprCstr = sema_expr.semaExprCstr;
+    pub const semaExprNoCheck = sema_expr.semaExprNoCheck;
+    pub const semaExprTarget = sema_expr.semaExprTarget;
+    pub const semaCallExpr = sema_call.semaCallExpr;
+    pub const semaCallValue = sema_call.semaCallValue;
+    pub const semaCallUnion = sema_call.semaCallUnion;
+    pub const semaCallPtr = sema_call.semaCallPtr;
+    pub const semaCallFunc = sema_call.semaCallFunc;
+    pub const semaCallFunc2 = sema_call.semaCallFunc2;
+    pub const semaCallFuncResult = sema_call.semaCallFuncResult;
+    pub const semaCallFuncSym = sema_call.semaCallFuncSym;
+    pub const semaCallFuncSym1 = sema_call.semaCallFuncSym1;
+    pub const semaCallFuncSym2 = sema_call.semaCallFuncSym2;
+    pub const semaCallFuncSymRec = sema_call.semaCallFuncSymRec;
+    pub const semaCallFuncSymRec2 = sema_call.semaCallFuncSymRec2;
     // pub const semaCallGenericFunc = sema.semaCallGenericFunc;
     // pub const semaCallGenericFuncRec = sema.semaCallGenericFuncRec;
 
-    pub const sema_expr_cstr_template = sema.sema_expr_cstr_template;
+    pub const sema_expr_cstr_template = sema_expr.sema_expr_cstr_template;
 };
 
 const FuncDebugInfo = struct {

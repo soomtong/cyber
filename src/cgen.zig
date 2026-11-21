@@ -655,8 +655,8 @@ pub fn gen(self: *cy.Compiler) !cy.compiler.AotCompileResult {
     for (self.chunks.items, 0..) |chunk, i| {
         log.tracev("Perform codegen for chunk{}: {s}", .{chunk.id, chunk.srcUri});
 
-        try cy.sema.pushChunkResolveContext(chunk, @ptrCast(chunk.ast.root));
-        defer cy.sema.popResolveContext(chunk);
+        try cy.sema_resolve.pushChunkResolveContext(chunk, @ptrCast(chunk.ast.root));
+        defer cy.sema_resolve.popResolveContext(chunk);
 
         try genChunk(&chunks[i]);
         log.tracev("Done. performChunkCodegen {s}", .{chunk.srcUri});

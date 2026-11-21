@@ -6,6 +6,8 @@ const t = stdx.testing;
 const cy = @import("cyber.zig");
 const C = @import("capi.zig");
 const sema = cy.sema;
+const sema_hint = cy.sema_hint;
+const sema_resolve = cy.sema_resolve;
 const sema_type = cy.sema_type;
 const types = cy.types;
 const bt = types.BuiltinTypes;
@@ -366,9 +368,9 @@ pub fn reserveFunc(
             // The condition of a template member can name the template parameters of the instance.
             const in_instance = parent.instance() != null;
             if (in_instance) {
-                try sema.pushSymResolveContext(c, parent, attr.value.?);
+                try sema_resolve.pushSymResolveContext(c, parent, attr.value.?);
             }
-            defer if (in_instance) sema.popResolveContext(c);
+            defer if (in_instance) sema_resolve.popResolveContext(c);
             const res = try cy.cte.evalCheck(c, attr.value.?, c.sema.bool_t);
             if (!res.value.asBool()) {
                 // Skip.
@@ -479,7 +481,7 @@ pub fn get_pub_resolved_chunk_sym(c: *cy.Chunk, chunk: *cy.sym.Chunk, name: []co
                 return null;
             }
             if (!alias.resolved) {
-                try sema.resolveUseAlias(c, alias);
+                try sema_resolve.resolveUseAlias(c, alias);
             }
             return alias.sym;
         },
@@ -556,7 +558,7 @@ fn getResolvedSym2(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *ast.N
             .use_alias => {
                 const alias = sym.cast(.use_alias);
                 if (!alias.resolved) {
-                    try sema.resolveUseAlias(c, alias);
+                    try sema_resolve.resolveUseAlias(c, alias);
                 }
                 return alias.sym;
             },
@@ -587,22 +589,22 @@ fn getResolvedSym2(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *ast.N
                 defer if (!resolved) {
                     _ = mod.symMap.remove(name);
                 };
-                try sema.ensure_resolved_instance_func_decl(c, &func_sym.decl);
+                try sema_resolve.ensure_resolved_instance_func_decl(c, &func_sym.decl);
                 if (func_sym.decl.with_cstrs.len > 0) {
-                    try sema.check_instance_func_cstr(c, variant, &func_sym.decl, node);
+                    try sema_resolve.check_instance_func_cstr(c, variant, &func_sym.decl, node);
                 }
                 // An overload that is skipped by `#[cond]` does not hide the overloads that follow it.
                 if (try c.reserveFunc(modSym, sym.name(), func_sym.decl.decl)) |func| {
-                    try sema.ensure_resolved_func(c, func, true, node);
+                    try sema_resolve.ensure_resolved_func(c, func, true, node);
                 }
 
                 for (func_sym.rest().items) |*decl| {
-                    try sema.ensure_resolved_instance_func_decl(c, decl);
+                    try sema_resolve.ensure_resolved_instance_func_decl(c, decl);
                     if (decl.with_cstrs.len > 0) {
-                        try sema.check_instance_func_cstr(c, variant, decl, node);
+                        try sema_resolve.check_instance_func_cstr(c, variant, decl, node);
                     }
                     const func = (try c.reserveFunc(modSym, sym.name(), decl.decl)) orelse continue;
-                    try sema.ensure_resolved_func(c, func, true, node);
+                    try sema_resolve.ensure_resolved_func(c, func, true, node);
                 }
                 resolved = true;
                 const res = mod.getSym(name) orelse return null;
@@ -612,11 +614,11 @@ fn getResolvedSym2(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *ast.N
                 const member = sym.cast(.variant_member);
                 try check_sym_visible(c, sym, node);
                 if (member.decl.type() == .const_decl) {
-                    return sema.reserveConst(c, modSym, sym.name(), member.decl.cast(.const_decl));
+                    return sema_resolve.reserveConst(c, modSym, sym.name(), member.decl.cast(.const_decl));
                 } else if (member.decl.type() == .template) {
                     const template = member.decl.cast(.template);
                     if (template.child_decl.type() == .funcDecl) {
-                        return @ptrCast(try sema.reserveFuncTemplateSym(c, modSym, sym.name(), template));
+                        return @ptrCast(try sema_resolve.reserveFuncTemplateSym(c, modSym, sym.name(), template));
                     } else {
                         @panic("TODO");
                     }
@@ -637,8 +639,8 @@ pub fn getResolvedSymOrFail(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, nod
             return c.reportErrorFmt("Can not access `{}` from parent `{}`. Parent is not a module.", &.{v(name), v(mod_name)}, node);
         } else {
             const mod_name = try cy.sym.formatSymName(c.sema, &cy.tempBuf, modSym.resolved(), .{ .from = c });
-            const hint = try sema.suggestModuleSym(c, modSym, name, node);
-            return c.reportErrorFix("Can not find the symbol `{}` in `{}`.{}", &.{v(name), v(mod_name), v(hint)}, node, sema.suggestedFix(c, name, node));
+            const hint = try sema_hint.suggestModuleSym(c, modSym, name, node);
+            return c.reportErrorFix("Can not find the symbol `{}` in `{}`.{}", &.{v(name), v(mod_name), v(hint)}, node, sema_hint.suggestedFix(c, name, node));
         }
     };
 }
@@ -666,8 +668,8 @@ pub fn accessResolvedSymOrFail(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, 
     return (try c.accessResolvedSym(rec_t, name, node)) orelse {
         const type_name = try c.sema.allocTypeName(rec_t);
         defer c.alloc.free(type_name);
-        const hint = try cy.sema.suggestMember(c, rec_t, name, node);
-        return c.reportErrorFix("Can not find the symbol `{}` for `{}`.{}", &.{v(name), v(type_name), v(hint)}, node, cy.sema.suggestedFix(c, name, node));
+        const hint = try cy.sema_hint.suggestMember(c, rec_t, name, node);
+        return c.reportErrorFix("Can not find the symbol `{}` for `{}`.{}", &.{v(name), v(type_name), v(hint)}, node, cy.sema_hint.suggestedFix(c, name, node));
     };
 }
 

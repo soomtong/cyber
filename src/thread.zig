@@ -226,7 +226,7 @@ pub fn nextOwnedFiber(root: *vmc.Fiber, cur: *vmc.Fiber) ?*vmc.Fiber {
 }
 
 pub const CancelTarget = union(enum) {
-    /// The frame keeps running: it is a destruction routine (`sema.CancelPad.keep`).
+    /// The frame keeps running: it is a destruction routine (`sema_call.CancelPad.keep`).
     keep,
     pad: [*]cy.Inst,
 };

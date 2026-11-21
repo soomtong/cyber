@@ -10,6 +10,12 @@ const cFunc = cy.core.cFunc;
 const zErrConstEvalFunc = cy.core.zErrConstEvalFunc;
 const zErrBuiltinFunc = cy.core.zErrBuiltinFunc;
 const sema = cy.sema;
+const sema_access = cy.sema_access;
+const sema_expr = cy.sema_expr;
+const sema_init = cy.sema_init;
+const sema_local = cy.sema_local;
+const sema_move = cy.sema_move;
+const sema_resolve = cy.sema_resolve;
 const sema_type = cy.sema_type;
 const ir = cy.ir;
 const v = cy.fmt.v;
@@ -230,7 +236,7 @@ pub fn access(c: *cy.Chunk, ctx: *cy.BuiltinContext, res: *sema.ExprResult) !voi
     const name_res = try cte.evalCheck(c, ctx.args[1], c.sema.eval_str_t);
     const name = name_res.value.as_eval_str();
     defer c.heap.release(name_res.value);
-    res.* = try sema.semaMetaAccess(c, rec_n, name, ctx.node);
+    res.* = try sema_access.semaMetaAccess(c, rec_n, name, ctx.node);
 }
 
 pub fn access_result_error(c: *cy.Chunk, ctx: *cy.BuiltinContext, res: *sema.ExprResult) !void {
@@ -270,10 +276,10 @@ pub fn access_option_payload(c: *cy.Chunk, ctx: *cy.BuiltinContext, res: *sema.E
     const option = try c.sema_expr_cstr_template(ctx.args[0], c.sema.option_tmpl);
     const option_t = option.type.cast(.option);
     if (option_t.zero_union) {
-        res.* = try sema.semaBitcast(c, option, option_t.child_t, ctx.node);
+        res.* = try sema_expr.semaBitcast(c, option, option_t.child_t, ctx.node);
         res.addressable = option.addressable;
     } else {
-        res.* = try sema.semaField(c, option, ctx.args[0], 1, option_t.child_t, ctx.node);
+        res.* = try sema_access.semaField(c, option, ctx.args[0], 1, option_t.child_t, ctx.node);
     }
 }
 
@@ -346,8 +352,8 @@ pub fn init_choice(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult)
     const case = choice_t.cast(.choice).getCaseByTag(@intCast(tag));
 
     var payload = try c.semaExprCstr(ctx.args[2], case.payload_t);
-    payload = try sema.semaOwn(c, payload, ctx.args[2]);
-    out.* = try sema.semaInitChoice(c, case.type, case.idx, case.val, payload, ctx.node);
+    payload = try sema_move.semaOwn(c, payload, ctx.args[2]);
+    out.* = try sema_init.semaInitChoice(c, case.type, case.idx, case.val, payload, ctx.node);
 }
 
 pub fn choice_tag_eval(c: *cy.Chunk, ctx: *cy.BuiltinContext) !cy.TypeValue {
@@ -389,7 +395,7 @@ pub fn is_result_error(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprRes
 
 pub fn is_none(c: *cy.Chunk, ctx: *cy.BuiltinContext, out: *sema.ExprResult) !void {
     var res = try c.semaExpr(ctx.args[0], .{});
-    res = try sema.semaManage(c, res, ctx.node);
+    res = try sema_move.semaManage(c, res, ctx.node);
     out.* = try c.semaIsNone(res, ctx.node);
 }
 
@@ -638,14 +644,14 @@ pub fn PartialStructLayout_field_layout(c: *cy.Chunk, ctx: *cy.ConstEvalContext)
         return TypeValue.init(option_t, res);
     }
 
-    const field_layout = try sema.ensure_partial_struct_layout(c, actives);
+    const field_layout = try sema_access.ensure_partial_struct_layout(c, actives);
     const res = try c.heap.newSome(option_t.cast(.option), Value.initPtr(field_layout));
     return TypeValue.init(option_t, res);
 }
 
 pub fn is_inline_eval(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     _ = ctx;
-    const rctx = sema.getResolveContext(c);
+    const rctx = sema_resolve.getResolveContext(c);
     const res = cy.Value.initBool(rctx.is_inline_eval);
     return cy.TypeValue.init(c.sema.bool_t, res);
 }
@@ -799,7 +805,7 @@ pub fn type_of(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
 pub fn type_init(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     const name = ctx.args[0].asString();
     defer c.heap.release(ctx.args[0]);
-    const res = try sema.lookupStaticIdent(c, name, ctx.node) orelse {
+    const res = try sema_local.lookupStaticIdent(c, name, ctx.node) orelse {
         return c.reportErrorFmt("Could not find the symbol `{}`.", &.{v(name)}, ctx.node);
     };
     switch (res) {
@@ -810,7 +816,7 @@ pub fn type_init(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
         .static => |sym| {
             // if (sym.type == .const_) {
             //     const const_ = sym.cast(.const_);
-            //     try sema.resolveConst(c, const_);
+            //     try sema_resolve.resolveConst(c, const_);
             //     const dupe = try c.heap.copyValue2(const_.type, const_.value);
             //     return Expr.initValue2(const_.type, dupe);
             // }

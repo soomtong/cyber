@@ -1445,6 +1445,10 @@ fn (&&Slice[]) reserve_own(new_cap int):
         return
     self.* = self.clone_copy(new_cap)
 
+--| Makes this `Slice` hold its buffer alone: a copy replaces a buffer that another value shares.
+fn (&&Slice[]) own_buffer():
+    self.reserve_own(self._len)
+
 --| A copy of this view in a new buffer that only the result holds, with room for at least `new_cap`
 --| elements. The ops that return a new `Slice` (`appended`, `inserted`, `removed`, `+`) start from it,
 --| so the receiver never shares a buffer with their result.

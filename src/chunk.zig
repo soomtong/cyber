@@ -146,6 +146,13 @@ pub const Chunk = struct {
     /// The outer locals that a branch of an `if` statement moved, until the statement joins its branches
     /// (`sema.semaIfStmt`).
     branch_moves: std.ArrayList(u32) = .empty,
+    /// The moves made while an overload candidate is matched, so that a candidate that does not match leaves the
+    /// locals as they were (`sema.undoMoves`). Recorded only while `move_undo_depth` is not 0.
+    move_undo: std.ArrayList(cy.sema.MoveUndo) = .empty,
+    move_undo_depth: u32 = 0,
+    /// The call that `sema.reuseSliceBuffer` turned into an in-place method, for the error of a mismatch
+    /// (`sema_func.reportCallFuncMismatch2` names the method that the script wrote).
+    reuse_call: ?cy.sema.ReuseCall = null,
     seq_flushing: bool = false,
 
     /// The `s.start(func, {args})` call of a `scope` block that is being analyzed, and its argument literal.
@@ -380,6 +387,7 @@ pub const Chunk = struct {
         self.borrow_loans.deinit(self.alloc);
         self.moved_sites.deinit(self.alloc);
         self.branch_moves.deinit(self.alloc);
+        self.move_undo.deinit(self.alloc);
         self.scope_start_borrows.deinit(self.alloc);
         self.scope_borrows.deinit(self.alloc);
         self.scope_blocks.deinit(self.alloc);

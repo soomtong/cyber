@@ -8884,13 +8884,25 @@ fn reuseSliceBuffer(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, rec_res:
 
     const in_sym = (try c.accessResolvedSym(rec_res.type, in_place, node)) orelse return null;
     if (in_sym.type != .func) return null;
+    const own_sym = (try c.accessResolvedSym(rec_res.type, "own_buffer", node)) orelse return null;
+    if (own_sym.type != .func) return null;
     const moved = try semaMove(c, rec_res, rec);
     const tmp = try declareHiddenLocal(c, "_reuse", rec_res.type, moved, rec);
     const tmp_res = try semaLocal(c, tmp.id, rec);
     const saved_void = c.slice_void_call;
-    const call = try c.semaCallFuncSymRec(in_sym.cast(.func), rec, tmp_res, args, false, node);
-    c.slice_void_call = saved_void;
+    const saved_reuse = c.reuse_call;
+    c.reuse_call = .{ .node = node, .written = sym, .in_place = in_sym.cast(.func) };
+    const call = c.semaCallFuncSymRec(in_sym.cast(.func), rec, tmp_res, args, false, node) catch |err| {
+        c.reuse_call = saved_reuse;
+        return err;
+    };
+    c.reuse_call = saved_reuse;
     _ = try c.ir.pushStmt(.discard, node, .{ .expr = call.ir });
+    // An in-place method that does not grow the buffer can leave it shared (`remove` of the last element, `append`
+    // of an empty span). The result of a new-list method shares its buffer with no other value.
+    const own_call = try c.semaCallFuncSymRec(own_sym.cast(.func), rec, try semaLocal(c, tmp.id, rec), &.{}, false, node);
+    c.slice_void_call = saved_void;
+    _ = try c.ir.pushStmt(.discard, node, .{ .expr = own_call.ir });
     return try semaMove(c, try semaLocal(c, tmp.id, rec), rec);
 }
 
@@ -10523,6 +10535,14 @@ fn semaMove(c: *cy.Chunk, res_: ExprResult, child: *ast.Node) !ExprResult {
         if (local.has_inactive_struct_fields) {
             return c.reportError("Cannot move a partially moved value.", child);
         }
+        if (c.move_undo_depth > 0) {
+            try c.move_undo.append(c.alloc, .{
+                .id = c.temp_access_path.var_id,
+                .site = c.moved_sites.get(c.temp_access_path.var_id),
+                .has_site = true,
+                .branch = cross,
+            });
+        }
         local.type = .dead;
         try c.moved_sites.put(c.alloc, c.temp_access_path.var_id, child);
         if (cross) try c.branch_moves.append(c.alloc, c.temp_access_path.var_id);
@@ -10546,11 +10566,81 @@ fn semaMove(c: *cy.Chunk, res_: ExprResult, child: *ast.Node) !ExprResult {
         local.has_inactive_struct_fields = true;
     }
     const start = c.temp_access_path.struct_field_offset;
+    if (c.move_undo_depth > 0) {
+        try c.move_undo.append(c.alloc, .{
+            .id = c.temp_access_path.var_id,
+            .member = true,
+            .new_state = !state_res.found_existing,
+            .offset = @intCast(start),
+            .len = @intCast(c.temp_access_path.state_len),
+        });
+    }
     @memset(state_res.value_ptr.*[start..start + c.temp_access_path.state_len], false);
 
     res.owned = true;
     return res;
 }
+
+/// A move made while an overload candidate is matched (`Chunk.move_undo`).
+pub const MoveUndo = struct {
+    id: LocalId,
+    /// The site that `Chunk.moved_sites` had for the local before the move, when `has_site`.
+    site: ?*ast.Node = null,
+    has_site: bool = false,
+    /// The move was added to `Chunk.branch_moves`.
+    branch: bool = false,
+    /// The move of a member: the range of the member state, and whether the move created the state of the local.
+    member: bool = false,
+    new_state: bool = false,
+    offset: u32 = 0,
+    len: u32 = 0,
+};
+
+/// Records that the local `id` is about to be made dead by a move that `semaMove` does not make.
+pub fn noteMove(c: *cy.Chunk, id: LocalId) !void {
+    if (c.move_undo_depth == 0) return;
+    if (c.varStack.items[id].type != .local) return;
+    try c.move_undo.append(c.alloc, .{ .id = id });
+}
+
+/// Takes back the moves recorded since `start`: an overload candidate did not match, and the next one checks the
+/// arguments again. The locals from `var_start` on are discarded by the caller.
+pub fn undoMoves(c: *cy.Chunk, start: usize, var_start: usize) void {
+    var i = c.move_undo.items.len;
+    while (i > start) {
+        i -= 1;
+        const undo = c.move_undo.items[i];
+        if (undo.branch) _ = c.branch_moves.pop();
+        if (undo.id >= var_start) continue;
+        const local = &c.varStack.items[undo.id];
+        if (undo.member) {
+            if (c.proc().var_active_struct_fields.get(undo.id)) |fields| {
+                @memset(fields[undo.offset..undo.offset + undo.len], true);
+            }
+            if (undo.new_state) {
+                _ = c.proc().var_active_struct_fields.remove(undo.id);
+                local.has_inactive_struct_fields = false;
+            }
+            continue;
+        }
+        local.type = .local;
+        if (undo.has_site) {
+            if (undo.site) |site| {
+                c.moved_sites.putAssumeCapacity(undo.id, site);
+            } else {
+                _ = c.moved_sites.remove(undo.id);
+            }
+        }
+    }
+    c.move_undo.items.len = start;
+}
+
+/// A new-list method call of `Slice` that is checked as its in-place method (`reuseSliceBuffer`).
+pub const ReuseCall = struct {
+    node: *ast.Node,
+    written: *cy.sym.FuncSym,
+    in_place: *cy.sym.FuncSym,
+};
 
 const EmbeddedResult = struct {
     field_idx: usize,

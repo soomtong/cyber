@@ -83,6 +83,8 @@ fn test_syntax(run: *Runner) void {
     run.case("syntax/range_no_start_error.cy");
     run.case("syntax/range_decreasing_value_error.cy");
     run.case("syntax/slice_decreasing_range_error.cy");
+    run.case("syntax/python_slice_error.cy");
+    run.case("syntax/for_placeholder_capture_error.cy");
     run.case("syntax/init_colon_error.cy");
     run.case("syntax/init_infer_empty_error.cy");
     run.case("syntax/init_infer_pairs_error.cy");
@@ -242,10 +244,7 @@ fn test_memory(run: *Runner) void {
     run.case("memory/move_branch_use_after_error.cy");
     run.case("memory/move_loop_error.cy");
     run.case("memory/slice_reuse_last_use.cy");
-    run.case("syntax/python_slice_error.cy");
-    run.case("syntax/for_placeholder_capture_error.cy");
-    run.case("core/slice_pop_dropped_error.cy");
-    run.case("modules/path_basename_error.cy");
+    run.case("memory/slice_reuse_arg_error.cy");
     run.case("memory/array_append_move.cy");
     run.case("memory/array_nocopy_elem.cy");
     run.case("memory/array_nocopy_index_copy_error.cy");
@@ -446,6 +445,7 @@ fn test_modules(run: *Runner) void {
     run.case("modules/core.cy");
 if (!aot) {
     run.case("modules/cy.cy");
+    run.case("modules/path_basename_error.cy");
 }
 
     run.case("modules/math.cy");
@@ -660,6 +660,7 @@ fn test_core(run: *Runner) void {
     run.case("syntax/func_return_tuple_error.cy");
     run.case("syntax/return_multiple_error.cy");
     run.case("core/slice_bound_option_error.cy");
+    run.case("core/slice_pop_dropped_error.cy");
     run.case("core/index_option_error.cy");
     run.case("core/set_index_value_error.cy");
     run.case("core/set_index_value_option_error.cy");

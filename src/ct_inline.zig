@@ -284,6 +284,11 @@ pub fn switchCaseInner(c: *cy.Chunk, case_stmt: *ast.CaseStmt, _: ?*anyopaque, _
 }
 
 fn forRangeInner(c: *cy.Chunk, for_range: *ast.ForRangeStmt, _: ?*anyopaque) anyerror!void {
+    // The body is checked once for each iteration in the same block, so no statement of it is the last use of a
+    // local of the block (`sema.reuseSliceBuffer`).
+    const saved_ctx = c.stmt_ctx;
+    c.stmt_ctx = .{};
+    defer c.stmt_ctx = saved_ctx;
     try evalStmts(c, for_range.stmts);
 }
 

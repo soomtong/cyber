@@ -63,3 +63,11 @@
   수신자(`s.xs.appended(v)`).
 - 확인: `xs.removed(0)` 결과의 `ptr`이 `xs`의 것과 같다(`memory/slice_reuse_last_use.cy`). 성능 수치는 재지 않았다(복사 하나가
   빠진다).
+- 코드 리뷰 수정(2026-11-21):
+  - 제자리 메서드가 복사하지 않는 경우(마지막 원소의 `remove`는 `size_down`만, 빈 span의 `append`는 바로 반환)에 결과가 버퍼를
+    공유했다. 제자리 호출 뒤에 `_reuse.own_buffer()`(`reserve_own(len)`)를 부른다. "결과는 같다"는 전제는 이 호출이 지킨다.
+  - overload 후보 매칭 중의 이동은 `Chunk.move_undo`에 적고, 후보가 맞지 않으면 `sema.undoMoves`가 되돌린다
+    (`sema_func.matchRtOverload`). `semaMove`의 통째 · 멤버 이동과 sink 매개변수(`sema.noteMove`)를 적는다.
+  - `#for` 본문은 같은 블록에 반복해 펼쳐지므로 `ct_inline.forRangeInner`가 `stmt_ctx`를 비워 재사용을 끈다.
+  - 불일치 오류는 `Chunk.reuse_call`로 적은 메서드의 같은 순번 overload를 보인다(`reportCallFuncMismatch2`). 새 목록 메서드와
+    제자리 메서드의 overload 선언 순서가 같아야 한다. 런타임 stack trace의 `Slice.remove`는 그대로 둔다.

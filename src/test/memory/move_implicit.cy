@@ -14,6 +14,12 @@ type Box:
 fn take(r R) -> int:
     return r.id
 
+fn sum(a R, b int) -> int:
+    return a.id + b
+
+fn sum(a R, b str) -> int:
+    return a.id + b.len()
+
 fn run():
     -- An argument.
     a := R{id=1}
@@ -38,6 +44,13 @@ fn run():
     n := 5
     m := n
     test.eq(10, n + m)
+
+    -- An overloaded function: the first candidate does not match, and the second one moves the local or the member.
+    e := R{id=6}
+    test.eq(8, sum(e, 'ab'))
+    box2 := Box{r=R{id=7}, n=8}
+    test.eq(10, sum(box2.r, 'abc'))
+    test.eq(8, box2.n)
 
 run()
 

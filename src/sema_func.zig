@@ -778,6 +778,12 @@ fn matchRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end
     const start_stmt = c.ir.curBlock().last;
     const var_start = c.varStack.items.len;
     const saved_take = c.global_take;
+    const undo_start = c.move_undo.items.len;
+    c.move_undo_depth += 1;
+    defer {
+        c.move_undo_depth -= 1;
+        if (c.move_undo_depth == 0) c.move_undo.clearRetainingCapacity();
+    }
 
     if (try matchOverloadedFunc(c, func, pre_args, end_args, loc, exact, match_err, node)) |res| {
         return .{
@@ -790,6 +796,9 @@ fn matchRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end
             }},
         };
     }
+
+    // A local that an argument moved is alive again for the next candidate.
+    sema.undoMoves(c, undo_start, var_start);
 
     // Discard any locals created during matching.
     if (var_start < c.varStack.items.len) {
@@ -999,6 +1008,7 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
                 if (target.sink) {
                     if (res.resType == .value_local) {
                         // move owner.
+                        try sema.noteMove(c, res.data.value_local);
                         c.varStack.items[res.data.value_local].type = .dead;
                     }
                     res.owned = true;
@@ -1021,6 +1031,7 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
                     if (arg.data.receiver.type.id() == target.get_type().id()) {
                         if (arg.data.receiver.resType == .value_local) {
                             // move owner.
+                            try sema.noteMove(c, arg.data.receiver.data.value_local);
                             c.varStack.items[arg.data.receiver.data.value_local].type = .dead;
                         }
                         var res = arg.data.receiver;
@@ -1453,7 +1464,23 @@ fn int_literal_fits_exact(node: *ast.Node, param_t: *cy.Type) bool {
     }
 }
 
-pub fn reportCallFuncMismatch2(c: *cy.Chunk, pre_args: []const Argument, end_args: []const *ast.Node, func: *cy.Func, match_err: FuncMatchError, node: *ast.Node) anyerror {
+pub fn reportCallFuncMismatch2(c: *cy.Chunk, pre_args: []const Argument, end_args: []const *ast.Node, func_: *cy.Func, match_err: FuncMatchError, node: *ast.Node) anyerror {
+    var func = func_;
+    if (c.reuse_call) |reuse| {
+        if (reuse.node == node) {
+            // The script wrote the new-list method. Its overloads are declared in the order of the in-place ones.
+            var in_place: ?*cy.Func = reuse.in_place.first;
+            var written: ?*cy.Func = reuse.written.first;
+            while (in_place != null and written != null) {
+                if (in_place.? == func) {
+                    func = written.?;
+                    break;
+                }
+                in_place = in_place.?.next;
+                written = written.?.next;
+            }
+        }
+    }
     return reportCallFuncMismatch3(c, pre_args, end_args, func.name(), func.sig, func, match_err, node);
 }
 

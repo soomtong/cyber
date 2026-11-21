@@ -1149,7 +1149,8 @@ statement, `_ = arr.removed(0)`), because it changes nothing.
 When the receiver is a variable and this is its last use (the only use of the name in the statement, and no later
 statement of the block names it), `appended`, `inserted`, `removed` and `+` take its buffer instead of copying it, like
 `move` followed by the in-place method. The result is the same; the variable can not be used after that anyway.
-`ys := xs.appended(4)` as the last use of `xs` then costs no copy.
+`ys := xs.appended(4)` as the last use of `xs` then costs no copy. When another value shares the buffer, the result gets its own copy
+as before. The body of `#for` does not take the buffer.
 
 Copies of a slice share its buffer until one of them resizes: an in-place resize of a slice whose buffer another value
 also holds (`ys := xs`, a sub-slice) first copies the buffer, so the other value keeps its elements and its length. Writing

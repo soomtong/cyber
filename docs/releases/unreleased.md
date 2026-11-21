@@ -65,3 +65,23 @@ the same block.' 오류였다.
 - 모듈에 없는 이름에 가까운 이름을 알려 준다('Can not find the symbol `bas` in `path`. Did you mean `base`?'). 다른 언어의 이름
   `basename` · `dirname` · `extname` · `isabs`는 `base` · `dir` · `ext` · `is_absolute`로 맞춘다. LSP quick fix도 붙는다.
 - 에이전트 가이드: `int(z)`와 `int('Z')`가 다른 값인 예와 `int(z[0])`, `Array` 이동 줄, 오류 표의 두 줄을 고쳤다.
+
+## 0.4.16 뒤 변경의 코드 리뷰에서 나온 수정
+
+릴리스 전 `/code-review`(0.4.16..HEAD)가 찾은 결함이다. 모두 위 절들의 기능(암시적 이동 · 갈래 안 이동 · 버퍼 재사용)에서 나왔고
+0.4.16에는 없다.
+
+- overload 후보가 맞지 않으면 그 시도에서 이동한 지역이 되살아난다. 전에는 첫 후보를 맞춰 보다 이동한 지역이 죽은 채 남아
+  `out += xs.appended(2)`, `out.append(xs.appended(2))`, `ys := out + xs.appended(2)`, `str(ys.appended('b').len())`가
+  '`xs` was moved at ...'로 거절됐고, `fn f(a R, b int)` · `fn f(a R, b str)`에 `f(r, s)`는 둘째 후보에 닿지 못했다. 멤버 이동
+  (`f(box.r, s)`)과 sink 매개변수도 같이 되돌린다.
+- 버퍼를 재사용한 새 목록은 다른 값과 버퍼를 나눠 갖지 않는다. 전에는 제자리 메서드가 복사하지 않는 두 경우(마지막 원소의
+  `removed`, 빈 목록을 더하는 `+` · `appended`)에 결과가 버퍼를 공유했다: `b := a` 뒤 `c := a.removed(2)`, `c[0] = 9`가 `b[0]`을
+  바꿨고, 매개변수로 받은 목록은 호출자의 목록을, sub-slice는 원래 목록을 바꿨다. 이제 제자리 메서드 뒤에 `own_buffer()`
+  (버퍼를 혼자 갖고 있지 않으면 복사)를 부른다. 혼자 갖고 있을 때는 전처럼 복사가 없다.
+- `#for` 본문에서는 버퍼를 재사용하지 않는다. 본문이 같은 블록에 반복해 펼쳐지므로 첫 반복이 지역을 옮기면 둘째 반복이
+  '`zs` was moved at ...'로 실패했다.
+- 버퍼를 재사용한 호출의 인자 오류가 적은 메서드를 말한다: `xs.inserted(1)`은 `fn insert(&>[]int, int, int) -> void`가 아니라
+  `fn inserted(&[]int, int, int) -> []int`를 보인다. 범위 밖 인덱스의 panic 문구는 같고, stack trace에는 제자리 메서드
+  (`Slice.remove`)가 나온다.
+- behavior 테스트 넷(`syntax/python_slice_error.cy` 등)이 `test_memory`에 등록돼 있던 것을 제 분류로 옮겼다.

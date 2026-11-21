@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.16-dev 1011-5e5765f</div>
+    <div class="sub-title">v0.4.16-dev 1019-7497c0e</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1990,6 +1990,10 @@ print(more.len())  --> 4
 <p>Assigning the result of an in-place method (<code>arr = arr.append(1)</code>, <code>rest := arr.remove(0)</code>) is a compile error that
 names the method to use. So is dropping the result of a method that returns a new slice (<code>arr.appended(1)</code> as a
 statement, <code>_ = arr.removed(0)</code>), because it changes nothing.</p>
+<p>When the receiver is a variable and this is its last use (the only use of the name in the statement, and no later
+statement of the block names it), <code>appended</code>, <code>inserted</code>, <code>removed</code> and <code>+</code> take its buffer instead of copying it, like
+<code>move</code> followed by the in-place method. The result is the same; the variable can not be used after that anyway.
+<code>ys := xs.appended(4)</code> as the last use of <code>xs</code> then costs no copy.</p>
 <p>Copies of a slice share its buffer until one of them resizes: an in-place resize of a slice whose buffer another value
 also holds (<code>ys := xs</code>, a sub-slice) first copies the buffer, so the other value keeps its elements and its length. Writing
 an element (<code>xs[0] = v</code>, <code>sort</code>, <code>reverse</code>) does not copy: every value that shares the buffer sees it.</p>
@@ -3288,7 +3292,7 @@ fn (&MyArray) @copy() -> Self:
     c.memcpy(new_buf.ptr, self.ptr, self.len)
     return {ptr=new_buf.ptr, len=self.len}
 </code></pre>
-<p>A type that implements the <code>NoCopy</code> trait prevents implicit copying:</p>
+<p>A type that implements the <code>NoCopy</code> trait prevents implicit copying. Where a copy would be made from a variable or a member of one, the value is <a href="#moving" title="">moved</a> instead, and the variable can not be used after that:</p>
 <pre><code class="language-cy">type Foo:
     with NoCopy
 
@@ -3296,13 +3300,14 @@ fn (&MyArray) @copy() -> Self:
 
 f := Foo{a=123}
 
-g := f
---> error: `Foo` is not copyable.
+g := f            -- Moves `f` into `g`.
+print(f.a)
+--> error: `f` was moved at 8:6. Borrow it with `&f` or clone it to use it here.
 </code></pre>
 <p>An <code>Array</code> can hold elements that are not copyable. The elements are moved into the array, read by borrow and deinitialized once:</p>
 <pre><code class="language-cy">a := Array[Foo]{Foo{a=1}, Foo{a=2}}   -- A literal moves its elements.
 f := Foo{a=3}
-a << move f                           -- A variable is moved explicitly.
+a << f                                -- A variable is moved.
 a[0] = Foo{a=4}                       -- The old element is deinitialized.
 
 print(a[1].a)       --> 2
@@ -3341,7 +3346,7 @@ fn (&Foo) @clone() -> Self:
 b := move a
 
 print(a)
---> error: `a` is no longer alive in this scope.
+--> error: `a` was moved at 2:11. Borrow it with `&a` or clone it to use it here.
 </code></pre>
 <p><code>move</code> is an explicit operation on any value type. It is not restricted to types that implement <code>NoCopy</code>.
 Moving a copyable value such as an <code>int</code> is allowed and still ends the source variable, so whether a type is copyable and whether it can be moved are independent:
@@ -3349,12 +3354,22 @@ a copyable type can be copied (<code>b := a</code>) or moved (<code>b := move a<
 This differs from Rust, where a <code>Copy</code> type is always copied and has no move. Moving a copyable value is useful when the type has a custom <code>@deinit</code> and a copy would deinitialize the resource twice,
 and in generic code that must handle copyable and <code>NoCopy</code> element types with the same statement (<code>Array.append</code> stores its argument with <code>move val</code>).
 Reference types <code>^T</code> are shared and reference counted, so a reference parameter can not be moved (<code>Cannot move a reference parameter.</code>).</p>
-<p>Some types such as <code>Array</code> can not be passed around by default without moving (or cloning) the value:</p>
+<p>Some types such as <code>Array</code> can not be passed around by default without moving (or cloning) the value. A <code>NoCopy</code> value that is read from a variable or a member of one where a copy would be made (an argument, an initializer, an assignment, a field or an element of a literal) is moved without <code>move</code>:</p>
 <pre><code class="language-cy">a := Array[int]{1, 2, 3}
 
-print(compute_sum(move a))
+print(compute_sum(a))   -- Same as `compute_sum(move a)`.
+print(a.len())
+--> error: `a` was moved at 3:19. Borrow it with `&a` or clone it to use it here.
 </code></pre>
-<p>In this case, the <code>Array</code> value is moved into the <code>compute_sum</code> function, so the <code>Array</code> is deinitialized by the callee function and not the callsite.</p>
+<p>In this case, the <code>Array</code> value is moved into the <code>compute_sum</code> function, so the <code>Array</code> is deinitialized by the callee function and not the callsite. A copyable value is still copied unless <code>move</code> is written.</p>
+<p>A variable is moved in the block that declares it, or in a branch of an <code>if</code> statement in that block. After the <code>if</code> statement the variable is dead. The branches that do not move it, and the implicit <code>else</code> when there is none, deinitialize it at their end, so <code>@deinit</code> can run before the end of the block:</p>
+<pre><code class="language-cy">f := open_log()!
+if verbose:
+    archive(f)          -- Moves `f`.
+-- Without `verbose`, `f` is deinitialized here, at the end of the implicit `else`.
+print('done')
+</code></pre>
+<p>A loop body can not move a variable that is declared outside the loop, because the next iteration reads it: 'Cannot move <code>f</code> here: it is declared in an outer block. A branch of an <code>if</code> statement can move it, a loop body can not (the next iteration reads it). Borrow it with <code>&f</code>.' A branch can move only a whole variable of an outer block, not a member of it.</p>
 <p>Values can be partially moved if a subset of its members were moved:</p>
 <pre><code class="language-cy">type Foo:
     a int
@@ -3452,7 +3467,7 @@ if true:
     ref = &b
     --> error: `ref` can not outlive `b`.
 </code></pre>
-<p>A borrow stored in a local variable is alive until the end of the block that declares the variable. A borrow that is only passed as an argument or used inside an expression ends with its statement. The compiler does not shorten a borrow to its last use.</p>
+<p>A borrow stored in a local variable is alive until the last statement of its block that names the variable. When that statement is a loop or an <code>if</code>, the borrow lives through all of it. A borrow that is only passed as an argument or used inside an expression ends with its statement. A local whose type has a destructor (a struct that holds a borrow and a managed field, a lambda that captures a borrow) keeps its borrow until the end of the block, where the destructor runs. A statement names the variable when the name is in its text, also in a nested block, a lambda, a string or a comment, but not after a <code>.</code> (<code>h.r</code> is a member).</p>
 <p>A local that holds a borrow can be borrowed again for one statement. The new borrow can not be kept in another local when it conflicts with the one the first local holds:</p>
 <pre><code class="language-cy">type Foo:
     xs []int
@@ -3492,17 +3507,17 @@ fn invalidate(arr &&Array[int]):
 </code></pre>
 <p>Note that invoking the append <code><<</code> and <code>clear</code> methods automatically obtain an exclusive borrow for <code>self</code> without an explicit <code>&&</code> operator.</p>
 <p>Resize operations such as <code><<</code> and <code>clear</code> require an exclusive borrow because they can potentially reallocate a dynamic buffer, thereby invalidating other borrows.
-If another borrow is alive when an exclusive borrow is obtained, it is a compile error. A borrow stored in a local is alive until its block ends, so put it in an inner block when the owner is resized afterwards:</p>
+If another borrow is alive when an exclusive borrow is obtained, it is a compile error. A borrow stored in a local ends after the last statement that names it, so the owner can be resized after that:</p>
 <pre><code class="language-cy">a := Array[int]{1, 2, 3}
-if true:
-    elem := &a[2]
-    elem.* = 300
-a << 4
--- Ok. `elem` went out of scope with its block.
-
 elem := &a[2]
+elem.* = 300
+a << 4
+-- Ok. `elem` is not used after `elem.* = 300`.
+
+elem2 := &a[2]
 a << 5
 --> error: Expected exclusive access. There is another active borrow to `a`.
+print(elem2.*)
 
 append_to(&a[2], &&a)
 --> error: Cannot pass an exclusive borrow of `a` with another argument that borrows `a`.
@@ -3517,6 +3532,7 @@ r := &a
 --> error: Cannot borrow `a`. There is an active exclusive borrow to it.
 print(a.len())
 --> error: Cannot borrow `a`. There is an active exclusive borrow to it.
+ex << 4
 </code></pre>
 <p>An exclusive borrow that a local, a parameter or a field already holds is checked again where it is passed on as <code>&&T</code>. It can not be passed on while another local borrows through it. A loop borrows what it iterates until it ends:</p>
 <pre><code class="language-cy">type Foo:
@@ -3535,6 +3551,7 @@ fn first(r &&Foo):
     s := &r.xs[0]
     r.grow()
     --> error: Expected exclusive access. There is another active borrow to `r`.
+    print(s.*)
 </code></pre>
 <p>Copies of one exclusive borrow (<code>r2 := r</code>) point to the same value and do not conflict with each other. A borrow that is assigned to <code>_</code> ends with its statement (<code>_ = r.add(1)</code>).</p>
 <p>A borrow into one field is no conflict with an exclusive use of another field: inside <code>for self.xs |x|:</code> the body can call <code>self.names.append(x)</code>.</p>
@@ -3543,6 +3560,7 @@ fn first(r &&Foo):
 s := &g.xs[0]
 g.xs = {7}
 --> error: Expected exclusive access. There is another active borrow to `g`.
+print(s.*)
 
 x := 1
 c := &x
@@ -3564,6 +3582,7 @@ f := Foo{xs={1, 2, 3}}
 h := Holder{r=&&f}
 print(f.xs.len())
 --> error: Cannot borrow `f`. There is an active exclusive borrow to it.
+h.r.grow()
 </code></pre>
 <p>A shared borrow gives no exclusive access to what is behind it. An exclusive borrow that is read through a shared borrow (<code>b.*</code> of <code>b := &r</code>, <code>self.r</code> in a <code>&Holder</code> method) can not be passed on as <code>&&T</code>: 'Cannot use an exclusive borrow that is read through a shared borrow.'</p>
 <p>A shared borrow does not replace or change a managed value behind it either. Another shared borrow of the same owner can point into that value:</p>
@@ -3582,7 +3601,7 @@ fn (&Foo) reset():
 fn (&Foo) count():
     self.n += 1       -- A value that is not managed is written in place.
 </code></pre>
-<p>Declare the receiver or the parameter as <code>&&T</code> (<code>fn (&&Foo) grow()</code>, <code>fn fill(out &&[]int)</code>). The call then needs exclusive access: <code>s := &f.xs[0]</code> followed by <code>f.grow()</code> is 'Expected exclusive access. There is another active borrow to <code>f</code>.' The rule also holds for an element (<code>self.items[i].name = 'x'</code>) and for a dereference (<code>p.* = {}</code> of <code>p &[]int</code>). It does not hold behind a reference or a pointer (<code>self.node.xs.append(1)</code> of <code>node ^Node</code>), and not in <code>@deinit</code>, which has the only access to the value that it ends.</p>
+<p>Declare the receiver or the parameter as <code>&&T</code> (<code>fn (&&Foo) grow()</code>, <code>fn fill(out &&[]int)</code>). The call then needs exclusive access: <code>s := &f.xs[0]</code> followed by <code>f.grow()</code> and a later use of <code>s</code> is 'Expected exclusive access. There is another active borrow to <code>f</code>.' The rule also holds for an element (<code>self.items[i].name = 'x'</code>) and for a dereference (<code>p.* = {}</code> of <code>p &[]int</code>). It does not hold behind a reference or a pointer (<code>self.node.xs.append(1)</code> of <code>node ^Node</code>), and not in <code>@deinit</code>, which has the only access to the value that it ends.</p>
 <p>A borrow can not be an element of a type that keeps its elements in a buffer (<code>[]&int</code>, <code>Array[Holder]</code>, a <code>Map</code> of borrows), where its lifetime is not checked. Use an owned type, <code>^T</code> or a vector <code>[N]T</code>.</p>
 <p>A managed value can not be moved while a local borrows from it:</p>
 <pre><code class="language-cy">h := move g

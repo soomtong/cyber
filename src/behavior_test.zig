@@ -234,6 +234,9 @@ fn test_memory(run: *Runner) void {
     run.case("memory/lift_borrow_container_error.cy");
     run.case("memory/lift_borrow_option_error.cy");
     run.case("memory/borrow_scope_release.cy");
+    run.case("memory/borrow_last_use.cy");
+    run.case("memory/borrow_last_use_loop_error.cy");
+    run.case("memory/borrow_last_use_copy_error.cy");
     run.case("memory/array_append_move.cy");
     run.case("memory/array_nocopy_elem.cy");
     run.case("memory/array_nocopy_index_copy_error.cy");

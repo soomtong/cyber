@@ -154,6 +154,9 @@ pub const Local = struct {
     borrow_inline: bool = false,
     /// The name of a `scope |s|:` block. Only `s.start` on this name takes borrows (`semaScopeStart`).
     scope_block: bool = false,
+    /// The borrow of this local ended after the last statement of its block that names it (`endBorrowsAfter`).
+    /// The local is not used again.
+    borrow_ended: bool = false,
 
     stack_idx: u32,
 
@@ -358,17 +361,107 @@ pub fn semaStmts(c: *cy.Chunk, stmts: []const *ast.Node) anyerror!void {
         // The first statements checked in a pass are those of the body.
         if (comp.recover_stmt_depth == null) comp.recover_stmt_depth = c.resolve_stack.items.len;
         if (comp.recover_skip.count() > 0) {
-            for (stmts) |stmt| {
+            var ends: BorrowEnds = .empty;
+            defer ends.deinit(c.alloc);
+            for (stmts, 0..) |stmt, i| {
+                const var_start = c.varStack.items.len;
                 try semaStmt(c, stmt);
                 // A skipped declaration ends the block: the rest would report its names as undeclared.
                 if (comp.recover_skip.contains(stmt) and declaresLocal(stmt)) return;
+                try endBorrowsAfter(c, &ends, stmts, i, var_start);
             }
             return;
         }
     }
-    for (stmts) |stmt| {
+    var ends: BorrowEnds = .empty;
+    defer ends.deinit(c.alloc);
+    for (stmts, 0..) |stmt, i| {
+        const var_start = c.varStack.items.len;
         try semaStmt(c, stmt);
+        try endBorrowsAfter(c, &ends, stmts, i, var_start);
     }
+}
+
+const BorrowEnd = struct {
+    local: LocalId,
+    /// The index of the last statement of the block that names the local.
+    last: usize,
+};
+
+const BorrowEnds = std.ArrayListUnmanaged(BorrowEnd);
+
+/// Non-lexical borrow lifetimes. A local of the block that can hold a borrow stops counting as a borrow of its owner
+/// after the last statement of the block that names it, not at the end of the block. Only a local without a destructor
+/// ends early: a destructor runs at the end of the block and could read the borrow. A statement names the local when
+/// its source text has the name as a word, so a mention in a nested block, a lambda or a string interpolation counts.
+/// See `docs/decisions/project_borrow_model.md` "비어휘적 수명".
+fn endBorrowsAfter(c: *cy.Chunk, ends: *BorrowEnds, stmts: []const *ast.Node, i: usize, var_start: usize) !void {
+    // A local of the REPL's top level is read by later inputs.
+    if (c.vm.config.persist_main and c.proc().func == null and c.semaBlocks.items.len == 1) return;
+    // The locals that the statement declared in this block.
+    var id = var_start;
+    while (id < c.varStack.items.len) : (id += 1) {
+        const local = c.varStack.items[id];
+        if (local.type != .local or local.inner.local.hidden) continue;
+        if (!local.decl_t.info.borrow_only or local.decl_t.isManaged()) continue;
+        const last = lastNamingStmt(c, stmts, i, local.name()) orelse continue;
+        try ends.append(c.alloc, .{ .local = @intCast(id), .last = last });
+    }
+    var j: usize = 0;
+    while (j < ends.items.len) {
+        const end = ends.items[j];
+        if (end.last != i) {
+            j += 1;
+            continue;
+        }
+        const local = &c.varStack.items[end.local];
+        unbindBorrowLocal(c, local);
+        local.borrow_ended = true;
+        _ = ends.swapRemove(j);
+    }
+}
+
+/// The index of the last statement from `i` on whose source text names `name`, or null when it can not be told.
+fn lastNamingStmt(c: *cy.Chunk, stmts: []const *ast.Node, i: usize, name: []const u8) ?usize {
+    const src_id = stmts[i].src();
+    const src = c.compiler.chunks.items[src_id].src;
+    var last = i;
+    var k = i + 1;
+    while (k < stmts.len) : (k += 1) {
+        const stmt = stmts[k];
+        if (stmt.src() != src_id) return null;
+        const start = stmt.pos();
+        var end: usize = undefined;
+        if (k + 1 < stmts.len) {
+            if (stmts[k + 1].src() != src_id) return null;
+            end = stmts[k + 1].pos();
+        } else {
+            end = stmt.end();
+            if (end == cy.NullId) return null;
+            // To the end of the line, for a node whose end is short of its text.
+            while (end < src.len and src[end] != '\n') end += 1;
+        }
+        if (start == cy.NullId or start > end or end > src.len) return null;
+        if (namesWord(src[start..end], name)) last = k;
+    }
+    return last;
+}
+
+/// Whether `text` has `name` as a word. A word after one `.` is a member (`h.r`), not a local. One after `..` is.
+fn namesWord(text: []const u8, name: []const u8) bool {
+    var pos: usize = 0;
+    while (std.mem.indexOfPos(u8, text, pos, name)) |idx| {
+        pos = idx + 1;
+        const after = idx + name.len;
+        if (after < text.len and isIdentChar(text[after])) continue;
+        if (idx > 0) {
+            const prev = text[idx - 1];
+            if (isIdentChar(prev)) continue;
+            if (prev == '.' and !(idx > 1 and text[idx - 2] == '.')) continue;
+        }
+        return true;
+    }
+    return false;
 }
 
 /// Whether a statement declares a name for the statements after it in its block.
@@ -7270,6 +7363,11 @@ pub fn lookupIdent(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupId
     return res;
 }
 
+/// `endBorrowsAfter` found no statement after this one that names the local. Reaching it is a compiler bug.
+fn reportBorrowEnded(c: *cy.Chunk, name: []const u8, node: *ast.Node) anyerror {
+    return c.reportErrorFmt("Internal error: the borrow of `{}` was ended before this use.", &.{v(name)}, node);
+}
+
 fn lookupIdent2(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdentResult {
     if (self.semaProcs.items.len == 0) {
         return (try lookupStaticIdent2(self, name, node)) orelse {
@@ -7282,6 +7380,7 @@ fn lookupIdent2(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdent
         switch (varInfo.type) {
             .local => {
                 const data = varInfo.data.local;
+                if (self.varStack.items[data.varId].borrow_ended) return reportBorrowEnded(self, name, node);
                 return LookupIdentResult{
                     .local = data.varId,
                 };
@@ -7382,6 +7481,7 @@ fn lookupParentLocal(c: *cy.Chunk, name: []const u8, node: *ast.Node) !?LookupPa
                 .local => {
                     const data = varInfo.data.local;
                     const svar = c.varStack.items[data.varId];
+                    if (svar.borrow_ended) return reportBorrowEnded(c, name, node);
                     if (svar.isCapturable()) {
                         return .{
                             .varId = data.varId,

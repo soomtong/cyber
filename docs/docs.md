@@ -2883,7 +2883,7 @@ if true:
     --> error: `ref` can not outlive `b`.
 ```
 
-A borrow stored in a local variable is alive until the end of the block that declares the variable. A borrow that is only passed as an argument or used inside an expression ends with its statement. The compiler does not shorten a borrow to its last use.
+A borrow stored in a local variable is alive until the last statement of its block that names the variable. When that statement is a loop or an `if`, the borrow lives through all of it. A borrow that is only passed as an argument or used inside an expression ends with its statement. A local whose type has a destructor (a struct that holds a borrow and a managed field, a lambda that captures a borrow) keeps its borrow until the end of the block, where the destructor runs. A statement names the variable when the name is in its text, also in a nested block, a lambda, a string or a comment, but not after a `.` (`h.r` is a member).
 
 A local that holds a borrow can be borrowed again for one statement. The new borrow can not be kept in another local when it conflicts with the one the first local holds:
 ```cy
@@ -2931,18 +2931,18 @@ fn invalidate(arr &&Array[int]):
 Note that invoking the append `<<` and `clear` methods automatically obtain an exclusive borrow for `self` without an explicit `&&` operator.
 
 Resize operations such as `<<` and `clear` require an exclusive borrow because they can potentially reallocate a dynamic buffer, thereby invalidating other borrows.
-If another borrow is alive when an exclusive borrow is obtained, it is a compile error. A borrow stored in a local is alive until its block ends, so put it in an inner block when the owner is resized afterwards:
+If another borrow is alive when an exclusive borrow is obtained, it is a compile error. A borrow stored in a local ends after the last statement that names it, so the owner can be resized after that:
 ```cy
 a := Array[int]{1, 2, 3}
-if true:
-    elem := &a[2]
-    elem.* = 300
-a << 4
--- Ok. `elem` went out of scope with its block.
-
 elem := &a[2]
+elem.* = 300
+a << 4
+-- Ok. `elem` is not used after `elem.* = 300`.
+
+elem2 := &a[2]
 a << 5
 --> error: Expected exclusive access. There is another active borrow to `a`.
+print(elem2.*)
 
 append_to(&a[2], &&a)
 --> error: Cannot pass an exclusive borrow of `a` with another argument that borrows `a`.
@@ -2959,6 +2959,7 @@ r := &a
 --> error: Cannot borrow `a`. There is an active exclusive borrow to it.
 print(a.len())
 --> error: Cannot borrow `a`. There is an active exclusive borrow to it.
+ex << 4
 ```
 
 An exclusive borrow that a local, a parameter or a field already holds is checked again where it is passed on as `&&T`. It can not be passed on while another local borrows through it. A loop borrows what it iterates until it ends:
@@ -2979,6 +2980,7 @@ fn first(r &&Foo):
     s := &r.xs[0]
     r.grow()
     --> error: Expected exclusive access. There is another active borrow to `r`.
+    print(s.*)
 ```
 Copies of one exclusive borrow (`r2 := r`) point to the same value and do not conflict with each other. A borrow that is assigned to `_` ends with its statement (`_ = r.add(1)`).
 
@@ -2990,6 +2992,7 @@ g := Foo{xs={1, 2, 3}}
 s := &g.xs[0]
 g.xs = {7}
 --> error: Expected exclusive access. There is another active borrow to `g`.
+print(s.*)
 
 x := 1
 c := &x
@@ -3013,6 +3016,7 @@ f := Foo{xs={1, 2, 3}}
 h := Holder{r=&&f}
 print(f.xs.len())
 --> error: Cannot borrow `f`. There is an active exclusive borrow to it.
+h.r.grow()
 ```
 
 A shared borrow gives no exclusive access to what is behind it. An exclusive borrow that is read through a shared borrow (`b.*` of `b := &r`, `self.r` in a `&Holder` method) can not be passed on as `&&T`: 'Cannot use an exclusive borrow that is read through a shared borrow.'
@@ -3034,7 +3038,7 @@ fn (&Foo) reset():
 fn (&Foo) count():
     self.n += 1       -- A value that is not managed is written in place.
 ```
-Declare the receiver or the parameter as `&&T` (`fn (&&Foo) grow()`, `fn fill(out &&[]int)`). The call then needs exclusive access: `s := &f.xs[0]` followed by `f.grow()` is 'Expected exclusive access. There is another active borrow to `f`.' The rule also holds for an element (`self.items[i].name = 'x'`) and for a dereference (`p.* = {}` of `p &[]int`). It does not hold behind a reference or a pointer (`self.node.xs.append(1)` of `node ^Node`), and not in `@deinit`, which has the only access to the value that it ends.
+Declare the receiver or the parameter as `&&T` (`fn (&&Foo) grow()`, `fn fill(out &&[]int)`). The call then needs exclusive access: `s := &f.xs[0]` followed by `f.grow()` and a later use of `s` is 'Expected exclusive access. There is another active borrow to `f`.' The rule also holds for an element (`self.items[i].name = 'x'`) and for a dereference (`p.* = {}` of `p &[]int`). It does not hold behind a reference or a pointer (`self.node.xs.append(1)` of `node ^Node`), and not in `@deinit`, which has the only access to the value that it ends.
 
 A borrow can not be an element of a type that keeps its elements in a buffer (`[]&int`, `Array[Holder]`, a `Map` of borrows), where its lifetime is not checked. Use an owned type, `^T` or a vector `[N]T`.
 

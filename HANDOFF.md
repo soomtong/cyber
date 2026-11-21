@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-22): 0.4.16 릴리스 뒤, 마지막 사용(C · D · E · B) · 코드 리뷰 수정 · 다시 대입 · 갈래 · 반복 본문 · 남은 다섯 · `and` · `or` · `scope`
+# HANDOFF (2026-11-22): 0.4.17 릴리스(마지막 사용 C · D · E · B와 그 뒤 변경, `sema.zig` 분할)
 
 ## 목표
 
@@ -27,6 +27,8 @@
 - 2026-11-22(사용자: "continue"): 마지막 사용의 남은 다섯(`if` · `switch` 식 갈래, `try` 문, 옮긴 집합이 다른 `break`, 멤버 수신자
   재사용, 변수에 담긴 `NoCopy` 옵션의 `?else`).
 - 2026-11-22(사용자: "continue"): 마지막 사용의 남은 둘(`and` · `or`의 왼쪽의 이동, `scope` 블록의 이동).
+- 2026-11-22(사용자: "src/sema.zig too large. are there ways to refactoring?" 뒤 "이 리팩토링이 정상으로 완료되면 다음 패치 버전을
+  올리자. 0.4.17 이야. 배포까지 부탁해. ... 남은 결정은 위임합니다."): `sema.zig` 분할과 0.4.17 릴리스.
 
 ## 현재 브랜치
 
@@ -106,6 +108,14 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
     죽은 채 오류를 내보낸다. `s`는 옮기지 못한다(`canMoveAcross`의 `scope_block` 검사).
   - 확인: 14단계 검증 rc=0.
   - tars-agent `docs/TODO.md`의 "다음 cyber 빌드" 항목에 덧붙였다(커밋 안 함).
+- [x] `sema.zig` 분할(2026-11-22). 결정 `docs/decisions/project_sema_split.md`(파일 표 · 방법 · 규칙).
+  - 15,418줄 → `sema.zig` 1,500줄 + 주제별 13개 파일. 선언을 그대로 옮기고 다른 파일의 선언을 `sema_x.name`으로 부른다(재수출
+    별칭 없음). `src/`의 다른 파일과 주석의 `sema.name`도 고쳤다. 거대 함수 쪼개기는 하지 않았다.
+  - `docs/gen-api-json.cy`와 `.github/workflows/gen-docs.yml`이 `member_aliases`를 읽는 파일은 `src/sema_hint.zig`다.
+  - 이 문서와 옛 결정 문서 · 릴리스 노트의 `sema.semaOwn` 같은 이름은 고치지 않았다. `rg -n "fn semaOwn" src`로 찾는다.
+  - 확인: 14단계 검증에서 1~13단계 rc=0. 14단계는 생성기가 `sema.zig`에서 `member_aliases`를 못 찾아 실패했고, 경로를 고친 뒤
+    `docs/api.json`과 일치를 확인했다.
+- [x] 0.4.17 릴리스(2026-11-22). 태그 · 빌드 번호 · 설치 확인은 아래 "릴리스" 절의 4~6단계를 마치고 적는다.
 
 ## 시도했으나 실패한 접근
 
@@ -210,18 +220,19 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 ## 핵심 파일
 
 - `src/refs.zig` "Hints" 절, `src/lsp/server.zig` `hintDiagnostics` · `onCodeAction` · `onInlayHint`, `src/lsp/assist.zig`.
-- `src/compiler.zig` `semaCarriedFuncs` · `carryFailedCompile`(실패 뒤 carry), `BodyRecover` · `semaChunkFuncsRecover` · `resolveChunkSyms` · `recoverableDecl`, `src/sema.zig` `semaStmts` ·
-  `semaStmt` · `declFailed`(복구 경로).
+- `src/compiler.zig` `semaCarriedFuncs` · `carryFailedCompile`(실패 뒤 carry), `BodyRecover` · `semaChunkFuncsRecover` · `resolveChunkSyms` · `recoverableDecl`, `src/sema_stmt.zig` `semaStmts` ·
+  `semaStmt`, `src/sema_resolve.zig` `declFailed`(복구 경로).
 - `src/builtins/core.cy` `Slice` 절(`reserve_own` · `clone_copy` · `append` · `appended` 등, `rg -n "fn \(&&?Slice\[\]\)"`).
-- `src/sema.zig` `semaOpAssignMethod` · `checkSliceInPlaceResult` · `checkDroppedSliceResult`.
+- `src/sema_call.zig` `semaOpAssignMethod` · `checkSliceInPlaceResult` · `checkDroppedSliceResult`.
+- sema 파일 표: `docs/decisions/project_sema_split.md`.
 - `src/parser.zig` `isForeignDeclKeyword` · `reportForeignDeclError` · `reportTypedDeclError`.
 - `src/std/os.cy` `read_file` · `read_file_bytes` · `write_file` · `write_file_bytes`.
-- `docs/releases/0.4.16.md`, `docs/releases/unreleased.md`.
+- `docs/releases/0.4.17.md`, `docs/releases/unreleased.md`.
 - `docs/decisions/project_fork_release_ci.md`(러너 미배정 · 재태깅 · 로컬 arm64 빌드 절차).
 
 ## 다음 에이전트에게
 
-1. 0.4.16이 마지막 릴리스다. 0.5 범위로 정했던 것은 모두 여기에 들어갔다. 그 뒤 변경은 `unreleased.md`.
+1. 0.4.17이 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(지금은 머리말뿐).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 

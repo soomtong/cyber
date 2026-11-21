@@ -138,6 +138,12 @@ pub const Chunk = struct {
     /// The borrows of a local besides the one to its `parent_local`: a borrow container can borrow from more than one
     /// local (`Pair{a=&&x, b=&&y}`, `h.r = &&f`).
     borrow_loans: std.ArrayList(cy.sema.BorrowLoan) = .empty,
+    /// Where a local of the current procs was moved (`move x`, or an implicit move of a `NoCopy` value), for the
+    /// error of a later use. Cleared when the id is given to a new local.
+    moved_sites: std.AutoHashMapUnmanaged(u32, *cy.ast.Node) = .empty,
+    /// The outer locals that a branch of an `if` statement moved, until the statement joins its branches
+    /// (`sema.semaIfStmt`).
+    branch_moves: std.ArrayList(u32) = .empty,
     seq_flushing: bool = false,
 
     /// The `s.start(func, {args})` call of a `scope` block that is being analyzed, and its argument literal.
@@ -370,6 +376,8 @@ pub const Chunk = struct {
         self.seq_pending.deinit(self.alloc);
         self.borrow_pending.deinit(self.alloc);
         self.borrow_loans.deinit(self.alloc);
+        self.moved_sites.deinit(self.alloc);
+        self.branch_moves.deinit(self.alloc);
         self.scope_start_borrows.deinit(self.alloc);
         self.scope_borrows.deinit(self.alloc);
         self.scope_blocks.deinit(self.alloc);

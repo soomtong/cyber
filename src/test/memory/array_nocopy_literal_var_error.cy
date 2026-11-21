@@ -4,11 +4,12 @@ type R struct:
 
 x := R{id=1}
 a := Array[R]{x}
+print(x.id)
 
 --cytest: error
---CompileError: Cannot copy `R`, type implements `NoCopy`.
+--CompileError: `x` was moved at 6:15. Borrow it with `&x` or clone it to use it here.
 --
---@MainPath():6:15:
---a := Array[R]{x}
---              ^
+--@MainPath():7:7:
+--print(x.id)
+--      ^
 --

@@ -236,6 +236,9 @@ pub const Block = struct {
     /// Whether there is a break stmt in the body of the loop.
     loop_has_break: bool,
 
+    /// Whether a local of an outer block can be moved here (`canMoveAcross`).
+    move_branch: MoveBranch = .none,
+
     pub fn init(node: *ast.Node, varStart: usize, varShadowStart: usize) Block {
         return .{
             .node = node,
@@ -248,6 +251,14 @@ pub const Block = struct {
 };
 
 pub const ProcId = u32;
+
+pub const MoveBranch = enum(u8) {
+    none,
+    /// The body of a branch of an `if` statement, or its outer block while the `else` statements are checked.
+    branch,
+    /// The outer block of an `if` statement, between its branches and the block of the local.
+    if_outer,
+};
 
 /// Lowering target of a `try` block. See `sema_try_stmt`.
 pub const TryCtx = struct {
@@ -1954,9 +1965,15 @@ fn implicitReturnMoveLocal(c: *cy.Chunk, expr: ExprResult) ?LocalId {
 /// Extracted `cond_n` and `stmts` to be compatible with IfStmt/ElseIfBlock.
 fn semaIfBlock(c: *cy.Chunk, cond_n: *ast.Node, stmts: []const *ast.Node, outer: usize,
     is_last: bool, end_reachable: *bool, node: *ast.Node) !void {
+    return semaIfBlock2(c, cond_n, stmts, outer, is_last, end_reachable, null, node);
+}
+
+fn semaIfBlock2(c: *cy.Chunk, cond_n: *ast.Node, stmts: []const *ast.Node, outer: usize,
+    is_last: bool, end_reachable: *bool, if_stmt: ?**ir.Stmt, node: *ast.Node) !void {
 
     const cond = try c.semaExprCstr(cond_n, c.sema.bool_t);
-    _ = try pushBlock(c, node);
+    const body_idx = try pushBlock(c, node);
+    c.semaBlocks.items[body_idx].move_branch = .branch;
     {
         try semaStmts(c, stmts);
         // NOTE: Set end_reachable before break.
@@ -1966,10 +1983,11 @@ fn semaIfBlock(c: *cy.Chunk, cond_n: *ast.Node, stmts: []const *ast.Node, outer:
         }
     }
     const block = try popBlock2(c, end_reachable.*);
-    _ = try c.ir.pushStmt(.if_block, node, .{
+    const stmt = try c.ir.pushStmt(.if_block, node, .{
         .cond_expr = cond.ir,
         .body_head = block.first,
     });
+    if (if_stmt) |out| out.* = stmt;
 }
 
 /// For `unwrap_or`, `unwrap_or_block`.
@@ -2978,13 +2996,33 @@ fn sema_try_stmt(c: *cy.Chunk, stmt: *ast.TryStmt) !void {
     }
 }
 
+/// A branch of an `if` statement, for the moves of outer locals (`joinBranchMoves`).
+const IfBranch = struct {
+    /// The `if_block` of the branch, or null for the `else` statements.
+    stmt: ?*ir.Stmt,
+    end_reachable: bool,
+    /// The range of `Chunk.branch_moves` that the branch moved.
+    moves_start: u32,
+    moves_end: u32,
+};
+
 fn semaIfStmt(c: *cy.Chunk, node: *ast.IfStmt) !void {
     var blocks_end_reachable = false;
     var has_else = false;
     const outer = try pushBlock(c, @ptrCast(node));
+    c.semaBlocks.items[outer].move_branch = .if_outer;
+    const outer_start = c.semaBlocks.items[outer].varStart;
+    const moves_start: u32 = @intCast(c.branch_moves.items.len);
+    var branches: std.ArrayListUnmanaged(IfBranch) = .empty;
+    defer branches.deinit(c.alloc);
+    // The moves of the branches are kept after `moves_start` while the next branch is checked, without the moved state.
+    var kept: std.ArrayListUnmanaged(LocalId) = .empty;
+    defer kept.deinit(c.alloc);
     {
         var end_reachable: bool = undefined;
-        try semaIfBlock(c, node.cond, node.stmts, outer, node.else_blocks.len == 0, &end_reachable, @ptrCast(node));
+        var if_stmt: *ir.Stmt = undefined;
+        try semaIfBlock2(c, node.cond, node.stmts, outer, node.else_blocks.len == 0, &end_reachable, &if_stmt, @ptrCast(node));
+        try endIfBranch(c, &branches, &kept, if_stmt, end_reachable, moves_start, outer_start);
         if (!blocks_end_reachable and end_reachable) {
             blocks_end_reachable = true;
         }
@@ -2993,7 +3031,9 @@ fn semaIfStmt(c: *cy.Chunk, node: *ast.IfStmt) !void {
             switch (else_block.type()) {
                 .elseif_block => {
                     const elseif = else_block.cast(.elseif_block);
-                    try semaIfBlock(c, elseif.cond, elseif.stmts, outer, i + 1 == node.else_blocks.len, &end_reachable, else_block);
+                    const start = c.branch_moves.items.len;
+                    try semaIfBlock2(c, elseif.cond, elseif.stmts, outer, i + 1 == node.else_blocks.len, &end_reachable, &if_stmt, else_block);
+                    try endIfBranch(c, &branches, &kept, if_stmt, end_reachable, start, outer_start);
                     if (!blocks_end_reachable and end_reachable) {
                         blocks_end_reachable = true;
                     }
@@ -3001,7 +3041,11 @@ fn semaIfStmt(c: *cy.Chunk, node: *ast.IfStmt) !void {
                 .else_block => {
                     has_else = true;
                     const else_ = else_block.cast(.else_block);
+                    const start = c.branch_moves.items.len;
+                    c.semaBlocks.items[outer].move_branch = .branch;
                     try semaStmts(c, else_.stmts);
+                    c.semaBlocks.items[outer].move_branch = .if_outer;
+                    try endIfBranch(c, &branches, &kept, null, c.block().endReachable, start, outer_start);
                     if (!blocks_end_reachable and c.block().endReachable) {
                         blocks_end_reachable = true;
                     }
@@ -3012,11 +3056,105 @@ fn semaIfStmt(c: *cy.Chunk, node: *ast.IfStmt) !void {
             }
         }
     }
+    if (kept.items.len > 0) {
+        try joinBranchMoves(c, node, outer, branches.items, kept.items, has_else);
+    }
+    // A local of a block further out is a move of the enclosing branch.
+    c.branch_moves.items.len = moves_start;
+    const parent_start = c.semaBlocks.items[outer - 1].varStart;
+    for (kept.items) |id| {
+        if (id < parent_start) try c.branch_moves.append(c.alloc, id);
+    }
     const block = try popBlock(c);
     _ = try c.ir.pushStmt(.block, @ptrCast(node), .{ .bodyHead = block.first });
 
     if (!blocks_end_reachable and has_else) {
         c.block().endReachable = false;
+    }
+}
+
+/// Ends a branch of an `if` statement: the outer locals that it moved are alive again for the next branch.
+fn endIfBranch(c: *cy.Chunk, branches: *std.ArrayListUnmanaged(IfBranch), kept: *std.ArrayListUnmanaged(LocalId),
+    stmt: ?*ir.Stmt, end_reachable: bool, start: usize, outer_start: u32) !void {
+    var branch = IfBranch{ .stmt = stmt, .end_reachable = end_reachable, .moves_start = @intCast(kept.items.len), .moves_end = 0 };
+    for (c.branch_moves.items[start..]) |id| {
+        if (id >= outer_start) continue;
+        c.varStack.items[id].type = .local;
+        if (end_reachable) try kept.append(c.alloc, id);
+    }
+    c.branch_moves.items.len = start;
+    branch.moves_end = @intCast(kept.items.len);
+    try branches.append(c.alloc, branch);
+}
+
+/// After the branches of an `if` statement: an outer local that a branch moved is destructed at the end of the other
+/// branches that reach the end, and of the implicit `else`. It is dead after the statement. Each path to the join then
+/// leaves it in one state, without a runtime flag. See `docs/decisions/project_last_use.md` "E".
+fn joinBranchMoves(c: *cy.Chunk, node: *ast.IfStmt, outer: usize, branches: []const IfBranch, moved: []const LocalId,
+    has_else: bool) !void {
+    // Each local once, in the order of the moves.
+    var ids: std.ArrayListUnmanaged(LocalId) = .empty;
+    defer ids.deinit(c.alloc);
+    for (moved) |id| {
+        if (std.mem.indexOfScalar(LocalId, ids.items, id) == null) try ids.append(c.alloc, id);
+    }
+    for (branches) |branch| {
+        if (!branch.end_reachable) continue;
+        const own = moved[branch.moves_start..branch.moves_end];
+        if (branch.stmt) |stmt| {
+            try c.ir.pushStmtBlock(c.alloc);
+            for (ids.items) |id| {
+                if (std.mem.indexOfScalar(LocalId, own, id) != null) continue;
+                try semaDestructLocal(c, &c.varStack.items[id], @ptrCast(node));
+            }
+            const chain = c.ir.popStmtBlock();
+            spliceBranchEnd(stmt, chain);
+        } else {
+            // The `else` statements run in the outer block, which is the current one.
+            for (ids.items) |id| {
+                if (std.mem.indexOfScalar(LocalId, own, id) != null) continue;
+                try semaDestructLocal(c, &c.varStack.items[id], @ptrCast(node));
+            }
+        }
+    }
+    if (!has_else) {
+        // The last branch falls through to the implicit `else`: it breaks out first.
+        const last = branches[branches.len - 1];
+        if (last.end_reachable) {
+            const start = c.proc().block_start;
+            const brk = try c.ir.newStmt(.break_, @ptrCast(node), .{ .block_offset = @intCast(outer - start) });
+            spliceBranchEnd(last.stmt.?, .{ .first = brk, .last = brk });
+        }
+        for (ids.items) |id| {
+            try semaDestructLocal(c, &c.varStack.items[id], @ptrCast(node));
+        }
+    }
+    for (ids.items) |id| {
+        c.varStack.items[id].type = .dead;
+    }
+}
+
+/// Puts `chain` at the end of the body of the `if_block` `stmt`, before the `break` out of the `if` statement that a
+/// branch other than the last one ends with.
+fn spliceBranchEnd(stmt: *ir.Stmt, chain: ir.StmtBlock) void {
+    const first = chain.first orelse return;
+    const if_block = stmt.cast(.if_block);
+    var prev: ?*ir.Stmt = null;
+    var cur = if_block.body_head;
+    while (cur) |s| {
+        if (s.next == null) break;
+        prev = s;
+        cur = s.next;
+    }
+    if (cur) |last| {
+        if (last.code == .break_) {
+            chain.last.?.next = last;
+            if (prev) |p| p.next = first else if_block.body_head = first;
+            return;
+        }
+        last.next = first;
+    } else {
+        if_block.body_head = first;
     }
 }
 
@@ -6131,6 +6269,14 @@ pub fn semaLocal(c: *cy.Chunk, id: LocalId, node: *ast.Node) !ExprResult {
             return res;
         },
         .dead => {
+            if (c.moved_sites.get(id)) |site| {
+                const ast_ = c.compiler.chunks.items[site.src()].ast;
+                var line: u32 = undefined;
+                var col: u32 = undefined;
+                var line_start: u32 = undefined;
+                ast_.computeLinePos(site.pos(), &line, &col, &line_start);
+                return c.reportErrorFmt("`{}` was moved at {}:{}. Borrow it with `&{}` or clone it to use it here.", &.{v(local.name()), v(line + 1), v(col + 1), v(local.name())}, node);
+            }
             return c.reportErrorFmt("`{}` is no longer alive in this scope.", &.{v(local.name())}, node);
         },
     }
@@ -7231,6 +7377,7 @@ fn pushLocalVar(c: *cy.Chunk, _type: LocalVarType, name: []const u8, declType: *
     if (c.compiler.record_refs and !hidden) {
         cy.refs.recordLocalDecl(c, name, declType);
     }
+    if (c.moved_sites.count() > 0) _ = c.moved_sites.remove(id);
     try c.varStack.append(c.alloc, .{
         .decl_t = declType,
         .lifetime = Lifetime.initBlock(@intCast(proc.block_depth)),
@@ -8322,7 +8469,57 @@ pub fn semaOwn(c: *cy.Chunk, expr: ExprResult, node: *ast.Node) !ExprResult {
     if (expr.owned) {
         return expr;
     }
+    if (expr.type.info.no_copy and canMoveImplicitly(c, expr)) {
+        return semaMove(c, expr, node);
+    }
+    if (expr.type.info.no_copy and expr.ir.code == .local) {
+        if (expr.recParentLocal()) |id| {
+            if (id < c.block().varStart and c.varStack.items[id].type == .local) return reportMoveAcross(c, id, node);
+        }
+    }
     return sema_copy(c, expr, node);
+}
+
+/// A `NoCopy` value that would be copied moves instead when it is read from a local or a member path of one
+/// (`total(xs)`, `Box{v=s.xs}`). A later use of the local is an error that names this place. A value that `move` could
+/// not take is left to the copy error. See `docs/decisions/project_last_use.md`.
+fn canMoveImplicitly(c: *cy.Chunk, expr: ExprResult) bool {
+    var cur = expr.ir;
+    while (cur.code == .field) {
+        const rec = cur.cast(.field).rec;
+        if (rec.type.kind() != .struct_t) return false;
+        if (rec.type.cast(.struct_t).base.sym().has_decl("@deinit")) return false;
+        cur = rec;
+    }
+    if (cur.code != .local) return false;
+    const id = expr.recParentLocal() orelse return false;
+    const local = c.varStack.items[id];
+    if (local.type != .local or local.inner.local.hidden) return false;
+    if (local.inner.local.id != cur.cast(.local).id) return false;
+    if (local.inner.local.isParam and local.decl_t.isObjectLike()) return false;
+    if (local.decl_t.info.borrow_only) return false;
+    if (id < c.block().varStart and (cur != expr.ir or !canMoveAcross(c, id))) return false;
+    if (cur == expr.ir and local.has_inactive_struct_fields) return false;
+    return true;
+}
+
+fn reportMoveAcross(c: *cy.Chunk, id: LocalId, node: *ast.Node) anyerror {
+    const name = c.varStack.items[id].name();
+    return c.reportErrorFmt("Cannot move `{}` here: it is declared in an outer block. A branch of an `if` statement can move it, a loop body can not (the next iteration reads it). Borrow it with `&{}`.", &.{v(name), v(name)}, node);
+}
+
+/// Whether the local `id` of an outer block can be moved from the current block: every block up to the one of the
+/// local is a branch of an `if` statement. A loop body is not: the next iteration would read the local.
+fn canMoveAcross(c: *cy.Chunk, id: LocalId) bool {
+    var i = c.semaBlocks.items.len - 1;
+    if (c.semaBlocks.items[i].move_branch != .branch) return false;
+    while (i > c.proc().block_start) {
+        i -= 1;
+        const b = c.semaBlocks.items[i];
+        if (id >= b.varStart) return true;
+        if (b.move_branch == .none) return false;
+    }
+    return false;
 }
 
 fn semaLift(c: *cy.Chunk, expr: ExprResult, node: *ast.Node) !ExprResult {
@@ -10200,58 +10397,71 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
         },
         .move_expr => {
             const child = node.cast(.move_expr).expr;
-            var res = try semaExpr(c, child, .{});
-            const field_access = try build_move_access_path(c, res, child);
-
-            // Can only move if owner was declared in the same block.
-            if (c.temp_access_path.var_id < c.block().varStart) {
-                return c.reportError("Can only move variable declared in the same block.", child);
-            }
-
-            const local = &c.varStack.items[c.temp_access_path.var_id];
-            if (local.inner.local.isParam and local.decl_t.isObjectLike()) {
-                return c.reportError("Cannot move a reference parameter.", child);
-            }
-            if (res.type.isManaged() and (local.active_borrows > 0 or local.active_ex_borrows > 0)) {
-                // The new owner can free what the borrow points to.
-                return c.reportErrorFmt("Cannot move `{}`. There is an active borrow to it.", &.{v(local.name())}, child);
-            }
-
-            if (!field_access) {
-                // move owner.
-                if (local.has_inactive_struct_fields) {
-                    return c.reportError("Cannot move a partially moved value.", child);
-                }
-                local.type = .dead;
-                if (res.ir.code == .local) {
-                    res.ir.cast(.local).moved = true;
-                }
-                // A value like a call result, not a read of a local: the local is dead.
-                return ExprResult.initOwned(res.ir);
-            }
-
-            // move member.
-            const state_res = try c.proc().var_active_struct_fields.getOrPut(c.alloc, c.temp_access_path.var_id);
-            if (!state_res.found_existing) {
-                const start = c.active_field_stack.items.len;
-                const state_len = local.decl_t.cast(.struct_t).field_state_len;
-                try c.active_field_stack.ensureUnusedCapacity(c.alloc, state_len);
-                c.active_field_stack.items.len += state_len;
-                const fields = c.active_field_stack.items[start..];
-                @memset(fields, true);
-                state_res.value_ptr.* = fields;
-                local.has_inactive_struct_fields = true;
-            }
-            const start = c.temp_access_path.struct_field_offset;
-            @memset(state_res.value_ptr.*[start..start + c.temp_access_path.state_len], false);
-
-            res.owned = true;
-            return res;
+            const res = try semaExpr(c, child, .{});
+            return semaMove(c, res, child);
         },
         else => {
             return c.reportErrorFmt("Unsupported node: {}", &.{v(node.type())}, node);
         },
     }
+}
+
+/// `move child` of the value `res` read from a local or a member of one.
+fn semaMove(c: *cy.Chunk, res_: ExprResult, child: *ast.Node) !ExprResult {
+    var res = res_;
+    const field_access = try build_move_access_path(c, res, child);
+
+    // Can only move if owner was declared in the same block, or the whole value from a branch of an `if`
+    // statement in that block (`semaIfStmt` destructs it at the end of the other branches).
+    const cross = c.temp_access_path.var_id < c.block().varStart;
+    if (cross and field_access) {
+        return c.reportError("Can only move a member of a variable declared in the same block.", child);
+    }
+    if (cross and !canMoveAcross(c, c.temp_access_path.var_id)) {
+        return reportMoveAcross(c, c.temp_access_path.var_id, child);
+    }
+
+    const local = &c.varStack.items[c.temp_access_path.var_id];
+    if (local.inner.local.isParam and local.decl_t.isObjectLike()) {
+        return c.reportError("Cannot move a reference parameter.", child);
+    }
+    if (res.type.isManaged() and (local.active_borrows > 0 or local.active_ex_borrows > 0)) {
+        // The new owner can free what the borrow points to.
+        return c.reportErrorFmt("Cannot move `{}`. There is an active borrow to it.", &.{v(local.name())}, child);
+    }
+
+    if (!field_access) {
+        // move owner.
+        if (local.has_inactive_struct_fields) {
+            return c.reportError("Cannot move a partially moved value.", child);
+        }
+        local.type = .dead;
+        try c.moved_sites.put(c.alloc, c.temp_access_path.var_id, child);
+        if (cross) try c.branch_moves.append(c.alloc, c.temp_access_path.var_id);
+        if (res.ir.code == .local) {
+            res.ir.cast(.local).moved = true;
+        }
+        // A value like a call result, not a read of a local: the local is dead.
+        return ExprResult.initOwned(res.ir);
+    }
+
+    // move member.
+    const state_res = try c.proc().var_active_struct_fields.getOrPut(c.alloc, c.temp_access_path.var_id);
+    if (!state_res.found_existing) {
+        const start = c.active_field_stack.items.len;
+        const state_len = local.decl_t.cast(.struct_t).field_state_len;
+        try c.active_field_stack.ensureUnusedCapacity(c.alloc, state_len);
+        c.active_field_stack.items.len += state_len;
+        const fields = c.active_field_stack.items[start..];
+        @memset(fields, true);
+        state_res.value_ptr.* = fields;
+        local.has_inactive_struct_fields = true;
+    }
+    const start = c.temp_access_path.struct_field_offset;
+    @memset(state_res.value_ptr.*[start..start + c.temp_access_path.state_len], false);
+
+    res.owned = true;
+    return res;
 }
 
 const EmbeddedResult = struct {

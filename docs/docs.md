@@ -2693,7 +2693,7 @@ fn (&MyArray) @copy() -> Self:
     return {ptr=new_buf.ptr, len=self.len}
 ```
 
-A type that implements the `NoCopy` trait prevents implicit copying:
+A type that implements the `NoCopy` trait prevents implicit copying. Where a copy would be made from a variable or a member of one, the value is [moved](#moving) instead, and the variable can not be used after that:
 ```cy
 type Foo:
     with NoCopy
@@ -2702,15 +2702,16 @@ type Foo:
 
 f := Foo{a=123}
 
-g := f
---> error: `Foo` is not copyable.
+g := f            -- Moves `f` into `g`.
+print(f.a)
+--> error: `f` was moved at 8:6. Borrow it with `&f` or clone it to use it here.
 ```
 
 An `Array` can hold elements that are not copyable. The elements are moved into the array, read by borrow and deinitialized once:
 ```cy
 a := Array[Foo]{Foo{a=1}, Foo{a=2}}   -- A literal moves its elements.
 f := Foo{a=3}
-a << move f                           -- A variable is moved explicitly.
+a << f                                -- A variable is moved.
 a[0] = Foo{a=4}                       -- The old element is deinitialized.
 
 print(a[1].a)       --> 2
@@ -2756,7 +2757,7 @@ a := 123
 b := move a
 
 print(a)
---> error: `a` is no longer alive in this scope.
+--> error: `a` was moved at 2:11. Borrow it with `&a` or clone it to use it here.
 ```
 
 `move` is an explicit operation on any value type. It is not restricted to types that implement `NoCopy`.
@@ -2766,13 +2767,25 @@ This differs from Rust, where a `Copy` type is always copied and has no move. Mo
 and in generic code that must handle copyable and `NoCopy` element types with the same statement (`Array.append` stores its argument with `move val`).
 Reference types `^T` are shared and reference counted, so a reference parameter can not be moved (`Cannot move a reference parameter.`).
 
-Some types such as `Array` can not be passed around by default without moving (or cloning) the value:
+Some types such as `Array` can not be passed around by default without moving (or cloning) the value. A `NoCopy` value that is read from a variable or a member of one where a copy would be made (an argument, an initializer, an assignment, a field or an element of a literal) is moved without `move`:
 ```cy
 a := Array[int]{1, 2, 3}
 
-print(compute_sum(move a))
+print(compute_sum(a))   -- Same as `compute_sum(move a)`.
+print(a.len())
+--> error: `a` was moved at 3:19. Borrow it with `&a` or clone it to use it here.
 ```
-In this case, the `Array` value is moved into the `compute_sum` function, so the `Array` is deinitialized by the callee function and not the callsite.
+In this case, the `Array` value is moved into the `compute_sum` function, so the `Array` is deinitialized by the callee function and not the callsite. A copyable value is still copied unless `move` is written.
+
+A variable is moved in the block that declares it, or in a branch of an `if` statement in that block. After the `if` statement the variable is dead. The branches that do not move it, and the implicit `else` when there is none, deinitialize it at their end, so `@deinit` can run before the end of the block:
+```cy
+f := open_log()!
+if verbose:
+    archive(f)          -- Moves `f`.
+-- Without `verbose`, `f` is deinitialized here, at the end of the implicit `else`.
+print('done')
+```
+A loop body can not move a variable that is declared outside the loop, because the next iteration reads it: 'Cannot move `f` here: it is declared in an outer block. A branch of an `if` statement can move it, a loop body can not (the next iteration reads it). Borrow it with `&f`.' A branch can move only a whole variable of an outer block, not a member of it.
 
 Values can be partially moved if a subset of its members were moved:
 ```cy

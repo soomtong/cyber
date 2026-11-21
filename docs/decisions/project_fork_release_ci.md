@@ -268,6 +268,9 @@ Latest Build 세 번(전 `44236296335`, 후 `44329139922` · `44522794178`). 시
   개발 기기와 같은 타깃의 Debug(Trace) 검사를 CI에서 잃으므로 결정은 사용자에게 둔다.
 - 결정(2026-11-20, 사용자): 뺀다. Latest Build · PR Build 둘 다 'Run tests. (debug)'의 조건에서 `aarch64-macos-none`을
   뺐다. 같은 타깃의 Debug는 커밋 전 로컬 `verify.sh` 1단계(`zig build test`)가 돌린다. 벽시계는 다음 push의 run에서 본다.
+- 결과(2026-11-21, Latest Build 두 run): 벽시계 21분 → 13분 32초(master `0b8115fe`) · 14분 28초(태그 `0.4.16`). arm64 macOS
+  job은 9분 · 7분으로 줄었다. 이제 벽시계를 정하는 job은 run마다 다르다(x64 macOS 13분 9초, x86_64 Linux 14분 3초). 예상한
+  11~13분과 거의 맞는다.
 
 ## 번들에 언어 서버 (2026-11-13)
 

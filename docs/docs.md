@@ -3017,6 +3017,25 @@ print(f.xs.len())
 
 A shared borrow gives no exclusive access to what is behind it. An exclusive borrow that is read through a shared borrow (`b.*` of `b := &r`, `self.r` in a `&Holder` method) can not be passed on as `&&T`: 'Cannot use an exclusive borrow that is read through a shared borrow.'
 
+A shared borrow does not replace or change a managed value behind it either. Another shared borrow of the same owner can point into that value:
+```cy
+type Foo:
+    xs []int
+    n  int
+
+fn (&Foo) grow():
+    self.xs.append(1)
+--> error: Cannot borrow exclusively through a shared borrow. Declare the borrow as `&&T`.
+
+fn (&Foo) reset():
+    self.xs = {}
+--> error: Cannot replace a managed value through a shared borrow. Declare the borrow as `&&T`.
+
+fn (&Foo) count():
+    self.n += 1       -- A value that is not managed is written in place.
+```
+Declare the receiver or the parameter as `&&T` (`fn (&&Foo) grow()`, `fn fill(out &&[]int)`). The call then needs exclusive access: `s := &f.xs[0]` followed by `f.grow()` is 'Expected exclusive access. There is another active borrow to `f`.' The rule also holds for an element (`self.items[i].name = 'x'`) and for a dereference (`p.* = {}` of `p &[]int`). It does not hold behind a reference or a pointer (`self.node.xs.append(1)` of `node ^Node`), and not in `@deinit`, which has the only access to the value that it ends.
+
 A borrow can not be an element of a type that keeps its elements in a buffer (`[]&int`, `Array[Holder]`, a `Map` of borrows), where its lifetime is not checked. Use an owned type, `^T` or a vector `[N]T`.
 
 A managed value can not be moved while a local borrows from it:
@@ -3034,6 +3053,8 @@ type Foo:
 fn (&Foo) mutate():
     self.a = 123
 ```
+
+A `&Foo` receiver writes the fields that are not managed (`int`, `float`, `bool`, a struct of those). To replace or change a managed field (`str`, `[]T`, `Map`, a struct with one), declare the receiver as `&&Foo`.
 
 Invoking methods automatically attempts to obtain the correct borrow type as specified by the method:
 ```cy
@@ -4524,7 +4545,7 @@ print(u.name)       --> Ada
 
 var diag json.Diag = {}
 try:
-    _ = json.decode([]User, '[{"id": 1, "name": 2}]', &diag)!
+    _ = json.decode([]User, '[{"id": 1, "name": 2}]', &&diag)!
 else |err|:
     print('%{err} %{diag.path}: %{diag.msg}')
 --> error.Type $[0].name: Expected a string, found number.
@@ -4534,7 +4555,7 @@ Parsing returns `error.Syntax` for malformed text and `error.Unicode` for text t
 ```cy
 var diag json.Diag = {}
 try:
-    v := json.parse('{"a": tru}', &diag)!
+    v := json.parse('{"a": tru}', &&diag)!
     print(v)
 else |err|:
     print('%{err} at %{diag.line}:%{diag.col}: %{diag.msg}')
@@ -4593,7 +4614,7 @@ Not supported, because they need backtracking or are rarely used: look-ahead and
 ```cy
 var diag regex.Diag = {}
 try:
-    re := regex.compile(`(\w+)\s+\1`, &diag)!
+    re := regex.compile(`(\w+)\s+\1`, &&diag)!
     print(re.is_match('a a'))
 else |err|:
     print('%{err} at %{diag.pos}: %{diag.msg}')
@@ -4676,12 +4697,12 @@ When `parse` fails it returns `error.NoMatch`. Pass a `peg.Diag` to see the fart
 ```cy
 var diag peg.Diag = {}
 try:
-    _ = p.parse('(1,(22,),4)', &diag)!
+    _ = p.parse('(1,(22,),4)', &&diag)!
 else |err|:
     print('%{err} at %{diag.pos}: %{diag.msg}')
 --> error.NoMatch at 7: Expected `'('` or `%d` at line 1, column 8, found `)`.
 ```
-`diag.line` and `diag.col` start at 1, and `diag.expected` has the expected patterns as they are written in the grammar. `peg.compile(grammar, &diag)` fills the same `Diag` for a grammar that does not compile (`error.Syntax`). A grammar is checked when it is compiled: a rule that is not defined, a repetition of something that can match nothing (`('a'?)*`), and a rule that is left recursive, that is, calls itself before it takes any input (`expr <- expr '+' num`), are errors. Write a left recursive rule as a loop: `expr <- num ('+' num)*`.
+`diag.line` and `diag.col` start at 1, and `diag.expected` has the expected patterns as they are written in the grammar. `peg.compile(grammar, &&diag)` fills the same `Diag` for a grammar that does not compile (`error.Syntax`). A grammar is checked when it is compiled: a rule that is not defined, a repetition of something that can match nothing (`('a'?)*`), and a rule that is left recursive, that is, calls itself before it takes any input (`expr <- expr '+' num`), are errors. Write a left recursive rule as a loop: `expr <- num ('+' num)*`.
 
 Matching is by Unicode code point: `.` and `[가-힣]` take a whole character, and offsets are in bytes. A byte of the input that is not UTF-8 is one character for `.` and for a negated class. The syntax is a subset of LPeg's `re` with the same meaning, with these differences: strings and classes have escapes, a named capture is a node of the result, `=name` matches the whole text of the capture, and what calls a Lua function (`p -> name`, `p => name`) or builds a table (`{| p |}`) is not supported. In a class, a `%` name goes on to the last letter, as in `re`: write `[_%w]`, not `[%w_]`.
 
@@ -4798,7 +4819,7 @@ The parse functions return `error.Syntax` when the text has another shape, `erro
 ```cy
 var diag time.Diag = {}
 try:
-    _ = time.parse('2026-02-30T10:22:01Z', &diag)!
+    _ = time.parse('2026-02-30T10:22:01Z', &&diag)!
 else |err|:
     print('%{err}: %{diag.msg}')
 --> error.Range: February 2026 has no day 30.

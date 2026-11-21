@@ -4818,7 +4818,7 @@ fn (&PtrSpan[]) set_backwards(o Self):
     if o.length != self.length:
         panic('InvalidLen')
     for self.length-1..>=0 |i|:
-        self[i] = o[i]
+        self.ptr[i] = o[i]
 
 -- --| Returns a slice with ends trimmed from `delims`. `mode` can be @left, @right, or @ends.
 -- #[bind] fn PtrSpan[].trim(self, mode symbol, delims PtrSpan[T]) PtrSpan[T]
@@ -5021,7 +5021,7 @@ type ScopeState:
 fn Scope :: new() -> Scope:
     return {fibers = Array[Ptr[void]]{}, state = ^ScopeState{err = none, taken = false, running = false}}
 
-fn (&Scope) @deinit():
+fn (&&Scope) @deinit():
     if @fiber_cancelled():
         -- The fiber that holds the scope is cancelled, maybe inside `run`. Its fibers end with it and their
         -- error has no one to go to.
@@ -5036,7 +5036,7 @@ fn (&Scope) @deinit():
             panic_unwrap_error(err)
 
 --| Adds a fiber that calls `func(args)`. The arguments are evaluated now. The fiber starts in `join`.
-fn (&Scope) start(func funcptr_t[%Sig], args FnTuple[Sig]):
+fn (&&Scope) start(func funcptr_t[%Sig], args FnTuple[Sig]):
     #if Sig.ret() != void and Sig.ret() != !void:
         meta.error('A fiber of a scope must return `void` or `!void`.')
     -- The state takes one value slot, which is 8 bytes on every target. A reference is not.
@@ -5054,7 +5054,7 @@ fn (&Scope) active() -> int:
 --| Runs the fibers until all of them are done. A fiber that stops at `suspend` gives the others a turn.
 --| When every fiber waits for a future, the scope waits like `Fiber.wait_ready`.
 --| Returns the first error that a fiber returned. More fibers can be started after a `join`.
-fn (&Scope) join() -> !void:
+fn (&&Scope) join() -> !void:
     self.run()
     if !self.state.taken:
         if self.state.err |err|:
@@ -5063,7 +5063,7 @@ fn (&Scope) join() -> !void:
 
 --| Cancels the fibers that are not done (`Fiber.cancel`) and drops an error that a fiber returned.
 --| A fiber that can not be cancelled runs to its end first.
-fn (&Scope) abort():
+fn (&&Scope) abort():
     for 0..self.fibers.len() |i|:
         _ = fiber_cancel(self.fibers[i])
     self.run()
@@ -5073,13 +5073,13 @@ fn (&Scope) abort():
 fn @scope_new() -> Scope:
     return Scope.new()
 
-fn @scope_abort(s &Scope):
+fn @scope_abort(s &&Scope):
     s.abort()
 
-fn @scope_join(s &Scope) -> !void:
+fn @scope_join(s &&Scope) -> !void:
     return s.join()
 
--fn (&Scope) run():
+-fn (&&Scope) run():
     if self.state.running:
         panic('The scope is already running its fibers.')
     self.state.running = true

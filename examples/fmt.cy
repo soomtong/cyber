@@ -155,7 +155,7 @@ fn Formatter :: @init(src str) -> Formatter:
 -- ---------------------------------------------------------------------------------------------------------
 
 -- Splits the source into tokens and lines.
-fn (&Formatter) tokenize():
+fn (&&Formatter) tokenize():
     src := self.src
     pos := prefix_end(src)
     self.prefix = src[0..pos]

@@ -1353,7 +1353,7 @@ type ReadLineFn = fn(prefix str) -> Future[str]
 --| Reads lines until a complete input is ready.
 --| A line ending with `:` opens a block; an empty line closes one.
 --| An attribute line (`#[...]`) is held until the declaration it annotates is complete.
-fn (&REPL) read(read_line ReadLineFn) -> ?str:
+fn (&&REPL) read(read_line ReadLineFn) -> ?str:
     while:
         prefix := self.prefix()
         future := read_line(prefix)
@@ -1387,7 +1387,7 @@ fn (&REPL) read(read_line ReadLineFn) -> ?str:
             self.append_line(input)
             continue
 
-fn (&REPL) append_line(line str):
+fn (&&REPL) append_line(line str):
     if self.input_buffer.len() > 0:
         self.input_buffer += "\n"
         self.input_buffer += ' '.repeat(self.indent * 4)

@@ -46,7 +46,7 @@ for doc.as_array().? |c|:
     var diag peg.Diag = {}
     var p ?peg.Peg = none
     try:
-        p = peg.compile(src, &diag)!
+        p = peg.compile(src, &&diag)!
     else:
         pass
     if kind == 'E':

@@ -660,6 +660,50 @@ pub fn readThroughShared(expr: *ir.Expr) bool {
     }
 }
 
+/// Whether the place `expr` is reached through a shared borrow: `self.xs` of `self &Foo`, `f.*` of `f &[]int`,
+/// `self.items[i].name` (the borrow that `@index_addr` returns comes from its receiver). What is behind a pointer
+/// (`self.node.xs` of `node ^Node`) is reached through the pointer, which is not a borrow.
+pub fn placeThroughShared(expr: *ir.Expr) bool {
+    var cur = expr;
+    while (true) {
+        switch (cur.code) {
+            .address_of => {
+                cur = cur.cast(.address_of).expr;
+                continue;
+            },
+            .call => {
+                // A borrow that a function returns points into what its first argument borrows.
+                const call = cur.cast(.call);
+                if (call.numArgs == 0 or !isBorrowType(cur.type)) return false;
+                cur = call.args[0];
+                continue;
+            },
+            else => {},
+        }
+        switch (cur.type.kind()) {
+            .borrow => return true,
+            .pointer => return false,
+            else => {},
+        }
+        switch (cur.code) {
+            .deref => cur = cur.cast(.deref).expr,
+            .field => cur = cur.cast(.field).rec,
+            else => return false,
+        }
+    }
+}
+
+/// A shared borrow gives no access that frees or moves what is behind it: another shared borrow of the same owner
+/// can point into it (`s := &f.xs[0]` next to the `&f` that a method received).
+fn checkNoWriteThroughShared(c: *cy.Chunk, place: *ir.Expr, comptime what: []const u8, node: *ast.Node) !void {
+    if (!placeThroughShared(place)) return;
+    // A destructor has the only access to the value that it ends.
+    if (c.proc().func) |func| {
+        if (std.mem.eql(u8, func.name(), "@deinit")) return;
+    }
+    return c.reportError("Cannot " ++ what ++ " through a shared borrow. Declare the borrow as `&&T`.", node);
+}
+
 fn isBorrowType(type_: *cy.Type) bool {
     return switch (type_.kind()) {
         .borrow, .ex_borrow => true,
@@ -807,6 +851,7 @@ fn checkWriteAccess(c: *cy.Chunk, left: ExprResult, node: *ast.Node) !void {
 
 /// `checkWriteAccess` for an assignment to the field `field_idx` of `left`.
 fn checkFieldWriteAccess(c: *cy.Chunk, left: ExprResult, field_idx: ?u16, node: *ast.Node) !void {
+    try checkNoWriteThroughShared(c, left.ir, "replace a managed value", node);
     const local = left.recParentLocal() orelse return;
     var field = borrowField(c, left);
     if (field == borrow_field_whole) {
@@ -2191,7 +2236,7 @@ fn sema_scope_stmt(c: *cy.Chunk, stmt: *ast.ScopeStmt) !void {
         }
     }
     const scope_t = c.sema.scope_new_fn.sig.ret;
-    const borrow_t = try getBorrowType(c, scope_t);
+    const borrow_t = try get_ex_borrow_type(c, scope_t);
 
     var body_end_reachable = false;
     _ = try pushBlock(c, node);
@@ -2266,7 +2311,7 @@ pub const OpenScopeBlock = struct {
 /// goes on like at a failing `!`.
 fn semaScopeJoinCheck(c: *cy.Chunk, scope_local: LocalId, node: *ast.Node) !void {
     const scope_t = c.sema.scope_new_fn.sig.ret;
-    const borrow_t = try getBorrowType(c, scope_t);
+    const borrow_t = try get_ex_borrow_type(c, scope_t);
     const scope_v = try semaLocal(c, scope_local, node);
     const scope_addr = try semaAddressOf(c, scope_v, borrow_t, node);
     var join_res = try c.semaCallFunc2(c.sema.scope_join_fn, &.{Argument.initPreResolved(node, scope_addr)}, &.{}, node);
@@ -11936,6 +11981,7 @@ pub fn sema_ex_borrow2(c: *cy.Chunk, child: ExprResult, ex_borrow_t: *cy.Type, n
         }
     };
 
+    try checkNoWriteThroughShared(c, eff_child.ir, "borrow exclusively", node);
     try checkExclusiveBorrowOfField(c, parent_local, borrowField(c, eff_child), false, node);
 
     const addr_of = try c.ir.newExpr(.address_of, ex_borrow_t, node, .{

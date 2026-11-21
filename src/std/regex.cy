@@ -16,7 +16,7 @@
 --|
 --| var diag regex.Diag = {}
 --| try:
---|     _ = regex.compile('a(?=b)', &diag)!
+--|     _ = regex.compile('a(?=b)', &&diag)!
 --| else |err|:
 --|     print('%{err} at %{diag.pos}: %{diag.msg}')
 --| ```
@@ -148,10 +148,10 @@ fn unicode_version() -> str
 --| and `error.TooBig` for one that is over `MaxInsts`.
 fn compile(pattern str) -> !Regex:
     var diag Diag = {}
-    return compile(pattern, &diag)
+    return compile(pattern, &&diag)
 
 --| Compiles a pattern. On failure, `diag` tells where and why.
-fn compile(pattern str, diag &Diag) -> !Regex:
+fn compile(pattern str, diag &&Diag) -> !Regex:
     diag.msg = ''
     diag.pos = 0
     if !str.is_utf8(pattern.span()):
@@ -502,17 +502,17 @@ fn (&Captures) expand(repl str) -> str:
     -- Nodes visited by `gen`, to stop a pattern that repeats nothing a great many times.
     work    int = 0
 
-fn (&Builder) fail(msg str) -> error:
+fn (&&Builder) fail(msg str) -> error:
     self.msg = msg
     self.err_pos = self.pos
     return error.Syntax
 
-fn (&Builder) fail_at(pos int, msg str) -> error:
+fn (&&Builder) fail_at(pos int, msg str) -> error:
     self.msg = msg
     self.err_pos = pos
     return error.Syntax
 
-fn (&Builder) too_big(msg str) -> error:
+fn (&&Builder) too_big(msg str) -> error:
     self.msg = msg
     self.err_pos = self.pos
     return error.TooBig
@@ -551,19 +551,19 @@ fn (&Builder) skip_x():
         else:
             return
 
-fn (&Builder) add(node Node) -> !int:
+fn (&&Builder) add(node Node) -> !int:
     if node.depth > MaxDepth:
         return self.fail('The pattern nests deeper than %{MaxDepth} levels.')
     self.nodes.append(node)
     return self.nodes.len() - 1
 
-fn (&Builder) enter(open int) -> !void:
+fn (&&Builder) enter(open int) -> !void:
     self.depth += 1
     if self.depth > MaxDepth:
         return self.fail_at(open, 'The pattern nests deeper than %{MaxDepth} levels.')
 
 -- Joins child nodes into a concatenation or an alternation.
-fn (&Builder) join(kind int, items []int) -> !int:
+fn (&&Builder) join(kind int, items []int) -> !int:
     start := self.kids.len()
     depth := 0
     empty := kind == NCat
@@ -578,7 +578,7 @@ fn (&Builder) join(kind int, items []int) -> !int:
     return self.add(Node{kind=kind, a=start, b=items.len(), depth=depth + 1, empty=empty})
 
 -- alt := cat ('|' cat)*. Stops at `)` and at the end.
-fn (&Builder) parse_alt() -> !int:
+fn (&&Builder) parse_alt() -> !int:
     var branches []int = {}
     branches.append(self.parse_cat()!)
     while self.peek() == '|':
@@ -588,7 +588,7 @@ fn (&Builder) parse_alt() -> !int:
         return branches[0]
     return self.join(NAlt, branches)
 
-fn (&Builder) parse_cat() -> !int:
+fn (&&Builder) parse_cat() -> !int:
     var items []int = {}
     while:
         self.skip_x()
@@ -619,7 +619,7 @@ fn (&Builder) parse_cat() -> !int:
         return items[0]
     return self.join(NCat, items)
 
-fn (&Builder) parse_number() -> !int:
+fn (&&Builder) parse_number() -> !int:
     start := self.pos
     n := 0
     while is_digit(self.peek()):
@@ -633,7 +633,7 @@ fn (&Builder) parse_number() -> !int:
         return self.too_big('The repetition count is over the limit of %{MaxInsts}.')
     return n
 
-fn (&Builder) parse_repeat(child int) -> !int:
+fn (&&Builder) parse_repeat(child int) -> !int:
     open := self.pos
     c := self.peek()
     self.pos += 1
@@ -673,11 +673,11 @@ fn (&Builder) parse_repeat(child int) -> !int:
     cn := self.nodes[child]
     return self.add(Node{kind=NRepeat, a=child, b=min, c=max, d=g, depth=cn.depth + 1, empty=min == 0 or cn.empty})
 
-fn (&Builder) assertion(kind int) -> !int:
+fn (&&Builder) assertion(kind int) -> !int:
     return self.add(Node{kind=NAssert, a=kind, empty=true})
 
 -- Returns a node, or -1 for `(?flags)`.
-fn (&Builder) parse_atom() -> !int:
+fn (&&Builder) parse_atom() -> !int:
     c := self.peek()
     switch c:
         case '(':
@@ -707,20 +707,20 @@ fn (&Builder) parse_atom() -> !int:
         else:
             return self.literal(self.rune())
 
-fn (&Builder) literal(cp int) -> !int:
+fn (&&Builder) literal(cp int) -> !int:
     if self.has(FlagI) and (cp >= 128 or is_alpha(cp)):
         self.ops = {}
         self.leaf(SetRange, cp, cp)
         return self.finish_set(true)
     return self.add(Node{kind=NChar, a=cp})
 
-fn (&Builder) leaf(op int, a int, b int):
+fn (&&Builder) leaf(op int, a int, b int):
     self.ops.append(op)
     self.ops.append(a)
     self.ops.append(b)
 
 -- Makes a set of the ops in `ops` and returns its node.
-fn (&Builder) finish_set(fold bool) -> !int:
+fn (&&Builder) finish_set(fold bool) -> !int:
     off := self.sets.len()
     flags := 0
     if fold:
@@ -736,7 +736,7 @@ fn (&Builder) finish_set(fold bool) -> !int:
     self.sets[off + 1] = set_ascii(self.sets.span(), off, 1)
     return self.add(Node{kind=NSet, a=off})
 
-fn (&Builder) parse_group() -> !int:
+fn (&&Builder) parse_group() -> !int:
     open := self.pos
     self.pos += 1
     saved := self.flags
@@ -785,7 +785,7 @@ fn (&Builder) parse_group() -> !int:
     cn := self.nodes[child]
     return self.add(Node{kind=NGroup, a=child, b=group, depth=cn.depth + 1, empty=cn.empty})
 
-fn (&Builder) parse_name() -> !str:
+fn (&&Builder) parse_name() -> !str:
     start := self.pos
     while:
         c := self.peek()
@@ -802,14 +802,14 @@ fn (&Builder) parse_name() -> !str:
     name := self.src[start..self.pos]
     if name.len() == 0:
         return self.fail('The group name is empty.')
-    for self.names |n|:
-        if n == name:
+    for 0..self.names.len() |i|:
+        if self.names[i] == name:
             return self.fail_at(start, 'There are two groups named `%{name}`.')
     self.pos += 1
     return name
 
 -- Parses `flags)` or `flags:` after `(?`. Returns whether a group body follows.
-fn (&Builder) parse_flags(open int) -> !bool:
+fn (&&Builder) parse_flags(open int) -> !bool:
     negate := false
     count := 0
     seen := 0
@@ -865,7 +865,7 @@ fn (&Builder) parse_flags(open int) -> !bool:
                 self.flags = self.flags || bit
         self.pos += 1
 
-fn (&Builder) perl_class(c int):
+fn (&&Builder) perl_class(c int):
     switch c:
         case 'd', 'D':
             self.leaf(SetTable, uni_table('digit', 3), 0)
@@ -877,7 +877,7 @@ fn (&Builder) perl_class(c int):
         self.leaf(SetNot, 0, 0)
 
 -- An escape outside a class. `pos` is at the backslash.
-fn (&Builder) parse_escape() -> !int:
+fn (&&Builder) parse_escape() -> !int:
     start := self.pos
     c := self.peek_at(1)
     switch c:
@@ -934,7 +934,7 @@ fn (&Builder) parse_escape() -> !int:
             return self.literal(cp)
 
 -- Reads `n` hex digits, or `{...}` when a brace follows.
-fn (&Builder) hex_escape(start int, n int) -> !int:
+fn (&&Builder) hex_escape(start int, n int) -> !int:
     cp := 0
     if self.peek() == '{':
         self.pos += 1
@@ -960,7 +960,7 @@ fn (&Builder) hex_escape(start int, n int) -> !int:
     return cp
 
 -- Reads the character of an escape. `pos` is after the backslash, `start` at it.
-fn (&Builder) escape_char(start int, in_class bool) -> !int:
+fn (&&Builder) escape_char(start int, in_class bool) -> !int:
     c := self.peek()
     if c == -1:
         return self.fail_at(start, 'The pattern ends with a `\\`. Write `\\\\` to match a backslash.')
@@ -1003,7 +1003,7 @@ fn (&Builder) escape_char(start int, in_class bool) -> !int:
 
 -- `\pL`, `\p{Name}`, `\p{gc=Name}`, `\p{sc=Name}`, and `\P` for the rest. `pos` is at the backslash.
 -- Adds one value to `ops`.
-fn (&Builder) unicode_class() -> !void:
+fn (&&Builder) unicode_class() -> !void:
     start := self.pos
     negated := self.peek_at(1) == 'P'
     self.pos += 2
@@ -1054,7 +1054,7 @@ fn (&Builder) unicode_class() -> !void:
         self.leaf(SetNot, 0, 0)
 
 -- Adds the ranges of `[:name:]` to `ops` as one value. Returns false for an unknown name.
-fn (&Builder) ascii_class(name str) -> bool:
+fn (&&Builder) ascii_class(name str) -> bool:
     var r []int = {}
     if name == 'alnum':
         r = {'0', '9', 'A', 'Z', 'a', 'z'}
@@ -1093,7 +1093,7 @@ fn (&Builder) ascii_class(name str) -> bool:
     return true
 
 -- A class from `[` to `]`. Adds one value to `ops`.
-fn (&Builder) class_bracket() -> !void:
+fn (&&Builder) class_bracket() -> !void:
     open := self.pos
     self.pos += 1
     self.enter(open)!
@@ -1137,13 +1137,13 @@ fn (&Builder) class_bracket() -> !void:
     self.depth -= 1
 
 -- Adds a leaf to the union that has `count` members so far.
-fn (&Builder) class_add(op int, a int, b int, count int):
+fn (&&Builder) class_add(op int, a int, b int, count int):
     self.leaf(op, a, b)
     if count > 0:
         self.leaf(SetOr, 0, 0)
 
 -- The members of a class up to `]` or a set operator. Adds one value to `ops`.
-fn (&Builder) class_union(open int, start_count int) -> !void:
+fn (&&Builder) class_union(open int, start_count int) -> !void:
     count := start_count
     while:
         self.skip_x()
@@ -1229,7 +1229,7 @@ fn (&Builder) class_union(open int, start_count int) -> !void:
 fn (&Builder) pc() -> int:
     return self.insts.len() / 3
 
-fn (&Builder) emit(op int, a int, b int) -> !int:
+fn (&&Builder) emit(op int, a int, b int) -> !int:
     if self.insts.len() / 3 >= MaxInsts:
         self.msg = 'The pattern is too big: its program has more than %{MaxInsts} instructions. Lower the repetition counts.'
         self.err_pos = 0
@@ -1240,7 +1240,7 @@ fn (&Builder) emit(op int, a int, b int) -> !int:
     return self.insts.len() / 3 - 1
 
 -- Emits a split whose first way enters the code that follows it. Returns the split, to set its other way later.
-fn (&Builder) split_enter(greedy bool) -> !int:
+fn (&&Builder) split_enter(greedy bool) -> !int:
     s := self.emit(OpSplit, 0, 0)!
     if greedy:
         self.insts[s * 3 + 1] = s + 1
@@ -1256,7 +1256,7 @@ fn (&Builder) split_leave(s int, greedy bool):
         self.insts[s * 3 + 1] = self.pc()
 
 -- Emits a split that goes back to `top` first when greedy, and on to the next instruction otherwise.
-fn (&Builder) split_back(top int, greedy bool) -> !void:
+fn (&&Builder) split_back(top int, greedy bool) -> !void:
     s := self.emit(OpSplit, 0, 0)!
     if greedy:
         self.insts[s * 3 + 1] = top
@@ -1265,13 +1265,13 @@ fn (&Builder) split_back(top int, greedy bool) -> !void:
         self.insts[s * 3 + 1] = s + 1
         self.insts[s * 3 + 2] = top
 
-fn (&Builder) gen_all(root int) -> !void:
+fn (&&Builder) gen_all(root int) -> !void:
     _ = self.emit(OpSave, 0, 0)!
     self.gen(root)!
     _ = self.emit(OpSave, 1, 0)!
     _ = self.emit(OpMatch, 0, 0)!
 
-fn (&Builder) gen(n int) -> !void:
+fn (&&Builder) gen(n int) -> !void:
     self.work += 1
     if self.work > MaxInsts * 8:
         self.msg = 'The pattern is too big: it repeats too many times. Lower the repetition counts.'
@@ -1314,7 +1314,7 @@ fn (&Builder) gen(n int) -> !void:
         else:
             self.gen_repeat(node)!
 
-fn (&Builder) gen_repeat(node Node) -> !void:
+fn (&&Builder) gen_repeat(node Node) -> !void:
     greedy := node.d == 1
     child := node.a
     if node.c == -1:

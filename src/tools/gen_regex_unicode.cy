@@ -93,7 +93,7 @@ fn (&Tables) find(name str) -> ?int:
             return i
     return none
 
-fn (&Tables) add(name str, r int):
+fn (&&Tables) add(name str, r int):
     if self.find(name) |i|:
         self.list[i].ranges.append(r)
     else:

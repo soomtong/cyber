@@ -33,7 +33,7 @@ fn caps(src str, s str) -> str:
 fn err_of(src str) -> str:
     var diag peg.Diag = {}
     try:
-        _ = peg.compile(src, &diag)!
+        _ = peg.compile(src, &&diag)!
     else |err|:
         return '%{err} %{diag.pos}: %{diag.msg}'
     return 'ok'
@@ -44,7 +44,7 @@ fn parse_err(src str, s str) -> str:
         return 'grammar'
     var diag peg.Diag = {}
     try:
-        _ = p.parse(s, &diag)!
+        _ = p.parse(s, &&diag)!
     else |err|:
         return '%{err} %{diag.pos}: %{diag.msg}'
     return 'ok'
@@ -374,7 +374,7 @@ t.eq('error.Syntax 0: The grammar is not valid UTF-8.', err_of(str([]byte{'\'', 
 -- The line and the column of an error.
 var gd peg.Diag = {}
 try:
-    _ = peg.compile("a <- 'x'\nb <- 'y' | 'z'", &gd)!
+    _ = peg.compile("a <- 'x'\nb <- 'y' | 'z'", &&gd)!
 else:
     pass
 t.eq(2, gd.line)
@@ -418,7 +418,7 @@ t.eq("error.NoMatch 3: Expected `'나'` at line 1, column 4, found `다`.", pars
 t.eq("error.NoMatch 1: Expected `'c'` at line 1, column 2, found `b`.", parse_err("'a' !('b' 'x') 'c'", 'ab'))
 var pd peg.Diag = {}
 try:
-    _ = peg.compile("list <- '(' item (',' %s* item)* ')'\nitem <- list / %d+")!.parse('(1,\n2,\nx)', &pd)!
+    _ = peg.compile("list <- '(' item (',' %s* item)* ')'\nitem <- list / %d+")!.parse('(1,\n2,\nx)', &&pd)!
 else:
     pass
 t.eq(3, pd.line)

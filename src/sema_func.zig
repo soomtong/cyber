@@ -595,6 +595,10 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
             ret_parent_scope_local = arg_res.recParentLocal();
         }
         arg_owners[arg_idx] = sema.borrowOwner(c, arg_res);
+        if (!arg_res.type.isManaged() and !arg_res.type.info.borrow_only and !arg_res.type.isPointer()) {
+            // A plain value (`self.pos`) is copied into the call. It borrows nothing.
+            arg_owners[arg_idx] = null;
+        }
         arg_ex[arg_idx] = arg_res.type.kind() == .ex_borrow;
         if (arg_ex[arg_idx] and param.get_type().kind() == .ex_borrow and sema.readThroughShared(arg_res.ir)) {
             return c.reportError("Cannot use an exclusive borrow that is read through a shared borrow.", arg.node);

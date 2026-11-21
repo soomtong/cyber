@@ -7,11 +7,6 @@ fn set_ptr(p Ptr[[]int]):
     p.* = r
     t.eq(2, r.len())
 
-fn set_borrow(p &[]str):
-    r := []str{'a' + 'b'}
-    p.* = r
-    t.eq('ab', r[0])
-
 fn set_ex_borrow(p &&[]str):
     r := []str{'c' + 'd', 'e' + 'f'}
     p.* = r
@@ -23,8 +18,6 @@ t.eq(2, xs.len())
 t.eq(2, xs[1])
 
 ss := []str{'x' + 'y'}
-set_borrow(&ss)
-t.eq('ab', ss[0])
 set_ex_borrow(&&ss)
 t.eq(2, ss.len())
 t.eq('ef', ss[1])

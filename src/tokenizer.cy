@@ -325,7 +325,7 @@ fn (&Tokenizer) peekAhead(steps int) -> ?byte:
 fn (&Tokenizer) advance():
     self.next_pos += 1
 
-fn (&Tokenizer) tokenize() -> !void:
+fn (&&Tokenizer) tokenize() -> !void:
     self.tokens.clear()
     self.next_pos = 0
 
@@ -375,7 +375,7 @@ fn (&Tokenizer) tokenize() -> !void:
                 break
 
 -- Consumes the next token skipping whitespace and returns the next tokenizer state.
-fn (&Tokenizer) tokenizeOne(state TokenizeState) -> !TokenizeState:
+fn (&&Tokenizer) tokenizeOne(state TokenizeState) -> !TokenizeState:
     if self.isAtEnd():
         return {tag=.end}
 
@@ -654,7 +654,7 @@ fn (&Tokenizer) tokenizeOne(state TokenizeState) -> !TokenizeState:
     return {tag=.token}
 
 -- Returns true if an indent or new line token was parsed.
-fn (&Tokenizer) tokenizeIndentOne() -> bool:
+fn (&&Tokenizer) tokenizeIndentOne() -> bool:
     if self.isAtEnd():
         return false
 
@@ -700,7 +700,7 @@ fn (&Tokenizer) tokenizeIndentOne() -> bool:
         else: return false
 
 -- Returns the next tokenizer state.
-fn (&Tokenizer) tokenizeStringOne(start int, state TokenizeState) -> !TokenizeState:
+fn (&&Tokenizer) tokenizeStringOne(start int, state TokenizeState) -> !TokenizeState:
     save := self.next_pos
     while:
         if self.isAtEnd():
@@ -854,7 +854,7 @@ fn (&Tokenizer) consumeIdent():
 
 -- With `ignore_errors`, an unterminated string becomes one `err` token from its quote to the end of the line or the
 -- source, and tokenizing goes on after it. The new line is left for the next token.
-fn (&Tokenizer) unterminatedString(start int) -> TokenizeState:
+fn (&&Tokenizer) unterminatedString(start int) -> TokenizeState:
     self.pushToken(.err, start)
     return {tag=.token}
 
@@ -902,7 +902,7 @@ fn (&Tokenizer) isNext(ch byte, lookahead int) -> bool:
         return false
     return self.src[self.next_pos + lookahead] == ch
 
-fn (&Tokenizer) tokenizeKeywordOrIdent(start int):
+fn (&&Tokenizer) tokenizeKeywordOrIdent(start int):
     self.consumeIdent()
     if self.keywords.get(self.src[start..self.next_pos]) |token_t|:
         self.pushToken(token_t, start)
@@ -910,7 +910,7 @@ fn (&Tokenizer) tokenizeKeywordOrIdent(start int):
         self.pushToken(.ident, start)
 
 -- Assumes first digit is consumed.
-fn (&Tokenizer) tokenizeNumber(start int) -> !void:
+fn (&&Tokenizer) tokenizeNumber(start int) -> !void:
     if self.isAtEnd():
         self.pushToken(.dec, start)
         return
@@ -1024,13 +1024,13 @@ fn (&Tokenizer) tokenizeNumber(start int) -> !void:
     self.pushToken(.dec, start)
     return
 
-fn (&Tokenizer) pushIndentToken(count int, start_pos int, spaces bool):
+fn (&&Tokenizer) pushIndentToken(count int, start_pos int, spaces bool):
     self.tokens += Token.indent(i32(start_pos), if (spaces) i32(count) else i32(count) || 0x80000000)
 
-fn (&Tokenizer) pushToken(token_t TokenType, start_pos int):
+fn (&&Tokenizer) pushToken(token_t TokenType, start_pos int):
     self.tokens += Token(token_t, i32(start_pos), i32(self.next_pos))
 
-fn (&Tokenizer) pushToken2(token_t TokenType, start_pos int, end_pos int):
+fn (&&Tokenizer) pushToken2(token_t TokenType, start_pos int, end_pos int):
     self.tokens += Token(token_t, i32(start_pos), i32(end_pos))
 
 fn (&Tokenizer) reportError(msg str) -> error:

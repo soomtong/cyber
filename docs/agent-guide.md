@@ -49,7 +49,7 @@ Syntax. Each line is Python, then the Cyber form.
 - `a // b` becomes `a / b`. Integer division truncates toward zero. `//` is an error. Power `**` is the same.
 - `import math` becomes `use math`. For a file: `use g 'geo.cy'`
 - A function is declared only at the top level, not inside `if`, `for` or another function.
-- `class P:` becomes `type P:` with fields such as `name str` below it. A method is `fn (&P) m():` and uses `self` inside. A method that changes the value is `fn (&&P) m():`.
+- `class P:` becomes `type P:` with fields such as `name str` below it. A method is `fn (&P) m():` and uses `self` inside. A method that changes the value is `fn (&&P) m():`. A `&P` method can write a number or bool field, but not a `str`, list or Map field: 'Cannot replace a managed value through a shared borrow.' or 'Cannot borrow exclusively through a shared borrow.' means that the method needs `&&P`.
 - `P(name='a', n=1)` becomes `P{name='a', n=1}`. A field is set with `=`, not `:`.
 - `print(a, b)` becomes `print(x)`. It takes exactly one argument. Join values with interpolation.
 - `len(xs)` becomes `xs.len()`. It is a method. `xs.len` is an error.

@@ -309,10 +309,7 @@
 
 ### 남은 구멍
 
-`&self` 메서드 안의 관리형 필드 대입(`fn (&Foo) reset(): self.xs = {7}`에 `s := &f.xs[0]`을 둔 채 `f.reset()`)은 그대로다.
-`&self` 메서드 안에서 필드에 제자리 메서드를 부르는 것(`self.xs.append(v)`)도 같다. `&T`로 값을 바꿀 수 있다는 언어 규칙에서
-오고, 막으면 표준 라이브러리 · 도구 · 테스트의 179곳 이상이 걸린다(`project_borrow_model.md` "R6 다시 재기"). 값을 바꾸는
-메서드의 수신자를 `&&T`로 선언하면 부르는 자리에서 검사된다. 나머지는 아래 절에서 고쳤다.
+`&self` 메서드 안의 관리형 필드 대입은 아래 "공유 빌림을 거친 쓰기" 절에서 막았다. 나머지는 다음 절에서 고쳤다.
 
 ## 배타 빌림을 담은 값 · 버퍼 속 빌림 · 주인이 여럿인 컨테이너 (2026-11-21, 깨지는 변경)
 
@@ -351,3 +348,45 @@
 - 테스트: `memory/ex_borrow_container_pass_error.cy`, `ex_borrow_option_error.cy`, `ex_borrow_through_shared_error.cy`,
   `borrow_in_buffer_error.cy`, `borrow_container_two_owners_error.cy`, `borrow_container_field_store_error.cy`.
   `types/method_mut_self_array_field.cy`는 컨테이너를 블록에 넣었다.
+
+## 공유 빌림을 거친 쓰기 (2026-11-21, 깨지는 변경)
+
+공유 빌림 `&T`로는 그 뒤의 관리형 값을 바꾸지 못한다. 전에는 컴파일되고, 부르는 쪽이 든 다른 빌림이 해제된 메모리를 읽었다
+(0.4.15에도 있다, F-169). 결정과 구현은 `docs/decisions/project_borrow_model.md` "R6 구현".
+
+### 새로 컴파일 오류가 되는 코드
+
+- `&T`를 거친 자리의 제자리 메서드와 `&&`: `fn (&Foo) grow(): self.xs.append(1)`, `fn add(xs &[]int): xs.append(1)`.
+  'Cannot borrow exclusively through a shared borrow. Declare the borrow as `&&T`.'
+- `&T`를 거친 관리형 값의 대입: `fn (&Foo) reset(): self.xs = {}`, `self.name = 'x'`, `self.items[i].name = 'x'`,
+  `fn set(p &[]int): p.* = {9}`. 'Cannot replace a managed value through a shared borrow. Declare the borrow as `&&T`.'
+- 고치는 법: 수신자 · 매개변수를 `&&T`로 선언한다(`fn (&&Foo) grow()`, `fn fill(out &&[]int)`). 부르는 쪽이 빌림을 직접 쓰면
+  `&&x`로 넘긴다. 메서드 호출 `f.grow()`는 그대로다.
+- `&&T`로 바꾸면 부르는 자리가 배타 접근을 요구한다. 같은 값의 빌림을 든 채 부르면 'Expected exclusive access. There is another
+  active borrow to `f`.', 그 값을 순회하는 중에 부르면(`for self.names |n|: ... self.fail(...)`) 같은 오류다. 인덱스로 돈다
+  (`for 0..self.names.len() |i|`).
+- 참조 `^T`로 `&&` 메서드를 부르려면 `r.*.m(...)`로 쓴다(이미 있던 규칙, 오류 문구가 알려 준다).
+
+### 표준 라이브러리에서 바뀐 서명
+
+- 진단을 받는 매개변수가 `&&Diag`가 됐다. 호출은 `&diag`가 아니라 `&&diag`다: `json.parse` · `json.decode` · `json.to`,
+  `toon.decode`, `regex.compile`, `peg.compile` · `Peg.parse`, `time.parse` · `parse_format` · `parse_date` · `parse_zoned`.
+  옛 꼴은 'Expected argument `&>Diag`, found `&Diag`'.
+- `json.Object`의 `set` · `remove` 수신자가 `&&Object`다.
+- `Scope`의 `start` · `join` · `abort` 수신자가 `&&Scope`다. `scope |s|:` 블록의 `s.start(...)`는 그대로고, `^Scope`에 담은
+  scope는 `s.*.start(...)` · `s.*.join()`으로 부른다.
+
+### 그대로 되는 코드
+
+- 관리형이 아닌 값의 쓰기: `fn (&Foo) count(): self.n += 1`, `fn bump(n &int): n.* += 1`.
+- 참조 · 포인터 뒤의 값: `self.node.xs.append(1)`(`node ^Node`).
+- `@deinit` 본문. 수신자는 `&T` 그대로 두고 필드를 바꿀 수 있다.
+- `&&self` 메서드에 `self`에서 읽은 관리형이 아닌 값을 넘기는 것: `self.fail(self.pos, msg)`. 전에는 'Cannot pass an exclusive
+  borrow of `self` with another argument that borrows `self`.'였다.
+
+### 구현
+
+- `sema.placeThroughShared` · `checkNoWriteThroughShared`(검사 자리는 `checkFieldWriteAccess`, `sema_ex_borrow2`).
+  `sema_func.matchFuncSig`는 복사되는 인자를 주인 충돌에서 뺀다.
+- 테스트: `memory/shared_borrow_append_error.cy`, `shared_borrow_assign_error.cy`, `shared_borrow_index_assign_error.cy`,
+  `shared_borrow_deref_assign_error.cy`, `shared_borrow_write.cy`.

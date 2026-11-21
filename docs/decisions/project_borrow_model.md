@@ -254,7 +254,7 @@ sema의 빌림 검사는 세 조각이 서로 맞물리지 않았다.
 
 ### R6 다시 재기 (2026-11-21)
 
-상태: 조사만. 결정은 사용자(0.5 뒤). 위 5안의 "59건 이상"은 첫 실패에서 멈춘 하한이었고 꼴도 하나만 셌다.
+상태: 안 A로 구현됨(아래 "R6 구현"). 조사 때는 결정을 사용자에게 남겼다. 위 5안의 "59건 이상"은 첫 실패에서 멈춘 하한이었고 꼴도 하나만 셌다.
 
 - 구멍은 관리형 필드 대입보다 넓다. `&T`를 거친 자리에서 `&&`를 만드는 것도 같다:
   `fn (&Foo) grow(): for 0..100 |i|: self.xs.append(i)`에 `s := &f.xs[0]`을 둔 채 `f.grow()`, `print(s.*)`는 해제된 버퍼를
@@ -289,3 +289,29 @@ sema의 빌림 검사는 세 조각이 서로 맞물리지 않았다.
   - C. 그대로 두고 한계로 적는다.
 - 추천: A를 0.5 뒤 첫 언어 결정으로. B는 닫지 못하는 길이 남아 들인 복잡도만큼의 보장이 없다. A를 하면 먼저 경고(LSP 힌트)로
   한 판 내보내 고칠 자리를 보이고, 다음 판에서 오류로 올리는 순서가 깨지는 폭을 줄인다.
+
+### R6 구현 (2026-11-21)
+
+결정(2026-11-21, 사용자): "다음 판에서 오류로 할 필요 없음. 이 버전에서 잡고 넘어간다. 1.0 전까지 깨지는 것을 허용한다." 경고
+단계 없이 안 A를 오류로 넣었다.
+
+- 규칙: 공유 빌림 `&T`를 거쳐 닿는 자리에서는 관리형 값을 바꾸지 못하고(대입 · 원소 대입 · `p.* = v`) `&&`를 만들지 못한다
+  (제자리 메서드 `self.xs.append(v)`, `&&self.xs`). 'Cannot replace a managed value through a shared borrow. Declare the borrow as
+  `&&T`.', 'Cannot borrow exclusively through a shared borrow. Declare the borrow as `&&T`.'
+- 그대로 되는 것: 관리형이 아닌 값의 대입(`self.n += 1`, `n.* += 1`), 참조 · 포인터 뒤(`self.node.xs.append(1)`의 `node ^Node`),
+  `@deinit` 본문(끝나는 값에 닿는 것은 소멸자뿐이다).
+- 판정 `sema.placeThroughShared`: IR 경로(`deref` · `field` · `address_of`)를 뿌리 쪽으로 따라가며 타입이 `&T`인 식을 만나면
+  참, 포인터를 만나면 거짓. 빌림을 돌려주는 호출(`@index_addr`)은 첫 인자(수신자)를 따라간다. 검사 자리는
+  `checkFieldWriteAccess`(관리형 대입 넷)와 `sema_ex_borrow2`(`&&` 생성).
+- 같이 푼 것: `&&` 인자와 주인이 같은 다른 인자의 충돌 검사(`matchFuncSig`)에서 관리형도 빌림도 포인터도 아닌 값은 뺀다
+  (`self.fail(self.pos, msg)`). 복사되는 값이라 빌리는 것이 없다. 이것이 없으면 `&&self` 메서드를 거의 쓸 수 없다.
+- 옮긴 것: core `Scope`의 `start` · `join` · `abort` · `@deinit`과 `@scope_join` · `@scope_abort`(`scope` 블록은 배타 빌림을
+  넘긴다), `PtrSpan.set_backwards`(포인터 색인으로), std `json` · `toon` · `regex` · `peg` · `time`의 `diag &Diag` → `&&Diag`와
+  내부 `Parser` · `Writer` · `Builder` · `Scan` · `Decoder` · `Encoder`의 수신자, `json.Object.set` · `remove`, `cy`의 `REPL`,
+  `src/tokenizer.cy`, 도구 · 예제. `Peg` · `Regex` · `Date` 같은 값의 메서드는 `&` 그대로다.
+- 따라 깨지는 것: `^T`로 `&&` 메서드를 부르면 'write `s.*.start(...)`'(이미 있던 규칙). `^Scope`에 `start` · `join`을 부르던 코드가
+  걸린다. 순회 중 `&&self` 메서드 호출(규칙 7)은 인덱스 순회로 바꾼다(`peg` · `regex`에서 한 곳씩).
+- 방법: 검사를 기록 모드로 두고 저장소의 `.cy`를 모두 컴파일해 자리를 모은 뒤 수신자를 바꾸고, 오류 모드에서 연쇄를 따라갔다.
+  끝에 변경 전 CLI와 새 CLI로 `.cy` 전부를 돌려 첫 오류 · 종료 코드가 달라진 파일이 의도한 것뿐인지 봤다.
+- 남은 것: 인스턴스화되지 않은 템플릿 본문은 쓰일 때 걸린다. `^T` 참조 뒤의 값은 여전히 세지 않는다(참조는 공유 소유).
+

@@ -17,7 +17,7 @@ for doc.as_array().? |c|:
     var diag regex.Diag = {}
     var re ?regex.Regex = none
     try:
-        re = regex.compile(pat, &diag)!
+        re = regex.compile(pat, &&diag)!
     else:
         pass
     rejected := c['matches'].is_null()

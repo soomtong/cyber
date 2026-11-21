@@ -16,7 +16,7 @@ fn spans(pat str, s str) -> str:
 fn err_of(pat str) -> str:
     var diag regex.Diag = {}
     try:
-        _ = regex.compile(pat, &diag)!
+        _ = regex.compile(pat, &&diag)!
     else |err|:
         return '%{err} %{diag.pos}: %{diag.msg}'
     return 'ok'

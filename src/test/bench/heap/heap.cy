@@ -11,7 +11,7 @@ type Heap:
 fn Heap :: @init() -> Heap:
     return {nodes={}}
 
-fn (&Heap) insert(n Node):
+fn (&&Heap) insert(n Node):
     pos := self.nodes.len()
     self.nodes.append(n)
     self.sift_up(pos)
@@ -48,7 +48,7 @@ fn (&Heap) swap(a int, b int):
     self.nodes[a] = self.nodes[b]
     self.nodes[b] = temp
 
-fn (&Heap) pop() -> Node:
+fn (&&Heap) pop() -> Node:
     top := self.nodes[0]
     self.nodes[0] = self.nodes[self.nodes.len() - 1]
     self.nodes.remove(self.nodes.len() - 1)

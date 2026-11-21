@@ -59,7 +59,7 @@ t.eq('{"s":"a:b","k":"-x"}', dec('# comment\ns: "a:b"\n\nk: -x\n'))
 t.eq('"hello"', dec('hello'))
 t.eq('{}', dec(''))
 t.eq('[]', dec('[]'))
-t.eq('{"a":{"b":1}}', json.stringify(toon.decode('a:\n    b: 1', {indent=4}, &{})!))
+t.eq('{"a":{"b":1}}', json.stringify(toon.decode('a:\n    b: 1', {indent=4}, &&json.Diag{})!))
 
 -- Round trip.
 src := '{"users":[{"id":1,"name":"Ada","tags":["a"]},{"id":2,"name":"Bob","tags":[]}],"meta":{"page":1,"next":null},"m":{"x":{"v":1.5},"y":{"v":-2}}}'
@@ -67,30 +67,30 @@ t.eq(src, toon.to_json(toon.from_json(src)!)!)
 
 -- Errors.
 var diag json.Diag = {}
-fn fails(src str, opts toon.DecodeOptions, diag &json.Diag) -> bool:
+fn fails(src str, opts toon.DecodeOptions, diag &&json.Diag) -> bool:
     _ = toon.decode(src, opts, diag) !else:
         return true
     return false
 
-t.eq(true, fails('a[3]: 1,2', {}, &diag))
+t.eq(true, fails('a[3]: 1,2', {}, &&diag))
 t.eq('The header declares 3 values, found 2.', diag.msg)
 t.eq(1, diag.line)
-t.eq(false, fails('a[3]: 1,2', {strict=false}, &diag))
-t.eq(true, fails('a: 1\n   b: 2', {}, &diag))
+t.eq(false, fails('a[3]: 1,2', {strict=false}, &&diag))
+t.eq(true, fails('a: 1\n   b: 2', {}, &&diag))
 t.eq(2, diag.line)
-t.eq(true, fails('a: 1\na: 2', {}, &diag))
+t.eq(true, fails('a: 1\na: 2', {}, &&diag))
 t.eq('Duplicate key `a`.', diag.msg)
-t.eq(true, fails('t[2]{a,b}:\n  1,2\n  3', {}, &diag))
+t.eq(true, fails('t[2]{a,b}:\n  1,2\n  3', {}, &&diag))
 t.eq(3, diag.line)
-t.eq(true, fails('a: "x\\q"', {}, &diag))
-t.eq(true, fails('a[2]{x}', {}, &diag) == false)
-t.eq(true, fails('a\nb', {}, &diag))
-t.eq(true, fails('[1]: x\nb: 1', {}, &diag))
+t.eq(true, fails('a: "x\\q"', {}, &&diag))
+t.eq(true, fails('a[2]{x}', {}, &&diag) == false)
+t.eq(true, fails('a\nb', {}, &&diag))
+t.eq(true, fails('[1]: x\nb: 1', {}, &&diag))
 t.eq(error.Unicode, toon.decode(str([]byte{0x61, 0x3a, 0x20, 0xff})).unwrap_error())
 t.eq(error.Unicode, toon.encode(json.Value.str(str([]byte{0xff}))).unwrap_error())
 
 -- A `number` encodes in canonical form, and `exact` keeps decoded numbers as text.
 t.eq('[3]: 9223372036854775808,1e+999,0.1', enc('[9223372036854775808, 1e999, 0.1000000000000000055511151231257827]'))
-t.eq('{"a":[1.50,2]}', json.stringify(toon.decode('a[2]: 1.50,2', toon.DecodeOptions{exact=true}, &diag)!))
+t.eq('{"a":[1.50,2]}', json.stringify(toon.decode('a[2]: 1.50,2', toon.DecodeOptions{exact=true}, &&diag)!))
 
 --cytest: pass

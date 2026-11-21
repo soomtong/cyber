@@ -59,7 +59,7 @@ for files |f|:
             var diag json.Diag = {}
             strict := opts['strict'].as_bool() ?else true
             try:
-                got := toon.decode(test['input'].as_str().?, {indent=indent, strict=strict}, &diag)!
+                got := toon.decode(test['input'].as_str().?, {indent=indent, strict=strict}, &&diag)!
                 ok = !should_err and same(got, test['expected'])
             else:
                 ok = should_err

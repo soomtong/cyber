@@ -154,7 +154,7 @@ fn leaf(out ^int):
     out.* += 1
 fn spawner(s ^Scope, out ^int, n int):
     for 0..n |i|:
-        s.start(leaf, {out})
+        s.*.start(leaf, {out})
         suspend
 fn long_run(out ^int, n int):
     for 0..n |i|:
@@ -162,13 +162,13 @@ fn long_run(out ^int, n int):
     out.* += 1
 dyn_total := ^0
 dyn := ^Scope.new()
-dyn.start(spawner, {dyn, dyn_total, 40})
-dyn.start(spawner, {dyn, dyn_total, 40})
+dyn.*.start(spawner, {dyn, dyn_total, 40})
+dyn.*.start(spawner, {dyn, dyn_total, 40})
 for 0..500 |i|:
-    dyn.start(leaf, {dyn_total})
-dyn.start(long_run, {dyn_total, 2000})
+    dyn.*.start(leaf, {dyn_total})
+dyn.*.start(long_run, {dyn_total, 2000})
 test.eq(dyn.active(), 503)
-dyn.join()!
+dyn.*.join()!
 test.eq(dyn_total.*, 581)
 test.eq(dyn.active(), 0)
 

@@ -21,7 +21,7 @@
 --|
 --| var diag peg.Diag = {}
 --| try:
---|     _ = p.parse('(1,)', &diag)!
+--|     _ = p.parse('(1,)', &&diag)!
 --| else |err|:
 --|     print(diag.msg)   --> Expected `'('` or `%d` at line 1, column 4, found `)`.
 --| ```
@@ -154,10 +154,10 @@ const NBackref = 11  -- a: name
 --| is left recursive or repeats something that can match nothing, and `error.TooBig` for one that is over `MaxInsts`.
 fn compile(grammar str) -> !Peg:
     var diag Diag = {}
-    return compile(grammar, &diag)
+    return compile(grammar, &&diag)
 
 --| Compiles a grammar. On failure, `diag` tells where and why.
-fn compile(grammar str, diag &Diag) -> !Peg:
+fn compile(grammar str, diag &&Diag) -> !Peg:
     diag.* = Diag{}
     if !str.is_utf8(grammar.span()):
         diag.msg = 'The grammar is not valid UTF-8.'
@@ -170,7 +170,7 @@ fn compile(grammar str, diag &Diag) -> !Peg:
         return err
     return Peg{prog=b.assemble(), names=b.names, strs=b.strs, exp_pc=b.exp_pc, exp_txt=b.exp_txt, src=grammar}
 
--fn set_line_col(diag &Diag, s str):
+-fn set_line_col(diag &&Diag, s str):
     line := 1
     last := 0
     for 0..diag.pos |i|:
@@ -192,7 +192,7 @@ fn (&Peg) source() -> str:
     return Run{out=[]int(OutLen, 0), caps=[]int(192, 0)}
 
 -- Runs the program. A capture log that does not fit in `r.caps` comes back in a bigger slice, which is kept.
--fn (&Peg) run(s str, start int, mode int, r &Run) -> int:
+-fn (&Peg) run(s str, start int, mode int, r &&Run) -> int:
     while:
         grown := exec(self.prog.span(), s, start, mode, r.out.span(), r.caps.span(), type.id(RawBuffer[byte]))
         if grown.len() > 0:
@@ -218,7 +218,7 @@ fn (&Peg) match(s str, start int) -> ?Capture:
     if start < 0 or start > s.len():
         return none
     r := new_run()
-    if !check(self.run(s, start, 0, &r)):
+    if !check(self.run(s, start, 0, &&r)):
         return none
     return self.tree(s, &r)
 
@@ -226,14 +226,14 @@ fn (&Peg) match(s str, start int) -> ?Capture:
 --| `error.TooDeep` when the match is over `MaxStack` and `error.TooBig` when it is over `MaxCaptures`.
 fn (&Peg) parse(s str) -> !Capture:
     var diag Diag = {}
-    return self.parse(s, &diag)
+    return self.parse(s, &&diag)
 
 --| Matches all of `s`. On failure, `diag` tells the farthest place that the match reached and what the grammar
 --| expected there.
-fn (&Peg) parse(s str, diag &Diag) -> !Capture:
+fn (&Peg) parse(s str, diag &&Diag) -> !Capture:
     diag.* = Diag{}
     r := new_run()
-    res := self.run(s, 0, ModeTrack, &r)
+    res := self.run(s, 0, ModeTrack, &&r)
     if res == ResStack:
         diag.msg = 'The match has more than %{MaxStack} open rule calls and choices.'
         return error.TooDeep
@@ -314,7 +314,7 @@ fn (&Peg) find(s str, start int) -> ?Capture:
     if start < 0 or start > s.len():
         return none
     r := new_run()
-    if !check(self.run(s, start, ModeSearch, &r)):
+    if !check(self.run(s, start, ModeSearch, &&r)):
         return none
     return self.tree(s, &r)
 
@@ -333,7 +333,7 @@ fn (&Peg) find_all(s str) -> []Capture:
     at := 0
     last_end := -1
     while at <= s.len():
-        if !check(self.run(s, at, ModeSearch, &r)):
+        if !check(self.run(s, at, ModeSearch, &&r)):
             break
         start := r.out[OutStart]
         end := r.out[OutEnd]
@@ -682,12 +682,12 @@ fn (&Capture) expand(repl str) -> str:
     -- Set by `parse_percent` for a class such as `%D` outside brackets.
     negated bool = false
 
-fn (&Builder) fail(msg str) -> error:
+fn (&&Builder) fail(msg str) -> error:
     self.msg = msg
     self.err_pos = self.pos
     return error.Syntax
 
-fn (&Builder) fail_at(pos int, msg str) -> error:
+fn (&&Builder) fail_at(pos int, msg str) -> error:
     self.msg = msg
     self.err_pos = pos
     return error.Syntax
@@ -720,18 +720,18 @@ fn (&Builder) skip():
         else:
             return
 
-fn (&Builder) add(node Node) -> !int:
+fn (&&Builder) add(node Node) -> !int:
     if node.depth > MaxDepth:
         return self.fail_at(node.from, 'The grammar nests deeper than %{MaxDepth} levels.')
     self.nodes.append(node)
     return self.nodes.len() - 1
 
-fn (&Builder) enter() -> !void:
+fn (&&Builder) enter() -> !void:
     self.depth += 1
     if self.depth > MaxDepth:
         return self.fail('The grammar nests deeper than %{MaxDepth} levels.')
 
-fn (&Builder) name_id(name str) -> int:
+fn (&&Builder) name_id(name str) -> int:
     for 0..self.names.len() |i|:
         if self.names[i] == name:
             return i
@@ -756,7 +756,7 @@ fn (&Builder) at_rule() -> bool:
     self.pos = save
     return res
 
-fn (&Builder) build() -> !void:
+fn (&&Builder) build() -> !void:
     self.skip()
     if self.at_rule():
         while self.pos < self.src.len():
@@ -764,8 +764,8 @@ fn (&Builder) build() -> !void:
                 break
             at := self.pos
             name := self.read_name()
-            for self.rules |r|:
-                if r == name:
+            for 0..self.rules.len() |i|:
+                if self.rules[i] == name:
                     return self.fail_at(at, 'The rule `%{name}` is defined twice.')
             self.skip()
             self.pos += 2
@@ -792,7 +792,7 @@ fn (&Builder) build() -> !void:
     self.gen_all()!
 
 -- alt := seq ('/' seq)*
-fn (&Builder) parse_alt() -> !int:
+fn (&&Builder) parse_alt() -> !int:
     self.enter()!
     from := self.pos
     var branches []int = {}
@@ -808,7 +808,7 @@ fn (&Builder) parse_alt() -> !int:
         return branches[0]
     return self.join(NAlt, branches, from)
 
-fn (&Builder) join(kind int, items []int, from int) -> !int:
+fn (&&Builder) join(kind int, items []int, from int) -> !int:
     start := self.kids.len()
     depth := 0
     for items |n|:
@@ -817,7 +817,7 @@ fn (&Builder) join(kind int, items []int, from int) -> !int:
             depth = self.nodes[n].depth
     return self.add(Node{kind=kind, a=start, b=items.len(), from=from, to=self.pos, depth=depth + 1})
 
-fn (&Builder) parse_seq() -> !int:
+fn (&&Builder) parse_seq() -> !int:
     self.skip()
     from := self.pos
     var items []int = {}
@@ -837,7 +837,7 @@ fn (&Builder) parse_seq() -> !int:
         return items[0]
     return self.join(NSeq, items, from)
 
-fn (&Builder) parse_prefix() -> !int:
+fn (&&Builder) parse_prefix() -> !int:
     c := self.peek()
     if c != '&' and c != '!':
         return self.parse_suffix()
@@ -855,7 +855,7 @@ fn (&Builder) parse_prefix() -> !int:
         kind = NNot
     return self.add(Node{kind=kind, a=child, from=from, to=self.pos, depth=self.nodes[child].depth + 1})
 
-fn (&Builder) parse_number(what str) -> !int:
+fn (&&Builder) parse_number(what str) -> !int:
     start := self.pos
     n := 0
     while is_digit(self.peek()):
@@ -871,10 +871,10 @@ fn (&Builder) parse_number(what str) -> !int:
         return error.TooBig
     return n
 
-fn (&Builder) rep(child int, min int, max int, from int) -> !int:
+fn (&&Builder) rep(child int, min int, max int, from int) -> !int:
     return self.add(Node{kind=NRep, a=child, b=min, c=max, from=from, to=self.pos, depth=self.nodes[child].depth + 1})
 
-fn (&Builder) parse_suffix() -> !int:
+fn (&&Builder) parse_suffix() -> !int:
     from := self.pos
     node := self.parse_primary()!
     while:
@@ -923,7 +923,7 @@ fn (&Builder) parse_suffix() -> !int:
     return node
 
 -- Reads the string after `->` and checks its `%` references.
-fn (&Builder) parse_template() -> !str:
+fn (&&Builder) parse_template() -> !str:
     at := self.pos
     lit := self.parse_literal()!
     var buf []byte = {}
@@ -948,7 +948,7 @@ fn (&Builder) parse_template() -> !str:
     b int
 
 -- Reads an escape after `\` in a literal or a class and returns its code point.
-fn (&Builder) parse_escape() -> !int:
+fn (&&Builder) parse_escape() -> !int:
     at := self.pos - 1
     c := self.peek()
     if c == -1:
@@ -997,7 +997,7 @@ fn (&Builder) parse_escape() -> !int:
             return self.fail_at(at, 'Unknown escape `\\%{str.init_rune(cp)}`. The escapes are `\\n \\r \\t \\\\ \\\' \\" \\[ \\] \\- \\^ \\xHH \\u{H..}`.')
 
 -- Reads a literal in quotes into `lits`.
-fn (&Builder) parse_literal() -> !Lit:
+fn (&&Builder) parse_literal() -> !Lit:
     open := self.pos
     quote := self.peek()
     self.pos += 1
@@ -1021,7 +1021,7 @@ fn (&Builder) parse_literal() -> !Lit:
     return Lit{a=start, b=self.lits.len() - start}
 
 -- Adds a set of code point ranges to `sets` and returns its node.
-fn (&Builder) set_node(ranges []int, negated bool, from int) -> !int:
+fn (&&Builder) set_node(ranges []int, negated bool, from int) -> !int:
     off := self.sets.len()
     lo := 0
     hi := 0
@@ -1049,7 +1049,7 @@ fn (&Builder) set_node(ranges []int, negated bool, from int) -> !int:
     return self.add(Node{kind=NSet, a=off, from=from, to=self.pos})
 
 -- Reads the letter of a `%x` class after the `%` and returns its ranges.
-fn (&Builder) parse_percent(in_class bool) -> ![]int:
+fn (&&Builder) parse_percent(in_class bool) -> ![]int:
     at := self.pos - 1
     c := self.peek()
     if c == '{':
@@ -1072,7 +1072,7 @@ fn (&Builder) parse_percent(in_class bool) -> ![]int:
         return self.fail('In a class, the name of a class goes on to the last letter, digit or `_`, so this reads as `' + '%' + name + '`. Put the other characters first: `[' + name[1..] + '%' + name[0..1] + ']`.')
     return self.fail('Unknown class `' + '%' + name + '`. The classes are `%a %c %d %g %l %p %s %u %w %x`, their upper case forms for the opposite, and `%nl`.')
 
-fn (&Builder) parse_class() -> !int:
+fn (&&Builder) parse_class() -> !int:
     open := self.pos
     self.pos += 1
     negated := false
@@ -1115,20 +1115,20 @@ fn (&Builder) parse_class() -> !int:
         return self.fail_at(open, 'This class is empty. Write `\\]` for a `]` in a class.')
     return self.set_node(ranges, negated, open)
 
-fn (&Builder) expect_close(open int, close str, what str) -> !void:
+fn (&&Builder) expect_close(open int, close str, what str) -> !void:
     self.skip()
     for 0..close.len() |i|:
         if self.peek_at(i) != int(close[i]):
             return self.fail('Expected `%{close}` to close the %{what} that starts at offset %{open}, found %{show(self.peek())}.')
     self.pos += close.len()
 
-fn (&Builder) cap(child int, kind int, aux int, from int) -> !int:
+fn (&&Builder) cap(child int, kind int, aux int, from int) -> !int:
     depth := 0
     if child >= 0:
         depth = self.nodes[child].depth + 1
     return self.add(Node{kind=NCap, a=child, b=kind, c=aux, from=from, to=self.pos, depth=depth})
 
-fn (&Builder) parse_primary() -> !int:
+fn (&&Builder) parse_primary() -> !int:
     from := self.pos
     c := self.peek()
     switch c:
@@ -1180,7 +1180,7 @@ fn (&Builder) parse_primary() -> !int:
                 return self.fail('Unexpected %{show(cp)}. Text goes in quotes: `\'%{str.init_rune(cp)}\'`.')
             return self.fail('Unexpected %{show(c)}. Text goes in quotes: `\'%{str.init_rune(c)}\'`.')
 
-fn (&Builder) parse_capture() -> !int:
+fn (&&Builder) parse_capture() -> !int:
     from := self.pos
     self.enter()!
     self.pos += 1
@@ -1213,7 +1213,7 @@ fn (&Builder) parse_capture() -> !int:
     return node
 
 -- Points each call at its rule.
-fn (&Builder) resolve() -> !void:
+fn (&&Builder) resolve() -> !void:
     for 0..self.nodes.len() |i|:
         if self.nodes[i].kind != NCall:
             continue
@@ -1284,7 +1284,7 @@ fn (&Builder) left_calls(n int, out &&[]int):
         else:
             pass
 
-fn (&Builder) check() -> !void:
+fn (&&Builder) check() -> !void:
     nrules := self.rules.len()
     if nrules > 0:
         self.nulls = []bool(nrules, false)
@@ -1334,7 +1334,7 @@ fn (&Builder) check() -> !void:
 fn (&Builder) here() -> int:
     return self.insts.len() / 3
 
-fn (&Builder) emit(op int, a int, b int) -> !int:
+fn (&&Builder) emit(op int, a int, b int) -> !int:
     if self.insts.len() / 3 >= MaxInsts:
         self.msg = 'The grammar is too big: its program has more than %{MaxInsts} instructions.'
         self.err_pos = 0
@@ -1348,7 +1348,7 @@ fn (&Builder) patch(pc int):
     self.insts[pc * 3 + 1] = self.here()
 
 -- Notes what the instruction `pc` expects, for the message of a failed `parse`.
-fn (&Builder) expects(pc int, txt str):
+fn (&&Builder) expects(pc int, txt str):
     self.exp_pc.append(pc)
     self.exp_txt.append(txt)
 
@@ -1363,7 +1363,7 @@ fn (&Builder) text_of(n int) -> str:
         return txt[0..end] + '...'
     return txt
 
-fn (&Builder) gen(n int) -> !void:
+fn (&&Builder) gen(n int) -> !void:
     self.work += 1
     if self.work > MaxInsts * 8:
         self.msg = 'The grammar is too big: it repeats too many times.'
@@ -1455,7 +1455,7 @@ fn (&Builder) gen(n int) -> !void:
         else:
             pass
 
-fn (&Builder) gen_all() -> !void:
+fn (&&Builder) gen_all() -> !void:
     if self.rules.len() == 0:
         self.gen(self.roots[0])!
         _ = self.emit(OpEnd, 0, 0)!

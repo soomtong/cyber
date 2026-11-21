@@ -89,7 +89,7 @@ for doc.as_array().? |c|:
         src := e[1].as_str().?
         var diag time.Diag = {}
         try:
-            p := time.parse_format(src, fmt, &diag)!
+            p := time.parse_format(src, fmt, &&diag)!
             if p != dt:
                 bad += 1
                 print('STRPTIME `%{src}` by `%{fmt}`: got %{p.format()}, python %{dt.format()}')

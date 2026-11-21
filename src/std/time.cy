@@ -1067,16 +1067,16 @@ fn (&Date) format(fmt str) -> !str:
         end += 1
     return '`' + self.src[self.pos..end] + '`'
 
--fn (&Scan) fail(pos int, msg str):
+-fn (&&Scan) fail(pos int, msg str):
     self.msg = msg
     self.err_pos = pos
 
--fn (&Scan) expected(what str) -> error:
+-fn (&&Scan) expected(what str) -> error:
     self.fail(self.pos, 'Expected ' + what + ', found ' + self.found() + '.')
     return error.Syntax
 
 -- Reads `min` to `max` digits.
--fn (&Scan) digits(min int, max int, what str) -> !int:
+-fn (&&Scan) digits(min int, max int, what str) -> !int:
     start := self.pos
     v := 0
     while self.pos < self.src.len() and self.pos - start < max:
@@ -1089,13 +1089,13 @@ fn (&Date) format(fmt str) -> !str:
         return self.expected(what)
     return v
 
--fn (&Scan) literal(c byte, what str) -> !void:
+-fn (&&Scan) literal(c byte, what str) -> !void:
     if self.peek() != c or self.at_end():
         return self.expected(what)
     self.pos += 1
 
 -- Reads the digits of a fraction of a second. Digits past the ninth are dropped.
--fn (&Scan) fraction() -> !int:
+-fn (&&Scan) fraction() -> !int:
     start := self.pos
     v := 0
     while self.pos < self.src.len():
@@ -1114,7 +1114,7 @@ fn (&Date) format(fmt str) -> !str:
     return v
 
 -- Reads `Z`, `+09:00`, `+0900` or `+09`.
--fn (&Scan) offset() -> !int:
+-fn (&&Scan) offset() -> !int:
     start := self.pos
     c := self.peek()
     if !self.at_end() and (c == 'Z' or c == 'z'):
@@ -1150,7 +1150,7 @@ fn (&Date) format(fmt str) -> !str:
     return true
 
 -- Reads a full or a three letter month name and returns the month.
--fn (&Scan) month() -> !int:
+-fn (&&Scan) month() -> !int:
     for 1..13 |m|:
         name := month_name(m)
         if has_word(self.src, self.pos, name):
@@ -1162,7 +1162,7 @@ fn (&Date) format(fmt str) -> !str:
             return m
     return self.expected('the name of a month such as `Nov` or `November`')
 
--fn (&Scan) weekday() -> !void:
+-fn (&&Scan) weekday() -> !void:
     for 0..7 |wd|:
         name := weekday_name(wd)
         if has_word(self.src, self.pos, name):
@@ -1175,7 +1175,7 @@ fn (&Date) format(fmt str) -> !str:
     return self.expected('the name of a day such as `Sun` or `Sunday`')
 
 -- Checks the fields and makes the value. `default_off` is the offset of a text that has none.
--fn (&Scan) finish(p &Parts, default_off int) -> !DateTime:
+-fn (&&Scan) finish(p &Parts, default_off int) -> !DateTime:
     off := default_off
     if p.has_off:
         off = p.off
@@ -1216,14 +1216,14 @@ fn (&Date) format(fmt str) -> !str:
         self.fail(0, 'The time is out of range: years 1 to 9999.')
         return err
 
--fn (&Scan) date_part(p &Parts) -> !void:
+-fn (&&Scan) date_part(p &Parts) -> !void:
     p.year = self.digits(4, 4, 'a four digit year')!
     self.literal('-', '`-` after the year')!
     p.month = self.digits(2, 2, 'a two digit month')!
     self.literal('-', '`-` after the month')!
     p.day = self.digits(2, 2, 'a two digit day')!
 
--fn (&Scan) rfc3339(default_off int) -> !DateTime:
+-fn (&&Scan) rfc3339(default_off int) -> !DateTime:
     var p Parts = {}
     self.clock_part(&p)!
     if self.at_end():
@@ -1244,7 +1244,7 @@ fn (&Date) format(fmt str) -> !str:
     return self.finish(&p, default_off)
 
 -- Reads the date, the separator and the time of day of an RFC 3339 timestamp.
--fn (&Scan) clock_part(p &Parts) -> !void:
+-fn (&&Scan) clock_part(p &Parts) -> !void:
     self.date_part(p)!
     sep := self.peek()
     if self.at_end() or (sep != 'T' and sep != 't' and sep != ' '):
@@ -1261,7 +1261,7 @@ fn (&Date) format(fmt str) -> !str:
         p.nsec = self.fraction()!
 
 -- Reads the text by a `strptime` format.
--fn (&Scan) by_format(fmt str, p &Parts) -> !void:
+-fn (&&Scan) by_format(fmt str, p &Parts) -> !void:
     i := 0
     n := fmt.len()
     while i < n:
@@ -1379,7 +1379,7 @@ fn (&Date) format(fmt str) -> !str:
                 self.fail(i - 2, 'Unknown specifier `%' + fmt[i - 1..i] + '`. See `DateTime.format` for the list.')
                 return error.Format
 
--fn (&Scan) formatted(fmt str, default_off int) -> !DateTime:
+-fn (&&Scan) formatted(fmt str, default_off int) -> !DateTime:
     var p Parts = {}
     self.by_format(fmt, &p)!
     if !self.at_end():
@@ -1400,7 +1400,7 @@ fn (&Date) format(fmt str) -> !str:
         p.day = c.d
     return self.finish(&p, default_off)
 
--fn report(s &Scan, diag &Diag):
+-fn report(s &Scan, diag &&Diag):
     diag.msg = s.msg
     diag.pos = s.err_pos
 
@@ -1409,19 +1409,19 @@ fn (&Date) format(fmt str) -> !str:
 --| `error.Syntax` when the text has another shape, `error.Range` when a field is out of range.
 fn parse(s str) -> !DateTime:
     var diag Diag = {}
-    return parse(s, &diag)
+    return parse(s, &&diag)
 
 --| On failure, `diag` tells where and why.
-fn parse(s str, diag &Diag) -> !DateTime:
+fn parse(s str, diag &&Diag) -> !DateTime:
     return parse_at(s, NoOffset, diag)
 
 --| Parses a timestamp that can be without a UTC offset, such as `2026-11-15 10:22:03`: it is read at `offset`
 --| minutes east of UTC. An offset in the text wins.
 fn parse(s str, offset int) -> !DateTime:
     var diag Diag = {}
-    return parse(s, offset, &diag)
+    return parse(s, offset, &&diag)
 
-fn parse(s str, offset int, diag &Diag) -> !DateTime:
+fn parse(s str, offset int, diag &&Diag) -> !DateTime:
     diag.msg = ''
     diag.pos = 0
     if !valid_offset(offset):
@@ -1429,7 +1429,7 @@ fn parse(s str, offset int, diag &Diag) -> !DateTime:
         return error.Range
     return parse_at(s, offset, diag)
 
--fn parse_at(s str, offset int, diag &Diag) -> !DateTime:
+-fn parse_at(s str, offset int, diag &&Diag) -> !DateTime:
     diag.msg = ''
     diag.pos = 0
     sc := Scan{src=s}
@@ -1446,17 +1446,17 @@ fn parse(s str, offset int, diag &Diag) -> !DateTime:
 --| for a specifier that is not known.
 fn parse_format(s str, fmt str) -> !DateTime:
     var diag Diag = {}
-    return parse_format(s, fmt, 0, &diag)
+    return parse_format(s, fmt, 0, &&diag)
 
-fn parse_format(s str, fmt str, diag &Diag) -> !DateTime:
+fn parse_format(s str, fmt str, diag &&Diag) -> !DateTime:
     return parse_format(s, fmt, 0, diag)
 
 --| A text without `%z` is read at `offset` minutes east of UTC.
 fn parse_format(s str, fmt str, offset int) -> !DateTime:
     var diag Diag = {}
-    return parse_format(s, fmt, offset, &diag)
+    return parse_format(s, fmt, offset, &&diag)
 
-fn parse_format(s str, fmt str, offset int, diag &Diag) -> !DateTime:
+fn parse_format(s str, fmt str, offset int, diag &&Diag) -> !DateTime:
     diag.msg = ''
     diag.pos = 0
     if !valid_offset(offset):
@@ -1470,9 +1470,9 @@ fn parse_format(s str, fmt str, offset int, diag &Diag) -> !DateTime:
 --| Parses a date such as `2026-11-15`.
 fn parse_date(s str) -> !Date:
     var diag Diag = {}
-    return parse_date(s, &diag)
+    return parse_date(s, &&diag)
 
-fn parse_date(s str, diag &Diag) -> !Date:
+fn parse_date(s str, diag &&Diag) -> !Date:
     diag.msg = ''
     diag.pos = 0
     sc := Scan{src=s}
@@ -1843,7 +1843,7 @@ fn (&Zone) datetime(year int, month int, day int, hour int, minute int, second i
     return self.src[start..self.pos]
 
 -- `[+-]hh[:mm[:ss]]` in seconds, with at most `max_hours` hours.
--fn (&Scan) tz_secs(max_hours int) -> !int:
+-fn (&&Scan) tz_secs(max_hours int) -> !int:
     neg := false
     if !self.at_end() and (self.peek() == '+' or self.peek() == '-'):
         neg = self.peek() == '-'
@@ -1864,7 +1864,7 @@ fn (&Zone) datetime(year int, month int, day int, hour int, minute int, second i
         return -v
     return v
 
--fn (&Scan) tz_day() -> !RuleDay:
+-fn (&&Scan) tz_day() -> !RuleDay:
     var r RuleDay = {}
     if self.at_end():
         return error.Syntax
@@ -1936,9 +1936,9 @@ fn (&DateTime) format_zoned() -> str:
 --| is not the offset of the zone at that time: the rules of the zone changed after the text was written.
 fn parse_zoned(s str) -> !DateTime:
     var diag Diag = {}
-    return parse_zoned(s, &diag)
+    return parse_zoned(s, &&diag)
 
-fn parse_zoned(s str, diag &Diag) -> !DateTime:
+fn parse_zoned(s str, diag &&Diag) -> !DateTime:
     diag.msg = ''
     diag.pos = 0
     sc := Scan{src=s}
@@ -1946,7 +1946,7 @@ fn parse_zoned(s str, diag &Diag) -> !DateTime:
         report(&sc, diag)
         return err
 
--fn (&Scan) rfc9557() -> !DateTime:
+-fn (&&Scan) rfc9557() -> !DateTime:
     var p Parts = {}
     self.clock_part(&p)!
     zulu := false

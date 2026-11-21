@@ -80,8 +80,11 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   덧붙였고 커밋하지 않았다.
 - [x] 재귀 타입의 버퍼 속 빌림(2026-11-21, 사용자: "continue"): `type Tree: kids []Tree`에 빌림 필드가 있으면 그 필드 자리에서
   거절한다(`Compiler.pending_buffer_args`). 전에는 core의 `PtrSpan[Tree]`를 가리켰다.
-- [ ] R6(`&T`를 거친 쓰기)는 사용자 결정 대기. 다시 재니 `self.xs.append(v)` 꼴도 같은 구멍이고 저장소에서 179곳 이상이다.
-  안 셋과 추천(Rust식 규칙을 0.5 뒤 첫 언어 결정으로, 경고 먼저)은 `project_borrow_model.md` "R6 다시 재기".
+- [x] R6(`&T`를 거친 쓰기, 2026-11-21, 깨지는 변경). 사용자: "다음 판에서 오류로 할 필요 없음. 이 버전에서 잡고 넘어간다. 1.0
+  전까지 깨지는 것을 허용한다." 공유 빌림을 거친 관리형 값의 대입과 `&&` 생성을 거절한다(`sema.placeThroughShared` ·
+  `checkNoWriteThroughShared`). std의 `diag &Diag`는 `&&Diag`, 상태를 바꾸는 메서드는 `&&` 수신자, `Scope`의 `start` · `join` ·
+  `abort`도 `&&`. 결정 `project_borrow_model.md` "R6 구현", `unreleased.md` "공유 빌림을 거친 쓰기", F-169. tars-agent는
+  `docs/TODO.md` 31행에 덧붙였고 커밋하지 않았다.
 
 - [x] 0.4.15 릴리스(2026-11-18): 태그 `0.4.15` → `93a9ca4f`, `build-969-93a9ca4`, Latest, 에셋 15개(CI). `install.sh 0.4.15`를 임시
   경로에 설치해 버전 · 스크립트 · `cyber-lsp`의 여러 구문 오류 진단을 확인했다. `/usr/local`의 설치는 사용자가 다시 한다.
@@ -162,7 +165,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-168까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-169까지, 열린 것 없음).
 
 ## 작업 방식
 
@@ -235,8 +238,9 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   (`src/test/setup.zig` `VMrunner`), 커스텀 러너(`src/test_runner.zig`)는 테스트 함수마다 allocator를 검사한다.
 - `src/parser.zig`에서 지역 이름 `t`는 모듈 수준 `t`를 가려 컴파일 오류다(`tok` · `ty`로 쓴다).
 - LSP 탐침: scratchpad에 JSON-RPC 클라이언트(파이썬, `Content-Length` 프레이밍)를 두고 서버에 직접 보낸다. 저장소 `.cy`를 다 열어 진단을 모으면 오탐이 드러난다.
-- 언어 메모: `Slice`의 `append` 등은 제자리(`xs.append(v)`), 새 목록은 `appended` · `+`. 비트 OR은 `||`, AND는 `&&`. 전역은 `global g int = 5`. `var x = 0`은 문법 오류(`x := 0`). `os.parseArgs`는
+- 언어 메모: `Slice`의 `append` 등은 제자리(`xs.append(v)`), 새 목록은 `appended` · `+`. 값을 바꾸는 메서드는 `fn (&&T)`, 출력 매개변수는 `out &&T`(호출은 `&&x`), `^T`로 `&&` 메서드를 부를 때는 `r.*.m()`. `&T`로는 관리형이 아닌 필드만 쓴다. 비트 OR은 `||`, AND는 `&&`. 전역은 `global g int = 5`. `var x = 0`은 문법 오류(`x := 0`). `os.parseArgs`는
   `-name=value`만 받는다. `Map`의 개수는 `size()`. `out.* += fut.await()`는 await 전에 `out.*`를 읽는다.
+- `.cy`를 넓게 고치는 규칙 변경은 변경 전 CLI(worktree에서 `zig build cli -p <dir>`)와 새 CLI로 저장소의 `.cy`를 모두 돌려 첫 오류 줄 · 종료 코드가 달라진 파일만 본다(behavior 러너는 샤드마다 첫 실패에서 멈춘다).
 - 벤치는 다른 프로세스가 CPU를 쓰는지 먼저 본다(tars-linux `services_test`, 종료 금지). 테스트와 동시에 돌리지 않는다.
 
 ## 참고 위치

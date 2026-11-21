@@ -62,7 +62,7 @@ for files |f|:
         var diag regex.Diag = {}
         var re ?regex.Regex = none
         try:
-            re = regex.compile(pat, &diag)!
+            re = regex.compile(pat, &&diag)!
         else:
             pass
         if re == none:

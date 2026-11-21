@@ -47,31 +47,31 @@ t.eq('"a\\"b\\\\c/d\\n\\té😀\\u0001"', json.stringify(json.Value.str(s)))
 
 -- Errors.
 var diag json.Diag = {}
-fn fails(src str, diag &json.Diag) -> bool:
+fn fails(src str, diag &&json.Diag) -> bool:
     _ = json.parse(src, diag) !else:
         return true
     return false
 
-t.eq(true, fails('[1,', &diag))
+t.eq(true, fails('[1,', &&diag))
 t.eq('Expected a value, found the end of input.', diag.msg)
-t.eq(true, fails('{\n  "a": tru\n}', &diag))
+t.eq(true, fails('{\n  "a": tru\n}', &&diag))
 t.eq(2, diag.line)
 t.eq(8, diag.col)
-t.eq(true, fails('01', &diag))
+t.eq(true, fails('01', &&diag))
 t.eq('A number can not have a leading zero.', diag.msg)
-t.eq(true, fails('[1] x', &diag))
+t.eq(true, fails('[1] x', &&diag))
 t.eq('Expected the end of input after the value, found `x`.', diag.msg)
-t.eq(true, fails('"\\ud800"', &diag))
-t.eq(true, fails('"\\udc00"', &diag))
-t.eq(true, fails('"a\tb"', &diag))
-t.eq(true, fails('{"a" 1}', &diag))
-t.eq(true, fails('{a: 1}', &diag))
-t.eq(true, fails('[1,]', &diag))
-t.eq(true, fails('1.', &diag))
-t.eq(true, fails('-', &diag))
-t.eq(true, fails('"\\x"', &diag))
-t.eq(true, fails('', &diag))
-t.eq(true, fails('['.repeat(300), &diag))
+t.eq(true, fails('"\\ud800"', &&diag))
+t.eq(true, fails('"\\udc00"', &&diag))
+t.eq(true, fails('"a\tb"', &&diag))
+t.eq(true, fails('{"a" 1}', &&diag))
+t.eq(true, fails('{a: 1}', &&diag))
+t.eq(true, fails('[1,]', &&diag))
+t.eq(true, fails('1.', &&diag))
+t.eq(true, fails('-', &&diag))
+t.eq(true, fails('"\\x"', &&diag))
+t.eq(true, fails('', &&diag))
+t.eq(true, fails('['.repeat(300), &&diag))
 t.eq('Arrays and objects nest deeper than 256 levels.', diag.msg)
 t.eq(error.Unicode, json.parse(str([]byte{0x22, 0xff, 0x22})).unwrap_error())
 t.eq(error.Syntax, json.parse('nul').unwrap_error())
@@ -152,7 +152,7 @@ t.eq(0, mm['b'].len())
 -- Failures say where and why. A struct that fails part way releases the fields it has made.
 fn to_fails(src str, err error, path str, msg str):
     var diag json.Diag = {}
-    _ = json.decode(Item, src, &diag) !else |e|:
+    _ = json.decode(Item, src, &&diag) !else |e|:
         t.eq(err, e)
         t.eq(path, diag.path)
         t.eq(msg, diag.msg)
@@ -172,7 +172,7 @@ to_fails('{"name": "a"', error.Syntax, '', 'Expected `,` or `}` in an object, fo
 
 fn to_fails_v(v json.Value) -> str:
     var diag json.Diag = {}
-    _ = json.to(Map[str, Shape], v, &diag) !else |e|:
+    _ = json.to(Map[str, Shape], v, &&diag) !else |e|:
         return '%{e} %{diag.path} %{diag.msg}'
     return 'ok'
 
@@ -203,7 +203,7 @@ t.eq('1e-7', ex[4].number_text().?)
 t.eq('12345600', ex[5].number_text().?)
 t.eq(1.5, ex[1].as_float().?)
 var exdiag json.Diag = {}
-t.eq(true, (json.parse('[1.0', json.ParseOptions{exact=true}, &exdiag) !else json.Value.null).is_null())
+t.eq(true, (json.parse('[1.0', json.ParseOptions{exact=true}, &&exdiag) !else json.Value.null).is_null())
 t.eq('Expected `,` or `]` in an array, found the end of input.', exdiag.msg)
 -- `fmt_number` writes any number token in the form of `fmt_float`.
 t.eq('0', json.fmt_number('-0'))

@@ -55,13 +55,13 @@ fn encode(v json.Value, opts EncodeOptions) -> !str:
 --| Decodes TOON text. Returns `error.Syntax` for malformed input and `error.Unicode` for input that is not UTF-8.
 fn decode(src str) -> !json.Value:
     var diag json.Diag = {}
-    return decode(src, DecodeOptions{}, &diag)
+    return decode(src, DecodeOptions{}, &&diag)
 
 --| Decodes TOON text. On failure, `diag` tells where and why.
-fn decode(src str, diag &json.Diag) -> !json.Value:
+fn decode(src str, diag &&json.Diag) -> !json.Value:
     return decode(src, DecodeOptions{}, diag)
 
-fn decode(src str, opts DecodeOptions, diag &json.Diag) -> !json.Value:
+fn decode(src str, opts DecodeOptions, diag &&json.Diag) -> !json.Value:
     if !str.is_utf8(src.span()):
         diag.msg = 'The input is not valid UTF-8.'
         return error.Unicode
@@ -228,10 +228,10 @@ fn to_json(src str) -> !str:
     sym      str
     bad_utf8 bool = false
 
-fn (&Encoder) put(s str):
+fn (&&Encoder) put(s str):
     self.buf.append(s.span())
 
-fn (&Encoder) line(depth int):
+fn (&&Encoder) line(depth int):
     if self.buf.len() > 0:
         self.buf.append(byte('\n'))
     for 0..depth * self.indent:
@@ -354,7 +354,7 @@ fn (&Encoder) row(o json.Object, cols []Col) -> str:
             return false
     return true
 
-fn (&Encoder) root(v json.Value):
+fn (&&Encoder) root(v json.Value):
     switch v:
         case .array |a|:
             if a.len() == 0:
@@ -373,12 +373,12 @@ fn (&Encoder) root(v json.Value):
             self.line(0)
             self.put(self.prim(v, true))
 
-fn (&Encoder) fields(o json.Object, depth int):
+fn (&&Encoder) fields(o json.Object, depth int):
     for o.entries |e|:
         self.field(self.key(e.key), e.value, depth, depth + 1, '')
 
 --| Writes a field whose line is at `depth` and whose nested content is at `child`.
-fn (&Encoder) field(k str, v json.Value, depth int, child int, prefix str):
+fn (&&Encoder) field(k str, v json.Value, depth int, child int, prefix str):
     switch v:
         case .array |a|:
             if a.len() == 0:
@@ -400,7 +400,7 @@ fn (&Encoder) field(k str, v json.Value, depth int, child int, prefix str):
             self.put(prefix + k + ': ' + self.prim(v, false))
 
 --| Writes a non-empty array with the header `head`. Items are at `child`.
-fn (&Encoder) array(head str, a []json.Value, depth int, child int, prefix str, allow_table bool):
+fn (&&Encoder) array(head str, a []json.Value, depth int, child int, prefix str, allow_table bool):
     n := a.len()
     self.line(depth)
     if all_primitive(a):
@@ -417,7 +417,7 @@ fn (&Encoder) array(head str, a []json.Value, depth int, child int, prefix str, 
     for a |e|:
         self.item(e, child)
 
-fn (&Encoder) keyed(head str, o json.Object, cols []Col, depth int, child int, prefix str):
+fn (&&Encoder) keyed(head str, o json.Object, cols []Col, depth int, child int, prefix str):
     self.line(depth)
     self.put(prefix + head + '[%{o.len()}:%{self.sym}]' + self.fields_text(cols) + ':')
     for o.entries |e|:
@@ -425,7 +425,7 @@ fn (&Encoder) keyed(head str, o json.Object, cols []Col, depth int, child int, p
         self.put(self.key(e.key) + ': ' + self.row(e.value.as_object().?, cols))
 
 --| Writes a list item whose hyphen is at `depth`.
-fn (&Encoder) item(v json.Value, depth int):
+fn (&&Encoder) item(v json.Value, depth int):
     switch v:
         case .array |a|:
             if a.len() == 0:
@@ -532,20 +532,20 @@ fn (&Encoder) item(v json.Value, depth int):
     --| Content depths of the header spans that are open, outermost first.
     spans    []int = {}
 
-fn (&Decoder) fail_at(num int, col int, msg str) -> error:
+fn (&&Decoder) fail_at(num int, col int, msg str) -> error:
     self.msg = msg
     self.err_line = num
     self.err_col = col
     return error.Syntax
 
-fn (&Decoder) fail(l Line, msg str) -> error:
+fn (&&Decoder) fail(l Line, msg str) -> error:
     return self.fail_at(l.num, l.col, msg)
 
-fn (&Decoder) run(src str) -> !json.Value:
+fn (&&Decoder) run(src str) -> !json.Value:
     self.prepare(src)!
     return self.root()
 
-fn (&Decoder) prepare(src str) -> !void:
+fn (&&Decoder) prepare(src str) -> !void:
     text := src
     if text.starts_with('\xEF\xBB\xBF'):
         text = text[3..]
@@ -592,7 +592,7 @@ fn (&Decoder) at_end() -> bool:
     return self.pos >= self.lines.len()
 
 --| Skips blank lines. In strict mode a blank line inside an open header span is an error.
-fn (&Decoder) skip_blanks() -> !void:
+fn (&&Decoder) skip_blanks() -> !void:
     start := self.pos
     while self.pos < self.lines.len() and self.lines[self.pos].blank:
         self.pos += 1
@@ -601,7 +601,7 @@ fn (&Decoder) skip_blanks() -> !void:
             blank := self.lines[start]
             return self.fail(blank, 'A blank line can not appear inside an array or a keyed table.')
 
-fn (&Decoder) root() -> !json.Value:
+fn (&&Decoder) root() -> !json.Value:
     self.skip_blanks()!
     if self.at_end():
         return json.Value.object({})
@@ -624,7 +624,7 @@ fn (&Decoder) root() -> !json.Value:
         self.pos += 1
         return self.prim(l, l.text)
     var obj json.Object = {}
-    self.fields(&obj, 0, 0)!
+    self.fields(&&obj, 0, 0)!
     return json.Value.object(obj)
 
 fn (&Decoder) count_content() -> int:
@@ -634,7 +634,7 @@ fn (&Decoder) count_content() -> int:
             n += 1
     return n
 
-fn (&Decoder) expect_end() -> !void:
+fn (&&Decoder) expect_end() -> !void:
     self.skip_blanks()!
     if !self.at_end():
         l := self.lines[self.pos]
@@ -642,7 +642,7 @@ fn (&Decoder) expect_end() -> !void:
 
 --| Returns the content depth of a nested scope whose content should be at `depth`.
 --| In non-strict mode a deeper first line sets the depth.
-fn (&Decoder) scope_depth(depth int) -> !int:
+fn (&&Decoder) scope_depth(depth int) -> !int:
     self.skip_blanks()!
     if self.at_end():
         return depth
@@ -654,7 +654,7 @@ fn (&Decoder) scope_depth(depth int) -> !int:
     return l.depth
 
 --| Reads fields at `depth` into `obj` until a line shallower than `floor`.
-fn (&Decoder) fields(obj &json.Object, depth int, floor int) -> !void:
+fn (&&Decoder) fields(obj &&json.Object, depth int, floor int) -> !void:
     while:
         self.skip_blanks()!
         if self.at_end():
@@ -669,7 +669,7 @@ fn (&Decoder) fields(obj &json.Object, depth int, floor int) -> !void:
         self.field(obj, l, l.text, depth + 1)!
 
 --| Parses a key-value or array-header line and its nested content at `child`.
-fn (&Decoder) field(obj &json.Object, l Line, text str, child int) -> !void:
+fn (&&Decoder) field(obj &&json.Object, l Line, text str, child int) -> !void:
     s := scan(text, ',')
     if s.colon < 0:
         return self.fail(l, 'Expected `key: value`, found a line without a colon.')
@@ -687,27 +687,27 @@ fn (&Decoder) field(obj &json.Object, l Line, text str, child int) -> !void:
     if rest.len() == 0:
         d := self.scope_depth(child)!
         var nested json.Object = {}
-        self.fields(&nested, d, child)!
+        self.fields(&&nested, d, child)!
         self.put(obj, l, k, json.Value.object(nested))!
     else rest == '[]':
         self.put(obj, l, k, json.Value.array({}))!
     else:
         self.put(obj, l, k, self.prim(l, rest)!)!
 
-fn (&Decoder) put(obj &json.Object, l Line, k str, v json.Value) -> !void:
+fn (&&Decoder) put(obj &&json.Object, l Line, k str, v json.Value) -> !void:
     if self.strict and obj.contains(k):
         return self.fail(l, 'Duplicate key `%{k}`.')
     obj.set(k, v)
 
 --| Decodes a key token: a quoted key or any text with spaces trimmed.
-fn (&Decoder) key_token(l Line, tok str) -> !str:
+fn (&&Decoder) key_token(l Line, tok str) -> !str:
     t := trim_spaces(tok)
     if t.len() > 0 and t[0] == '"':
         return self.quoted_token(l, t)
     return t
 
 --| Decodes a token that starts with a quote. The closing quote must end the token.
-fn (&Decoder) quoted_token(l Line, t str) -> !str:
+fn (&&Decoder) quoted_token(l Line, t str) -> !str:
     var buf []byte = {}
     i := 1
     n := t.len()
@@ -749,7 +749,7 @@ fn (&Decoder) quoted_token(l Line, t str) -> !str:
     return self.fail(l, 'Expected `"` to end the string.')
 
 --| Decodes a value token.
-fn (&Decoder) prim(l Line, tok str) -> !json.Value:
+fn (&&Decoder) prim(l Line, tok str) -> !json.Value:
     t := trim_spaces(tok)
     if t.len() > 0 and t[0] == '"':
         return json.Value.str(self.quoted_token(l, t)!)
@@ -793,7 +793,7 @@ fn (&Decoder) prim(l Line, tok str) -> !json.Value:
     return i == n
 
 --| Splits `s` on unquoted `delim` and decodes each token.
-fn (&Decoder) values(l Line, s str, delim byte) -> ![]json.Value:
+fn (&&Decoder) values(l Line, s str, delim byte) -> ![]json.Value:
     var res []json.Value = {}
     in_quote := false
     start := 0
@@ -817,7 +817,7 @@ fn (&Decoder) values(l Line, s str, delim byte) -> ![]json.Value:
     return res
 
 --| Parses an array header line. `text` starts at the key or at `[`.
-fn (&Decoder) header(l Line, text str) -> !Header:
+fn (&&Decoder) header(l Line, text str) -> !Header:
     s := scan(text, ',')
     b := s.bracket
     var key ?str = none
@@ -872,7 +872,7 @@ fn (&Decoder) header(l Line, text str) -> !Header:
     return Header{key=key, n=count, keyed=keyed, delim=delim, has_fields=has_fields, fields=fields, rest=rest}
 
 --| Parses `{a,b{c}}` at `i.*`.
-fn (&Decoder) field_list(l Line, text str, i &int, delim byte) -> ![]Col:
+fn (&&Decoder) field_list(l Line, text str, i &int, delim byte) -> ![]Col:
     var cols []Col = {}
     n := text.len()
     i.* += 1
@@ -923,7 +923,7 @@ fn (&Decoder) field_list(l Line, text str, i &int, delim byte) -> ![]Col:
             return self.fail(l, 'Expected the delimiter or `}` in the field list.')
 
 --| Reads the inline values, rows or items of a header on line `l`. Nested content is at `child`.
-fn (&Decoder) header_value(h Header, l Line, child int) -> !json.Value:
+fn (&&Decoder) header_value(h Header, l Line, child int) -> !json.Value:
     if h.keyed:
         return self.keyed_rows(h, l, child)
     if h.has_fields:
@@ -934,7 +934,7 @@ fn (&Decoder) header_value(h Header, l Line, child int) -> !json.Value:
         return json.Value.array(vals)
     return self.list_items(h, l, child)
 
-fn (&Decoder) check_count(l Line, want int, got int, what str) -> !void:
+fn (&&Decoder) check_count(l Line, want int, got int, what str) -> !void:
     if self.strict and want != got:
         return self.fail(l, 'The header declares %{want} %{what}, found %{got}.')
 
@@ -949,15 +949,15 @@ fn (&Decoder) build(l Line, cols []Col, cells []json.Value, idx &int) -> json.Ob
             idx.* += 1
     return obj
 
-fn (&Decoder) open_span(child int) -> !int:
+fn (&&Decoder) open_span(child int) -> !int:
     d := self.scope_depth(child)!
     self.spans.append(d)
     return d
 
-fn (&Decoder) close_span():
+fn (&&Decoder) close_span():
     self.spans.size_down(self.spans.len() - 1)
 
-fn (&Decoder) table_rows(h Header, l Line, child int) -> !json.Value:
+fn (&&Decoder) table_rows(h Header, l Line, child int) -> !json.Value:
     depth := self.open_span(child)!
     leaves := leaf_count(h.fields)
     var rows []json.Value = {}
@@ -985,7 +985,7 @@ fn (&Decoder) table_rows(h Header, l Line, child int) -> !json.Value:
     self.check_count(l, h.n, rows.len(), 'rows')!
     return json.Value.array(rows)
 
-fn (&Decoder) keyed_rows(h Header, l Line, child int) -> !json.Value:
+fn (&&Decoder) keyed_rows(h Header, l Line, child int) -> !json.Value:
     depth := self.open_span(child)!
     leaves := leaf_count(h.fields)
     var obj json.Object = {}
@@ -1012,14 +1012,14 @@ fn (&Decoder) keyed_rows(h Header, l Line, child int) -> !json.Value:
         if cells.len() != leaves:
             return self.fail(r, 'The table header declares %{leaves} fields, found %{cells.len()} values in the row.')
         idx := 0
-        self.put(&obj, r, k, json.Value.object(self.build(r, h.fields, cells, &idx)))!
+        self.put(&&obj, r, k, json.Value.object(self.build(r, h.fields, cells, &idx)))!
         count += 1
         self.pos += 1
     self.close_span()
     self.check_count(l, h.n, count, 'entries')!
     return json.Value.object(obj)
 
-fn (&Decoder) list_items(h Header, l Line, child int) -> !json.Value:
+fn (&&Decoder) list_items(h Header, l Line, child int) -> !json.Value:
     depth := self.open_span(child)!
     var items []json.Value = {}
     while:
@@ -1041,7 +1041,7 @@ fn (&Decoder) list_items(h Header, l Line, child int) -> !json.Value:
     return json.Value.array(items)
 
 --| Parses a list item whose hyphen is at `depth`.
-fn (&Decoder) list_item(l Line, depth int) -> !json.Value:
+fn (&&Decoder) list_item(l Line, depth int) -> !json.Value:
     if l.text == '-':
         self.pos += 1
         return json.Value.object({})
@@ -1060,8 +1060,8 @@ fn (&Decoder) list_item(l Line, depth int) -> !json.Value:
     if s.colon >= 0:
         -- An object: the first field is on the hyphen line, its scope at `depth + 2`, other fields at `depth + 1`.
         var obj json.Object = {}
-        self.field(&obj, l, rest, depth + 2)!
-        self.fields(&obj, depth + 1, depth + 1)!
+        self.field(&&obj, l, rest, depth + 2)!
+        self.fields(&&obj, depth + 1, depth + 1)!
         return json.Value.object(obj)
     self.pos += 1
     return self.prim(l, rest)

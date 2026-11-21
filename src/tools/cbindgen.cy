@@ -386,7 +386,7 @@ fn visitor(cursor, parent clang.CXCursor, data Ptr[void]) -> i32:
 
 #[extern]
 fn unionVisitor(cursor, parent clang.CXCursor, data Ptr[void]) -> i32:
-    state := as[&Union] data
+    state := as[Ptr[Union]] data
     cxName := clang.getCursorDisplayName(cursor)
     name := fromCXString(cxName)
 
@@ -404,7 +404,7 @@ fn unionVisitor(cursor, parent clang.CXCursor, data Ptr[void]) -> i32:
 
 #[extern]
 fn structVisitor(cursor, parent clang.CXCursor, data Ptr[void]) -> i32:
-    state := as[&Struct] data
+    state := as[Ptr[Struct]] data
     cxName := clang.getCursorDisplayName(cursor)
     name := fromCXString(cxName)
 
@@ -455,7 +455,7 @@ fn genMacros(headerPath str) -> !void:
 #[extern]
 fn initListExpr(cursor, parent clang.CXCursor, data Ptr[void]) -> i32:
     -- eprint('initListExpr: %{cursor.kind}')
-    state := as[&InitListExprState] data
+    state := as[Ptr[InitListExprState]] data
     switch cursor.kind:
         case clang.CXCursor_IntegerLiteral:
             eval := clang.Cursor_Evaluate(cursor)
@@ -475,7 +475,7 @@ type InitListExprState:
 
 #[extern]
 fn initVarVisitor(cursor, parent clang.CXCursor, data Ptr[void]) -> i32:
-    state := as[&InitVarState] data
+    state := as[Ptr[InitVarState]] data
     cxName := clang.getCursorDisplayName(cursor)
     name := fromCXString(cxName)
 

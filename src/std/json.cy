@@ -13,7 +13,7 @@ use meta
 --|
 --| var diag json.Diag = {}
 --| try:
---|     _ = json.parse('[1,', &diag)!
+--|     _ = json.parse('[1,', &&diag)!
 --| else |err|:
 --|     print('%{err} %{diag.line}:%{diag.col} %{diag.msg}')
 --| ```
@@ -81,14 +81,14 @@ fn (&Object) get(key str) -> ?Value:
     return none
 
 --| Sets the value of `key`. An existing key keeps its position.
-fn (&Object) set(key str, value Value):
+fn (&&Object) set(key str, value Value):
     if self.index_of(key) |i|:
         self.entries[i].value = value
         return
     self.entries.append(Entry{key=key, value=value})
 
 --| Removes `key` and returns whether it was present.
-fn (&Object) remove(key str) -> bool:
+fn (&&Object) remove(key str) -> bool:
     if self.index_of(key) |i|:
         self.entries.remove(i)
         return true
@@ -308,18 +308,18 @@ fn array(elems [&]Value) -> Value:
 --| Parses a JSON text. Returns `error.Syntax` for malformed input and `error.Unicode` for input that is not UTF-8.
 fn parse(src str) -> !Value:
     var diag Diag = {}
-    return parse(src, &diag)
+    return parse(src, &&diag)
 
 --| Parses a JSON text. On failure, `diag` tells where and why.
-fn parse(src str, diag &Diag) -> !Value:
+fn parse(src str, diag &&Diag) -> !Value:
     return parse(src, ParseOptions{}, diag)
 
 --| Parses a JSON text with options, such as `ParseOptions{exact=true}` to keep every number without loss.
 fn parse(src str, opts ParseOptions) -> !Value:
     var diag Diag = {}
-    return parse(src, opts, &diag)
+    return parse(src, opts, &&diag)
 
-fn parse(src str, opts ParseOptions, diag &Diag) -> !Value:
+fn parse(src str, opts ParseOptions, diag &&Diag) -> !Value:
     if !str.is_utf8(src.span()):
         diag.msg = 'The input is not valid UTF-8.'
         return error.Unicode
@@ -429,10 +429,10 @@ fn from(x %T) -> Value:
 --| Parses a JSON text and converts it to `T`, see `to`.
 fn decode(%T type, src str) -> !T:
     var diag Diag = {}
-    return decode(T, src, &diag)
+    return decode(T, src, &&diag)
 
 --| Parses a JSON text and converts it to `T`. On failure, `diag` tells where and why.
-fn decode(%T type, src str, diag &Diag) -> !T:
+fn decode(%T type, src str, diag &&Diag) -> !T:
     v := parse(src, diag)!
     return to(T, v, diag)
 
@@ -444,29 +444,29 @@ fn decode(%T type, src str, diag &Diag) -> !T:
 --| Returns `error.Type` for a value of another kind or an unknown case name and `error.MissingField` for a missing field.
 fn to(%T type, v Value) -> !T:
     var diag Diag = {}
-    return to(T, v, &diag)
+    return to(T, v, &&diag)
 
 --| Converts a `Value` to `T`. On failure, `diag.msg` tells why and `diag.path` where, such as `$.users[1].id`.
-fn to(%T type, v Value, diag &Diag) -> !T:
+fn to(%T type, v Value, diag &&Diag) -> !T:
     diag.path = ''
     res := to_ref(T, &v, diag) !else |err|:
         diag.path = '$' + diag.path
         return err
     return res
 
--fn to_float(s str, diag &Diag) -> !float:
+-fn to_float(s str, diag &&Diag) -> !float:
     f := float(s)
     if !is_finite(f):
         diag.msg = 'The number `%{s}` does not fit `float`.'
         return error.Overflow
     return f
 
--fn mismatch(diag &Diag, expected str, v &Value) -> error:
+-fn mismatch(diag &&Diag, expected str, v &Value) -> error:
     diag.msg = 'Expected %{expected}, found %{v.kind()}.'
     return error.Type
 
 --| Returns a whole number as an `int`. A float must have no fraction and fit `int`.
--fn to_whole(v &Value, diag &Diag) -> !int:
+-fn to_whole(v &Value, diag &&Diag) -> !int:
     switch v.*:
         case .int |i|:
             return i
@@ -498,7 +498,7 @@ fn to(%T type, v Value, diag &Diag) -> !T:
             return mismatch(diag, 'an integer', v)
 
 --| Returns an `r64` from 2^63, which `to_whole` cannot return as an `int`. Other values give `none`.
--fn to_big_r64(v &Value, diag &Diag) -> !?r64:
+-fn to_big_r64(v &Value, diag &&Diag) -> !?r64:
     switch v.*:
         case .number |s|:
             t := fmt_number(s)
@@ -522,7 +522,7 @@ fn to(%T type, v Value, diag &Diag) -> !T:
         else:
             return none
 
--fn to_ref(%T type, v &Value, diag &Diag) -> !T:
+-fn to_ref(%T type, v &Value, diag &&Diag) -> !T:
     #if T == Value:
         return v.*
     #else T == Object:
@@ -729,7 +729,7 @@ fn to(%T type, v Value, diag &Diag) -> !T:
                 meta.error('`json.to` does not support `' + type.name(T) + '`.')
 
 --| Converts the member `name` of `o` to the field type `T`. A missing member is `none` for an optional field.
--fn field_to(%T type, o &Object, name str, diag &Diag) -> !T:
+-fn field_to(%T type, o &Object, name str, diag &&Diag) -> !T:
     idx := o.index_of(name) ?else:
         #if type.is_instance_of(T, Option):
             return none
@@ -887,15 +887,15 @@ fn parse_number(text str, exact bool) -> ?Value:
     buf    []byte = {}
     indent int
 
-fn (&Writer) put(s str):
+fn (&&Writer) put(s str):
     self.buf.append(s.span())
 
-fn (&Writer) newline(depth int):
+fn (&&Writer) newline(depth int):
     self.buf.append(byte('\n'))
     for 0..depth * self.indent:
         self.buf.append(byte(' '))
 
-fn (&Writer) value(v Value, depth int):
+fn (&&Writer) value(v Value, depth int):
     switch v:
         case .null:
             self.put('null')
@@ -950,7 +950,7 @@ fn (&Writer) value(v Value, depth int):
     depth int = 0
     msg   str = ''
 
-fn (&Parser) report(diag &Diag):
+fn (&&Parser) report(diag &&Diag):
     diag.msg = self.msg
     diag.pos = self.pos
     line := 1
@@ -962,7 +962,7 @@ fn (&Parser) report(diag &Diag):
     diag.line = line
     diag.col = self.pos - line_start + 1
 
-fn (&Parser) fail(msg str) -> error:
+fn (&&Parser) fail(msg str) -> error:
     self.msg = msg
     return error.Syntax
 
@@ -984,7 +984,7 @@ fn (&Parser) skip_ws():
         else:
             return
 
-fn (&Parser) value() -> !Value:
+fn (&&Parser) value() -> !Value:
     switch self.peek():
         case '{':
             return self.object()
@@ -1007,18 +1007,18 @@ fn (&Parser) value() -> !Value:
                 return self.number()
             return self.fail('Expected a value, found %{self.found()}.')
 
-fn (&Parser) word(w str) -> !void:
+fn (&&Parser) word(w str) -> !void:
     if self.src[self.pos..].starts_with(w):
         self.pos += w.len()
         return
     return self.fail('Expected a value, found %{self.found()}.')
 
-fn (&Parser) enter() -> !void:
+fn (&&Parser) enter() -> !void:
     self.depth += 1
     if self.depth > MaxDepth:
         return self.fail('Arrays and objects nest deeper than %{MaxDepth} levels.')
 
-fn (&Parser) array() -> !Value:
+fn (&&Parser) array() -> !Value:
     self.enter()!
     self.pos += 1
     var arr []Value = {}
@@ -1041,7 +1041,7 @@ fn (&Parser) array() -> !Value:
         else:
             return self.fail('Expected `,` or `]` in an array, found %{self.found()}.')
 
-fn (&Parser) object() -> !Value:
+fn (&&Parser) object() -> !Value:
     self.enter()!
     self.pos += 1
     var obj Object = {}
@@ -1096,7 +1096,7 @@ fn (&Parser) object() -> !Value:
         return int(c - 'A') + 10
     return -1
 
-fn (&Parser) hex4() -> !int:
+fn (&&Parser) hex4() -> !int:
     if self.pos + 4 > self.src.len():
         return self.fail('Expected four hex digits after `\\u`.')
     res := 0
@@ -1110,7 +1110,7 @@ fn (&Parser) hex4() -> !int:
     return res
 
 --| Parses a string at the opening quote.
-fn (&Parser) string() -> !str:
+fn (&&Parser) string() -> !str:
     self.pos += 1
     start := self.pos
     src := self.src
@@ -1182,7 +1182,7 @@ fn (&Parser) digits() -> int:
         self.pos += 1
     return self.pos - start
 
-fn (&Parser) number() -> !Value:
+fn (&&Parser) number() -> !Value:
     start := self.pos
     if self.peek() == '-':
         self.pos += 1

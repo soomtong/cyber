@@ -1737,6 +1737,7 @@ fn check_locals(c: *cy.Chunk, exp_var_start: usize, node: *ast.Node) !void {
 
 fn semaBreakTo(c: *cy.Chunk, block_idx: usize, node: *ast.Node) !void {
     const start = c.proc().block_start;
+    try checkAssignMoveJump(c, block_idx, node);
     const b = &c.semaBlocks.items[block_idx];
     try semaDestructBlock2(c, b);
     _ = try c.ir.pushStmt(.break_, node, .{ .block_offset = @intCast(block_idx - start) });
@@ -1748,6 +1749,7 @@ fn semaBreak(c: *cy.Chunk, node: *ast.Node) !void {
     const idx = c.loopBlock(start) orelse {
         return c.reportError("Expected parent loop block.", node);
     };
+    try checkAssignMoveJump(c, idx, node);
     const b = &c.semaBlocks.items[idx];
     b.loop_has_break = true;
     try semaDestructBlock2(c, b);
@@ -1757,6 +1759,7 @@ fn semaBreak(c: *cy.Chunk, node: *ast.Node) !void {
 
 fn semaContinueTo(c: *cy.Chunk, block_idx: usize, node: *ast.Node) !void {
     const start = c.proc().block_start;
+    try checkAssignMoveJump(c, block_idx, node);
     const b = &c.semaBlocks.items[block_idx];
     try semaDestructBlock2(c, b);
     _ = try c.ir.pushStmt(.continue_, node, .{ .block_offset = @intCast(block_idx - start) });
@@ -1768,6 +1771,7 @@ fn semaContinue(c: *cy.Chunk, node: *ast.Node) !void {
     const idx = c.loopBlock(start) orelse {
         return c.reportError("Expected parent loop block.", node);
     };
+    try checkAssignMoveJump(c, idx, node);
     const b = &c.semaBlocks.items[idx];
     if (b.pre_continue_block != cy.NullId) {
         const pre_cont_block = &c.semaBlocks.items[b.pre_continue_block];
@@ -3723,27 +3727,52 @@ fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.
                     return c.reportError("TODO: Write to a reference parameter.", node);
                 }
 
+                if (svar.type == .dead and id < c.block().varStart) {
+                    // A loop body or a branch would leave the local alive on one path and moved on another.
+                    return reportAssignMovedOuter(c, id, left_n);
+                }
+
                 var right_cstr = Cstr.initRequire(svar.decl_t);
                 right_cstr.assign_to_local = true;
-                right_res = try semaAssignRight(c, left_n, right, right_cstr, opts.rhsOpAssignBinExpr);
-                if (right_res.resType == .value and right_res.data.value.has_aux_local) {
-                    var_start += 1;
+                // The right side can move the local (`r = eat(r)`): the assignment gives it a value again.
+                const revive = AssignRevive{ .id = id, .block = @intCast(c.semaBlocks.items.len - 1), .prev = c.assign_revive };
+                const saved_revive = c.assign_revive;
+                if (!opts.rhsOpAssignBinExpr and !svar.inner.local.hidden and !isPersistedMainLocal(c, id)) {
+                    c.assign_revive = &revive;
                 }
-                try checkBorrowOutlives(c, id, right_res, right);
-                // `svar` can be stale here: the right side can add locals.
-                if (c.varStack.items[id].decl_t.isManaged()) {
-                    // The old value is destructed.
-                    try checkExclusiveBorrowOfField(c, id, borrow_field_whole, true, node);
+                var borrow_init: ExprResult = undefined;
+                {
+                    defer c.assign_revive = saved_revive;
+                    right_res = try semaAssignRight(c, left_n, right, right_cstr, opts.rhsOpAssignBinExpr);
+                    if (right_res.resType == .value and right_res.data.value.has_aux_local) {
+                        var_start += 1;
+                    }
+                    try checkBorrowOutlives(c, id, right_res, right);
+                    // `svar` can be stale here: the right side can add locals.
+                    if (c.varStack.items[id].decl_t.isManaged() and c.varStack.items[id].type != .dead) {
+                        // The old value is destructed.
+                        try checkExclusiveBorrowOfField(c, id, borrow_field_whole, true, node);
+                    }
+                    borrow_init = right_res;
+                    right_res = try semaOwn(c, right_res, right);
                 }
-                const borrow_init = right_res;
-                right_res = try semaOwn(c, right_res, right);
+                // A local that was moved, before the statement or by its right side, has no value to destruct.
+                const moved = c.varStack.items[id].type == .dead;
+                if (moved and isPersistedMainLocal(c, id)) {
+                    // A failure of the right side at runtime would leave the moved local to the next input.
+                    const name = c.varStack.items[id].name();
+                    return c.reportErrorFmt("Cannot assign to the top level variable `{}` of the REPL after it was moved. Declare it again with `{} := ...`.", &.{v(name), v(name)}, left_n);
+                }
 
                 if (right_res.type.isManaged()) {
                     const tempv = try declareHiddenLocal(c, "_temp", right_res.type, right_res, right);
                     right_res = try semaLocal(c, tempv.id, node);
-                    try semaDestructLocal(c, &c.varStack.items[leftRes.data.value_local], left_n);
+                    if (!moved) {
+                        try semaDestructLocal(c, &c.varStack.items[leftRes.data.value_local], left_n);
+                    }
                     c.varStack.items[tempv.id].type = .dead;
                 }
+                if (moved) try reviveLocal(c, id);
 
                 const local = &c.varStack.items[leftRes.data.value_local];
                 if (local.has_inactive_struct_fields) {
@@ -3842,6 +3871,55 @@ fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.
 
 /// The right side of `left_n = right`. While it is analyzed, the chunk knows the variable that is assigned
 /// (`Chunk.assign_target`).
+/// An assignment `x = right` to the local `id`, while its right side is checked. The right side can move the local
+/// where it always runs (`r = eat(r)`, `xs = xs.appended(v)`): the local is alive again when the statement ends, so
+/// the move is allowed from a loop body or any other block too. See `docs/decisions/project_last_use.md`.
+pub const AssignRevive = struct {
+    id: LocalId,
+    /// The block of the statement. A move from a deeper block is a part that is evaluated conditionally, or a lambda.
+    block: u32,
+    prev: ?*const AssignRevive,
+};
+
+/// Whether a move of the whole local `id` at this point is undone by the assignment to it that is being checked.
+fn movesIntoAssign(c: *cy.Chunk, id: LocalId) bool {
+    const rev = c.assign_revive orelse return false;
+    return rev.id == id and rev.block == c.semaBlocks.items.len - 1;
+}
+
+/// The assignment gives the moved local `id` a value: it is alive again.
+fn reviveLocal(c: *cy.Chunk, id: LocalId) !void {
+    if (c.move_undo_depth > 0) {
+        try c.move_undo.append(c.alloc, .{ .id = id, .revive = true, .site = c.moved_sites.get(id), .has_site = true });
+    }
+    c.varStack.items[id].type = .local;
+    _ = c.moved_sites.remove(id);
+}
+
+fn reportAssignMovedOuter(c: *cy.Chunk, id: LocalId, node: *ast.Node) anyerror {
+    const local = c.varStack.items[id];
+    const site = c.moved_sites.get(id).?;
+    const ast_ = c.compiler.chunks.items[site.src()].ast;
+    var line: u32 = undefined;
+    var col: u32 = undefined;
+    var line_start: u32 = undefined;
+    ast_.computeLinePos(site.pos(), &line, &col, &line_start);
+    return c.reportErrorFmt("Cannot assign to `{}` here: it was moved at {}:{} and it is declared in an outer block. Assign to it in the block that declares it, or declare a new variable.", &.{v(local.name()), v(line + 1), v(col + 1)}, node);
+}
+
+/// A jump out of the block `block_idx` (`break`, `continue`, a failing `!` in a `try` block). The right side of an
+/// assignment that moved its local can not jump to where the local is still declared: the local would be read as
+/// alive there.
+fn checkAssignMoveJump(c: *cy.Chunk, block_idx: usize, node: *ast.Node) !void {
+    var cur = c.assign_revive;
+    while (cur) |rev| : (cur = rev.prev) {
+        if (block_idx > rev.block) continue;
+        const local = c.varStack.items[rev.id];
+        if (local.type != .dead or rev.id >= c.semaBlocks.items[block_idx].varStart) continue;
+        return c.reportErrorFmt("Cannot leave the assignment to `{}` here: its right side moved `{}`, which is declared outside the block that ends here. Move it to a new variable in a statement before this one.", &.{v(local.name()), v(local.name())}, node);
+    }
+}
+
 fn semaAssignRight(c: *cy.Chunk, left_n: *ast.Node, right: *ast.Node, cstr: Cstr, op_assign_bin_expr: bool) !ExprResult {
     c.assign_target = left_n;
     c.assign_right = right;
@@ -6373,6 +6451,13 @@ pub fn semaLocal(c: *cy.Chunk, id: LocalId, node: *ast.Node) !ExprResult {
             return res;
         },
         .dead => {
+            if (c.assign_left == node and c.moved_sites.contains(id) and !local.inner.local.hidden) {
+                // The left side of `x = y`: the assignment gives a moved local a value again (`semaAssignStmt`).
+                const expr = try c.ir.newExpr(.local, local.decl_t, node, .{ .id = local.inner.local.id });
+                var res = ExprResult.initLocal(expr, local.stack_idx);
+                res.addressable = true;
+                return res;
+            }
             if (c.moved_sites.get(id)) |site| {
                 const ast_ = c.compiler.chunks.items[site.src()].ast;
                 var line: u32 = undefined;
@@ -8604,7 +8689,7 @@ fn canMoveImplicitly(c: *cy.Chunk, expr: ExprResult) bool {
     if (local.inner.local.id != cur.cast(.local).id) return false;
     if (local.inner.local.isParam and local.decl_t.isObjectLike()) return false;
     if (local.decl_t.info.borrow_only) return false;
-    if (id < c.block().varStart and (cur != expr.ir or !canMoveAcross(c, id))) return false;
+    if (id < c.block().varStart and (cur != expr.ir or !(canMoveAcross(c, id) or movesIntoAssign(c, id)))) return false;
     if (cur == expr.ir and local.has_inactive_struct_fields) return false;
     return true;
 }
@@ -9011,12 +9096,18 @@ fn reuseSliceBuffer(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, rec_res:
     if (local.active_borrows > 0 or local.active_ex_borrows > 0 or local.has_inactive_struct_fields) return null;
     if (c.vm.config.persist_main and c.proc().func == null and c.semaBlocks.items.len == 1) return null;
     // The local is of this block, and this statement of the block is its last use.
-    if (id < c.block().varStart) return null;
+    // Or the statement assigns the result to the local (`xs = xs.appended(v)`), from any block: the left side and
+    // the receiver are its only names of the local.
     const ctx = c.stmt_ctx;
     if (ctx.stmts.len == 0 or ctx.block != c.semaBlocks.items.len - 1) return null;
     const text = stmtText(c, ctx.stmts, ctx.idx) orelse return null;
-    if (countNames(text, local.name()) != 1) return null;
-    if ((lastNamingStmt(c, ctx.stmts, ctx.idx, local.name()) orelse return null) != ctx.idx) return null;
+    if (movesIntoAssign(c, id) and assignsToName(ctx.stmts[ctx.idx], local.name())) {
+        if (countNames(text, local.name()) != 2) return null;
+    } else {
+        if (id < c.block().varStart) return null;
+        if (countNames(text, local.name()) != 1) return null;
+        if ((lastNamingStmt(c, ctx.stmts, ctx.idx, local.name()) orelse return null) != ctx.idx) return null;
+    }
 
     const in_sym = (try c.accessResolvedSym(rec_res.type, in_place, node)) orelse return null;
     if (in_sym.type != .func) return null;
@@ -9040,6 +9131,13 @@ fn reuseSliceBuffer(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, rec_res:
     c.slice_void_call = saved_void;
     _ = try c.ir.pushStmt(.discard, node, .{ .expr = own_call.ir });
     return try semaMove(c, try semaLocal(c, tmp.id, rec), rec);
+}
+
+/// Whether `stmt` is `name = ...`.
+fn assignsToName(stmt: *ast.Node, name: []const u8) bool {
+    if (stmt.type() != .assign_stmt) return false;
+    const left = stmt.cast(.assign_stmt).left;
+    return left.type() == .ident and std.mem.eql(u8, left.cast(.ident).name.slice(), name);
 }
 
 fn semaCallFuncSymRecInner(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, rec_res: ExprResult,
@@ -10371,7 +10469,8 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
             const unwrap = node.cast(.unwrap_or);
 
             var opt = try semaElseOption(c, unwrap.opt, unwrap.default);
-            opt = try semaEnsureAddressable(c, opt, unwrap.opt);
+            // A new value (a call) goes to `_opt` as it is, so a `NoCopy` option can be unwrapped.
+            if (!opt.owned) opt = try semaEnsureAddressable(c, opt, unwrap.opt);
 
             const payload_t = opt.type.cast(.option).child_t;
             const res_local = try declareHiddenLocal(c, "_temp", payload_t, null, node);
@@ -10407,7 +10506,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: Cstr) anyerror!ExprR
             const unwrap = node.cast(.unwrap_or_block);
 
             var opt = try semaElseOption(c, unwrap.opt, null);
-            opt = try semaEnsureAddressable(c, opt, unwrap.opt);
+            if (!opt.owned) opt = try semaEnsureAddressable(c, opt, unwrap.opt);
 
             const payload_t = opt.type.cast(.option).child_t;
             const res_local = try declareHiddenLocal(c, "_unwrap_res", payload_t, null, node);
@@ -10661,8 +10760,10 @@ fn semaMove(c: *cy.Chunk, res_: ExprResult, child: *ast.Node) !ExprResult {
     if (outer_local and field_access) {
         return c.reportError("Can only move a member of a variable declared in the same block.", child);
     }
-    const cross = c.temp_access_path.var_id < c.semaBlocks.items[moveBlock(c)].varStart;
-    if (outer_local and !canMoveAcross(c, c.temp_access_path.var_id)) {
+    // An assignment to the local that is being checked gives it a value again: no branch or loop sees the move.
+    const into_assign = !field_access and movesIntoAssign(c, c.temp_access_path.var_id);
+    const cross = !into_assign and c.temp_access_path.var_id < c.semaBlocks.items[moveBlock(c)].varStart;
+    if (outer_local and !into_assign and !canMoveAcross(c, c.temp_access_path.var_id)) {
         return reportMoveAcross(c, c.temp_access_path.var_id, child);
     }
 
@@ -10734,6 +10835,8 @@ pub const MoveUndo = struct {
     has_site: bool = false,
     /// The move was added to `Chunk.branch_moves`.
     branch: bool = false,
+    /// Not a move: an assignment gave the moved local a value (`reviveLocal`).
+    revive: bool = false,
     /// The move of a member: the range of the member state, and whether the move created the state of the local.
     member: bool = false,
     new_state: bool = false,
@@ -10768,7 +10871,7 @@ pub fn undoMoves(c: *cy.Chunk, start: usize, var_start: usize) void {
             }
             continue;
         }
-        local.type = .local;
+        local.type = if (undo.revive) .dead else .local;
         if (undo.has_site) {
             if (undo.site) |site| {
                 c.moved_sites.putAssumeCapacity(undo.id, site);

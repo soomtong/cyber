@@ -188,7 +188,7 @@ An embedding host can refuse a module. Then `use name` fails with 'Failed to loa
 - To share, lift the value to the heap with `^`: `p := ^P{name='a', age=3}`. Read and write fields as `p.age`, and use `p.*` for the whole value.
 - An operator on a reference works on the value it points to only through `.*`: `n.* += 2`, `out.* += 'x'` for `out := ^[]str{}`.
 - To let a function modify an argument, declare `fn inc(p &int)` and call `inc(&a)`.
-- `Array[T]` cannot be copied. Passing or assigning a variable moves it (`total(a)`, `b := a`), and using the original after that is an error that names the move. For an ordinary list use `[]T`.
+- `Array[T]` cannot be copied. Passing or assigning a variable moves it (`total(a)`, `b := a`), and using the original after that is an error that names the move, until it is assigned again (`a = step(a)` is allowed, in a loop too). For an ordinary list use `[]T`.
 - A closure can only capture variables of type `^T` or `&T`. In simple code use a plain function or a loop instead of a closure.
 - In the REPL and in hosts that keep top-level variables between runs, a top-level borrow (`c := &x`) cannot be kept ('Cannot persist local ... of borrow type'). Borrow inside a function, or use `^T`.
 

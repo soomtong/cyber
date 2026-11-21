@@ -84,6 +84,9 @@ pub const Chunk = struct {
     assign_target: ?*ast.Node = null,
     assign_right: ?*ast.Node = null,
 
+    /// The assignments to a local whose right side is being checked, innermost first (`sema.AssignRevive`).
+    assign_revive: ?*const cy.sema.AssignRevive = null,
+
     /// The last method call of a `Slice` that returned nothing (`sema.semaCallFuncSymRec`).
     slice_void_call: ?*ast.Node = null,
     /// The statement being checked (`sema.semaStmts`).

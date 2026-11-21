@@ -75,7 +75,7 @@
   메서드는 버퍼가 유일하지 않으면 먼저 복사하므로(결정 3) 다른 값과 나눈 버퍼는 그대로다.
 - "마지막 사용"은 C와 같은 텍스트 조사(`stmtText` · `countNames` · `lastNamingStmt`)다. 지금 문장과 그 블록은 `Chunk.stmt_ctx`
   (`semaStmts`가 문장마다 둔다)로 안다. 지역이 이 블록 것이어야 하므로 반복문이 사이에 끼지 않는다.
-- 빼는 것: `xs = xs.appended(v)`(이름이 두 번, 그리고 이동한 지역에 다시 대입하는 것이 아직 안 된다), REPL 최상위, 멤버
+- 빼는 것: `xs = xs.appended(v)`(이름이 두 번. 뒤에 넣었다, 아래 "이동한 지역에 다시 대입"), REPL 최상위, 멤버
   수신자(`s.xs.appended(v)`).
 - 확인: `xs.removed(0)` 결과의 `ptr`이 `xs`의 것과 같다(`memory/slice_reuse_last_use.cy`). 성능 수치는 재지 않았다(복사 하나가
   빠진다).
@@ -87,3 +87,30 @@
   - `#for` 본문은 같은 블록에 반복해 펼쳐지므로 `ct_inline.forRangeInner`가 `stmt_ctx`를 비워 재사용을 끈다.
   - 불일치 오류는 `Chunk.reuse_call`로 적은 메서드의 같은 순번 overload를 보인다(`reportCallFuncMismatch2`). 새 목록 메서드와
     제자리 메서드의 overload 선언 순서가 같아야 한다. 런타임 stack trace의 `Slice.remove`는 그대로 둔다.
+
+## 이동한 지역에 다시 대입 (2026-11-21)
+
+E · B 절의 "남은 것" 가운데 "이동한 지역에 다시 대입"과 `xs = xs.appended(v)`의 재사용을 했다(사용자: "continue").
+
+- 대입문(`semaAssignStmt`의 지역 갈래)이 오른쪽을 검사한 뒤 지역이 죽어 있으면(문장 전에 옮겼거나 오른쪽이 옮겼거나) 옛 값의
+  소멸을 건너뛰고 지역을 되살린다(`reviveLocal`: `.local`로, `moved_sites`에서 뺌). 런타임 플래그는 없다.
+- 왼쪽 이름이 죽은 지역이면 `semaLocal`이 `assign_left`일 때만 읽기를 허용한다(`moved_sites`에 있는, 이동으로 죽은 지역만).
+- 오른쪽 검사 동안 `Chunk.assign_revive`(`AssignRevive{id, block, prev}`, 안쪽 대입문은 사슬)를 둔다. `movesIntoAssign`이 참이면
+  (같은 지역, 지금 블록이 문장의 블록) `semaMove` · `canMoveImplicitly`가 바깥 블록 지역의 이동을 받고 `branch_moves`에 올리지 않는다.
+  문장이 끝나면 살아 있으므로 반복문 · 갈래의 합류가 볼 것이 없다. 블록이 같아야 하므로 조건부로 평가되는 식과 람다 안은 그대로 막힌다.
+- 선형이 아닌 흐름 셋을 막는다(`checkAssignMoveJump`, `semaBreak` · `semaContinue` · `semaBreakTo` · `semaContinueTo`): 오른쪽이
+  지역을 옮긴 뒤 그 지역이 선언된 블록 안쪽 어딘가를 `break` · `continue` · `try` 본문의 실패한 `!`로 떠나면, 도착한 자리의 sema
+  상태는 지역이 살아 있다고 본다. 문장의 블록보다 안쪽 블록으로 가는 내부 `break`(`?else` 낮추기 등)와, 떠나는 블록 안에서 선언한
+  지역은 괜찮다. `return`과 함수 밖으로 나가는 `!`는 그 시점 상태로 소멸을 만들므로 괜찮다.
+- 문장 전에 죽은 지역은 선언한 블록에서만 되살린다. 반복 본문이면 첫 바퀴와 다음 바퀴가, 갈래면 갈래마다 상태가 달라진다.
+  같은 갈래에서 옮기고 대입하는 꼴(`if c: take(x); x = R{}`)도 지금은 이 오류다(`branch_moves`에서 빼면 되지만 하지 않았다).
+- overload 후보 매칭 중의 되살리기는 `MoveUndo.revive`로 적어 후보가 맞지 않으면 다시 죽인다.
+- REPL 최상위 지역은 되살리지 않는다. 오른쪽이 런타임에 실패하면 옮겨진 지역이 저장 목록에 남는다.
+- B: `reuseSliceBuffer`가 `movesIntoAssign`이고 문장이 `name = ...`이면(`assignsToName`) 이름이 문장에 두 번일 때 재사용한다.
+  뒤 문장 검사와 "이 블록의 지역" 조건은 이 꼴에서는 보지 않는다.
+- 그 길에 고친 것: `?else`(`unwrap_or` · `unwrap_or_block`)가 새 값인 옵션을 `_temp`에 담지 않고 `_opt`로 바로 넘긴다. `NoCopy`
+  payload가 풀린다.
+- 테스트: `memory/move_assign.cy`(소멸 순서 로그) · `move_assign_outer_error.cy` · `move_assign_break_error.cy` ·
+  `move_assign_try_error.cy` · `slice_reuse_assign.cy` · `unwrap_else_nocopy.cy`, lib 테스트 `session.zig`의 persist_main 이동.
+- 남은 것: 반복 본문에서 옮긴 바로 뒤 `break` · `return`, `switch` · `if` 언랩 · `if` 식 갈래의 이동, 같은 갈래에서 옮긴 뒤 대입,
+  멤버 수신자 재사용(`s.xs = s.xs.appended(v)`), 변수에 담긴 `NoCopy` 옵션의 `?else`.

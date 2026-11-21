@@ -54,6 +54,37 @@ the same block.' 오류였다.
 뒤 문장에 나오지 않음) 복사하지 않고 그 버퍼를 넘겨받는다. `move` 뒤 제자리 메서드와 같다. 결과는 전과 같고 복사만 줄어든다.
 다른 값이 버퍼를 나눠 갖고 있으면 제자리 메서드가 전처럼 먼저 복사한다. 결정 `docs/decisions/project_last_use.md` "B 구현".
 
+## 이동한 변수에 다시 대입할 수 있다
+
+대입문이 이동한 지역 변수에 값을 다시 준다. 전에는 '`r` was moved at ...' 오류였다(`r = eat(move r)`도 같았다).
+
+```cy
+acc := Array[int]{}
+for 0..3 |i|:
+    acc = step(acc, i)     -- 오른쪽이 `acc`를 옮기고 결과를 대입한다. 소멸은 없다.
+take(acc)
+acc = Array[int]{}         -- 옮긴 뒤라 소멸시킬 옛 값이 없다.
+```
+
+- 오른쪽이 대입 대상을 옮기는 꼴(`x = f(x)`)은 반복 본문 · `if` 갈래 · `switch` 등 어느 블록에서든 된다. 문장이 끝나면 변수가 살아
+  있기 때문이다. 옮기는 자리는 늘 평가되는 자리여야 한다(`and` · `or` · `if` 식 · `?else` · `!else` 안은 전처럼 막힌다).
+- 문장 전에 이미 옮긴 변수는 그 변수를 선언한 블록에서만 대입한다. 반복 본문 · 갈래에서는 'Cannot assign to `a` here: it was
+  moved at L:C and it is declared in an outer block. Assign to it in the block that declares it, or declare a new variable.'
+- 바깥 블록의 변수를 옮긴 오른쪽은 `break` · `continue` · `try` 블록 안의 실패한 `!`로 문장을 떠나지 못한다('Cannot leave the
+  assignment to `a` here: its right side moved `a`, which is declared outside the block that ends here. Move it to a new
+  variable in a statement before this one.'). `return`은 된다.
+- REPL의 최상위 변수는 옮긴 뒤 대입하지 못한다('Cannot assign to the top level variable `g` of the REPL after it was moved.
+  Declare it again with `g := ...`.'). 오른쪽이 실행 중 실패하면 옮겨진 변수가 다음 입력에 남기 때문이다.
+- `xs = xs.appended(v)`(`inserted` · `removed` · `+`도)는 문장에 `xs`가 그 둘뿐이면 버퍼를 재사용한다. 반복 본문에서도 된다. 원소
+  100개를 이렇게 붙이면 버퍼가 100번이 아니라 자랄 때만(시험에서 4번) 새로 잡힌다. 결과는 전과 같다.
+- 결정 `docs/decisions/project_last_use.md` "이동한 지역에 다시 대입", 매뉴얼 Moving 절 · Slice 절.
+
+## `?else`가 `NoCopy` 옵션을 푼다
+
+`b := make() ?else: ...`와 `make() ?else default`에서 옵션이 호출 결과 같은 새 값이면 payload가 `NoCopy`여도 풀린다. 0.4.16에서는
+'Cannot copy `?R`, type member implements `NoCopy`.'였고, 그 뒤 master에서는 숨은 지역을 짚는 'Cannot move `_temp` inside a
+`?else` expression'이었다. 변수에 담긴 옵션(`o ?else ...`)은 전처럼 막힌다.
+
 ## 고치는 법을 말하는 문구 넷 (tars-agent 요청, 0.4.16 CodeAct 회차)
 
 - Python 슬라이스 `s[:3]` · `s[2:]` · `s[1:3]`: 'A slice is written `s[..3]`, `s[2..]` or `s[1..3]`, not `s[:3]`.' 전에는

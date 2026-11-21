@@ -1150,7 +1150,9 @@ When the receiver is a variable and this is its last use (the only use of the na
 statement of the block names it), `appended`, `inserted`, `removed` and `+` take its buffer instead of copying it, like
 `move` followed by the in-place method. The result is the same; the variable can not be used after that anyway.
 `ys := xs.appended(4)` as the last use of `xs` then costs no copy. When another value shares the buffer, the result gets its own copy
-as before. The body of `#for` does not take the buffer.
+as before. The body of `#for` does not take the buffer. A statement that assigns the result to the receiver
+(`xs = xs.appended(v)`, with no other use of `xs` in it) takes the buffer too, also in a loop body, so building a list
+this way does not copy it for each element.
 
 Copies of a slice share its buffer until one of them resizes: an in-place resize of a slice whose buffer another value
 also holds (`ys := xs`, a sub-slice) first copies the buffer, so the other value keeps its elements and its length. Writing
@@ -2792,6 +2794,17 @@ if verbose:
 print('done')
 ```
 A loop body can not move a variable that is declared outside the loop, because the next iteration reads it: 'Cannot move `f` here: it is declared in an outer block. A branch of an `if` statement can move it, a loop body can not (the next iteration reads it). Borrow it with `&f`.' A branch can move only a whole variable of an outer block, not a member of it.
+
+An assignment gives a moved variable a value again. The right side can move the variable that the statement assigns, and then a loop body or any other block can do it too, because the variable is alive when the statement ends:
+```cy
+acc := Array[int]{}
+for 0..3 |i|:
+    acc = step(acc, i)      -- Moves `acc` into `step` and assigns the result. No value is deinitialized.
+
+take(acc)
+acc = Array[int]{}          -- `acc` was moved, so there is no old value to deinitialize.
+```
+A variable that was moved before the statement gets a value only in the block that declares it. In a loop body or a branch the paths would differ: 'Cannot assign to `acc` here: it was moved at 5:6 and it is declared in an outer block. Assign to it in the block that declares it, or declare a new variable.' The right side that moved a variable of an outer block can not leave the statement with `break`, `continue` or a failing `!` inside a `try` block ('Cannot leave the assignment to `acc` here: ...'), since the variable would be read after that. `return` can. In the REPL a top level variable that was moved is declared again with `:=`, not assigned.
 
 The condition of an `if` statement always runs, so it moves a variable like a statement of the block (`if take(f) > 0:`). An expression that evaluates a part conditionally does not move a variable: `and`, `or`, an `if` expression, `?else` and `!else` report 'Cannot move `f` inside an `and` expression: a part of the expression is evaluated conditionally. Borrow it with `&f`, or move it to a variable in a statement before this one.' The condition of an `else` branch reports 'Cannot move `f` in the condition of an `else` branch: the condition is evaluated conditionally. Move it inside the branch, or borrow it with `&f`.'
 

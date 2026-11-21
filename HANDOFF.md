@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-21): 0.4.16 릴리스 뒤, 마지막 사용(C · D · E · B)과 그 코드 리뷰 수정
+# HANDOFF (2026-11-21): 0.4.16 릴리스 뒤, 마지막 사용(C · D · E · B) · 코드 리뷰 수정 · 이동한 지역에 다시 대입
 
 ## 목표
 
@@ -21,11 +21,12 @@
   재사용", "A 없이 D · E"). 결정 `docs/decisions/project_last_use.md`.
 - 2026-11-21(사용자: `/code-review high from 0.4.16` 뒤 "step by step 수정해주세요. 결정을 위임합니다. 서브 에이전트(최대 3개)를
   사용할 수 있으니 병렬 실행 가능한 업무는 함께 진행"): 리뷰 9건(중요 5, 사소 4)을 모두 고쳤다.
+- 2026-11-21(사용자: "continue"): 마지막 사용의 남은 것 중 이동한 지역에 다시 대입과 `xs = xs.appended(v)`의 버퍼 재사용.
 
 ## 현재 브랜치
 
 `master`. 0.4.16 태그 `ca000225`와 `5e5765f9`까지 push돼 있다. 그 뒤 커밋(`7e8c5782` CI 기록, `90b55104` 비어휘적
-수명, `6e2a0206` D · E, `4149c6b8` B, 코드 리뷰 수정 `5fca44c6` · `ad24ee2c` · `a63c63c3`과 `if` 갈래 수정, HANDOFF 커밋들)은
+수명, `6e2a0206` D · E, `4149c6b8` B, 코드 리뷰 수정 `5fca44c6` · `ad24ee2c` · `a63c63c3`과 `if` 갈래 수정, 이동한 지역에 다시 대입, HANDOFF 커밋들)은
 push하지 않았다.
 PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지 못해 15분 뒤 취소된 탓이다(나머지 6개 통과).
 
@@ -62,6 +63,14 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - 값을 반환하는 `op=` 메서드의 문구, behavior 테스트 넷의 분류.
   - 확인: 14단계 검증에서 1~13단계 rc=0. 14단계는 `own_buffer` 탓에 `docs/api.json`이 낡아 실패했고, 다시 만든 뒤 일치를 확인했다.
   - tars-agent `docs/TODO.md`의 "다음 cyber 빌드" 항목에 세션의 `move` 규칙과 새 문구 둘을 적었다(커밋 안 함).
+
+- [x] 이동한 지역에 다시 대입(2026-11-21). 결정 `project_last_use.md` "이동한 지역에 다시 대입", `unreleased.md` 같은 이름의 절.
+  - 대입문이 죽은 지역을 되살린다(`sema.reviveLocal`). 오른쪽이 대입 대상을 옮기는 꼴(`x = f(x)`)은 어느 블록에서든 된다
+    (`Chunk.assign_revive`, `sema.movesIntoAssign`). 바깥 지역을 옮긴 오른쪽의 `break` · `continue` · `try` 안 `!`는 오류
+    (`checkAssignMoveJump`). 문장 전에 옮긴 지역은 선언한 블록에서만, REPL 최상위는 안 됨.
+  - `xs = xs.appended(v)`가 버퍼를 재사용한다(반복 본문 포함, `reuseSliceBuffer`의 `assignsToName` 갈래).
+  - `?else`가 새 값인 `NoCopy` 옵션을 푼다(`unwrap_or` · `unwrap_or_block`).
+  - tars-agent `docs/TODO.md`의 "다음 cyber 빌드" 항목에 덧붙였다(커밋 안 함).
 
 ## 시도했으나 실패한 접근
 
@@ -153,8 +162,8 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `endIfBranch` · `joinBranchMoves` · `spliceBranchEnd`. 반복 본문 밖 지역은 'Cannot move `a` here: ...'.
 - [x] B(`4149c6b8`): `appended` · `inserted` · `removed` · `+`가 마지막 사용에서 버퍼 재사용(`sema.reuseSliceBuffer`,
   `Chunk.stmt_ctx`). 원래의 B 버그는 slice 결정 3에서 이미 없어졌다. A(IR 활성 분석)는 만들지 않기로 했다.
-  - 남은 것(결정 문서 "E 구현" · "B 구현" 끝): 반복 본문에서 옮긴 뒤 `break` · `return`, `switch` · `if` 언랩 · `if` 식 갈래의 이동,
-    이동한 지역에 다시 대입(`xs = xs.appended(v)`도 이것 때문에 재사용 안 됨), 멤버 수신자 재사용. 성능 수치는 재지 않았다.
+  - 남은 것(결정 문서 "이동한 지역에 다시 대입" 끝): 반복 본문에서 옮긴 뒤 `break` · `return`, `switch` · `if` 언랩 · `if` 식
+    갈래의 이동, 같은 갈래에서 옮긴 뒤 대입, 멤버 수신자 재사용, 변수에 담긴 `NoCopy` 옵션의 `?else`. 성능 수치는 재지 않았다.
   - tars-agent 프롬프트 `prompt/cyber-subset.md` · `.en.md` 168 · 347행이 "`move a`로 넘긴다", "Cannot copy ... `move`"라고 안내한다.
     이제 `move` 없이 이동한다. 그 저장소에는 쓰지 않았다(다른 세션의 미추적 파일 `spike/s2/out/0.4.16/`이 있음).
 - [x] tars-agent 요청 `docs/requests/cyber-0.4.16-messages-from-codeact-round.md`의 문구 넷(2026-11-21, 사용자: "update tars-agent
@@ -205,6 +214,8 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `format_zoned`는 `time.zone` · `time.local`로 읽은 zone만 괄호를 붙인다(데이터로 만든 zone은 오프셋만). 같은 바이트라도 DB에서
   읽은 zone과 `zone_from_tzif`의 zone은 `==`에서 다르다. `parse_format`에서 `%j`는 `%m` · `%d` · `%e` · `%b`와 함께 쓸 수 없다.
   모든 `DateTime`이 `Zone` 값을 통째로 품는다(30칸 가까이). `==` 오버로드가 없어 공유 참조로 못 줄였다.
+- `g := f(move g)`처럼 선언의 초기식이 같은 이름의 옛 변수를 읽으면 '`g` is no longer alive in this scope.'다(REPL에서 확인).
+  `t := f(move g)` 뒤 `g := move t`로 쓴다.
 - 하위 블록에서는 `move` · `meta.consume`을 못 쓴다(`else` 갈래의 consume은 뒤까지 죽은 상태로 남는다). 컴파일 타임
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).

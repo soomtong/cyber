@@ -466,6 +466,27 @@ test "persist_main: a top level local moves with `move` only, and a moved one is
     try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "test.eq(2, b.len())", config, &res));
     try zt.eq(C.Success, C.vm_evalx(vm, "repl", "d := Array[str]{long(7)}\nif bx.n == 2:\n    test.eq(1, eat(move d))", config, &res));
     try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "test.eq(1, d.len())", config, &res));
+    // An assignment does not give a moved top level local a value again. A local of a function or a block gets one.
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "fn same(x Array[str]) -> Array[str]:\n    return x\ng := Array[str]{long(9)}", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "h := move g\ng = Array[str]{long(10)}", config, &res));
+    {
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, "Cannot assign to the top level variable `g` of the REPL after it was moved. Declare it again with `g := ...`.") != null);
+    }
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "g = same(move g)", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\test.eq(1, g.len())
+        \\if bx.n == 1:
+        \\    q := Array[str]{long(11)}
+        \\    q = same(q)
+        \\    for 0..2:
+        \\        q = same(q)
+        \\    test.eq(28, q[0].len())
+        \\t := same(move g)
+        \\g := move t
+    , config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "test.eq(1, g.len())", config, &res));
     // The name can be declared again, and the other locals are kept.
     try zt.eq(C.Success, C.vm_evalx(vm, "repl", "a := Array[str]{long(8)}\ne := move a\na := 3", config, &res));
     try zt.eq(C.Success, C.vm_evalx(vm, "repl", "test.eq(3, a)\ntest.eq(1, e.len())\ntest.eq(1, bx.xs.len())", config, &res));

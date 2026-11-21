@@ -201,6 +201,10 @@ zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Dd
     `/cy/bin/cyber src/test/modules/<name>.cy`. Windows는 로컬에서 돌릴 수단이 없어 master run으로 본다(태그는 그 뒤).
   - arm64 Linux(릴리스 대상 아님)에서는 `os.open_dir`가 `error.InvalidArgument`다. `lc.O_DIRECTORY`가 system으로만 갈리고
     아키텍처로는 갈리지 않는 것으로 보인다(원인은 확인하지 않았다).
+- 0.4.17(2026-11-22): 태그 `0.4.17` → `02c3c425`, `build-1031-02c3c42`, 에셋 15개. master run(16분 56초)과 태그 run 모두 재실행
+  없이 통과했다. `sema.zig` 분할(`project_sema_split.md`)이 들어간 릴리스라 플랫폼별 분석 경로의 `pub` 누락을 CI의 Linux ·
+  Windows · wasm 빌드로 확인한 셈이다. `docs/gen-api-json.cy`가 읽는 파일이 `src/sema_hint.zig`로 바뀌어 `gen-docs.yml`의
+  `paths`도 고쳤다.
 
 ## CI 시간 줄이기 (2026-11-18)
 

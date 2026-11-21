@@ -115,7 +115,10 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - 이 문서와 옛 결정 문서 · 릴리스 노트의 `sema.semaOwn` 같은 이름은 고치지 않았다. `rg -n "fn semaOwn" src`로 찾는다.
   - 확인: 14단계 검증에서 1~13단계 rc=0. 14단계는 생성기가 `sema.zig`에서 `member_aliases`를 못 찾아 실패했고, 경로를 고친 뒤
     `docs/api.json`과 일치를 확인했다.
-- [x] 0.4.17 릴리스(2026-11-22). 태그 · 빌드 번호 · 설치 확인은 아래 "릴리스" 절의 4~6단계를 마치고 적는다.
+- [x] 0.4.17 릴리스(2026-11-22). 태그 `0.4.17` → `02c3c425`, `build-1031-02c3c42`, Latest, 에셋 15개. master run과 태그 run 모두
+  재실행 없이 통과했다. `install.sh 0.4.17`을 scratchpad에 설치해 버전 문자열, `move` 없는 `Array` 이동 · 빌림의 마지막 사용 예,
+  '`x` was moved at ...' 오류, `cyber-lsp initialize`를 확인했다. `/usr/local`의 설치는 사용자가 다시 한다.
+  tars-agent `docs/TODO.md`의 "다음 cyber 빌드" 항목에 그 빌드가 0.4.17임을 덧붙였다(커밋 안 함).
 
 ## 시도했으나 실패한 접근
 

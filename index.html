@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.16-dev 1019-7497c0e</div>
+    <div class="sub-title">v0.4.16-dev 1025-7673823</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1993,7 +1993,8 @@ statement, <code>_ = arr.removed(0)</code>), because it changes nothing.</p>
 <p>When the receiver is a variable and this is its last use (the only use of the name in the statement, and no later
 statement of the block names it), <code>appended</code>, <code>inserted</code>, <code>removed</code> and <code>+</code> take its buffer instead of copying it, like
 <code>move</code> followed by the in-place method. The result is the same; the variable can not be used after that anyway.
-<code>ys := xs.appended(4)</code> as the last use of <code>xs</code> then costs no copy.</p>
+<code>ys := xs.appended(4)</code> as the last use of <code>xs</code> then costs no copy. When another value shares the buffer, the result gets its own copy
+as before. The body of <code>#for</code> does not take the buffer.</p>
 <p>Copies of a slice share its buffer until one of them resizes: an in-place resize of a slice whose buffer another value
 also holds (<code>ys := xs</code>, a sub-slice) first copies the buffer, so the other value keeps its elements and its length. Writing
 an element (<code>xs[0] = v</code>, <code>sort</code>, <code>reverse</code>) does not copy: every value that shares the buffer sees it.</p>
@@ -3370,6 +3371,7 @@ if verbose:
 print('done')
 </code></pre>
 <p>A loop body can not move a variable that is declared outside the loop, because the next iteration reads it: 'Cannot move <code>f</code> here: it is declared in an outer block. A branch of an <code>if</code> statement can move it, a loop body can not (the next iteration reads it). Borrow it with <code>&f</code>.' A branch can move only a whole variable of an outer block, not a member of it.</p>
+<p>The condition of an <code>if</code> statement always runs, so it moves a variable like a statement of the block (<code>if take(f) > 0:</code>). An expression that evaluates a part conditionally does not move a variable: <code>and</code>, <code>or</code>, an <code>if</code> expression, <code>?else</code> and <code>!else</code> report 'Cannot move <code>f</code> inside an <code>and</code> expression: a part of the expression is evaluated conditionally. Borrow it with <code>&f</code>, or move it to a variable in a statement before this one.' The condition of an <code>else</code> branch reports 'Cannot move <code>f</code> in the condition of an <code>else</code> branch: the condition is evaluated conditionally. Move it inside the branch, or borrow it with <code>&f</code>.'</p>
 <p>Values can be partially moved if a subset of its members were moved:</p>
 <pre><code class="language-cy">type Foo:
     a int
@@ -5955,6 +5957,14 @@ belongs to the script: <code>cyber main.cy --version</code> runs <code>main.cy</
 <pre><code class="language-bash">> sp := [&]int{1, 2}
 CompileError: Cannot persist local `sp` of borrow type `[&]int` across evals. Declare it inside a block or use an owned type.
 > sp := []int{1, 2}
+</code></pre>
+<p>A top level variable of the REPL does not move without <code>move</code>, because later inputs read it. A <code>NoCopy</code> value that would move in a script is a compile error that says to write <code>move a</code> or to borrow. After <code>move a</code>, later inputs can not use <code>a</code>. A member of a top level variable can not be moved:</p>
+<pre><code class="language-bash">> a := Array[str]{'x', 'y'}
+> b := a
+CompileError: Cannot copy `Array[str]`, a `NoCopy` type. The top level variable `a` of the REPL does not move without `move`: later inputs read it. Write `move a` to give it away (later inputs can not use `a` then), or borrow it.
+> b := move a
+> a
+CompileError: Undeclared variable `a`.
 </code></pre>
 <p>When the first input ends with <code>:</code>, the REPL will automatically indent the next line. To recede the indentation, provide an empty input. Once the indent returns to the beginning, the entire code block is submitted for evaluation:</p>
 <pre><code class="language-bash">> if true:

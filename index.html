@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.16-dev 1025-7673823</div>
+    <div class="sub-title">v0.4.17-dev 1031-02c3c42</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1852,6 +1852,7 @@ print(v)     --> 123
 if opt |value|:
     print(value)    --> abc
 </code></pre>
+<p>When the payload is a <code>NoCopy</code> type, the capture takes it out of the option. An option that is read from a variable is <a href="#moving" title="">moved</a> then, so the variable can not be used after the statement (<code>if make() |v|:</code> and <code>while it.next() |v|:</code> take the payload of a new value). An option in a member (<code>if s.opt |v|:</code>) is not moved: 'Cannot copy <code>?Foo</code>, type member implements <code>NoCopy</code>.'</p>
 <p>The capture unwraps the whole condition. An operand of <code>and</code> or <code>or</code> is a <code>bool</code>, so <code>if ok and s.index('=') |i|:</code> is a compile error. Put the unwrap in an <code>if</code> of its own:</p>
 <pre><code class="language-cy">if ok:
     if s.index('=') |i|:
@@ -1994,7 +1995,10 @@ statement, <code>_ = arr.removed(0)</code>), because it changes nothing.</p>
 statement of the block names it), <code>appended</code>, <code>inserted</code>, <code>removed</code> and <code>+</code> take its buffer instead of copying it, like
 <code>move</code> followed by the in-place method. The result is the same; the variable can not be used after that anyway.
 <code>ys := xs.appended(4)</code> as the last use of <code>xs</code> then costs no copy. When another value shares the buffer, the result gets its own copy
-as before. The body of <code>#for</code> does not take the buffer.</p>
+as before. The body of <code>#for</code> does not take the buffer. A statement that assigns the result to the receiver
+(<code>xs = xs.appended(v)</code>, with no other use of <code>xs</code> in it) takes the buffer too, also in a loop body, so building a list
+this way does not copy it for each element. So does a member of a variable or of the <code>&&T</code> receiver of a method
+(<code>self.xs = self.xs.appended(v)</code>), when the variable is not borrowed and the arguments do not name it.</p>
 <p>Copies of a slice share its buffer until one of them resizes: an in-place resize of a slice whose buffer another value
 also holds (<code>ys := xs</code>, a sub-slice) first copies the buffer, so the other value keeps its elements and its length. Writing
 an element (<code>xs[0] = v</code>, <code>sort</code>, <code>reverse</code>) does not copy: every value that shares the buffer sees it.</p>
@@ -3363,15 +3367,45 @@ print(a.len())
 --> error: `a` was moved at 3:19. Borrow it with `&a` or clone it to use it here.
 </code></pre>
 <p>In this case, the <code>Array</code> value is moved into the <code>compute_sum</code> function, so the <code>Array</code> is deinitialized by the callee function and not the callsite. A copyable value is still copied unless <code>move</code> is written.</p>
-<p>A variable is moved in the block that declares it, or in a branch of an <code>if</code> statement in that block. After the <code>if</code> statement the variable is dead. The branches that do not move it, and the implicit <code>else</code> when there is none, deinitialize it at their end, so <code>@deinit</code> can run before the end of the block:</p>
+<p>A variable is moved in the block that declares it, or in a branch inside that block: a branch of an <code>if</code> statement or expression, of an <code>if</code> unwrap statement or a case of a <code>switch</code> statement or expression. A <code>begin:</code> block moves it like the block around it. After the statement the variable is dead. The branches that do not move it, and the implicit <code>else</code> when there is none, deinitialize it at their end, so <code>@deinit</code> can run before the end of the block:</p>
 <pre><code class="language-cy">f := open_log()!
 if verbose:
     archive(f)          -- Moves `f`.
 -- Without `verbose`, `f` is deinitialized here, at the end of the implicit `else`.
 print('done')
 </code></pre>
-<p>A loop body can not move a variable that is declared outside the loop, because the next iteration reads it: 'Cannot move <code>f</code> here: it is declared in an outer block. A branch of an <code>if</code> statement can move it, a loop body can not (the next iteration reads it). Borrow it with <code>&f</code>.' A branch can move only a whole variable of an outer block, not a member of it.</p>
-<p>The condition of an <code>if</code> statement always runs, so it moves a variable like a statement of the block (<code>if take(f) > 0:</code>). An expression that evaluates a part conditionally does not move a variable: <code>and</code>, <code>or</code>, an <code>if</code> expression, <code>?else</code> and <code>!else</code> report 'Cannot move <code>f</code> inside an <code>and</code> expression: a part of the expression is evaluated conditionally. Borrow it with <code>&f</code>, or move it to a variable in a statement before this one.' The condition of an <code>else</code> branch reports 'Cannot move <code>f</code> in the condition of an <code>else</code> branch: the condition is evaluated conditionally. Move it inside the branch, or borrow it with <code>&f</code>.'</p>
+<p>A branch that moves a variable and then assigns to it leaves it alive, like a branch that did not move it. A branch can move only a whole variable of an outer block, not a member of it.</p>
+<p>A loop body can move a variable that is declared outside the loop where it then leaves the loop with <code>return</code> or <code>break</code>, or where it assigns to the variable again before the next iteration:</p>
+<pre><code class="language-cy">buf := Array[int]{}
+for items |it|:
+    if it.last:
+        send(buf)       -- Moves `buf`.
+        break
+    buf << it.value
+-- `buf` is dead here. When the loop ends without that `break`, `buf` is deinitialized at the end of the loop.
+</code></pre>
+<p>After a <code>break</code> that follows a move, the variable is dead after the loop. The other ways out of the loop (its end, a <code>break</code> that moved nothing, a <code>break</code> that moved other variables) deinitialize it. A body that goes on to the next iteration after the move is an error at the move, because the next iteration reads the variable: 'Cannot move <code>f</code> here: it is declared outside the loop, and the next iteration reads it. A loop body can move it where it then leaves the loop with <code>break</code> or <code>return</code>, or gives it a value again. Borrow it with <code>&f</code>.'</p>
+<p>The body of a <code>try</code> statement and its <code>else</code> block move a variable of an outer block too. A variable that the body moved before a <code>!</code> that can fail is dead in the <code>else</code> block, and a variable that either way through the statement moved is dead after it. The ways that did not move it deinitialize it: a failing <code>!</code> before it leaves the body, the body or the <code>else</code> block at its end.</p>
+<pre><code class="language-cy">buf := Array[int]{}
+try:
+    n := read_into(&&buf)!      -- When this fails, `buf` is deinitialized before the `else` block runs.
+    send(buf)                   -- Moves `buf`.
+    flush()!
+else |err|:
+    print(err)                  -- `buf` is dead here.
+-- `buf` is dead here.
+</code></pre>
+<p>The body of a <code>scope</code> block moves a variable in the same way as the body of a <code>try</code> statement: a <code>!</code> that fails before the move deinitializes the variable, and after the block it is dead. The name of the block itself does not move ('Cannot move <code>s</code>: it is the scope of a <code>scope</code> block, which joins its fibers at the end of the block. Borrow it with <code>&&s</code>.'), and a variable that a fiber of the block borrows is borrowed until the block ends.</p>
+<p>An assignment gives a moved variable a value again. The right side can move the variable that the statement assigns, and then a loop body or any other block can do it too, because the variable is alive when the statement ends:</p>
+<pre><code class="language-cy">acc := Array[int]{}
+for 0..3 |i|:
+    acc = step(acc, i)      -- Moves `acc` into `step` and assigns the result. No value is deinitialized.
+
+take(acc)
+acc = Array[int]{}          -- `acc` was moved, so there is no old value to deinitialize.
+</code></pre>
+<p>A variable that was moved before the statement gets a value in the block that declares it, or in the block that moved it (a branch or a loop body that moves a variable and then assigns to it). In another block the paths would differ: 'Cannot assign to <code>acc</code> here: it was moved at 5:6 and it is declared in an outer block. Assign to it in the block that declares it, or declare a new variable.' The right side that moved a variable of an outer block can not leave the statement with <code>break</code>, <code>continue</code> or a failing <code>!</code> inside a <code>try</code> block ('Cannot leave the assignment to <code>acc</code> here: ...'), since the variable would be read after that. <code>return</code> can. In the REPL a top level variable that was moved is declared again with <code>:=</code>, not assigned.</p>
+<p>The condition of an <code>if</code> statement or expression and the option of an <code>if</code> unwrap statement always run, so they move a variable like a statement of the block (<code>if take(f) > 0:</code>). So does the option of <code>?else</code> (<code>o ?else default</code> moves a <code>NoCopy</code> option out of <code>o</code>). So does the left operand of <code>and</code> and <code>or</code> (<code>ok := take(f) and ready</code>). A part of an expression that is evaluated conditionally does not move a variable: the right operand of <code>and</code> and <code>or</code>, and the default and the block of <code>?else</code> and <code>!else</code> report 'Cannot move <code>f</code> inside an <code>and</code> expression: a part of the expression is evaluated conditionally. Borrow it with <code>&f</code>, or move it to a variable in a statement before this one.' The condition of an <code>else</code> branch reports 'Cannot move <code>f</code> in the condition of an <code>else</code> branch: the condition is evaluated conditionally. Move it inside the branch, or borrow it with <code>&f</code>.'</p>
 <p>Values can be partially moved if a subset of its members were moved:</p>
 <pre><code class="language-cy">type Foo:
     a int

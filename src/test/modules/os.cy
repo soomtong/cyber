@@ -186,14 +186,26 @@ if meta.cpu() != 'wasm32':
 
 
 -- Standard error names.
-t.eq(error.NotFound, os.from_errno(2))
-t.eq(error.PermissionDenied, os.from_errno(1))
-t.eq(error.PermissionDenied, os.from_errno(13))
-t.eq(error.AlreadyExists, os.from_errno(17))
-t.eq(error.NotADirectory, os.from_errno(20))
-t.eq(error.InvalidArgument, os.from_errno(22))
-t.eq(error.Unknown, os.from_errno(9999))
-t.eq(error.Unknown, os.from_win32_error(2))
+if meta.system() == .windows:
+    -- An `errno` has no name on Windows. The names come from the Windows codes.
+    t.eq(error.Unknown, os.from_errno(2))
+    t.eq(error.NotFound, os.from_win32_error(2))
+    t.eq(error.NotFound, os.from_win32_error(3))
+    t.eq(error.PermissionDenied, os.from_win32_error(5))
+    t.eq(error.AlreadyExists, os.from_win32_error(183))
+    t.eq(error.InvalidArgument, os.from_win32_error(87))
+    t.eq(error.Unknown, os.from_win32_error(99999))
+    t.eq(error.Unknown, os.from_win32_error(-1))
+    t.eq(error.Unknown, os.from_win32_error(4294967298))
+else:
+    t.eq(error.NotFound, os.from_errno(2))
+    t.eq(error.PermissionDenied, os.from_errno(1))
+    t.eq(error.PermissionDenied, os.from_errno(13))
+    t.eq(error.AlreadyExists, os.from_errno(17))
+    t.eq(error.NotADirectory, os.from_errno(20))
+    t.eq(error.InvalidArgument, os.from_errno(22))
+    t.eq(error.Unknown, os.from_errno(9999))
+    t.eq(error.Unknown, os.from_win32_error(2))
 -- A code outside the C type has no name. It does not panic.
 t.eq(error.Unknown, os.from_errno(-1))
 t.eq(error.Unknown, os.from_errno(4294967298))

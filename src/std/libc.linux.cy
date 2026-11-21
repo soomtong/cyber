@@ -32,6 +32,7 @@ type Stat cstruct:
     ino   r64
 
 -type ssize_t = c.ssize_t
+-type c_int = c.c_int
 
 type timespec cstruct:
     sec  ssize_t

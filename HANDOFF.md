@@ -38,7 +38,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   sema는 돌지 않는다. outline도 복구해서 파싱한다. 설계 · 확인은 LSP 설계 문서 13절.
 - [x] tars-agent: `docs/TODO.md`의 0.4.15 항목에 os 힌트를 적었다(`74e0615`, push 안 함).
 
-- [x] 코드 리뷰 수정 10건(2026-11-18). 목록과 동작 변화는 `docs/releases/unreleased.md` "0.4.14..0.4.15 코드 리뷰에서 나온 수정".
+- [x] 코드 리뷰 수정 10건(2026-11-18). 목록과 동작 변화는 `docs/releases/0.4.16.md` "0.4.14..0.4.15 코드 리뷰에서 나온 수정".
   - 전역 take-and-restore: 값을 인자 뒤에 꺼낸다(`sema.finishGlobalTake`, `sema_func.matchFuncSig` 끝에서 호출).
     결정 문서 `project_slice_append_aliasing.md` 결정 3-1의 "인자" 항목.
   - 컴파일러가 fix를 오류에 싣는다(`Chunk.reportErrorFix`, `sema.suggestedFix`, `CLReport.has_fix`). LSP는 `data.fix`.
@@ -63,15 +63,15 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
     `refs.findAllTo`가 모듈 심볼을 맞추지 않게 고쳤다(첫 줄 선언과 모듈 위치 0이 겹침).
   - `/code-review high` 6건 수정(`b99e0bcb`): 오버로드는 함께 rename(spec 14절을 바꿈), 키워드 이름 거절, `declAt`이
     enum · choice · union case를 찾음, `@` 내장 호출(`fiber f(a)`)과 인스턴스마다 다른 오버로드의 호출은 inlay 없음.
-    목록은 `docs/releases/unreleased.md` "rename · 매개변수 이름 inlay의 리뷰 수정".
+    목록은 `docs/releases/0.4.16.md` "rename · 매개변수 이름 inlay의 리뷰 수정".
 - [x] CI 시간 확인(2026-11-19): `project_fork_release_ci.md` "CI에서 잰 결과". 러너 사용 137 → 77분, 벽시계는 21분 그대로.
   arm64 macOS Debug 테스트(약 13분, 3코어라 병렬화 효과 없음)가 벽시계를 정한다.
 - [x] tars-agent `docs/TODO.md`에 다음 빌드에서 안내 105행을 고칠 항목(`4aae2ec`, tars-agent에 커밋됨).
 - [x] `/code-review high` 0.4.15..HEAD의 9건 수정(2026-11-21, 사용자: "결정을 위임합니다 ... 자잘한 거 모두 수정 ... 다음 패치
-  버전을 준비"). 목록과 동작 변화는 `docs/releases/unreleased.md` "0.4.15..HEAD 코드 리뷰에서 나온 수정", 발견 이슈 F-164 ~ F-166.
+  버전을 준비"). 목록과 동작 변화는 `docs/releases/0.4.16.md` "0.4.15..HEAD 코드 리뷰에서 나온 수정", 발견 이슈 F-164 ~ F-166.
 - [x] 빌림 검사의 남은 구멍 셋(2026-11-21, 사용자: "이 문제는 해결 가능한가? 어떤 방식이 나을까 추천" 뒤 "결정을 위임합니다").
   배타 접근을 쓰는 자리에서 검사한다(깨지는 변경: 순회 중 `&&self` 메서드 호출, 빌려 둔 관리형 값의 대입). 결정
-  `docs/decisions/project_borrow_model.md` "쓰는 자리 검사", `docs/releases/unreleased.md` 같은 이름의 절, 발견 이슈 F-167.
+  `docs/decisions/project_borrow_model.md` "쓰는 자리 검사", `docs/releases/0.4.16.md` 같은 이름의 절, 발견 이슈 F-167.
   패치로 낼지 0.5로 미룰지는 사용자가 정한다(커밋 하나라 되돌리기 쉽다).
 - [x] 그 뒤 탐침에서 나온 구멍의 조사와 수정(2026-11-21, 사용자: "research to fix them", "continue"). 배타 빌림을 담은 값은
   배타로 세고, 공유 빌림 뒤의 배타 사용과 버퍼 속 빌림 타입을 거절하고, 주인이 여럿인 컨테이너를 센다(깨지는 변경). 결정 문서
@@ -83,7 +83,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - [x] R6(`&T`를 거친 쓰기, 2026-11-21, 깨지는 변경). 사용자: "다음 판에서 오류로 할 필요 없음. 이 버전에서 잡고 넘어간다. 1.0
   전까지 깨지는 것을 허용한다." 공유 빌림을 거친 관리형 값의 대입과 `&&` 생성을 거절한다(`sema.placeThroughShared` ·
   `checkNoWriteThroughShared`). std의 `diag &Diag`는 `&&Diag`, 상태를 바꾸는 메서드는 `&&` 수신자, `Scope`의 `start` · `join` ·
-  `abort`도 `&&`. 결정 `project_borrow_model.md` "R6 구현", `unreleased.md` "공유 빌림을 거친 쓰기", F-169. tars-agent는
+  `abort`도 `&&`. 결정 `project_borrow_model.md` "R6 구현", `docs/releases/0.4.16.md` "공유 빌림을 거친 쓰기", F-169. tars-agent는
   `docs/TODO.md` 31행에 덧붙였고 커밋하지 않았다.
 
 - [x] 0.4.15 릴리스(2026-11-18): 태그 `0.4.15` → `93a9ca4f`, `build-969-93a9ca4`, Latest, 에셋 15개(CI). `install.sh 0.4.15`를 임시
@@ -108,7 +108,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   compile is dropped ...`(전에는 로더 5번, 이제 1번). `cyber.h` 로더 주석 · docs.md 세션 절 · F-120에 적음.
 - [x] `spawn f(args)`(2026-11-20, 깨지는 변경): `spawn`은 키워드, `sema.semaSpawnExpr`가 core `@spawn(f, {args})`로 푼다.
   `spawn` · `fiber`는 첫 호출까지만 받는다(`Parser.parseEntryCall`, `stop_after_call`). 결정은 `project_coroutines.md` 끝 절,
-  사용자 문구는 `unreleased.md` 끝 절. tars-agent에는 옛 꼴이 `spike/s1`에만 있어 쓰지 않았다.
+  사용자 문구는 `docs/releases/0.4.16.md` "`spawn f(args)`: 스레드 생성도 키워드 + 호출식". tars-agent에는 옛 꼴이 `spike/s1`에만 있어 쓰지 않았다.
 - [x] 결정 기록 · CI arm64 Debug step 뺌(`1bc5426e`, 벽시계는 다음 push의 run에서 본다).
 - [x] core `@eq`의 choice(`064afc9f`): case 비교 뒤 payload `==`. `?json.Value == none`이 된다.
 - [x] 정렬 안 A 조사(`9fe2d097`, `project_sort_closures.md` "안 A 조사"): 스택 이동은 F-136으로 이미 안전.
@@ -118,7 +118,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - [x] 1.7 C 1단계(`80762140`): 'While specializing `inner[int]` here:' 주석. `Instance.site` · `site_parent`,
   `Compiler.compile_seq`(세션의 앞 컴파일 노드를 쓰지 않게), `Chunk.appendInstanceTrace`, `sema.bodyInstance`.
 - [x] 1.7 A 표준 OS 오류 이름(결정 `project_os_error_names.md`): `os.from_errno` · `from_win32_error` · `last_error` ·
-  `last_os_error`. 깨지는 변경(옛 이름 표는 `unreleased.md`). Windows 매핑은 실행 확인 못 함.
+  `last_os_error`. 깨지는 변경(옛 이름 표는 `docs/releases/0.4.16.md`). Windows 매핑은 실행 확인 못 함.
 - [ ] 0.5 릴리스(사용자 지시 때).
 - [ ] 기술 부채(급하지 않음): `@destruct_span` 취소 keep 지점(쓰게 되면), `Scope.run`의 바퀴당 `waiting()` 질의(준비 큐 ·
   futex식 대기 표, fiber 수 비용이 문제가 되면), 취소 불변식 panic(닿는 경로 없음). 기록은 `project_coroutines.md`.
@@ -132,7 +132,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - `src/sema.zig` `semaOpAssignMethod` · `checkSliceInPlaceResult` · `checkDroppedSliceResult`.
 - `src/parser.zig` `isForeignDeclKeyword` · `reportForeignDeclError` · `reportTypedDeclError`.
 - `src/std/os.cy` `read_file` · `read_file_bytes` · `write_file` · `write_file_bytes`.
-- `docs/releases/0.4.15.md`, `docs/releases/unreleased.md`.
+- `docs/releases/0.4.16.md`, `docs/releases/unreleased.md`.
 - `docs/decisions/project_fork_release_ci.md`(러너 미배정 · 재태깅 · 로컬 arm64 빌드 절차).
 
 ## 다음 에이전트에게
@@ -181,7 +181,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 1. 버전 세 곳: `build.zig` · `build.zig.zon` · `install.sh`.
 2. `unreleased.md` → `docs/releases/<v>.md`(요약 · 호환성 절을 새로 쓴다), `unreleased.md`는 머리말만 남긴다.
-3. 13단계 검증 rc=0 → master push → 그 Latest Build가 끝난 뒤 annotated 태그 push(같이 올리면 `concurrency: latest`로 한쪽이 취소된다).
+3. 14단계 검증 rc=0 → master push → 그 Latest Build가 끝난 뒤 annotated 태그 push(같이 올리면 `concurrency: latest`로 한쪽이 취소된다).
 4. 릴리스 run 확인(`gh run list`), `gh release edit <v> --notes-file docs/releases/<v>.md --latest`. Latest는 `gh release list`로 본다.
 5. `install.sh <v>`를 scratchpad에 설치해 버전 문자열 · `cyber-lsp initialize` · 예제 하나 확인.
 6. 노트에 태그 커밋 · 빌드 번호를 적어 커밋하고 `docs/decisions/project_fork_release_ci.md`에도 기록.

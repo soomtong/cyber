@@ -242,6 +242,12 @@ fn test_memory(run: *Runner) void {
     run.case("memory/move_implicit.cy");
     run.case("memory/move_branch.cy");
     run.case("memory/move_branch_use_after_error.cy");
+    run.case("memory/move_branch_locals.cy");
+    run.case("memory/move_if_cond.cy");
+    run.case("memory/move_and_error.cy");
+    run.case("memory/move_if_expr_error.cy");
+    run.case("memory/move_else_default_error.cy");
+    run.case("memory/move_else_cond_error.cy");
     run.case("memory/move_loop_error.cy");
     run.case("memory/slice_reuse_last_use.cy");
     run.case("memory/slice_reuse_arg_error.cy");

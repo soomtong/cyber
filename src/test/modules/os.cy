@@ -226,6 +226,10 @@ if meta.cpu() != 'wasm32':
         t.fail()
     else |err|:
         t.eq(error.AlreadyExists, err)
-        t.eq(17, os.last_os_error())
+        -- `EEXIST`, or `ERROR_ALREADY_EXISTS` on Windows.
+        if meta.system() == .windows:
+            t.eq(183, os.last_os_error())
+        else:
+            t.eq(17, os.last_os_error())
 
 --cytest: pass

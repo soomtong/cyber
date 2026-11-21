@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.15-dev 987-76b9121</div>
+    <div class="sub-title">v0.4.16-dev 1010-ca00022</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1253,6 +1253,7 @@ var b float = 'hello'
 fn foo():
     print(a)    --> 123
 </code></pre>
+<p>A global can not have a borrow type (<code>&T</code>, <code>?&T</code>, a borrow container such as <code>OpaqueFunc[F]</code>), since it would outlive the local it borrows. Use an owned type such as <code>^T</code>.</p>
 <p>The initializer of a global variable can use the global variables that are initialized before it:</p>
 <pre><code class="language-cy">global a int = 123
 
@@ -2020,8 +2021,8 @@ print(log.pop().?)      --> !
 </code></pre>
 <ul>
 <li>The value is not copied, so a loop that grows a global list stays fast.</li>
-<li>An argument is evaluated before the value moves out, so it reads the global as it was: <code>g.append(g.len())</code> and
-<code>g.append(next())</code> with a <code>next</code> that reads <code>g</code> both work. An argument that leaves the call (<code>g += f()!</code> when <code>f</code>
+<li>An argument is evaluated before the value moves out, so it reads the global as it was: <code>g.append(g.len())</code>,
+<code>g.append(g[0])</code> and <code>g.append(next())</code> with a <code>next</code> that reads <code>g</code> all work. An argument that leaves the call (<code>g += f()!</code> when <code>f</code>
 returns an error) leaves the global as it was.</li>
 <li>An argument that borrows the same global can not be evaluated first: <code>g.append(g.span())</code> is the compile error 'The
 method takes <code>g</code> out while it runs, so this argument can not read <code>g</code>. Read it into a local first.' Another field of
@@ -2560,6 +2561,15 @@ s = Shape.line(20)
 --> error: Only a case of a choice can capture a payload.
 </code></pre>
 <a href="#custom-types">^topic</a>
+<h3 id="compare-choices">Compare choices. <a href="#compare-choices">#</a></h3>
+<p><code>==</code> compares the active cases first. Two values of the same case compare their payloads with <code>==</code>, and a case without a payload is equal to itself:</p>
+<pre><code class="language-cy">Shape.line(20) == Shape.line(20)   --> true
+Shape.line(20) == Shape.line(30)   --> false
+Shape.line(20) == Shape.point      --> false
+Shape.point == Shape.point         --> true
+</code></pre>
+<p>A payload compares by the rules of its type, so a slice payload compares by reference (see <a href="#comparison-operators" title="">Comparison operators</a>). An optional choice can be compared with <code>none</code>.</p>
+<a href="#custom-types">^topic</a>
 <h3 id="unwrap-choice">Unwrap choice. <a href="#unwrap-choice">#</a></h3>
 <p>A choice can be unwrapped with the <code>.!</code> operator. This will either return the payload or signals a thread panic if the expected case is not active:</p>
 <pre><code class="language-cy">s := Shape.line(20)
@@ -3051,11 +3061,21 @@ f := fn() -> int:
     return a.* + 2
 print(f())     --> 3
 </code></pre>
-<p>When a closure captures a local variable that is not a reference <code>^T</code>, it becomes a pinned closure. A pinned closure cannot be copied or moved: <em>Still experimental</em></p>
+<p>A local that is not a reference <code>^T</code> or a borrow <code>&T</code> can not be captured. Borrow it before the lambda and capture the borrow. A closure that captures a borrow becomes a pinned closure of the type <code>OpaqueFunc[F]</code>:</p>
 <pre><code class="language-cy">a := 1
+b := &a
 f := fn() -> int:
-    return a + 2
+    return b.* + 2
 print(f())     --> 3
+</code></pre>
+<p>A pinned closure keeps its captured values without a reference, so it is a <a href="#scope-parameter" title="">borrow container</a>: it can not outlive the locals it captures, it is returned only through a <code>scope</code> return type, and it can not be lifted with <code>^</code> or stored in a global:</p>
+<pre><code class="language-cy">type F = fn() -> int
+
+fn make() -> OpaqueFunc[F]:
+    x := 42
+    b := &x
+    return fn() -> int => b.* + 1
+--> error: Returning a borrow container requires a `scope` modifier.
 </code></pre>
 <a href="#functions">^topic</a>
 <h3 id="function-pointer-types">Function pointer types. <a href="#function-pointer-types">#</a></h3>
@@ -3433,6 +3453,17 @@ if true:
     --> error: `ref` can not outlive `b`.
 </code></pre>
 <p>A borrow stored in a local variable is alive until the end of the block that declares the variable. A borrow that is only passed as an argument or used inside an expression ends with its statement. The compiler does not shorten a borrow to its last use.</p>
+<p>A local that holds a borrow can be borrowed again for one statement. The new borrow can not be kept in another local when it conflicts with the one the first local holds:</p>
+<pre><code class="language-cy">type Foo:
+    xs []int
+
+f := Foo{xs={1, 2, 3}}
+r := &&f
+r.xs.append(4)      -- Reborrows `f` through `r` for this statement.
+print(r.xs.len())   --> 4
+s := &r.xs[0]
+--> error: Cannot borrow `f`. There is an active exclusive borrow to it.
+</code></pre>
 <p>Some dynamic data structure types allow borrowing a reference to an inner element:</p>
 <pre><code class="language-cy">a := Array[int]{1, 2, 3}
 elem := &a[2]
@@ -3487,6 +3518,76 @@ r := &a
 print(a.len())
 --> error: Cannot borrow `a`. There is an active exclusive borrow to it.
 </code></pre>
+<p>An exclusive borrow that a local, a parameter or a field already holds is checked again where it is passed on as <code>&&T</code>. It can not be passed on while another local borrows through it. A loop borrows what it iterates until it ends:</p>
+<pre><code class="language-cy">type Foo:
+    xs []int
+
+fn (&&Foo) grow():
+    self.xs.append(0)
+
+fn (&&Foo) each():
+    for self.xs |x|:
+        print(self.xs.len() + x)    -- Ok. A read.
+        self.grow()
+        --> error: Expected exclusive access. There is another active borrow to `self`.
+
+fn first(r &&Foo):
+    s := &r.xs[0]
+    r.grow()
+    --> error: Expected exclusive access. There is another active borrow to `r`.
+</code></pre>
+<p>Copies of one exclusive borrow (<code>r2 := r</code>) point to the same value and do not conflict with each other. A borrow that is assigned to <code>_</code> ends with its statement (<code>_ = r.add(1)</code>).</p>
+<p>A borrow into one field is no conflict with an exclusive use of another field: inside <code>for self.xs |x|:</code> the body can call <code>self.names.append(x)</code>.</p>
+<p>An assignment that destructs the old value needs exclusive access too. This is the case when the type of the local, the field or the element is managed (an array, a <code>str</code>, a struct that has such a field). The conflict is a borrow that points into a buffer of the old value, and a loop over it. A borrow of the place itself (<code>&x</code>, <code>&g.xs</code>) stays valid and reads the new value, and so does a borrow of a value that is not managed:</p>
+<pre><code class="language-cy">g := Foo{xs={1, 2, 3}}
+s := &g.xs[0]
+g.xs = {7}
+--> error: Expected exclusive access. There is another active borrow to `g`.
+
+x := 1
+c := &x
+x = 7
+print(c.*)
+--> 7
+
+t := 'abc'
+p := &t
+t = 'zzz'
+print(p.*)
+--> zzz
+</code></pre>
+<p>A value that contains an exclusive borrow (a struct with an <code>&&T</code> field, <code>?&&T</code>) keeps exclusive access to the owner like the borrow, and it is checked the same way when it is passed to a function. It borrows from every local that one of its fields borrows, also from a borrow that is assigned to a field later:</p>
+<pre><code class="language-cy">type Holder:
+    r &&Foo
+
+f := Foo{xs={1, 2, 3}}
+h := Holder{r=&&f}
+print(f.xs.len())
+--> error: Cannot borrow `f`. There is an active exclusive borrow to it.
+</code></pre>
+<p>A shared borrow gives no exclusive access to what is behind it. An exclusive borrow that is read through a shared borrow (<code>b.*</code> of <code>b := &r</code>, <code>self.r</code> in a <code>&Holder</code> method) can not be passed on as <code>&&T</code>: 'Cannot use an exclusive borrow that is read through a shared borrow.'</p>
+<p>A shared borrow does not replace or change a managed value behind it either. Another shared borrow of the same owner can point into that value:</p>
+<pre><code class="language-cy">type Foo:
+    xs []int
+    n  int
+
+fn (&Foo) grow():
+    self.xs.append(1)
+--> error: Cannot borrow exclusively through a shared borrow. Declare the borrow as `&&T`.
+
+fn (&Foo) reset():
+    self.xs = {}
+--> error: Cannot replace a managed value through a shared borrow. Declare the borrow as `&&T`.
+
+fn (&Foo) count():
+    self.n += 1       -- A value that is not managed is written in place.
+</code></pre>
+<p>Declare the receiver or the parameter as <code>&&T</code> (<code>fn (&&Foo) grow()</code>, <code>fn fill(out &&[]int)</code>). The call then needs exclusive access: <code>s := &f.xs[0]</code> followed by <code>f.grow()</code> is 'Expected exclusive access. There is another active borrow to <code>f</code>.' The rule also holds for an element (<code>self.items[i].name = 'x'</code>) and for a dereference (<code>p.* = {}</code> of <code>p &[]int</code>). It does not hold behind a reference or a pointer (<code>self.node.xs.append(1)</code> of <code>node ^Node</code>), and not in <code>@deinit</code>, which has the only access to the value that it ends.</p>
+<p>A borrow can not be an element of a type that keeps its elements in a buffer (<code>[]&int</code>, <code>Array[Holder]</code>, a <code>Map</code> of borrows), where its lifetime is not checked. Use an owned type, <code>^T</code> or a vector <code>[N]T</code>.</p>
+<p>A managed value can not be moved while a local borrows from it:</p>
+<pre><code class="language-cy">h := move g
+--> error: Cannot move `g`. There is an active borrow to it.
+</code></pre>
 <a href="#memory">^topic</a>
 <h3 id="self-borrow"><code>self</code> borrow. <a href="#self-borrow">#</a></h3>
 <p>Methods can be declared to accept borrows or exclusive borrows from the <code>self</code> receiver:</p>
@@ -3496,6 +3597,7 @@ print(a.len())
 fn (&Foo) mutate():
     self.a = 123
 </code></pre>
+<p>A <code>&Foo</code> receiver writes the fields that are not managed (<code>int</code>, <code>float</code>, <code>bool</code>, a struct of those). To replace or change a managed field (<code>str</code>, <code>[]T</code>, <code>Map</code>, a struct with one), declare the receiver as <code>&&Foo</code>.</p>
 <p>Invoking methods automatically attempts to obtain the correct borrow type as specified by the method:</p>
 <pre><code class="language-cy">f := Foo{a=1}
 f.mutate()
@@ -3519,6 +3621,19 @@ fn (scope &FooArray) iterator() -> scope FooIterator:
         idx = 0,
     }
 </code></pre>
+<p>A borrow container value lives only as long as the shortest lived local it borrows. Assigning it to a local of an outer block is a compile error:</p>
+<pre><code class="language-cy">type Ref:
+    p &int
+
+z := 1
+var r Ref = Ref{p=&z}
+begin:
+    y := 2
+    r = Ref{p=&y}
+--> error: `r` can not outlive `y`.
+</code></pre>
+<p>The same holds when the value is wrapped in an option (<code>var o ?Ref</code>), comes from an <code>if</code> expression, or is assigned to a field or an element (<code>o.r = Ref{p=&y}</code>). A method can not store a borrow of one of its own locals behind a parameter: <code>self.r = Ref{p=&y}</code> is the compile error 'The value behind <code>self</code> can not outlive <code>y</code>.'</p>
+<p>A borrow that is read through a borrow container (<code>&&r</code>, <code>&r.p</code>) can not outlive the container either, even when the local that the container borrows from lives longer.</p>
 <a href="#memory">^topic</a>
 <h3 id="sink-parameter"><code>sink</code> parameter. <a href="#sink-parameter">#</a></h3>
 <p>The <code>sink</code> modifier accepts and consumes a value argument: <em>This is not much different from a <code>move</code> operation, so this feature may be removed.</em></p>
@@ -3679,6 +3794,19 @@ free(s.ptr)
 
 err := MyError.NameTooLong
 </code></pre>
+<a href="#error-handling">^topic</a>
+<h3 id="os-errors">OS errors. <a href="#os-errors">#</a></h3>
+<p>A failed OS call in <code>os</code> returns one of a fixed set of error names, the same on every platform:</p>
+<table><thead><tr><th>Error</th><th>Cause (POSIX / Windows)</th></tr></thead><tbody><tr><td><code>NotFound</code></td><td><code>ENOENT</code> / <code>ERROR_FILE_NOT_FOUND</code>, <code>ERROR_PATH_NOT_FOUND</code></td></tr><tr><td><code>PermissionDenied</code></td><td><code>EPERM</code>, <code>EACCES</code> / <code>ERROR_ACCESS_DENIED</code>, <code>ERROR_SHARING_VIOLATION</code></td></tr><tr><td><code>AlreadyExists</code></td><td><code>EEXIST</code> / <code>ERROR_ALREADY_EXISTS</code>, <code>ERROR_FILE_EXISTS</code></td></tr><tr><td><code>NotADirectory</code>, <code>IsADirectory</code>, <code>DirectoryNotEmpty</code></td><td><code>ENOTDIR</code>, <code>EISDIR</code>, <code>ENOTEMPTY</code> / <code>ERROR_DIRECTORY</code>, <code>ERROR_DIR_NOT_EMPTY</code></td></tr><tr><td><code>NoSpace</code>, <code>ReadOnly</code>, <code>NameTooLong</code>, <code>TooManyOpenFiles</code>, <code>Busy</code>, <code>CrossesDevices</code></td><td><code>ENOSPC</code>, <code>EROFS</code>, <code>ENAMETOOLONG</code>, <code>EMFILE</code>, <code>EBUSY</code>, <code>EXDEV</code> and the Windows codes of the same causes</td></tr><tr><td><code>Interrupted</code>, <code>WouldBlock</code>, <code>TimedOut</code>, <code>BrokenPipe</code>, <code>ConnectionRefused</code></td><td><code>EINTR</code>, <code>EAGAIN</code>, <code>ETIMEDOUT</code>, <code>EPIPE</code>, <code>ECONNREFUSED</code></td></tr><tr><td><code>OutOfMemory</code>, <code>InvalidArgument</code>, <code>Unsupported</code></td><td><code>ENOMEM</code>, <code>EINVAL</code>, <code>EBADF</code>, <code>ENOSYS</code>, ...</td></tr><tr><td><code>Unknown</code></td><td>any other code</td></tr></tbody></table><pre><code class="language-cy">use os
+
+fn load_config() -> !str:
+    data := os.read_file('config.txt') !else |err|:
+        if err == error.NotFound:
+            return ''
+        return err
+    return data
+</code></pre>
+<p><code>os.last_os_error()</code> gives the code of the last failed OS call (<code>errno</code>, or <code>GetLastError</code> on Windows). <code>os.from_errno(code)</code> and <code>os.from_win32_error(code)</code> convert a code to its name, for example after a call through the C FFI. A code without a name, or one outside the range of the C type (<code>int</code>, <code>DWORD</code>), is <code>error.Unknown</code>.</p>
 <a href="#error-handling">^topic</a>
 <h2 id="results">Results. <a href="#results">#</a></h2>
 <p>A result value forces the call site to unwrap it in order to use the payload.</p>
@@ -3857,7 +3985,7 @@ If the main thread panics, then the program aborts without unwinding other child
 
 fn compute(n int, out &int) -> !void:
     -- The fiber is suspended while the thread computes.
-    out.* = spawn(fib, {n}).await()
+    out.* = spawn fib(n).await()
 
 fn main() -> !void:
     a := 0
@@ -3874,18 +4002,20 @@ fn main() -> !void:
 <p>Threads are isolated from one another and can communicate by message passing or by sharing memory safely.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="spawn-threads">Spawn threads. <a href="#spawn-threads">#</a></h3>
-<p>The builtin <code>spawn</code> creates and starts a new thread with a function as the entry point:</p>
-<pre><code class="language-cy">task := spawn(fib, {40})
+<p><code>spawn</code> followed by a function call creates and starts a new thread. The arguments are evaluated and sent now, and the function is called on the new thread:</p>
+<pre><code class="language-cy">task := spawn fib(40)
 
 fn fib(n int) -> int:
     if n < 2:
         return n
     return fib(n - 1) + fib(n - 2)
 </code></pre>
-<p>The entry point can be a lambda. It can not capture variables, because a closure is not <code>Sendable</code>:</p>
-<pre><code class="language-cy">task := spawn(fn(n int) -> int => n + 1, {3})
-print(task.await())    --> 4
+<p><code>spawn</code> takes the first call only, so <code>spawn fib(40).await()</code> waits for the thread, like <code>(spawn fib(40)).await()</code>. A prefix operator takes the whole term: <code>-spawn fib(40).await()</code> is <code>-(spawn fib(40).await())</code>. <code>fiber</code> is read the same way.</p>
+<p>The entry point can be a lambda in a variable. It can not capture variables, because a closure is not <code>Sendable</code>:</p>
+<pre><code class="language-cy">inc := fn(n int) -> int => n + 1
+print(spawn inc(3).await())    --> 4
 </code></pre>
+<p>A method is named through its type, with the receiver as the first argument: <code>spawn Job.run(job)</code>. <code>spawn job.run()</code> is a compile error, and so is an entry function that takes a borrow (<code>&T</code>): the arguments are sent to the new thread.</p>
 <p><code>spawn</code> returns a <code>Future[T]</code> where <code>T</code> is the return type of the entry function. If the runtime could not dispatch the thread, a panic is raised.
 The <code>Future</code> contains the asynchronous result of the new thread.
 A thread can not be stopped from the script and its status can not be queried. The <code>Future</code> is the only handle to it.</p>
@@ -3911,7 +4041,7 @@ fn (&Point) @send(dst Thread) -> Point:
 fn sum(p Point) -> int:
     return p.x + p.y
 
-print(spawn(sum, {Point{x = 1, y = 2}}).await())    --> 3
+print(spawn sum(Point{x = 1, y = 2}).await())    --> 3
 </code></pre>
 <p>These types are not <code>Sendable</code> yet: <em>Planned Feature</em></p>
 <ul>
@@ -3954,7 +4084,7 @@ This abstraction allows the current thread to continue execution without waiting
 <p>Futures can represent asynchronous work that is run in parallel or on a single thread.
 I/O bound work can be delegated to the operating system and CPU bound work can be run across multiple threads. A <code>Future</code> is not concerned with how the work is accomplished.</p>
 <p><code>spawn</code> returns a <code>Future</code>, and so does a host function that answers later:</p>
-<pre><code class="language-cy">work := spawn(fib, {30})
+<pre><code class="language-cy">work := spawn fib(30)
 -- `work` is a `Future[int]`. The main block continues while `fib` runs.
 print(work.await())    --> 832040
 </code></pre>
@@ -3972,8 +4102,8 @@ print(work.await())
 <p>If the spawned thread panicked, <code>await</code> panics with <code>Spawned thread panicked: <message></code>. If the spawned thread was interrupted or ran out of fuel, the waiting thread is interrupted too.</p>
 <p>A future that no spawned thread completes (one from a host function, or from <code>FutureResolver</code> before <code>complete</code>) can only be completed from outside the running program. Awaiting it on the main thread suspends the whole program and returns to the host, which completes the future and resumes the program at the <code>await</code> (see <a href="#suspending-an-eval" title="">Suspending an eval</a>). This works at any call depth and in a generator body. Inside a fiber the <code>await</code> suspends the fiber instead (see <a href="#fibers" title="">Fibers</a>). The <code>cyber</code> command completes no futures, so there the program ends with <code>panic: Abandoned while awaiting a future.</code> A spawned thread can not wait for such a future, and neither can a function that a host function called: both panic.</p>
 <p>When <code>await</code> returns, the expression evaluates to the completed value of the <code>Future</code>:</p>
-<pre><code class="language-cy">a := spawn(fib, {20})
-b := spawn(fib, {25})
+<pre><code class="language-cy">a := spawn fib(20)
+b := spawn fib(25)
 print(a.await() + b.await())    --> 81790
 </code></pre>
 <p><code>await</code> can be used in any function which makes asynchronous functions <strong>colorless</strong>. They do not need a special function modifier. This means that asynchronous work can be wrapped in a synchronous API.</p>
@@ -4015,6 +4145,7 @@ _ = f.resume()         --> a: first
 _ = f.resume()         --> a: last
 print(f.status())      --> FiberStatus.done
 </code></pre>
+<p><code>fiber</code> takes the first call only: <code>fiber f(x).resume()</code> resumes the new fiber.</p>
 <p>Each fiber starts with a stack of 512 bytes that grows on demand like the thread's stack. A spawned thread can create fibers of its own. Fibers are not available when compiling AOT.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="suspend-and-resume"><code>suspend</code> and <code>resume</code>. <a href="#suspend-and-resume">#</a></h3>
@@ -4115,7 +4246,7 @@ print(out.*)          --> 7
 <h3 id="waiting-for-fibers">Waiting for fibers. <a href="#waiting-for-fibers">#</a></h3>
 <p>A loop that resumes fibers calls <code>Fiber.wait_ready()</code> when every fiber waits. It blocks the root context until a future that a suspended fiber awaits is done and returns <code>true</code>. It returns <code>false</code> at once when no fiber awaits a future:</p>
 <pre><code class="language-cy">fn fetch(name str, n int, log ^ArrayStore[str]):
-    res := spawn(compute, {n}).await()
+    res := spawn compute(n).await()
     log << '%{name}: %{res}'
 
 log := ^ArrayStore[str]{}
@@ -4142,7 +4273,7 @@ while a.status() != .done or b.status() != .done:
 <h3 id="scope-block"><code>scope</code> block. <a href="#scope-block">#</a></h3>
 <p>A <code>scope</code> block runs a group of fibers and does that loop itself. The name between the bars is a <code>Scope</code> that lives for the block. <code>start</code> adds a fiber: the arguments are evaluated at once, and the fibers run when the body is done. A fiber that stops at <code>suspend</code> gives the others a turn, and when every fiber waits for a future the block waits like <code>Fiber.wait_ready()</code>:</p>
 <pre><code class="language-cy">fn fetch(name str, n int, log ^ArrayStore[str]) -> !void:
-    res := spawn(compute, {n}).await()
+    res := spawn compute(n).await()
     if res < 0:
         return error.Negative
     log << '%{name}: %{res}'
@@ -4721,7 +4852,7 @@ fn main() -> !void:
     src := os.read_file('missing.txt')!
     print(src)
 
---> panic: Unwrapped error `error.FileNotFound`.
+--> panic: Unwrapped error `error.NotFound`.
 </code></pre>
 <a href="#modules">^topic</a>
 <h2 id="builtin-modules">Builtin modules. <a href="#builtin-modules">#</a></h2>
@@ -4752,7 +4883,7 @@ print(x[1].number_text().?)         --> 1.5
 <p><code>number_text()</code> returns any number in one form (<code>1.50</code> and <code>1.5</code> give <code>1.5</code>, <code>1e2</code> gives <code>100</code>), and <code>json.fmt_number(text)</code> does the same for a token. <code>json.stringify</code> writes a <code>number</code> as it is, so its text must match the JSON number grammar. An object keeps its keys in insertion order, and a duplicate key keeps its first position and takes the last value.</p>
 <ul>
 <li>Read: <code>v['key']</code> and <code>v[idx]</code> return <code>Value.null</code> when the member is missing. <code>get(key)</code> and <code>at(idx)</code> return an option. <code>as_bool</code>, <code>as_int</code>, <code>as_float</code> (also converts an <code>int</code> and a <code>number</code>, <code>none</code> beyond the <code>float</code> range), <code>as_str</code>, <code>as_array</code> and <code>as_object</code> return an option of the payload. <code>kind()</code> returns the JSON type name.</li>
-<li>Compare: <code>a.eq(b)</code> compares by the JSON model (<code>1</code> equals <code>1.0</code>, key order does not matter). A <code>number</code> compares by <code>number_text()</code>. <code>==</code> does not support <code>Value</code>, so test an option with <code>?else</code> or <code>if ... |x|</code> instead of <code>== none</code>.</li>
+<li>Compare: <code>a.eq(b)</code> compares by the JSON model (<code>1</code> equals <code>1.0</code>, key order does not matter). A <code>number</code> compares by <code>number_text()</code>. <code>==</code> compares the case and payload as for any choice, so <code>1 == 1.0</code> is false and an <code>array</code> or <code>object</code> compares by reference. An option can be tested with <code>== none</code>.</li>
 <li>Build: <code>json.Object</code> has <code>set</code>, <code>get</code>, <code>remove</code>, <code>contains</code>, <code>keys</code> and <code>len</code>. <code>json.object</code> and <code>json.array</code> make values from lists.</li>
 <li>Write: <code>json.stringify(v)</code> is compact and <code>json.stringify(v, 2)</code> puts each element on its own line. NaN and infinities become <code>null</code>. A float uses the shortest digits that read back as the same value, without a trailing <code>.0</code>, and an exponent below <code>1e-6</code> or from <code>1e21</code> (<code>1e+21</code>).</li>
 <li>Convert: <code>json.encode(x)</code> and <code>json.from(x)</code> take a Cyber value: numbers, <code>bool</code>, <code>str</code>, slices, structs (fields in order), optionals (<code>none</code> is <code>null</code>), enums (the case name), choices (<code>{"case": payload}</code>) and <code>Map</code> with <code>str</code> keys (sorted). An <code>r64</code> from 2^63, which does not fit <code>int</code>, becomes a <code>number</code> with its unsigned digits (<code>18446744073709551615</code>). Pass a borrow for a value that can not be copied: <code>json.encode(&map)</code>.</li>
@@ -4768,7 +4899,7 @@ print(u.name)       --> Ada
 
 var diag json.Diag = {}
 try:
-    _ = json.decode([]User, '[{"id": 1, "name": 2}]', &diag)!
+    _ = json.decode([]User, '[{"id": 1, "name": 2}]', &&diag)!
 else |err|:
     print('%{err} %{diag.path}: %{diag.msg}')
 --> error.Type $[0].name: Expected a string, found number.
@@ -4776,7 +4907,7 @@ else |err|:
 <p>Parsing returns <code>error.Syntax</code> for malformed text and <code>error.Unicode</code> for text that is not UTF-8. Arrays and objects can nest 256 levels. A <code>json.Diag</code> passed to <code>parse</code> tells where and why parsing failed:</p>
 <pre><code class="language-cy">var diag json.Diag = {}
 try:
-    v := json.parse('{"a": tru}', &diag)!
+    v := json.parse('{"a": tru}', &&diag)!
     print(v)
 else |err|:
     print('%{err} at %{diag.line}:%{diag.col}: %{diag.msg}')
@@ -4815,7 +4946,7 @@ print(regex.compile(`[,;]\s*`)!.split('a, b;c'))   --> {'a', 'b', 'c'}
 <p>Not supported, because they need backtracking or are rarely used: look-ahead and look-behind, backreferences (<code>\1</code>), possessive and atomic groups, <code>\Z</code>, octal escapes, the <code>R</code> flag, turning off <code>u</code>, and Unicode properties other than general categories, scripts and the ones listed. <code>regex.compile</code> returns <code>error.Syntax</code> for these and for a malformed pattern. Pass a <code>regex.Diag</code> to see why:</p>
 <pre><code class="language-cy">var diag regex.Diag = {}
 try:
-    re := regex.compile(`(\w+)\s+\1`, &diag)!
+    re := regex.compile(`(\w+)\s+\1`, &&diag)!
     print(re.is_match('a a'))
 else |err|:
     print('%{err} at %{diag.pos}: %{diag.msg}')
@@ -4871,12 +5002,12 @@ print(csv.match('a,"b,c",d').?[0])        --> a;"b,c";d
 <p>When <code>parse</code> fails it returns <code>error.NoMatch</code>. Pass a <code>peg.Diag</code> to see the farthest place that the match reached and what the grammar could have matched there:</p>
 <pre><code class="language-cy">var diag peg.Diag = {}
 try:
-    _ = p.parse('(1,(22,),4)', &diag)!
+    _ = p.parse('(1,(22,),4)', &&diag)!
 else |err|:
     print('%{err} at %{diag.pos}: %{diag.msg}')
 --> error.NoMatch at 7: Expected `'('` or `%d` at line 1, column 8, found `)`.
 </code></pre>
-<p><code>diag.line</code> and <code>diag.col</code> start at 1, and <code>diag.expected</code> has the expected patterns as they are written in the grammar. <code>peg.compile(grammar, &diag)</code> fills the same <code>Diag</code> for a grammar that does not compile (<code>error.Syntax</code>). A grammar is checked when it is compiled: a rule that is not defined, a repetition of something that can match nothing (<code>('a'?)*</code>), and a rule that is left recursive, that is, calls itself before it takes any input (<code>expr <- expr '+' num</code>), are errors. Write a left recursive rule as a loop: <code>expr <- num ('+' num)*</code>.</p>
+<p><code>diag.line</code> and <code>diag.col</code> start at 1, and <code>diag.expected</code> has the expected patterns as they are written in the grammar. <code>peg.compile(grammar, &&diag)</code> fills the same <code>Diag</code> for a grammar that does not compile (<code>error.Syntax</code>). A grammar is checked when it is compiled: a rule that is not defined, a repetition of something that can match nothing (<code>('a'?)*</code>), and a rule that is left recursive, that is, calls itself before it takes any input (<code>expr <- expr '+' num</code>), are errors. Write a left recursive rule as a loop: <code>expr <- num ('+' num)*</code>.</p>
 <p>Matching is by Unicode code point: <code>.</code> and <code>[가-힣]</code> take a whole character, and offsets are in bytes. A byte of the input that is not UTF-8 is one character for <code>.</code> and for a negated class. The syntax is a subset of LPeg's <code>re</code> with the same meaning, with these differences: strings and classes have escapes, a named capture is a node of the result, <code>=name</code> matches the whole text of the capture, and what calls a Lua function (<code>p -> name</code>, <code>p => name</code>) or builds a table (<code>{| p |}</code>) is not supported. In a class, a <code>%</code> name goes on to the last letter, as in <code>re</code>: write <code>[_%w]</code>, not <code>[%w_]</code>.</p>
 <p>A grammar backtracks, so there is no bound on the time of a match as there is for <code>regex</code>: a grammar can take time that grows fast with the length of the input. A match keeps a stack of open rule calls and choices. When the stack is over <code>peg.MaxStack</code> (100000) entries, for input that nests very deep, <code>parse</code> returns <code>error.TooDeep</code>, and for a match with more than <code>peg.MaxCaptures</code> (1000000) captures it returns <code>error.TooBig</code>. The functions that return an option panic in these cases. A call at the end of the last choice of a rule takes no stack: <code>tail <- !. / . tail</code> runs over any length of input. A grammar over <code>peg.MaxInsts</code> (65536) instructions is <code>error.TooBig</code> (<code>p^100</code> takes 100 times the instructions of <code>p</code>), and patterns nest at most <code>peg.MaxDepth</code> (250) deep. A compiled <code>Peg</code> does not change: compile once and use it for every match.</p>
 <a href="#modules">^topic</a>
@@ -4969,7 +5100,7 @@ print(time.parse_format('Nov  5 10:22:01', '%b %e %T')!.format())
 <p>The parse functions return <code>error.Syntax</code> when the text has another shape, <code>error.Range</code> when a field is out of range and <code>error.Format</code> when the format is wrong. Each takes a <code>time.Diag</code> as its last argument to see why:</p>
 <pre><code class="language-cy">var diag time.Diag = {}
 try:
-    _ = time.parse('2026-02-30T10:22:01Z', &diag)!
+    _ = time.parse('2026-02-30T10:22:01Z', &&diag)!
 else |err|:
     print('%{err}: %{diag.msg}')
 --> error.Range: February 2026 has no day 30.
@@ -5638,7 +5769,7 @@ cl_vm_evalx(vm, CL_BYTES("turn"), src, cfg, &res);
 </code></pre>
 <a href="#libcyber">^topic</a>
 <h3 id="denying-threads">Denying threads. <a href="#denying-threads">#</a></h3>
-<p><code>spawn</code> runs a function on another thread, and a host function that the function calls runs on that thread too. A host whose functions only work on the thread of the eval sets <code>deny_spawn</code> in <code>CLEvalConfig</code> or <code>CLCompileConfig</code>. A call to <code>spawn</code> in a chunk that is not a standard module is then a compile error. Fibers and <code>scope</code> blocks stay available: they run on the thread of the eval.</p>
+<p><code>spawn</code> runs a function on another thread, and a host function that the function calls runs on that thread too. A host whose functions only work on the thread of the eval sets <code>deny_spawn</code> in <code>CLEvalConfig</code> or <code>CLCompileConfig</code>. A <code>spawn</code> in a chunk that is not a standard module is then a compile error. Fibers and <code>scope</code> blocks stay available: they run on the thread of the eval.</p>
 <pre><code class="language-c">CLEvalConfig cfg = clDefaultEvalConfig();
 cfg.deny_spawn = true;
 </code></pre>

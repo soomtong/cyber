@@ -85,3 +85,26 @@ the same block.' 오류였다.
   `fn inserted(&[]int, int, int) -> []int`를 보인다. 범위 밖 인덱스의 panic 문구는 같고, stack trace에는 제자리 메서드
   (`Slice.remove`)가 나온다.
 - behavior 테스트 넷(`syntax/python_slice_error.cy` 등)이 `test_memory`에 등록돼 있던 것을 제 분류로 옮겼다.
+- REPL의 최상위 변수는 `move`를 적어야만 이동한다. 암시적 이동이 들어온 뒤 `eat(a)` · `b := a`만으로 변수가 이동했는데, 이동
+  상태가 다음 입력으로 넘어가지 않아 다음 입력이 해제된 값을 읽었다(`print(a[0])`가 segfault). 이제 'Cannot copy `Array[str]`, a
+  `NoCopy` type. The top level variable `a` of the REPL does not move without `move`: later inputs read it. Write `move a` to give it
+  away (later inputs can not use `a` then), or borrow it.' 오류다. 최상위 `if` 갈래 안에서 최상위 변수를 옮기는 것도 같다.
+  함수 본문의 지역과 갈래 안에서 선언한 지역은 전처럼 이동한다.
+  - 명시적 `move a` 뒤에는 다음 입력에서 `a`가 없다('Undeclared variable `a`.'). 0.4.16까지는 `b := move a` 뒤에도 다음 입력이 `a`를
+    되살려 값의 주인이 둘이 됐다(새 builtin `@untrackMainLocal`).
+  - 최상위 변수의 멤버는 REPL에서 옮기지 못한다: 'Cannot move a member of the top level variable `bx` of the REPL: later inputs read
+    `bx`. Move the whole variable with `move bx`, or do it inside a function.' 암시적 이동 자리에서는 'A member of the top level
+    variable `bx` of the REPL does not move ...' 문구다.
+- 값을 반환하는 `op=` 메서드(`` fn (&Acc) `+=`(o int) -> int ``)를 문장으로 쓰면 'The `+=` method of `Acc` returns `int`, and an
+  `x += y` statement can not use or drop the value. Declare the method without a return type.' 전에는 문법에 없는 'Write
+  `_ = a += 2` to drop the value.'였고, `!void`를 반환할 때의 'Add `!` after the call' 안내도 쓸 수 없는 문법이었다.
+- `if` 갈래 이동의 컴파일러 panic을 고쳤다. 한 갈래가 바깥 변수를 옮기고 `else`(또는 뒤 `else cond:`)에 관리형 지역이 있으면
+  'panic: expected mapping to IR local'이었다. 갈래 끝 소멸의 cancel pad가 다른 갈래의 지역까지 잡은 탓이다. 같은 수정으로
+  소멸자 안에서 취소됐을 때 이미 옮겼거나 방금 소멸시킨 변수를 다시 소멸시키지 않는다.
+- `if` 문의 조건식에서 변수를 옮길 수 있다(`if take(a) > 0:`). 조건식은 늘 평가되므로 그 블록의 문장에서 옮긴 것과 같다. 전에는
+  같은 블록의 변수인데 'it is declared in an outer block' 오류였다.
+- 조건부로 평가되는 식 안의 이동은 계속 오류이고 문구가 원인을 말한다: 'Cannot move `a` inside an `and` expression: a part of the
+  expression is evaluated conditionally. Borrow it with `&a`, or move it to a variable in a statement before this one.'(`and` ·
+  `or` · `if` 식 · `?else` · `!else`), 'Cannot move `a` in the condition of an `else` branch: the condition is evaluated
+  conditionally. Move it inside the branch, or borrow it with `&a`.'
+  - 남은 한계: `while` 조건식과 `if` 언랩(`if opt(a) |v|:`)의 조건식은 옛 문구 그대로다.

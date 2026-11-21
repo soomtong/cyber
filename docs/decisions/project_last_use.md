@@ -36,7 +36,7 @@
 ## E 구현 (2026-11-21)
 
 - 블록에 `move_branch` 표지를 둔다. `semaIfBlock2`의 갈래 본문은 `branch`, `semaIfStmt`의 바깥 블록은 `if_outer`(`else` 문장을
-  검사하는 동안만 `branch`). 조건식은 바깥 블록에서 평가되므로 조건식 안의 이동은 막힌다.
+  검사하는 동안만 `branch`). 조건식은 바깥 블록에서 평가된다. 첫 조건식의 이동은 코드 리뷰 수정(아래)에서 허용했다.
 - `canMoveAcross`: 지금 블록이 `branch`이고, 지역의 블록까지 사이의 블록이 모두 `branch` · `if_outer`면 옮길 수 있다. 반복 본문 ·
   `begin:` 블록 · `if` 언랩 · `switch`는 표지가 없어 막힌다. 갈래 안에서는 지역 전체만 옮긴다(멤버 이동의 상태표는 같은 블록 전제).
 - 갈래를 넘는 이동은 `Chunk.branch_moves`에 쌓는다. 갈래가 끝나면(`endIfBranch`) 그 갈래가 옮긴 바깥 지역을 다시 `.local`로
@@ -50,6 +50,22 @@
   경로의 상태가 갈라져 반복문 뒤에도 합류 처리가 필요하다. `switch` · `if` 언랩 · `if` 식의 갈래도 아직이다.
 - 테스트: `memory/move_implicit.cy` · `move_branch.cy`(소멸 순서를 로그로 비교) · `move_branch_use_after_error.cy` ·
   `move_loop_error.cy`.
+- 코드 리뷰 수정(2026-11-21):
+  - 갈래 끝 소멸은 모든 갈래가 끝난 뒤에 만들어져, 그 호출의 cancel pad가 뒤 갈래의 지역 · 그 갈래가 이미 옮긴 지역 · 같은
+    갈래에서 방금 소멸시킨 지역을 살아 있다고 봤다(`else`에 관리형 지역이 있으면 'expected mapping to IR local' panic).
+    `IfBranch.var_end`(갈래가 끝나는 시점의 지역 끝)를 두고 `destructBranchEnd`가 `cancel_pad_var_end`와 지역 상태를 그 갈래
+    기준으로 맞춘 뒤 소멸을 만든다. 하나를 소멸시킬 때마다 `.dead`로 둔다.
+  - `else`가 없을 때 마지막 갈래에 붙이는 `break` 앞에 바깥 블록 지역의 소멸(`semaDestructBlock2`)을 넣는다. 다른 갈래의
+    `semaBreakTo`와 같은 모양이다.
+  - `if` 문의 첫 조건식은 늘 평가되므로 그 안의 이동(지역 전체)은 `if` 문이 있는 블록의 이동이다(`MoveBranch.if_cond`,
+    `moveBlock`). 조건부로 평가되는 식(`and` · `or` · `if` 식 · `?else` · `!else`)과 `else cond:`의 조건식은 계속 막고
+    `reportMoveAcross`가 원인에 맞는 문구를 낸다. `and` · `or`의 왼쪽과 `if` 식의 조건은 늘 평가되지만 같은 내부 블록이라 막힌다.
+    `while` 조건식과 `if` 언랩의 조건식은 옛 문구('declared in an outer block') 그대로다.
+  - REPL(`persist_main`)의 최상위 지역은 암시적으로 이동하지 않는다(`isPersistedMainLocal`, 지역 id로 판정). 이동 상태가 다음
+    입력으로 넘어가지 않기 때문이다. 명시적 `move`는 받고, main 끝에서 죽은 최상위 지역을 `@untrackMainLocal`로 저장 목록에서
+    뺀다(`semaUntrackMovedMainLocals`). 최상위 지역의 멤버 이동은 오류다.
+  - 테스트: `memory/move_branch_locals.cy` · `move_if_cond.cy` · `move_and_error.cy` · `move_if_expr_error.cy` ·
+    `move_else_default_error.cy` · `move_else_cond_error.cy`, lib 테스트 `session.zig`의 persist_main 이동.
 
 ## B 구현 (2026-11-21)
 

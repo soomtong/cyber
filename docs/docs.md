@@ -2793,6 +2793,8 @@ print('done')
 ```
 A loop body can not move a variable that is declared outside the loop, because the next iteration reads it: 'Cannot move `f` here: it is declared in an outer block. A branch of an `if` statement can move it, a loop body can not (the next iteration reads it). Borrow it with `&f`.' A branch can move only a whole variable of an outer block, not a member of it.
 
+The condition of an `if` statement always runs, so it moves a variable like a statement of the block (`if take(f) > 0:`). An expression that evaluates a part conditionally does not move a variable: `and`, `or`, an `if` expression, `?else` and `!else` report 'Cannot move `f` inside an `and` expression: a part of the expression is evaluated conditionally. Borrow it with `&f`, or move it to a variable in a statement before this one.' The condition of an `else` branch reports 'Cannot move `f` in the condition of an `else` branch: the condition is evaluated conditionally. Move it inside the branch, or borrow it with `&f`.'
+
 Values can be partially moved if a subset of its members were moved:
 ```cy
 type Foo:
@@ -5840,6 +5842,16 @@ Top level variables are carried over to the next input by moving their values. A
 > sp := [&]int{1, 2}
 CompileError: Cannot persist local `sp` of borrow type `[&]int` across evals. Declare it inside a block or use an owned type.
 > sp := []int{1, 2}
+```
+
+A top level variable of the REPL does not move without `move`, because later inputs read it. A `NoCopy` value that would move in a script is a compile error that says to write `move a` or to borrow. After `move a`, later inputs can not use `a`. A member of a top level variable can not be moved:
+```bash
+> a := Array[str]{'x', 'y'}
+> b := a
+CompileError: Cannot copy `Array[str]`, a `NoCopy` type. The top level variable `a` of the REPL does not move without `move`: later inputs read it. Write `move a` to give it away (later inputs can not use `a` then), or borrow it.
+> b := move a
+> a
+CompileError: Undeclared variable `a`.
 ```
 
 When the first input ends with `:`, the REPL will automatically indent the next line. To recede the indentation, provide an empty input. Once the indent returns to the beginning, the entire code block is submitted for evaluation:

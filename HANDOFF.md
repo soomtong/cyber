@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-21): 0.4.16 릴리스 뒤
+# HANDOFF (2026-11-21): 0.4.16 릴리스 뒤, 빌림의 비어휘적 수명
 
 ## 목표
 
@@ -16,10 +16,12 @@
 - 2026-11-20: 남은 사용자 결정(사용자가 질문에 답함): 정렬 안 A는 조사만, core `@eq` choice는 0.5에, CI arm64 macOS Debug step은
   뺌, 표준 오류 어휘(설계 원칙 1.7 A)는 0.5에 호환성 절로(언어 별칭 없음), 1.7 C는 1단계(인스턴스화 경로 오류 문구)만 0.5 전,
   2.7은 권고대로(정체성 문서화, 마지막 사용 분석은 0.5 뒤 첫 과제, 첫 소비자 C). 기록은 각 결정 문서의 "결정(2026-11-20" 줄.
+- 2026-11-21(사용자: "continue"): 0.4.16 뒤 남은 첫 과제인 2.7의 C(빌림의 비어휘적 수명).
 
 ## 현재 브랜치
 
-`master`. 모두 push돼 있다(2026-11-21, 0.4.16 태그 `ca000225`와 그 뒤의 기록 커밋).
+`master`. 0.4.16 태그 `ca000225`와 `5e5765f9`까지 push돼 있다. 그 뒤 커밋 둘(`7e8c5782` CI 기록, `90b55104` 비어휘적
+수명)은 push하지 않았다.
 PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지 못해 15분 뒤 취소된 탓이다(나머지 6개 통과).
 
 ## 완료된 작업
@@ -124,6 +126,13 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `&&diag` · `spawn f(args)` · 예제 · `cyber-lsp initialize`를 확인했다. `/usr/local`의 설치는 사용자가 다시 한다.
   master run이 Linux · Windows에서 두 번 실패해 고쳤다(`39f0af08`, `0b8115fe`). 경위와 push 전 Linux 확인법은
   `project_fork_release_ci.md` "0.4.16".
+- [x] CI 벽시계 확인(`7e8c5782`): arm64 Debug step을 뺀 뒤 21분 → 13.5~14.5분. `project_fork_release_ci.md`.
+- [x] 빌림의 비어휘적 수명(`90b55104`, 2.7의 C). 지역의 빌림이 같은 블록에서 이름이 마지막으로 나오는 문장 뒤에 끝난다.
+  `sema.endBorrowsAfter` · `lastNamingStmt` · `namesWord`(소스 텍스트로 언급을 찾음), 안전망 `Local.borrow_ended` ·
+  `reportBorrowEnded`. 소멸자 있는 지역 · REPL 최상위는 제외. 결정 `project_borrow_model.md` "비어휘적 수명", 매뉴얼 Borrows 절,
+  `unreleased.md`, 테스트 `memory/borrow_last_use*.cy`. 14단계 검증 rc=0.
+  - 다음 후보: 2.4의 A(IR 역방향 활성 분석)와 그 소비자 B(`Slice` 값 의미) · D(`NoCopy` 암시적 이동) · E(분기 안 이동).
+    C는 A 없이 했다(빌림 검사가 IR 생성과 함께 돌기 때문). 깨지는 정도는 B가 가장 크다(받는 쪽을 남기는 코드에 복사).
 - [ ] 기술 부채(급하지 않음): `@destruct_span` 취소 keep 지점(쓰게 되면), `Scope.run`의 바퀴당 `waiting()` 질의(준비 큐 ·
   futex식 대기 표, fiber 수 비용이 문제가 되면), 취소 불변식 panic(닿는 경로 없음). 기록은 `project_coroutines.md`.
 
@@ -141,7 +150,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 ## 다음 에이전트에게
 
-1. 0.4.16이 마지막 릴리스다. 0.5 범위로 정했던 것은 모두 여기에 들어갔다.
+1. 0.4.16이 마지막 릴리스다. 0.5 범위로 정했던 것은 모두 여기에 들어갔다. 그 뒤 변경은 `unreleased.md`.
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 

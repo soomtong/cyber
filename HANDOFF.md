@@ -143,6 +143,10 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
     이동한 지역에 다시 대입(`xs = xs.appended(v)`도 이것 때문에 재사용 안 됨), 멤버 수신자 재사용. 성능 수치는 재지 않았다.
   - tars-agent 프롬프트 `prompt/cyber-subset.md` · `.en.md` 168 · 347행이 "`move a`로 넘긴다", "Cannot copy ... `move`"라고 안내한다.
     이제 `move` 없이 이동한다. 그 저장소에는 쓰지 않았다(다른 세션의 미추적 파일 `spike/s2/out/0.4.16/`이 있음).
+- [x] tars-agent 요청 `docs/requests/cyber-0.4.16-messages-from-codeact-round.md`의 문구 넷(2026-11-21, 사용자: "update tars-agent
+  docs. and check ..."): Python 슬라이스, `|_|` 반복(위치도), 버린 값의 `_ = <문장>`, 모듈의 가까운 이름 · `basename` 등.
+  `agent-guide.md`의 `int(z)` 예 · `Array` 이동 · 오류 표. tars-agent에는 요청서 회신 절과 TODO 항목(다음 빌드로 올릴 때 프롬프트
+  168 · 347행)을 써서 커밋했다(`8bf3e89`, push 안 함). 프롬프트 본문은 0.4.16 고정이라 지금 고치지 않았다.
 - [ ] 기술 부채(급하지 않음): `@destruct_span` 취소 keep 지점(쓰게 되면), `Scope.run`의 바퀴당 `waiting()` 질의(준비 큐 ·
   futex식 대기 표, fiber 수 비용이 문제가 되면), 취소 불변식 panic(닿는 경로 없음). 기록은 `project_coroutines.md`.
 

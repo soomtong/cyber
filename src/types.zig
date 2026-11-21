@@ -74,8 +74,11 @@ pub const TypeInfo = packed struct(u16) {
 
     /// Must be determined without resolving the type.
     generic: bool = false,
-    
-    padding: u8 = 0,
+
+    /// Type is an exclusive borrow or contains one.
+    ex_borrow: bool = false,
+
+    padding: u7 = 0,
 };
 
 pub const Type = extern struct {

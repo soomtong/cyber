@@ -596,7 +596,13 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         }
         arg_owners[arg_idx] = sema.borrowOwner(c, arg_res);
         arg_ex[arg_idx] = arg_res.type.kind() == .ex_borrow;
-        if (arg_ex[arg_idx] and param.get_type().kind() == .ex_borrow) {
+        if (arg_ex[arg_idx] and param.get_type().kind() == .ex_borrow and sema.readThroughShared(arg_res.ir)) {
+            return c.reportError("Cannot use an exclusive borrow that is read through a shared borrow.", arg.node);
+        }
+        // A value that contains an exclusive borrow (`Holder{r=&&f}`) gives the callee the same access.
+        if ((arg_ex[arg_idx] and param.get_type().kind() == .ex_borrow) or
+            (arg_res.type.kind() != .ex_borrow and arg_res.type.info.ex_borrow))
+        {
             arg_ex_via[arg_idx] = arg_res.recParentLocal();
             arg_ex_field[arg_idx] = sema.borrowField(c, arg_res);
         }
@@ -612,7 +618,12 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
 
     // All arguments are alive inside the call, so an exclusive borrow can not share its owner with another argument.
     for (0..arg_idx) |i| {
-        if (!arg_ex[i]) continue;
+        if (!arg_ex[i]) {
+            if (arg_ex_via[i]) |via| {
+                try sema.checkExclusiveBorrowOfField(c, via, arg_ex_field[i], false, arg_nodes[i]);
+            }
+            continue;
+        }
         // The callee can change the value, so no other local can hold a borrow of it. An exclusive borrow that is
         // already in a local or a field (`r.grow()` of `r := &&f`, `h.r.grow()`) is checked here, where it is used.
         if (arg_ex_via[i]) |via| {
@@ -778,6 +789,7 @@ fn matchRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end
 
     // Discard any locals created during matching.
     if (var_start < c.varStack.items.len) {
+        sema.truncateBorrowLoans(c, var_start);
         c.varStack.items.len = var_start;
     }
     // The hidden locals of a take (`sema.takeGlobal`) went with them. The next candidate takes again.

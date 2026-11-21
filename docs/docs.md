@@ -3004,6 +3004,21 @@ print(p.*)
 --> zzz
 ```
 
+A value that contains an exclusive borrow (a struct with an `&&T` field, `?&&T`) keeps exclusive access to the owner like the borrow, and it is checked the same way when it is passed to a function. It borrows from every local that one of its fields borrows, also from a borrow that is assigned to a field later:
+```cy
+type Holder:
+    r &&Foo
+
+f := Foo{xs={1, 2, 3}}
+h := Holder{r=&&f}
+print(f.xs.len())
+--> error: Cannot borrow `f`. There is an active exclusive borrow to it.
+```
+
+A shared borrow gives no exclusive access to what is behind it. An exclusive borrow that is read through a shared borrow (`b.*` of `b := &r`, `self.r` in a `&Holder` method) can not be passed on as `&&T`: 'Cannot use an exclusive borrow that is read through a shared borrow.'
+
+A borrow can not be an element of a type that keeps its elements in a buffer (`[]&int`, `Array[Holder]`, a `Map` of borrows), where its lifetime is not checked. Use an owned type, `^T` or a vector `[N]T`.
+
 A managed value can not be moved while a local borrows from it:
 ```cy
 h := move g

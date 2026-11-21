@@ -130,6 +130,14 @@ pub const Chunk = struct {
     /// Operands of the expression being analyzed that are done but not consumed yet, in evaluation order.
     /// See `sema.seqFlush`.
     seq_pending: std.ArrayList(cy.sema.SeqEntry) = .empty,
+
+    /// Owners that the borrow values of the current statement borrow from (`sema.noteBorrowOwner`). A local that is
+    /// bound in the statement takes those that are not its `parent_local` as loans.
+    borrow_pending: std.ArrayList(cy.sema.BorrowOwner) = .empty,
+    borrow_pending_start: u32 = 0,
+    /// The borrows of a local besides the one to its `parent_local`: a borrow container can borrow from more than one
+    /// local (`Pair{a=&&x, b=&&y}`, `h.r = &&f`).
+    borrow_loans: std.ArrayList(cy.sema.BorrowLoan) = .empty,
     seq_flushing: bool = false,
 
     /// The `s.start(func, {args})` call of a `scope` block that is being analyzed, and its argument literal.
@@ -360,6 +368,8 @@ pub const Chunk = struct {
         self.blockJumpStack.deinit(self.alloc);
         self.varShadowStack.deinit(self.alloc);
         self.seq_pending.deinit(self.alloc);
+        self.borrow_pending.deinit(self.alloc);
+        self.borrow_loans.deinit(self.alloc);
         self.scope_start_borrows.deinit(self.alloc);
         self.scope_borrows.deinit(self.alloc);
         self.scope_blocks.deinit(self.alloc);
@@ -616,6 +626,8 @@ pub const Chunk = struct {
                 i -= 1;
                 const ctx = self.resolve_stack.items[i];
                 const caller = ctx.caller orelse continue;
+                // An error that is reported at the caller itself does not repeat it.
+                if (traceHas(report, caller)) continue;
                 const trace = try self.alloc.create(cy.compiler.Report);
                 trace.* = .{
                     .type = .compile_err,

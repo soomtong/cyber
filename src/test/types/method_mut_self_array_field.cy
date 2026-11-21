@@ -111,10 +111,12 @@ fn (&&Holder) push(x int):
     self.r.items << x
 
 f := Items{items=Array[int]{}}
-h := Holder{r=&&f}
-h.push(1)
-h.push(2)
-h.push(3)
+begin:
+    -- `f` can not be read while `h` holds its exclusive borrow.
+    h := Holder{r=&&f}
+    h.push(1)
+    h.push(2)
+    h.push(3)
 test.eq(3, f.items.len())
 test.eq(3, f.items[2])
 

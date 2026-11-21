@@ -309,11 +309,41 @@
 
 ### 남은 구멍
 
-독립 탐침(스크립트 110여 개)에서 나온 것으로, 모두 0.4.15에도 있다. 컴파일되고 해제된 메모리를 읽는다. 목록과 까닭은
-`docs/decisions/project_borrow_model.md` "쓰는 자리 검사"의 "남은 것".
+`&self` 메서드 안의 관리형 필드 대입(`fn (&Foo) reset(): self.xs = {7}`에 `s := &f.xs[0]`을 둔 채 `f.reset()`)은 그대로다.
+`&T`로 값을 바꿀 수 있다는 언어 규칙에서 오고, 막으면 표준 라이브러리의 59곳 이상이 걸린다. 나머지는 아래 절에서 고쳤다.
 
-- 배타 빌림을 담은 빌림 컨테이너를 값이나 `&Holder`로 넘기고 받은 쪽이 `h.r.grow()`를 부르는 것.
-- 주인 기록이 없는 길로 꺼낸 컨테이너 · 빌림: 배열 원소(`hs[0].r.grow()`), option을 `if o |h|:`로 푼 것, 필드만 바꾼 컨테이너
-  (`h.r = &&f`).
-- 빌림을 캡처한 클로저가 배타 사용을 하는 것.
-- `&self` 메서드 안의 관리형 필드 대입(`fn (&Foo) reset(): self.xs = {7}`). 공유 빌림으로도 쓸 수 있는 언어 규칙에서 온다.
+## 배타 빌림을 담은 값 · 버퍼 속 빌림 · 주인이 여럿인 컨테이너 (2026-11-21, 깨지는 변경)
+
+위 절을 낸 뒤 독립 탐침(스크립트 110여 개)에서 나온 구멍을 뿌리별로 고쳤다. 모두 0.4.15에도 있고, 컴파일된 뒤 해제된 메모리를
+읽었다. 조사와 측정은 `docs/decisions/project_borrow_model.md` "남은 구멍 조사".
+
+### 새로 컴파일 오류가 되는 코드
+
+- 배타 빌림을 담은 값(`&&T` 필드를 가진 struct, `?&&T`, 그것을 담은 struct · option)은 주인을 배타로 빌린다. 그 값이 사는 동안
+  주인을 읽거나 빌리면 'Cannot borrow `f`. There is an active exclusive borrow to it.': `h := Holder{r=&&f}` 뒤 `f.xs.len()`,
+  `var o ?&&Foo = &&f` 뒤 `s := &f.xs[0]`. `r := &&f` 뒤 `f`를 읽을 수 없는 것과 같은 규칙이다. 주인을 다시 쓰려면 그 값을 안쪽
+  블록에 둔다. 전에는 공유 빌림으로 세어, 받은 함수의 `h.r.grow()`가 다른 지역의 빌림을 무효로 만들었다.
+- 그런 값을 인자로 넘길 때도 `&&T`처럼 검사한다: `s := &r.xs[0]`을 둔 채 `go(Holder{r=r})`는 'Expected exclusive access. There
+  is another active borrow to `r`.'
+- 공유 빌림을 거쳐 읽은 배타 빌림을 `&&T`로 넘기는 것: `b := &r` 뒤 `b.*.grow()`, `fn (&Holder) go(): self.r.grow()`,
+  `hs[0].r.grow()`. 'Cannot use an exclusive borrow that is read through a shared borrow.' 수신자를 `&&Holder`로 선언한다.
+- 버퍼에 원소를 두는 타입의 타입 인자가 빌림 타입인 것: `[]&int`, `[]Holder`, `Array[&T]`. '`[]&int` keeps values of the
+  borrow type `&int` in a buffer, where a borrow is not checked. Use an owned type, `^T` or a vector `[N]T`.' 전에는
+  `fn mk() -> []&int: x := 41; return {&x}`가 컴파일되고 죽은 스택을 읽었다. inline vector `[3]&int`와 option은 그대로 된다.
+- 빌림 컨테이너의 둘째 주인: `p := Pair{a=&&x, b=&&y}` 뒤 `t := &y.xs[0]`. 전에는 한 주인만 셌다. 필드에 나중에 넣은 빌림도
+  센다: `h.r = &&f` 뒤 `s := &f.xs[0]`.
+
+### 구현
+
+- `TypeInfo.ex_borrow`(배타 빌림이거나 그것을 담은 타입, struct · option으로 전파). `bindBorrowLocal`이 이 플래그로 배타 여부를
+  정하고, `matchFuncSig`가 이 플래그의 인자를 쓰는 자리에서 검사한다.
+- `sema.readThroughShared`: 인자의 IR 경로(`deref` · `field`)가 `&T`를 지나는지.
+- `sema_type.resolveStructFields`: 템플릿 인스턴스에 빌림 필드가 없는데 타입 인자가 빌림 타입이면 거절. 오류는 타입을 쓴 자리에
+  낸다. 같은 위치가 두 번 찍히지 않게 `Chunk.appendErrorTrace`가 이미 가리킨 호출 자리를 건너뛴다.
+- 선언을 해석하다 난 오류가 그 선언을 부른 자리와 같은 곳이면 위치를 한 번만 찍는다. 'The type `Shape` has no size. It can not
+  be the type of a field.'가 `type W:`를 두 번 보여 줬다(`types/trait_field_error.cy`).
+- `Chunk.borrow_loans`: 지역이 `parent_local` 말고 더 빌린 주인들. 값에 들어가는 빌림의 주인을 문장 단위로 모았다가
+  (`noteBorrowOwner`) 묶이는 지역의 대여로 옮기고, 필드 대입도 대여를 더한다(`addFieldBorrowLoan`). 지역이 사라질 때 내린다.
+- 테스트: `memory/ex_borrow_container_pass_error.cy`, `ex_borrow_option_error.cy`, `ex_borrow_through_shared_error.cy`,
+  `borrow_in_buffer_error.cy`, `borrow_container_two_owners_error.cy`, `borrow_container_field_store_error.cy`.
+  `types/method_mut_self_array_field.cy`는 컨테이너를 블록에 넣었다.

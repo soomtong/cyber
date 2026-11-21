@@ -162,6 +162,7 @@ pub fn ensure_resolved_type(c: *cy.Chunk, type_: *cy.Type, node: *ast.Node) anye
         .ex_borrow,
         .borrow => {
             type_.info.borrow_only = true;
+            type_.info.ex_borrow = type_.kind() == .ex_borrow;
             type_.info.managed = false;
             type_.info.copy_base = false;
             type_.info.copy_user = false;
@@ -863,6 +864,7 @@ pub fn resolveStructFields(c: *cy.Chunk, struct_t: *cy.types.Struct, decl: *ast.
 
     // Alignment follows C-ABI rules.
     var has_borrow_child = false;
+    var has_ex_borrow_child = false;
     var has_managed_child = false;
     var has_copy_child = false;
     var has_no_copy_child = false;
@@ -916,6 +918,9 @@ pub fn resolveStructFields(c: *cy.Chunk, struct_t: *cy.types.Struct, decl: *ast.
         }
         if (field_t.info.borrow_only) {
             has_borrow_child = true;
+        }
+        if (field_t.info.ex_borrow) {
+            has_ex_borrow_child = true;
         }
 
         if (!field_t.has_size()) {
@@ -984,7 +989,28 @@ pub fn resolveStructFields(c: *cy.Chunk, struct_t: *cy.types.Struct, decl: *ast.
     struct_t.embedded_fields_len = @intCast(embedded_fields.len);
     struct_t.resolving_struct = false;
 
+    if (!has_borrow_child) {
+        // A type argument that is a borrow, and no field that is one: the borrows are behind a pointer (`[]&int`,
+        // `Array[Holder]`), where their lifetime and exclusivity are not checked.
+        if (struct_t.base.sym().instance) |inst| {
+            for (inst.params, 0..) |param, i| {
+                if (inst.param_types[i].id() != bt.Type) continue;
+                const arg_t = param.asPtr(*cy.Type);
+                const is_borrow = arg_t.kind() == .borrow or arg_t.kind() == .ex_borrow or
+                    (arg_t.isResolved() and arg_t.info.borrow_only);
+                if (!is_borrow) continue;
+                // Reported where the type is asked for, not at the template in another module.
+                const at: *ast.Node = inst.siteIn(c.compiler) orelse @ptrCast(decl);
+                const name = try c.sema.allocTypeName(&struct_t.base);
+                defer c.alloc.free(name);
+                const arg_name = try c.sema.allocTypeName(arg_t);
+                defer c.alloc.free(arg_name);
+                return c.reportErrorFmt("`{}` keeps values of the borrow type `{}` in a buffer, where a borrow is not checked. Use an owned type, `^T` or a vector `[N]T`.", &.{cy.fmt.v(name), cy.fmt.v(arg_name)}, at);
+            }
+        }
+    }
     struct_t.base.info.borrow_only = has_borrow_child;
+    struct_t.base.info.ex_borrow = has_ex_borrow_child;
 
     const sym = struct_t.base.sym();
     const has_user_deinit = sym.has_decl("@deinit");
@@ -1221,6 +1247,7 @@ pub fn resolveOptionType(c: *cy.Chunk, option_t: *cy.types.Option, decl: *ast.No
     // `?&T` holds the borrow, so it is bound to the borrowed value's lifetime like `&T` (can not be lifted,
     // returned without `scope`, carried over by the REPL or taken by a generator).
     option_t.base.info.borrow_only = option_t.child_t.info.borrow_only;
+    option_t.base.info.ex_borrow = option_t.child_t.info.ex_borrow;
 
     try resolve_type_info2(c, &option_t.base.info, has_copy_child, has_no_copy_payload);
 

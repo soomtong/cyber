@@ -1,4 +1,4 @@
--- The exclusive borrow in a borrow container can not be used while a local borrows from the owner directly.
+-- A borrow container that holds an exclusive borrow keeps exclusive access to the owner like the borrow itself.
 type Foo:
     xs []int
 
@@ -16,9 +16,9 @@ h.r.grow()
 print(s.*)
 
 --cytest: error
---CompileError: Expected exclusive access. There is another active borrow to `f`.
+--CompileError: Cannot borrow `f`. There is an active exclusive borrow to it.
 --
---@MainPath():15:1:
---h.r.grow()
---^~~
+--@MainPath():14:7:
+--s := &f.xs[0]
+--      ^~~~
 --

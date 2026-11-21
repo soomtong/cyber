@@ -73,6 +73,9 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   배타 접근을 쓰는 자리에서 검사한다(깨지는 변경: 순회 중 `&&self` 메서드 호출, 빌려 둔 관리형 값의 대입). 결정
   `docs/decisions/project_borrow_model.md` "쓰는 자리 검사", `docs/releases/unreleased.md` 같은 이름의 절, 발견 이슈 F-167.
   패치로 낼지 0.5로 미룰지는 사용자가 정한다(커밋 하나라 되돌리기 쉽다).
+- [x] 그 뒤 탐침에서 나온 구멍의 조사와 수정(2026-11-21, 사용자: "research to fix them", "continue"). 배타 빌림을 담은 값은
+  배타로 세고, 공유 빌림 뒤의 배타 사용과 버퍼 속 빌림 타입을 거절하고, 주인이 여럿인 컨테이너를 센다(깨지는 변경). 결정 문서
+  "남은 구멍 조사", 발견 이슈 F-168. 남은 것: `&self` 메서드의 관리형 필드 대입(언어 결정, std 59곳 이상).
   빌림 검사에 남긴 구멍(0.5 후보)은 `docs/decisions/project_borrow_model.md` "남은 것" 끝. tars-agent는 `docs/TODO.md` 31행에
   덧붙였고 커밋하지 않았다.
 

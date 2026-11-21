@@ -94,19 +94,19 @@ for items |it|:
 ```
 
 - `if` 언랩 문(`if opt |v|:`)의 갈래, `switch` 문의 case, `begin:` 블록. 옮기지 않은 갈래의 끝에서 변수가 소멸하고 문장 뒤에는
-  죽어 있다(`if` 문과 같다). `switch` 식(`x := switch ...`)의 case는 전처럼 막힌다.
+  죽어 있다(`if` 문과 같다). `switch` 식의 case는 아래 "남은 자리의 이동"에서 열었다.
 - 반복 본문: 옮긴 뒤 `return`이나 `break`로 반복문을 떠나면 된다. `break` 뒤에는 변수가 죽어 있고, 반복문을 떠나는 다른 길(반복이
-  끝남, 옮기지 않은 `break`)은 반복문 끝에서 그 변수를 소멸시킨다. 옮긴 뒤 `break`가 여럿이면 모두 같은 변수들을 옮겨야 한다
-  ('Cannot leave the loop here: `a` is moved before only one of this `break` and the `break` at L:C. ...').
+  끝남, 옮기지 않은 `break`)은 반복문 끝에서 그 변수를 소멸시킨다. 옮긴 뒤 `break`가 여럿이고 옮긴 변수가 서로 달라도 된다
+  (아래 "남은 자리의 이동").
 - 옮긴 뒤 다음 반복으로 넘어가면 옮긴 자리의 오류다. 문구가 바뀌었다: 'Cannot move `a` here: it is declared outside the loop, and
   the next iteration reads it. A loop body can move it where it then leaves the loop with `break` or `return`, or gives it a
   value again. Borrow it with `&a`.' 반복 조건식(`while take(a):`)의 이동도 이 문구다.
 - 같은 갈래 · 같은 반복 본문에서 옮긴 뒤 대입하면 변수가 살아 있다(`if c: take(x); x = R{}`, `for ..: take(x); x = R{}`). 전에는
   'Cannot assign to `x` here: it was moved at L:C and it is declared in an outer block.'
 - `if` 언랩 문의 옵션 식은 `if` 문의 첫 조건식처럼 늘 평가되므로 변수를 옮길 수 있다(`if take(r) |v|:`).
-- 남은 블록(`try` 블록과 그 `else` 블록, `switch` 식, `?else` · `!else` 블록)의 문구: 'Cannot move `a` here: it is declared outside
-  this block. A branch of an `if` or `switch` statement, a `begin:` block and a loop body can move an outer variable, this
-  block can not. Borrow it with `&a`.'
+- 남은 블록(`scope` 블록, `?else` · `!else` 블록)의 문구: 'Cannot move `a` here: it is declared outside this block. A branch of
+  an `if` or `switch`, a `begin:` block, a `try` statement and a loop body can move an outer variable, this block can not.
+  Borrow it with `&a`.'
 - 결정 `docs/decisions/project_last_use.md` "갈래 종류와 반복 본문", 매뉴얼 Moving 절.
 
 ## `if` · `while` 언랩이 `NoCopy` payload를 꺼낸다
@@ -124,7 +124,47 @@ implements `NoCopy`.'였다.
 
 `b := make() ?else: ...`와 `make() ?else default`에서 옵션이 호출 결과 같은 새 값이면 payload가 `NoCopy`여도 풀린다. 0.4.16에서는
 'Cannot copy `?R`, type member implements `NoCopy`.'였고, 그 뒤 master에서는 숨은 지역을 짚는 'Cannot move `_temp` inside a
-`?else` expression'이었다. 변수에 담긴 옵션(`o ?else ...`)은 전처럼 막힌다.
+`?else` expression'이었다. 변수에 담긴 옵션(`o ?else ...`)은 아래 "남은 자리의 이동"에서 열었다.
+
+## 남은 자리의 이동: `if` · `switch` 식, `try` 문, 서로 다른 `break`, `o ?else`
+
+바깥 변수의 이동을 거절하던 자리 넷을 받아들인다. 모두 런타임 플래그 없이, 그 변수를 옮기지 않은 길의 끝에서 소멸시켜 문장 뒤의
+상태를 하나로 맞춘다.
+
+```cy
+buf := Array[int]{}
+try:
+    n := read_into(&&buf)!      -- 여기서 실패하면 `else` 블록 전에 `buf`가 소멸한다
+    send(buf)                   -- `buf`를 옮긴다
+    flush()!
+else |err|:
+    print(err)                  -- 여기서 `buf`는 죽어 있다
+```
+
+- `if` 식의 갈래와 `switch` 식의 case(`v := if (c) take(a) else 0`, `v := switch k: case .x => take(a) ...`). 옮기지 않은 갈래가
+  값을 낸 뒤 그 변수를 소멸시키고, 식 뒤에는 죽어 있다. `if` 식의 조건은 늘 평가되므로 문장의 일부처럼 옮긴다. 전에는 'Cannot
+  move `a` inside an `if` expression: ...'과 'Cannot move `a` here: it is declared outside this block. ...'였다.
+- `try` 문의 본문과 `else` 블록. 본문이 실패할 수 있는 `!` 전에 옮긴 변수는 `else` 블록에서 죽어 있다('`a` was moved at L:C.
+  ...'). 그 변수를 옮기기 전에 실패한 `!`는 본문을 떠나기 전에 그것을 소멸시킨다. 어느 한 길이 옮긴 변수는 문장 뒤에 죽어 있고,
+  옮기지 않은 길(본문의 끝, `else` 블록의 끝)이 소멸시킨다. 반복문 안이면 반복문 규칙을 따른다(옮긴 뒤 `else` 블록이 다음 반복으로
+  가면 옮긴 자리의 오류).
+- 반복문의 `break`들이 서로 다른 바깥 변수를 옮긴 뒤여도 된다. 각 `break`는 다른 `break`만 옮긴 변수를 떠나기 전에 소멸시킨다.
+  'Cannot leave the loop here: ... has to follow the same moves.' 오류는 없어졌다.
+- 변수에 담긴 `NoCopy` 옵션의 `?else`(`a := o ?else default`, `o ?else:` 블록). 옵션 식은 늘 평가되므로 `o`가 이동한다. 뒤에 `o`를
+  쓰면 '`o` was moved at L:C. ...'. 전에는 'Cannot move `o` inside a `?else` expression: ...'였다. `?else`의 기본값 식과 블록은
+  조건부로 평가되므로 전처럼 바깥 변수를 옮기지 못한다.
+- 그대로 막히는 자리: `and` · `or`의 오른쪽(왼쪽도 같은 내부 블록이라 막힌다), `?else` · `!else`의 기본값과 블록, `scope` 블록.
+- 결정 `docs/decisions/project_last_use.md` "남은 다섯", 매뉴얼 Moving 절.
+
+## 멤버에 대입하는 새 목록 메서드도 버퍼를 재사용한다
+
+`s.xs = s.xs.appended(v)`(`inserted` · `removed` · `+`도)가 `s.xs.append(v)`처럼 제자리에서 돈다. 결과는 전과 같고 원소 하나마다
+목록을 복사하던 비용이 없어진다. 메서드 안의 `self.xs = self.xs.appended(v)`(`&&T` 수신자)도 같다.
+
+- 조건: 경로가 지역 변수(또는 `&&T` 매개변수)에서 구조체 값의 멤버로만 이어지고, 그 변수가 빌려져 있지 않고, 오른쪽에서 그
+  변수의 이름이 수신자에 한 번만 나온다. 참조(`^T`) · 공유 빌림(`&T`)을 거친 멤버와 인자가 그 변수를 읽는 문장
+  (`s.xs = s.xs.appended(s.n)`)은 전처럼 복사한다.
+- 다른 값이 버퍼를 나눠 갖고 있으면 제자리 메서드가 전처럼 먼저 복사한다.
 
 ## 고치는 법을 말하는 문구 넷 (tars-agent 요청, 0.4.16 CodeAct 회차)
 

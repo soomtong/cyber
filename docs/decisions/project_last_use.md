@@ -63,7 +63,7 @@
   - REPL(`persist_main`)의 최상위 지역은 암시적으로 이동하지 않는다(`isPersistedMainLocal`, 지역 id로 판정). 이동 상태가 다음
     입력으로 넘어가지 않기 때문이다. 명시적 `move`는 받고, main 끝에서 죽은 최상위 지역을 `@untrackMainLocal`로 저장 목록에서
     뺀다(`semaUntrackMovedMainLocals`). 최상위 지역의 멤버 이동은 오류다.
-  - 테스트: `memory/move_branch_locals.cy` · `move_if_cond.cy` · `move_and_error.cy` · `move_if_expr_error.cy` ·
+  - 테스트: `memory/move_branch_locals.cy` · `move_if_cond.cy` · `move_and_error.cy` · `move_if_expr_error.cy`(뒤에 지움) ·
     `move_else_default_error.cy` · `move_else_cond_error.cy`, lib 테스트 `session.zig`의 persist_main 이동.
 
 ## B 구현 (2026-11-21)
@@ -150,7 +150,46 @@ E · B 절의 "남은 것" 가운데 "이동한 지역에 다시 대입"과 `xs 
   `for a |r|`는 캡처 전에 원소 타입을 보고 전의 복사 오류를 낸다(`reportNoCopy`): 캡처가 payload를 가져가면 오류가 core의
   `Array.next` 본문에서 나기 때문이다.
 - 테스트: `memory/move_branch_kinds.cy` · `move_loop.cy`(소멸 순서 로그) · `move_loop_error.cy` · `move_loop_continue_error.cy` ·
-  `move_loop_break_error.cy` · `move_loop_after_error.cy` · `move_try_error.cy` · `unwrap_nocopy_capture.cy` ·
+  `move_loop_break_error.cy`(뒤에 지움) · `move_loop_after_error.cy` · `move_try_error.cy`(뒤에 지움) · `unwrap_nocopy_capture.cy` ·
   `move_unwrap_after_error.cy`.
 - 남은 것: `if` 식 · `switch` 식 갈래의 이동, `try` 블록의 이동, 옮긴 집합이 다른 `break`들, 멤버 수신자 재사용
-  (`s.xs = s.xs.appended(v)`), 변수에 담긴 `NoCopy` 옵션의 `?else`(`o ?else ...`).
+  (`s.xs = s.xs.appended(v)`), 변수에 담긴 `NoCopy` 옵션의 `?else`(`o ?else ...`). 아래 "남은 다섯"에서 모두 했다.
+
+## 남은 다섯 (2026-11-22)
+
+위 절 끝의 다섯을 했다(사용자: "continue"). 새 런타임 플래그는 없다. 공통 수단은 "나중에 채우는 자리"다: 떠나는 문장
+(`break`, 실패한 `!`) 앞에 빈 IR `block` 문장을 두고, 문장 전체를 본 뒤에 그 자리에 소멸을 채운다(`MovedBreak.slot`). 떠나는
+시점에는 다른 길이 무엇을 옮길지 모르기 때문이다. 채울 때의 지역 상태는 `destructBranchEnd`가 그 자리 기준으로 맞춘다.
+
+- 변수에 담긴 `NoCopy` 옵션의 `?else`: 옵션을 `?else`의 블록을 열기 전에 소유한다(`semaElseOptionOwner`). 전에는 블록 안의
+  `semaOwn`이 바깥 지역의 이동이라 막혔다. 옵션 식은 늘 평가되므로 문장의 블록에서 옮기는 것이 맞다.
+- 멤버 수신자 재사용(`reuseMemberSliceBuffer`, `semaAssignStmt`의 `accessExpr` 갈래 첫머리): `s.xs = s.xs.appended(v)`를 제자리
+  호출 `s.xs.append(v)`와 `s.xs.own_buffer()`로 바꾼다. 지역 꼴과 달리 이동이 없다(멤버가 받는 쪽이자 대상).
+  - 조건: 왼쪽과 수신자의 소스 텍스트가 같고, 경로의 뿌리 이름이 오른쪽에 한 번만 나오고, IR이 구조체 값의 `field` 사슬로
+    지역(값 구조체 또는 `&&T` 지역)에 닿고, 그 지역이 빌려져 있지 않고 부분 이동 상태가 아니다.
+  - 참조(`^T`)를 거친 멤버는 뺀다: 인자가 다른 참조로 같은 객체를 고칠 수 있어 평가 순서가 보인다. `&T`는 쓰기가 막히므로 원래
+    오류를 그대로 내도록 뺀다.
+  - 불일치 오류는 지역 꼴처럼 `Chunk.reuse_call`로 적은 메서드 이름을 보인다.
+- 옮긴 집합이 다른 `break`들: `semaMovedBreak`가 `break` 앞에 자리를 두고 그 `break`의 집합을 적는다(`Chunk.moved_breaks`,
+  `Chunk.break_moves`의 구간). `popLoopWrap`이 합집합 U를 구해 각 자리에 U에서 그 `break`의 집합을 뺀 것의 소멸을 채운다.
+  반복이 끝나서 나오는 길과 옮기지 않은 `break`는 전처럼 L 뒤에서 U를 소멸시킨다. 집합이 다를 때의 오류는 없앴다.
+- `try` 문(`sema_try_stmt`, `semaTryExit`): 본문 B, handler H, 감싸는 O 모두 `.plain`이다. `TryCtx.track_moves`는 `try` 문만
+  켠다(`scope` 문은 같은 `try_ctx`를 쓰지만 `.none`으로 남겼다).
+  - 실패한 `!`마다 그 시점에 B가 옮긴 바깥 지역 집합 M_i를 적고 자리를 둔다(`Chunk.try_exits` · `try_moves`). B가 끝나면
+    U_fail(M_i의 합집합)을 구한다. H에서는 U_fail이 죽어 있고, 각 자리에는 U_fail에서 M_i를 뺀 것의 소멸을 채운다.
+  - 문장 뒤에 죽는 집합 D: B의 끝과 H의 끝이 둘 다 닿으면 M_end ∪ U_fail ∪ M_H, 한쪽만 닿으면 그쪽 것. B 끝의 `break` 앞
+    자리에 D에서 M_end를 뺀 것을, H의 끝에는 M_end 가운데 H에서 살아 있는 것의 소멸을 넣는다.
+  - H를 검사하는 동안 U_fail을 `branch_moves`에 넣어 둔다. H 안의 `break` · `continue` · 바깥 `try`의 실패한 `!`가 그 지역을
+    옮긴 것으로 봐야 하기 때문이다. 빠뜨렸을 때 안쪽 `try`의 H에서 실패한 `!`가 바깥 H의 끝에서 이중 소멸을 냈다
+    (`move_try.cy`의 `run4`).
+  - `try_exits`는 `moved_breaks`와 따로 둔다. `try` 본문 안에서 바깥 반복문의 `break`가 나올 수 있어 한 목록이면 구간이 섞인다.
+    안쪽 `try`의 기록은 B가 끝날 때 복사해 두고 바로 줄인다(H의 `!`는 바깥 `try`의 기록이다).
+- `if` 식 · `switch` 식: 문장과 같은 틀(`IfBranch` · `endIfBranch` · `joinBranchMoves`, `CaseMoves`)을 쓴다. 낮춘 꼴이 문장과
+  같아서(결과 지역에 쓰고 바깥 블록으로 `break`) 갈래 끝 소멸이 값 대입 뒤, `break` 앞에 들어간다. `if` 식의 조건은 `.if_cond`.
+- `reportMoveAcross`는 지금 블록이 아니라 이동을 막는 블록(지역의 블록까지 가는 길의 첫 `.none`)을 보고 문구를 고른다.
+  `if` 식 갈래 안에서 바깥의 `and`가 막는 경우 때문이다.
+- `.none`으로 남은 것: `and` · `or`의 내부 블록, `?else` · `!else`의 블록, `scope` 블록.
+- 테스트: `memory/unwrap_else_nocopy_var.cy` · `slice_reuse_member.cy` · `move_loop_breaks.cy` · `move_try.cy` ·
+  `move_try_after_error.cy` · `move_try_loop_error.cy` · `move_expr_branch.cy` · `move_if_expr_after_error.cy`. 지운 것:
+  `move_if_expr_error.cy` · `move_loop_break_error.cy` · `move_try_error.cy`.
+- 남은 것: `and` · `or`의 왼쪽(늘 평가됨)의 이동, `scope` 블록의 이동. 성능 수치는 재지 않았다.

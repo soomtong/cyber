@@ -152,6 +152,13 @@ pub const Chunk = struct {
     /// The outer locals that the `break` statements of a loop moved, from `Block.break_moves_start` of the wrap block
     /// of the loop (`sema.semaBreak`).
     break_moves: std.ArrayList(u32) = .empty,
+    /// The `break` statements that left a loop after they moved outer locals, from `Block.moved_breaks_start` of the
+    /// wrap block of the loop.
+    moved_breaks: std.ArrayList(sema.MovedBreak) = .empty,
+    /// The failing `!` of the body of a `try` statement and the outer locals that the body moved before each
+    /// (`sema.semaTryExit`), until the body ends.
+    try_exits: std.ArrayList(sema.MovedBreak) = .empty,
+    try_moves: std.ArrayList(u32) = .empty,
     /// The moves made while an overload candidate is matched, so that a candidate that does not match leaves the
     /// locals as they were (`sema.undoMoves`). Recorded only while `move_undo_depth` is not 0.
     move_undo: std.ArrayList(cy.sema.MoveUndo) = .empty,
@@ -394,6 +401,9 @@ pub const Chunk = struct {
         self.moved_sites.deinit(self.alloc);
         self.branch_moves.deinit(self.alloc);
         self.break_moves.deinit(self.alloc);
+        self.moved_breaks.deinit(self.alloc);
+        self.try_exits.deinit(self.alloc);
+        self.try_moves.deinit(self.alloc);
         self.move_undo.deinit(self.alloc);
         self.scope_start_borrows.deinit(self.alloc);
         self.scope_borrows.deinit(self.alloc);

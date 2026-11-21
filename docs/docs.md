@@ -1154,7 +1154,8 @@ statement of the block names it), `appended`, `inserted`, `removed` and `+` take
 `ys := xs.appended(4)` as the last use of `xs` then costs no copy. When another value shares the buffer, the result gets its own copy
 as before. The body of `#for` does not take the buffer. A statement that assigns the result to the receiver
 (`xs = xs.appended(v)`, with no other use of `xs` in it) takes the buffer too, also in a loop body, so building a list
-this way does not copy it for each element.
+this way does not copy it for each element. So does a member of a variable or of the `&&T` receiver of a method
+(`self.xs = self.xs.appended(v)`), when the variable is not borrowed and the arguments do not name it.
 
 Copies of a slice share its buffer until one of them resizes: an in-place resize of a slice whose buffer another value
 also holds (`ys := xs`, a sub-slice) first copies the buffer, so the other value keeps its elements and its length. Writing
@@ -2787,7 +2788,7 @@ print(a.len())
 ```
 In this case, the `Array` value is moved into the `compute_sum` function, so the `Array` is deinitialized by the callee function and not the callsite. A copyable value is still copied unless `move` is written.
 
-A variable is moved in the block that declares it, or in a branch inside that block: a branch of an `if` statement, of an `if` unwrap statement or a case of a `switch` statement. A `begin:` block moves it like the block around it. After the statement the variable is dead. The branches that do not move it, and the implicit `else` when there is none, deinitialize it at their end, so `@deinit` can run before the end of the block:
+A variable is moved in the block that declares it, or in a branch inside that block: a branch of an `if` statement or expression, of an `if` unwrap statement or a case of a `switch` statement or expression. A `begin:` block moves it like the block around it. After the statement the variable is dead. The branches that do not move it, and the implicit `else` when there is none, deinitialize it at their end, so `@deinit` can run before the end of the block:
 ```cy
 f := open_log()!
 if verbose:
@@ -2807,9 +2808,21 @@ for items |it|:
     buf << it.value
 -- `buf` is dead here. When the loop ends without that `break`, `buf` is deinitialized at the end of the loop.
 ```
-After a `break` that follows a move, the variable is dead after the loop. The other ways out of the loop (its end, a `break` that moved nothing) deinitialize it. Each `break` that follows a move of an outer variable has to follow the same moves: 'Cannot leave the loop here: `a` is moved before only one of this `break` and the `break` at 6:9. ...' A body that goes on to the next iteration after the move is an error at the move, because the next iteration reads the variable: 'Cannot move `f` here: it is declared outside the loop, and the next iteration reads it. A loop body can move it where it then leaves the loop with `break` or `return`, or gives it a value again. Borrow it with `&f`.'
+After a `break` that follows a move, the variable is dead after the loop. The other ways out of the loop (its end, a `break` that moved nothing, a `break` that moved other variables) deinitialize it. A body that goes on to the next iteration after the move is an error at the move, because the next iteration reads the variable: 'Cannot move `f` here: it is declared outside the loop, and the next iteration reads it. A loop body can move it where it then leaves the loop with `break` or `return`, or gives it a value again. Borrow it with `&f`.'
 
-Other blocks do not move a variable of an outer block: a `try` block and its `else` block, a `switch` expression and the block of `?else` and `!else` report 'Cannot move `f` here: it is declared outside this block. ...'.
+The body of a `try` statement and its `else` block move a variable of an outer block too. A variable that the body moved before a `!` that can fail is dead in the `else` block, and a variable that either way through the statement moved is dead after it. The ways that did not move it deinitialize it: a failing `!` before it leaves the body, the body or the `else` block at its end.
+```cy
+buf := Array[int]{}
+try:
+    n := read_into(&&buf)!      -- When this fails, `buf` is deinitialized before the `else` block runs.
+    send(buf)                   -- Moves `buf`.
+    flush()!
+else |err|:
+    print(err)                  -- `buf` is dead here.
+-- `buf` is dead here.
+```
+
+Other blocks do not move a variable of an outer block: a `scope` block and the block of `?else` and `!else` report 'Cannot move `f` here: it is declared outside this block. A branch of an `if` or `switch`, a `begin:` block, a `try` statement and a loop body can move an outer variable, this block can not. Borrow it with `&f`.'
 
 An assignment gives a moved variable a value again. The right side can move the variable that the statement assigns, and then a loop body or any other block can do it too, because the variable is alive when the statement ends:
 ```cy
@@ -2822,7 +2835,7 @@ acc = Array[int]{}          -- `acc` was moved, so there is no old value to dein
 ```
 A variable that was moved before the statement gets a value in the block that declares it, or in the block that moved it (a branch or a loop body that moves a variable and then assigns to it). In another block the paths would differ: 'Cannot assign to `acc` here: it was moved at 5:6 and it is declared in an outer block. Assign to it in the block that declares it, or declare a new variable.' The right side that moved a variable of an outer block can not leave the statement with `break`, `continue` or a failing `!` inside a `try` block ('Cannot leave the assignment to `acc` here: ...'), since the variable would be read after that. `return` can. In the REPL a top level variable that was moved is declared again with `:=`, not assigned.
 
-The condition of an `if` statement and the option of an `if` unwrap statement always run, so they move a variable like a statement of the block (`if take(f) > 0:`). An expression that evaluates a part conditionally does not move a variable: `and`, `or`, an `if` expression, `?else` and `!else` report 'Cannot move `f` inside an `and` expression: a part of the expression is evaluated conditionally. Borrow it with `&f`, or move it to a variable in a statement before this one.' The condition of an `else` branch reports 'Cannot move `f` in the condition of an `else` branch: the condition is evaluated conditionally. Move it inside the branch, or borrow it with `&f`.'
+The condition of an `if` statement or expression and the option of an `if` unwrap statement always run, so they move a variable like a statement of the block (`if take(f) > 0:`). So does the option of `?else` (`o ?else default` moves a `NoCopy` option out of `o`). An expression that evaluates a part conditionally does not move a variable: `and`, `or`, and the default of `?else` and `!else` report 'Cannot move `f` inside an `and` expression: a part of the expression is evaluated conditionally. Borrow it with `&f`, or move it to a variable in a statement before this one.' The condition of an `else` branch reports 'Cannot move `f` in the condition of an `else` branch: the condition is evaluated conditionally. Move it inside the branch, or borrow it with `&f`.'
 
 Values can be partially moved if a subset of its members were moved:
 ```cy

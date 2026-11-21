@@ -2330,7 +2330,10 @@ fn semaLogicOr(c: *cy.Chunk, left: *ast.Node, right: *ast.Node, node: *ast.Node)
 
     const outer = try pushBlock(c, node);
     {
+        // The left operand always runs: a move in it is a move in the block around the expression (`moveBlock`).
+        c.block().move_branch = .if_cond;
         const cond = try semaLogicOperand(c, left);
+        c.semaBlocks.items[outer].move_branch = .none;
 
         _ = try pushBlock(c, left);
         {
@@ -2366,7 +2369,10 @@ fn semaLogicAnd(c: *cy.Chunk, left: *ast.Node, right: *ast.Node, node: *ast.Node
 
     const outer = try pushBlock(c, node);
     {
+        // The left operand always runs: a move in it is a move in the block around the expression (`moveBlock`).
+        c.block().move_branch = .if_cond;
         var cond = try semaLogicOperand(c, left);
+        c.semaBlocks.items[outer].move_branch = .none;
         const expr = try c.ir.newExpr(.unary_op, c.sema.bool_t, left, .{
             .childT = c.sema.bool_t, .op = .lnot, .expr = cond.ir,
         });
@@ -2642,7 +2648,12 @@ fn sema_scope_stmt(c: *cy.Chunk, stmt: *ast.ScopeStmt) !void {
     const borrow_t = try get_ex_borrow_type(c, scope_t);
 
     var body_end_reachable = false;
-    _ = try pushBlock(c, node);
+    // The outer locals that the body moved where it reaches its end: they are dead after the statement.
+    var end_moves: std.ArrayListUnmanaged(LocalId) = .empty;
+    defer end_moves.deinit(c.alloc);
+    const scope_idx = try pushBlock(c, node);
+    c.block().move_branch = .plain;
+    const outer_start = c.block().varStart;
     {
         const new_call = try c.semaCallFunc2(c.sema.scope_new_fn, &.{}, &.{}, node);
         const scope_local = try declareLocalInit(c, stmt.name.cast(.ident).name.slice(), scope_t, new_call, stmt.name);
@@ -2652,14 +2663,22 @@ fn sema_scope_stmt(c: *cy.Chunk, stmt: *ast.ScopeStmt) !void {
         defer endScopeBorrows(c, borrows_start);
 
         const mid = try pushBlock(c, node);
+        c.block().move_branch = .plain;
+        // The locals that the body moved before some failing `!`: dead where the body failed.
+        var fail_moves: std.ArrayListUnmanaged(LocalId) = .empty;
+        defer fail_moves.deinit(c.alloc);
         {
             const err_local = try declareHiddenLocal(c, "_try_err", c.sema.error_t, null, node);
             c.varStack.items[err_local.id].type = .dead;
 
             const proc = c.proc();
             const body_block = try pushBlock(c, node);
+            c.block().move_branch = .plain;
+            const body_start = c.block().varStart;
+            const exits_start = c.try_exits.items.len;
+            const exit_moves_start = c.try_moves.items.len;
             const prev_ctx = proc.try_ctx;
-            proc.try_ctx = .{ .body_block = @intCast(body_block), .err_local = err_local.id };
+            proc.try_ctx = .{ .body_block = @intCast(body_block), .err_local = err_local.id, .track_moves = true };
             {
                 try c.scope_blocks.append(c.alloc, .{
                     .local = scope_local.id,
@@ -2669,15 +2688,52 @@ fn sema_scope_stmt(c: *cy.Chunk, stmt: *ast.ScopeStmt) !void {
                 defer c.scope_blocks.items.len -= 1;
                 try semaStmts(c, stmt.stmts);
                 body_end_reachable = c.block().endReachable;
+                const moves_start = c.block().moves_start;
                 if (body_end_reachable) {
+                    try appendOuterMoves(c, &end_moves, moves_start, outer_start);
                     try semaBreakTo(c, mid, node);
                 }
+                restoreMoves(c, moves_start);
             }
             c.proc().try_ctx = prev_ctx;
+            const exits = try c.alloc.dupe(MovedBreak, c.try_exits.items[exits_start..]);
+            defer c.alloc.free(exits);
+            c.try_exits.items.len = exits_start;
+            const exit_moves = try c.alloc.dupe(LocalId, c.try_moves.items[exit_moves_start..]);
+            defer c.alloc.free(exit_moves);
+            c.try_moves.items.len = exit_moves_start;
+            for (exit_moves) |id| {
+                if (std.mem.indexOfScalar(LocalId, fail_moves.items, id) == null) try fail_moves.append(c.alloc, id);
+            }
+            std.mem.sort(LocalId, fail_moves.items, {}, std.sort.desc(LocalId));
             const body = try popBlock2(c, false);
             _ = try c.ir.pushStmt(.block, node, .{ .bodyHead = body.first });
 
-            // The body failed.
+            // Each failing `!` destructs the ones that it did not move itself, in the slot before its `break`.
+            for (exits) |ex| {
+                const own = exit_moves[ex.start - exit_moves_start..ex.end - exit_moves_start];
+                if (own.len == fail_moves.items.len) continue;
+                try c.ir.pushStmtBlock(c.alloc);
+                {
+                    errdefer _ = c.ir.popStmtBlock();
+                    try destructBranchEnd(c, fail_moves.items, own, body_start, node);
+                }
+                ex.slot.cast(.block).bodyHead = c.ir.popStmtBlock().first;
+            }
+
+            // The body failed. The moves are moves on the way of the error for the statements around (an enclosing
+            // `try`), and the locals are dead for a `return` of the error.
+            const fail_moves_start = c.branch_moves.items.len;
+            try c.branch_moves.appendSlice(c.alloc, fail_moves.items);
+            for (fail_moves.items) |id| {
+                c.varStack.items[id].type = .dead;
+            }
+            defer {
+                for (fail_moves.items) |id| {
+                    c.varStack.items[id].type = .local;
+                }
+                c.branch_moves.items.len = fail_moves_start;
+            }
             const scope_v = try semaLocal(c, scope_local.id, node);
             const scope_addr = try semaAddressOf(c, scope_v, borrow_t, node);
             const abort_call = try c.semaCallFunc2(c.sema.scope_abort_fn, &.{Argument.initPreResolved(node, scope_addr)}, &.{}, node);
@@ -2690,12 +2746,18 @@ fn sema_scope_stmt(c: *cy.Chunk, stmt: *ast.ScopeStmt) !void {
         const mid_block = try popBlock2(c, false);
         _ = try c.ir.pushStmt(.block, node, .{ .bodyHead = mid_block.first });
         c.block().endReachable = body_end_reachable;
+        // Only the end of the body comes here.
+        for (end_moves.items) |id| {
+            c.varStack.items[id].type = .dead;
+        }
+        try c.branch_moves.appendSlice(c.alloc, end_moves.items);
 
         if (body_end_reachable) {
             // `s.join()!`
             try semaScopeJoinCheck(c, scope_local.id, node);
         }
     }
+    endPlainBlockMoves(c, scope_idx);
     const block = try popBlock(c);
     _ = try c.ir.pushStmt(.block, node, .{ .bodyHead = block.first });
     if (!body_end_reachable) {
@@ -9203,6 +9265,9 @@ fn semaUntrackMovedMainLocals(c: *cy.Chunk) !void {
 /// `!else`), the condition of an `else` branch, or a block like a loop body.
 fn reportMoveAcross(c: *cy.Chunk, id: LocalId, node: *ast.Node) anyerror {
     const name = c.varStack.items[id].name();
+    if (c.varStack.items[id].scope_block) {
+        return c.reportErrorFmt("Cannot move `{}`: it is the scope of a `scope` block, which joins its fibers at the end of the block. Borrow it with `&&{}`.", &.{v(name), v(name)}, node);
+    }
     // The block that does not take the move: the current one, or one between it and the block of the local.
     var b = &c.semaBlocks.items[moveBlock(c)];
     if (b.move_branch == .branch or b.move_branch == .plain) {
@@ -9232,13 +9297,15 @@ fn reportMoveAcross(c: *cy.Chunk, id: LocalId, node: *ast.Node) anyerror {
     if (b.move_branch == .if_outer) {
         return c.reportErrorFmt("Cannot move `{}` in the condition of an `else` branch: the condition is evaluated conditionally. Move it inside the branch, or borrow it with `&{}`.", &.{v(name), v(name)}, node);
     }
-    return c.reportErrorFmt("Cannot move `{}` here: it is declared outside this block. A branch of an `if` or `switch`, a `begin:` block, a `try` statement and a loop body can move an outer variable, this block can not. Borrow it with `&{}`.", &.{v(name), v(name)}, node);
+    return c.reportErrorFmt("Cannot move `{}` here: it is declared outside this block. A branch of an `if` or `switch`, a `begin:` block, a `try` statement, a `scope` block and a loop body can move an outer variable, this block can not. Borrow it with `&{}`.", &.{v(name), v(name)}, node);
 }
 
 /// Whether the local `id` of an outer block can be moved from the current block: every block up to the one of the
 /// local is a branch of an `if`, `if` unwrap or `switch` statement, a `begin:` block or a block of a loop. A loop
 /// takes the move only where the body then leaves the loop (`checkLoopMoves`, `semaBreak`).
 fn canMoveAcross(c: *cy.Chunk, id: LocalId) bool {
+    // The `Scope` of a `scope` block stays where it is: the block joins its fibers at the end.
+    if (c.varStack.items[id].scope_block) return false;
     var i = moveBlock(c);
     if (id >= c.semaBlocks.items[i].varStart) return true;
     const kind = c.semaBlocks.items[i].move_branch;
@@ -9255,8 +9322,10 @@ fn canMoveAcross(c: *cy.Chunk, id: LocalId) bool {
 /// The block that a move at this point is a move in: the current one, or the block of the `if` statement while its
 /// first condition is checked.
 fn moveBlock(c: *cy.Chunk) usize {
-    const i = c.semaBlocks.items.len - 1;
-    return if (c.semaBlocks.items[i].move_branch == .if_cond) i - 1 else i;
+    var i = c.semaBlocks.items.len - 1;
+    // The left operand of an `and` in the condition is two such blocks deep.
+    while (c.semaBlocks.items[i].move_branch == .if_cond) i -= 1;
+    return i;
 }
 
 fn semaLift(c: *cy.Chunk, expr: ExprResult, node: *ast.Node) !ExprResult {

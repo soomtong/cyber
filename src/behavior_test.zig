@@ -268,6 +268,11 @@ fn test_memory(run: *Runner) void {
     run.case("memory/move_try.cy");
     run.case("memory/move_try_after_error.cy");
     run.case("memory/move_try_loop_error.cy");
+    run.case("memory/move_logic.cy");
+    run.case("memory/move_logic_after_error.cy");
+    run.case("memory/move_scope.cy");
+    run.case("memory/move_scope_after_error.cy");
+    run.case("memory/move_scope_self_error.cy");
     run.case("memory/unwrap_nocopy_capture.cy");
     run.case("memory/move_unwrap_after_error.cy");
     run.case("memory/array_append_move.cy");

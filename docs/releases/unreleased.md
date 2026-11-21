@@ -104,9 +104,7 @@ for items |it|:
 - 같은 갈래 · 같은 반복 본문에서 옮긴 뒤 대입하면 변수가 살아 있다(`if c: take(x); x = R{}`, `for ..: take(x); x = R{}`). 전에는
   'Cannot assign to `x` here: it was moved at L:C and it is declared in an outer block.'
 - `if` 언랩 문의 옵션 식은 `if` 문의 첫 조건식처럼 늘 평가되므로 변수를 옮길 수 있다(`if take(r) |v|:`).
-- 남은 블록(`scope` 블록, `?else` · `!else` 블록)의 문구: 'Cannot move `a` here: it is declared outside this block. A branch of
-  an `if` or `switch`, a `begin:` block, a `try` statement and a loop body can move an outer variable, this block can not.
-  Borrow it with `&a`.'
+- `scope` 블록은 아래 "`and` · `or`의 왼쪽과 `scope` 블록의 이동"에서 열었다.
 - 결정 `docs/decisions/project_last_use.md` "갈래 종류와 반복 본문", 매뉴얼 Moving 절.
 
 ## `if` · `while` 언랩이 `NoCopy` payload를 꺼낸다
@@ -153,8 +151,26 @@ else |err|:
 - 변수에 담긴 `NoCopy` 옵션의 `?else`(`a := o ?else default`, `o ?else:` 블록). 옵션 식은 늘 평가되므로 `o`가 이동한다. 뒤에 `o`를
   쓰면 '`o` was moved at L:C. ...'. 전에는 'Cannot move `o` inside a `?else` expression: ...'였다. `?else`의 기본값 식과 블록은
   조건부로 평가되므로 전처럼 바깥 변수를 옮기지 못한다.
-- 그대로 막히는 자리: `and` · `or`의 오른쪽(왼쪽도 같은 내부 블록이라 막힌다), `?else` · `!else`의 기본값과 블록, `scope` 블록.
+- 그대로 막히는 자리: `and` · `or`의 오른쪽, `?else` · `!else`의 기본값과 블록. `and` · `or`의 왼쪽과 `scope` 블록은 아래 절에서
+  열었다.
 - 결정 `docs/decisions/project_last_use.md` "남은 다섯", 매뉴얼 Moving 절.
+
+## `and` · `or`의 왼쪽과 `scope` 블록의 이동
+
+바깥 변수를 옮기지 못하던 마지막 두 자리다.
+
+- `and` · `or`의 왼쪽 피연산자는 늘 평가되므로 식을 둘러싼 블록의 문장처럼 변수를 옮긴다(`ok := take(a) and ready`,
+  `if take(a) or force:`). 오른쪽은 조건부로 평가되므로 전처럼 'Cannot move `a` inside an `and` expression: ...'이다. 왼쪽이 옮긴
+  변수를 오른쪽에서 쓰면 '`a` was moved at L:C. ...'. 반복문 조건 · 본문에서는 반복문 규칙을 따른다.
+- `scope` 블록의 본문은 `try` 문의 본문처럼 바깥 변수를 옮긴다. 블록 뒤에는 죽어 있다. 본문의 `!`가 실패하면 그때까지 옮긴 변수는
+  죽은 채로, 뒤에서 옮길 변수는 블록을 떠나기 전에 소멸된 채로 오류가 나간다(감싸는 `try` 문의 `else` 블록에서 둘 다 죽어 있다).
+  fiber의 오류는 블록 끝의 join에서 나가므로 본문이 옮긴 변수는 모두 죽어 있다.
+- 블록의 이름(`scope |s|:`의 `s`)은 옮기지 못한다: 'Cannot move `s`: it is the scope of a `scope` block, which joins its fibers
+  at the end of the block. Borrow it with `&&s`.' 전에는 'Cannot move `s` here: it is declared outside this block. ...'였다.
+- fiber가 빌린 변수는 블록이 끝날 때까지 빌려져 있으므로 관리형 값이면 옮기지 못한다('Cannot move `a`. There is an active borrow
+  to it.', 전과 같다).
+- 일반 문구 'Cannot move `a` here: it is declared outside this block. ...'의 블록 목록에 `scope` 블록이 들어갔다.
+- 결정 `docs/decisions/project_last_use.md` "`and` · `or`의 왼쪽과 `scope` 블록", 매뉴얼 Moving 절.
 
 ## 멤버에 대입하는 새 목록 메서드도 버퍼를 재사용한다
 

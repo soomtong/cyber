@@ -192,4 +192,29 @@ E · B 절의 "남은 것" 가운데 "이동한 지역에 다시 대입"과 `xs 
 - 테스트: `memory/unwrap_else_nocopy_var.cy` · `slice_reuse_member.cy` · `move_loop_breaks.cy` · `move_try.cy` ·
   `move_try_after_error.cy` · `move_try_loop_error.cy` · `move_expr_branch.cy` · `move_if_expr_after_error.cy`. 지운 것:
   `move_if_expr_error.cy` · `move_loop_break_error.cy` · `move_try_error.cy`.
-- 남은 것: `and` · `or`의 왼쪽(늘 평가됨)의 이동, `scope` 블록의 이동. 성능 수치는 재지 않았다.
+- 남은 것: `and` · `or`의 왼쪽(늘 평가됨)의 이동, `scope` 블록의 이동. 아래 절에서 했다. 성능 수치는 재지 않았다.
+
+## `and` · `or`의 왼쪽과 `scope` 블록 (2026-11-22)
+
+위 절 끝의 둘을 했다(사용자: "continue"). 새 런타임 플래그도 새 IR도 없다.
+
+- `and` · `or`의 왼쪽: 식의 내부 블록을 왼쪽 피연산자를 검사하는 동안만 `.if_cond`로 둔다(`semaLogicAnd` · `semaLogicOr`). 그 뒤는
+  `.none`이라 오른쪽은 전처럼 막힌다. `moveBlock`은 `.if_cond`가 이어지는 동안 바깥으로 간다: `a and b and c`의 `a`는 두 겹,
+  `if` 조건 안의 `and`도 두 겹이다. 사이에 `.none`(`?else`의 블록, 바깥 `and`의 오른쪽)이 있으면 거기서 멈춰 막힌다.
+  - 평가 순서: 왼쪽의 이동은 오른쪽보다 먼저라 오른쪽에서 그 변수를 읽으면 이동 뒤 사용 오류다.
+  - 왼쪽을 블록 밖에서 먼저 검사하는 방법은 왼쪽의 임시 지역이 소멸하는 시점을 바꾸므로 쓰지 않았다.
+- `scope` 블록: 바깥 S(`s`를 선언) · 가운데 mid(`_try_err`) · 본문 B가 모두 `.plain`이고 `TryCtx.track_moves`를 켠다. `try` 문의
+  본문과 같은 수단(`semaTryExit`의 자리, `Chunk.try_exits` · `try_moves`)을 쓴다. `try` 문과 다른 점은 실패한 길이 끝에 닿지
+  않는다는 것이다(abort 뒤 오류가 나간다).
+  - B가 끝나면 U_fail(실패한 `!`마다의 집합 M_i의 합집합)을 구하고, 각 자리에 U_fail에서 M_i를 뺀 것의 소멸을 채운다.
+  - 실패한 길(`s.abort()` 뒤 `semaPropagateError`)은 U_fail을 죽은 상태로, `branch_moves`에 넣은 채 검사한다. 함수의 `return`은
+    그 상태로 소멸을 만들고, 감싸는 `try` 문은 U_fail을 그 `!`가 옮긴 것으로 적는다.
+  - 문장 뒤에는 B의 끝에서 죽어 있던 M_end만 죽어 있다. 끝의 `s.join()!`가 실패하면 M_end가 옮긴 집합이다.
+  - `s` 자체는 옮기지 못한다(`canMoveAcross`가 `Local.scope_block`을 거절, 문구는 `reportMoveAcross`). 블록 끝의 join과 실패한
+    길의 abort가 `s`를 읽는다.
+  - fiber가 빌린 지역은 `scope_borrows`로 블록 끝까지 빌려져 있어 관리형 값의 이동은 `semaMove`의 빌림 검사가 막는다. 관리형이
+    아닌 값은 빌린 채 옮겨도 칸이 남아 있다(전부터 그렇다).
+- `.none`으로 남은 것: `and` · `or`의 오른쪽, `?else` · `!else`의 기본값과 블록. 모두 조건부로 평가되고 식의 일부라, 열려면
+  식마다 갈래 합류가 필요하다. 하지 않기로 했다(오류 문구가 문장으로 옮기라고 안내한다).
+- 테스트: `memory/move_logic.cy` · `move_logic_after_error.cy` · `move_scope.cy` · `move_scope_after_error.cy` ·
+  `move_scope_self_error.cy`. `move_and_error.cy`(오른쪽)는 그대로다.

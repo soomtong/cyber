@@ -53,3 +53,15 @@ the same block.' 오류였다.
 `Slice`의 `appended` · `inserted` · `removed` · `+`는 받는 쪽이 변수이고 그 사용이 마지막이면(그 문장에 이름이 한 번만 나오고 블록의
 뒤 문장에 나오지 않음) 복사하지 않고 그 버퍼를 넘겨받는다. `move` 뒤 제자리 메서드와 같다. 결과는 전과 같고 복사만 줄어든다.
 다른 값이 버퍼를 나눠 갖고 있으면 제자리 메서드가 전처럼 먼저 복사한다. 결정 `docs/decisions/project_last_use.md` "B 구현".
+
+## 고치는 법을 말하는 문구 넷 (tars-agent 요청, 0.4.16 CodeAct 회차)
+
+- Python 슬라이스 `s[:3]` · `s[2:]` · `s[1:3]`: 'A slice is written `s[..3]`, `s[2..]` or `s[1..3]`, not `s[:3]`.' 전에는
+  'Expected element expression.' · 'Expected closing bracket.'.
+- `for 0..n |_|:`: 'A loop that does not use its value is written `for 0..n:` or `for xs:`. `|_|` is not allowed.' 위치가 `_`다.
+  전에는 다음 줄을 가리키는 'Expected ident.'.
+- 값을 버린 문장: 'Expected assignment to a variable or placeholder for `?str`. Write `_ = xs.pop()` to drop the value.' 문장이
+  60자 이하 한 줄이면 그 문장으로 꼴을 보인다.
+- 모듈에 없는 이름에 가까운 이름을 알려 준다('Can not find the symbol `bas` in `path`. Did you mean `base`?'). 다른 언어의 이름
+  `basename` · `dirname` · `extname` · `isabs`는 `base` · `dir` · `ext` · `is_absolute`로 맞춘다. LSP quick fix도 붙는다.
+- 에이전트 가이드: `int(z)`와 `int('Z')`가 다른 값인 예와 `int(z[0])`, `Array` 이동 줄, 오류 표의 두 줄을 고쳤다.

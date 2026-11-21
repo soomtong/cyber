@@ -2365,6 +2365,7 @@ pub const Parser = struct {
                 self.advance();
 
                 token = self.peek();
+                if (token.tag() == .underscore) return self.reportLoopPlaceholder();
                 each = (try self.parseExpr(.{})) orelse {
                     return self.reportError("Expected ident.", &.{});
                 };
@@ -2713,6 +2714,7 @@ pub const Parser = struct {
                 self.advance();
 
                 token = self.peek();
+                if (token.tag() == .underscore) return self.reportLoopPlaceholder();
                 const ident = (try self.parseExpr(.{})) orelse {
                     return self.reportError("Expected ident.", &.{});
                 };
@@ -3463,6 +3465,7 @@ pub const Parser = struct {
         // Assume left bracket is already consumed.
         self.consumeWhitespaceTokens();
 
+        if (self.peek().tag() == .colon) return self.reportPythonSlice();
         var arg = (try self.parseExpr(.{})) orelse {
             return self.reportError("Expected element expression.", &.{});
         };
@@ -3490,11 +3493,22 @@ pub const Parser = struct {
         }
 
         if (self.peek().tag() != .right_bracket) {
+            if (self.peek().tag() == .colon) return self.reportPythonSlice();
             return self.reportErrorAt("Expected closing bracket.", &.{}, self.next_pos);
         }
         self.advance();
 
         return self.ast.dupeNodes(self.node_stack.items[arg_start..]);
+    }
+
+    /// `for 0..n |_|:`. A loop that does not use its value has no capture.
+    fn reportLoopPlaceholder(self: *Parser) anyerror {
+        return self.reportErrorAt("A loop that does not use its value is written `for 0..n:` or `for xs:`. `|_|` is not allowed.", &.{}, self.next_pos);
+    }
+
+    /// `s[:3]`, `s[2:]`, `s[1:3]`: Python's slice. The `:` is at the next token.
+    fn reportPythonSlice(self: *Parser) anyerror {
+        return self.reportErrorAt("A slice is written `s[..3]`, `s[2..]` or `s[1..3]`, not `s[:3]`.", &.{}, self.next_pos);
     }
 
     fn parseInitLit(self: *Parser) !*ast.InitLit {

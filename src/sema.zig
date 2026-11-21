@@ -1257,7 +1257,14 @@ fn semaExprStmtEnd(c: *cy.Chunk, expr: ExprResult, var_start: usize, node: *ast.
         if (expr.type.kind() == .result) {
             return c.reportErrorFmt("Expected to handle the error case for `{}`. Add `!` after the call to unwrap it, or handle the error with `!else` or `try`.", &.{v(name)}, node);
         } else {
-            return c.reportErrorFmt("Expected assignment to a variable or placeholder for `{}`.", &.{v(name)}, node);
+            // The fix with the statement's own text, when it is short (`xs.pop()`).
+            if (node.src() == c.id) {
+                const text = c.ast.nodeString(node);
+                if (text.len <= 60 and std.mem.indexOfScalar(u8, text, '\n') == null) {
+                    return c.reportErrorFmt("Expected assignment to a variable or placeholder for `{}`. Write `_ = {}` to drop the value.", &.{v(name), v(text)}, node);
+                }
+            }
+            return c.reportErrorFmt("Expected assignment to a variable or placeholder for `{}`. Write `_ = ...` to drop the value.", &.{v(name)}, node);
         }
     }
 
@@ -2567,6 +2574,7 @@ const member_aliases = [_][2][]const u8{
     .{ "startswith", "starts_with" }, .{ "startsWith", "starts_with" }, .{ "hasPrefix", "starts_with" },
     .{ "endswith", "ends_with" }, .{ "endsWith", "ends_with" }, .{ "hasSuffix", "ends_with" },
     .{ "find", "index" }, .{ "indexOf", "index" },
+    .{ "basename", "base" }, .{ "dirname", "dir" }, .{ "extname", "ext" }, .{ "isabs", "is_absolute" },
     .{ "rfind", "last_index" }, .{ "rindex", "last_index" }, .{ "lastIndexOf", "last_index" }, .{ "isNaN", "is_nan" }, .{ "isInf", "is_inf" }, .{ "indexOfNewLine", "index_newline" },
     .{ "strip", "trim" }, .{ "trimSpace", "trim" },
     .{ "lstrip", "trim_left" }, .{ "trimStart", "trim_left" }, .{ "trim_start", "trim_left" }, .{ "ltrim", "trim_left" },
@@ -2663,31 +2671,11 @@ pub fn suggestMember(c: *cy.Chunk, rec_t: *cy.Type, name: []const u8, node: *ast
     }
 
     // A member whose name is close. Short names only match one edit away.
-    const max_dist: usize = if (name.len >= 5) 2 else if (name.len >= 3) 1 else 0;
-    if (max_dist == 0) return "";
-    var best: ?[]const u8 = null;
-    var best_dist: usize = max_dist + 1;
     const mods = [_]?*cy.Module{
         base_t.sym().getMod(),
         if (base_t.sym().instance) |inst| (if (inst.type == .sym) inst.getSymTemplate().getMod() else null) else null,
     };
-    for (mods) |opt_mod| {
-        const mod = opt_mod orelse continue;
-        var iter = mod.symMap.iterator();
-        while (iter.next()) |entry| {
-            const cand = entry.key_ptr.*;
-            if (cand.len == 0 or !(std.ascii.isAlphabetic(cand[0]) or cand[0] == '_')) continue;
-            if (std.mem.eql(u8, cand, name)) continue;
-            // An internal member (`_len`) is only suggested for a name that is written like one.
-            if (cand[0] == '_' and name[0] != '_') continue;
-            const d = editDistance(name, cand, best_dist) orelse continue;
-            if (d < best_dist or (d == best_dist and best != null and std.mem.lessThan(u8, cand, best.?))) {
-                best = cand;
-                best_dist = d;
-            }
-        }
-    }
-    if (best) |cand| {
+    if (closestSym(&mods, name)) |cand| {
         setSuggestNew("{s}", .{cand});
         return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{cand}) catch "";
     }
@@ -2833,7 +2821,38 @@ pub fn suggestModuleSym(c: *cy.Chunk, mod_sym: *cy.Sym, name: []const u8, node: 
             return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{snake}) catch "";
         }
     }
+    // A symbol whose name is close, like `suggestMember`.
+    const mod = mod_sym.getMod() orelse return "";
+    if (closestSym(&.{mod}, name)) |cand| {
+        setSuggestNew("{s}", .{cand});
+        return std.fmt.bufPrint(&suggest_buf, " Did you mean `{s}`?", .{cand}) catch "";
+    }
     return "";
+}
+
+/// The symbol of `mods` whose name is closest to `name`, within two edits (one for a short name).
+fn closestSym(mods: []const ?*cy.Module, name: []const u8) ?[]const u8 {
+    const max_dist: usize = if (name.len >= 5) 2 else if (name.len >= 3) 1 else 0;
+    if (max_dist == 0) return null;
+    var best: ?[]const u8 = null;
+    var best_dist: usize = max_dist + 1;
+    for (mods) |opt_mod| {
+        const mod = opt_mod orelse continue;
+        var iter = mod.symMap.iterator();
+        while (iter.next()) |entry| {
+            const cand = entry.key_ptr.*;
+            if (cand.len == 0 or !(std.ascii.isAlphabetic(cand[0]) or cand[0] == '_')) continue;
+            if (std.mem.eql(u8, cand, name)) continue;
+            // An internal member (`_len`) is only suggested for a name that is written like one.
+            if (cand[0] == '_' and name[0] != '_') continue;
+            const d = editDistance(name, cand, best_dist) orelse continue;
+            if (d < best_dist or (d == best_dist and best != null and std.mem.lessThan(u8, cand, best.?))) {
+                best = cand;
+                best_dist = d;
+            }
+        }
+    }
+    return best;
 }
 
 /// `suggestMember` for a field access `x.name`. A suggested method is written as a call: `len()`.

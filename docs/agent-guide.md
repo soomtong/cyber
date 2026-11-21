@@ -180,6 +180,7 @@ An embedding host can refuse a module. Then `use name` fails with 'Failed to loa
 - A call that returns `!T` must be handled, even `!void`. A bare `os.write_file(p, s)` is an error. Write `os.write_file(p, s)!` inside `try:`, or `os.write_file(p, s) !else |e|:`.
 - Unwrap a `!T` before you use the value: `x := r()!`, then `x.len()`. `print(r())` and `r().len()` are errors.
 - `int('abc')` and `float('abc')` give 0 without an error. When you need validation, use `int.parse(s) !else ...` or `float.parse(s) !else ...`.
+- The two rules meet on one letter: with `z := 'Z'`, `int(z)` parses the string and gives 0, but `int('Z')` takes the literal as the code point 90. To get the code of the first byte from a variable, use `int(z[0])`.
 
 ## Values, references, borrows
 
@@ -187,7 +188,7 @@ An embedding host can refuse a module. Then `use name` fails with 'Failed to loa
 - To share, lift the value to the heap with `^`: `p := ^P{name='a', age=3}`. Read and write fields as `p.age`, and use `p.*` for the whole value.
 - An operator on a reference works on the value it points to only through `.*`: `n.* += 2`, `out.* += 'x'` for `out := ^[]str{}`.
 - To let a function modify an argument, declare `fn inc(p &int)` and call `inc(&a)`.
-- `Array[T]` cannot be copied. Use `move a` to pass or relocate it. Using the original after a move is an error. For an ordinary list use `[]T`.
+- `Array[T]` cannot be copied. Passing or assigning a variable moves it (`total(a)`, `b := a`), and using the original after that is an error that names the move. For an ordinary list use `[]T`.
 - A closure can only capture variables of type `^T` or `&T`. In simple code use a plain function or a loop instead of a closure.
 - In the REPL and in hosts that keep top-level variables between runs, a top-level borrow (`c := &x`) cannot be kept ('Cannot persist local ... of borrow type'). Borrow inside a function, or use `^T`.
 
@@ -377,8 +378,7 @@ Most compile errors say how to fix the code, for example 'Did you mean starts_wi
 - 'Can not find the symbol `map` in `[]int`.' (also `filter`): write a loop.
 - 'Expected `1` arguments, found `2`, when calling the function `fn print(...)`': write `print('%{a} %{b}')`.
 - 'Can not find the symbol `&&` for `bool`.': logical AND. Write `and`.
-- 'Expected assignment to a variable or placeholder ...': a call whose value is discarded. Write `_ = f()` or assign it to a variable.
-- 'Cannot copy ..., type implements `NoCopy`.': copying an Array. Use `[]T`, or `move`.
+- 'Cannot copy ..., type implements `NoCopy`.': copying an element of an Array (`x := a[0]`). Borrow it with `&a[0]`, or use `[]T`.
 - 'Return statement is not allowed in the main block.': a top-level return. Wrap the code in `fn main():`.
 - 'Missing return statement.': some path has no return. Add a return at the end.
 - '`fn` declarations are not allowed here.': a function inside a block. Declare it at the top level.

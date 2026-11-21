@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-21): 0.4.16 릴리스 뒤, 마지막 사용(C · D · E · B)
+# HANDOFF (2026-11-21): 0.4.16 릴리스 뒤, 마지막 사용(C · D · E · B)과 그 코드 리뷰 수정
 
 ## 목표
 
@@ -19,11 +19,14 @@
 - 2026-11-21(사용자: "continue"): 0.4.16 뒤 남은 첫 과제인 2.7의 C(빌림의 비어휘적 수명).
 - 2026-11-21(사용자: "A: 해보자 B: 고치자 D: 마지막 사용은 암시적 move 허용 E: 제안 수용", 뒤 질문에 "B는 마지막 사용이면 버퍼
   재사용", "A 없이 D · E"). 결정 `docs/decisions/project_last_use.md`.
+- 2026-11-21(사용자: `/code-review high from 0.4.16` 뒤 "step by step 수정해주세요. 결정을 위임합니다. 서브 에이전트(최대 3개)를
+  사용할 수 있으니 병렬 실행 가능한 업무는 함께 진행"): 리뷰 9건(중요 5, 사소 4)을 모두 고쳤다.
 
 ## 현재 브랜치
 
 `master`. 0.4.16 태그 `ca000225`와 `5e5765f9`까지 push돼 있다. 그 뒤 커밋(`7e8c5782` CI 기록, `90b55104` 비어휘적
-수명, `6e2a0206` D · E, `4149c6b8` B와 HANDOFF 커밋들)은 push하지 않았다.
+수명, `6e2a0206` D · E, `4149c6b8` B, 코드 리뷰 수정 `5fca44c6` · `ad24ee2c` · `a63c63c3`과 `if` 갈래 수정, HANDOFF 커밋들)은
+push하지 않았다.
 PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지 못해 15분 뒤 취소된 탓이다(나머지 6개 통과).
 
 ## 완료된 작업
@@ -48,6 +51,17 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - 컴파일러가 fix를 오류에 싣는다(`Chunk.reportErrorFix`, `sema.suggestedFix`, `CLReport.has_fix`). LSP는 `data.fix`.
   - 확인: `zig build test` Debug · ReleaseSafe 통과(behavior 558개, LSP 41개).
 - [x] CI 시간 줄이기(2026-11-18). 원인 넷과 고친 것은 `project_fork_release_ci.md` "CI 시간 줄이기". CI에서의 수치는 push 뒤에 본다.
+
+- [x] 0.4.16..HEAD 코드 리뷰 수정 9건(2026-11-21). 목록은 `unreleased.md` "0.4.16 뒤 변경의 코드 리뷰에서 나온 수정", 구현은
+  `project_last_use.md`의 E · B 절 "코드 리뷰 수정".
+  - overload 후보 실패 시 이동 되돌리기(`Chunk.move_undo`, `sema.undoMoves` · `noteMove`, `matchRtOverload`).
+  - 재사용한 버퍼의 공유 차단(core `Slice.own_buffer`), `#for` 본문의 재사용 끔, 불일치 오류의 메서드 이름(`Chunk.reuse_call`).
+  - `if` 갈래 끝 소멸의 cancel pad(`IfBranch.var_end`, `destructBranchEnd`), 첫 조건식의 이동 허용(`MoveBranch.if_cond`),
+    조건부 식의 이동 문구.
+  - REPL 최상위 지역은 `move`로만 이동, 이동한 것은 다음 입력에 없음(`isPersistedMainLocal`, `@untrackMainLocal`).
+  - 값을 반환하는 `op=` 메서드의 문구, behavior 테스트 넷의 분류.
+  - 확인: 14단계 검증에서 1~13단계 rc=0. 14단계는 `own_buffer` 탓에 `docs/api.json`이 낡아 실패했고, 다시 만든 뒤 일치를 확인했다.
+  - tars-agent `docs/TODO.md`의 "다음 cyber 빌드" 항목에 세션의 `move` 규칙과 새 문구 둘을 적었다(커밋 안 함).
 
 ## 시도했으나 실패한 접근
 
@@ -170,6 +184,9 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 ## 알려진 한계
 
+- 이동(2026-11-21 코드 리뷰 뒤): `and` · `or`의 왼쪽과 `if (c) a else b`의 조건은 늘 평가되지만 이동이 막힌다(같은 내부 블록).
+  `while` 조건식과 `if` 언랩 조건식의 이동은 옛 문구('declared in an outer block')로 막힌다. 버퍼를 재사용한 호출의 런타임
+  stack trace에는 제자리 메서드(`Slice.remove`)가 나온다. REPL에서 `move a` 뒤 다음 입력의 `a`는 일반 'Undeclared variable'이다.
 - 양보만 하는 fiber와 Future를 기다리는 fiber가 섞이면 `Scope.run`이 쉬지 않고 돈다(설계대로).
 - 실행으로 확인하지 못한 경로: Windows `FallbackReadLine`. 시작한 자식이 멈춘 동안 부모 스택이 옮겨지는 경우는 지금 구조에서
   생기지 않음을 확인했다(`project_coroutines.md` 끝 절).

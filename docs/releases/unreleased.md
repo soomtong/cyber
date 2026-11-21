@@ -223,8 +223,7 @@
   - 필드 · 원소 대입: `o.v = View{a=&z}`, `o.a = &z`, `h.cb = fn() -> int => bz.* + 1`(`OpaqueFunc` 필드).
   - 매개변수가 가리키는 값의 필드에 함수 안 지역의 빌림을 넣는 것: `fn (&&Outer) set(): z := 4; self.v = View{a=&z}`는
     'The value behind `self` can not outlive `z`.' `scope` 매개변수의 빌림을 넣는 것(`self.v = View{a=p}`)은 된다.
-- 남은 한계는 `docs/decisions/project_borrow_model.md` "남은 것"에 적었다(빌림 컨테이너 안의 배타 빌림을 거친 빌림, 빌려 둔
-  채로 `&&T` 지역 · 매개변수를 값으로 넘기는 것, 빌려 둔 지역의 필드 대입).
+- 이 절을 쓸 때 남긴 한계 셋은 아래 "배타 접근을 쓰는 자리에서 검사" 절에서 고쳤다.
 
 ### 전역의 제자리 메서드
 
@@ -254,3 +253,67 @@
   바뀌고 쓰임이 남았다.
 - 범위 포맷이 문서 끝의 빈 줄을 하나 남겼다(`x=1\n\n\n` → `x = 1\n\n`). 이제 전체 포맷처럼 모두 지우고, 줄바꿈 없이 끝나는
   마지막 줄이 범위에 들면 줄바꿈을 붙인다.
+
+## 배타 접근을 쓰는 자리에서 검사 (2026-11-21, 깨지는 변경)
+
+빌림 검사는 빌림을 만드는 자리(`&x`, `&&x`, 수신자의 `T → &&T` 변환)에서만 돌았다. 이미 만들어진 `&&T` 값을 그대로 넘기거나
+대입으로 옛 값을 해제하는 자리에는 검사가 없어, 아래 코드가 모두 컴파일되고 해제된 메모리를 읽었다(0.4.15에도 있던 결함).
+이제 그 자리에서도 같은 검사를 한다. 결정은 `docs/decisions/project_borrow_model.md` "쓰는 자리 검사".
+
+### 새로 컴파일 오류가 되는 코드
+
+모두 'Expected exclusive access. There is another active borrow to `x`.'다(`x`는 빌린 지역).
+
+- 빌려 둔 채로 `&&T` 지역 · 매개변수를 `&&T`로 넘기는 것: `fn foo(r &&Foo): s := &r.xs[0]; r.grow(); print(s.*)`.
+  `take(r)`처럼 인자로 넘겨도 같다.
+- 순회 중에 `&&self` 메서드를 부르는 것: `for self.xs |x|: self.grow()`. 루프는 끝날 때까지 `self.xs`를 빌린다. `self`를 읽는
+  메서드(`&self`)와 필드 읽기는 그대로 된다. 본문이 부르는 메서드가 값을 바꾸지 않으면 수신자를 `&Foo`로 선언하고, 바꾸면
+  순회할 값을 먼저 복사하거나 인덱스로 돈다(`for 0..self.xs.len() |i|:`).
+- 빌림 컨테이너 안의 배타 빌림을 쓰는 것: `h := Holder{r=&&f}` 뒤 `s := &h.r.xs[0]`(또는 `s := &f.xs[0]`)이 살아 있는 동안의
+  `h.r.grow()`.
+- 옛 값을 해제하는 대입: `s := &g.xs[0]` 뒤 `g.xs = {7}`, `g = Foo{xs={7}}`, `xs[0] = Foo{...}`(원소 안을 빌려 둔 경우),
+  `r.* = Foo{...}`, 순회 중인 값의 대입(`for f.xs |x|: f.xs = {7}`). 지역 · 필드 · 원소의 타입이 관리형(배열, `str`, 그런
+  필드를 가진 struct)일 때만 검사하고, 충돌로 보는 것은 옛 값의 버퍼 안을 가리키는 빌림과 루프뿐이다.
+- 빌려 둔 관리형 값의 `move`: `s := &g.xs[0]` 뒤 `h := move g`, `eat(move g)`는 'Cannot move `g`. There is an active borrow
+  to it.' 새 주인이 빌림이 가리키는 버퍼를 해제할 수 있었다.
+- 빌림 컨테이너를 거친 빌림이 컨테이너보다 오래 사는 것: 안쪽 블록의 `h := Holder{r=&&f}` 뒤 바깥 지역에 `p = &&h`. 전에는
+  `h`가 빌린 `f`의 수명만 봐서 통과했고 `p`가 사라진 `h`의 자리를 가리켰다. 이제 '`p` can not outlive `h`.'
+
+### 그대로 되는 코드
+
+- 자리 자체를 가리키는 빌림을 둔 채의 대입: `c := &x`, `x = 7`(`c.*`는 7), `p := &t`, `t = 'zzz'`, `v := &g`, `g.name = 'b'`,
+  `pn := &p.n`, `p = P{...}`. 자리는 그대로이고 빌림은 새 값을 읽는다. 관리형이 아닌 값의 대입도 검사하지 않는다.
+- 다른 필드: `first := &r.items[0]` 뒤 `r.name = 'b'`, `for self.order |k|: self.names[0] = 'x'`, `self.m[k] = v`.
+- 버린 결과: `_ = r.add(1)` 뒤 `_ = r.add(2)`(`add`는 `scope &&Foo`를 돌려주는 빌더). `_`에 넣은 빌림은 문장과 함께 끝난다.
+  주인 지역에서 `_ = f.add(1)`, `_ = f.add(2)`를 잇는 것은 0.4.15에서 오류였고 이제 된다.
+- 순회 중 다른 필드의 배타 빌림: `for self.xs |x|: self.names.append('a')`. 0.4.15에서 오류였고 이제 된다(필드 단위 구분이
+  `&&`를 만드는 자리에도 적용된다).
+- 빌림의 복사끼리는 충돌이 아니다: `r := &&f`, `r2 := r` 뒤 `r.grow()`, `take(r2)`.
+- 빌림 컨테이너를 거친 빌림: `h := Holder{r=&&f}`, `p := &&h` 뒤 `p.push(1)`, `p.r.grow()`.
+- 빌림이 블록과 함께 끝난 뒤의 사용과 대입.
+
+### 구현
+
+- `sema_func.matchFuncSig`: `&&T` 매개변수에 넘기는 `&&T` 인자가 지역을 거쳐 읽은 값이면 `sema.checkExclusiveBorrowOf`.
+  함수 템플릿의 경로(`matchGenericFuncRt`)에도 같은 검사를 넣었다.
+- `sema.checkWriteAccess`: 지역 대입, 필드 대입, 원소 대입(`@set_index`와 `@index_addr` 경로), `p.* = v`.
+- `Local.borrow_via`(거쳐 온 빌림 컨테이너) · `Local.borrow_alias`(복사 묶음의 첫 지역) · `Local.borrow_field`(주인의 어느
+  필드 안인지) · `Local.borrow_inline`(자리를 가리키는지). `checkExclusiveBorrowOfField`는 주인의 계수가 남을 때만 지역 목록을
+  훑어 복사, 거쳐 온 컨테이너, 다른 필드의 빌림, (대입일 때) 자리 빌림을 뺀다. 계수가 0인 보통 경로의 비용은 전과 같다.
+  `Local`은 64비트에서 8바이트(Debug 80, Release 72), 32비트에서 12바이트(60, 56) 늘었다.
+- `localDecl`: `_`에 넣는 `&T` · `&&T`는 묶지 않는다. `.move_expr`: 빌린 관리형 값의 move 거절.
+- 테스트: `memory/ex_borrow_use.cy`, `memory/ex_borrow_use_while_borrowed_error.cy`, `ex_borrow_use_in_loop_error.cy`, `ex_borrow_generic_use_error.cy`,
+  `ex_borrow_container_use_error.cy`, `ex_borrow_container_owner_use_error.cy`, `assign_field_while_borrowed_error.cy`,
+  `assign_local_while_borrowed_error.cy`, `assign_index_while_borrowed_error.cy`, `borrow_container_outlive_error.cy`,
+  `assign_in_loop_while_borrowed_error.cy`, `move_while_borrowed_error.cy`.
+
+### 남은 구멍
+
+독립 탐침(스크립트 110여 개)에서 나온 것으로, 모두 0.4.15에도 있다. 컴파일되고 해제된 메모리를 읽는다. 목록과 까닭은
+`docs/decisions/project_borrow_model.md` "쓰는 자리 검사"의 "남은 것".
+
+- 배타 빌림을 담은 빌림 컨테이너를 값이나 `&Holder`로 넘기고 받은 쪽이 `h.r.grow()`를 부르는 것.
+- 주인 기록이 없는 길로 꺼낸 컨테이너 · 빌림: 배열 원소(`hs[0].r.grow()`), option을 `if o |h|:`로 푼 것, 필드만 바꾼 컨테이너
+  (`h.r = &&f`).
+- 빌림을 캡처한 클로저가 배타 사용을 하는 것.
+- `&self` 메서드 안의 관리형 필드 대입(`fn (&Foo) reset(): self.xs = {7}`). 공유 빌림으로도 쓸 수 있는 언어 규칙에서 온다.

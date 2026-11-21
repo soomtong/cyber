@@ -2961,6 +2961,55 @@ print(a.len())
 --> error: Cannot borrow `a`. There is an active exclusive borrow to it.
 ```
 
+An exclusive borrow that a local, a parameter or a field already holds is checked again where it is passed on as `&&T`. It can not be passed on while another local borrows through it. A loop borrows what it iterates until it ends:
+```cy
+type Foo:
+    xs []int
+
+fn (&&Foo) grow():
+    self.xs.append(0)
+
+fn (&&Foo) each():
+    for self.xs |x|:
+        print(self.xs.len() + x)    -- Ok. A read.
+        self.grow()
+        --> error: Expected exclusive access. There is another active borrow to `self`.
+
+fn first(r &&Foo):
+    s := &r.xs[0]
+    r.grow()
+    --> error: Expected exclusive access. There is another active borrow to `r`.
+```
+Copies of one exclusive borrow (`r2 := r`) point to the same value and do not conflict with each other. A borrow that is assigned to `_` ends with its statement (`_ = r.add(1)`).
+
+A borrow into one field is no conflict with an exclusive use of another field: inside `for self.xs |x|:` the body can call `self.names.append(x)`.
+
+An assignment that destructs the old value needs exclusive access too. This is the case when the type of the local, the field or the element is managed (an array, a `str`, a struct that has such a field). The conflict is a borrow that points into a buffer of the old value, and a loop over it. A borrow of the place itself (`&x`, `&g.xs`) stays valid and reads the new value, and so does a borrow of a value that is not managed:
+```cy
+g := Foo{xs={1, 2, 3}}
+s := &g.xs[0]
+g.xs = {7}
+--> error: Expected exclusive access. There is another active borrow to `g`.
+
+x := 1
+c := &x
+x = 7
+print(c.*)
+--> 7
+
+t := 'abc'
+p := &t
+t = 'zzz'
+print(p.*)
+--> zzz
+```
+
+A managed value can not be moved while a local borrows from it:
+```cy
+h := move g
+--> error: Cannot move `g`. There is an active borrow to it.
+```
+
 ### `self` borrow.
 Methods can be declared to accept borrows or exclusive borrows from the `self` receiver:
 ```cy
@@ -3013,6 +3062,8 @@ begin:
 ```
 
 The same holds when the value is wrapped in an option (`var o ?Ref`), comes from an `if` expression, or is assigned to a field or an element (`o.r = Ref{p=&y}`). A method can not store a borrow of one of its own locals behind a parameter: `self.r = Ref{p=&y}` is the compile error 'The value behind `self` can not outlive `y`.'
+
+A borrow that is read through a borrow container (`&&r`, `&r.p`) can not outlive the container either, even when the local that the container borrows from lives longer.
 
 ### `sink` parameter.
 The `sink` modifier accepts and consumes a value argument: *This is not much different from a `move` operation, so this feature may be removed.*

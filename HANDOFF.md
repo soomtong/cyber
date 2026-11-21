@@ -69,6 +69,10 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - [x] tars-agent `docs/TODO.md`에 다음 빌드에서 안내 105행을 고칠 항목(`4aae2ec`, tars-agent에 커밋됨).
 - [x] `/code-review high` 0.4.15..HEAD의 9건 수정(2026-11-21, 사용자: "결정을 위임합니다 ... 자잘한 거 모두 수정 ... 다음 패치
   버전을 준비"). 목록과 동작 변화는 `docs/releases/unreleased.md` "0.4.15..HEAD 코드 리뷰에서 나온 수정", 발견 이슈 F-164 ~ F-166.
+- [x] 빌림 검사의 남은 구멍 셋(2026-11-21, 사용자: "이 문제는 해결 가능한가? 어떤 방식이 나을까 추천" 뒤 "결정을 위임합니다").
+  배타 접근을 쓰는 자리에서 검사한다(깨지는 변경: 순회 중 `&&self` 메서드 호출, 빌려 둔 관리형 값의 대입). 결정
+  `docs/decisions/project_borrow_model.md` "쓰는 자리 검사", `docs/releases/unreleased.md` 같은 이름의 절, 발견 이슈 F-167.
+  패치로 낼지 0.5로 미룰지는 사용자가 정한다(커밋 하나라 되돌리기 쉽다).
   빌림 검사에 남긴 구멍(0.5 후보)은 `docs/decisions/project_borrow_model.md` "남은 것" 끝. tars-agent는 `docs/TODO.md` 31행에
   덧붙였고 커밋하지 않았다.
 

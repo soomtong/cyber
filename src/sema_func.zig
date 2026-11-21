@@ -239,6 +239,12 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
         if (final_arg.resolve_t == .rt) {
             args[arg_idx] = final_arg.res.rt.ir;
             const arg_res = final_arg.res.rt;
+            if (arg_res.type.kind() == .ex_borrow) {
+                // Like `matchFuncSig`: an exclusive borrow that a local holds is checked where it is passed on.
+                if (arg_res.recParentLocal()) |via| {
+                    try sema.checkExclusiveBorrowOfField(c, via, sema.borrowField(c, arg_res), false, arg.node);
+                }
+            }
             if (arg_res.resType == .value and !arg_res.addressable) {
                 try sema.seqPush(c, &args[arg_idx], arg_res.owned, arg.node);
             } else {
@@ -548,6 +554,9 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
     // Owners borrowed by each argument, to reject an exclusive borrow next to another borrow of the same local.
     var arg_owners: [256]?sema.LocalId = @splat(null);
     var arg_ex: [256]bool = @splat(false);
+    // The local that an exclusive borrow argument for a `&&T` parameter is read through.
+    var arg_ex_via: [256]?sema.LocalId = @splat(null);
+    var arg_ex_field: [256]u16 = undefined;
     var arg_nodes: [256]*ast.Node = undefined;
 
     var arg_idx: u32 = 0;
@@ -587,6 +596,10 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         }
         arg_owners[arg_idx] = sema.borrowOwner(c, arg_res);
         arg_ex[arg_idx] = arg_res.type.kind() == .ex_borrow;
+        if (arg_ex[arg_idx] and param.get_type().kind() == .ex_borrow) {
+            arg_ex_via[arg_idx] = arg_res.recParentLocal();
+            arg_ex_field[arg_idx] = sema.borrowField(c, arg_res);
+        }
         arg_nodes[arg_idx] = arg.node;
         args[arg_idx] = arg_res.ir;
         if (arg_res.resType == .value and !arg_res.addressable) {
@@ -600,6 +613,11 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
     // All arguments are alive inside the call, so an exclusive borrow can not share its owner with another argument.
     for (0..arg_idx) |i| {
         if (!arg_ex[i]) continue;
+        // The callee can change the value, so no other local can hold a borrow of it. An exclusive borrow that is
+        // already in a local or a field (`r.grow()` of `r := &&f`, `h.r.grow()`) is checked here, where it is used.
+        if (arg_ex_via[i]) |via| {
+            try sema.checkExclusiveBorrowOfField(c, via, arg_ex_field[i], false, arg_nodes[i]);
+        }
         const owner = arg_owners[i] orelse continue;
         for (0..arg_idx) |j| {
             if (j == i) continue;

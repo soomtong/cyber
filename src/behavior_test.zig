@@ -276,6 +276,18 @@ fn test_memory(run: *Runner) void {
     run.case("memory/reborrow_bind_error.cy");
     run.case("memory/reborrow_ex_bind_error.cy");
     run.case("memory/reborrow_scope_result_bind_error.cy");
+    run.case("memory/ex_borrow_use.cy");
+    run.case("memory/ex_borrow_use_while_borrowed_error.cy");
+    run.case("memory/ex_borrow_use_in_loop_error.cy");
+    run.case("memory/ex_borrow_generic_use_error.cy");
+    run.case("memory/ex_borrow_container_use_error.cy");
+    run.case("memory/ex_borrow_container_owner_use_error.cy");
+    run.case("memory/assign_field_while_borrowed_error.cy");
+    run.case("memory/assign_local_while_borrowed_error.cy");
+    run.case("memory/assign_index_while_borrowed_error.cy");
+    run.case("memory/borrow_container_outlive_error.cy");
+    run.case("memory/move_while_borrowed_error.cy");
+    run.case("memory/assign_in_loop_while_borrowed_error.cy");
     run.case("memory/global_borrow_error.cy");
     run.case("memory/scope_param_missing_error.cy");
     run.case("memory/scope_too_many_params_error.cy");

@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-21): 0.4.16 릴리스 뒤, 빌림의 비어휘적 수명
+# HANDOFF (2026-11-21): 0.4.16 릴리스 뒤, 마지막 사용(C · D · E · B)
 
 ## 목표
 
@@ -17,11 +17,13 @@
   뺌, 표준 오류 어휘(설계 원칙 1.7 A)는 0.5에 호환성 절로(언어 별칭 없음), 1.7 C는 1단계(인스턴스화 경로 오류 문구)만 0.5 전,
   2.7은 권고대로(정체성 문서화, 마지막 사용 분석은 0.5 뒤 첫 과제, 첫 소비자 C). 기록은 각 결정 문서의 "결정(2026-11-20" 줄.
 - 2026-11-21(사용자: "continue"): 0.4.16 뒤 남은 첫 과제인 2.7의 C(빌림의 비어휘적 수명).
+- 2026-11-21(사용자: "A: 해보자 B: 고치자 D: 마지막 사용은 암시적 move 허용 E: 제안 수용", 뒤 질문에 "B는 마지막 사용이면 버퍼
+  재사용", "A 없이 D · E"). 결정 `docs/decisions/project_last_use.md`.
 
 ## 현재 브랜치
 
-`master`. 0.4.16 태그 `ca000225`와 `5e5765f9`까지 push돼 있다. 그 뒤 커밋 둘(`7e8c5782` CI 기록, `90b55104` 비어휘적
-수명)은 push하지 않았다.
+`master`. 0.4.16 태그 `ca000225`와 `5e5765f9`까지 push돼 있다. 그 뒤 커밋(`7e8c5782` CI 기록, `90b55104` 비어휘적
+수명, `6e2a0206` D · E, `4149c6b8` B와 HANDOFF 커밋들)은 push하지 않았다.
 PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지 못해 15분 뒤 취소된 탓이다(나머지 6개 통과).
 
 ## 완료된 작업
@@ -131,8 +133,16 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `sema.endBorrowsAfter` · `lastNamingStmt` · `namesWord`(소스 텍스트로 언급을 찾음), 안전망 `Local.borrow_ended` ·
   `reportBorrowEnded`. 소멸자 있는 지역 · REPL 최상위는 제외. 결정 `project_borrow_model.md` "비어휘적 수명", 매뉴얼 Borrows 절,
   `unreleased.md`, 테스트 `memory/borrow_last_use*.cy`. 14단계 검증 rc=0.
-  - 다음 후보: 2.4의 A(IR 역방향 활성 분석)와 그 소비자 B(`Slice` 값 의미) · D(`NoCopy` 암시적 이동) · E(분기 안 이동).
-    C는 A 없이 했다(빌림 검사가 IR 생성과 함께 돌기 때문). 깨지는 정도는 B가 가장 크다(받는 쪽을 남기는 코드에 복사).
+- [x] D(`6e2a0206`): `NoCopy` 값을 지역 · 멤버 경로에서 읽어 복사할 자리면 `move`처럼 이동(`sema.semaOwn` →
+  `canMoveImplicitly` → `semaMove`). 이동 뒤 사용은 'was moved at L:C'(`Chunk.moved_sites`).
+- [x] E(`6e2a0206`): `if` 갈래가 바깥 지역을 옮김. `Block.move_branch` · `canMoveAcross` · `Chunk.branch_moves` ·
+  `endIfBranch` · `joinBranchMoves` · `spliceBranchEnd`. 반복 본문 밖 지역은 'Cannot move `a` here: ...'.
+- [x] B(`4149c6b8`): `appended` · `inserted` · `removed` · `+`가 마지막 사용에서 버퍼 재사용(`sema.reuseSliceBuffer`,
+  `Chunk.stmt_ctx`). 원래의 B 버그는 slice 결정 3에서 이미 없어졌다. A(IR 활성 분석)는 만들지 않기로 했다.
+  - 남은 것(결정 문서 "E 구현" · "B 구현" 끝): 반복 본문에서 옮긴 뒤 `break` · `return`, `switch` · `if` 언랩 · `if` 식 갈래의 이동,
+    이동한 지역에 다시 대입(`xs = xs.appended(v)`도 이것 때문에 재사용 안 됨), 멤버 수신자 재사용. 성능 수치는 재지 않았다.
+  - tars-agent 프롬프트 `prompt/cyber-subset.md` · `.en.md` 168 · 347행이 "`move a`로 넘긴다", "Cannot copy ... `move`"라고 안내한다.
+    이제 `move` 없이 이동한다. 그 저장소에는 쓰지 않았다(다른 세션의 미추적 파일 `spike/s2/out/0.4.16/`이 있음).
 - [ ] 기술 부채(급하지 않음): `@destruct_span` 취소 keep 지점(쓰게 되면), `Scope.run`의 바퀴당 `waiting()` 질의(준비 큐 ·
   futex식 대기 표, fiber 수 비용이 문제가 되면), 취소 불변식 panic(닿는 경로 없음). 기록은 `project_coroutines.md`.
 

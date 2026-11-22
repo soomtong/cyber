@@ -262,6 +262,8 @@ pub fn sema_func_sym(c: *cy.Chunk, func: *cy.Func, prefer_ct_sym: bool, opt_targ
         },
         else => {},
     }
+    // A function value is code like a call: a body that failed has no IR to point to.
+    try checkCallee(c, func, node);
     func.info.escaped = true;
     var loc = try c.ir.newExpr(.func_ptr, ptr_t, node, .{ .func = func });
     var res = sema.ExprResult.initCustom(loc, .func, ptr_t, .{ .func = func });
@@ -531,7 +533,8 @@ pub fn markHotCall(c: *cy.Chunk, func: *cy.Func) void {
     }
 }
 
-/// A call to a function whose body did not compile in an earlier compile of the session (`FuncInfo.body_failed`).
+/// A call to, or a function value of, a function whose body did not compile in an earlier compile of the session
+/// (`FuncInfo.body_failed`).
 /// A body that the failed compile left unchecked (`Compiler.carry_funcs`) finds such a function through a type it
 /// already has, and so can this source. The function has no IR, so code can not be generated for the call
 /// (SIGSEGV in `bc_gen.check_inline` before 2026-11-22).

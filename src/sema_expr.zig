@@ -1857,6 +1857,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                     const template = left.data.sym.cast(.func_template);
                     const func_res = try cy.template.expandTemplateFuncForArgs(c, template, index_expr.args.slice(), node);
                     const typeId = try cy.sema.getFuncPtrType(c, func_res.sig);
+                    try sema_call.checkCallee(c, func_res, node);
                     func_res.info.escaped = true;
                     const loc = try c.ir.newExpr(.func_ptr, typeId, node, .{ .func = func_res });
                     return sema.ExprResult.initCustom(loc, .func, typeId, .{ .func = func_res });

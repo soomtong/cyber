@@ -965,6 +965,99 @@ test "A body of a template instance that failed does not break the next compile.
     }
 }
 
+test "A function value of a body that failed does not break the next compile." {
+    // `f := bad[bool]` failed in the body of `bad[bool]`. A second `g := bad[bool]` made a function value of
+    // the body without IR, and the host panicked in the relocation of `bc_gen` (`genSymMap.get(...).?`).
+    C.setSilent(true);
+    defer C.setSilent(false);
+    var res: C.EvalResult = undefined;
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    const decls =
+        \\use test
+        \\fn bad[T Any](x T) -> int:
+        \\    return x + 1
+        \\fn mk[T Any](x T) -> int:
+        \\    return x + 1
+    ;
+    // A function value or a call first, then the other way.
+    const first = [_][]const u8{
+        "f := bad[bool]",
+        "fn h():\n  f := bad[bool]\n  _ = f(true)\nh()",
+        "_ = bad[bool](true)",
+        "fn h():\n  _ = bad[bool](true)\nh()",
+    };
+    for (first) |src| {
+        for ([_]bool{ true, false }) |validate| {
+            errdefer std.debug.print("source: {s}\nvalidate: {}\n", .{ src, validate });
+            const vm = C.vm_initx(zt.alloc);
+            defer C.vm_deinit(vm);
+            errdefer {
+                const summary = C.vm_compile_error_summary(vm);
+                defer C.vm_freeb(vm, summary);
+                std.debug.print("summary: {s}\n", .{summary});
+            }
+            try zt.eq(C.Success, C.vm_evalx(vm, "repl", decls, config, &res));
+            const nexts = [_][]const u8{ src, "g := bad[bool]", "_ = bad[bool](false)", "fn h2():\n  g := bad[bool]\nh2()", src };
+            for (nexts) |next| {
+                errdefer std.debug.print("next: {s}\n", .{next});
+                if (validate) {
+                    try zt.eq(C.ErrorCompile, C.vm_validate(vm, next));
+                } else {
+                    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", next, config, &res));
+                }
+                const summary = C.vm_compile_error_summary(vm);
+                defer C.vm_freeb(vm, summary);
+                try zt.expect(std.mem.indexOf(u8, summary, "return x + 1") != null);
+                try zt.eq(C.Success, C.vm_validate(vm, "print(1)"));
+            }
+            // Other instances are good.
+            try zt.eq(C.Success, C.vm_evalx(vm, "repl", "fi := bad[int]\ntest.eq(3, fi(2))\ntest.eq(4, mk[int](3))", config, &res));
+        }
+    }
+    // A method of a type instance whose body failed, while the instance is good (`sema_func_sym`).
+    const box_decls =
+        \\use test
+        \\type Box[T Any]:
+        \\    v T
+        \\fn (&Box[]) dup() -> T:
+        \\    return self.v
+        \\fn (&Box[]) size() -> int:
+        \\    return 1
+    ;
+    const box_first = [_][]const u8{
+        "bx := Box[Array[int]]{v=Array[int]{1}}\n_ = bx.dup()",
+        "f := Box[Array[int]].dup",
+    };
+    for (box_first) |src| {
+        for ([_]bool{ true, false }) |validate| {
+            errdefer std.debug.print("source: {s}\nvalidate: {}\n", .{ src, validate });
+            const vm = C.vm_initx(zt.alloc);
+            defer C.vm_deinit(vm);
+            errdefer {
+                const summary = C.vm_compile_error_summary(vm);
+                defer C.vm_freeb(vm, summary);
+                std.debug.print("summary: {s}\n", .{summary});
+            }
+            try zt.eq(C.Success, C.vm_evalx(vm, "repl", box_decls, config, &res));
+            const nexts = [_][]const u8{ src, "g := Box[Array[int]].dup", "fn h():\n  g := Box[Array[int]].dup\nh()", src };
+            for (nexts) |next| {
+                errdefer std.debug.print("next: {s}\n", .{next});
+                if (validate) {
+                    try zt.eq(C.ErrorCompile, C.vm_validate(vm, next));
+                } else {
+                    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", next, config, &res));
+                }
+                const summary = C.vm_compile_error_summary(vm);
+                defer C.vm_freeb(vm, summary);
+                try zt.expect(std.mem.indexOf(u8, summary, "return self.v") != null);
+                try zt.eq(C.Success, C.vm_validate(vm, "print(1)"));
+            }
+            try zt.eq(C.Success, C.vm_evalx(vm, "repl", "sz := Box[Array[int]].size\nbi := Box[int]{v=3}\ntest.eq(3, bi.dup())", config, &res));
+        }
+    }
+}
+
 test "A slice of a NoCopy element type is refused and does not break the next compile." {
     C.setSilent(true);
     defer C.setSilent(false);

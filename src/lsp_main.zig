@@ -77,11 +77,12 @@ pub fn main(init: std.process.Init.Minimal) !u8 {
             .idle => try server.flush(),
             .eof => break,
         }
-        for (server.out.items) |body| {
-            defer alloc.free(body);
-            try transport.writeMessage(body);
-        }
-        server.out.clearRetainingCapacity();
+        // A failed write (the client closed the stream) ends the server. `sendAll` frees every reply either way,
+        // so `server.deinit` does not free one of them again.
+        transport.sendAll(alloc, &server.out, transport.Stdout{}) catch |err| {
+            std.debug.print("{s}: can not write a message: {s}\n", .{ lsp.name, @errorName(err) });
+            break;
+        };
     }
     // `exit` without `shutdown` before it, or a closed stream, is an abnormal end.
     return if (server.exit and server.shutdown) 0 else 1;

@@ -124,6 +124,55 @@ pub fn writeMessage(body: []const u8) !void {
     try stdout.writeStreamingAll(io, body);
 }
 
+/// Writes stdout. The sink of `sendAll` in the server.
+pub const Stdout = struct {
+    pub fn write(_: Stdout, body: []const u8) !void {
+        return writeMessage(body);
+    }
+};
+
+/// Writes the queued messages in order with `sink.write` and frees each one. `out` is empty afterwards, also when a
+/// write fails: the messages not sent yet are dropped, as the client can not be reached any more, and the error is
+/// returned.
+pub fn sendAll(alloc: std.mem.Allocator, out: *std.ArrayList([]u8), sink: anytype) !void {
+    defer {
+        for (out.items) |body| alloc.free(body);
+        out.clearRetainingCapacity();
+    }
+    for (out.items) |body| try sink.write(body);
+}
+
+test "A failed write frees every queued message once and empties the queue." {
+    const t = std.testing;
+    const alloc = t.allocator;
+    var out: std.ArrayList([]u8) = .empty;
+    defer {
+        for (out.items) |body| alloc.free(body);
+        out.deinit(alloc);
+    }
+    for ([_][]const u8{ "a", "b", "c" }) |text| {
+        try out.append(alloc, try alloc.dupe(u8, text));
+    }
+    const Failing = struct {
+        written: usize = 0,
+        fn write(self: *@This(), _: []const u8) !void {
+            if (self.written == 1) return error.BrokenPipe;
+            self.written += 1;
+        }
+    };
+    var sink: Failing = .{};
+    try t.expectError(error.BrokenPipe, sendAll(alloc, &out, &sink));
+    try t.expectEqual(@as(usize, 1), sink.written);
+    try t.expectEqual(@as(usize, 0), out.items.len);
+
+    // The queue is usable after it.
+    try out.append(alloc, try alloc.dupe(u8, "d"));
+    sink = .{};
+    try sendAll(alloc, &out, &sink);
+    try t.expectEqual(@as(usize, 1), sink.written);
+    try t.expectEqual(@as(usize, 0), out.items.len);
+}
+
 test "A frame is complete when its body has arrived." {
     const t = std.testing;
     try t.expectEqual(@as(?Frame, null), try parseFrame(""));

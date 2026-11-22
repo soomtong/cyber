@@ -423,6 +423,7 @@ fn test_types(run: *Runner) void {
     run.case("types/struct_init_mixed_const_error.cy");
     run.case("types/structs.cy");
     run.case("types/struct_default_initializer.cy");
+    run.case("types/struct_default_nocopy_global_error.cy");
     run.case("types/struct_init_undeclared_field_error.cy");
     run.case("types/struct_set_undeclared_field_error.cy");
     run.case("types/struct_too_many_fields_error.cy");

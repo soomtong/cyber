@@ -51,4 +51,18 @@ test.eq(false, #{meta.has_field_default(Foo, 'b')})
 test.eq(7, meta.field_default(Bar, 'x'))
 test.eq(0, meta.field_default(Foo2, 'b').len())
 
+-- A default that reads a global is copied for each literal, as an explicit `G2{s=G}` is.
+global G str = 'hello' + ' world'
+type G2:
+    s str = G
+for 0..3:
+    g2 := G2{}
+    test.eq('hello world', g2.s)
+g2a := G2{}
+g2b := G2{}
+test.eq('hello world', g2a.s)
+test.eq('hello world', g2b.s)
+test.eq('hello world', meta.field_default(G2, 's'))
+test.eq('hello world', G)
+
 --cytest: pass

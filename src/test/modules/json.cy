@@ -167,6 +167,14 @@ t.eq(1, conf2.port)
 t.eq(0, conf2.tags.len())
 t.eq(true, conf2.debug == none)
 t.eq(4, conf2.size.h)
+-- A default that reads a global is copied for each value, not shared with the global.
+global CONF_NAME str = 'na' + 'me'
+type Named:
+    name str = CONF_NAME
+for 0..3:
+    named := json.decode(Named, '{}')!
+    t.eq('name', named.name)
+t.eq('name', CONF_NAME)
 var conf_diag json.Diag = {}
 t.eq(error.MissingField, json.decode(Conf, '{"port": 1}', &&conf_diag).unwrap_error())
 t.eq('Missing the field `host`.', conf_diag.msg)

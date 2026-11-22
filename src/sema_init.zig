@@ -179,6 +179,8 @@ pub fn semaInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, initializer: *as
 
 /// Checks the default value of the field `idx` where a struct literal leaves it out. The names in it are looked up
 /// in the struct's declaration (its module and template parameters), not among the locals of the literal's code.
+/// The value is owned, as an explicit field value is: a default that reads a place (`s str = G`) is copied, and a
+/// `NoCopy` one is an error, so each literal gets its own value.
 pub fn semaFieldDefault(c: *cy.Chunk, struct_t: *cy.types.Struct, idx: usize) !sema.ExprResult {
     const field = struct_t.fields_ptr[idx];
     try sema_resolve.pushSymResolveContext(c, @ptrCast(struct_t.base.sym()), field.init_n);
@@ -186,7 +188,8 @@ pub fn semaFieldDefault(c: *cy.Chunk, struct_t: *cy.types.Struct, idx: usize) !s
     const prev_hide = c.hide_locals_below;
     c.hide_locals_below = c.semaProcs.items.len;
     defer c.hide_locals_below = prev_hide;
-    return sema_expr.semaExprCstr(c, field.init_n.?, field.type);
+    const res = try sema_expr.semaExprCstr(c, field.init_n.?, field.type);
+    return sema_move.semaOwn(c, res, field.init_n.?);
 }
 
 /// `initializerId` is a record literal node.

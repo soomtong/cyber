@@ -228,7 +228,7 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
     defer template_ctx.deinit(c);
 
     var arg_idx: u32 = 0;
-    var arg_nodes: [256]*ast.Node = undefined;
+    var borrows: ArgBorrows = .{};
 
     // An argument is evaluated before a statement that a later argument adds (`sema_move.seqFlush`).
     const seq_start = c.seq_pending.items.len;
@@ -242,22 +242,18 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
         } else {
             arg = Argument.init(end_args[i - pre_args.len]);
         }
+        const pending_start: u32 = @intCast(c.borrow_pending.items.len);
         const final_arg = try matchTemplateArg(c, params[i], arg, template, &template_ctx, i, false);
         if (final_arg.resolve_t == .rt) {
             args[arg_idx] = final_arg.res.rt.ir;
             const arg_res = final_arg.res.rt;
-            if (arg_res.type.kind() == .ex_borrow) {
-                // Like `matchFuncSig`: an exclusive borrow that a local holds is checked where it is passed on.
-                if (arg_res.recParentLocal()) |via| {
-                    try sema_borrow.checkExclusiveBorrowOfField(c, via, sema_borrow.borrowField(c, arg_res), false, arg.node);
-                }
-            }
+            // The argument matched its parameter, so an exclusive borrow argument is for a `&&T` parameter.
+            try borrows.add(c, arg_idx, arg_res, arg_res.type.kind() == .ex_borrow, pending_start, arg.node);
             if (arg_res.resType == .value and !arg_res.addressable) {
                 try sema_move.seqPush(c, &args[arg_idx], arg_res.owned, arg.node);
             } else {
                 try sema_move.seqPushTakeArg(c, &args[arg_idx], arg.node);
             }
-            arg_nodes[arg_idx] = arg.node;
             arg_idx += 1;
         } else if (final_arg.resolve_t == .template) {
             const name = template.func_params[i].name_type.as_name();
@@ -267,8 +263,10 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
         }
     }
 
+    try borrows.check(c, arg_idx);
+
     if (tookReceiver(c, pre_args) and arg_idx > 0) {
-        try sema_move.finishGlobalTake(c, args[1..arg_idx], arg_nodes[1..arg_idx]);
+        try sema_move.finishGlobalTake(c, args[1..arg_idx], borrows.nodes[1..arg_idx]);
     }
 
     const func_instance = try genFunc(c, template, &template_ctx, node);
@@ -558,17 +556,8 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
     const capture_param_scope = sig.scope_param_idx != cy.NullU8;
     var ret_parent_scope_local: ?u32 = null;
 
-    // Owners borrowed by each argument, to reject an exclusive borrow next to another borrow of the same local.
-    var arg_owners: [256]?sema.LocalId = @splat(null);
-    var arg_ex: [256]bool = @splat(false);
-    // The local that an exclusive borrow argument for a `&&T` parameter is read through.
-    var arg_ex_via: [256]?sema.LocalId = @splat(null);
-    var arg_ex_field: [256]u16 = undefined;
-    var arg_nodes: [256]*ast.Node = undefined;
-    // The other owners that each argument notes (`if c: &y else &a[0]`) in `Chunk.borrow_pending`.
+    var borrows: ArgBorrows = .{};
     const call_pending_start = c.borrow_pending.items.len;
-    var arg_pending_start: [256]u32 = @splat(0);
-    var arg_pending_end: [256]u32 = @splat(0);
     var scope_arg_idx: ?u32 = null;
 
     var arg_idx: u32 = 0;
@@ -598,9 +587,8 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         }
 
         var match: bool = undefined;
-        arg_pending_start[arg_idx] = @intCast(c.borrow_pending.items.len);
+        const pending_start: u32 = @intCast(c.borrow_pending.items.len);
         const arg_res = try matchArg(c, arg, param, overloaded, exact, &match);
-        arg_pending_end[arg_idx] = @intCast(c.borrow_pending.items.len);
         if (!match) {
             match_err.* = FuncMatchError.init(param, arg_idx + 1, arg_res.type);
             return null;
@@ -609,23 +597,7 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
             ret_parent_scope_local = arg_res.recParentLocal();
             scope_arg_idx = arg_idx;
         }
-        arg_owners[arg_idx] = sema_borrow.borrowOwner(c, arg_res);
-        if (!arg_res.type.isManaged() and !arg_res.type.info.borrow_only and !arg_res.type.isPointer()) {
-            // A plain value (`self.pos`) is copied into the call. It borrows nothing.
-            arg_owners[arg_idx] = null;
-        }
-        arg_ex[arg_idx] = arg_res.type.kind() == .ex_borrow;
-        if (arg_ex[arg_idx] and param.get_type().kind() == .ex_borrow and sema_borrow.readThroughShared(arg_res.ir)) {
-            return c.reportError("Cannot use an exclusive borrow that is read through a shared borrow.", arg.node);
-        }
-        // A value that contains an exclusive borrow (`Holder{r=&&f}`) gives the callee the same access.
-        if ((arg_ex[arg_idx] and param.get_type().kind() == .ex_borrow) or
-            (arg_res.type.kind() != .ex_borrow and arg_res.type.info.ex_borrow))
-        {
-            arg_ex_via[arg_idx] = arg_res.recParentLocal();
-            arg_ex_field[arg_idx] = sema_borrow.borrowField(c, arg_res);
-        }
-        arg_nodes[arg_idx] = arg.node;
+        try borrows.add(c, arg_idx, arg_res, param.get_type().kind() == .ex_borrow, pending_start, arg.node);
         args[arg_idx] = arg_res.ir;
         if (arg_res.resType == .value and !arg_res.addressable) {
             try sema_move.seqPush(c, &args[arg_idx], arg_res.owned, arg.node);
@@ -635,45 +607,17 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         arg_idx += 1;
     }
 
-    // All arguments are alive inside the call, so an exclusive borrow can not share its owner with another argument.
-    for (0..arg_idx) |i| {
-        if (!arg_ex[i]) {
-            if (arg_ex_via[i]) |via| {
-                try sema_borrow.checkExclusiveBorrowOfField(c, via, arg_ex_field[i], false, arg_nodes[i]);
-            }
-            continue;
-        }
-        // The callee can change the value, so no other local can hold a borrow of it. An exclusive borrow that is
-        // already in a local or a field (`r.grow()` of `r := &&f`, `h.r.grow()`) is checked here, where it is used.
-        if (arg_ex_via[i]) |via| {
-            try sema_borrow.checkExclusiveBorrowOfField(c, via, arg_ex_field[i], false, arg_nodes[i]);
-        }
-        // Each argument borrows its owner and the other owners that it notes (`if c: &y else &a[0]`).
-        const owner = arg_owners[i] orelse continue;
-        var k: u32 = arg_pending_start[i];
-        var cur: ?sema.LocalId = owner;
-        while (cur) |o| : ({
-            cur = nextArgOwner(c, arg_pending_end[i], &k);
-        }) {
-            for (0..arg_idx) |j| {
-                if (j == i) continue;
-                if (argBorrowsOwner(c, arg_owners[j], arg_pending_start[j], arg_pending_end[j], o)) {
-                    const name = c.varStack.items[o].name();
-                    return c.reportErrorFmt("Cannot pass an exclusive borrow of `{}` with another argument that borrows `{}`.", &.{v(name), v(name)}, arg_nodes[i]);
-                }
-            }
-        }
-    }
+    try borrows.check(c, arg_idx);
 
     if (tookReceiver(c, pre_args) and arg_idx > 0) {
-        try sema_move.finishGlobalTake(c, args[1..arg_idx], arg_nodes[1..arg_idx]);
+        try sema_move.finishGlobalTake(c, args[1..arg_idx], borrows.nodes[1..arg_idx]);
     }
 
     // The result borrows only from the `scope` argument, so the owners that the other arguments note end with the
     // call.
     if (c.borrow_pending.items.len > call_pending_start) {
         var keep: []const sema.BorrowOwner = &.{};
-        if (scope_arg_idx) |idx| keep = c.borrow_pending.items[arg_pending_start[idx]..arg_pending_end[idx]];
+        if (scope_arg_idx) |idx| keep = c.borrow_pending.items[borrows.pending_start[idx]..borrows.pending_end[idx]];
         std.mem.copyForwards(sema.BorrowOwner, c.borrow_pending.items[call_pending_start..], keep);
         c.borrow_pending.items.len = call_pending_start + keep.len;
     }
@@ -682,6 +626,78 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         .ret_parent_scope_local = ret_parent_scope_local,
     };
 }
+
+/// The borrows that the arguments of one call hold. All arguments are alive inside the call, so an exclusive borrow
+/// can not share its owner with another argument. `matchFuncSig` and `matchGenericFuncRt` both check it.
+const ArgBorrows = struct {
+    // Owners borrowed by each argument, to reject an exclusive borrow next to another borrow of the same local.
+    owners: [256]?sema.LocalId = @splat(null),
+    ex: [256]bool = @splat(false),
+    // The local that an exclusive borrow argument for a `&&T` parameter is read through.
+    ex_via: [256]?sema.LocalId = @splat(null),
+    ex_field: [256]u16 = undefined,
+    nodes: [256]*ast.Node = undefined,
+    // The other owners that each argument notes (`if c: &y else &a[0]`) in `Chunk.borrow_pending`.
+    pending_start: [256]u32 = @splat(0),
+    pending_end: [256]u32 = @splat(0),
+
+    /// Records argument `idx`. `param_ex` is whether its parameter is `&&T`. The argument noted its other owners in
+    /// `borrow_pending` from `pending_start`.
+    fn add(self: *ArgBorrows, c: *cy.Chunk, idx: u32, arg_res: sema.ExprResult, param_ex: bool, pending_start: u32,
+        node: *ast.Node) !void {
+        self.pending_start[idx] = pending_start;
+        self.pending_end[idx] = @intCast(c.borrow_pending.items.len);
+        self.owners[idx] = sema_borrow.borrowOwner(c, arg_res);
+        if (!arg_res.type.isManaged() and !arg_res.type.info.borrow_only and !arg_res.type.isPointer()) {
+            // A plain value (`self.pos`) is copied into the call. It borrows nothing.
+            self.owners[idx] = null;
+        }
+        self.ex[idx] = arg_res.type.kind() == .ex_borrow;
+        if (self.ex[idx] and param_ex and sema_borrow.readThroughShared(arg_res.ir)) {
+            return c.reportError("Cannot use an exclusive borrow that is read through a shared borrow.", node);
+        }
+        // A value that contains an exclusive borrow (`Holder{r=&&f}`) gives the callee the same access.
+        if ((self.ex[idx] and param_ex) or
+            (arg_res.type.kind() != .ex_borrow and arg_res.type.info.ex_borrow))
+        {
+            self.ex_via[idx] = arg_res.recParentLocal();
+            self.ex_field[idx] = sema_borrow.borrowField(c, arg_res);
+        }
+        self.nodes[idx] = node;
+    }
+
+    /// Checks the first `nargs` arguments.
+    fn check(self: *const ArgBorrows, c: *cy.Chunk, nargs: u32) !void {
+        for (0..nargs) |i| {
+            if (!self.ex[i]) {
+                if (self.ex_via[i]) |via| {
+                    try sema_borrow.checkExclusiveBorrowOfField(c, via, self.ex_field[i], false, self.nodes[i]);
+                }
+                continue;
+            }
+            // The callee can change the value, so no other local can hold a borrow of it. An exclusive borrow that is
+            // already in a local or a field (`r.grow()` of `r := &&f`, `h.r.grow()`) is checked here, where it is used.
+            if (self.ex_via[i]) |via| {
+                try sema_borrow.checkExclusiveBorrowOfField(c, via, self.ex_field[i], false, self.nodes[i]);
+            }
+            // Each argument borrows its owner and the other owners that it notes (`if c: &y else &a[0]`).
+            const owner = self.owners[i] orelse continue;
+            var k: u32 = self.pending_start[i];
+            var cur: ?sema.LocalId = owner;
+            while (cur) |o| : ({
+                cur = nextArgOwner(c, self.pending_end[i], &k);
+            }) {
+                for (0..nargs) |j| {
+                    if (j == i) continue;
+                    if (argBorrowsOwner(c, self.owners[j], self.pending_start[j], self.pending_end[j], o)) {
+                        const name = c.varStack.items[o].name();
+                        return c.reportErrorFmt("Cannot pass an exclusive borrow of `{}` with another argument that borrows `{}`.", &.{v(name), v(name)}, self.nodes[i]);
+                    }
+                }
+            }
+        }
+    }
+};
 
 /// The next other owner that an argument notes in `Chunk.borrow_pending`, from `k` up to `end`.
 fn nextArgOwner(c: *cy.Chunk, end: u32, k: *u32) ?sema.LocalId {

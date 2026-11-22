@@ -243,3 +243,35 @@ F-170(위 "갈래가 주는 빌림의 주인")이 남긴 구멍 셋이다.
 - 확인: `concurrency/spawn_send.cy`, `concurrency/spawn_drop.cy`, lib 테스트 'A spawned function returns only what await can
   copy.', 'Futures dropped without await free their spawned threads.' 결정 `docs/decisions/project_spawn_result_ownership.md`(남은
   것: 인자 쪽 `@send`의 참조 있는 option · result, 큐에 있는 작업은 버려도 끝까지 돈다, `VM.shared_states`가 계속 자란다).
+
+## 남은 것의 정리 (2026-11-22)
+
+바로 위 절이 남긴 것과 그 길에 찾은 것이다.
+
+- wasm32-freestanding(웹) 라이브러리 빌드(`zig build lib -Dtarget=wasm32-freestanding`)가 Zig 0.16 `std.Io` 이전(d64bcde5) 뒤로 std 안의 약 70개
+  오류로 컴파일되지 않았다. `stdx.io()`가 OS 없는 타깃에서도 `std.Io.Threaded`를 만든 탓이다. 이제 freestanding에서는 `std.Io.failing`을 쓴다. 경합 없는 mutex는 그대로
+  동작하고 파일 · 프로세스 호출은 오류로 실패하며, 시계와 출력은 전처럼 호스트가 준다. `math.random`은 freestanding에서 호스트 시계로 시드한다. CI의 wasm32-wasi 작업이 freestanding
+  라이브러리도 빌드한다(전에는 6db63e13 뒤로 빌드하지 않아 회귀를 못 잡았다).
+- `Int.fmt`의 내부 helper(`intFmtExt`)에도 `Raw.fmt`와 같은 64바이트 고정 버퍼가 있었다(스크립트 API가 config를 넘기지 않아 드러나지 않음). 두 함수가 padding을 결과 문자열에 바로
+  채우는 helper 하나(`initPaddedDigits`)를 쓴다. 쓰이지 않던 `int_fmt2`와 주석 처리된 `Int.fmt(format, config)` 선언은 지웠다.
+- 4 GB를 넘는 문자열에서 `str`의 slice, `insert`, `rune_at`, `rune_str_at`, `seek_pos`, `replace`가 바이트 인덱스를 u32로 바꾸다 호스트를 끝낼 수 있었다. 이제
+  usize다. ASCII가 아닌 바이트 집합의 `index_any`는 4 GB 뒤의 일치를 놓쳤다. 32비트 대상에서 음수 인덱스의 slice는 'OutOfBounds' panic이다.
+- `Int[24]`, `Raw[7]`, `Float[16]` 같은 지원하지 않는 비트 크기가 호스트를 끝냈다. 이제 'Unsupported bit size `24` for `Int`. Expected 8, 16, 32 or 64.'
+  컴파일 오류다. 같은 경로에서 type loader의 오류 trace가 segfault하던 것도 고쳤다(`resolve_custom_type`). 확인: `types/int_unsupported_bits_error.cy`,
+  `types/float_unsupported_bits_error.cy`.
+- `meta.eval`이 호스트를 끝냈다(`@panic("TODO")`). 이제 '`meta.eval` is not supported yet. Use the compile-time expression `#{}`.' 컴파일 오류다.
+  확인: `meta/meta_eval_error.cy`.
+- 호스트의 `dl_resolver`가 `c.bind_lib` 경로를 거부하면 호스트를 끝냈다. 이제 'Cannot resolve ...'를 내고 `FileNotFound`로 실패한다.
+- 복합 대입(`x op= y`)의 좌변에서 인덱스나 수신자를 계산할 때 함수가 불리면 그 함수가 두 번 실행됐다. 사용자 연산자 메서드(`a[ix + 1] += 1`), `@get`(`h.items[0] += 1`), 사용자
+  `@index`(`g[1][0] += 1`)가 그렇다. 이제 시험 분석에서 호출이 생긴 부분(`ir.Buffer.call_count`)은 우변보다 먼저 한 번만 계산한다. `str`의 `+`처럼 함수로 구현된 내장 연산도 한 번
+  계산한다. 정수 · 실수 연산, 필드, `p.*`만으로 된 좌변(`a[i + 1] *= 2`)의 바이트코드는 그대로다. 확인: `functions/eval_order.cy`.
+- `&T` · `&&T` 수신자로 선언한 단항 연산자(`fn (&Ix) `-`() -> Ix`)가 메서드 호출이나 이항 연산자처럼 피연산자를 자동으로 빌린다. 전에는 `-x`가 'Expected argument `&Ix`,
+  found `Ix`'였다. `~`, `!`(`not`)도 같고, 임시값(`-mk()`), 필드(`-p.ix`), 빌림 지역(`b := &x` 뒤 `-b`)도 된다. `&&T` 수신자는 메서드처럼 배타 접근이 필요하다. 숫자나
+  bool을 가리키는 참조에 단항 연산자를 쓰면(`r := &n` 뒤 `-r`) 'Can not use `-` on `&int`. Dereference it first: `-r.*`.'다(이항 연산자와 같은 규칙). 확인:
+  `functions/unary_op_borrow_receiver.cy`, `functions/unary_op_ex_borrow_error.cy`, `vars/ref_unary_operand_error.cy`,
+  `vars/ref_unary_not_error.cy`.
+- 컨테이너 안 빌림의 복사본(`r = xs[0]`, `r = xs[i]`, `r = h.b`, `r = h.inner.b`, `r = h.o`)이 컨테이너가 아니라 컨테이너가 빌린 지역에 묶인다. 컨테이너보다 오래 살 수 있지만 그
+  지역들보다는 못 살고, 그 지역들은 모두 계속 빌린 상태다. 자리 자체의 빌림(`&h.b`, `&xs[0]`)은 그대로 컨테이너에 묶인다. 컨테이너가 다른 컨테이너 안의 자리를 빌린 값을 담았을 수 있으면(`H{b=&w.x}`,
+  `h.b = &w.x`, `&&h`를 넘긴 뒤, `Local.borrow_places`) 복사본도 컨테이너에 묶인다.
+- 선언 뒤에 빌림을 저장한 컨테이너(`h.b = &z`)를 바깥 지역으로 복사하면(`r = h`) 블록 끝에서 컴파일러가 index out of bounds로 panic했다. 이제 '`r` can not outlive `z`.'.
+- 확인: `memory/borrow_copy_out.cy`와 `borrow_copy_out_*_error.cy`, `borrow_copy_loan_outlive_error.cy`.

@@ -3206,11 +3206,11 @@ A borrow that can come from one of several branches (`if (c) &y else &a[0]`) bor
 
 A case capture of a `switch` borrows what the control borrows: a value capture `|p|` of a borrow payload borrows the value that the control borrows from, and a borrow capture `|&v|` borrows the local that holds the control. A borrow of a case local can not leave the case: `case .one |n| => &n` is the compile error 'The result of `switch` can not outlive `n`.'
 
-A borrow that is read through a borrow container (`&&r`, `&r.p`) can not outlive the container either, even when the local that the container borrows from lives longer.
+A borrow of a place in a borrow container (`&&r`, `&r.p`) points into the container, so it can not outlive the container either, even when the local that the container borrows from lives longer. A copy of a borrow that is read out of a container (`p = r.p`, `p = xs[i]`, `p = r.inner.p`, an option field `r.o`) borrows what the container borrows instead: it can outlive the container, but not the locals that the container borrows, and it keeps all of them borrowed. When the container can hold a borrow of a place in another borrow container (`H{b=&w.x}`, `h.b = &w.x`, or after `&&h` was taken), the copy can not outlive the container.
 
 An unwrap capture of `if` and `while` (`if o |q|:`) borrows what the option borrows, like a `switch` capture: `r = q` compiles when `r` does not outlive that owner. A borrow of a capture of a value (`r = &q`) can not leave the branch.
 
-A vector of borrows (`[2]&int`) is a borrow container: it lives only as long as the shortest lived local that its elements borrow, and it keeps all of them borrowed. It can be iterated, also through a span (`for xs[1..] |p|:`), and a capture borrows what the vector borrows. A copy of a borrow container (`r = h`) keeps all the owners of `h` borrowed.
+A vector of borrows (`[2]&int`) is a borrow container: it lives only as long as the shortest lived local that its elements borrow, and it keeps all of them borrowed. It can be iterated, also through a span (`for xs[1..] |p|:`), and a capture borrows what the vector borrows. A copy of a borrow container (`r = h`) keeps all the owners of `h` borrowed, and it can not outlive any of them, also a borrow that was stored in `h` after it was declared (`h.b = &z`).
 
 ### `sink` parameter.
 The `sink` modifier accepts and consumes a value argument: *This is not much different from a `move` operation, so this feature may be removed.*

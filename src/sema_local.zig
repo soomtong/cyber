@@ -1228,7 +1228,7 @@ pub fn popLambdaProc(c: *cy.Chunk) !sema.ExprResult {
             if (!info.val_t.isRefPointer()) {
                 captures_scope_locals = true;
             }
-            if (pvar.parent_local != cy.NullId) try sema_borrow.noteBorrowOwner(c, sema_borrow.borrowOwnerOf(c, pId), pvar.decl_t.info.ex_borrow);
+            try sema_borrow.noteBorrowLocal(c, pId);
             owner = sema_borrow.shorterOwner(c, owner, sema_borrow.borrowOwnerOf(c, pId));
         }
         c.alloc.free(captures);

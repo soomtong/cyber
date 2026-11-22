@@ -96,6 +96,9 @@ pub const Lifetime = struct {
 pub const BorrowOwner = struct {
     owner: LocalId,
     ex: bool,
+    /// The part of the value can point into `owner`, a local that holds borrows itself (`&w.x` of
+    /// `w := W{q=&z}`), not only into the owner at its root (`sema_borrow.valuePlaceFree`).
+    place: bool = false,
 };
 
 pub const BorrowLoan = struct {
@@ -139,6 +142,10 @@ pub const Local = struct {
     /// The borrow container that the borrow of this local was read through (`p := &&h` of `h := Holder{r=&&f}`), or
     /// `cy.NullId`. The local can not outlive it (`checkViaOutlives`).
     borrow_via: LocalId = cy.NullId,
+    /// Whether the value of this local can hold a borrow that points into a local that holds borrows itself
+    /// (`h := H{b=&w.x}`, `h.b = &w.x`), or that this is unknown (`&&h` was taken). Only then a copy of a borrow
+    /// that is read out of the local (`h.b`) has to stay inside the local (`sema_borrow.copyOutOf`).
+    borrow_places: bool = false,
     /// The first local of the copies of one borrow (`r2 := r`), or `cy.NullId` for a borrow that is no copy.
     borrow_alias: LocalId = cy.NullId,
     /// The field of the owner that the borrow of this local points into, `borrow_field_whole` or

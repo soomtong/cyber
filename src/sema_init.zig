@@ -31,7 +31,7 @@ pub fn semaTupleInit(c: *cy.Chunk, type_: *cy.Type, fields: []const cy.types.Fie
         for (fields, 0..) |field, i| {
             var arg = try c.semaExprCstr(lit.args.ptr[i], field.type);
             if (field.type.info.borrow_only) {
-                try sema_borrow.noteBorrowOwner(c, sema_borrow.borrowOwner(c, arg), arg.type.info.ex_borrow);
+                try sema_borrow.noteBorrowValue(c, arg);
                 owner = sema_borrow.shorterOwner(c, owner, sema_borrow.borrowOwner(c, arg));
             }
             if (record_borrows and field.type.info.borrow_only) {
@@ -84,7 +84,7 @@ pub fn semaInitPartialVector(c: *cy.Chunk, vector_t: *cy.types.PartialVector, in
 fn noteElemOwner(c: *cy.Chunk, cur: ?sema.LocalId, elem_t: *cy.Type, arg: sema.ExprResult) !?sema.LocalId {
     if (!elem_t.info.borrow_only) return cur;
     const arg_owner = sema_borrow.borrowOwner(c, arg);
-    try sema_borrow.noteBorrowOwner(c, arg_owner, arg.type.info.ex_borrow);
+    try sema_borrow.noteBorrowValue(c, arg);
     return sema_borrow.shorterOwner(c, cur, arg_owner);
 }
 
@@ -175,7 +175,7 @@ pub fn semaInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, initializer: *as
         } else {
             var arg = try c.semaExprCstr(item.node.?, fieldT);
             if (fieldT.info.borrow_only) {
-                try sema_borrow.noteBorrowOwner(c, sema_borrow.borrowOwner(c, arg), arg.type.info.ex_borrow);
+                try sema_borrow.noteBorrowValue(c, arg);
                 owner = sema_borrow.shorterOwner(c, owner, sema_borrow.borrowOwner(c, arg));
             }
             arg = try sema_move.semaOwn(c, arg, item.node.?);

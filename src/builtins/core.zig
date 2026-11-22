@@ -2485,6 +2485,17 @@ fn raw_fmt(t: *cy.Thread) anyerror!C.Ret {
     const val = t.param(u64);
     const format = std.enums.fromInt(NumberFormat, t.param(i64)) orelse return error.InvalidEnumTag;
     const config = t.param(cy.heap.NumberFormatConfig);
+    if (config.width.from()) |width| {
+        // The cap matches `str.repeat`.
+        if (width < 0 or width > std.math.maxInt(u32)) {
+            return t.ret_panic_fmt("Invalid width: {}", &.{cy.fmt.v(width)});
+        }
+    }
+    if (config.pad.from()) |pad| {
+        if (pad >= 128) {
+            return t.ret_panic_fmt("Invalid pad: {}, expected an ASCII rune", &.{cy.fmt.v(pad)});
+        }
+    }
     ret.* = try rawFmtExt(t, val, format, config);
     return C.RetOk;
 }
@@ -2557,11 +2568,18 @@ pub fn rawFmtExt(t: *cy.Thread, val: u64, format: NumberFormat, opts: cy.heap.Nu
             .hex => 16,
             else => return error.InvalidArgument,
         };
+        // 64 digits hold any `u64` in base 2. The padding goes to the string, so a width can be larger.
         var buf: [64]u8 = undefined;
-        const fill: u8 = opts.pad.from() orelse ' ';
-        const width: ?usize = if (opts.width.from()) |width| @intCast(width) else null;
-        const end = std.fmt.printInt(&buf, val, base, .lower, .{ .fill = fill, .width = width });
-        return t.heap.init_astr(buf[0..end]);
+        const n = std.fmt.printInt(&buf, val, base, .lower, .{});
+        const width: usize = if (opts.width.from()) |width| @intCast(width) else 0;
+        if (width <= n) {
+            return t.heap.init_astr(buf[0..n]);
+        }
+        const res = try t.heap.init_astr_undef(width);
+        const dst = res.mutSlice();
+        @memset(dst[0..width - n], opts.pad.from() orelse ' ');
+        @memcpy(dst[width - n ..], buf[0..n]);
+        return res;
     }
 }
 

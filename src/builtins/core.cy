@@ -387,10 +387,10 @@ fn (EvalStr) len() -> int
 fn (EvalStr) @index(idx int) -> byte
 
 type NumberFormatConfig:
-    --| `pad` provides the ASCII rune that is used for padding.
+    --| `pad` provides the ASCII rune that is used for padding. A byte of 128 or more panics.
     pad   ?byte = none
 
-    --| `width` maximum width.
+    --| `width` is the minimum width. Shorter digits are padded at the start. A negative width panics.
     width ?int = none
 
 type byte = Raw[8]

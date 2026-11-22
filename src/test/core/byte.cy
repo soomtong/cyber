@@ -66,10 +66,17 @@ test.eq('0o172', byte(122).fmt(.oct))
 test.eq('0x7a', byte(122).fmt(.hex))
 if meta.is_vm_target():
     test.eq('z', byte(122).fmt(.ch))
-    -- test.eq('00000010', byte(2).fmt(.bin, {pad=`0`, width=8}))
-    -- test.eq('010', byte(8).fmt(.oct, {pad=`0`, width=3}))
-    -- test.eq('0010', byte(10).fmt(.dec, {pad=`0`, width=4}))
-    -- test.eq('0010', byte(16).fmt(.hex, {pad=`0`, width=4}))
+    test.eq('00000010', byte(2).fmt(.bin, {pad='0', width=8}))
+    test.eq('010', byte(8).fmt(.oct, {pad='0', width=3}))
+    test.eq('0010', byte(10).fmt(.dec, {pad='0', width=4}))
+    test.eq('  10', byte(16).fmt(.hex, {width=4}))
+    test.eq('255', byte(255).fmt(.dec, {width=2}))
+    test.eq('255', byte(255).fmt(.dec, {width=0}))
+
+    -- A width beyond 64 digits. Aborted the host with a fixed buffer.
+    wide := r64(255).fmt(.hex, {pad='0', width=100})
+    test.eq(100, wide.len())
+    test.eq('0'.repeat(98) + 'ff', wide)
 
 -- Infer from string literal.
 var aa byte = 'a'

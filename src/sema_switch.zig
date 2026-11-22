@@ -43,6 +43,14 @@ pub const SwitchInfo = struct {
 
     end_reachable: bool,
 
+    /// The local that holds the value of the control, which a borrow capture (`|&v|`) borrows from. The hidden
+    /// `control` local that points to it is not bound to an owner.
+    control_parent: ?sema.LocalId = null,
+
+    /// The local that the value of the control borrows from, before a temp holds it. A copy capture (`|p|`) of a
+    /// borrow payload borrows from it.
+    control_owner: ?sema.LocalId = null,
+
     /// For a `switch` expression: the owner of a borrow result, joined over the cases (`sema_borrow.joinBranchOwner`).
     borrow_owner: ?sema.LocalId = null,
 
@@ -99,6 +107,7 @@ pub fn semaSwitchStmt(c: *cy.Chunk, block: *ast.SwitchBlock) !void {
     const var_start = c.varStack.items.len;
     // Determine the control type first.
     var control_expr = try c.semaExpr(block.expr, .{});
+    const control_owner = control_expr.recParentLocal();
     control_expr = try sema_move.semaEnsureAddressable(c, control_expr, block.expr);
     const control_borrow_t = try sema.getBorrowType(c, control_expr.type);
     control_expr = try sema_expr.semaAddressOf(c, control_expr, control_borrow_t, block.expr);
@@ -108,6 +117,8 @@ pub fn semaSwitchStmt(c: *cy.Chunk, block: *ast.SwitchBlock) !void {
 
     var info = try SwitchInfo.init(c, block.expr, control, false, .{}, @ptrCast(block));
     defer info.deinit(c.alloc);
+    info.control_parent = control_expr.recParentLocal();
+    info.control_owner = control_owner orelse info.control_parent;
 
     info.cond_local = (try sema_local.declareHiddenLocal(c, "_cond", c.sema.bool_t, null, @ptrCast(block))).id;
 
@@ -175,6 +186,7 @@ fn popCaseBlock(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt, conds: []*
 pub fn semaSwitchExpr(c: *cy.Chunk, block: *ast.SwitchBlock, cstr: sema.Cstr) !sema.ExprResult {
     // Determine the control type first.
     var control_expr = try c.semaExpr(block.expr, .{});
+    const control_owner = control_expr.recParentLocal();
     control_expr = try sema_move.semaEnsureAddressable(c, control_expr, block.expr);
     const control_borrow_t = try sema.getBorrowType(c, control_expr.type);
     control_expr = try sema_expr.semaAddressOf(c, control_expr, control_borrow_t, block.expr);
@@ -184,6 +196,8 @@ pub fn semaSwitchExpr(c: *cy.Chunk, block: *ast.SwitchBlock, cstr: sema.Cstr) !s
 
     var info = try SwitchInfo.init(c, block.expr, control, true, cstr, @ptrCast(block));
     defer info.deinit(c.alloc);
+    info.control_parent = control_expr.recParentLocal();
+    info.control_owner = control_owner orelse info.control_parent;
 
     info.cond_local = (try sema_local.declareHiddenLocal(c, "_cond", c.sema.bool_t, null, @ptrCast(block))).id;
 
@@ -354,7 +368,7 @@ fn semaSwitchElseCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt) !*ir
     if (case.body_kind == .expr) {
         const body = case.body_data.expr;
         var expr = try c.semaExpr(body, info.opts);
-        info.borrow_owner = try sema_borrow.joinBranchOwner(c, info.borrow_owner, expr);
+        info.borrow_owner = try sema_borrow.joinCaseOwner(c, info.borrow_owner, expr, c.block().varStart, body);
         expr = try sema_move.semaOwn(c, expr, body);
 
         // Infer target type.
@@ -427,14 +441,22 @@ fn semaSwitchCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt, control:
             .idx = 1,
             .rec = control.ir,
         });
-        var capture = sema.ExprResult.init2(fieldLoc);
+        // The payload lives in the control, so a capture borrows from the owner of the control.
+        var capture = sema.ExprResult.initField(fieldLoc, info.control_parent);
         capture.addressable = true;
 
         switch (case.data.case.capture.?.type()) {
             .ident => {
                 const name = case.data.case.capture.?.cast(.ident).name.slice();
                 capture = try sema_expr.sema_copy(c, capture, case.data.case.capture.?);
-                _ = try sema_local.declareLocalInit(c, name, capture_t, capture, case.data.case.capture.?);
+                // A copy of a borrow payload points to what the control borrows, not into the control.
+                switch (capture.resType) {
+                    .value_field => capture.data.value_field.parent_local = info.control_owner,
+                    .value => capture.data.value.parent_local = info.control_owner,
+                    else => {},
+                }
+                const capture_v = try sema_local.declareLocalInit(c, name, capture_t, capture, case.data.case.capture.?);
+                try sema_borrow.bindCaptureLocal(c, capture_v.id, capture);
             },
             .borrow => {
                 const borrow = case.data.case.capture.?.cast(.borrow);
@@ -444,7 +466,8 @@ fn semaSwitchCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt, control:
                 const name = borrow.child.cast(.ident).name.slice();
                 const borrow_t = try sema.getBorrowType(c, capture_t);
                 capture = try sema_expr.semaAddressOf(c, capture, borrow_t, case.data.case.capture.?);
-                _ = try sema_local.declareLocalInit(c, name, borrow_t, capture, case.data.case.capture.?);
+                const capture_v = try sema_local.declareLocalInit(c, name, borrow_t, capture, case.data.case.capture.?);
+                try sema_borrow.bindCaptureLocal(c, capture_v.id, capture);
             },
             else => {
                 return c.reportError("Unsupported capture.", case.data.case.capture.?);
@@ -463,7 +486,7 @@ fn semaSwitchCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt, control:
         } else {
             body_expr = try c.semaExprCstr(body, info.opts.target_t.?);
         }
-        info.borrow_owner = try sema_borrow.joinBranchOwner(c, info.borrow_owner, body_expr);
+        info.borrow_owner = try sema_borrow.joinCaseOwner(c, info.borrow_owner, body_expr, c.block().varStart, body);
         body_expr = try sema_move.semaOwn(c, body_expr, body);
 
         // Assign to res.

@@ -81,6 +81,29 @@ pub fn joinBranchOwner(c: *cy.Chunk, cur: ?sema.LocalId, res: sema.ExprResult) !
     return shorterOwner(c, cur, owner);
 }
 
+/// `joinBranchOwner` for the body of a `switch` case. A borrow of a local of the case (`case .one |v| => &v`) ends
+/// with the case, so the result can not hold it.
+pub fn joinCaseOwner(c: *cy.Chunk, cur: ?sema.LocalId, res: sema.ExprResult, case_var_start: usize, node: *ast.Node) !?sema.LocalId {
+    if (res.type.info.borrow_only) {
+        if (borrowOwner(c, res)) |owner| {
+            if (owner >= case_var_start) {
+                const name = c.varStack.items[owner].name();
+                return c.reportErrorFmt("The result of `switch` can not outlive `{}`.", &.{v(name)}, node);
+            }
+        }
+    }
+    return joinBranchOwner(c, cur, res);
+}
+
+/// Records that the capture `var_idx` of a `switch` case holds the borrow `init` (the payload of the control or a
+/// borrow of it) until the case ends. The borrow owners that the branches of the `switch` note before it are kept.
+pub fn bindCaptureLocal(c: *cy.Chunk, var_idx: sema.LocalId, init: sema.ExprResult) !void {
+    const saved_start = c.borrow_pending_start;
+    c.borrow_pending_start = @intCast(c.borrow_pending.items.len);
+    defer c.borrow_pending_start = saved_start;
+    try bindBorrowLocal(c, var_idx, init);
+}
+
 fn addBorrowLoan(c: *cy.Chunk, local: sema.LocalId, owner: sema.LocalId, ex: bool) !void {
     if (owner == local or c.varStack.items[local].parent_local == owner) return;
     for (c.borrow_loans.items) |loan| {

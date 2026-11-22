@@ -3019,6 +3019,7 @@ type TraitStruct:
     vtable r64  -- Ptr[void]
     impl   r64  -- Ptr[void]
 
+--| Copies a value to the heap of thread `dst` (see `@sendable`). Runs on the thread that allocates.
 fn @send(dst Thread, src Ptr[%T]) -> T:
     @nop('@send: ' + type.name(T))
 
@@ -3027,25 +3028,50 @@ fn @send(dst Thread, src Ptr[%T]) -> T:
             #if meta.has_decl(T, '@send'):
                 return src.@send(dst)
             #else:
-                meta.error('Expected sendable: ' + type.name(T))
-                -- return @copyStruct(T, src)
-        #case .int:
-            return src.*
-        #case .raw:
-            return src.*
-        #case .bool:
-            return src.*
-        #case .float:
-            return src.*
-        #case .enum:
-            return src.*
-        #case .error:
-            return src.*
-        #else:
-            #if T == symbol:
-                return src.*
+                return @send_bytes(T, src)
+        #case .option |option_t|:
+            #if type.managed(T):
+                if meta.is_none(src):
+                    return none
+                else:
+                    payload := *meta.access_option_payload(src.*)
+                    return @send(dst, payload)
             #else:
-                meta.error('Expected sendable: ' + type.name(T))
+                return @send_bytes(T, src)
+        #case .result |result_t|:
+            #if type.managed(T):
+                if meta.is_result_error(src):
+                    return meta.access_result_error(src.*)
+                else:
+                    payload := *meta.access_result_payload(src.*)
+                    return @send(dst, payload)
+            #else:
+                return @send_bytes(T, src)
+        #else:
+            return @send_bytes(T, src)
+
+-- A value without references is sent as its bytes.
+fn @send_bytes(%T type, src Ptr[T]) -> T:
+    #if !type.managed(T) and type.is_copyable(T):
+        return src.*
+    #else:
+        meta.error('Expected sendable: ' + type.name(T))
+
+--| Whether `@send` can copy a value of `T` to another thread: a struct with a `@send` method, a value without
+--| references, or an option or a result whose payload can be sent.
+#[consteval]
+fn @sendable(T type) -> bool:
+    #switch type.info(T):
+        #case .struct:
+            #if meta.has_decl(T, '@send'):
+                return true
+        #case .option |option_t|:
+            #if type.managed(T):
+                return @sendable(option_t.child)
+        #case .result |result_t|:
+            #if type.managed(T):
+                return @sendable(result_t.child)
+    return !type.managed(T) and type.is_copyable(T)
 
 --| Generic copy for any type.
 --| Marked unsafe to allow copying borrow containers.
@@ -4616,25 +4642,14 @@ fn (&Future[]) await() -> T:
 -- A spawned thread is done and its result is still in its own heap. Copies it into this thread's heap:
 -- `@send` runs on this thread, so it allocates only in the heap of the thread that runs it.
 -- Then the spawned thread is freed.
--- Only a spawned thread's future gets here, and `spawn` takes only the results that this can copy
+-- Only a spawned thread's future gets here, and `spawn` takes only the results that `@send` can copy
 -- (`@check_sendable`). Other types keep `await` compiling for the futures that the host completes.
 fn (&Future[]) @receive():
     res := as[Ptr[T]] @thread_result(self.inner.shared_state)
-    #if type.managed(T):
-        #switch type.info(T):
-            #case .struct:
-                #if meta.has_decl(T, '@send'):
-                    self.inner.data = res.@send(@cur_thread())
-                #else:
-                    panic('Unexpected spawned result: ' + type.name(T))
-            #else:
-                panic('Unexpected spawned result: ' + type.name(T))
+    #if @sendable(T):
+        self.inner.data = @send(@cur_thread(), res)
     #else:
-        -- No references: the bytes are the value.
-        #if type.is_copyable(T):
-            self.inner.data = res.*
-        #else:
-            panic('Unexpected spawned result: ' + type.name(T))
+        panic('Unexpected spawned result: ' + type.name(T))
     self.inner.completed = true
     @thread_result_done(self.inner.shared_state)
 
@@ -5197,6 +5212,7 @@ fn @spawn(func funcptr_t[%Sig], args FnTuple[Sig]) -> Future[Sig.ret()]:
     #for 0..Sig.num_params() |i|:
         #param := Sig.param_at(i)
         #param_name := 'p' + EvalStr(i)
+        @check_sendable(param.type)
         @ptr_init(*meta.access(thread_args, param_name), @send(thread, *meta.access(args, param_name)))
 
     future := Future(Sig.ret())
@@ -5208,23 +5224,10 @@ fn @spawn(func funcptr_t[%Sig], args FnTuple[Sig]) -> Future[Sig.ret()]:
     @start_thread(thread, @thread_entry[Sig], @thread_drop[Sig], func, args_size, move thread_args, future.inner.shared_state, ret_size)
     return future
 
--- A spawned thread's result is copied by `Future.@receive`: the bytes of a value without references, or the
--- type's `@send`.
+-- The arguments of `spawn` and the result of the spawned function are copied by `@send`.
 fn @check_sendable(%T type):
-    #if type.managed(T):
-        #switch type.info(T):
-            #case .struct:
-                #if meta.has_decl(T, '@send'):
-                    pass
-                #else:
-                    meta.error('Expected sendable: ' + type.name(T))
-            #else:
-                meta.error('Expected sendable: ' + type.name(T))
-    #else:
-        #if type.is_copyable(T):
-            pass
-        #else:
-            meta.error('Expected sendable: ' + type.name(T))
+    #if !@sendable(T):
+        meta.error('Expected sendable: ' + type.name(T))
 
 #[bind]
 fn @new_shared_state() -> Ptr[byte]

@@ -638,6 +638,7 @@ if (!aot) {
         run.case("concurrency/spawn.cy");
         run.case("concurrency/spawn_send.cy");
         run.case("concurrency/spawn_drop.cy");
+        run.case("concurrency/spawn_send_option.cy");
     }
     run.case("concurrency/spawn_old_form_error.cy");
     run.case("concurrency/spawn_method_entry_error.cy");

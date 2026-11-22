@@ -75,6 +75,38 @@ VM 해제 때까지 남았다. 루프에서 future를 버리는 스크립트는 
 refcount 검사가 spawn된 스레드마다 drop 뒤 0을 확인한다). lib `Futures dropped without await free their spawned threads.`(같은
 VM에서 300개씩 버리는 eval 5회의 메모리 증가가 2 MiB 이하. 소유권 수정 전 약 12 MiB).
 
+## 인자와 결과의 같은 보내기 규칙 (option · result의 payload 보내기)
+
+배경: 위 결정 3 뒤에도 인자와 결과의 규칙이 달랐다. 결과는 `@check_sendable`(참조 없는 값은 바이트, 참조 있는 struct는
+`@send`)을 따랐고, 인자는 `@send`의 `#switch`를 그대로 따랐다. 남은 것에 적었던 "참조 있는 option · result 인자가 빈 본문으로
+컴파일된다"는 다시 재현해 보니 사실이 아니었다. 인자 쪽 `@send`의 `#else`가 'Expected sendable: ?str'로 막았다. 대신 반대
+방향으로 어긋났다. `?int` · `!int` · 참조 없는 `@send` 없는 struct(`Point{x, y int}`)는 결과로는 되고 인자로는
+'Expected sendable: ?int' · 'Expected sendable: Point' 컴파일 오류였다.
+
+결정: 컴파일 오류로 맞추지 않고, payload를 보낼 수 있는 `?T` · `!T`를 보낸다. 인자와 결과가 같은 규칙 하나를 쓴다.
+
+1. 규칙은 `core.cy`의 `#[consteval] fn @sendable(T type) -> bool` 하나다. `@send` 메서드가 있는 struct, 참조 없는 복사 가능 값
+   (`type.managed`가 거짓이고 `type.is_copyable`), 참조 있는 `?T` · `!T`는 `T`가 보낼 수 있을 때.
+2. `@send`가 이 규칙대로 복사한다. struct는 `@send` 메서드, 없으면 바이트. 참조 있는 option은 `none`이거나 payload의 `@send`,
+   result는 error 그대로이거나 payload의 `@send`. 나머지는 바이트(`@send_bytes`), 바이트로 못 보내면 'Expected sendable: <타입>'.
+   `@copy`의 option · result 갈래와 같은 모양이다.
+3. `@spawn`은 결과와 각 인자에 `@check_sendable`을 건다. 오류는 바깥 타입 이름으로 난다('Expected sendable: ?[]int').
+4. `Future.@receive`는 `#if @sendable(T)`일 때 `@send(@cur_thread(), res)`를 부른다. 받는 쪽도 같은 함수라 갈래를 따로 두지
+   않는다. `await`가 호스트 future에서도 인스턴스화되므로 규칙 밖의 타입은 전처럼 panic 한 줄로 컴파일된다.
+
+컴파일 오류로 맞추는 대신 보내기를 고른 이유. `?str` · `!str`은 spawn된 함수의 흔한 반환 타입이고(찾지 못함, 실패), payload의
+`@send`를 재귀로 부르는 것만으로 된다. 새 복사 경로가 생기지 않는다. 할당은 payload의 `@send`가 하고, 그것은 이미 받는 스레드에서
+돈다(인자는 아직 돌지 않는 새 스레드의 힙, 결과는 await하는 스레드). `docs.md` Sendable 절의 계획 목록에 있던
+"`?T` · `!T` if `T` is Sendable"이 이것이다. 인자에서 참조 없는 struct를 바이트로 받게 된 것은 결과 쪽과 같은 규칙을 쓴 결과다.
+`Ptr[T]`처럼 참조 없는 raw 값도 결과로는 이미 받았으므로 인자로도 받는다(raw 포인터는 `deny_raw_ptrs`로 막는 영역이다).
+
+`#[consteval]` 함수 안의 `#switch`에는 `#else: pass`를 쓸 수 없다('Inline eval: Unsupported passStmt.'). 갈래 없이 아래로
+떨어지게 쓴다.
+
+확인: behavior `concurrency/spawn_send_option.cy`(`?str` · `!str` 인자와 결과, `none` · error 값, `@send` 있는 struct의 option
+인자 · 결과, `??str`, 참조 없는 struct 인자, 버린 `?str` future). lib `A spawned function returns only what await can copy.`
+(`?[]int` 결과와 `![]int` 인자의 컴파일 오류, `?int` 인자와 `none`).
+
 ## 구현 메모
 
 - `src/sync.zig` `FutureSyncState`: `thread`, `result` · `result_len`, `drop_func` 필드와 상태 5. 상태 1(쓰는 중)은 쓰지 않는다.
@@ -90,9 +122,7 @@ VM에서 300개씩 버리는 eval 5회의 메모리 증가가 2 MiB 이하. 소�
 
 ## 남은 것
 
-- 인자 쪽 `@send`도 같은 `#switch`라 참조 있는 option · result 인자는 빈 본문으로 컴파일된다. 인자는 spawn하는 스레드에서
-  새 스레드(아직 돌지 않음)의 힙으로 복사하므로 경쟁은 없지만 값이 정의되지 않는다. `@check_sendable`을 인자에도 걸지는
-  따로 정한다.
+- (해결) 인자와 결과의 보내기 규칙이 달랐다. "인자와 결과의 같은 보내기 규칙" 절.
 - 아직 큐에 있는 작업의 future를 버려도 작업은 끝까지 돈다(결과는 곧 버려진다). 큐에서 빼거나 스레드 interrupt로 끊는 것은
   필요해지면 한다.
 - `VM.shared_states`는 VM 수명 동안 자란다(위 3).

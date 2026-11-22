@@ -635,16 +635,27 @@ test "A spawned function returns only what await can copy." {
     C.setSilent(true);
     defer C.setSilent(false);
     var res: C.EvalResult = undefined;
-    // The `@send` of an option fell through and handed back an undefined value.
+    // An option is sent only when its payload can be sent.
     try zt.eq(C.ErrorCompile, C.vm_eval(vm,
-        \\fn opt(n int) -> ?str:
-        \\  return 'a' + n.fmt()
+        \\fn opt(n int) -> ?[]int:
+        \\  return {n}
         \\_ = spawn opt(1)
     , &res));
     {
         const report = C.vm_error_summary(vm);
         defer C.vm_freeb(vm, report);
-        try zt.eq(true, std.mem.startsWith(u8, report, "CompileError: Expected sendable: ?str\n"));
+        try zt.eq(true, std.mem.startsWith(u8, report, "CompileError: Expected sendable: ?[]int\n"));
+    }
+    // The arguments follow the same rule as the result.
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\fn first(a ![]int) -> int:
+        \\  return 1
+        \\_ = spawn first([]int{1})
+    , &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try zt.eq(true, std.mem.startsWith(u8, report, "CompileError: Expected sendable: ![]int\n"));
     }
     try zt.eq(C.ErrorCompile, C.vm_eval(vm,
         \\type P:
@@ -670,6 +681,10 @@ test "A spawned function returns only what await can copy." {
         \\test.eq(symbol.up, spawn sym(1).await())
         \\test.eq(6, spawn res(3).await()!)
         \\test.eq(-7, spawn res(-1).await() !else -7)
+        \\fn twice(n ?int) -> int:
+        \\  return (n ?else 0) * 2
+        \\test.eq(8, spawn twice(4).await())
+        \\test.eq(0, spawn twice(none).await())
     , &res));
 }
 

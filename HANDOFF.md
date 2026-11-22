@@ -32,6 +32,8 @@
 - 2026-11-22(사용자: `/code-review high from 0.4.16 to head`와 "in tars-agent reports
   docs/requests/cyber-0.4.17-session-crash-after-slice-of-nocopy.md"): 요청서의 셋(세션 세그폴트, `[]T`의 `NoCopy` 원소 문구,
   빌린 값의 `for`)을 고쳤다. 이어서 리뷰 6건도 고쳤다("남은 작업"의 첫 항목).
+- 2026-11-22(사용자: "continue" 뒤 질문에 "빌림 검사의 남은 구멍"): 0.4.17 뒤 기능과 빌림 검사가 만나는 자리를 탐침해
+  갈래가 주는 빌림의 구멍(F-170)을 고쳤다.
 
 ## 현재 브랜치
 
@@ -134,6 +136,13 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - `for`는 빌림을 받으면 역참조한다(`sema_stmt.zig`의 `.for_iter_stmt`).
   - 재현 조건: 앞에 성공한 eval이 있는 세션이어야 한다. 첫 컴파일이 실패하면 VM이 리셋되어 보이지 않는다.
   - tars-agent: 요청서에 회신 절, `docs/TODO.md` 36행에 회신 요약(커밋함, push 안 함).
+
+- [x] 갈래가 주는 빌림의 주인(2026-11-22, F-170, 깨지는 변경: `-> !&T`에 `scope`). 결정 `project_borrow_model.md` "갈래가 주는
+  빌림", `unreleased.md` 같은 이름의 절.
+  - `sema_borrow.joinBranchOwner`를 `if` 식 · `switch` 식(`SwitchInfo.borrow_owner`) · `?else` · `!else`(블록 꼴 포함)에 쓴다.
+  - `bindBorrowLocal`이 빌림 지역에도 대여를 기록한다. `resolveResultType`이 `borrow_only` · `ex_borrow`를 전파한다. `!`는 새
+    결과의 빌림 payload에 결과의 주인을 넘긴다(전에는 블록 끝에서 panic).
+  - 저장소의 `.cy` 전부를 변경 전 · 후 CLI로 컴파일해 비교했다. 탐침 스크립트는 세션 scratchpad에만 있었다.
 
 ## 시도했으나 실패한 접근
 
@@ -289,7 +298,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-169까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-170까지, 열린 것 없음).
 
 ## 작업 방식
 

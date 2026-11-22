@@ -17,6 +17,7 @@ const sema_call = cy.sema_call;
 const sema_expr = cy.sema_expr;
 const sema_resolve = cy.sema_resolve;
 const sema_move = cy.sema_move;
+const sema_borrow = cy.sema_borrow;
 
 pub const SwitchInfo = struct {
     node: *ast.Node,
@@ -41,6 +42,9 @@ pub const SwitchInfo = struct {
     is_expr: bool,
 
     end_reachable: bool,
+
+    /// For a `switch` expression: the owner of a borrow result, joined over the cases (`sema_borrow.joinBranchOwner`).
+    borrow_owner: ?sema.LocalId = null,
 
     /// For a `switch` statement: the moves of outer locals by its cases.
     moves: ?*CaseMoves = null,
@@ -207,10 +211,9 @@ pub fn semaSwitchExpr(c: *cy.Chunk, block: *ast.SwitchBlock, cstr: sema.Cstr) !s
 
     const res = (try sema_expr.semaLocal(c, res_local.id, info.node)).ir;
     c.varStack.items[res_local.id].type = .dead;
-    // if (info.opts.target_t.?.id() == bt.Void) {
-    //     @panic("boom");
-    // }
-    return sema.ExprResult.initOwned(res);
+    var switch_res = sema.ExprResult.initOwned(res);
+    switch_res.data.value.parent_local = info.borrow_owner;
+    return switch_res;
 }
 
 /// Saves reference to the control local for unwrapping.
@@ -351,6 +354,7 @@ fn semaSwitchElseCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt) !*ir
     if (case.body_kind == .expr) {
         const body = case.body_data.expr;
         var expr = try c.semaExpr(body, info.opts);
+        info.borrow_owner = try sema_borrow.joinBranchOwner(c, info.borrow_owner, expr);
         expr = try sema_move.semaOwn(c, expr, body);
 
         // Infer target type.
@@ -459,6 +463,7 @@ fn semaSwitchCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt, control:
         } else {
             body_expr = try c.semaExprCstr(body, info.opts.target_t.?);
         }
+        info.borrow_owner = try sema_borrow.joinBranchOwner(c, info.borrow_owner, body_expr);
         body_expr = try sema_move.semaOwn(c, body_expr, body);
 
         // Assign to res.

@@ -998,10 +998,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                         c.varStack.items[res_local.id].inner.local.declIrStart.cast(.declare_local).decl_t = target_t;
                         c.varStack.items[res_local.id].decl_t = target_t;
                     }
-                    if (target_t.info.borrow_only) {
-                        try sema_borrow.noteBorrowOwner(c, sema_borrow.borrowOwner(c, body), body.type.info.ex_borrow);
-                        if_owner = sema_borrow.shorterOwner(c, if_owner, sema_borrow.borrowOwner(c, body));
-                    }
+                    if_owner = try sema_borrow.joinBranchOwner(c, if_owner, body);
                     body = try sema_move.semaOwn(c, body, if_expr.body);
                     _ = try c.ir.pushStmt(.set_local, if_expr.body, .{
                         .id = @intCast(res_local.ir_id),
@@ -1023,10 +1020,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                 c.semaBlocks.items[outer].move_branch = .branch;
                 c.semaBlocks.items[outer].moves_start = @intCast(else_moves_start);
                 var else_body = try c.semaExprCstr(if_expr.else_expr, target_t);
-                if (target_t.info.borrow_only) {
-                    try sema_borrow.noteBorrowOwner(c, sema_borrow.borrowOwner(c, else_body), else_body.type.info.ex_borrow);
-                    if_owner = sema_borrow.shorterOwner(c, if_owner, sema_borrow.borrowOwner(c, else_body));
-                }
+                if_owner = try sema_borrow.joinBranchOwner(c, if_owner, else_body);
                 else_body = try sema_move.semaOwn(c, else_body, if_expr.else_expr);
                 _ = try c.ir.pushStmt(.set_local, if_expr.else_expr, .{
                     .id = @intCast(res_local.ir_id),
@@ -1466,6 +1460,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
             const unwrap_res = node.cast(.unwrap_res);
             var res_expr = try c.sema_expr_cstr_template(unwrap_res.res, c.sema.result_tmpl);
             const owned = res_expr.owned;
+            // A borrow payload of a new result (`f(&a)!`) borrows from the owner of the result, not from the temp that
+            // holds it for the statement.
+            const borrow_owner = if (res_expr.type.info.borrow_only) sema_borrow.borrowOwner(c, res_expr) else null;
             res_expr = try sema_move.semaEnsureAddressable(c, res_expr, unwrap_res.res);
 
             const borrow_t = try sema.getBorrowType(c, res_expr.type);
@@ -1495,6 +1492,11 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                 unwrap.owned = true;
                 // The payload is a new value, not a place: a borrow (`==`, `for`) must give it a temp to release.
                 unwrap.addressable = false;
+                if (res_expr.type.info.borrow_only) {
+                    var payload = sema.ExprResult.initOwned(unwrap.ir);
+                    payload.data.value.parent_local = borrow_owner;
+                    return payload;
+                }
             }
             return unwrap;
         },
@@ -1503,6 +1505,8 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
 
             var res = try c.sema_expr_cstr_template(unwrap.res, c.sema.result_tmpl);
             const owned = res.owned;
+            // A borrow payload lives as long as the owner of the result or of the default, whichever goes first.
+            var owner = try sema_borrow.joinBranchOwner(c, null, res);
             res = try sema_move.semaEnsureAddressable(c, res, unwrap.res);
 
             const payload_t = res.type.cast(.result).child_t;
@@ -1516,6 +1520,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                 {
                     try checkElseDefaultPrec(c, "!else", unwrap.default, payload_t);
                     const else_body = try c.semaExprCstr(unwrap.default, payload_t);
+                    owner = try sema_borrow.joinBranchOwner(c, owner, else_body);
                     _ = try c.ir.pushStmt(.set_local, unwrap.default, .{
                         .id = @intCast(dst_local.ir_id),
                         .right = else_body.ir,
@@ -1542,13 +1547,16 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
 
             const ret = (try semaLocal(c, dst_local.id, node)).ir;
             c.varStack.items[dst_local.id].type = .dead;
-            return sema.ExprResult.initOwned(ret);
+            var unwrap_ret = sema.ExprResult.initOwned(ret);
+            unwrap_ret.data.value.parent_local = owner;
+            return unwrap_ret;
         },
         .unwrap_res_or_block => {
             const unwrap = node.cast(.unwrap_res_or_block);
 
             var res = try c.sema_expr_cstr_template(unwrap.res, c.sema.result_tmpl);
             const owned = res.owned;
+            const owner = try sema_borrow.joinBranchOwner(c, null, res);
             res = try sema_move.semaEnsureAddressable(c, res, unwrap.res);
 
             const payload_t = res.type.cast(.result).child_t;
@@ -1594,12 +1602,16 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
             c.varStack.items[dst_local.id].type = .local;
             const ret = (try semaLocal(c, dst_local.id, node)).ir;
             c.varStack.items[dst_local.id].type = .dead;
-            return sema.ExprResult.initOwned(ret);
+            var unwrap_ret = sema.ExprResult.initOwned(ret);
+            unwrap_ret.data.value.parent_local = owner;
+            return unwrap_ret;
         },
         .unwrap_or => {
             const unwrap = node.cast(.unwrap_or);
 
             var opt = try semaElseOption(c, unwrap.opt, unwrap.default);
+            // A borrow payload lives as long as the owner of the option or of the default, whichever goes first.
+            var owner = try sema_borrow.joinBranchOwner(c, null, opt);
             opt = try sema_stmt.semaElseOptionOwner(c, opt, unwrap.opt);
 
             const payload_t = opt.type.cast(.option).child_t;
@@ -1615,6 +1627,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                 // Else.
                 try checkElseDefaultPrec(c, "?else", unwrap.default, payload_t);
                 var else_body = try c.semaExprCstr(unwrap.default, payload_t);
+                owner = try sema_borrow.joinBranchOwner(c, owner, else_body);
                 else_body = try sema_move.semaOwn(c, else_body, unwrap.default);
                 _ = try c.ir.pushStmt(.set_local, unwrap.default, .{
                     .id = @intCast(res_local.ir_id),
@@ -1630,12 +1643,15 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
             const expr = (try semaLocal(c, res_local.id, node)).ir;
             // Move to return.
             c.varStack.items[res_local.id].type = .dead;
-            return sema.ExprResult.initOwned(expr);
+            var unwrap_ret = sema.ExprResult.initOwned(expr);
+            unwrap_ret.data.value.parent_local = owner;
+            return unwrap_ret;
         },
         .unwrap_or_block => {
             const unwrap = node.cast(.unwrap_or_block);
 
             var opt = try semaElseOption(c, unwrap.opt, null);
+            const owner = try sema_borrow.joinBranchOwner(c, null, opt);
             opt = try sema_stmt.semaElseOptionOwner(c, opt, unwrap.opt);
 
             const payload_t = opt.type.cast(.option).child_t;
@@ -1662,7 +1678,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
             c.varStack.items[res_local.id].type = .local;
             const res = (try semaLocal(c, res_local.id, node)).ir;
             c.varStack.items[res_local.id].type = .dead;
-            return sema.ExprResult.initOwned(res);
+            var unwrap_ret = sema.ExprResult.initOwned(res);
+            unwrap_ret.data.value.parent_local = owner;
+            return unwrap_ret;
         },
         .expand_lit => {
             const expand_lit = node.cast(.expand_lit);

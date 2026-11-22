@@ -71,6 +71,16 @@ pub fn noteBorrowOwner(c: *cy.Chunk, owner: ?sema.LocalId, ex: bool) !void {
     try c.borrow_pending.append(c.alloc, .{ .owner = o, .ex = ex });
 }
 
+/// The owner of a value that one of several branches gives (an `if` or `switch` expression, the two sides of `?else`
+/// and `!else`), joined with the owner `cur` of the branches before it. The result lives as long as the owner that goes
+/// out of scope first, and the other owners are loans of the local that the result is bound to.
+pub fn joinBranchOwner(c: *cy.Chunk, cur: ?sema.LocalId, res: sema.ExprResult) !?sema.LocalId {
+    if (!res.type.info.borrow_only) return cur;
+    const owner = borrowOwner(c, res);
+    try noteBorrowOwner(c, owner, res.type.info.ex_borrow);
+    return shorterOwner(c, cur, owner);
+}
+
 fn addBorrowLoan(c: *cy.Chunk, local: sema.LocalId, owner: sema.LocalId, ex: bool) !void {
     if (owner == local or c.varStack.items[local].parent_local == owner) return;
     for (c.borrow_loans.items) |loan| {
@@ -137,16 +147,15 @@ pub fn bindBorrowLocal(c: *cy.Chunk, var_idx: sema.LocalId, init: sema.ExprResul
     const owner = borrowOwner(c, init) orelse return;
     if (owner == var_idx) return;
     defer c.borrow_pending.items.len = c.borrow_pending_start;
-    if (!isBorrowLocal(c, var_idx)) {
-        // The other owners of a borrow container.
-        var i: usize = c.borrow_pending_start;
-        while (i < c.borrow_pending.items.len) : (i += 1) {
-            const p = c.borrow_pending.items[i];
-            if (p.owner >= c.varStack.items.len) continue;
-            const other = borrowOwnerOf(c, p.owner);
-            if (other == owner or other == var_idx) continue;
-            try addBorrowLoan(c, var_idx, other, p.ex);
-        }
+    // The other owners of a borrow container, or of a borrow that one of several branches gives
+    // (`if c: &x else &a[0]`).
+    var i: usize = c.borrow_pending_start;
+    while (i < c.borrow_pending.items.len) : (i += 1) {
+        const p = c.borrow_pending.items[i];
+        if (p.owner >= c.varStack.items.len) continue;
+        const other = borrowOwnerOf(c, p.owner);
+        if (other == owner or other == var_idx) continue;
+        try addBorrowLoan(c, var_idx, other, p.ex);
     }
     // A value that contains an exclusive borrow (`Holder{r=&&f}`, `?&&Foo`) keeps exclusive access like the borrow.
     const ex = decl_t.info.ex_borrow;

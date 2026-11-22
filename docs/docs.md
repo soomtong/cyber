@@ -905,7 +905,7 @@ var a ?str = 'abc'
 print(a)    --> abc
 ```
 
-An optional borrow `?&T` is a borrow container: like `&T` it can not be lifted with `^`, it is returned with a `scope` parameter and a `scope` return type, and a generator can not take it as a parameter.
+An optional borrow `?&T` is a borrow container: like `&T` it can not be lifted with `^`, it is returned with a `scope` parameter and a `scope` return type, and a generator can not take it as a parameter. A result `!&T` is the same.
 
 The option type's constructor can also wrap a value:
 ```cy
@@ -3193,7 +3193,9 @@ begin:
 --> error: `r` can not outlive `y`.
 ```
 
-The same holds when the value is wrapped in an option (`var o ?Ref`), comes from an `if` expression, or is assigned to a field or an element (`o.r = Ref{p=&y}`). A method can not store a borrow of one of its own locals behind a parameter: `self.r = Ref{p=&y}` is the compile error 'The value behind `self` can not outlive `y`.'
+The same holds when the value is wrapped in an option (`var o ?Ref`), comes from an `if` or `switch` expression or a `?else` or `!else` default, or is assigned to a field or an element (`o.r = Ref{p=&y}`). A method can not store a borrow of one of its own locals behind a parameter: `self.r = Ref{p=&y}` is the compile error 'The value behind `self` can not outlive `y`.'
+
+A borrow that can come from one of several branches (`if (c) &y else &a[0]`) borrows from the owner of each branch: `a` can not be modified while the borrow is in use.
 
 A borrow that is read through a borrow container (`&&r`, `&r.p`) can not outlive the container either, even when the local that the container borrows from lives longer.
 

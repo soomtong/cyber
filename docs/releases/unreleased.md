@@ -81,3 +81,18 @@
 `move_for_capture.cy` · `move_overload_undo.cy` · `move_overload_undo_loop_error.cy` · `slice_reuse_assign_jump.cy`, LSP 테스트
 'Inlay hints name the parameters at the arguments of a call.'
 
+## 갈래가 주는 빌림의 주인 (2026-11-22, 깨지는 변경)
+
+여러 갈래 중 하나가 빌림을 주는 식이 주인을 잃어, 빌린 배열을 키운 뒤 해제된 메모리를 읽었다. 0.4.17에도 있었다.
+
+- `switch` 식: `e := switch x: case 1 => &a[0] else => &a[1]` 뒤 `a << i`가 됐다. `&&a`를 주는 두 갈래는 배타 빌림 둘을 만들었고,
+  안쪽 블록 지역의 빌림을 바깥 변수에 넣을 수 있었다. 이제 `if` 식처럼 'Expected exclusive access. There is another active borrow
+  to `a`.', '`r` can not outlive `z`.'다.
+- `?else` · `!else`: 옵션 · 결과 쪽(`o ?else &y`, `o`가 `&a[0]`을 담음)과 기본값 쪽(`o ?else &a[0]`) 모두 주인을 센다.
+- 두 주인의 빌림: `e := if (c) &y else &a[0]`은 `y`만 셌다. 이제 둘 다 센다(`switch` 식 · `?else`도 같다).
+- `!&T`: 결과 타입이 빌림을 담은 것으로 셈해진다(`?&T`와 같다). `r := f(&a)`를 든 채 `a`를 키울 수 없다. `-> !&T`를 돌려주는 함수는
+  `scope`가 필요하다: 'Returning a borrow container requires a `scope` modifier.' `fn pick(scope p &int) -> scope !&int`로 적는다.
+- `e := f(&a)!`(`f`가 `scope !&int`)를 담은 블록이 끝날 때 컴파일러가 panic으로 죽던 것도 고쳤다.
+- 테스트 `memory/borrow_branch_owner.cy`와 `memory/borrow_switch_expr_*_error.cy` 등 오류 테스트 열 개. 결정
+  `project_borrow_model.md` "갈래가 주는 빌림", 발견 이슈 F-170.
+

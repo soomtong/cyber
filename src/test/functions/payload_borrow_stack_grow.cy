@@ -12,7 +12,7 @@ type Ref enum:
     case none
     case one &int
 
-fn pick(p &int) -> !&int:
+fn pick(scope p &int) -> scope !&int:
     return p
 
 x := 42

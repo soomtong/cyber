@@ -1247,6 +1247,9 @@ pub fn resolveResultType(c: *cy.Chunk, res_t: *cy.types.Result, decl: *ast.Node)
     res_t.cases_arr[1] = .{ .sym=null, .name_ptr="result", .name_len="result".len, .payload_t = res_t.child_t, .val = 1 };
 
     res_t.base.info.managed = has_managed_payload;
+    // `!&T` holds the borrow like `?&T` (`resolve_option_type`).
+    res_t.base.info.borrow_only = res_t.child_t.info.borrow_only;
+    res_t.base.info.ex_borrow = res_t.child_t.info.ex_borrow;
 
     try resolve_type_info2(c, &res_t.base.info, has_copy_payload, has_no_copy_payload);
 

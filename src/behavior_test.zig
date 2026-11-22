@@ -320,6 +320,17 @@ fn test_memory(run: *Runner) void {
     run.case("memory/borrow_store_outlive.cy");
     run.case("memory/borrow_option_outlive_error.cy");
     run.case("memory/borrow_if_expr_outlive_error.cy");
+    run.case("memory/borrow_branch_owner.cy");
+    run.case("memory/borrow_switch_expr_owner_error.cy");
+    run.case("memory/borrow_switch_expr_ex_error.cy");
+    run.case("memory/borrow_switch_expr_outlive_error.cy");
+    run.case("memory/borrow_else_default_owner_error.cy");
+    run.case("memory/borrow_else_option_owner_error.cy");
+    run.case("memory/borrow_res_else_owner_error.cy");
+    run.case("memory/borrow_if_expr_two_owners_error.cy");
+    run.case("memory/borrow_result_payload_error.cy");
+    run.case("memory/borrow_result_local_error.cy");
+    run.case("memory/return_borrow_result_scope_missing_error.cy");
     run.case("memory/borrow_field_outlive_error.cy");
     run.case("memory/borrow_param_field_outlive_error.cy");
     run.case("memory/closure_borrow_field_outlive_error.cy");

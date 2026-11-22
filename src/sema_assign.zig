@@ -493,8 +493,13 @@ pub fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *
                 return c.reportError("Expected pointer type.", ptr_n);
             }
             const expr = sema.Cstr.initRequire(child_t);
+            const right_val = try c.semaExprOrOpAssignBinExpr(right, expr, opts.rhsOpAssignBinExpr);
+            // A borrow that is stored behind a pointer or a borrow (`pp.* = &z`) is stored in the value that it points
+            // to, like a borrow that is stored in a field.
+            try sema_borrow.checkFieldBorrowOutlives(c, ptr, right_val, right);
+            try sema_borrow.addFieldBorrowLoan(c, ptr, right_val);
             // A local on the right is borrowed: own a copy, or the local and the target release one value twice.
-            const right_res = try sema_move.semaOwn(c, try c.semaExprOrOpAssignBinExpr(right, expr, opts.rhsOpAssignBinExpr), right);
+            const right_res = try sema_move.semaOwn(c, right_val, right);
 
             if (child_t.isManaged()) {
                 try sema_borrow.checkWriteAccess(c, ptr, node);

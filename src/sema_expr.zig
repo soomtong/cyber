@@ -2253,11 +2253,11 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: sema.Cstr) !sema.ExprRe
                 else => {},
             }
 
-            // Look for sym under child type's module.
-            const childTypeSym = child.type.sym();
-            const sym = try c.getResolvedSymOrFail(@ptrCast(childTypeSym), unary.op.name(), node);
+            // Look for sym under child type's module, or under the type that a borrow or a reference points to.
+            try checkRefUnaryOperand(c, child.type, unary, node);
+            const sym = try c.accessResolvedSymOrFail(child.type, unary.op.name(), node);
             const func_sym = try sema_call.requireFuncSym(c, sym, node);
-            return c.semaCallFuncSym1(func_sym, unary.child, child, node);
+            return c.semaCallFuncSymRec(func_sym, unary.child, child, &.{}, false, node);
         },
         .lnot => {
             const child = try c.semaExprTarget(unary.child, expr.target_t);
@@ -2273,9 +2273,9 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: sema.Cstr) !sema.ExprRe
                 else => {},
             }
 
-            // Look for sym under child type's module.
-            const childTypeSym = child.type.sym();
-            const sym = (try c.getResolvedSym(@ptrCast(childTypeSym), unary.op.name(), node)) orelse {
+            // Look for sym under child type's module, or under the type that a borrow or a reference points to.
+            try checkRefUnaryOperand(c, child.type, unary, node);
+            const sym = (try c.accessResolvedSym(child.type, unary.op.name(), node)) orelse {
                 const type_name = try c.sema.allocTypeName(child.type);
                 defer c.alloc.free(type_name);
                 const hint: []const u8 = switch (child.type.kind()) {
@@ -2286,7 +2286,7 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: sema.Cstr) !sema.ExprRe
                 return c.reportErrorFmt("`not` takes a `bool`. Found `{}`.{}", &.{v(type_name), v(hint)}, node);
             };
             const func_sym = try sema_call.requireFuncSym(c, sym, node);
-            return c.semaCallFuncSym1(func_sym, unary.child, child, node);
+            return c.semaCallFuncSymRec(func_sym, unary.child, child, &.{}, false, node);
         },
         .bitwiseNot => {
             // Only an int or raw target reaches the operand. Another target (float) would convert
@@ -2316,14 +2316,33 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: sema.Cstr) !sema.ExprRe
                 else => {},
             }
 
-            // Look for sym under child type's module.
-            const childTypeSym = child.type.sym();
-            const sym = try c.getResolvedSymOrFail(@ptrCast(childTypeSym), unary.op.name(), node);
+            // Look for sym under child type's module, or under the type that a borrow or a reference points to.
+            try checkRefUnaryOperand(c, child.type, unary, node);
+            const sym = try c.accessResolvedSymOrFail(child.type, unary.op.name(), node);
             const func_sym = try sema_call.requireFuncSym(c, sym, node);
-            return c.semaCallFuncSym1(func_sym, unary.child, child, node);
+            return c.semaCallFuncSymRec(func_sym, unary.child, child, &.{}, false, node);
         },
         else => return c.reportErrorFmt("Unsupported unary op: {}", &.{v(unary.op)}, node),
     }
+}
+
+/// `-n` or `not b` where `n` is a `&int` or `b` is a `^bool`: the operator is on the value it points to, as for a
+/// binary operator (`checkRefOperand`). Without this the lookup found the reserved `int.-`.
+fn checkRefUnaryOperand(c: *cy.Chunk, child_t: *cy.Type, unary: *ast.Unary, node: *ast.Node) !void {
+    if (child_t.kind() == .pointer and !child_t.isRefPointer()) return;
+    const pointee_t = child_t.getRefLikeChild() orelse return;
+    switch (pointee_t.kind()) {
+        .int, .raw, .float => {},
+        else => if (pointee_t.id() != bt.Bool) return,
+    }
+    const name = try c.sema.allocTypeName(child_t);
+    defer c.alloc.free(name);
+    const child_s = c.nodeString(unary.child);
+    const op_s: []const u8 = if (unary.op == .lnot) "not" else unary.op.name();
+    const sep: []const u8 = if (unary.op == .lnot) " " else "";
+    return c.reportErrorFmt("Can not use `{}` on `{}`. Dereference it first: `{}{}{}.*`.", &.{
+        v(op_s), v(name), v(op_s), v(sep), v(child_s),
+    }, node);
 }
 
 pub fn sema_bin_expr3(c: *cy.Chunk, left: sema.ExprResult, left_n: *ast.Node, right: sema.ExprResult, right_n: *ast.Node, op: cy.BinaryExprOp, node: *ast.Node) !sema.ExprResult {

@@ -209,6 +209,8 @@ fn test_functions(run: *Runner) void {
     run.case("functions/main_func_top_stmt_error.cy");
     run.case("functions/@init.cy");
     run.case("functions/overload.cy");
+    run.case("functions/unary_op_borrow_receiver.cy");
+    run.case("functions/unary_op_ex_borrow_error.cy");
     run.case("functions/read_capture_local_error.cy");
     run.case("functions/capture_non_ref_error.cy");
     run.case("functions/static.cy");
@@ -777,6 +779,8 @@ fn test_vars(run: *Runner) void {
     run.case("vars/ref_slice_insert_error.cy");
     run.case("vars/op_assign_ref_int_error.cy");
     run.case("vars/ref_operand_error.cy");
+    run.case("vars/ref_unary_operand_error.cy");
+    run.case("vars/ref_unary_not_error.cy");
     run.case("vars/read_undeclared_error.cy");
     run.case("vars/read_undeclared_diff_scope_error.cy");
     run.case("vars/read_outside_if_var_error.cy");

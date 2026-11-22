@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 const stdx = @import("stdx");
 const t = stdx.testing;
 const cy = @import("cyber.zig");
-const os = @import("std/os.zig");
 
 const log = cy.log.scoped(.fmt);
 
@@ -406,30 +405,20 @@ pub fn printStderr(fmt: []const u8, vals: []const FmtValue) void {
     };
 }
 
-pub const StderrWriter = if (!cy.isWasmFreestanding) std.Io.File.Writer else HostFileWriter;
+pub const StderrWriter = std.Io.File.Writer;
 
 pub fn lockStderrWriter() StderrWriter {
-    if (!cy.isWasmFreestanding) {
-        printMutex.lockUncancelable(stdx.io());
-        return std.Io.File.stderr().writer(stdx.io(), &.{});
-    } else {
-        return HostFileWriter{ .fid = 2 };
-    }
+    printMutex.lockUncancelable(stdx.io());
+    return std.Io.File.stderr().writer(stdx.io(), &.{});
 }
 
 pub fn lockStdoutWriter() StderrWriter {
-    if (!cy.isWasmFreestanding) {
-        printMutex.lockUncancelable(stdx.io());
-        return std.Io.File.stdout().writer(stdx.io(), &.{});
-    } else {
-        return HostFileWriter{ .fid = 1 };
-    }
+    printMutex.lockUncancelable(stdx.io());
+    return std.Io.File.stdout().writer(stdx.io(), &.{});
 }
 
 pub fn unlockPrint() void {
-    if (!cy.isWasmFreestanding) {
-        printMutex.unlock(stdx.io());
-    }
+    printMutex.unlock(stdx.io());
 }
 
 pub fn printStderrOrErr(fmt: []const u8, vals: []const FmtValue) !void {
@@ -438,44 +427,6 @@ pub fn printStderrOrErr(fmt: []const u8, vals: []const FmtValue) !void {
     defer unlockPrint();
     try format(&w.interface, fmt, vals);
 }
-
-const HostFileWriter = struct {
-    fid: u32,
-
-    pub const Error = error{};
-
-    pub fn writeByte(self: HostFileWriter, byte: u8) Error!void {
-        os.hostFileWrite(self.fid, @ptrCast(&byte), 1);
-    }
-
-    pub fn writeAll(self: HostFileWriter, data: []const u8) Error!void {
-        os.hostFileWrite(self.fid, data.ptr, data.len);
-    }
-
-    pub fn write(self: HostFileWriter, data: []const u8) Error!u64 {
-        os.hostFileWrite(self.fid, data.ptr, data.len);
-        return data.len;
-    }
-
-    pub fn writeByteNTimes(self: HostFileWriter, byte: u8, n: usize) Error!void {
-        var bytes: [256]u8 = undefined;
-        @memset(bytes[0..], byte);
-
-        var remaining = n;
-        while (remaining > 0) {
-            const to_write = @min(remaining, bytes.len);
-            try self.writeAll(bytes[0..to_write]);
-            remaining -= to_write;
-        }
-    }
-
-    pub fn writeBytesNTimes(self: HostFileWriter, bytes: []const u8, n: usize) anyerror!void {
-        var i: usize = 0;
-        while (i < n) : (i += 1) {
-            try self.writeAll(bytes);
-        }
-    }
-};
 
 pub const Repeat = struct {
     s: []const u8,

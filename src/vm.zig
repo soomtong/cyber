@@ -669,7 +669,7 @@ pub const VM = struct {
             return self.finishExec(val);
         } else {
             defer res.aot.deinit(self.alloc);
-            if (cy.isFreestanding or cy.isWasm or !cy.hasCLI) {
+            if (cy.isWasm or !cy.hasCLI) {
                 return error.Unsupported;
             }
 
@@ -1368,15 +1368,7 @@ fn z_panic_unexpected_choice(t: *cy.Thread, exp: i64, act: i64) callconv(.c) voi
     t.log_tracev("{s}", .{msg});
 }
 
-fn c_pow(b: f64, e: f64) callconv(.c) f64 {
-    return std.math.pow(f64, b, e);
-}
-
 comptime {
-    if (cy.isWasmFreestanding and build_config.vmEngine == .c) {
-        @export(&c_pow, .{ .name = "pow", .linkage = .strong });
-    }
-
     @export(&zAwait, .{ .name = "zAwait", .linkage = .strong });
     @export(&zFiberAwaitReady, .{ .name = "zFiberAwaitReady", .linkage = .strong });
     @export(&zFiberSetOwner, .{ .name = "zFiberSetOwner", .linkage = .strong });

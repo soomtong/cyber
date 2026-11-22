@@ -4,8 +4,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const is_freestanding = builtin.os.tag == .freestanding;
-
 pub const testing = @import("testing.zig");
 
 pub const time = @import("time.zig");
@@ -22,12 +20,7 @@ pub const debug = @import("debug.zig");
 /// process environment. `std.Io.Threaded.global_single_threaded` has a failing allocator
 /// and an empty environment, so child processes could not be spawned through it and
 /// would inherit no environment variables.
-///
-/// wasm32-freestanding has no OS for `Threaded` to build on (no paths, no poll, no processes), so it
-/// gets `std.Io.failing`: an uncontended mutex still works there, files and processes fail with an error.
-/// The host provides the clock (`time_wasm.zig`) and the output (`fmt.HostFileWriter`) itself.
 pub fn io() std.Io {
-    if (is_freestanding) return std.Io.failing;
     if (threaded_state.load(.acquire) != threaded_ready) initThreadedOnce();
     return threaded.io();
 }

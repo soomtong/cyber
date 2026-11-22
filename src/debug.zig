@@ -1116,7 +1116,7 @@ fn write_hash_map(vm: *cy.VM, w: *std.Io.Writer, instance: *cy.Instance, type_: 
     try w.writeByte('}');
 }
 
-const EnableTimerTrace = builtin.target.os.tag != .freestanding and builtin.mode == .debug;
+const EnableTimerTrace = builtin.mode == .debug;
 
 const TimerTrace = struct {
     timer: if (EnableTimerTrace) stdx.time.Timer else void,

@@ -67,7 +67,7 @@ pub fn build(b: *std.Build) !void {
         break :b false;
     };
     threads = b.option(bool, "threads", "Enable threads.") orelse b: {
-        if (target.cpu.arch.isWasm() and (target.os.tag == .freestanding or target.os.tag == .wasi)) {
+        if (target.os.tag == .wasi) {
             break :b false;
         }
         break :b true;

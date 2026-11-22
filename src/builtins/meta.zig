@@ -23,8 +23,6 @@ const ast = cy.ast;
 const cte = cy.cte;
 const Value = cy.Value;
 const TypeValue = cy.TypeValue;
-const is_wasm = builtin.target.cpu.arch.isWasm();
-const is_wasm_freestanding = is_wasm and builtin.target.os.tag == .freestanding;
 
 const Src = @embedFile("meta.cy");
 
@@ -576,9 +574,6 @@ pub fn full_version(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
 }
 
 pub fn load_(c: *cy.Chunk, cx: *cy.ConstEvalContext) !cy.TypeValue {
-    if (is_wasm_freestanding) {
-        return c.reportError("Unsupported.", cx.node);
-    }
     const path = cx.args[0].asString();
     defer c.heap.release(cx.args[0]);
 
@@ -667,7 +662,6 @@ pub const SystemKind = enum {
     linux,
     macos,
     windows,
-    freestanding,
     wasi,
 };
 

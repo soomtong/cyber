@@ -56,8 +56,8 @@ zig build lib -Doptimize=ReleaseSafe
 # For cross platform build. eg. Host: Linux x64, Target: MacOS arm64
 zig build lib -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none
 
-# For Web/WASM.
-zig build lib -Doptimize=ReleaseSafe -Dtarget=wasm32-freestanding
+# For WASM. The browser runs it through a WASI host (see `examples/web-playground/wasi.js`).
+zig build lib -Doptimize=ReleaseSafe -Dtarget=wasm32-wasi
 ```
 
 You'll find the resulting static library in `./zig-out/lib`. It can also be configured to output a shared library instead.

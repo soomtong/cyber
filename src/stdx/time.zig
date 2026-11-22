@@ -2,20 +2,15 @@ const std = @import("std");
 const builtin = @import("builtin");
 const stdx = @import("stdx.zig");
 
-const time_wasm = @import("time_wasm.zig");
-const IsWasm = builtin.target.cpu.arch.isWasm() and builtin.target.os.tag != .wasi;
-
-pub const Timer = if (IsWasm) time_wasm.Timer else NativeTimer;
-
 /// Same surface as the `std.time.Timer` that Zig 0.16 removed.
-const NativeTimer = struct {
+pub const Timer = struct {
     start_ts: std.Io.Timestamp,
 
-    pub fn start() !NativeTimer {
+    pub fn start() !Timer {
         return .{ .start_ts = .now(stdx.io(), .awake) };
     }
 
-    pub fn read(self: NativeTimer) u64 {
+    pub fn read(self: Timer) u64 {
         return @intCast(self.start_ts.untilNow(stdx.io(), .awake).toNanoseconds());
     }
 };
@@ -37,9 +32,5 @@ pub const Duration = struct {
 };
 
 pub fn getMilliTimestamp() i64 {
-    if (IsWasm) {
-        return time_wasm.getMilliTimestamp();
-    } else {
-        return std.time.milliTimestamp();
-    }
+    return std.time.milliTimestamp();
 }

@@ -13,7 +13,6 @@ const NullId = std.math.maxInt(u32);
 const vmc = @import("vmc");
 const malloc = build_config.malloc;
 const is_wasm = builtin.target.cpu.arch.isWasm();
-const is_wasm_freestanding = is_wasm and builtin.target.os.tag == .freestanding;
 const mi = @import("mimalloc");
 
 pub const Src = @embedFile("std/cli.cy");
@@ -199,10 +198,6 @@ pub fn loader(vm_: ?*C.VM, mod_: ?*C.Sym, spec_: C.Bytes, res: [*c]C.LoaderResul
             .manage_src = false,
         };
         return true;
-    }
-
-    if (is_wasm_freestanding) {
-        return false;
     }
 
     // Load from file or http.
@@ -709,10 +704,9 @@ pub fn zErrFunc(comptime f: fn (t: *C.Thread) anyerror!C.Ret) C.BindFunc {
     };
 }
 
-pub const isFreestanding = builtin.target.os.tag == .freestanding;
 
 pub fn prepPanicZError(t: *C.Thread, err: anyerror, optTrace: ?*std.lang.StackTrace) C.Ret {
-    if (!isFreestanding and C.verbose()) {
+    if (C.verbose()) {
         std.debug.print("{}", .{err});
         if (optTrace) |trace_| {
             std.debug.dumpErrorReturnTrace(trace_);

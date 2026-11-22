@@ -8,10 +8,6 @@ const C = @import("../capi.zig");
 
 const Src = @embedFile("time.cy");
 
-/// wasm without WASI has no clock of its own: the host provides `hostMilliTimestamp` (see `stdx/time_wasm.zig`),
-/// which serves both clocks at millisecond resolution.
-const is_wasm_freestanding = builtin.target.cpu.arch.isWasm() and builtin.target.os.tag != .wasi;
-
 comptime {
     @export(&bind, .{ .name = "cl_mod_bind_time", .linkage = .strong });
 }
@@ -35,9 +31,6 @@ const funcs = [_]struct { []const u8, C.BindFunc }{
 };
 
 fn clockNs(clock: std.Io.Clock) i64 {
-    if (is_wasm_freestanding) {
-        return stdx.time.getMilliTimestamp() * std.time.ns_per_ms;
-    }
     const ns = std.Io.Timestamp.now(stdx.io(), clock).toNanoseconds();
     return std.math.cast(i64, ns) orelse if (ns < 0) std.math.minInt(i64) else std.math.maxInt(i64);
 }

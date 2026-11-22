@@ -1,10 +1,8 @@
 const std = @import("std");
 const stdx = @import("stdx");
 const cy = @import("cyber.zig");
-pub const wasm = @import("log_wasm.zig");
 const builtin = @import("builtin");
 
-const UseStd = !builtin.target.isWasm() or builtin.target.os.tag == .wasi;
 const UseTimer = builtin.mode == .debug and false;
 
 var timer: ?stdx.time.Timer = null;
@@ -65,7 +63,7 @@ pub fn scoped(comptime Scope: @EnumLiteral()) type {
 
 const c = @import("capi.zig");
 
-const default = if (UseStd) std.log.default else wasm.scoped(.default);
+const default = std.log.default;
 
 pub fn debug(comptime format: []const u8, args: anytype) void {
     default.info(format, args);

@@ -224,9 +224,7 @@ pub const ByteCodeBuffer = struct {
 };
 
 fn printStderr(comptime format: []const u8, args: anytype) void {
-    if (!cy.isWasmFreestanding) {
-        std.debug.print(format, args);
-    }
+    std.debug.print(format, args);
 }
 
 const DumpInstOptions = struct {

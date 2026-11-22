@@ -123,8 +123,6 @@ fn _args(t: *C.Thread) !C.Ret {
     return C.RetOk;
 }
 
-extern fn hostSleep(secs: u64, nsecs: u64) void;
-
 pub fn openLib(t: *C.Thread) anyerror!C.Ret {
     // if (!cy.hasFFI) return t.ret_panic("Unsupported.");
 
@@ -134,8 +132,6 @@ pub fn openLib(t: *C.Thread) anyerror!C.Ret {
     // return @call(.never_inline, ffi.ffiBindLib, .{t, config, ret});
     return C.thread_ret_panic(t, "TODO");
 }
-
-pub extern fn hostFileWrite(fid: u32, str: [*]const u8, strLen: usize) void;
 
 fn cacheUrl(t: *C.Thread) anyerror!C.Ret {
     // if (is_wasm) return t.ret_panic("Unsupported.");
@@ -249,8 +245,6 @@ pub fn fetchUrl(t: *C.Thread) anyerror!C.Ret {
 
     return C.RetOk;
 }
-
-extern fn hostFetchUrl(url: [*]const u8, urlLen: usize) void;
 
 /// `std.DynLib` wraps libc's `dlopen` handle only when it links a dynamic libc. A static musl build
 /// gets `ElfDynLib`, which has no handle, so `RTLD_DEEPBIND` applies only to the libc case.

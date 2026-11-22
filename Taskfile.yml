@@ -106,12 +106,6 @@ tasks:
       - task: lib
         vars: { OPT: ReleaseSafe, TARGET: '{{.TARGET}}', CLI_ARGS: '{{.CLI_ARGS}}' }
 
-  lib:wasm:
-    desc: 'Build libcyber for the browser (wasm32-freestanding, ReleaseSafe).'
-    cmds:
-      - task: lib
-        vars: { OPT: ReleaseSafe, TARGET: wasm32-freestanding, CLI_ARGS: '{{.CLI_ARGS}}' }
-
   cross:
     desc: 'Cross compile the CLI in ReleaseSafe. Usage: task cross TARGET=aarch64-linux-gnu'
     requires:

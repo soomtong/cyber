@@ -4885,7 +4885,6 @@ type SystemKind enum:
     case linux
     case macos
     case windows
-    case freestanding
     case wasi
 
 #[bind] type VaList[T Any] _

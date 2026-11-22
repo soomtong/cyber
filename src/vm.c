@@ -7,7 +7,7 @@
 // #include <stdio.h>
 #include "vm.h"
 
-// NOTE: Don't depend on libc that is not available in wasm-freestanding.
+// NOTE: Don't depend on libc that is not available in wasi-libc (wasm32-wasi).
 
 #define TRACE_DUMP_OPS 0
 #define TRACE_DUMP_NOP 0

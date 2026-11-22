@@ -110,9 +110,7 @@ pub const getInstLenAt = bytecode.getInstLenAt;
 
 pub const simd = @import("simd.zig");
 
-pub const isFreestanding = builtin.target.os.tag == .freestanding;
 pub const isWasm = builtin.target.cpu.arch.isWasm();
-pub const isWasmFreestanding = isWasm and builtin.target.os.tag == .freestanding;
 pub const is32Bit = build_config.is32Bit;
 pub const hasStdFiles = !isWasm;
 pub const hasCYC = build_config.cyc;

@@ -455,7 +455,7 @@ pub fn zErrFunc2(comptime f: fn (t: *cy.Thread) anyerror!C.Ret, comptime eval_f:
 }
 
 pub fn prepPanicZError(t: *cy.Thread, err: anyerror, optTrace: ?*std.lang.StackTrace) C.Ret {
-    if (!cy.isFreestanding and C.verbose()) {
+    if (C.verbose()) {
         logger.tracev("{}", .{err});
         if (optTrace) |trace| {
             std.debug.dumpErrorReturnTrace(trace);

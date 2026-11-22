@@ -76,7 +76,6 @@ jobs:
           "x86_64-selinux-gnu": "cyber-selinux-x64.tar.gz",
           "x86_64-macos-none": "cyber-macos-x64.tar.gz",
           "aarch64-macos-none": "cyber-macos-arm64.tar.gz",
-          "wasm32-freestanding": "cyber-web.wasm",
           "wasm32-wasi": "cyber-wasi.wasm"
         }')[matrix.config.target] }}
       ZIG_TARGET_FLAG: >-
@@ -87,7 +86,6 @@ jobs:
           "x86_64-selinux-gnu": "-Dtarget=x86_64-linux-gnu -Dcpu=baseline -Dselinux",
           "x86_64-macos-none": "-Dtarget=x86_64-macos-none -Dcpu=baseline",
           "aarch64-macos-none": "-Dtarget=aarch64-macos-none -Dcpu=baseline",
-          "wasm32-freestanding": "-Dtarget=wasm32-freestanding",
           "wasm32-wasi": "-Dtarget=wasm32-wasi"
         }')[matrix.config.target] }}
       BUILD_HOST: ${{ matrix.config.host }}
@@ -120,7 +118,7 @@ jobs:
           wget -c https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-x86_64-linux-${{ env.ZIG_VERSION }}.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin
 
       - name: Install wasm3.
-        if: env.BUILD_HOST == 'ubuntu-24.04' && (env.BUILD_TARGET == 'wasm32-freestanding' || env.BUILD_TARGET == 'wasm32-wasi')
+        if: env.BUILD_HOST == 'ubuntu-24.04' && env.BUILD_TARGET == 'wasm32-wasi'
         run: |
           git clone --depth=1 https://github.com/wasm3/wasm3.git
           cd wasm3
@@ -248,10 +246,8 @@ jobs:
           zig build test ${{ env.ZIG_TARGET_FLAG }} ${{ env.DEV_FLAG }} -Doptimize=ReleaseFast
 
       - name: Run tests.
-        if: env.BUILD_TARGET == 'wasm32-freestanding' || env.BUILD_TARGET == 'wasm32-wasi'
+        if: env.BUILD_TARGET == 'wasm32-wasi'
         run: |
-          # No matrix job builds wasm32-freestanding (the web library), so this checks that it still compiles.
-          zig build lib -Doptimize=ReleaseSafe -Dtarget=wasm32-freestanding ${{ env.DEV_FLAG }}
           zig build build-test -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe ${{ env.DEV_FLAG }}
           wasm3/build/wasm3 zig-out/bin/lib_test.wasm
           wasm3/build/wasm3 zig-out/bin/cli_test.wasm

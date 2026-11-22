@@ -86,9 +86,9 @@ pub fn utf8CharSliceAt(str: []const u8, idx: usize) ?[]const u8 {
 }
 
 /// `out_bad_byte` can be used to determine if it's an ascii string.
-pub fn ustringSeekByRuneIndex(str: []const u8, byte_idx: u32, rune_idx: u32, target_rune_idx: u32, out_bad_byte: *bool) !usize {
+pub fn ustringSeekByRuneIndex(str: []const u8, byte_idx: usize, rune_idx: usize, target_rune_idx: usize, out_bad_byte: *bool) !usize {
     var i: usize = 0;
-    var curCharIdx: u32 = 0;
+    var curCharIdx: usize = 0;
     var bad_byte = false;
     if (target_rune_idx >= rune_idx) {
         i = byte_idx;
@@ -567,6 +567,30 @@ fn indexOfNewLineCpu(buf: []const u8) ?usize {
     return null;
 }
 
+test "prepReplacement records usize idxes." {
+    const alloc = std.testing.allocator;
+    var idxes: std.ArrayList(usize) = .empty;
+    defer idxes.deinit(alloc);
+    const src = "a--b--c";
+    const new_len = try prepReplacement(alloc, src, "--", "+", &idxes);
+    try std.testing.expectEqual(5, new_len);
+    try std.testing.expectEqualSlices(usize, &.{ 1, 4 }, idxes.items);
+    var dst: [5]u8 = undefined;
+    replaceAtIdxes(&dst, src, 2, "+", idxes.items);
+    try std.testing.expectEqualStrings("a+b+c", &dst);
+}
+
+test "ustringSeekByRuneIndex takes usize indexes." {
+    var bad_byte: bool = undefined;
+    const s = "a\u{e9}b";
+    try std.testing.expectEqual(0, try ustringSeekByRuneIndex(s, 0, 0, 0, &bad_byte));
+    try std.testing.expectEqual(3, try ustringSeekByRuneIndex(s, 0, 0, 2, &bad_byte));
+    try std.testing.expectEqual(4, try ustringSeekByRuneIndex(s, 0, 0, 3, &bad_byte));
+    try std.testing.expectError(error.OutOfBounds, ustringSeekByRuneIndex(s, 0, 0, 4, &bad_byte));
+    // An index past `u32` gives an error, not a cast abort.
+    try std.testing.expectError(error.OutOfBounds, ustringSeekByRuneIndex(s, 0, 0, 1 << 33, &bad_byte));
+}
+
 test "string.indexOf matches std.mem.find." {
     const find = struct {
         fn check(str: []const u8, needle: []const u8) !void {
@@ -666,7 +690,8 @@ pub fn indexOfNewLine(buf: []const u8) ?usize {
 }
 
 /// Like std.mem.replacementSize but also records the idxes.
-pub fn prepReplacement(str: []const u8, needle: []const u8, replacement: []const u8, idxesWriter: anytype) !usize {
+/// The idxes are `usize`, so a string past 4 GB works.
+pub fn prepReplacement(alloc: std.mem.Allocator, str: []const u8, needle: []const u8, replacement: []const u8, idxes: *std.ArrayList(usize)) !usize {
     if (needle.len == 0) {
         return str.len;
     }
@@ -675,7 +700,7 @@ pub fn prepReplacement(str: []const u8, needle: []const u8, replacement: []const
     while (i < str.len) {
         if (std.mem.startsWith(u8, str[i..], needle)) {
             size = size - needle.len + replacement.len;
-            _ = try idxesWriter.write(std.mem.asBytes(&@as(u32, @intCast(i))));
+            try idxes.append(alloc, i);
             i += needle.len;
         } else {
             i += 1;
@@ -684,7 +709,7 @@ pub fn prepReplacement(str: []const u8, needle: []const u8, replacement: []const
     return size;
 }
 
-pub fn replaceAtIdxes(dst: []u8, src: []const u8, needleLen: u32, replacement: []const u8, idxes: []const u32) void {
+pub fn replaceAtIdxes(dst: []u8, src: []const u8, needleLen: usize, replacement: []const u8, idxes: []const usize) void {
     var dstIdx: usize = 0;
     var srcIdx: usize = 0;
     for (idxes) |idx| {

@@ -2049,16 +2049,16 @@ fn str_index_any_byte(t: *cy.Thread) !C.Ret {
         }
     } else {
         // Slow check against every byte.
-        var minIndex: u32 = cy.NullId;
+        var minIndex: ?usize = null;
         for (set) |byte| {
-            if (cy.string.indexOfChar(slice, byte)) |idx| {
-                if (idx < minIndex) {
-                    minIndex = @intCast(idx);
-                }
+            // Only the bytes before the best hit so far need a search.
+            const end = minIndex orelse slice.len;
+            if (cy.string.indexOfChar(slice[0..end], byte)) |idx| {
+                minIndex = idx;
             }
         }
-        if (minIndex != cy.NullId) {
-            ret.* = cy.value.Option(i64).some(@intCast(minIndex));
+        if (minIndex) |idx| {
+            ret.* = cy.value.Option(i64).some(@intCast(idx));
             return C.RetOk;
         }
     }

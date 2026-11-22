@@ -159,4 +159,10 @@ t.eq(str.is_utf8([]byte{0xf0, 0x9f, 0xa6, 0x8a}.span()), true)
 t.eq(str.is_utf8([]byte{0xc0, 0x80}.span()), false)
 t.eq(str([]byte{0xff, 0x61}).len(), 2)
 
+-- index_any with a set that has a byte of 128 or more searches each byte and keeps the first hit.
+t.eq(4, 'abc🦊xyz🐶'.index_any({0x9f, 'z'}).?)
+t.eq(8, 'abc🦊xyz🐶'.index_any({'z', 'y'}).?)
+t.eq(0, 'abc🦊xyz🐶'.index_any({0xf0, 'a'}).?)
+t.eq(?int(none), 'abc'.index_any({0xf0, 'q'}))
+
 --cytest: pass

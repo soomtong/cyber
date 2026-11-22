@@ -98,7 +98,8 @@ pub fn sliceFn(t: *cy.Thread) callconv(.c) Ret {
     const str = obj.slice();
     const buf = obj.buf;
 
-    const start: usize = @intCast(t.param(u64));
+    // A negative index arrives as a large `u64`. The cast checks it before `usize` on a 32-bit target.
+    const start = std.math.cast(usize, t.param(u64)) orelse return t.ret_panic("OutOfBounds");
     const end = str.len;
     if (start > end) {
         return t.ret_panic("OutOfBounds");
@@ -107,19 +108,17 @@ pub fn sliceFn(t: *cy.Thread) callconv(.c) Ret {
         return t.ret_panic("OutOfBounds");
     }
 
-    const ustart: u32 = @intCast(start);
-    const uend: u32 = @intCast(end);
     if (obj.ascii()) {
         t.heap.retainObjectOpt(@ptrCast(buf));
-        ret.* = try t.heap.init_astr_slice(str[ustart..uend], buf);
+        ret.* = try t.heap.init_astr_slice(str[start..end], buf);
         return RetOk;
     } else {
         t.heap.retainObjectOpt(@ptrCast(buf));
-        if (cy.string.isAstring(str[ustart..uend])) {
-            ret.* = try t.heap.init_astr_slice(str[ustart..uend], buf);
+        if (cy.string.isAstring(str[start..end])) {
+            ret.* = try t.heap.init_astr_slice(str[start..end], buf);
             return RetOk;
         } else {
-            ret.* = try t.heap.init_ustr_slice(str[ustart..uend], buf);
+            ret.* = try t.heap.init_ustr_slice(str[start..end], buf);
             return RetOk;
         }
     }
@@ -131,8 +130,9 @@ pub fn slice2(t: *cy.Thread) callconv(.c) Ret {
     const str = obj.slice();
     const buf = obj.buf;
 
-    const start: usize = @intCast(t.param(u64));
-    const end: usize = @intCast(t.param(u64));
+    // A negative index arrives as a large `u64`. The cast checks it before `usize` on a 32-bit target.
+    const start = std.math.cast(usize, t.param(u64)) orelse return t.ret_panic("OutOfBounds");
+    const end = std.math.cast(usize, t.param(u64)) orelse return t.ret_panic("OutOfBounds");
     if (start > str.len) {
         return t.ret_panic("OutOfBounds");
     }
@@ -143,19 +143,17 @@ pub fn slice2(t: *cy.Thread) callconv(.c) Ret {
         return t.ret_panic("OutOfBounds");
     }
 
-    const ustart: u32 = @intCast(start);
-    const uend: u32 = @intCast(end);
     if (obj.ascii()) {
         t.heap.retainObjectOpt(@ptrCast(buf));
-        ret.* = try t.heap.init_astr_slice(str[ustart..uend], buf);
+        ret.* = try t.heap.init_astr_slice(str[start..end], buf);
         return RetOk;
     } else {
         t.heap.retainObjectOpt(@ptrCast(buf));
-        if (cy.string.isAstring(str[ustart..uend])) {
-            ret.* = try t.heap.init_astr_slice(str[ustart..uend], buf);
+        if (cy.string.isAstring(str[start..end])) {
+            ret.* = try t.heap.init_astr_slice(str[start..end], buf);
             return RetOk;
         } else {
-            ret.* = try t.heap.init_ustr_slice(str[ustart..uend], buf);
+            ret.* = try t.heap.init_ustr_slice(str[start..end], buf);
             return RetOk;
         }
     }
@@ -187,7 +185,7 @@ pub fn insertFn(t: *cy.Thread) anyerror!Ret {
     if (idx < 0 or idx > str.len) {
         return error.OutOfBounds;
     }
-    const uidx: u32 = @intCast(idx);
+    const uidx: usize = @intCast(idx);
     if (obj.ascii()) {
         if (insert.ascii()) {
             ret.* = try t.heap.init_astr_concat3(str[0..uidx], insert.slice(), str[uidx..]);
@@ -440,7 +438,7 @@ pub fn seek_pos(t: *cy.Thread) anyerror!Ret {
         ret.* = idx;
         return RetOk;
     } else {
-        const uidx: u32 = @intCast(idx);
+        const uidx: usize = @intCast(idx);
         var bad_byte: bool = undefined;
         const start = string.ustringSeekByRuneIndex(str, 0, 0, uidx, &bad_byte) catch {
             return t.ret_panic_fmt("Out of bounds rune index: {}", &.{cy.fmt.v(idx)});
@@ -463,7 +461,7 @@ pub fn rune_at(t: *cy.Thread) anyerror!Ret {
         ret.* = @intCast(str[@intCast(idx)]);
         return RetOk;
     } else {
-        const uidx: u32 = @intCast(idx);
+        const uidx: usize = @intCast(idx);
         const rune_len = std.unicode.utf8ByteSequenceLength(str[uidx]) catch {
             ret.* = @intCast(std.unicode.replacement_character);
             return RetOk;
@@ -490,7 +488,7 @@ pub fn runeStrAt(t: *cy.Thread) anyerror!Ret {
     if (idx < 0 or idx >= str.len) {
         return t.ret_panic("OutOfBounds");
     }
-    const uidx: u32 = @intCast(idx);
+    const uidx: usize = @intCast(idx);
     if (obj.ascii()) {
         // TODO: return slice.
         ret.* = try t.heap.init_astr(str[uidx..uidx + 1]);
@@ -547,22 +545,19 @@ fn astringReplace(t: *cy.Thread, str: []const u8, needlev: cy.heap.Str, replacev
     const needle = needlev.slice();
     const replacement = replacev.slice();
 
-    var buf: std.array_list.Aligned(u8, .@"4") = .empty;
-    defer buf.deinit(t.alloc);
-    const newLen = try string.prepReplacement(str, needle, replacement, stdx.listWriter(&buf, t.alloc));
-    const numIdxes = buf.items.len / 4;
-    if (numIdxes > 0) {
+    var idxes: std.ArrayList(usize) = .empty;
+    defer idxes.deinit(t.alloc);
+    const newLen = try string.prepReplacement(t.alloc, str, needle, replacement, &idxes);
+    if (idxes.items.len > 0) {
         if (replacev.ascii()) {
             const new = try t.heap.init_astr_undef(newLen);
             const newBuf = new.mutSlice();
-            const idxes = @as([*]const u32, @ptrCast(buf.items.ptr))[0..numIdxes];
-            string.replaceAtIdxes(newBuf, str, @intCast(needle.len), replacement, idxes);
+            string.replaceAtIdxes(newBuf, str, needle.len, replacement, idxes.items);
             return new;
         } else {
             const new = try t.heap.init_ustr_undef(newLen);
             const newBuf = new.mutSlice();
-            const idxes = @as([*]const u32, @ptrCast(buf.items.ptr))[0..numIdxes];
-            string.replaceAtIdxes(newBuf, str, @intCast(needle.len), replacement, idxes);
+            string.replaceAtIdxes(newBuf, str, needle.len, replacement, idxes.items);
             return new;
         }
     } else {
@@ -574,15 +569,13 @@ fn ustringReplace(t: *cy.Thread, str: []const u8, needlev: cy.heap.Str, replacev
     const needle = needlev.slice();
     const replacement = replacev.slice();
 
-    var buf: std.array_list.Aligned(u8, .@"4") = .empty;
-    defer buf.deinit(t.alloc);
-    const newLen = try string.prepReplacement(str, needle, replacement, stdx.listWriter(&buf, t.alloc));
-    const numIdxes = buf.items.len / 4;
-    if (numIdxes > 0) {
+    var idxes: std.ArrayList(usize) = .empty;
+    defer idxes.deinit(t.alloc);
+    const newLen = try string.prepReplacement(t.alloc, str, needle, replacement, &idxes);
+    if (idxes.items.len > 0) {
         const new = try t.heap.init_ustr_undef(newLen);
         const newBuf = new.mutSlice();
-        const idxes = @as([*]const u32, @ptrCast(buf.items.ptr))[0..numIdxes];
-        cy.string.replaceAtIdxes(newBuf, str, @intCast(needle.len), replacement, idxes);
+        cy.string.replaceAtIdxes(newBuf, str, needle.len, replacement, idxes.items);
         return new;
     } else {
         return null;

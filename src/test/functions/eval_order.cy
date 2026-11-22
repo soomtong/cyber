@@ -138,4 +138,88 @@ log = ^ArrayStore[str]{}
 test.eq(getf(log)(sayr(log, 2)!), 3)
 test.eq(joined(log), 'fr2')
 
+-- Compound assignment evaluates the receiver and the index of its left side once, before the right side.
+fn key(log ^ArrayStore[str], s str) -> str:
+    log << 'key-%{s}'
+    return s
+fn geta(log ^ArrayStore[str], a ^[]int) -> ^[]int:
+    log << 'g'
+    return a
+fn getr(log ^ArrayStore[str], scope p &P) -> scope &P:
+    log << 'g'
+    return p
+fn getm(log ^ArrayStore[str], m ^Map[str, int]) -> ^Map[str, int]:
+    log << 'm'
+    return m
+fn ptr(log ^ArrayStore[str], p ^int) -> ^int:
+    log << 'p'
+    return p
+type Box:
+    xs []int
+fn mkbox(log ^ArrayStore[str]) -> Box:
+    log << 'box'
+    return Box{xs=[]int{1, 2}}
+
+log = ^ArrayStore[str]{}
+ia := []int{10, 20, 30}
+ia[say(log, 1)] += say(log, 2)
+test.eq(ia[1], 22)
+test.eq(joined(log), 'say1say2')
+log = ^ArrayStore[str]{}
+ha := ^[]int{1, 2, 3}
+geta(log, ha)[say(log, 1)] += 1
+test.eq(ha[1], 3)
+test.eq(joined(log), 'gsay1')
+log = ^ArrayStore[str]{}
+pa := P{a=1, b=2}
+getr(log, &pa).a += 5
+test.eq(pa.a, 6)
+test.eq(joined(log), 'g')
+-- Map key, and a map from a call (`@index` and `@set_index`).
+log = ^ArrayStore[str]{}
+ms := Map[str, int]{}
+ms['a'] = 1
+ms[key(log, 'a')] += 10
+test.eq(ms['a'], 11)
+test.eq(joined(log), 'key-a')
+log = ^ArrayStore[str]{}
+hm := ^Map[str, int]{}
+hm['a'] = 2
+getm(log, hm)[key(log, 'a')] *= 3
+test.eq(hm['a'], 6)
+test.eq(joined(log), 'mkey-a')
+-- Nested index, a field of an element, a dereference.
+log = ^ArrayStore[str]{}
+grid := [][]int{[]int{1, 2}, []int{3, 4}}
+grid[say(log, 1)][say(log, 0)] += 100
+test.eq(grid[1][0], 103)
+test.eq(joined(log), 'say1say0')
+log = ^ArrayStore[str]{}
+ps := []P{P{a=1, b=2}, P{a=3, b=4}}
+ps[say(log, 1)].b -= 1
+test.eq(ps[1].b, 3)
+test.eq(joined(log), 'say1')
+log = ^ArrayStore[str]{}
+hn := ^int(5)
+ptr(log, hn).* += say(log, 2)
+test.eq(hn.*, 7)
+test.eq(joined(log), 'psay2')
+-- Other operators and a managed element.
+log = ^ArrayStore[str]{}
+bits := []int{1, 2}
+bits[say(log, 0)] ||= 6
+bits[say(log, 1)] <<= say(log, 3)
+test.eq(bits[0], 7)
+test.eq(bits[1], 16)
+test.eq(joined(log), 'say0say1say3')
+log = ^ArrayStore[str]{}
+ss := []str{'a', 'b'}
+ss[say(log, 1)] += 'c'
+test.eq(ss[1], 'bc')
+test.eq(joined(log), 'say1')
+-- An owned receiver is held for the statement and destructed after it.
+log = ^ArrayStore[str]{}
+mkbox(log).xs[say(log, 0)] += 1
+test.eq(joined(log), 'boxsay0')
+
 --cytest: pass

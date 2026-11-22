@@ -582,6 +582,9 @@ pub fn sema_copy(c: *cy.Chunk, expr: sema.ExprResult, node: *ast.Node) anyerror!
 
 /// Skips emitting IR for a sym.
 pub fn semaExprSkipSym(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) !sema.ExprResult {
+    if (c.place_subst.items.len > 0) {
+        if (try cy.sema_assign.semaPlaceSubst(c, node)) |res| return res;
+    }
     switch (node.type()) {
         .group => {
             const child_n = node.cast(.group).child;
@@ -790,6 +793,10 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
     }
 
     c.curNode = node;
+
+    if (c.place_subst.items.len > 0) {
+        if (try cy.sema_assign.semaPlaceSubst(c, node)) |res| return res;
+    }
 
     if (node.type() == .lambda_cont_expr) {
         c.cur_cont_expr = node.cast(.lambda_cont_expr);

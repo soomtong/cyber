@@ -147,6 +147,10 @@ pub const Chunk = struct {
     /// See `sema_move.seqFlush`.
     seq_pending: std.ArrayList(cy.sema_move.SeqEntry) = .empty,
 
+    /// Parts of the left side of `x op= y` that were evaluated once into hidden locals. Sema of such a node reads
+    /// its local. See `sema_assign.stabilizeOpAssignLeft`.
+    place_subst: std.ArrayList(cy.sema_assign.PlaceSubst) = .empty,
+
     /// Owners that the borrow values of the current statement borrow from (`sema_borrow.noteBorrowOwner`). A local that is
     /// bound in the statement takes those that are not its `parent_local` as loans.
     borrow_pending: std.ArrayList(cy.sema.BorrowOwner) = .empty,
@@ -409,6 +413,7 @@ pub const Chunk = struct {
         self.blockJumpStack.deinit(self.alloc);
         self.varShadowStack.deinit(self.alloc);
         self.seq_pending.deinit(self.alloc);
+        self.place_subst.deinit(self.alloc);
         self.borrow_pending.deinit(self.alloc);
         self.borrow_loans.deinit(self.alloc);
         self.moved_sites.deinit(self.alloc);

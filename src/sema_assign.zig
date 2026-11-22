@@ -307,6 +307,86 @@ fn semaAssignToGlobal(c: *cy.Chunk, left: sema.ExprResult, left_n: *ast.Node, ri
     }
 }
 
+/// A node of the left side of `x op= y` whose value is held in the hidden local `id` for the statement.
+pub const PlaceSubst = struct {
+    node: *ast.Node,
+    id: sema.LocalId,
+};
+
+/// Sema of a node that `stabilizeOpAssignLeft` evaluated reads its local.
+pub fn semaPlaceSubst(c: *cy.Chunk, node: *ast.Node) !?sema.ExprResult {
+    var i = c.place_subst.items.len;
+    while (i > 0) {
+        i -= 1;
+        const e = c.place_subst.items[i];
+        if (e.node == node) return try sema_expr.semaLocal(c, e.id, node);
+    }
+    return null;
+}
+
+/// `x op= y` is `x = x op y`, and the left side is analyzed twice: once to read and once to write. A receiver or an
+/// index that can have a side effect (`f()[g()] += 1`, `get(p).a += 1`, `ptr().* += 1`) is evaluated once, before the
+/// right side, into a hidden local, and both analyses read the local. A variable, a field path, a constant and an
+/// operator expression of those are analyzed twice as before, so `x += 1` and `a[i] += 1` keep their IR.
+fn stabilizeOpAssignLeft(c: *cy.Chunk, node: *ast.Node, top: bool) !void {
+    switch (node.type()) {
+        .ident, .at_lit => {},
+        .group => try stabilizeOpAssignLeft(c, node.cast(.group).child, top),
+        .accessExpr => try stabilizeOpAssignLeft(c, node.cast(.accessExpr).left, false),
+        .deref => try stabilizeOpAssignLeft(c, node.cast(.deref).left, false),
+        .index_expr => {
+            const index = node.cast(.index_expr);
+            try stabilizeOpAssignLeft(c, index.left, false);
+            if (index.args.len == 1) {
+                const arg = index.args.ptr[0];
+                if (arg.type() != .range and !isPureOperand(arg)) {
+                    try holdOperand(c, arg);
+                }
+            }
+        },
+        .callExpr => {
+            const call = node.cast(.callExpr);
+            if (top) {
+                // `meta.access(rec, name) op= y`.
+                if (call.args.len == 2) try stabilizeOpAssignLeft(c, call.args.ptr[0], false);
+                return;
+            }
+            try holdOperand(c, node);
+        },
+        else => {
+            if (!isPureOperand(node)) try holdOperand(c, node);
+        },
+    }
+}
+
+/// An operand that can be evaluated twice: it has no side effect and evaluates to the same value.
+fn isPureOperand(node: *ast.Node) bool {
+    return switch (node.type()) {
+        .ident, .at_lit, .binLit, .decLit, .hexLit, .octLit, .floatLit, .trueLit, .falseLit, .noneLit, .void_lit,
+        .string_lit, .raw_string_lit, .sq_string_lit, .string_multi_lit, .raw_string_multi_lit, .sq_string_multi_lit,
+        .dot_lit, .error_lit => true,
+        .group => isPureOperand(node.cast(.group).child),
+        .accessExpr => isPureOperand(node.cast(.accessExpr).left),
+        .unary_expr => isPureOperand(node.cast(.unary_expr).child),
+        .binExpr => isPureOperand(node.cast(.binExpr).left) and isPureOperand(node.cast(.binExpr).right),
+        else => false,
+    };
+}
+
+/// Evaluates `node` into a hidden local that lives until the statement ends.
+fn holdOperand(c: *cy.Chunk, node: *ast.Node) !void {
+    const res = try c.semaExprSkipSym(node, .{});
+    if (res.resType != .value) return;
+    // A place is read again like a variable.
+    if (res.addressable) return;
+    if (res.type.kind() == .void or res.type.kind() == .never) return;
+    // A managed value that is not owned has no local to own it.
+    if (res.type.isManaged() and !res.owned) return;
+    const temp = try sema_local.declareHiddenLocal(c, "_place", res.type, res, node);
+    c.varStack.items[temp.id].lifetime = .initTemp();
+    try c.place_subst.append(c.alloc, .{ .node = node, .id = temp.id });
+}
+
 const AssignOptions = struct {
     rhsOpAssignBinExpr: bool = false,
 };
@@ -314,15 +394,17 @@ const AssignOptions = struct {
 /// Pass rightId explicitly to perform custom sema on op assign rhs.
 pub fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.Node, opts: AssignOptions) !void {
     var var_start = c.varStack.items.len;
+    const subst_start = c.place_subst.items.len;
+    defer c.place_subst.items.len = subst_start;
+    if (opts.rhsOpAssignBinExpr) {
+        try stabilizeOpAssignLeft(c, left_n, true);
+    }
     switch (left_n.type()) {
         .index_expr => {
             const left = left_n.cast(.index_expr);
             if (left.args.len != 1) {
                 return c.reportErrorFmt("Unsupported array expr.", &.{}, left_n);
             }
-            const rec = try c.semaExpr(left.left, .{});
-            _ = rec;
-
             var final_right = right;
             if (opts.rhsOpAssignBinExpr) {
                 // Push bin expr.

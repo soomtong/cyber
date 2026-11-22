@@ -199,6 +199,14 @@ pub fn addFieldBorrowLoan(c: *cy.Chunk, left: sema.ExprResult, right: sema.ExprR
         target = if (root.borrow_via != cy.NullId) root.borrow_via else root.parent_local;
     }
     try addBorrowLoan(c, target, owner, right.type.info.ex_borrow);
+    // The other owners of a borrow that one of several branches gives (`h.r = if c: &y else &a[0]`), or of a borrow
+    // container.
+    for (c.borrow_pending.items[c.borrow_pending_start..]) |p| {
+        if (p.owner >= c.varStack.items.len) continue;
+        const other = borrowOwnerOf(c, p.owner);
+        if (other == owner) continue;
+        try addBorrowLoan(c, target, other, p.ex);
+    }
 }
 
 /// Records that the local `var_idx` holds the borrow `init` until it goes out of scope.

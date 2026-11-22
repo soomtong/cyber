@@ -322,6 +322,11 @@ fn test_memory(run: *Runner) void {
     run.case("memory/borrow_if_expr_outlive_error.cy");
     run.case("memory/borrow_branch_owner.cy");
     run.case("memory/borrow_switch_expr_owner_error.cy");
+    run.case("memory/borrow_branch_store.cy");
+    run.case("memory/borrow_branch_field_error.cy");
+    run.case("memory/borrow_branch_elem_error.cy");
+    run.case("memory/borrow_branch_arg_error.cy");
+    run.case("memory/borrow_branch_arg_ex_error.cy");
     run.case("memory/borrow_switch_capture.cy");
     run.case("memory/borrow_switch_capture_local_error.cy");
     run.case("memory/borrow_switch_capture_owner_error.cy");

@@ -648,12 +648,19 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         if (arg_ex_via[i]) |via| {
             try sema_borrow.checkExclusiveBorrowOfField(c, via, arg_ex_field[i], false, arg_nodes[i]);
         }
+        // Each argument borrows its owner and the other owners that it notes (`if c: &y else &a[0]`).
         const owner = arg_owners[i] orelse continue;
-        for (0..arg_idx) |j| {
-            if (j == i) continue;
-            if (arg_owners[j] == owner) {
-                const name = c.varStack.items[owner].name();
-                return c.reportErrorFmt("Cannot pass an exclusive borrow of `{}` with another argument that borrows `{}`.", &.{v(name), v(name)}, arg_nodes[i]);
+        var k: u32 = arg_pending_start[i];
+        var cur: ?sema.LocalId = owner;
+        while (cur) |o| : ({
+            cur = nextArgOwner(c, arg_pending_end[i], &k);
+        }) {
+            for (0..arg_idx) |j| {
+                if (j == i) continue;
+                if (argBorrowsOwner(c, arg_owners[j], arg_pending_start[j], arg_pending_end[j], o)) {
+                    const name = c.varStack.items[o].name();
+                    return c.reportErrorFmt("Cannot pass an exclusive borrow of `{}` with another argument that borrows `{}`.", &.{v(name), v(name)}, arg_nodes[i]);
+                }
             }
         }
     }
@@ -674,6 +681,26 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
     return .{
         .ret_parent_scope_local = ret_parent_scope_local,
     };
+}
+
+/// The next other owner that an argument notes in `Chunk.borrow_pending`, from `k` up to `end`.
+fn nextArgOwner(c: *cy.Chunk, end: u32, k: *u32) ?sema.LocalId {
+    while (k.* < end) {
+        const p = c.borrow_pending.items[k.*];
+        k.* += 1;
+        if (p.owner < c.varStack.items.len) return sema_borrow.borrowOwnerOf(c, p.owner);
+    }
+    return null;
+}
+
+/// Whether an argument with the owner `first` and the other owners in `borrow_pending[start..end]` borrows `owner`.
+fn argBorrowsOwner(c: *cy.Chunk, first: ?sema.LocalId, start: u32, end: u32, owner: sema.LocalId) bool {
+    var cur = first orelse return false;
+    var k = start;
+    while (true) {
+        if (cur == owner) return true;
+        cur = nextArgOwner(c, end, &k) orelse return false;
+    }
 }
 
 /// Whether the receiver of this call is the one that `sema_move.takeGlobal` took a place for.

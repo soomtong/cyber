@@ -69,6 +69,10 @@ pub fn resolve_custom_type(c: *cy.Chunk, decl: *ast.CustomTypeDecl, opt_variant:
 
     const type_sym = try c.createTypeSym(&src_c.sym.head, decl_name, null, @ptrCast(decl));
     type_sym.instance = opt_variant;
+    if (opt_variant) |variant| {
+        // An error from the type loader names the instance in its trace, so the sym is set before the loader runs.
+        variant.data.sym.sym = &type_sym.head;
+    }
 
     try sema_resolve.pushSymResolveContext(c, @ptrCast(type_sym), null);
     defer sema_resolve.popResolveContext(c);

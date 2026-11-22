@@ -408,6 +408,8 @@ fn test_memory(run: *Runner) void {
 fn test_types(run: *Runner) void {
     run.case("types/cast.cy");
     run.case("types/cast_error.cy");
+    run.case("types/int_unsupported_bits_error.cy");
+    run.case("types/float_unsupported_bits_error.cy");
     // // Failed to cast to abstract type at runtime.
     // try eval(.{ .silent = true },
     //     \\let a = 123
@@ -562,6 +564,7 @@ fn test_meta(run: *Runner) void {
     run.case("meta/ct_if.cy");
     run.case("meta/ct_op_assign.cy");
     run.case("meta/ct_vector_index_error.cy");
+    run.case("meta/meta_eval_error.cy");
     run.case("meta/get_panic.cy"); 
     run.case("meta/get_set.cy"); 
     run.case("meta/init_record.cy"); 

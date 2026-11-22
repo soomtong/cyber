@@ -447,9 +447,8 @@ pub fn enum_case(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
 }
 
 pub fn eval(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
-    _ = c;
-    _ = ctx;
-    @panic("TODO");
+    // Not implemented. Aborted the host before.
+    return c.reportError("`meta.eval` is not supported yet. Use the compile-time expression `#{}`.", ctx.node);
 }
 
 pub fn error_(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
@@ -853,7 +852,7 @@ pub fn type_init(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     switch (res) {
         .capture,
         .local => {
-            @panic("Unexpected.");
+            return c.reportErrorFmt("Expected type, found the local `{}`.", &.{v(name)}, ctx.node);
         },
         .static => |sym| {
             // if (sym.type == .const_) {

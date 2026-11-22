@@ -50,7 +50,9 @@ fn getDynLib(vm: *cy.VM, c: *cy.Chunk) !*dynlib.DynLib {
     if (c.bind_lib) |path| {
         var final_path: C.Bytes = undefined;
         if (!vm.compiler.dl_resolver.?(@ptrCast(vm), C.to_bytes(path), &final_path)) {
-            @panic("Failed to load dynamic library.");
+            // A host resolver that refuses the path. Aborted the host before.
+            std.debug.print("{s}\nCannot resolve {s}.\n", .{ c.srcUri, path });
+            return error.FileNotFound;
         }
         defer C.vm_freeb(@ptrCast(vm), C.from_bytes(final_path));
         lib.* = os.dlopen(C.from_bytes(final_path)) catch |err| {

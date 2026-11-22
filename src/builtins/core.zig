@@ -651,6 +651,12 @@ fn createPtrType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Ty
     return @ptrCast(new_t);
 }
 
+/// A compile error for a bit size that has no builtin type. Aborted the host before.
+fn unsupportedBits(c: *cy.Chunk, instance: *cy.Instance, comptime name: []const u8, comptime expected: []const u8, bits: i64) ?*C.Type {
+    const err = c.reportErrorFmt("Unsupported bit size `{}` for `" ++ name ++ "`. Expected " ++ expected ++ ".", &.{v(bits)}, instance.siteIn(c.compiler));
+    return cy.compiler.failCreateType(c, err);
+}
+
 fn createRawType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Type {
     _ = vm;
     _ = decl;
@@ -665,9 +671,7 @@ fn createRawType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Ty
         32 => bt.R32,
         16 => bt.R16,
         8  => bt.R8,
-        else => {
-            std.debug.panic("Unsupported. `{}` bits is not supported for `Byte`.", .{bits});
-        },
+        else => return unsupportedBits(c, instance, "Raw", "8, 16, 32 or 64", bits),
     };
     const new_t = c.sema.createTypeWithId(.raw, type_id, .{ .bits = @intCast(bits), .distinct = false }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
@@ -705,9 +709,7 @@ fn createIntType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.Ty
         32 => bt.I32,
         16 => bt.I16,
         8  => bt.I8,
-        else => {
-            std.debug.panic("Unsupported. `{}` bits is not supported for `Int`.", .{bits});
-        },
+        else => return unsupportedBits(c, instance, "Int", "8, 16, 32 or 64", bits),
     };
     const new_t = c.sema.createTypeWithId(.int, type_id, .{ .bits = @intCast(bits) }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);
@@ -758,9 +760,7 @@ fn createFloatType(vm: ?*C.VM, c_mod: ?*C.Sym, decl: ?*C.Node) callconv(.c) ?*C.
     const type_id = switch (bits) {
         64 => bt.F64,
         32 => bt.F32,
-        else => {
-            std.debug.panic("Unsupported. `{}` bits is not supported for `Float`.", .{bits});
-        },
+        else => return unsupportedBits(c, instance, "Float", "32 or 64", bits),
     };
     const new_t = c.sema.createTypeWithId(.float, type_id, .{ .bits = @intCast(bits) }) catch |err| return cy.compiler.failCreateType(c, err);
     return @ptrCast(new_t);

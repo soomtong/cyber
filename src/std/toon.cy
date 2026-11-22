@@ -28,12 +28,12 @@ type Delim enum:
     case pipe
 
 type EncodeOptions:
-    --| Spaces per indentation level.
+    --| Spaces per indentation level, at least 1.
     indent int = 2
     delim  Delim = .comma
 
 type DecodeOptions:
-    --| Spaces per indentation level.
+    --| Spaces per indentation level, at least 1.
     indent int = 2
     --| When `false`, the decoder accepts count mismatches, duplicate keys (the last wins), tab indentation,
     --| blank lines inside arrays and deeper first lines of a nested scope, as the spec's non-strict mode.
@@ -41,18 +41,22 @@ type DecodeOptions:
     --| Keeps every number with a fraction or an exponent as `json.Value.number`, as `json.ParseOptions`.
     exact  bool = false
 
---| Encodes a value as TOON text. Returns `error.Unicode` when a string or key is not valid UTF-8.
+--| Encodes a value as TOON text. Returns `error.Unicode` when a string or key is not valid UTF-8
+--| and `error.Range` when `indent` is less than 1.
 fn encode(v json.Value) -> !str:
     return encode(v, EncodeOptions{})
 
 fn encode(v json.Value, opts EncodeOptions) -> !str:
+    if opts.indent < 1:
+        return error.Range
     e := Encoder{indent=opts.indent, delim=delim_byte(opts.delim), sym=delim_sym(opts.delim)}
     e.root(v)
     if e.bad_utf8:
         return error.Unicode
     return str(e.buf)
 
---| Decodes TOON text. Returns `error.Syntax` for malformed input and `error.Unicode` for input that is not UTF-8.
+--| Decodes TOON text. Returns `error.Syntax` for malformed input, `error.Unicode` for input that is not UTF-8
+--| and `error.Range` when `indent` is less than 1.
 fn decode(src str) -> !json.Value:
     var diag json.Diag = {}
     return decode(src, DecodeOptions{}, &&diag)
@@ -62,6 +66,9 @@ fn decode(src str, diag &&json.Diag) -> !json.Value:
     return decode(src, DecodeOptions{}, diag)
 
 fn decode(src str, opts DecodeOptions, diag &&json.Diag) -> !json.Value:
+    if opts.indent < 1:
+        diag.msg = 'The indent must be at least 1, found %{opts.indent}.'
+        return error.Range
     if !str.is_utf8(src.span()):
         diag.msg = 'The input is not valid UTF-8.'
         return error.Unicode

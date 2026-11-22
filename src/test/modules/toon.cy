@@ -89,6 +89,14 @@ t.eq(true, fails('[1]: x\nb: 1', {}, &&diag))
 t.eq(error.Unicode, toon.decode(str([]byte{0x61, 0x3a, 0x20, 0xff})).unwrap_error())
 t.eq(error.Unicode, toon.encode(json.Value.str(str([]byte{0xff}))).unwrap_error())
 
+-- An indent below 1 is an error, not a division by zero or a flattened tree.
+t.eq(error.Range, toon.decode('a:\n  b: 1', {indent=0}, &&diag).unwrap_error())
+t.eq('The indent must be at least 1, found 0.', diag.msg)
+t.eq(error.Range, toon.decode('a:\n  b: 1', {indent=-2}, &&diag).unwrap_error())
+t.eq(error.Range, toon.encode(json.parse('{"a": {"b": 1}}')!, {indent=0}).unwrap_error())
+t.eq(error.Range, toon.encode(json.parse('{"a": {"b": 1}}')!, {indent=-2}).unwrap_error())
+t.eq('a:\n b: 1', toon.encode(json.parse('{"a": {"b": 1}}')!, {indent=1})!)
+
 -- A `number` encodes in canonical form, and `exact` keeps decoded numbers as text.
 t.eq('[3]: 9223372036854775808,1e+999,0.1', enc('[9223372036854775808, 1e999, 0.1000000000000000055511151231257827]'))
 t.eq('{"a":[1.50,2]}', json.stringify(toon.decode('a[2]: 1.50,2', toon.DecodeOptions{exact=true}, &&diag)!))

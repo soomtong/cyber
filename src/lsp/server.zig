@@ -501,9 +501,11 @@ pub const Server = struct {
         // A document that used this one as a module now reads the file on disk instead of the editor's text.
         var iter = self.docs.valueIterator();
         while (iter.next()) |other| other.*.dirty = true;
-        // The diagnostics of a closed document go away with it.
+        // The diagnostics of a closed document go away with it. A module that is open has its diagnostics from
+        // its own check, and they stay.
         try self.publish(doc.uri, null, &.{});
         for (doc.related.items) |related| {
+            if (self.docs.contains(related)) continue;
             try self.publish(related, null, &.{});
         }
     }
@@ -628,8 +630,10 @@ pub const Server = struct {
             try self.publish(group.uri, if (group_i == 0) doc.version else null, group.diags.items);
         }
 
-        // A module that had an error in the last check and has none now is cleared.
+        // A module that had an error in the last check and has none now is cleared. A module that has been opened
+        // since has its diagnostics from its own check: an empty list from here would replace them.
         for (doc.related.items) |old| {
+            if (self.docs.contains(old)) continue;
             var still = false;
             for (groups.items[1..]) |group| {
                 if (std.mem.eql(u8, group.uri, old)) still = true;

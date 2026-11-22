@@ -1609,6 +1609,71 @@ test "A module is read from the editor when it is open, otherwise from the disk.
     }
 }
 
+/// The number of diagnostics that the last message for `uri` in `out` published, or null without one.
+fn lastDiagCount(out: []const Value, uri: []const u8) ?usize {
+    var count: ?usize = null;
+    for (out) |msg| {
+        if (std.mem.eql(u8, str(msg, &.{ "params", "uri" }), uri)) count = items(msg, &.{ "params", "diagnostics" }).len;
+    }
+    return count;
+}
+
+test "Opening or closing a module with an error keeps its diagnostics." {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "mod.cy", .data = "x := undefined_name\n" });
+    const dir = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(dir);
+
+    var s: Session = undefined;
+    try s.init();
+    defer s.deinit();
+    try s.initialize("[]");
+    const arena = s.arena.allocator();
+    const sep = std.Io.Dir.path.sep_str;
+    const main_doc = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "main.cy", .{dir}));
+    const mod_doc = try lsp.pathToUri(arena, try std.fmt.allocPrint(arena, "{s}" ++ sep ++ "mod.cy", .{dir}));
+    const main_text = "use m 'mod.cy'\n";
+    const mod_text = "x := undefined_name\n";
+    const close_fmt =
+        \\{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":"{s}"}}}}}}
+    ;
+
+    // The module gets its error from the check of the document that uses it.
+    try s.open(main_doc, 1, main_text);
+    var out = try s.flush();
+    try t.expectEqual(@as(?usize, 1), lastDiagCount(out, main_doc));
+    try t.expectEqual(@as(?usize, 1), lastDiagCount(out, mod_doc));
+
+    // Opened, the module gets it from its own check. The check of the document that comes after must not
+    // clear it. The order of the checks in one flush is the order of a hash map, so here they go one by one.
+    try s.open(mod_doc, 1, mod_text);
+    s.server.docs.get(main_doc).?.dirty = false;
+    out = try s.flush();
+    try t.expectEqual(@as(?usize, 1), lastDiagCount(out, mod_doc));
+    try t.expectEqual(@as(i64, 1), int(out[out.len - 1], &.{ "params", "version" }));
+    s.server.docs.get(main_doc).?.dirty = true;
+    out = try s.flush();
+    try t.expectEqual(@as(?usize, 1), lastDiagCount(out, main_doc));
+    try t.expectEqual(@as(?usize, null), lastDiagCount(out, mod_doc));
+
+    // Closed, the module is cleared, and the next check of the document gives the error back.
+    out = try s.send(try std.fmt.allocPrint(arena, close_fmt, .{mod_doc}));
+    try t.expectEqual(@as(?usize, 0), lastDiagCount(out, mod_doc));
+    out = try s.flush();
+    try t.expectEqual(@as(?usize, 1), lastDiagCount(out, main_doc));
+    try t.expectEqual(@as(?usize, 1), lastDiagCount(out, mod_doc));
+
+    // The module is opened again and the document is closed before a check: the document still names the
+    // module from its last check, and its close leaves the open module alone.
+    try s.open(mod_doc, 2, mod_text);
+    out = try s.send(try std.fmt.allocPrint(arena, close_fmt, .{main_doc}));
+    try t.expectEqual(@as(?usize, 0), lastDiagCount(out, main_doc));
+    try t.expectEqual(@as(?usize, null), lastDiagCount(out, mod_doc));
+    out = try s.flush();
+    try t.expectEqual(@as(?usize, 1), lastDiagCount(out, mod_doc));
+}
+
 test "Hints of the compiler: unused names, scope exits, inlay hints, quick fixes and doc comments." {
     var s: Session = undefined;
     try s.init();

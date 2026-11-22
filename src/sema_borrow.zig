@@ -209,6 +209,25 @@ pub fn addFieldBorrowLoan(c: *cy.Chunk, left: sema.ExprResult, right: sema.ExprR
     }
 }
 
+/// A copy of a borrow container that is read from the local `from` (`r = h`, the element that `for xs |p|` copies)
+/// keeps the other owners that `from` lends from (`BorrowLoan`), and those of the containers it was read through.
+fn copyBorrowLoans(c: *cy.Chunk, var_idx: sema.LocalId, owner: sema.LocalId, from: sema.LocalId) !void {
+    var cur = from;
+    var depth: usize = 0;
+    while (cur != cy.NullId and cur != owner and cur != var_idx and depth < 16) : (depth += 1) {
+        const len = c.borrow_loans.items.len;
+        var i: usize = 0;
+        while (i < len) : (i += 1) {
+            const loan = c.borrow_loans.items[i];
+            if (loan.local != cur) continue;
+            const other = borrowOwnerOf(c, loan.owner);
+            if (other == owner or other == var_idx) continue;
+            try addBorrowLoan(c, var_idx, other, loan.ex);
+        }
+        cur = c.varStack.items[cur].borrow_via;
+    }
+}
+
 /// Records that the local `var_idx` holds the borrow `init` until it goes out of scope.
 pub fn bindBorrowLocal(c: *cy.Chunk, var_idx: sema.LocalId, init: sema.ExprResult) !void {
     const decl_t = c.varStack.items[var_idx].decl_t;
@@ -226,6 +245,7 @@ pub fn bindBorrowLocal(c: *cy.Chunk, var_idx: sema.LocalId, init: sema.ExprResul
         if (other == owner or other == var_idx) continue;
         try addBorrowLoan(c, var_idx, other, p.ex);
     }
+    try copyBorrowLoans(c, var_idx, owner, init.recParentLocal().?);
     // A value that contains an exclusive borrow (`Holder{r=&&f}`, `?&&Foo`) keeps exclusive access like the borrow.
     const ex = decl_t.info.ex_borrow;
     const local = &c.varStack.items[var_idx];

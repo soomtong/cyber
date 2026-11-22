@@ -338,6 +338,16 @@ fn semaStmt2(c: *cy.Chunk, node: *ast.Node) !void {
                     // The hidden local releases the ref at the end of the loop, so an existing local must be retained.
                     iterable_expr = try sema_move.semaOwn(c, iterable_expr, iterable_n);
                 } else {
+                    if (iterable_expr.type.info.borrow_only and iterable_expr.resType == .value and
+                        iterable_expr.data.value.parent_local != null)
+                    {
+                        // A borrow container that a call gives (`for xs[..] |p|:`) is held by a local that borrows
+                        // what it borrows, so an element borrows from that owner, not from a temporary value.
+                        const owned = try sema_move.semaOwn(c, iterable_expr, iterable_n);
+                        const span_v = try sema_local.declareHiddenLocal(c, "_span", owned.type, owned, iterable_n);
+                        try sema_borrow.bindBorrowLocal(c, span_v.id, iterable_expr);
+                        iterable_expr = try sema_expr.semaLocal(c, span_v.id, iterable_n);
+                    }
                     iterable_expr = try sema_borrow.semaBorrow(c, iterable_expr, node);
                 }
                 const iterable_v = try sema_local.declareHiddenLocal(c, "_iterable", iterable_expr.type, iterable_expr, iterable_n);
@@ -1145,6 +1155,7 @@ fn semaIfUnwrapBlock2(c: *cy.Chunk, opt: sema.ExprResult, opt_n: *ast.Node, opt_
     body: *const fn (*cy.Chunk, u32, sema.ExprResult, *anyopaque) anyerror!void,
     body_data: *anyopaque, outer: usize, is_last: bool, node: *ast.Node) !void {
 
+    const opt_owner = opt.recParentLocal();
     const owned_opt = try sema_move.semaOwn(c, opt, opt_n);
     // _opt = <opt>
     const opt_v = try sema_local.declareHiddenLocal(c, "_opt", opt.type, owned_opt, opt_n);
@@ -1160,7 +1171,7 @@ fn semaIfUnwrapBlock2(c: *cy.Chunk, opt: sema.ExprResult, opt_n: *ast.Node, opt_
     _ = try sema_local.pushBlock(c, @ptrCast(node));
     {
         if (opt_unwrap) |unwrap| {
-            try semaCaptureUnwrap(c, opt.type, opt_v.id, get_opt, unwrap);
+            try semaCaptureUnwrap(c, opt.type, opt_v.id, opt_owner orelse opt_v.id, get_opt, unwrap);
         }
 
         try body(c, opt_v.id, get_opt, body_data);
@@ -1184,8 +1195,11 @@ fn semaIfUnwrapBlock2(c: *cy.Chunk, opt: sema.ExprResult, opt_n: *ast.Node, opt_
 }
 
 /// `opt_id` is the hidden local that owns the option. A `NoCopy` payload moves out of it to the capture: the option
-/// is then dead in the branch (it has nothing left to destruct).
-fn semaCaptureUnwrap(c: *cy.Chunk, opt_t: *cy.Type, opt_id: sema.LocalId, get_opt: sema.ExprResult, capture: *ast.Node) !void {
+/// is then dead in the branch (it has nothing left to destruct). `opt_owner` is the local that the option was read
+/// from, or `opt_id` for a new value: a borrow payload points to what it borrows, so the capture borrows from it
+/// until the branch ends.
+fn semaCaptureUnwrap(c: *cy.Chunk, opt_t: *cy.Type, opt_id: sema.LocalId, opt_owner: sema.LocalId,
+    get_opt: sema.ExprResult, capture: *ast.Node) !void {
     // _unwrap = _opt.?
     const unwrap_t = opt_t.cast(.option).child_t;
     var unwrap_name: []const u8 = undefined;
@@ -1203,7 +1217,13 @@ fn semaCaptureUnwrap(c: *cy.Chunk, opt_t: *cy.Type, opt_id: sema.LocalId, get_op
     } else {
         unwrap_init = try sema_expr.sema_copy(c, unwrap_init, capture);
     }
+    switch (unwrap_init.resType) {
+        .value_field => unwrap_init.data.value_field.parent_local = opt_owner,
+        .value => unwrap_init.data.value.parent_local = opt_owner,
+        else => {},
+    }
     const unwrap_v = try sema_local.declareLocalInit(c, unwrap_name, unwrap_t, unwrap_init, capture);
+    try sema_borrow.bindCaptureLocal(c, unwrap_v.id, unwrap_init);
     const unwrap_local = try sema_expr.semaLocal(c, unwrap_v.id, capture);
 
     if (capture.type() == .seqDestructure) {
@@ -1231,6 +1251,7 @@ fn semaIfUnwrapBlock(c: *cy.Chunk, opt_n: *ast.Node, opt_unwrap: ?*ast.Node,
     cond_moves_end: *usize, node: *ast.Node) !void {
 
     const opt = try c.sema_expr_cstr_template(opt_n, c.sema.option_tmpl);
+    const opt_owner = opt.recParentLocal();
 
     // _opt = <opt>
     const owned_opt = try sema_move.semaOwn(c, opt, opt_n);
@@ -1250,7 +1271,7 @@ fn semaIfUnwrapBlock(c: *cy.Chunk, opt_n: *ast.Node, opt_unwrap: ?*ast.Node,
     c.block().move_branch = .branch;
     {
         if (opt_unwrap) |unwrap| {
-            try semaCaptureUnwrap(c, opt.type, opt_v.id, get_opt, unwrap);
+            try semaCaptureUnwrap(c, opt.type, opt_v.id, opt_owner orelse opt_v.id, get_opt, unwrap);
         }
 
         try semaStmts(c, stmts);

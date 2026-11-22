@@ -1184,6 +1184,9 @@ pub fn resolvePartialVectorType(c: *cy.Chunk, array_t: *cy.types.PartialVector, 
     array_t.base.info.managed = has_managed_child;
     array_t.base.info.copy_base = has_copy_child;
     array_t.base.info.copy_user = false;
+    // A vector of borrows (`[2]&int`) holds the borrows like a struct with borrow fields.
+    array_t.base.info.borrow_only = array_t.elem_t.info.borrow_only;
+    array_t.base.info.ex_borrow = array_t.elem_t.info.ex_borrow;
     array_t.base.info.resolved = true;
 }
 
@@ -1201,6 +1204,9 @@ pub fn resolveVectorType(c: *cy.Chunk, array_t: *cy.types.Vector, decl: *ast.Nod
     array_t.base.info.managed = has_managed_child;
     array_t.base.info.copy_base = has_copy_child;
     array_t.base.info.copy_user = false;
+    // A vector of borrows (`[2]&int`) holds the borrows like a struct with borrow fields.
+    array_t.base.info.borrow_only = array_t.elem_t.info.borrow_only;
+    array_t.base.info.ex_borrow = array_t.elem_t.info.ex_borrow;
     array_t.base.info.resolved = true;
 }
 

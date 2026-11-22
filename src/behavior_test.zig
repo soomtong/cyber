@@ -334,6 +334,18 @@ fn test_memory(run: *Runner) void {
     run.case("memory/borrow_switch_capture.cy");
     run.case("memory/borrow_switch_capture_local_error.cy");
     run.case("memory/borrow_switch_capture_owner_error.cy");
+    run.case("memory/borrow_unwrap_capture.cy");
+    run.case("memory/borrow_unwrap_capture_owner_error.cy");
+    run.case("memory/borrow_unwrap_capture_local_error.cy");
+    run.case("memory/borrow_unwrap_capture_lend_error.cy");
+    run.case("memory/borrow_while_capture_owner_error.cy");
+    run.case("memory/borrow_for_vector.cy");
+    run.case("memory/borrow_for_vector_owner_error.cy");
+    run.case("memory/borrow_for_vector_lend_error.cy");
+    run.case("memory/borrow_for_span_lend_error.cy");
+    run.case("memory/borrow_vector_lit_outlive_error.cy");
+    run.case("memory/borrow_vector_lit_lend_error.cy");
+    run.case("memory/borrow_copy_loans_error.cy");
     run.case("memory/borrow_switch_expr_ex_error.cy");
     run.case("memory/borrow_switch_expr_outlive_error.cy");
     run.case("memory/borrow_else_default_owner_error.cy");

@@ -62,27 +62,42 @@ pub fn semaInitPartialVector(c: *cy.Chunk, vector_t: *cy.types.PartialVector, in
     }
     const args = try c.ir.allocArray(*ir.Expr, nargs + 1);
     args[0] = (try sema_lit.semaConst(c, nargs, c.sema.i64_t, @ptrCast(init_n))).ir;
+    var owner: ?sema.LocalId = null;
     {
         const seq_start = c.seq_pending.items.len;
         defer sema_move.seqPop(c, seq_start);
         for (init_n.args.slice(), 0..) |arg_n, i| {
             var arg = try c.semaExprTarget(arg_n, vector_t.elem_t);
+            owner = try noteElemOwner(c, owner, vector_t.elem_t, arg);
             arg = try sema_move.semaOwn(c, arg, arg_n);
             args[i+1] = arg.ir;
             try sema_move.seqPush(c, &args[i+1], true, arg_n);
         }
     }
-    return sema_expr.semaPartialVector(c, &vector_t.base, args, @ptrCast(init_n));
+    var res = try sema_expr.semaPartialVector(c, &vector_t.base, args, @ptrCast(init_n));
+    if (res.resType == .value) res.data.value.parent_local = owner;
+    return res;
+}
+
+/// An element of a vector literal of borrows (`[2]&int{&y, &x}`) borrows from its owner, like a field of a struct
+/// literal: the vector lives as long as the owner that goes out of scope first, and the others are its loans.
+fn noteElemOwner(c: *cy.Chunk, cur: ?sema.LocalId, elem_t: *cy.Type, arg: sema.ExprResult) !?sema.LocalId {
+    if (!elem_t.info.borrow_only) return cur;
+    const arg_owner = sema_borrow.borrowOwner(c, arg);
+    try sema_borrow.noteBorrowOwner(c, arg_owner, arg.type.info.ex_borrow);
+    return sema_borrow.shorterOwner(c, cur, arg_owner);
 }
 
 pub fn semaInitVector(c: *cy.Chunk, vector_t: *cy.types.Vector, init_n: *ast.InitLit) !sema.ExprResult {
     const nargs = init_n.args.len;
     const args = try c.ir.allocArray(*ir.Expr, nargs);
+    var owner: ?sema.LocalId = null;
     {
         const seq_start = c.seq_pending.items.len;
         defer sema_move.seqPop(c, seq_start);
         for (init_n.args.slice(), 0..) |arg_n, i| {
             var arg = try c.semaExprTarget(arg_n, vector_t.elem_t);
+            owner = try noteElemOwner(c, owner, vector_t.elem_t, arg);
             arg = try sema_move.semaOwn(c, arg, arg_n);
             args[i] = arg.ir;
             try sema_move.seqPush(c, &args[i], true, arg_n);
@@ -92,7 +107,9 @@ pub fn semaInitVector(c: *cy.Chunk, vector_t: *cy.types.Vector, init_n: *ast.Ini
     const loc = try c.ir.newExpr(.init, @ptrCast(vector_t), @ptrCast(init_n), .{
         .nargs = @intCast(nargs), .args = args.ptr,
     });
-    return sema.ExprResult.initOwned(loc);
+    var res = sema.ExprResult.initOwned(loc);
+    res.data.value.parent_local = owner;
+    return res;
 }
 
 pub fn semaInitGenericArray(c: *cy.Chunk, generic_t: *cy.types.GenericVector, init_n: *ast.InitLit) !sema.ExprResult {

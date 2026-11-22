@@ -1736,11 +1736,12 @@ fn (&Span[]) iterator() -> int:
 fn (&Span[]) len() -> int:
     return self.length
 
-fn (&Span[]) next(idx &int) -> ?T:
+-- `scope` so a span of borrows (`[&]&int`) can be iterated: an element borrows what the span borrows.
+fn (scope &Span[]) next(idx &int) -> scope ?T:
     if idx.* == self.length:
         return none
 
-    val := self[idx.*]
+    val := @scope_ptr_to_borrow('self', *(as[Ptr[T]] self.base)[idx.*]).*
     idx.* += 1
     return val
 
@@ -4489,7 +4490,8 @@ fn (&Vector[]) iterator() -> int:
 fn (&Vector[]) len() -> int:
     return N
 
-fn (&Vector[]) next(idx &int) -> ?T:
+-- `scope` so a vector of borrows (`[2]&int`) can be iterated: an element borrows what the vector borrows.
+fn (scope &Vector[]) next(idx &int) -> scope ?T:
     if idx.* >= N:
         return none
     res := self[idx.*]

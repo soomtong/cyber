@@ -77,17 +77,38 @@ fn endBorrowsAfter(c: *cy.Chunk, ends: *BorrowEnds, stmts: []const *ast.Node, i:
         const last = lastNamingStmt(c, stmts, i, local.name()) orelse continue;
         try ends.append(c.alloc, .{ .local = @intCast(id), .last = last });
     }
+    // A local that another live local points into (`hr := &h`) keeps its borrows while that local lives: a borrow
+    // that is read through it (`hr.b`) needs them. It ends after a later statement.
+    var progress = true;
+    while (progress) {
+        progress = false;
+        var j: usize = 0;
+        while (j < ends.items.len) {
+            const end = ends.items[j];
+            if (end.last != i or sema_borrow.isPointedInto(c, end.local)) {
+                j += 1;
+                continue;
+            }
+            const local = &c.varStack.items[end.local];
+            sema_borrow.unbindBorrowLocal(c, local);
+            local.borrow_ended = true;
+            _ = ends.swapRemove(j);
+            progress = true;
+        }
+    }
     var j: usize = 0;
     while (j < ends.items.len) {
-        const end = ends.items[j];
-        if (end.last != i) {
+        if (ends.items[j].last != i) {
             j += 1;
             continue;
         }
-        const local = &c.varStack.items[end.local];
-        sema_borrow.unbindBorrowLocal(c, local);
-        local.borrow_ended = true;
-        _ = ends.swapRemove(j);
+        if (i + 1 < stmts.len) {
+            ends.items[j].last = i + 1;
+            j += 1;
+        } else {
+            // The end of the block ends it.
+            _ = ends.swapRemove(j);
+        }
     }
 }
 

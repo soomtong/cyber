@@ -397,6 +397,23 @@ pub fn bindBorrowLocal(c: *cy.Chunk, var_idx: sema.LocalId, init: sema.ExprResul
     }
 }
 
+/// Whether a live local other than `local` can point into it: a borrow of it or of a place in it (`hr := &h`,
+/// `Local.borrow_via`), or a value that holds a borrow of a place in some local (`Local.borrow_places`, which does
+/// not tell the local). Used by the non-lexical end of the borrows of `local` (`sema_stmt.endBorrowsAfter`).
+pub fn isPointedInto(c: *cy.Chunk, local: sema.LocalId) bool {
+    for (c.varStack.items, 0..) |other, k| {
+        if (k == local or other.parent_local == cy.NullId) continue;
+        if (other.borrow_places) return true;
+        var cur = other.borrow_via;
+        var depth: usize = 0;
+        while (cur < c.varStack.items.len and depth < 16) : (depth += 1) {
+            if (cur == local) return true;
+            cur = c.varStack.items[cur].borrow_via;
+        }
+    }
+    return false;
+}
+
 pub fn unbindBorrowLocal(c: *cy.Chunk, local: *sema.Local) void {
     if (c.borrow_loans.items.len > 0) {
         dropBorrowLoans(c, @intCast((@intFromPtr(local) - @intFromPtr(c.varStack.items.ptr)) / @sizeOf(sema.Local)));

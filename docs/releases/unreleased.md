@@ -146,3 +146,29 @@
   오른쪽 순서가 깨진 곳은 맵 리터럴의 키와 값(`Map[int,int]{(say(1))=sayr(2)!}`가 `r2 1`), `..=` 슬라이스의 수신자와 시작,
   범위의 시작(`say(1) .. sayr(2)!`), 포인터 인덱스의 포인터, 함수 포인터 호출의 callee다. 앞 피연산자를 `seqPushRes`로 등록한 뒤
   뒤 피연산자를 분석한다. 확인: `functions/eval_order.cy`.
+
+## 갈래가 주는 빌림의 남은 구멍 (0.4.0..0.4.17 코드 리뷰, 2026-11-22, 깨지는 변경)
+
+F-170(위 "갈래가 주는 빌림의 주인")이 남긴 구멍 셋이다.
+
+- `switch` case 캡처: `c := Ref.one(&y)`에서 `s := switch c: case .one |p| => p, else => &x`가 컴파일러를 'index out of bounds:
+  index 8, len 8'로 끝냈다. 슬롯이 다시 쓰이면 엉뚱한 지역이 주인이 됐다. case 캡처가 주인 없이 선언돼, case가 끝나며 사라진
+  캡처 id가 결과의 주인으로 남았다. 이제 값 캡처 `|p|`는 control 값이 빌린 대상을, 빌림 캡처 `|&v|`는 control을 담은 지역을
+  빌린다. 그래서 `switch` 문 안의 `r = p`도 컴파일된다(전에는 '`r` can not outlive `p`.'). case 지역의 빌림을 결과로 내면
+  'The result of `switch` can not outlive `n`.'이다. 확인: `memory/borrow_switch_capture.cy`, `borrow_switch_capture_local_error.cy`,
+  `borrow_switch_capture_owner_error.cy`.
+- `scope` 함수의 반환: `fn g(scope p &[]int) -> scope &int`의 `return if (k == 1) &p[0] else &y`가 컴파일돼 끝난 프레임을
+  가리키는 빌림을 돌려줬다. 갈래 순서를 바꾸면 오류였다. `switch`와 `o ?else &y`도 같았다. 매개변수와 본문 지역은 블록 깊이가
+  같은데 `shorterOwner`가 동점이면 첫 갈래를 골랐고, 반환 검사는 주인 하나만 봤다. 이제 동점이면 나중에 선언된 지역을 고르고,
+  반환 검사(`checkReturnOwners`)가 갈래의 모든 주인과 반환하는 지역의 loan을 본다. `?&T`, `!&T`, 빌림 컨테이너의 반환은 전에
+  검사가 없어 `return &y`가 컴파일됐다. 이제 `&T`처럼 검사한다. 오류는 'Expected to return a borrow from the same scope as `p`.'.
+  확인: `memory/scope_return_branch.cy`와 `scope_return_*_error.cy` 여섯.
+- 필드 · 원소 저장과 인자: `h.r = if (k == 2) &y else &a[0]` 뒤 `a << i`를 100번 하고 `h.r`을 읽으면 쓰레기 값이 나왔다.
+  `f(if ... else &a[0], &&a)`도 컴파일됐다. 갈래의 다른 주인(`borrow_pending`)을 지역 선언과 다시 대입만 반영했다. 이제 필드 ·
+  원소 저장은 모든 주인에 loan을 걸고, 인자 충돌 검사는 인자마다 모든 주인을 본다. 오류는 'Expected exclusive access. There is
+  another active borrow to `a`.'와 'Cannot pass an exclusive borrow of `a` with another argument that borrows `a`.'. 확인:
+  `memory/borrow_branch_store.cy`와 `borrow_branch_{field,elem,arg,arg_ex}_error.cy`.
+
+남은 것: 템플릿 함수(`matchGenericFuncRt`)는 인자끼리 배타 빌림 충돌을 검사하지 않는다(`f(int, &a[0], &&a)`가 컴파일된다, 갈래와
+무관한 기존 구멍). `if o |q|: r = q`는 '`r` can not outlive `q`.'로 막힌다(보수적, 캡처를 주인에 묶지 않음). 복합 대입
+(`arr[say(1)] += 2`)은 좌변을 두 번 계산한다.

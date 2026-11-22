@@ -3171,7 +3171,7 @@ Functions can only return borrows if the scope is bound to a borrow parameter. T
 fn (scope &FooArray) @index_addr(idx int) -> scope &Foo:
     return &self.inner[idx]
 ```
-The `scope` binding informs the callsite that the returned borrow belongs to the same scope as a borrowed argument. This ensures the returned borrow's lifetime does not exceed the lifetime of the borrowed argument.
+The `scope` binding informs the callsite that the returned borrow belongs to the same scope as a borrowed argument. This ensures the returned borrow's lifetime does not exceed the lifetime of the borrowed argument. Every branch of the returned value (`if`, `switch`, `?else`, `!else`) must borrow from a `scope` parameter, whatever their order, and the same check applies to `?&T`, `!&T` and borrow containers: `return if (k == 1) &p[0] else &y` is the compile error 'Expected to return a borrow from the same scope as `p`.'
 
 Any type that contains a borrow member becomes a borrow container and requires the `scope` binding:
 ```cy
@@ -3201,7 +3201,9 @@ begin:
 
 The same holds when the value is wrapped in an option (`var o ?Ref`), comes from an `if` or `switch` expression or a `?else` or `!else` default, or is assigned to a field or an element (`o.r = Ref{p=&y}`). A method can not store a borrow of one of its own locals behind a parameter: `self.r = Ref{p=&y}` is the compile error 'The value behind `self` can not outlive `y`.'
 
-A borrow that can come from one of several branches (`if (c) &y else &a[0]`) borrows from the owner of each branch: `a` can not be modified while the borrow is in use.
+A borrow that can come from one of several branches (`if (c) &y else &a[0]`) borrows from the owner of each branch: `a` can not be modified while the borrow is in use. This holds also when the borrow is stored in a field or an element, or passed as an argument: `f(if (c) &y else &a[0], &&a)` is a compile error.
+
+A case capture of a `switch` borrows what the control borrows: a value capture `|p|` of a borrow payload borrows the value that the control borrows from, and a borrow capture `|&v|` borrows the local that holds the control. A borrow of a case local can not leave the case: `case .one |n| => &n` is the compile error 'The result of `switch` can not outlive `n`.'
 
 A borrow that is read through a borrow container (`&&r`, `&r.p`) can not outlive the container either, even when the local that the container borrows from lives longer.
 

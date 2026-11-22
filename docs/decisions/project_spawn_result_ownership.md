@@ -103,6 +103,23 @@ VM에서 spawn을 반복하는 호스트(세션 · persist_main)나 루프에서
 4011개 spawn eval을 같은 VM에서 5회. 첫 eval 뒤 4회 동안 목록 64개 이하, 메모리 증가 512 KiB 이하. 해제를 끄면 목록 20055개로
 실패). scratchpad `stress.cy`(버린 `int` · `?str` future 4천 개, await하는 `?str` 500개, `?str` · `!str` 인자, main의 2만 개 문자열) Debug 200회 0 실패, ReleaseSafe 200회 0 실패(출력 비교, Debug의 refcount 검사 포함).
 
+## 버린 future의 큐에 있는 작업은 끝까지 돈다 (결정 유지)
+
+남은 것에 있던 "아직 시작하지 않은 작업의 future를 버리면 작업을 건너뛸지"를 검토했고, 건너뛰지 않기로 했다.
+
+1. `docs.md`는 `spawn`이 스레드를 "creates and starts"한다고 쓰고, "A thread can not be stopped from the script"라고 쓴다.
+   버린 future에 대해서는 "frees the spawned thread and its result when the thread ends"만 약속한다. 곧 버려도 스레드는 끝까지
+   돈다는 뜻으로 읽힌다.
+2. `_ = spawn f(x)`는 future를 곧바로 버린다. 이때 작업은 대개 아직 큐에 있다. 큐의 작업을 취소하면 이 형태(fire-and-forget,
+   호스트 함수 호출 · 파일 쓰기 같은 부수 효과)가 worker가 그 사이에 작업을 꺼냈는지에 따라 돌기도 하고 안 돌기도 한다. 동작이
+   타이밍에 달리는 것이 메모리를 조금 아끼는 것보다 나쁘다. `spawn_drop.cy`도 버린 future의 스레드가 돈다는 전제로 쓰였다.
+3. 취소가 필요하면 명시적 API(취소 토큰, `Future.cancel()`)로 한다. 그때 상태 6을 큐에서 본 worker가 함수를 부르지 않고 인자를
+   destruct하는 경로를 더하면 된다. 지금은 계획 없음.
+
+VM 해제는 예외다. `stopSpawnedThreads`가 interrupt로 남은 작업을 멈추므로 스크립트가 끝난 뒤의 fire-and-forget 작업은 끝나지
+않을 수 있다(이전과 같음). 확인: lib `A spawned thread runs to its end when its future is dropped before it started.`(future를
+곧바로 버린 100개 작업이 모두 호스트 함수를 부른다).
+
 ## 인자와 결과의 같은 보내기 규칙 (option · result의 payload 보내기)
 
 배경: 위 결정 3 뒤에도 인자와 결과의 규칙이 달랐다. 결과는 `@check_sendable`(참조 없는 값은 바이트, 참조 있는 struct는
@@ -151,6 +168,7 @@ VM에서 spawn을 반복하는 호스트(세션 · persist_main)나 루프에서
 ## 남은 것
 
 - (해결) 인자와 결과의 보내기 규칙이 달랐다. "인자와 결과의 같은 보내기 규칙" 절.
-- 아직 큐에 있는 작업의 future를 버려도 작업은 끝까지 돈다(결과는 곧 버려진다). 큐에서 빼거나 스레드 interrupt로 끊는 것은
-  필요해지면 한다.
+- (결정 유지) 아직 큐에 있는 작업의 future를 버려도 작업은 끝까지 돈다. "버린 future의 큐에 있는 작업은 끝까지 돈다" 절.
+  취소는 명시적 API가 생길 때 한다.
 - (해결) `VM.shared_states`가 VM 수명 동안 자랐다. "공유 상태의 회수" 절.
+- 스크립트가 끝난 뒤 남은 fire-and-forget 작업은 VM 해제의 interrupt로 멈춘다. 끝까지 기다리는 옵션은 필요해지면 한다.

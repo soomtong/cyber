@@ -675,6 +675,56 @@ test "The sync states of spawned threads are freed when both sides are done." {
     }
 }
 
+test "A spawned thread runs to its end when its future is dropped before it started." {
+    if (is_wasm) return;
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    const S = struct {
+        var calls = std.atomic.Value(i64).init(0);
+        fn mod_bump(t_: *C.Thread) callconv(.c) C.Ret {
+            _ = C.thread_ret(t_, void);
+            _ = calls.fetchAdd(1, .acq_rel);
+            return C.RetOk;
+        }
+        fn mod_calls(t_: *C.Thread) callconv(.c) C.Ret {
+            C.thread_ret(t_, i64).* = calls.load(.acquire);
+            return C.RetOk;
+        }
+        fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+            const name = C.from_bytes(uri);
+            if (std.mem.eql(u8, name, "mod")) {
+                C.mod_add_func(mod, "bump", C.BIND_FUNC(&mod_bump));
+                C.mod_add_func(mod, "calls", C.BIND_FUNC(&mod_calls));
+                res[0].src = C.to_bytes(
+                    \\#[bind] fn bump()
+                    \\#[bind] fn calls() -> int
+                );
+                return true;
+            } else {
+                return C.default_loader(vm_, mod, uri, res);
+            }
+        }
+    };
+    C.vm_set_loader(vm, @ptrCast(&S.loader));
+    var res: C.EvalResult = undefined;
+    // Most of the 100 futures are dropped while their task is still queued. Fire and forget: each task still
+    // runs. `await` runs the queued tasks, so the loop ends on a machine without spare workers too.
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use mod
+        \\fn job(n int) -> int:
+        \\  mod.bump()
+        \\  return n
+        \\fn idle(n int) -> int:
+        \\  return n
+        \\for 0..100 |i|:
+        \\  _ = spawn job(i)
+        \\while mod.calls() < 100:
+        \\  _ = spawn idle(0).await()
+    , &res));
+    try zt.eq(100, S.calls.load(.acquire));
+}
+
 test "A spawned function returns only what await can copy." {
     if (is_wasm) return;
     const vm = C.vm_init();

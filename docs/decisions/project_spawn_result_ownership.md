@@ -65,6 +65,7 @@ VM 해제 때까지 남았다. 루프에서 future를 버리는 스크립트는 
    간다.
 3. 공유 상태 자체는 이전처럼 `VM.shared_states`가 소유하고 VM과 같이 해제한다. 버린 future가 많은 스크립트에서 이 목록은
    spawn 수만큼 자란다(한 항목 수십 바이트). 상태를 refcount로 바꿔 즉시 해제하는 것은 남은 것으로 둔다.
+   (해결: 아래 "공유 상태의 회수" 절)
 
 구현: `core.cy` `FutureValue.@deinit` · `@future_drop` 바인딩, `worker.zig` `dropFuture`와 `run_task`의 `cmpxchg 0 → 2`
 (결과 버퍼 할당 실패의 0 → 3도 `cmpxchg`), `sync.zig` 상태 6. 호스트 future(`cl_future_new`)와 `Future.complete`는
@@ -74,6 +75,33 @@ VM 해제 때까지 남았다. 루프에서 future를 버리는 스크립트는 
 (끝나기 전 · 뒤에 버린 future 섞기, 스레드 안에서 버린 future, `@deinit` 있는 결과, `Future.wait_any` 뒤 버림. Debug의
 refcount 검사가 spawn된 스레드마다 drop 뒤 0을 확인한다). lib `Futures dropped without await free their spawned threads.`(같은
 VM에서 300개씩 버리는 eval 5회의 메모리 증가가 2 MiB 이하. 소유권 수정 전 약 12 MiB).
+
+## 공유 상태의 회수
+
+배경: `FutureSyncState`는 `@new_shared_state`가 만들어 `VM.shared_states`에 넣고 VM 해제(또는 reset) 때만 해제했다. 같은
+VM에서 spawn을 반복하는 호스트(세션 · persist_main)나 루프에서 spawn하는 스크립트는 spawn마다 한 항목(구조체 약 64바이트와
+목록의 포인터)이 VM 수명 동안 남았다. lib 테스트의 eval 5회(4011개 spawn씩)에서 목록이 20055개로 자랐다.
+
+결정: 공유 상태에 사용자 수 `refs`(처음 2)를 두고, 둘 다 끝나면 마지막 쪽이 목록에서 빼고 해제한다(`VM.releaseSharedState`).
+스레드 결과의 해제 책임(위 상태 6)과 같은 "나중에 끝나는 쪽" 모델이다. 상태 머신에 상태를 더하지 않고 별도 카운터를 쓴 이유는,
+상태는 결과 · 스레드의 해제 책임을 정하고 카운터는 상태 구조체 자체의 수명을 정해 두 질문이 다르기 때문이다(상태 5 · 3 · 4
+뒤에도 소유자는 `panic_msg`와 상태를 읽는다).
+
+1. 소유자 쪽: `FutureValue.@deinit`의 `@future_drop`이 `dropFuture` 뒤 한 번 내린다. `await`가 받은 뒤(상태 5)에도 소유자는
+   `FutureValue`가 살아 있는 동안 상태를 읽으므로, 받기가 아니라 destruct가 끝이다.
+2. 생산자 쪽: `run_task`의 세 끝(성공 · 실패 · 결과 버퍼 할당 실패)에서 마지막 상태 쓰기와 (상태 6이면) `dropThreadResult` 뒤
+   내린다. 그 뒤 생산자는 상태를 건드리지 않는다(`notifyProgress`는 전역 epoch만 쓴다). `@start_thread`에서 작업을 큐에 넣지
+   못하면 생산자가 없으므로 그 자리에서 내린다.
+3. 목록 제거는 O(1)이다. 상태에 목록 위치 `index`를 두고 `shared_state_mutex` 아래 `swapRemove` 뒤 옮겨진 항목의 `index`를
+   고친다. `VM` 필드의 타입은 그대로라 `vm.h`의 `ZVM` padding은 변하지 않는다.
+4. 목록은 남은 상태를 찾는 데 계속 쓴다. 소유자가 destruct되지 않은 future(release op가 없는 `single_run` · `persist_main`의 main
+   지역, panic 쓸기로 사라진 객체 안의 future)의 상태는 `refs`가 0이 되지 않으므로 전처럼 `dropUnclaimedResults`가 결과를 해제하고
+   VM 해제 · reset이 상태를 해제한다. VM 해제 중 `dropMainResult`가 REPL 결과의 future를 destruct하면 그 자리에서 목록에서
+   빠지고, 마지막 해제 루프는 남은 것만 돈다.
+
+확인: lib `The sync states of spawned threads are freed when both sides are done.`(await한 것과 버린 것, 스레드 안의 spawn을 섞은
+4011개 spawn eval을 같은 VM에서 5회. 첫 eval 뒤 4회 동안 목록 64개 이하, 메모리 증가 512 KiB 이하. 해제를 끄면 목록 20055개로
+실패). scratchpad `stress.cy`(버린 `int` · `?str` future 4천 개, await하는 `?str` 500개, `?str` · `!str` 인자, main의 2만 개 문자열) Debug 200회 0 실패, ReleaseSafe 200회 0 실패(출력 비교, Debug의 refcount 검사 포함).
 
 ## 인자와 결과의 같은 보내기 규칙 (option · result의 payload 보내기)
 
@@ -125,4 +153,4 @@ VM에서 300개씩 버리는 eval 5회의 메모리 증가가 2 MiB 이하. 소�
 - (해결) 인자와 결과의 보내기 규칙이 달랐다. "인자와 결과의 같은 보내기 규칙" 절.
 - 아직 큐에 있는 작업의 future를 버려도 작업은 끝까지 돈다(결과는 곧 버려진다). 큐에서 빼거나 스레드 interrupt로 끊는 것은
   필요해지면 한다.
-- `VM.shared_states`는 VM 수명 동안 자란다(위 3).
+- (해결) `VM.shared_states`가 VM 수명 동안 자랐다. "공유 상태의 회수" 절.

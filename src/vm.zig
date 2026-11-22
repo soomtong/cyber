@@ -452,6 +452,27 @@ pub const VM = struct {
 
     /// Asks every spawned thread to stop at its next checkpoint and waits until the worker pool is idle.
     /// A thread blocked inside a host function is waited for.
+    /// Drops one side's use of a spawned thread's future state (`FutureSyncState.refs`): the owner when the
+    /// `FutureValue` is destructed, the producer when its task ends. The last one removes the state from
+    /// `shared_states` and frees it, so a script that spawns in a loop does not grow the list.
+    pub fn releaseSharedState(self: *VM, state: *cy.sync.FutureSyncState) void {
+        if (@atomicRmw(u8, &state.refs, .Sub, 1, .acq_rel) != 1) return;
+        {
+            self.shared_state_mutex.lockUncancelable(stdx.io());
+            defer self.shared_state_mutex.unlock(stdx.io());
+            const idx = state.index;
+            std.debug.assert(self.shared_states.items[idx] == state);
+            _ = self.shared_states.swapRemove(idx);
+            if (idx < self.shared_states.items.len) {
+                self.shared_states.items[idx].index = idx;
+            }
+        }
+        if (state.panic_msg()) |msg| {
+            self.alloc.free(msg);
+        }
+        self.alloc.destroy(state);
+    }
+
     pub fn stopSpawnedThreads(self: *VM) void {
         if (comptime !build_config.threads) return;
         const set = @cmpxchgStrong(u8, self.main_thread.c.interrupt, 0, 2, .acq_rel, .monotonic) == null;

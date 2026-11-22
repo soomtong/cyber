@@ -248,6 +248,7 @@ pub const Pool = struct {
                     }
                     thread.deinit(false);
                     pool.alloc.destroy(thread);
+                    pool.vm.releaseSharedState(sync_state);
                     pool.notifyProgress();
                     return;
                 };
@@ -264,6 +265,7 @@ pub const Pool = struct {
                         _ = @cmpxchgStrong(u8, &sync_state.state, 0, 3, .acq_rel, .monotonic);
                         thread.deinit(false);
                         pool.alloc.destroy(thread);
+                        pool.vm.releaseSharedState(sync_state);
                         pool.notifyProgress();
                         return;
                     };
@@ -279,6 +281,8 @@ pub const Pool = struct {
                     std.debug.assert(actual == 6);
                     pool.dropThreadResult(sync_state);
                 }
+                // The producer is done with the state. The owner can free it from here on.
+                pool.vm.releaseSharedState(sync_state);
                 pool.notifyProgress();
             },
         }

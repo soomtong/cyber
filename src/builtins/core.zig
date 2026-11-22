@@ -1537,7 +1537,7 @@ pub fn new_shared_state(t: *cy.Thread) !C.Ret {
     const ret = t.ret(*cy.sync.FutureSyncState);
     const state = try t.alloc.create(cy.sync.FutureSyncState);
     errdefer t.alloc.destroy(state);
-    state.* = .{ .state = 0 };
+    state.* = .{ .state = 0, .index = t.c.vm.shared_states.items.len };
     try t.c.vm.shared_states.append(t.alloc, state);
     ret.* = state;
     return C.RetOk;
@@ -1559,7 +1559,11 @@ pub fn start_thread(t: *cy.Thread) !C.Ret {
     thread.c.stack_ptr[ret_reg_size + 4] = func;
     @memcpy(thread.c.stack_ptr[ret_reg_size+5..ret_reg_size+5+func_args.len], func_args);
     sync_state.drop_func = drop_func.val;
-    try t.c.vm.worker_pool.add_thread_task(thread, entry_func, sync_state, ret_size);
+    t.c.vm.worker_pool.add_thread_task(thread, entry_func, sync_state, ret_size) catch |err| {
+        // No task will end and drop the producer's use of the state.
+        t.c.vm.releaseSharedState(sync_state);
+        return err;
+    };
 
     return C.RetOk;
 }
@@ -1591,6 +1595,8 @@ pub fn future_drop(t: *cy.Thread) !C.Ret {
     _ = t.ret(void);
     const sync_state = t.param(?*cy.sync.FutureSyncState) orelse return C.RetOk;
     t.c.vm.worker_pool.dropFuture(sync_state);
+    // The owner is done with the state.
+    t.c.vm.releaseSharedState(sync_state);
     return C.RetOk;
 }
 

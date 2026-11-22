@@ -23,9 +23,15 @@ const std = @import("std");
 /// (1 was a writing state when the producer wrote into the owner's future. It is no longer used.)
 ///
 /// `state` is the first field: `core.cy` holds the state as `Ptr[byte]` and writes the initial 0 through it.
-/// Owned by `VM.shared_states` and freed with the VM (or its reset), so an awaiting thread only reads `panic_msg`.
+/// Listed in `VM.shared_states`. `refs` counts the two sides that use it: the owner (the `FutureValue`, until it
+/// is destructed) and the producer (the queued or running task, until `run_task` ends). The side that drops the
+/// last one frees it (`VM.releaseSharedState`). A state whose owner was never destructed (a main local without
+/// release ops, a future in an object that a panic sweep freed) is freed with the VM or its reset.
 pub const FutureSyncState = extern struct {
     state: u8,
+    refs: u8 = 2,
+    /// The position in `VM.shared_states`, for an O(1) removal. Protected by `VM.shared_state_mutex`.
+    index: usize = 0,
     panic_msg_ptr: ?[*]const u8 = null,
     panic_msg_len: usize = 0,
 

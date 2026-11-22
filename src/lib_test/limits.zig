@@ -628,6 +628,53 @@ test "Futures dropped without await free their spawned threads." {
     }
 }
 
+test "The sync states of spawned threads are freed when both sides are done." {
+    if (is_wasm) return;
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    const zvm: *cy.VM = @ptrCast(@alignCast(vm));
+    var res: C.EvalResult = undefined;
+    // Awaited and dropped futures, and a thread that spawns its own. The list of sync states grew by one
+    // entry per spawn for the VM's lifetime.
+    const src =
+        \\use test
+        \\fn sq(n int) -> int:
+        \\  return n * n
+        \\fn fan(n int) -> int:
+        \\  s := 0
+        \\  for 0..n |i|:
+        \\    s += spawn sq(i).await()
+        \\  return s
+        \\total := 0
+        \\for 0..2000 |i|:
+        \\  total += spawn sq(i % 10).await()
+        \\  _ = spawn sq(i)
+        \\test.eq(57000, total)
+        \\test.eq(285, spawn fan(10).await())
+    ;
+    try zt.eq(C.Success, C.vm_eval(vm, src, &res));
+    const used = C.vm_memory_used(vm);
+    for (0..4) |_| {
+        try zt.eq(C.Success, C.vm_eval(vm, src, &res));
+    }
+    // Only the states of threads that still run on workers when the eval ends can be left.
+    const states = blk: {
+        zvm.shared_state_mutex.lockUncancelable(stdx.io());
+        defer zvm.shared_state_mutex.unlock(stdx.io());
+        break :blk zvm.shared_states.items.len;
+    };
+    if (states > 64) {
+        std.debug.print("shared states: {}\n", .{states});
+        return error.TestUnexpectedResult;
+    }
+    // 4 evals spawn 16044 threads. A state left behind for each is over 1 MiB.
+    const grown = C.vm_memory_used(vm) -| used;
+    if (grown > 512 * 1024) {
+        std.debug.print("grown: {}\n", .{grown});
+        return error.TestUnexpectedResult;
+    }
+}
+
 test "A spawned function returns only what await can copy." {
     if (is_wasm) return;
     const vm = C.vm_init();

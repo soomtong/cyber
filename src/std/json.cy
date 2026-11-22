@@ -462,6 +462,14 @@ fn to(%T type, v Value, diag &&Diag) -> !T:
         return error.Overflow
     return f
 
+-- A finite number beyond the range of `f32` is an error. One that is too small rounds to 0, as in Go.
+-fn to_f32(f float, text str, diag &&Diag) -> !f32:
+    r := f32(f)
+    if is_finite(f) and !is_finite(float(r)):
+        diag.msg = 'The number `%{text}` does not fit `f32`.'
+        return error.Overflow
+    return r
+
 -fn mismatch(diag &&Diag, expected str, v &Value) -> error:
     diag.msg = 'Expected %{expected}, found %{v.kind()}.'
     return error.Type
@@ -563,9 +571,9 @@ fn to(%T type, v Value, diag &&Diag) -> !T:
             case .int |i|:
                 return f32(float(i))
             case .float |f|:
-                return f32(f)
+                return to_f32(f, fmt_float(f), diag)
             case .number |s|:
-                return f32(to_float(s, diag)!)
+                return to_f32(to_float(s, diag)!, s, diag)
             else:
                 return mismatch(diag, 'a number', v)
     #else type.is_instance_of(T, Slice):

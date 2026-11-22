@@ -274,6 +274,20 @@ t.eq(r64(5), json.to(r64, json.parse('5')!)!)
 t.eq(error.Overflow, json.to(r64, json.parse('18446744073709551616')!).unwrap_error())
 t.eq(error.Overflow, json.to(r64, json.parse('-1')!).unwrap_error())
 t.eq(error.Overflow, json.to(float, nums[4]).unwrap_error())
+-- A finite number beyond `f32` is `error.Overflow`, not `inf`. One too small for `f32` rounds to 0.
+t.eq(error.Overflow, json.to(f32, json.Value.number('1e39')).unwrap_error())
+t.eq(error.Overflow, json.to(f32, json.Value.float(-1e39)).unwrap_error())
+var f32_diag json.Diag = {}
+t.eq(error.Overflow, json.decode([]f32, '[1, 3.5e38]', &&f32_diag).unwrap_error())
+t.eq('$[1]', f32_diag.path)
+t.eq('The number `3.5e+38` does not fit `f32`.', f32_diag.msg)
+t.eq(error.Overflow, json.to(f32, json.Value.float(1e39), &&f32_diag).unwrap_error())
+t.eq('The number `1e+39` does not fit `f32`.', f32_diag.msg)
+t.eq(f32(3.4e38), json.to(f32, json.Value.number('3.4e38'))!)
+t.eq(f32(-3.4e38), json.decode(f32, '-3.4e38')!)
+t.eq(f32(0.0), json.to(f32, json.Value.number('1e-50'))!)
+t.eq(f32(1.5), json.decode(f32, '1.5')!)
+t.eq(f32(16777216.0), json.to(f32, json.Value.int(16777216))!)
 t.eq(error.Type, json.to(str, json.Value.bool(true)).unwrap_error())
 
 --cytest: pass

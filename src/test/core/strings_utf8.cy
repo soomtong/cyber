@@ -26,6 +26,11 @@ t.eq(s[s.seek_pos(4)..s.seek_pos(8)], 'xyz🐶')
 t.eq(s[s.seek_pos(7)..s.seek_pos(8)], '🐶')
 t.eq(s[s.seek_pos(8)..s.seek_pos(8)], '')
 
+-- seek_pos() one past the last rune gives the length, for an ASCII string too.
+t.eq('hello'.seek_pos(5), 5)
+t.eq('hello'.seek_pos(0), 0)
+t.eq('héllo'.seek_pos(5), 6)
+
 -- concat()
 t.eq(s.concat('123'), 'abc🦊xyz🐶123')
 
@@ -113,6 +118,10 @@ t.eq(s.rune_str_at(0).is_ascii(), true)
 t.eq(s.rune_str_at(s.seek_pos(3)), '🦊')
 t.eq(s.rune_str_at(s.seek_pos(3)).is_ascii(), false)
 t.eq(s.rune_str_at(s.seek_pos(7)), '🐶')
+-- A sequence cut off by the end of the string gives its first byte. Read past the string before.
+cut := s[0..5]
+t.eq(cut.rune_str_at(3).len(), 1)
+t.eq(cut.rune_str_at(3)[0], s[3])
 
 -- split()
 res := 'abc,🐶ab,a'.split(',')

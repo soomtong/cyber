@@ -431,16 +431,20 @@ pub fn seek_pos(t: *cy.Thread) anyerror!Ret {
     const obj = t.param(*cy.heap.Str);
     const str = obj.slice();
     const idx = t.param(i64);
+    // A string has at most as many runes as bytes. The rune index one past the last rune gives the length, as
+    // the end of a slice.
+    if (idx < 0 or idx > str.len) {
+        return t.ret_panic_fmt("Out of bounds rune index: {}", &.{cy.fmt.v(idx)});
+    }
     if (obj.ascii()) {
-        if (idx < 0 or idx >= str.len) {
-            return t.ret_panic("OutOfBounds");
-        }
-        ret.* = @intCast(idx);
+        ret.* = idx;
         return RetOk;
     } else {
         const uidx: u32 = @intCast(idx);
         var bad_byte: bool = undefined;
-        const start: u32 = @intCast(try string.ustringSeekByRuneIndex(str, 0, 0, uidx, &bad_byte));
+        const start = string.ustringSeekByRuneIndex(str, 0, 0, uidx, &bad_byte) catch {
+            return t.ret_panic_fmt("Out of bounds rune index: {}", &.{cy.fmt.v(idx)});
+        };
         ret.* = @intCast(start);
         return RetOk;
     }

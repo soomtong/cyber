@@ -712,6 +712,11 @@ pub fn runeSliceAt(str: []const u8, idx: usize, out_bad_byte: *bool) []const u8 
         out_bad_byte.* = true;
         return str[idx..idx+1];
     };
+    if (idx + len > str.len) {
+        // A sequence cut off by the end of the string.
+        out_bad_byte.* = true;
+        return str[idx..idx+1];
+    }
     out_bad_byte.* = false;
     return str[idx..idx+len];
 }

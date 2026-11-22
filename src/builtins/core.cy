@@ -4209,7 +4209,8 @@ fn (&str) repeat(n int) -> str:
 fn (&str) seek(n int) -> r32:
     return self.rune_at(self.seek_pos(n))
 
---| Returns the starting byte index for the n'th rune.
+--| Returns the starting byte index for the n'th rune. `n` equal to the rune count gives the length of the
+--| string. Panics for a negative `n` or one beyond the rune count.
 #[bind]
 fn (&str) seek_pos(n int) -> int:
     len := self.len()

@@ -311,6 +311,14 @@ t.eq(false, fails(`\w{30000}`))
 t.eq('error.TooBig 3: The repetition count is over the limit of 32768.', err_of(`\w{40000}`))
 t.eq(true, err_of(`(?:a{1000}){1000}`).starts_with('error.TooBig 0: The pattern is too big: its program has more than 32768 instructions.'))
 t.eq(true, err_of(`(?:(?:){30000}){30000}`).starts_with('error.TooBig 0: The pattern is too big: it repeats too many times.'))
+-- The capture slots of a search grow with the instructions times the groups: a cap keeps memory bounded.
+t.eq('error.TooBig 0: The pattern is too big: its 4000 groups and 8003 instructions need more than 1048576 capture slots. Use fewer groups, or write `(?:...)` for a group that needs no capture.', err_of('()' ** 4000))
+t.eq(true, err_of('()' ** 16000).starts_with('error.TooBig 0: The pattern is too big: its 16000 groups'))
+t.eq('ok', err_of('(?:)' ** 16000))
+t.eq('ok', err_of(`(\w)` ** 300))
+many_groups := regex.compile(`(\w)` ** 300)!
+t.eq(301, many_groups.captures('a' ** 300).?.len())
+t.eq('b', many_groups.replace_all('a' ** 299 + 'b', '$300'))
 
 -- Time is linear in the input: these patterns take exponential time with backtracking.
 many := 'a' ** 20000

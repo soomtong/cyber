@@ -25,6 +25,10 @@
 --| Counted repetitions are expanded: `\w{100}` takes 100 instructions.
 const MaxInsts = 32768
 
+--| Compiling stops with `error.TooBig` when the instructions times the capture slots (two per group, group 0
+--| too) is over this. A search for groups keeps a row of slots for each instruction, twice: this keeps it to 16 MiB.
+const MaxSlotTable = 1 << 20
+
 --| Compiling stops with `error.Syntax` when groups, classes and repetitions nest deeper than this.
 const MaxDepth = 250
 
@@ -145,7 +149,7 @@ const NGroup = 8     -- a: child, b: group number
 fn unicode_version() -> str
 
 --| Compiles a pattern. Returns `error.Syntax` for a pattern that is malformed or uses a feature that is not supported,
---| and `error.TooBig` for one that is over `MaxInsts`.
+--| and `error.TooBig` for one that is over `MaxInsts` or `MaxSlotTable`.
 fn compile(pattern str) -> !Regex:
     var diag Diag = {}
     return compile(pattern, &&diag)
@@ -170,6 +174,10 @@ fn compile(pattern str, diag &&Diag) -> !Regex:
         diag.msg = b.msg
         diag.pos = 0
         return err
+    if b.pc() * b.names.len() * 2 > MaxSlotTable:
+        diag.msg = 'The pattern is too big: its %{b.names.len() - 1} groups and %{b.pc()} instructions need more than %{MaxSlotTable} capture slots. Use fewer groups, or write `(?:...)` for a group that needs no capture.'
+        diag.pos = 0
+        return error.TooBig
     return Regex{prog=b.assemble(), names=b.names, source=pattern}
 
 --| Returns `s` with every character that has a meaning in a pattern escaped, so that it matches itself.

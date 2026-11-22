@@ -29,6 +29,9 @@
 - 2026-11-22(사용자: "continue"): 마지막 사용의 남은 둘(`and` · `or`의 왼쪽의 이동, `scope` 블록의 이동).
 - 2026-11-22(사용자: "src/sema.zig too large. are there ways to refactoring?" 뒤 "이 리팩토링이 정상으로 완료되면 다음 패치 버전을
   올리자. 0.4.17 이야. 배포까지 부탁해. ... 남은 결정은 위임합니다."): `sema.zig` 분할과 0.4.17 릴리스.
+- 2026-11-22(사용자: `/code-review high from 0.4.16 to head`와 "in tars-agent reports
+  docs/requests/cyber-0.4.17-session-crash-after-slice-of-nocopy.md"): 요청서의 셋(세션 세그폴트, `[]T`의 `NoCopy` 원소 문구,
+  빌린 값의 `for`)을 고쳤다. 리뷰 7건은 고치지 않았다("남은 작업"의 첫 항목).
 
 ## 현재 브랜치
 
@@ -119,6 +122,18 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   재실행 없이 통과했다. `install.sh 0.4.17`을 scratchpad에 설치해 버전 문자열, `move` 없는 `Array` 이동 · 빌림의 마지막 사용 예,
   '`x` was moved at ...' 오류, `cyber-lsp initialize`를 확인했다. `/usr/local`의 설치는 사용자가 다시 한다.
   tars-agent `docs/TODO.md`의 "다음 cyber 빌드" 항목에 그 빌드가 0.4.17임을 덧붙였다(커밋 안 함).
+- [x] tars-agent 요청 `cyber-0.4.17-session-crash-after-slice-of-nocopy.md`(2026-11-22). 기록은 `docs/releases/unreleased.md`.
+  - 세션 세그폴트: 템플릿 본문의 실패를 인스턴스가 아니라 본문 단위로 표시한다(`FuncInfo.body_failed`). 부르는 자리는
+    `sema_call.checkCallee`: 넘어온 본문에서 부르면 그 본문도 버리고, 지금 소스에서 부르면 다시 검사한다
+    (`Compiler.recheck_funcs`, `semaChunkFuncs`가 `Chunk.funcs` 뒤에 돈다. `Chunk.funcs`는 함수를 소유하므로 거기 넣으면 이중 해제).
+  - `semaCarriedFuncs`는 넘어온 본문이 전개한 함수(`main.funcs`의 늘어난 부분)도 같은 패스에서 검사하고, trait 구현 본문이 버려진
+    타입은 인스턴스째 버린다(`hasFailedImpl`, 아니면 `bc_gen.fillVtables`가 null).
+  - 앞 컴파일에서 실패한 인스턴스는 캐시에서 빼고 다시 전개한다(`template.failedEarlier`, `site_seq` 비교). 실패한 컴파일이
+    미해석으로 남긴 타입은 `compiler.resolveCarriedTypes`가 먼저 해석한다.
+  - `[]T`의 `NoCopy` 원소는 `sema_type.resolveStructFields` 끝에서 거절한다(`reportNoCopyInSlice`, `pending_slice_args`).
+  - `for`는 빌림을 받으면 역참조한다(`sema_stmt.zig`의 `.for_iter_stmt`).
+  - 재현 조건: 앞에 성공한 eval이 있는 세션이어야 한다. 첫 컴파일이 실패하면 VM이 리셋되어 보이지 않는다.
+  - tars-agent: 요청서에 회신 절, `docs/TODO.md` 36행에 회신 요약(커밋함, push 안 함).
 
 ## 시도했으나 실패한 접근
 
@@ -128,6 +143,23 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - zsh는 `$files`를 단어로 나누지 않는다. 여러 파일 치환은 `rg -l0 ... | xargs -0`.
 
 ## 남은 작업
+
+- [ ] `/code-review high` 0.4.16..HEAD(2026-11-22)의 7건. 중요 5건은 리뷰가 CLI로 재현했다. 사용자가 고치라고 하지 않았다.
+  1. `sema_stmt.zig:544` · `581`: `while` 조건식 · `while opt |v|`의 옵션식이 바깥 `NoCopy` 지역을 옮기고 본문이 항상
+     `break` · `return`이면 이중 소멸이나 use-after-move(`while take1(x) == 2: break` → 't1 d1 d1 end'). 조건식의 이동이 본문
+     이동처럼 `branch_moves`에 남는다. 고칠 방향: 조건 평가 뒤 `branch_moves` 증가분이 있으면 오류.
+  2. `sema_move.zig:446`: 오버로드 후보 실패의 `undoMoves`가 `branch_moves.pop()`으로 엉뚱한 항목을 뺀다(인자 안의 `if` 식 join이
+     이미 지운 경우). 반복문에서 바깥 `y`의 이동 오류가 사라져 런타임 'attempt to use null value'. 고칠 방향: undo에 길이를 저장.
+  3. `sema_expr.zig:1043`, `sema_switch.zig:198`: `if` 문 첫 조건 · `and`/`or` 왼쪽 안의 `if` 식이 같은 블록의 지역을 옮기면 반복
+     본문 끝에서 이중 소멸, `while` 본문이면 컴파일러 'index out of bounds'. join 기준을 `.if_cond`를 건너뛴 `moveBlock`의
+     `varStart`로.
+  4. `sema_stmt.zig:396`: `for xs |x|:` 본문의 `move x`(캡처)가 컴파일러 index out of bounds(0.4.16은 오류 문구).
+     stmts 블록 pop 전에 `endPlainBlockMoves`, 또는 `restoreMoves`가 `id >= varStack.len`을 건너뛴다.
+  5. `sema_call.zig:356`: `try:` 안의 `xs = xs.appended(f()!)`가 0.4.16과 달리 'Cannot leave the assignment to `xs` here: ...'
+     오류(`scope` 블록, `?else: break` 인자도). 대입 꼴 버퍼 재사용은 인자에 떠날 수 있는 `!` · `break`가 있으면 건너뛴다.
+  6. (사소, 코드로만 확인) `sema_call.zig:381`: 마지막 사용의 `xs.inserted(0, v)`에서 LSP 매개변수 이름 inlay가 사라질 수 있다
+     (`recordCall`이 `insert`와 `own_buffer` 둘을 기록).
+  7. (사소) 커밋 `61247330`의 제목이 82자다(80자 규칙). 태그에 들어가 고쳐 쓰지 않는다.
 
 - [x] LSP 다음 후보(2026-11-19). 설계 · 확인은 `docs/specs/2026-11-12-lsp-design.md` 12절 "매개변수 이름" · "다른 소스의 노드", 14절.
   - VS Code 테스트에 다섯 항목(`15ce5fa8`): 린트 진단, quick fix, inlay, 문서 주석 hover, 여러 구문 오류. 16개 통과.

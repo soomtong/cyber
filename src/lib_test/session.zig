@@ -901,3 +901,107 @@ test "An `#[extern]` function without the `c` module is a compile error, not a c
     // The session goes on.
     try zt.eq(C.Success, C.vm_evalx(vm, "main", "x := 1", config, &res));
 }
+
+test "A body of a template instance that failed does not break the next compile." {
+    // tars-agent, cyber 0.4.17: `[]Array[int]` failed in a body of `PtrSpan[Array[int]]` (a slice copies its
+    // elements). `Slice[Array[int]]` itself did not fail and its unchecked bodies were carried to the next
+    // compile, which generated a call into the body that was never checked: SIGSEGV in `cl_vm_validate`.
+    // `[]Array[int]` is now refused as a type, so the same is shown with templates of the session.
+    C.setSilent(true);
+    defer C.setSilent(false);
+    var res: C.EvalResult = undefined;
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    const decls =
+        \\use test
+        \\type Box[T Any]:
+        \\    v T
+        \\fn (&Box[]) dup() -> T:
+        \\    return self.v
+        \\fn (&Box[]) size() -> int:
+        \\    return 1
+        \\type Wrap[T Any]:
+        \\    b Box[T]
+        \\fn (&Wrap[]) get() -> T:
+        \\    return self.b.dup()
+        \\fn (&Wrap[]) get2() -> T:
+        \\    return self.get()
+    ;
+    const bad = [_][]const u8{
+        "w := Wrap[Array[int]]{b=Box[Array[int]]{v=Array[int]{1}}}\n_ = w.get2()",
+        "fn f():\n  w := Wrap[Array[int]]{b=Box[Array[int]]{v=Array[int]{1}}}\n  _ = w.get2()\nf()",
+    };
+    for (bad) |src| {
+        for ([_]bool{ true, false }) |validate| {
+            errdefer std.debug.print("source: {s}\nvalidate: {}\n", .{ src, validate });
+            const vm = C.vm_initx(zt.alloc);
+            defer C.vm_deinit(vm);
+            errdefer {
+                const summary = C.vm_compile_error_summary(vm);
+                defer C.vm_freeb(vm, summary);
+                std.debug.print("summary: {s}\n", .{summary});
+            }
+            try zt.eq(C.Success, C.vm_evalx(vm, "repl", decls, config, &res));
+            // Three times: the later ones call the body that failed and get its error again.
+            for (0..3) |_| {
+                if (validate) {
+                    try zt.eq(C.ErrorCompile, C.vm_validate(vm, src));
+                } else {
+                    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", src, config, &res));
+                }
+                const summary = C.vm_compile_error_summary(vm);
+                defer C.vm_freeb(vm, summary);
+                try zt.expect(std.mem.indexOf(u8, summary, "Cannot copy `Array[int]`") != null);
+                try zt.expect(std.mem.indexOf(u8, summary, "return self.v") != null);
+                // A source that does not call the body is not blamed for it.
+                try zt.eq(C.Success, C.vm_validate(vm, "print(1)"));
+                try zt.eq(C.Success, C.vm_evalx(vm, "repl", "test.eq(1, 1)", config, &res));
+            }
+            // Only that body failed. The instances are still good.
+            try zt.eq(C.Success, C.vm_evalx(vm, "repl", "bx := Box[Array[int]]{v=Array[int]{1}}\ntest.eq(1, bx.size())", config, &res));
+            try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = bx.dup()", config, &res));
+            try zt.eq(C.Success, C.vm_evalx(vm, "repl", "test.eq(1, bx.size())\nbi := Box[int]{v=3}\ntest.eq(3, bi.dup())", config, &res));
+        }
+    }
+}
+
+test "A slice of a NoCopy element type is refused and does not break the next compile." {
+    C.setSilent(true);
+    defer C.setSilent(false);
+    var res: C.EvalResult = undefined;
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    const bad = [_][]const u8{
+        "xs := []Array[int]{}",
+        "xs := []Array[int]{Array[int]{7}}",
+        "a := Array[int]{7}\nxs := []Array[int]{move a}",
+        "fn f():\n  a := []Array[int]{Array[int]{7}}\n  x := a[0]\n  _ = x.len()\nf()",
+        "type W:\n  xs []Array[int]",
+    };
+    for (bad) |src| {
+        for ([_]bool{ true, false }) |validate| {
+            errdefer std.debug.print("source: {s}\nvalidate: {}\n", .{ src, validate });
+            const vm = C.vm_initx(zt.alloc);
+            defer C.vm_deinit(vm);
+            errdefer {
+                const summary = C.vm_compile_error_summary(vm);
+                defer C.vm_freeb(vm, summary);
+                std.debug.print("summary: {s}\n", .{summary});
+            }
+            try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use test\nx := 5", config, &res));
+            for (0..2) |_| {
+                if (validate) {
+                    try zt.eq(C.ErrorCompile, C.vm_validate(vm, src));
+                } else {
+                    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", src, config, &res));
+                }
+                const summary = C.vm_compile_error_summary(vm);
+                defer C.vm_freeb(vm, summary);
+                try zt.expect(std.mem.indexOf(u8, summary, "A slice `[]Array[int]` copies its elements") != null);
+                try zt.eq(C.Success, C.vm_validate(vm, "print(1)"));
+            }
+            try zt.eq(C.Success, C.vm_evalx(vm, "repl", "test.eq(5, x)\nys := []int{1, 2}\ntest.eq(2, ys.len())", config, &res));
+            try zt.eq(C.Success, C.vm_evalx(vm, "repl", "zs := Array[Array[int]]{}\nzs.append(Array[int]{7})\ntest.eq(1, zs.len())", config, &res));
+        }
+    }
+}

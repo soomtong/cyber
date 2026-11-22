@@ -107,6 +107,9 @@ pub const Compiler = struct {
     /// (`type Tree: kids []Tree`). Checked when the argument turns out to be a borrow type
     /// (`sema_type.resolveStructFields`). Of this compile only.
     pending_buffer_args: std.ArrayListUnmanaged(PendingBufferArg) = .empty,
+    /// `Slice` instances that were resolved before their element type was. Checked when the element type turns
+    /// out to be `NoCopy` (`sema_type.resolveStructFields`). Of this compile only.
+    pending_slice_args: std.ArrayListUnmanaged(PendingBufferArg) = .empty,
 
     /// Record what the names of the main source refer to (`cl_vm_set_symbol_info`, `refs.zig`).
     /// Kept across `cl_vm_reset` like `report_color`. The references are those of the last compile.
@@ -216,6 +219,13 @@ pub const Compiler = struct {
     /// chunks that hold them are not compiled again, so their bodies were never checked or generated.
     /// The next compile checks and generates them in its main chunk. The chunks that own them still destroy them.
     carry_funcs: std.ArrayListUnmanaged(*cy.Func) = .empty,
+    /// Inside `semaCarriedFuncs`: an error is not this source's (`sema_call.checkCallee`).
+    checking_carried: bool = false,
+    /// The functions with a failed body that this compile calls and checks again (`sema_call.checkCallee`).
+    /// A chunk does not take them into `Chunk.funcs`, which owns its functions: `semaChunkFuncs` checks them
+    /// from `recheck_next` on.
+    recheck_funcs: std.ArrayListUnmanaged(*cy.Func) = .empty,
+    recheck_next: u32 = 0,
     carry_syms: std.ArrayListUnmanaged(*cy.Sym) = .empty,
 
     c_includes: std.ArrayList([]const u8),
@@ -303,7 +313,9 @@ pub const Compiler = struct {
             self.ref_calls.deinit(self.alloc);
             self.recover_skip.deinit(self.alloc);
             self.failed_decls.deinit(self.alloc);
+            self.recheck_funcs.deinit(self.alloc);
             self.pending_buffer_args.deinit(self.alloc);
+            self.pending_slice_args.deinit(self.alloc);
             self.ref_hints.deinit(self.alloc);
             self.ref_hint_text.deinit(self.alloc);
             self.reports.deinit(self.alloc);
@@ -554,6 +566,10 @@ pub const Compiler = struct {
         for (self.carry_syms.items) |sym| {
             if (survives(sym, start, type_start, 0)) try syms.append(self.alloc, sym);
         }
+        // Checked again by the failed compile, in a chunk that is gone. No chunk has them in `Chunk.funcs`.
+        for (self.recheck_funcs.items) |func| {
+            if (carryFunc(func, start, type_start)) try funcs.append(self.alloc, func);
+        }
         for (self.newChunks()) |chunk| {
             if (chunk != self.main_chunk and !chunk.evicted) {
                 if (self.chunk_map.get(chunk.srcUri)) |cached| {
@@ -565,6 +581,7 @@ pub const Compiler = struct {
                 if (carryFunc(func, start, type_start)) try funcs.append(self.alloc, func);
             }
             for (chunk.syms.items) |sym| {
+                // A type that the failed compile left unresolved is carried too (`resolveCarriedTypes`).
                 if (sym.type == .type and survives(sym, start, type_start, 0)) try syms.append(self.alloc, sym);
             }
         }
@@ -609,7 +626,10 @@ pub const Compiler = struct {
     fn compileInner(self: *Compiler, uri: []const u8, src_opt: ?[]const u8, config: C.CompileConfig) !CompileResult {
         self.config = config;
         self.failed_decls.clearRetainingCapacity();
+        self.recheck_funcs.clearRetainingCapacity();
+        self.recheck_next = 0;
         self.pending_buffer_args.clearRetainingCapacity();
+        self.pending_slice_args.clearRetainingCapacity();
 
         if (!self.cont) {
             try reserveCoreTypes(self);
@@ -708,6 +728,7 @@ pub const Compiler = struct {
         }
 
         // Before this compile resolves anything of its own, so that none of it takes an instance that is dropped.
+        try resolveCarriedTypes(self, mainChunk);
         try semaCarriedFuncs(self, mainChunk);
 
         var id: u32 = self.chunk_start;
@@ -960,7 +981,8 @@ fn performChunkSema(c: *cy.Chunk) !void {
     try semaChunkFuncs(c);
 }
 
-/// Passes over the carried bodies (`semaCarriedFuncs`). Each pass after the first drops one more instance.
+/// Passes over the carried bodies (`semaCarriedFuncs`). Each pass after the first drops one more body. After
+/// the last one every carried body of a template instance is dropped.
 const max_carry_passes = 8;
 
 /// Reports after which recovery stops. A compile that is this wrong gains nothing from more of them.
@@ -1019,10 +1041,21 @@ fn semaChunkFuncs(c: *cy.Chunk) !void {
     if (c.compiler.recover) {
         return semaChunkFuncsRecover(c);
     }
+    const self = c.compiler;
     // Iterate funcs with explicit index since lambdas could be appended.
     var i: u32 = 0;
-    while (i < c.funcs.items.len) : (i += 1) {
-        const func = c.funcs.items[i];
+    while (true) {
+        var func: *cy.Func = undefined;
+        if (i < c.funcs.items.len) {
+            func = c.funcs.items[i];
+            i += 1;
+            // Dropped by `semaCarriedFuncs`. Checked again when this source calls it.
+            if (func.info.body_failed) continue;
+        } else if (self.recheck_next < self.recheck_funcs.items.len) {
+            // A body that failed in an earlier compile and that this one calls. What it expands joins `c.funcs`.
+            func = self.recheck_funcs.items[self.recheck_next];
+            self.recheck_next += 1;
+        } else break;
         switch (func.type) {
             .userFunc => {
                 // Skip strictly const eval functions.
@@ -1035,9 +1068,9 @@ fn semaChunkFuncs(c: *cy.Chunk) !void {
                     continue;
                 }
                 log.tracev("sema func: {s}", .{func.name()});
-                // A template instance whose body does not compile is not handed out or carried again.
-                errdefer if (ownerInstance(func)) |inst| {
-                    inst.failed = true;
+                // A body of a template instance that does not compile is not carried to the next compile.
+                errdefer if (ownerInstance(func) != null) {
+                    func.info.body_failed = true;
                 };
                 if (func.isMethod()) {
                     try sema_local.semaMethodBody(c, func);
@@ -2054,6 +2087,7 @@ fn carryFunc(func: *cy.Func, start: u32, type_start: u32) bool {
         // A lambda is made again with the body that holds it.
         else => return false,
     }
+    if (func.info.body_failed) return false;
     if (func.instance) |inst| {
         if (!instanceSurvives(inst, start, type_start, 0)) return false;
     }
@@ -2148,32 +2182,104 @@ fn resolveImplFuncs(self: *Compiler, type_: *cy.Type) !void {
     }
 }
 
+/// Resolves the types that a failed compile left unresolved (`Compiler.carry_syms`). An error while a template
+/// instance is resolved ends the compile before the instances that it asked for on the way are resolved
+/// (`template.expand_template2`), and they stay in the cache of their template: after `[]Array[int]` was refused,
+/// `[]int{1, 2}` took a `Span[int]` without fields (SIGSEGV in sema, 2026-11-22).
+///
+/// A type that does not resolve is not this source's error: its instance is marked failed, so it is not handed
+/// out or carried, and the next source that asks for it expands it again (`template.failedEarlier`).
+fn resolveCarriedTypes(self: *Compiler, main: *cy.Chunk) !void {
+    var dropped = false;
+    var keep: usize = 0;
+    // What resolving expands joins `main.syms`, not `carry_syms`.
+    for (self.carry_syms.items) |sym| {
+        const type_ = sym.cast(.type).type;
+        if (!type_.isResolved()) {
+            const inst = sym.instance();
+            const decl = sym.declNodeOrNull();
+            const ok = if (decl == null or (inst != null and inst.?.failed)) false else b: {
+                const report_start = self.reports.items.len;
+                const node: *ast.Node = decl.?;
+                const sym_start = main.syms.items.len;
+                const res = sema_type.resolve_type_sym(main, sym, node);
+                const res2 = if (res) |_| b2: {
+                    if (main.syms.items.len > sym_start) {
+                        break :b2 sema_type.resolve_all_types_after(main, sym_start, node);
+                    }
+                    break :b2 {};
+                } else |err| err;
+                if (res2) |_| {
+                    break :b type_.isResolved();
+                } else |err| {
+                    if (err != error.CompileError or inst == null or !canGoOn(self)) return err;
+                    for (self.reports.items[report_start..]) |*report| {
+                        report.deinit(self.alloc);
+                    }
+                    self.reports.items.len = report_start;
+                    break :b false;
+                }
+            };
+            if (!ok) {
+                if (inst) |i| i.failed = true;
+                dropped = true;
+                continue;
+            }
+        }
+        self.carry_syms.items[keep] = sym;
+        keep += 1;
+    }
+    self.carry_syms.items.len = keep;
+    if (dropped) self.dropFailedCarries();
+}
+
 /// Checks the bodies that a failed compile left unchecked or without code (`Compiler.carry_funcs`) in the
 /// main chunk of this compile, so that their code is generated with it. What these bodies expand is appended to
 /// the main chunk and checked with it.
 ///
 /// The body of a template instance that a failed compile left behind may not compile (`Map[[]int, int]` after an
-/// error ahead of it). The error is not this source's: the instance is marked failed, so it is no longer handed
-/// out or carried, and what the pass checked is dropped (`StackMark` takes back the function blocks). The next pass
-/// checks the rest again, since a body that was checked may call into the dropped instance. Before 2026-11-20 the
-/// whole source was compiled again instead, which called the module loader and the resolvers again.
+/// error ahead of it). The error is not this source's: the body is marked failed (`FuncInfo.body_failed`), so it is
+/// no longer carried, and what the pass checked is dropped (`StackMark` takes back the function blocks). The next
+/// pass checks the rest again, since a body that was checked may call the dropped one (`sema_call.checkCallee`
+/// fails it in turn). A source that calls a dropped body checks it again and gets its error. Before 2026-11-20 the
+/// whole source was compiled again instead, which called the module loader and the resolvers again. Before
+/// 2026-11-22 the whole instance was marked failed: after `[]Array[int]` failed in a body of
+/// `PtrSpan[Array[int]]`, `Array[Array[int]]` could not be used for the rest of the session.
 fn semaCarriedFuncs(self: *Compiler, main: *cy.Chunk) !void {
+    self.checking_carried = true;
+    defer self.checking_carried = false;
+    // What the carried bodies expand joins `main.funcs`. It is checked here as theirs: checked with the source,
+    // a call from it to a dropped body would count as the source's and report that body's error.
+    const funcs_start = main.funcs.items.len;
     var passes: u32 = 0;
     pass: while (true) {
         for (self.carry_funcs.items) |func| {
             func.info.emitted = false;
             func.info.bc_inline = 0;
         }
+        for (main.funcs.items[funcs_start..]) |func| {
+            if (func.type != .userFunc and func.type != .extern_) continue;
+            func.info.emitted = false;
+            func.info.bc_inline = 0;
+        }
         var marks = try RecoverMarks.take(self);
         defer marks.deinit(self);
         const report_start = self.reports.items.len;
-        for (self.carry_funcs.items) |func| {
+        const num_carried = self.carry_funcs.items.len;
+        var i: usize = 0;
+        while (true) : (i += 1) {
+            var func: *cy.Func = undefined;
+            if (i < num_carried) {
+                func = self.carry_funcs.items[i];
+            } else if (funcs_start + (i - num_carried) < main.funcs.items.len) {
+                func = main.funcs.items[funcs_start + (i - num_carried)];
+            } else break;
             const has_body = switch (func.type) {
                 .userFunc => !func.info.const_eval_only,
                 .extern_ => func.data.extern_.has_impl,
                 else => false,
             };
-            if (!has_body or func.info.emitted or !func.isResolved()) {
+            if (!has_body or func.info.emitted or func.info.body_failed or !func.isResolved()) {
                 continue;
             }
             const res = if (func.type == .userFunc and func.isMethod())
@@ -2182,23 +2288,62 @@ fn semaCarriedFuncs(self: *Compiler, main: *cy.Chunk) !void {
                 sema_local.semaFuncBody(main, func);
             res catch |err| {
                 // A function that belongs to no instance can not be dropped. Its error is reported.
-                const inst = ownerInstance(func) orelse return err;
-                inst.failed = true;
-                if (err != error.CompileError or passes + 1 >= max_carry_passes or !canGoOn(self)) return err;
+                if (ownerInstance(func) == null) return err;
+                func.info.body_failed = true;
+                if (err != error.CompileError or !canGoOn(self)) return err;
                 passes += 1;
+                if (passes >= max_carry_passes) {
+                    // Too long a chain of bodies that call a dropped one. The rest is not checked ahead of its
+                    // use: a call checks a dropped body again.
+                    for (self.carry_funcs.items) |carried| {
+                        if (ownerInstance(carried) != null) carried.info.body_failed = true;
+                    }
+                    for (main.funcs.items[funcs_start..]) |expanded| {
+                        if (ownerInstance(expanded) != null) expanded.info.body_failed = true;
+                    }
+                }
                 for (self.reports.items[report_start..]) |*report| {
                     report.deinit(self.alloc);
                 }
                 self.reports.items.len = report_start;
-                for (marks.marks, 0..) |mark, i| {
-                    mark.restore(self.chunks.items[i]);
+                for (marks.marks, 0..) |mark, j| {
+                    mark.restore(self.chunks.items[j]);
                 }
                 self.dropFailedCarries();
                 continue :pass;
             };
         }
+        // A carried type with a dropped body behind one of its traits has no complete vtable. The type is
+        // dropped: what calls into it fails in the next pass, and a source that asks for it expands it again.
+        var dropped = false;
+        for (self.carry_syms.items) |sym| {
+            if (!hasFailedImpl(sym.cast(.type).type)) continue;
+            const inst = sym.instance() orelse return error.CompileError;
+            inst.failed = true;
+            dropped = true;
+        }
+        if (dropped) {
+            passes += 1;
+            for (marks.marks, 0..) |mark, j| {
+                mark.restore(self.chunks.items[j]);
+            }
+            self.dropFailedCarries();
+            continue :pass;
+        }
         return;
     }
+}
+
+/// Whether a function of `type_` that implements a trait has a failed body (`FuncInfo.body_failed`).
+fn hasFailedImpl(type_: *cy.Type) bool {
+    if (type_.kind() != .struct_t or !type_.isResolved()) return false;
+    for (type_.cast(.struct_t).impls()) |*impl| {
+        for (impl.trait.members()) |member| {
+            const func = type_.get_trait_method_impl(member) orelse continue;
+            if (func.info.body_failed) return true;
+        }
+    }
+    return false;
 }
 
 pub fn ownerInstance(func: *cy.Func) ?*cy.Instance {

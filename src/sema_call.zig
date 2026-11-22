@@ -494,7 +494,31 @@ pub fn markHotCall(c: *cy.Chunk, func: *cy.Func) void {
     }
 }
 
+/// A call to a function whose body did not compile in an earlier compile of the session (`FuncInfo.body_failed`).
+/// A body that the failed compile left unchecked (`Compiler.carry_funcs`) finds such a function through a type it
+/// already has, and so can this source. The function has no IR, so code can not be generated for the call
+/// (SIGSEGV in `bc_gen.check_inline` before 2026-11-22).
+/// - From this source: the body is checked again with this compile (`Compiler.recheck_funcs`), which reports its
+///   error where it is. With error recovery the body is not checked again and the call is the error.
+/// - From a carried body: the error is not this source's. The carried body fails and is dropped in turn.
+pub fn checkCallee(c: *cy.Chunk, func: *cy.Func, node: *ast.Node) !void {
+    if (func.info.body_failed) {
+        const compiler = c.compiler;
+        if (compiler.checking_carried or compiler.recover) return cy.template.failedInstance(c, node);
+        // The mark stays until the body compiles (`sema_local`): this compile can fail before it gets there.
+        if (std.mem.indexOfScalar(*cy.Func, compiler.recheck_funcs.items, func) == null) {
+            func.info.emitted = false;
+            func.info.bc_inline = 0;
+            try compiler.recheck_funcs.append(compiler.alloc, func);
+        }
+        return;
+    }
+    const inst = cy.compiler.ownerInstance(func) orelse return;
+    if (inst.failed) return cy.template.failedInstance(c, node);
+}
+
 pub fn sema_call_ir(c: *cy.Chunk, func: *cy.Func, args: []const *ir.Expr, node: *ast.Node) !sema.ExprResult {
+    try checkCallee(c, func, node);
     if (c.compiler.record_refs) cy.refs.recordCall(c, node, func);
     markHotCall(c, func);
     try cy.global_init.recordCall(c, func);

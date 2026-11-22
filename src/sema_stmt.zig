@@ -327,7 +327,12 @@ fn semaStmt2(c: *cy.Chunk, node: *ast.Node) !void {
             c.block().move_branch = .plain;
             {
                 const iterable_n: *ast.Node = @ptrCast(stmt.iterable);
-                const iterable_init = try c.semaExpr(stmt.iterable, .{});
+                var iterable_init = try c.semaExpr(stmt.iterable, .{});
+                if (iterable_init.type.kind() == .borrow or iterable_init.type.kind() == .ex_borrow) {
+                    // A borrowed iterable (`a &[]int`) is iterated in place, like `for a.* |x|:`. Borrowing the
+                    // borrow asked for `iterator(&&[]int)`.
+                    iterable_init = try sema_expr.semaDeref(c, iterable_init, iterable_n);
+                }
                 var iterable_expr = iterable_init;
                 if (iterable_init.type.isRefPointer()) {
                     // The hidden local releases the ref at the end of the loop, so an existing local must be retained.

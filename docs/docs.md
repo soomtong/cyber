@@ -1058,6 +1058,15 @@ for {1, 2, 3} |n|:
 
 A list literal uses braces. `['a', 'b']` is not a list literal: `[n]T` is a vector type.
 
+A slice copies its elements (two copies of a slice share the buffer until one of them is resized), so the element type can not be a [`NoCopy`](#moving) type such as `Array[T]`. Use an `Array` for those, which moves its elements:
+```cy
+xs := []Array[int]{}
+--> error: A slice `[]Array[int]` copies its elements, so the element type `Array[int]` can not be `NoCopy`. Use `Array[Array[int]]`, which moves them.
+
+ys := Array[Array[int]]{}
+ys.append(Array[int]{1, 2})
+```
+
 The first element of the slice starts at index 0.
 ```cy
 print(arr[0])    --> 1
@@ -2180,6 +2189,18 @@ for arr |i, &val|:
     print('index %{i}, length %{val.len()}')
 ```
 Iteration by borrow is required when the element type can not be copied. `Array` and `Slice` support it. A type supports it by declaring `next_borrow(idx &int) -> scope ?&T` next to `next`. The iterable is borrowed during the loop, so it can not be modified in the loop body.
+
+A borrow of an iterable is iterated like the iterable. `for a.* |x|:` is the same loop:
+```cy
+fn total(a &[]int) -> int:
+    s := 0
+    for a |x|:
+        s += x
+    return s
+
+b := {1, 2, 3}
+print(total(&b))    --> 6
+```
 
 ### `break` statement.
 The `break` statement exits the current parent loop prematurely:

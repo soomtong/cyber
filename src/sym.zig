@@ -943,6 +943,10 @@ const FuncInfo = packed struct {
 
     /// `sema_call.isCancelKeepFunc` cache: 0 unknown, 1 a destruction routine, 2 not one.
     cancel_keep: u2 = 0,
+
+    /// The body of this function of a template instance did not compile, in a session that goes on. It has no
+    /// IR and is not carried to the next compile. A call to it checks the body again (`sema_call.checkCallee`).
+    body_failed: bool = false,
 };
 
 pub const FuncConfig = struct {

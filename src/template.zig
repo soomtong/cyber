@@ -384,7 +384,11 @@ pub fn expand_template2(c: *cy.Chunk, template: *cy.sym.Template, arg_types: []c
 
     // Ensure variant type.
     const key = VariantKey{ .param_types = arg_types, .params = args };
-    const res = try template.instance_cache.getOrPutContext(c.alloc, key, .{});
+    var res = try template.instance_cache.getOrPutContext(c.alloc, key, .{});
+    if (res.found_existing and failedEarlier(c, res.value_ptr.*)) {
+        template.instance_cache.removeByPtr(res.key_ptr);
+        res = try template.instance_cache.getOrPutContext(c.alloc, key, .{});
+    }
     if (!res.found_existing) {
         // Generate type instance.
         const instance = blk: {
@@ -433,9 +437,16 @@ pub fn expand_template2(c: *cy.Chunk, template: *cy.sym.Template, arg_types: []c
     return variant.data.sym.sym;
 }
 
+/// Whether `instance` failed to expand in an earlier compile of the session. The reports of that compile are
+/// gone, so the instance leaves the cache and is expanded again: the source that asks gets the error itself, not
+/// 'because of an earlier error'. The instance stays in `instances`, which owns it.
+fn failedEarlier(c: *cy.Chunk, instance: *Instance) bool {
+    return instance.failed and instance.site_seq != c.compiler.compile_seq;
+}
+
 /// An instance whose expansion failed is asked for again. The error was reported where it failed, so with
 /// error recovery the body that asks is given up without another report.
-fn failedInstance(c: *cy.Chunk, node: *ast.Node) anyerror {
+pub fn failedInstance(c: *cy.Chunk, node: *ast.Node) anyerror {
     if (c.compiler.recover and c.compiler.reports.items.len > 0) {
         return error.CompileError;
     }
@@ -653,7 +664,11 @@ pub fn expandResolvedFuncTemplate(
 ) !*cy.Func {
     // Ensure variant func.
     const key = VariantKey{ .param_types = arg_types, .params = args };
-    const res = try template.instance_cache.getOrPutContext(c.alloc, key, .{});
+    var res = try template.instance_cache.getOrPutContext(c.alloc, key, .{});
+    if (res.found_existing and failedEarlier(c, res.value_ptr.*)) {
+        template.instance_cache.removeByPtr(res.key_ptr);
+        res = try template.instance_cache.getOrPutContext(c.alloc, key, .{});
+    }
     if (!res.found_existing) {
         const variant = blk: {
             // The new slot's key still points at the caller's arguments. It leaves the cache unless a variant fills it.

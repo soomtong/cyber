@@ -1323,6 +1323,7 @@ pub fn popFuncBlock(c: *cy.Chunk) !void {
     };
 
     func.info.emitted = true;
+    func.info.body_failed = false;
 
     if (func.type == .userFunc) {
         func.data.userFunc.loc = proc.ir;

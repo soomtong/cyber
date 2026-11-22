@@ -278,6 +278,8 @@ fn test_memory(run: *Runner) void {
     run.case("memory/array_append_move.cy");
     run.case("memory/array_nocopy_elem.cy");
     run.case("memory/array_nocopy_index_copy_error.cy");
+    run.case("memory/slice_nocopy_elem_error.cy");
+    run.case("memory/slice_nocopy_elem_field_error.cy");
     run.case("memory/array_nocopy_for_copy_error.cy");
     run.case("memory/array_nocopy_last_error.cy");
     run.case("memory/array_nocopy_literal_var_error.cy");
@@ -742,6 +744,7 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/for_iter.cy");
     run.case("control_flow/for_iter_unsupported_error.cy");
     run.case("control_flow/for_iter_borrow_unsupported_error.cy");
+    run.case("control_flow/for_iter_borrowed_iterable.cy");
     run.case("control_flow/for_iter_index_borrow_error.cy");
     run.case("meta/infer_param_outside_func_error.cy");
     run.case("meta/infer_param_type_arg_error.cy");

@@ -869,6 +869,18 @@ fn reportBorrowInBuffer(c: *cy.Chunk, inst_t: *cy.Type, arg_t: *cy.Type, fallbac
     return c.reportErrorFmt("`{}` keeps values of the borrow type `{}` in a buffer, where a borrow is not checked. Use an owned type, `^T` or a vector `[N]T`.", &.{cy.fmt.v(name), cy.fmt.v(arg_name)}, at);
 }
 
+/// `inst_t` is a `Slice` whose element type `arg_t` can not be copied. Before 2026-11-22 the error came from a
+/// body of `PtrSpan[T]` in core, and only when one was checked.
+fn reportNoCopyInSlice(c: *cy.Chunk, inst_t: *cy.Type, arg_t: *cy.Type, fallback: *ast.Node) anyerror {
+    // Reported where the type is asked for, not at the template in another module.
+    const at: *ast.Node = inst_t.sym().instance.?.siteIn(c.compiler) orelse fallback;
+    const name = try c.sema.allocTypeName(inst_t);
+    defer c.alloc.free(name);
+    const arg_name = try c.sema.allocTypeName(arg_t);
+    defer c.alloc.free(arg_name);
+    return c.reportErrorFmt("A slice `{}` copies its elements, so the element type `{}` can not be `NoCopy`. Use `Array[{}]`, which moves them.", &.{cy.fmt.v(name), cy.fmt.v(arg_name), cy.fmt.v(arg_name)}, at);
+}
+
 pub fn resolveStructFields(c: *cy.Chunk, struct_t: *cy.types.Struct, decl: *ast.StructDecl) !void {
     struct_t.resolving_struct = true;
     std.debug.assert(!struct_t.base.isResolved());
@@ -1038,6 +1050,25 @@ pub fn resolveStructFields(c: *cy.Chunk, struct_t: *cy.types.Struct, decl: *ast.
     struct_t.base.info.managed = has_managed_child or has_user_deinit;
 
     try resolve_type_info(c, sym, &struct_t.base.info, has_copy_child, has_no_copy_child, decl.name);
+
+    // A slice copies its elements: a resize of a shared slice clones the buffer.
+    if (sym.instance) |inst| {
+        if (inst.data.sym.template == c.sema.slice_tmpl) {
+            const arg_t = inst.params[0].asPtr(*cy.Type);
+            if (arg_t.kind() == .struct_t and !arg_t.isResolved()) {
+                // Not known yet (`type Tree: kids []Tree`). Checked when the argument is resolved.
+                try c.compiler.pending_slice_args.append(c.alloc, .{ .inst_t = &struct_t.base, .arg_t = arg_t });
+            } else if (arg_t.isResolved() and arg_t.info.no_copy) {
+                return reportNoCopyInSlice(c, &struct_t.base, arg_t, @ptrCast(decl));
+            }
+        }
+    }
+    if (struct_t.base.info.no_copy) {
+        for (c.compiler.pending_slice_args.items) |pending| {
+            if (pending.arg_t != &struct_t.base) continue;
+            return reportNoCopyInSlice(c, pending.inst_t, &struct_t.base, @ptrCast(decl));
+        }
+    }
 
     if (has_ct_child) {
         struct_t.base.info.ct = true;

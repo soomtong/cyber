@@ -60,6 +60,7 @@
     `moveBlock`). 조건부로 평가되는 식(`and` · `or` · `if` 식 · `?else` · `!else`)과 `else cond:`의 조건식은 계속 막고
     `reportMoveAcross`가 원인에 맞는 문구를 낸다. `and` · `or`의 왼쪽과 `if` 식의 조건은 늘 평가되지만 같은 내부 블록이라 막힌다.
     `while` 조건식과 `if` 언랩의 조건식은 옛 문구('declared in an outer block') 그대로다.
+    (2026-11-22 코드 리뷰 수정에서 `while` 조건식은 새 문구로 막는다. 맨 아래 절.)
   - REPL(`persist_main`)의 최상위 지역은 암시적으로 이동하지 않는다(`isPersistedMainLocal`, 지역 id로 판정). 이동 상태가 다음
     입력으로 넘어가지 않기 때문이다. 명시적 `move`는 받고, main 끝에서 죽은 최상위 지역을 `@untrackMainLocal`로 저장 목록에서
     뺀다(`semaUntrackMovedMainLocals`). 최상위 지역의 멤버 이동은 오류다.
@@ -125,7 +126,8 @@ E · B 절의 "남은 것" 가운데 "이동한 지역에 다시 대입"과 `xs 
   합친 결과다. 즉 여기까지 오는 모든 경로에서 죽어 있다.
 - 같은 블록에서 옮긴 뒤 대입(`movedInBlock`): 죽은 바깥 지역이 지금 블록의 `moves_start` 뒤에 있으면 대입이 되살리고
   (`reviveLocal`) 그 항목을 `branch_moves`에서 뺀다. 블록은 그 지역을 옮기지 않은 것으로 끝난다. overload 후보 되돌리기는
-  `MoveUndo.branch_taken`으로 뺀 만큼 다시 넣는다.
+  `branch_moves`를 후보 시작 때의 복사본으로 되돌린다(`sema_move.beginUndo` · `undoMoves`. 2026-11-22까지는
+  `MoveUndo.branch` · `branch_taken`으로 항목 하나씩 되돌렸고 틀렸다. 맨 아래 절).
 - `if` 언랩 문: `semaIfStmt`와 같은 틀(`IfBranch` · `endIfBranch` · `joinBranchMoves`)을 쓴다. 옵션 식은 첫 조건식처럼
   `.if_cond`에서 평가된다. `IfBranch`는 `if_block` 문장 대신 본문 머리의 포인터(`body`)를 갖는다.
 - `switch` 문: case 본문 블록이 `.branch`다(`pushCaseBlock` · `popCaseBlock`, `SwitchInfo.moves`). `switch`는 빠짐없이 다루므로
@@ -218,3 +220,30 @@ E · B 절의 "남은 것" 가운데 "이동한 지역에 다시 대입"과 `xs 
   식마다 갈래 합류가 필요하다. 하지 않기로 했다(오류 문구가 문장으로 옮기라고 안내한다).
 - 테스트: `memory/move_logic.cy` · `move_logic_after_error.cy` · `move_scope.cy` · `move_scope_after_error.cy` ·
   `move_scope_self_error.cy`. `move_and_error.cy`(오른쪽)는 그대로다.
+
+## 0.4.16..0.4.17 코드 리뷰에서 나온 수정 (2026-11-22)
+
+`/code-review high from 0.4.16`의 6건이다(사용자: "let's fix them step by step. use sub agent as you can."). 모두 0.4.17에 들어간
+결함이다. 릴리스 기록은 `docs/releases/unreleased.md`.
+
+- `while` 조건식과 `while opt |v|:`의 옵션 식: 반복마다 평가되므로 반복문 밖 지역의 이동은 오류다(`sema_stmt.checkLoopCondMoves`,
+  조건식 검사 뒤 `branch_moves`의 늘어난 부분을 본다). 전에는 본문의 이동처럼 기록돼, 본문이 늘 `break` · `return`으로 떠나면
+  조건이 거짓인 길에서 이중 소멸이 났다. 반복문 밖의 `NoCopy` 옵션 변수를 `while o |v|:`로 푸는 것도 같은 오류다.
+  `for 0..take(x)`와 `for mk(y) |v|`는 한 번만 평가되므로 그대로 된다.
+- 조건식 안의 `if` 식: 합류 기준이 `.if_cond` 블록의 `varStart`여서 문장 블록의 지역이 `branch_moves`에 남았고, 반복 블록의
+  `restoreMoves`가 되살려 이중 소멸(또는 컴파일러 panic)이 났다. 기준은 `.if_cond`를 건너뛴 블록이다(`sema_move.moveBlockFrom`,
+  `if` 식과 `switch` 식).
+- `else` 조건식 안의 `if` 식 갈래의 이동이 `.if_outer`를 지나 올라가 이중 소멸이 났다. `MoveBranch.else_cond`를 더했다:
+  `else` 조건식을 검사하는 동안 바깥 블록의 종류이고, `canMoveAcross` · `reportMoveAcross`가 `.none`처럼 막는다.
+- `for xs |i, x|:`의 캡처와 인덱스는 본문에서 옮길 수 있다. 캡처는 본문과 함께 끝난다: 본문 끝과 `continue`가 본문 블록을 떠나기
+  전에 살아 있는 캡처를 소멸시킨다. `endPlainBlockMoves`만으로는 `continue`의 길에서 이중 소멸이나 누수가 났다.
+  전에는 `restoreMoves`가 이미 빠진 지역 id로 `varStack`을 읽어 컴파일러가 죽었다.
+- overload 후보 되돌리기: 인자 안의 `if` 식이 합류하며 자기 항목을 이미 뺀 뒤 `undoMoves`가 `branch_moves`의 꼬리를 빼서,
+  바깥 블록이 옮긴 다른 지역의 기록이 사라졌다. 후보를 시작할 때 `branch_moves`를 복사해 두고 실패하면 복사본으로 되돌린다.
+  `break_moves` · `moved_breaks` · `try_exits` · `try_moves`도 시작 때 길이로 줄인다(방어적, 오동작은 만들지 못했다).
+- `xs = xs.appended(v)`의 버퍼 재사용: 인자가 문장을 떠날 수 있으면 건너뛰고 복사한다(`sema_call.canLeaveAssign`, 문장 텍스트에
+  `break` · `continue`가 있거나, `try` 본문 밖에서 선언한 지역이고 `!`가 있을 때). 대입 꼴은 인자보다 먼저 `xs`를 옮기므로
+  `checkAssignMoveJump`가 0.4.16에서 되던 코드를 거절했다. 멤버 꼴과 선언 꼴은 문제가 없다.
+- 재사용 경로의 호출 기록(`sema_call.recordCallRef`): 제자리 메서드는 사용자가 적은 메서드로 한 번만 기록하고 `own_buffer`는
+  기록하지 않는다. 전에는 한 호출 노드에 선언 둘이 기록돼 LSP의 매개변수 이름 inlay가 빠졌다.
+- 확인하지 못한 것: 조건식 안의 `switch` 식(그 자리에 넣는 문법이 없다), 문장 텍스트에 보이지 않는 점프가 있는 대입 꼴.

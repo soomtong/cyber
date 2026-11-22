@@ -973,7 +973,7 @@ var opt ?str = 'abc'
 if opt |value|:
     print(value)    --> abc
 ```
-When the payload is a `NoCopy` type, the capture takes it out of the option. An option that is read from a variable is [moved](#moving) then, so the variable can not be used after the statement (`if make() |v|:` and `while it.next() |v|:` take the payload of a new value). An option in a member (`if s.opt |v|:`) is not moved: 'Cannot copy `?Foo`, type member implements `NoCopy`.'
+When the payload is a `NoCopy` type, the capture takes it out of the option. An option that is read from a variable is [moved](#moving) then, so the variable can not be used after the statement (`if make() |v|:` and `while it.next() |v|:` take the payload of a new value; `while o |v|:` with a variable `o` from outside the loop is an error, see [moving](#moving)). An option in a member (`if s.opt |v|:`) is not moved: 'Cannot copy `?Foo`, type member implements `NoCopy`.'
 
 The capture unwraps the whole condition. An operand of `and` or `or` is a `bool`, so `if ok and s.index('=') |i|:` is a compile error. Put the unwrap in an `if` of its own:
 ```cy
@@ -2830,6 +2830,14 @@ for items |it|:
 -- `buf` is dead here. When the loop ends without that `break`, `buf` is deinitialized at the end of the loop.
 ```
 After a `break` that follows a move, the variable is dead after the loop. The other ways out of the loop (its end, a `break` that moved nothing, a `break` that moved other variables) deinitialize it. A body that goes on to the next iteration after the move is an error at the move, because the next iteration reads the variable: 'Cannot move `f` here: it is declared outside the loop, and the next iteration reads it. A loop body can move it where it then leaves the loop with `break` or `return`, or gives it a value again. Borrow it with `&f`.'
+
+The condition of a `while` loop is evaluated before every iteration, so it can not move a variable that is declared outside the loop. Neither can the option of `while opt |v|:` (a `NoCopy` option in a variable would be moved by the first iteration): 'Cannot move `x` in the condition of a `while` loop: it is declared outside the loop, and the condition is evaluated before every iteration. Borrow it with `&x`, or write `while:` and move it in the body where the body then leaves the loop with `break` or `return`.'
+
+The each variable and the index of a `for` loop belong to one iteration. The body can move them:
+```cy
+for names |name|:
+    keep(move name)
+```
 
 The body of a `try` statement and its `else` block move a variable of an outer block too. A variable that the body moved before a `!` that can fail is dead in the `else` block, and a variable that either way through the statement moved is dead after it. The ways that did not move it deinitialize it: a failing `!` before it leaves the body, the body or the `else` block at its end.
 ```cy

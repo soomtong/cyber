@@ -46,3 +46,38 @@
 - `fn total(a &[]int)`의 `for a |x|:`는 'Expected argument `&[]int`, found `&&[]int`, when calling `fn iterator(&[]int) -> int`.'였다.
   `for`가 빌림을 다시 빌렸다. 이제 빌림(`&T`)을 받으면 그 자리에서 돈다. `for a.* |x|:`와 같다.
 - `|i, x|`, `|&x|`도 같다. `Array` · `Map`의 빌림도 된다. 테스트 `control_flow/for_iter_borrowed_iterable.cy`.
+
+## 0.4.16..0.4.17 코드 리뷰에서 나온 수정 (2026-11-22)
+
+`/code-review high`의 6건이다. 모두 0.4.17의 마지막 사용 분석(이동 · 버퍼 재사용)에 있던 결함이다. 설계 기록은
+`docs/decisions/project_last_use.md`의 마지막 절.
+
+새로 컴파일 오류가 되는 코드(0.4.17에서는 컴파일되고 틀리게 돌았다):
+
+- `while` 조건식이나 `while opt |v|:`의 옵션 식이 반복문 밖 변수를 옮기는 것. 본문이 늘 `break` · `return`으로 떠나면 조건이
+  거짓인 길에서 변수가 두 번 소멸되거나, 반복문 뒤에서 옮긴 변수를 읽을 수 있었다(`while take(x) == 2: break`).
+  'Cannot move `x` in the condition of a `while` loop: it is declared outside the loop, and the condition is evaluated before every
+  iteration. Borrow it with `&x`, or write `while:` and move it in the body where the body then leaves the loop with `break` or
+  `return`.' 반복문 밖의 `NoCopy` 옵션 변수를 `while o |v|:`로 푸는 것도 이 오류다.
+- `else` 조건식 안의 `if` 식 갈래가 바깥 변수를 옮기는 것(`else (if (j == 0) take(x) else 0) == 7:`). 이중 소멸이 났다.
+  문구는 기존의 'Cannot move `a` in the condition of an `else` branch: ...'다.
+- 반복 본문이 바깥 변수를 옮긴 뒤, 같은 본문에서 인자에 `if` 식 갈래의 이동이 있는 overload 호출을 하는 것. 실패한 후보를
+  되돌리며 바깥 변수의 이동 기록이 지워져 'Cannot move `y` here: it is declared outside the loop, ...' 오류가 나지 않고 변수가
+  반복마다 소멸됐다. 같은 꼴이 `if` 갈래 안이면 옮기지 않은 길에서 변수가 소멸되지 않았다.
+
+고친 동작:
+
+- `if` 문의 첫 조건식이나 `and` · `or`의 왼쪽 안의 `if` 식이 같은 블록의 변수를 옮기면 반복 본문 끝에서 그 변수가 다시
+  소멸됐고(`for` 본문), `while` 본문에서는 컴파일러가 'index out of bounds'로 죽었다.
+- `for xs |x|:` 본문의 `move x`(캡처 변수나 인덱스)가 컴파일러를 죽였다(0.4.16은 'Can only move variable declared in the same
+  block.'). 이제 옮길 수 있다. 캡처는 반복 한 번의 변수이고, `continue`와 본문 끝에서 옮기지 않은 캡처가 소멸된다.
+- `try:` 안의 `xs = xs.appended(f()!)`(`xs`는 `try` 밖 선언)와 반복문 안의 `xs = xs.appended(pick(i) ?else: break)`가 0.4.16과
+  달리 'Cannot leave the assignment to `xs` here: its right side moved `xs`'로 거절됐다. 이런 문장은 버퍼를 재사용하지 않고
+  0.4.16처럼 복사한다. `inserted` · `removed` · `+`도 같다.
+- cyber-lsp: 버퍼를 재사용하는 호출(`xs = xs.inserted(0, v)`, 마지막 사용의 `ys := xs.inserted(0, v)`)에 매개변수 이름 inlay가
+  나오지 않았다.
+
+테스트: `memory/move_while_cond_error.cy` · `move_while_unwrap_error.cy` · `move_cond_expr.cy` · `move_else_cond_expr_error.cy` ·
+`move_for_capture.cy` · `move_overload_undo.cy` · `move_overload_undo_loop_error.cy` · `slice_reuse_assign_jump.cy`, LSP 테스트
+'Inlay hints name the parameters at the arguments of a call.'
+

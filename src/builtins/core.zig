@@ -159,7 +159,6 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
 
     .{"int_fmt",      zErrFunc2(int_fmt, int_fmt_eval)},
 
-    // .{"int.fmt2",       zErrFunc(int_fmt2)},
 
     .{"@fabs",  zErrBuiltinFunc(bindings.fabs, null)},
     .{"atof",         zErrFunc(atof)},
@@ -2521,13 +2520,12 @@ fn raw_fmt(t: *cy.Thread) anyerror!C.Ret {
     const format = std.enums.fromInt(NumberFormat, t.param(i64)) orelse return error.InvalidEnumTag;
     const config = t.param(cy.heap.NumberFormatConfig);
     if (config.width.from()) |width| {
-        // The cap matches `str.repeat`.
-        if (width < 0 or width > std.math.maxInt(u32)) {
+        if (!validFormatWidth(width)) {
             return t.ret_panic_fmt("Invalid width: {}", &.{cy.fmt.v(width)});
         }
     }
     if (config.pad.from()) |pad| {
-        if (pad >= 128) {
+        if (!validFormatPad(pad)) {
             return t.ret_panic_fmt("Invalid pad: {}, expected an ASCII rune", &.{cy.fmt.v(pad)});
         }
     }
@@ -2551,12 +2549,35 @@ fn int_fmt(t: *cy.Thread) anyerror!C.Ret {
     return C.RetOk;
 }
 
-fn int_fmt2(t: *cy.Thread) anyerror!Value {
-    const val = t.getInt(0);
-    const format = std.enums.fromInt(NumberFormat, t.getInt(1)) orelse return error.InvalidEnumTag;
+// The width cap matches `str.repeat`.
+fn validFormatWidth(width: i64) bool {
+    return width >= 0 and width <= std.math.maxInt(u32);
+}
 
-    const config = t.getPtr(*cy.heap.NumberFormatConfig, 2);
-    return intFmtExt(t, val, format, config);
+fn validFormatPad(pad: u8) bool {
+    return pad < 128;
+}
+
+/// Returns `digits` padded at the start to `opts.width` with `opts.pad`. The padding goes straight to the
+/// result, so a width can be larger than the digits buffer. An invalid width or pad gives `error.InvalidArgument`;
+/// a script caller checks them first to panic with a message.
+fn initPaddedDigits(heap: *cy.Heap, digits: []const u8, opts: cy.heap.NumberFormatConfig) !cy.heap.Str {
+    var width: usize = 0;
+    if (opts.width.from()) |w| {
+        if (!validFormatWidth(w)) return error.InvalidArgument;
+        width = @intCast(w);
+    }
+    const pad = opts.pad.from() orelse ' ';
+    if (!validFormatPad(pad)) return error.InvalidArgument;
+    if (width <= digits.len) {
+        return heap.init_astr(digits);
+    }
+    const res = try heap.init_astr_undef(width);
+    const dst = res.mutSlice();
+    const n = digits.len;
+    @memset(dst[0 .. width - n], pad);
+    @memcpy(dst[width - n ..], digits);
+    return res;
 }
 
 pub fn intFmtExt(heap: *cy.Heap, val: i64, format: NumberFormat, opts: cy.heap.NumberFormatConfig) !cy.heap.Str {
@@ -2574,17 +2595,16 @@ pub fn intFmtExt(heap: *cy.Heap, val: i64, format: NumberFormat, opts: cy.heap.N
             .hex => 16,
             else => return error.InvalidArgument,
         };
-        var buf: [64]u8 = undefined;
-        var end: usize = undefined;
-        const fill: u8 = opts.pad.from() orelse ' ';
-        const width: ?usize = if (opts.width.from()) |width| @intCast(width) else null;
+        // 65 bytes hold any `i64` in base 2 with a sign.
+        var buf: [65]u8 = undefined;
+        var n: usize = undefined;
         if (format == .dec and val < 0) {
-            end = std.fmt.printInt(&buf, val, base, .lower, .{ .fill = fill, .width = width });
+            n = std.fmt.printInt(&buf, val, base, .lower, .{});
         } else {
             // Format as u64 to prevent emitting the `+` character.
-            end = std.fmt.printInt(&buf, @as(u64, @bitCast(val)), base, .lower, .{ .fill = fill, .width = width });
+            n = std.fmt.printInt(&buf, @as(u64, @bitCast(val)), base, .lower, .{});
         }
-        return heap.init_astr(buf[0..end]);
+        return initPaddedDigits(heap, buf[0..n], opts);
     }
 }
 
@@ -2603,19 +2623,44 @@ pub fn rawFmtExt(t: *cy.Thread, val: u64, format: NumberFormat, opts: cy.heap.Nu
             .hex => 16,
             else => return error.InvalidArgument,
         };
-        // 64 digits hold any `u64` in base 2. The padding goes to the string, so a width can be larger.
+        // 64 digits hold any `u64` in base 2.
         var buf: [64]u8 = undefined;
         const n = std.fmt.printInt(&buf, val, base, .lower, .{});
-        const width: usize = if (opts.width.from()) |width| @intCast(width) else 0;
-        if (width <= n) {
-            return t.heap.init_astr(buf[0..n]);
-        }
-        const res = try t.heap.init_astr_undef(width);
-        const dst = res.mutSlice();
-        @memset(dst[0..width - n], opts.pad.from() orelse ' ');
-        @memcpy(dst[width - n ..], buf[0..n]);
-        return res;
+        return initPaddedDigits(&t.heap, buf[0..n], opts);
     }
+}
+
+test "intFmtExt pads past the digits buffer." {
+    // An eval loads the core types that the string heap objects need.
+    const cvm = C.vm_initx(std.testing.allocator);
+    defer C.vm_deinit(cvm);
+    var eval_res: C.EvalResult = undefined;
+    try std.testing.expectEqual(C.Success, C.vm_eval(cvm, "_ = 1", &eval_res));
+    const vm: *cy.VM = @ptrCast(@alignCast(cvm));
+    const heap = &vm.main_thread.heap;
+
+    const plain = try intFmtExt(heap, -42, .dec, .{});
+    defer heap.destructStr(&plain);
+    try std.testing.expectEqualStrings("-42", plain.slice());
+
+    // A width beyond 64 digits. Aborted the host with a fixed buffer.
+    const wide = try intFmtExt(heap, 255, .hex, .{ .pad = .some('0'), .width = .some(100) });
+    defer heap.destructStr(&wide);
+    try std.testing.expectEqual(100, wide.slice().len);
+    try std.testing.expect(std.mem.allEqual(u8, wide.slice()[0..98], '0'));
+    try std.testing.expectEqualStrings("ff", wide.slice()[98..]);
+
+    const short = try intFmtExt(heap, 12345, .dec, .{ .width = .some(2) });
+    defer heap.destructStr(&short);
+    try std.testing.expectEqualStrings("12345", short.slice());
+
+    const spaced = try intFmtExt(heap, -5, .dec, .{ .width = .some(4) });
+    defer heap.destructStr(&spaced);
+    try std.testing.expectEqualStrings("  -5", spaced.slice());
+
+    try std.testing.expectError(error.InvalidArgument, intFmtExt(heap, 1, .dec, .{ .width = .some(-1) }));
+    try std.testing.expectError(error.InvalidArgument, intFmtExt(heap, 1, .dec, .{ .width = .some(1 << 40) }));
+    try std.testing.expectError(error.InvalidArgument, intFmtExt(heap, 1, .dec, .{ .pad = .some(200), .width = .some(3) }));
 }
 
 pub fn getDeinitObject(t: *cy.Thread) anyerror!C.Ret {

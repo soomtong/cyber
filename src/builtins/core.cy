@@ -672,11 +672,6 @@ fn (Int[]) fmt() -> str:
 fn (Int[]) fmt(format NumberFormat) -> str:
     return int_fmt(self, format)
 
--- --| `opts.pad` provides the ASCII rune that is used for padding with a string length of `config.width`.
--- #[bind='int.fmt2']
--- fn Int.fmt(self, format NumberFormat, config NumberFormatConfig) -> str:
---     panic('Unsupported')
-
 #[bind] fn int_fmt(x int, format NumberFormat) -> str
 
 fn (Int[]) ufmt() -> str:

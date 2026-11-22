@@ -369,3 +369,41 @@ sema의 빌림 검사는 세 조각이 서로 맞물리지 않았다.
   안쪽 블록 지역.
 - 남은 것: 앞 절들의 남은 것과 같다(`^T` 참조 뒤의 값, 인스턴스화되지 않은 템플릿 본문).
 
+
+### 다른 컨테이너의 자리를 가리키는 컨테이너 · 매개변수 저장 (2026-11-22)
+
+`26f2c7d8`(컨테이너에서 꺼낸 빌림의 복사를 주인에 묶음) 뒤에 남은 구멍 일곱. 모두 실행하면 쓰레기 값이나 해제된 메모리를 읽었다.
+1.0 전이라 경고 없이 오류로 넣었다.
+
+| 꼴 | 원인 | 고친 것 |
+|---|---|---|
+| `h := H{b=&w.x}` · `h.b = &w.x` 뒤 바깥 `r = h`, 바깥 `h = H{b=&w.x}` | 복사(`value_local`)와 대기 목록의 자리 항목(`BorrowOwner.place`)에는 `w`를 보는 검사가 없었다 | 자리를 가리킬 수 있는 지역의 복사는 그 지역보다 오래 살 수 없다(`placeStart` · `checkPlaces`). 자리 항목도 검사한다 |
+| `hr := &h` 뒤 바깥 `pp = &hr.b`, `r = hr` | 빌림 지역을 거친 자리는 `checkViaOutlives`가 건너뛰었다 | 빌림 지역은 `borrow_via`를 따라 컨테이너까지 간다 |
+| `hr := &h`, `h.b = &z`, `r = hr.b`, 또는 `a << 4` 뒤 `hr.b.*` | 비어휘적 수명이 `h`를 이름이 마지막으로 나온 문장 뒤에 끝내 `h`의 대여가 사라졌다 | 다른 살아 있는 지역이 `h`를 가리키면(`borrow_via` 사슬, 또는 어딘가의 자리를 담음 `borrow_places`) 끝내지 않고 다음 문장에서 다시 본다(`isPointedInto`) |
+| `h.o = &w.x` 뒤 `if h.o \|q\|: r = q` | `semaWrapSome`이 결과의 주인을 뿌리 주인으로 바꾸며 자리 정보를 잃었다 | 감쌀 때 `noteBorrowValue`로 자리 · 복사 대여를 적는다(`semaInitCunionCase`도) |
+| `pp.* = &z` | 역참조 대입에 수명 검사도 대여도 없었다 | 필드 대입과 같은 `checkFieldBorrowOutlives` · `addFieldBorrowLoan` |
+| `return &w.x`, `return h`(`h`가 `&w.x`를 담음), `scope h H`의 `return &h.x` | 반환 검사가 뿌리 주인만 봤다 | 함수의 지역 메모리를 가리키면(`pointsIntoFrame`) 또는 자리를 가리킬 수 있으면 오류. 꺼낸 복사(`return h.b`)의 대여도 본다 |
+| `fn f(h &&H, p &int): h.b = p` | 주인이 매개변수면 "뒤의 값" 검사를 건너뛰었다 | 아래 규칙 |
+
+- 언랩 캡처(`|q|`)는 payload의 복사다. 옵션이 지역의 복사이거나 컨테이너에서 꺼낸 것이면(`if o |q|`, `if h.o |q|`) 캡처는 그 지역을
+  가리키지 않는다(`bindCaptureCopy`). `for xs |p|`의 `Vector` · `Span`의 `next`도 원소의 복사로 본다. 사용자 정의 `scope` `next`는
+  원소 안을 가리킬 수 있어 그대로 지역에 묶는다.
+- 매개변수 저장 규칙: 매개변수 뒤의 값(`&T` · `&&T` · `^T` 매개변수)에는 그 함수의 `scope` 빌림 매개변수가 빌린 것만 넣을 수 있다.
+  다른 매개변수(값 매개변수 포함)의 빌림은 'The value behind `h` can not outlive `p`.'. 부르는 쪽은 `scope` 인자가 있으면 다른
+  빌림 인자 가운데 빌림 컨테이너 타입을 가리키는 것마다 그 `scope` 인자를 필드에 넣은 것처럼 검사하고 대여를 더한다
+  (`ArgBorrows.lendScopeArg`, 제너릭 인스턴스도). 함수가 실제로 넣지 않아도 넣은 것으로 본다(안전한 쪽).
+  - 고른 까닭: Rust의 수명 매개변수(`fn set<'a>(&mut self: Outer<'a>, p: &'a i32)`)를 새 문법 없이 `scope` 하나로 나타낸다.
+    본문 요약(어느 매개변수를 어디에 넣는지)을 부르는 자리에 넘기는 안은 검사 순서(뒤에 오는 함수, 재귀)와 함수 값에서 알 수 없어
+    버렸다. 저장소에서 깨진 것은 테스트 하나(`borrow_copy_out_place_ex_error.cy`의 `put`에 `scope`를 붙임)뿐이다.
+  - `scope`가 값 매개변수(`scope h H`)면 받지 않는다. 복사가 호출과 함께 끝난다.
+- 역참조 대입의 오류 문구는 빌림의 뿌리 주인 이름을 쓴다(`pp := &r`, `r := &y` 뒤 `pp.* = &z`는 '`y` can not outlive `z`.').
+  `r := &&o; r.v = ...`와 같은 식이다. 판정은 안전한 쪽이다(뿌리 주인은 `r`보다 오래 산다).
+- 알고 둔 오탐: 자리를 담은 지역(`borrow_places`)이 살아 있는 동안은 같은 블록의 다른 컨테이너도 비어휘적으로 끝나지 않는다. 어느
+  지역을 가리키는지 기록하지 않기 때문이다. `hr := &h`로 읽은 `return hr.b`는 `h`가 자리를 담지 않아도 거절한다.
+- 테스트: `memory/borrow_place_valid.cy`(되는 것), `borrow_place_copy_error` · `borrow_place_field_copy_error` ·
+  `borrow_place_assign_error` · `borrow_via_place_error` · `borrow_via_copy_error` · `borrow_unwrap_place_error` ·
+  `borrow_last_use_via_error` · `borrow_last_use_via_lend_error` · `borrow_deref_store_outlive_error` ·
+  `borrow_deref_store_lend_error` · `borrow_return_place_error` · `borrow_return_place_field_error` ·
+  `borrow_return_param_place_error` · `borrow_param_store_error` · `borrow_scope_param_store_error`.
+- 남은 것: 자리 대상 지역을 지역마다 목록으로 적으면(`borrow_places`를 지역 id 목록으로) 위 오탐이 줄고, 역참조 대입 문구가 빌림
+  지역(`r`)을 짚을 수 있다.

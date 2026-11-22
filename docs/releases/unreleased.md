@@ -107,3 +107,42 @@
   - 템플릿 struct의 `v T = T(3)`은 'Undeclared variable `T`.'였다.
   - 리터럴을 쓴 함수에 같은 이름의 지역이 있으면 그 지역이 기본값이 됐다(`K := 100` 뒤 `A{}`의 `x int = K`가 100). 이제 7이다.
     동작이 바뀌는 수정이다.
+
+## 0.4.0..0.4.17 코드 리뷰에서 나온 수정 (2026-11-22)
+
+`/code-review high` 3815c4c0..23df09eb의 10건을 쉬운 것부터 고쳤다. 빌림 검사 셋은 아래 별도 항목이다.
+
+- toon: `EncodeOptions.indent` · `DecodeOptions.indent`가 1보다 작으면 `encode` · `decode`가 `error.Range`를 돌려준다. 전에는
+  `toon.decode('a:\n  b: 1', DecodeOptions{indent=0}, &&d)`가 'Division by zero'로 panic했고, `indent=-2`는 `b`를 버린
+  `{"a":{}}`를, `encode`의 `indent=0`은 중첩을 잃은 `a:\nb: 1`을 냈다. `decode`는 `diag.msg`에 'The indent must be at least 1,
+  found 0.'을 남긴다. 옵션 값은 입력 텍스트의 형식 오류가 아니므로 `error.Syntax`가 아니다. 확인: `modules/toon.cy`.
+- `str.index_rune`:
+  - 비 ASCII 문자열에서 2 · 3바이트 rune을 찾지 못했다(`'héllo'.index_rune(233)`이 none). `utf8Encode`의 길이를 버리고
+    4바이트 버퍼 전체로 찾았다. 이제 인코딩한 길이만큼 찾는다.
+  - surrogate(`0xD800`)가 가드를 통과해 'thread panic: error'로 호스트를 끝냈다. 코드 포인트가 아닌 값(surrogate, 음수,
+    `0x10FFFF` 초과)은 이제 none이다. `index_rune(0)`도 찾는다.
+  - `index_any_rune(AsSpan[int])` 오버로드가 바이트 검색 `index_any`를 불러 'Expected type `AsSpan[byte]`. Found `[&]int`.'로
+    컴파일되지 않았다. 확인: `core/strings_utf8.cy`.
+- 세션(`persist_main`)에서 본문이 실패한 함수를 값으로 다시 쓰면 호스트가 `bc_gen.zig:142`에서 panic했다
+  (`fn bad[T Any](x T) -> int: return x + 1` 뒤 `f := bad[bool]`, 다시 `g := bad[bool]`. 메서드 본문만 실패한
+  `Box[Array[int]].dup`도 같다). `FuncInfo.body_failed`를 호출 경로(`checkCallee`)에서만 봤다. 함수 값을 만드는 `sema_func_sym`과
+  함수 템플릿 인스턴스 경로도 `checkCallee`를 불러, 원래 오류를 같은 위치에 다시 낸다. 확인: lib 테스트 'A function value of a
+  body that failed does not break the next compile.'
+- 언어 서버: 오류가 있는 모듈을 열면 그 진단이 사라지고 다음 편집 때까지 돌아오지 않았다. 그 모듈을 쓰는 문서의 지난 검사 목록
+  (`related`)에 남아 있어, 다시 검사 · 닫기가 열린 모듈의 진단을 빈 목록으로 덮었다. 이제 열린 모듈의 진단은 지우지 않는다. 모듈을
+  닫으면 그 진단은 지워지고, 쓰는 문서의 다음 검사가 디스크의 모듈로 다시 낸다. 확인: LSP 테스트 'Opening or closing a module with
+  an error keeps its diagnostics.'
+- struct 필드 기본값이 global 같은 place를 읽으면 복사 없이 공유됐다. `s str = G`의 `A{}`를 여러 번 만들면 문자열이 깨지거나
+  'double free', 'panic: index out of bounds'가 났고, `Array[int]` 기본값은 이중 해제였다. `semaFieldDefault`의 결과가 명시한
+  필드 값과 달리 `semaOwn`을 거치지 않았다. 이제 같은 소유 처리를 받는다: 복사할 수 있는 값은 복사하고, `NoCopy` 값을 place에서
+  읽는 기본값은 필드 선언의 기본값 식에서 'Cannot copy `Array[int]`, type implements `NoCopy`.'다(깨지는 변경). `meta.field_default`와
+  `json.to`도 같다. 확인: `types/struct_default_initializer.cy`, `types/struct_default_nocopy_global_error.cy`, `modules/json.cy`.
+- regex: 캡처 그룹이 많은 패턴이 짧은 입력에 GB 단위 메모리를 썼다(`regex.compile('()'.repeat(4000)).captures('x')`가 RSS
+  1 GB, `'()'.repeat(16000)`은 약 16 GB를 잡으려다 OOM). 검색 작업 버퍼가 명령 수 × 슬롯 수라 그룹 수의 제곱으로 커지는데
+  `MaxInsts`가 막지 못했다. 이제 명령 수 × 캡처 슬롯 수(그룹 0을 포함해 그룹마다 2)가 새 한도 `regex.MaxSlotTable`(1048576)을
+  넘으면 `compile`이 `error.TooBig`이다: 'The pattern is too big: its N groups and M instructions need more than 1048576 capture
+  slots. ...' 캡처 검색 한 번의 작업 메모리는 16 MiB 이하다. 그룹이 수십 개인 패턴은 영향이 없다. 확인: `modules/regex.cy`.
+- 평가 순서: 뒤 피연산자가 문장을 끌어올리면(`!` 언랩, 임시 지역) 그 문장이 앞 피연산자보다 먼저 실행됐다. 0.4.8의 왼쪽에서
+  오른쪽 순서가 깨진 곳은 맵 리터럴의 키와 값(`Map[int,int]{(say(1))=sayr(2)!}`가 `r2 1`), `..=` 슬라이스의 수신자와 시작,
+  범위의 시작(`say(1) .. sayr(2)!`), 포인터 인덱스의 포인터, 함수 포인터 호출의 callee다. 앞 피연산자를 `seqPushRes`로 등록한 뒤
+  뒤 피연산자를 분석한다. 확인: `functions/eval_order.cy`.

@@ -1468,6 +1468,8 @@ print(v.y)       --> 0
 
 The names in a default value are looked up where the type is declared: in its module, including private declarations, and among its template parameters (`v T = T(3)`). The locals of the code that writes the initializer are not visible to it, so a local `K` does not change the default `x int = K`.
 
+A default value is owned like a value written in the initializer: a default that reads a global or another place copies it, and one that reads a `NoCopy` value from a place is the compile error 'Cannot copy `Array[int]`, type implements `NoCopy`.' at the default.
+
 `meta.has_field_default(T, name)` tells whether a field has a default value, and `meta.field_default(T, name)` evaluates it.
 
 Unlike a `struct`, a `cstruct` can default to their [zero values](#zero-values).
@@ -4666,7 +4668,7 @@ else |err|:
 
 `toon.encode(v)` follows the spec's forms: `key: value`, nested objects by indentation, inline primitive arrays (`tags[2]: a,b`), a table for an array of uniform objects (`users[2]{id,name}:`), a keyed table for an object whose values are uniform objects (`env[2:]{region}:`), and `- ` items otherwise. `toon.EncodeOptions` sets `indent` (2) and `delim` (`.comma`, `.tab` or `.pipe`). It returns `error.Unicode` for a string that is not UTF-8.
 
-`toon.decode(src)` checks declared lengths, table widths, indentation and duplicate keys. `toon.DecodeOptions{strict=false}` applies the spec's non-strict recoveries. Errors are `error.Syntax` with a `json.Diag` (line and column). An unquoted token that matches the JSON number grammar is a number, others are strings (`05` stays `"05"`); numbers decode as `json.parse` reads them, and `toon.DecodeOptions{exact=true}` keeps them as text like `json.ParseOptions`. A `number` encodes in the canonical form of `json.fmt_number`. `toon.from_json(src)` and `toon.to_json(src)` convert text directly. The implementation passes the spec's 564 conformance fixtures (`src/test/assets/toon-spec`).
+`toon.decode(src)` checks declared lengths, table widths, indentation and duplicate keys. `toon.DecodeOptions{strict=false}` applies the spec's non-strict recoveries. Errors are `error.Syntax` with a `json.Diag` (line and column). `indent` in `toon.EncodeOptions` and `toon.DecodeOptions` must be at least 1: below that `encode` and `decode` return `error.Range`. An unquoted token that matches the JSON number grammar is a number, others are strings (`05` stays `"05"`); numbers decode as `json.parse` reads them, and `toon.DecodeOptions{exact=true}` keeps them as text like `json.ParseOptions`. A `number` encodes in the canonical form of `json.fmt_number`. `toon.from_json(src)` and `toon.to_json(src)` convert text directly. The implementation passes the spec's 564 conformance fixtures (`src/test/assets/toon-spec`).
 
 ### Regular expressions.
 The `regex` module searches text with regular expressions. Matching never backtracks: a search takes time linear in the length of the input, whatever the pattern. The syntax is a subset of the Rust `regex` crate's, which is the default syntax of [ripgrep](https://github.com/BurntSushi/ripgrep). A pattern that compiles here matches what it matches there:
@@ -4722,7 +4724,7 @@ else |err|:
     print('%{err} at %{diag.pos}: %{diag.msg}')
 --> error.Syntax at 8: Backreferences (`\1`) and octal escapes are not supported: matching never backtracks. Capture both parts and compare them in code. A character by number is `\x41` or `\x{1F600}`.
 ```
-A counted repetition is expanded, so `\w{100}` is 100 steps of the program. A program over `regex.MaxInsts` (32768) instructions is `error.TooBig`, and groups, classes and repetitions nest at most `regex.MaxDepth` (250) deep. One search takes at most the size of the program times the length of the input. A compiled `Regex` does not change: compile once and use it for every search.
+A counted repetition is expanded, so `\w{100}` is 100 steps of the program. A program over `regex.MaxInsts` (32768) instructions is `error.TooBig`, and groups, classes and repetitions nest at most `regex.MaxDepth` (250) deep. The number of instructions times the capture slots (two per group, counting group 0) must not be over `regex.MaxSlotTable` (1048576), or `compile` returns `error.TooBig`, so a search with captures takes at most 16 MiB. Write `(?:...)` for a group that needs no capture. One search takes at most the size of the program times the length of the input. A compiled `Regex` does not change: compile once and use it for every search.
 
 ### Parsing expression grammars.
 The `peg` module matches text with a parsing expression grammar (PEG): patterns with rules that call each other. It is for input that a regular expression can not describe, such as nested brackets, and for a format with several parts that is easier to read as rules. The syntax is that of the `re` module of [LPeg](https://www.inf.puc-rio.br/~roberto/lpeg/re.html):

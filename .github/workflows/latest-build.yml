@@ -250,6 +250,8 @@ jobs:
       - name: Run tests.
         if: env.BUILD_TARGET == 'wasm32-freestanding' || env.BUILD_TARGET == 'wasm32-wasi'
         run: |
+          # No matrix job builds wasm32-freestanding (the web library), so this checks that it still compiles.
+          zig build lib -Doptimize=ReleaseSafe -Dtarget=wasm32-freestanding ${{ env.DEV_FLAG }}
           zig build build-test -Dtarget=wasm32-wasi -Doptimize=ReleaseSafe ${{ env.DEV_FLAG }}
           wasm3/build/wasm3 zig-out/bin/lib_test.wasm
           wasm3/build/wasm3 zig-out/bin/cli_test.wasm

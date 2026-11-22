@@ -81,3 +81,12 @@
   경우가 있어 감싸는 함수를 기계적으로 지우면 안 된다(`Chunk.findResolvedType`를 그렇게 잘못 지웠다가 복원, `meta.type.field`가 씀).
   복사-패치 JIT(`src/jit/`, `Compiler.jitBuf`, `FuncInfo.jit`, `-Djit`)는 남겨 테스트에서 제외했다가 2026-11-06 지웠다
   (`project_direction.md`).
+- wasm32-freestanding 라이브러리(`zig build lib -Doptimize=ReleaseSafe -Dtarget=wasm32-freestanding`)가 std 안에서
+  약 70개 오류로 컴파일되지 않았다(2026-11-22 수정). 원인은 `stdx.io()`가 freestanding에서도 `std.Io.Threaded`를
+  만들어, 그 vtable이 참조하는 경로 · poll · 프로세스 함수가 OS 없는 타깃에서 분석된 것이다. ZU-M1(d64bcde5, Zig 0.16
+  `std.Io` 이전)에서 들어왔고, 그 뒤 `core.new_shared_state` · `math.random`(9250d814) 등이 같은 길로 닿는다. CI는
+  6db63e13에서 이미 꺼져 있던 `web-lib` 행렬 항목을 지운 뒤로 freestanding을 빌드하지 않아 잡지 못했다. 이제
+  `stdx.io()`는 freestanding에서 `std.Io.failing`을 돌려준다: 경합 없는 mutex는 그대로 동작하고 파일 · 프로세스는
+  오류로 실패하며, 시계(`time_wasm.zig`)와 출력(`fmt.HostFileWriter`)은 원래대로 호스트가 준다. `failing`의 `random`은
+  0을 채우므로 `math.random`은 freestanding에서 `hostMilliTimestamp`로 시드한다. CI는 wasm32-wasi 작업의 `Run tests.`
+  단계에 freestanding 라이브러리 빌드 한 줄을 더했다.

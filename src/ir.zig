@@ -819,6 +819,10 @@ pub const Buffer = struct {
     /// runs before the expression they belong to, so they are evaluated first (`sema_move.seqFlush`).
     seq_pending: usize = 0,
 
+    /// Number of call expressions created so far. Tells whether analyzing an expression produced a call
+    /// (`sema_assign.holdOperand`).
+    call_count: u32 = 0,
+
     pub fn init(self: *Buffer, alloc: std.mem.Allocator) void {
         self.* = .{
             .arena = .{ .child_allocator = alloc, .state = .{} },
@@ -868,6 +872,10 @@ pub const Buffer = struct {
 
     pub fn newExpr(self: *Buffer, comptime code: ExprCode, type_: *cy.Type, node: *ast.Node, data: ExprImpl(code)) !*Expr {
         log.tracev("ir expr: {} {s}", .{code, type_.name()});
+        switch (code) {
+            .call, .call_ptr, .call_union, .call_trait, .gen_next, .fiber_resume => self.call_count +%= 1,
+            else => {},
+        }
         const new = try self.alloc.create(ExprImpl(code));
         new.* = data;
         new.base = .{

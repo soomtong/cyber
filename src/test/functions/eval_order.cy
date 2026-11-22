@@ -222,4 +222,69 @@ log = ^ArrayStore[str]{}
 mkbox(log).xs[say(log, 0)] += 1
 test.eq(joined(log), 'boxsay0')
 
+-- An index or a receiver that a user operator, `@get` or `@index` gives is evaluated once too.
+type LIx:
+    log ^ArrayStore[str]
+    n int
+fn (&LIx) `+`(o int) -> int:
+    self.log << 'plus'
+    return self.n + o
+fn (LIx) `-`() -> int:
+    self.log << 'neg'
+    return -self.n
+type Rows:
+    log ^ArrayStore[str]
+    xs ^[]int
+fn (&Rows) @get(%name EvalStr) -> ^[]int:
+    self.log << 'get'
+    return self.xs
+fn (&Rows) `+`(o int) -> ^[]int:
+    self.log << 'rplus'
+    return self.xs
+type Grid:
+    log ^ArrayStore[str]
+    rows []^[]int
+fn (&Grid) @index(i int) -> ^[]int:
+    self.log << 'index'
+    return self.rows[i]
+
+log = ^ArrayStore[str]{}
+oa := []int{1, 2, 3, 4}
+oi := LIx{log=log, n=1}
+oa[oi + 1] += 10
+test.eq(oa[2], 13)
+test.eq(joined(log), 'plus')
+log = ^ArrayStore[str]{}
+on := LIx{log=log, n=-1}
+oa[-on] *= say(log, 5)
+test.eq(oa[1], 10)
+test.eq(joined(log), 'negsay5')
+log = ^ArrayStore[str]{}
+oi.log = log
+oa[(oi + 1) - 1] -= 1
+test.eq(oa[1], 9)
+test.eq(joined(log), 'plus')
+log = ^ArrayStore[str]{}
+rows := Rows{log=log, xs=^[]int{1, 2}}
+rows.items[0] += 5
+test.eq(rows.xs[0], 6)
+test.eq(joined(log), 'get')
+log = ^ArrayStore[str]{}
+rows.log = log
+(rows + 0)[1] += say(log, 5)
+test.eq(rows.xs[1], 7)
+test.eq(joined(log), 'rplussay5')
+log = ^ArrayStore[str]{}
+grid2 := Grid{log=log, rows=[]^[]int{^[]int{1, 2}, ^[]int{3, 4}}}
+grid2[1][0] += 100
+test.eq(grid2.rows[1][0], 103)
+test.eq(joined(log), 'index')
+-- A builtin operator and a dereference are analyzed twice and call nothing.
+pi := 1
+oa[pi + 1] += 1
+test.eq(oa[2], 14)
+pn := ^int(3)
+pn.* += 1
+test.eq(pn.*, 4)
+
 --cytest: pass

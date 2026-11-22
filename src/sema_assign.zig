@@ -325,24 +325,31 @@ pub fn semaPlaceSubst(c: *cy.Chunk, node: *ast.Node) !?sema.ExprResult {
 }
 
 /// `x op= y` is `x = x op y`, and the left side is analyzed twice: once to read and once to write. A receiver or an
-/// index that can have a side effect (`f()[g()] += 1`, `get(p).a += 1`, `ptr().* += 1`) is evaluated once, before the
-/// right side, into a hidden local, and both analyses read the local. A variable, a field path, a constant and an
-/// operator expression of those are analyzed twice as before, so `x += 1` and `a[i] += 1` keep their IR.
+/// index whose evaluation calls a function (`f()[g()] += 1`, `get(p).a += 1`, `ptr().* += 1`, `a[ix + 1] += 1` with a
+/// user `+`, `h.items[0] += 1` with a user `@get`) is evaluated once, before the right side, into a hidden local, and
+/// both analyses read the local. A variable, a field, a constant and a builtin operation of those are analyzed twice
+/// as before, so `x += 1`, `a[i] += 1` and `a[i + 1] += 1` keep their IR.
 fn stabilizeOpAssignLeft(c: *cy.Chunk, node: *ast.Node, top: bool) !void {
     switch (node.type()) {
         .ident, .at_lit => {},
         .group => try stabilizeOpAssignLeft(c, node.cast(.group).child, top),
-        .accessExpr => try stabilizeOpAssignLeft(c, node.cast(.accessExpr).left, false),
+        .accessExpr => {
+            try stabilizeOpAssignLeft(c, node.cast(.accessExpr).left, false);
+            // A receiver `h.items` that `@get` gives.
+            if (!top) try holdOperand(c, node);
+        },
         .deref => try stabilizeOpAssignLeft(c, node.cast(.deref).left, false),
         .index_expr => {
             const index = node.cast(.index_expr);
             try stabilizeOpAssignLeft(c, index.left, false);
             if (index.args.len == 1) {
                 const arg = index.args.ptr[0];
-                if (arg.type() != .range and !isPureOperand(arg)) {
+                if (arg.type() != .range and !isConstOperand(arg)) {
                     try holdOperand(c, arg);
                 }
             }
+            // A receiver `m[k]` that a user `@index` gives.
+            if (!top) try holdOperand(c, node);
         },
         .callExpr => {
             const call = node.cast(.callExpr);
@@ -354,29 +361,32 @@ fn stabilizeOpAssignLeft(c: *cy.Chunk, node: *ast.Node, top: bool) !void {
             try holdOperand(c, node);
         },
         else => {
-            if (!isPureOperand(node)) try holdOperand(c, node);
+            if (!isConstOperand(node)) try holdOperand(c, node);
         },
     }
 }
 
-/// An operand that can be evaluated twice: it has no side effect and evaluates to the same value.
-fn isPureOperand(node: *ast.Node) bool {
+/// A variable or a literal. Evaluating it twice gives the same value and nothing else.
+fn isConstOperand(node: *ast.Node) bool {
     return switch (node.type()) {
         .ident, .at_lit, .binLit, .decLit, .hexLit, .octLit, .floatLit, .trueLit, .falseLit, .noneLit, .void_lit,
         .string_lit, .raw_string_lit, .sq_string_lit, .string_multi_lit, .raw_string_multi_lit, .sq_string_multi_lit,
         .dot_lit, .error_lit => true,
-        .group => isPureOperand(node.cast(.group).child),
-        .accessExpr => isPureOperand(node.cast(.accessExpr).left),
-        .unary_expr => isPureOperand(node.cast(.unary_expr).child),
-        .binExpr => isPureOperand(node.cast(.binExpr).left) and isPureOperand(node.cast(.binExpr).right),
+        .group => isConstOperand(node.cast(.group).child),
         else => false,
     };
 }
 
-/// Evaluates `node` into a hidden local that lives until the statement ends.
+/// Evaluates `node` into a hidden local that lives until the statement ends, when its evaluation calls a function:
+/// a call, a user operator (`` `+` ``, `@index`, `@get`) or a builtin one that is a function (`str` `+`). An
+/// expression without a call (a field, `i + 1` of `int`, `p.*`) is analyzed again by the read and the write, so its
+/// IR does not change. The IR of this analysis is then not used.
 fn holdOperand(c: *cy.Chunk, node: *ast.Node) !void {
+    const calls_before = c.ir.call_count;
     const res = try c.semaExprSkipSym(node, .{});
-    if (res.resType != .value) return;
+    if (c.ir.call_count == calls_before) return;
+    // `.value_field`: what `@get` gives.
+    if (res.resType != .value and res.resType != .value_field) return;
     // A place is read again like a variable.
     if (res.addressable) return;
     if (res.type.kind() == .void or res.type.kind() == .never) return;

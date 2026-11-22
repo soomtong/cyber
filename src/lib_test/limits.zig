@@ -600,6 +600,34 @@ test "cl_vm_interrupt stops a regex search without a failed search." {
     try zt.eq(false, S.failed);
 }
 
+test "Futures dropped without await free their spawned threads." {
+    if (is_wasm) return;
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    var res: C.EvalResult = undefined;
+    // Each eval drops 300 futures, some before their thread ended and some after. The last `await` runs the
+    // queued tasks, so only the threads still running on workers can hold memory when the eval ends.
+    const src =
+        \\use test
+        \\fn label(n int) -> str:
+        \\  return 'item-' + n.fmt()
+        \\for 0..300 |i|:
+        \\  _ = spawn label(i)
+        \\test.eq('item-7', spawn label(7).await())
+    ;
+    try zt.eq(C.Success, C.vm_eval(vm, src, &res));
+    const used = C.vm_memory_used(vm);
+    for (0..4) |_| {
+        try zt.eq(C.Success, C.vm_eval(vm, src, &res));
+    }
+    // A thread that nobody freed would hold its stack and heap: 1200 of them are several MiB.
+    const grown = C.vm_memory_used(vm) -| used;
+    if (grown > 2 * 1024 * 1024) {
+        std.debug.print("grown: {}\n", .{grown});
+        return error.TestUnexpectedResult;
+    }
+}
+
 test "A spawned function returns only what await can copy." {
     if (is_wasm) return;
     const vm = C.vm_init();

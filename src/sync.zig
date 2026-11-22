@@ -4,8 +4,8 @@ const std = @import("std");
 /// and the thread that produces the result.
 /// `FutureValue.completed` is set once the owner received the result.
 ///
-/// The producer never touches the owner's heap or the owner's `FutureValue`: a thread heap is not thread-safe.
-/// The result stays in the spawned thread's heap (`thread`, with the returned value's bytes in `result`) until
+/// The producer never touches the owner's heap or the owner's `FutureValue`: a thread heap is not thread-safe,
+/// and the owner can destruct the future at any time. The result stays in the spawned thread's heap (`thread`, with the returned value's bytes in `result`) until
 /// the owner takes it: `await` copies it into the owner's heap with `@send` on the owner's thread, then drops
 /// the spawned thread (`worker.dropThreadResult`).
 ///
@@ -14,8 +14,12 @@ const std = @import("std");
 /// 3, failed: Transition from `pending` by the worker when the spawned thread panicked.
 ///    `panic_msg` carries the thread's panic message when it had one.
 /// 4, stopped: Transition from `pending` by the worker when the spawned thread was interrupted or ran out of fuel.
-/// 5, received: Transition from `completed` by the owner once it took the result and freed the spawned thread.
-///    `await` reads the future's own `data` from then on.
+/// 5, received: Transition from `completed` by the owner once it took the result (or dropped it) and freed
+///    the spawned thread. `await` reads the future's own `data` from then on.
+/// 6, abandoned: Transition from `pending` by the owner when the future is destructed before the thread ended.
+///    The producer drops the result and frees the spawned thread itself instead of completing.
+/// Only the 0 -> 2/3/4 (producer) and 0 -> 6 (owner) transitions race. The side that loses the `cmpxchg` on 0
+/// sees the other's state, which says who frees the spawned thread: the owner for 2, the producer for 6.
 /// (1 was a writing state when the producer wrote into the owner's future. It is no longer used.)
 ///
 /// `state` is the first field: `core.cy` holds the state as `Ptr[byte]` and writes the initial 0 through it.

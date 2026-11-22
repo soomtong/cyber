@@ -239,7 +239,7 @@ pub const Pool = struct {
                         sync_state.panic_msg_len = m.len;
                     }
                     if (@cmpxchgStrong(u8, &sync_state.state, 0, failed, .acq_rel, .monotonic) != null) {
-                        // The owner already invalidated the future. Nobody reads the message.
+                        // The owner destructed the future (6). Nobody reads the message.
                         if (msg) |m| {
                             sync_state.panic_msg_ptr = null;
                             sync_state.panic_msg_len = 0;
@@ -260,7 +260,8 @@ pub const Pool = struct {
                     const buf = pool.alloc.alignedAlloc(u8, .@"8", ret_byte_size) catch {
                         // No room to keep the result. Sweep the thread's heap like a panic does.
                         _ = cy.thread.freeHeapPages(thread) catch {};
-                        @atomicStore(u8, &sync_state.state, 3, .release);
+                        // Abandoned (6) when this fails. Nobody waits then.
+                        _ = @cmpxchgStrong(u8, &sync_state.state, 0, 3, .acq_rel, .monotonic);
                         thread.deinit(false);
                         pool.alloc.destroy(thread);
                         pool.notifyProgress();
@@ -273,14 +274,18 @@ pub const Pool = struct {
                 sync_state.result = result;
                 sync_state.result_len = ret_byte_size;
 
-                @atomicStore(u8, &sync_state.state, 2, .release);
+                if (@cmpxchgStrong(u8, &sync_state.state, 0, 2, .acq_rel, .acquire)) |actual| {
+                    // The owner destructed the future while the thread ran (6). The thread drops its result.
+                    std.debug.assert(actual == 6);
+                    pool.dropThreadResult(sync_state);
+                }
                 pool.notifyProgress();
             },
         }
     }
 
     /// Destructs a done thread's result in the thread's own heap and frees the thread. The caller owns the
-    /// thread exclusively: the owner after 2.
+    /// thread exclusively: the producer after the owner abandoned the future (6), or the owner after 2.
     /// Runs the thread's drop function on the calling OS thread, like `run_queued_task` runs a task there.
     pub fn dropThreadResult(pool: *Pool, sync_state: *cy.sync.FutureSyncState) void {
         const thread: *cy.Thread = @ptrCast(@alignCast(sync_state.thread orelse return));
@@ -329,8 +334,21 @@ pub const Pool = struct {
         pool.dropThreadResult(sync_state);
     }
 
-    /// Frees the done threads whose futures were never awaited. Called after `stopSpawnedThreads`, while the
-    /// compiled code still exists.
+    /// The owner destructs the future of a spawned thread. Whichever of the owner and the producer ends
+    /// last frees the thread: a pending future is marked abandoned (0 -> 6) and the producer drops its result
+    /// when it ends. A done future's thread is freed here (2 -> 5).
+    pub fn dropFuture(pool: *Pool, sync_state: *cy.sync.FutureSyncState) void {
+        if (@cmpxchgStrong(u8, &sync_state.state, 0, 6, .acq_rel, .acquire)) |actual| {
+            if (actual == 2) {
+                pool.claimThreadResult(sync_state);
+            }
+            // 3, 4: the producer freed the thread. 5: the result was received.
+        }
+    }
+
+    /// Frees the done threads whose futures were never awaited nor destructed (a main local that the eval
+    /// does not release, a future in an object that a panic sweep freed). Called after `stopSpawnedThreads`,
+    /// while the compiled code still exists.
     pub fn dropUnclaimedResults(pool: *Pool, states: []const *cy.sync.FutureSyncState) void {
         for (states) |sync_state| {
             if (@atomicLoad(u8, &sync_state.state, .acquire) == 2) {

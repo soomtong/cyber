@@ -4657,6 +4657,10 @@ type FutureValue[T Any]:
 
     data      ?T
 
+-- A spawned thread's future that was never awaited still owns the thread and its result.
+fn (&FutureValue[]) @deinit():
+    @future_drop(self.shared_state)
+
 -- type AsyncTask[T Any]:
 --     cb   FutureOnResultFn[T]
 --     next ?^FutureTask
@@ -5256,6 +5260,11 @@ fn @thread_result(shared_state Ptr[byte]) -> Ptr[void]
 -- The owner took the result: drops it in the spawned thread's heap and frees the thread.
 #[bind]
 fn @thread_result_done(shared_state Ptr[byte])
+
+-- The owner destructs a spawned thread's future. Frees the thread and its result when the thread is done, or
+-- tells the thread to free them itself when it ends. Nothing for a future without a shared state.
+#[bind]
+fn @future_drop(shared_state Ptr[byte])
 
 -- TODO: &FnTuple[Sig] is a temporary fix for inlined builtins. Won't be necessary after struct inlining work.
 #[bind]

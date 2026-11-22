@@ -64,5 +64,6 @@
 - `spawn` 스레드의 await는 여전히 바쁜 대기다(CPU 한 코어를 점유). 조건 변수로 바꾸려면 완료 쪽이 깨워야 하는데 지금 완료는
   원자적 저장뿐이다. 스레드가 많은 스크립트에서 문제되면 `spinLoopHint` 뒤에 짧은 sleep을 둔다.
 - 호스트 함수 안에서 막힌 스레드는 이 변경과 무관하게 끊지 못한다(`project_vm_interrupt.md` 미정).
-- `Future`를 await하지 않고 버리면 worker가 완료 값을 main 힙의 `FutureValue`에 쓰는 시점에 그 객체가 이미 해제됐을 수 있다.
-  기존 경로이고 `sync.zig`의 "소유자 무효화(3)"가 그 자리인데 core.cy가 아직 쓰지 않는다.
+- (해결) `Future`를 await하지 않고 버리면 worker가 완료 값을 main 힙의 `FutureValue`에 쓰는 시점에 그 객체가 이미 해제됐을 수
+  있었다. 2026-11-22: `project_spawn_result_ownership.md`. worker는 `FutureValue`도 부모 힙도 쓰지 않고, 버린 future는 상태 6으로
+  표시해 나중에 끝나는 쪽이 spawn된 스레드를 해제한다.

@@ -16,7 +16,10 @@
 2. 사용자 `@send`가 `^T`를 만들면 그 객체는 실행 중인 스레드, 곧 worker의 힙에 생겼다. 받는 쪽에서 보면 남의 힙을 가리키는
    값이다.
 3. worker가 완료 값을 부모 힙의 `FutureValue.data`에 직접 썼다. future를 await하지 않고 버리면 그 객체는 이미 해제됐을 수
-   있다(`project_spawn_nested_await.md` 남은 것). 버그 2(아래 "Future 소유권")와 같은 자리다.
+   있다(`project_spawn_nested_await.md` 남은 것, 해제 후 쓰기). 버린 future가 부모 힙에 받은 결과 문자열도 아무도 해제하지
+   않았다. 재현(scratchpad `drop.cy`: 루프에서 `_ = spawn work(i)` · `_ = spawn work_str(i)` 2천 번씩, 그 뒤 main이 2만 개
+   문자열)은 Debug에서 10번 모두 실패했다(`hash_map` 잠금 단언 abort, 세그폴트(139), `unreleased refcount: 1888`).
+   "Future 소유권" 절에서 다룬다.
 
 ## 결정
 
@@ -24,8 +27,8 @@
    `FutureValue`도 건드리지 않는다.
    - `@thread_entry`는 `@call(func, &args)`의 값을 그대로 돌려준다. worker는 반환 값의 바이트를 풀 할당자의 버퍼로 옮기고
      (`FutureSyncState.result`), 스레드 객체를 `FutureSyncState.thread`에 둔 채 상태를 2로 바꾼다. OS 스레드는 풀로 돌아간다.
-   - `Future.await()`는 `@await_` 뒤 `completed`가 거짓이면 `@send(@cur_thread(), result)`로 값을 자기 힙에 복사해
-     `data`에 넣고 `completed = true`, 그다음 `@thread_result_done`이 상태를 5(받음)로 바꾸고 spawn된 스레드를 해제한다.
+   - `Future.await()`는 `@await_` 뒤 `completed`가 거짓이면 `Future.@receive`로 값을 자기 힙에 복사해 `data`에 넣고
+     `completed = true`, 그다음 `@thread_result_done`이 상태를 5(받음)로 바꾸고 spawn된 스레드를 해제한다.
      두 번째 `await`는 `data`를 읽는다.
    - 해제는 `worker.dropThreadResult`: spawn된 스레드 위에서 `@thread_drop[Sig]`(결과의 `@destruct`)를 부른 뒤 스레드를 해제한다.
      스레드가 끝난 뒤에는 그 스레드를 아무도 쓰지 않으므로, 호출하는 OS 스레드에서 돌린다(`run_queued_task`가 대기 중에 남의
@@ -41,7 +44,36 @@
    인스턴스화되므로(호스트 future 포함) `@receive`는 받지 못하는 타입에서 `@send` 대신 panic 한 줄로 컴파일된다. 그 줄은
    `spawn`이 그런 future를 만들지 않으므로 실행되지 않는다.
 4. VM을 해제할 때(`VM.deinit`, reset 포함) `stopSpawnedThreads` 뒤 `dropUnclaimedResults`가 상태 2로 남은 스레드를 해제한다.
-   await하지 않은 future의 스레드다. 컴파일된 drop 함수가 아직 있을 때 돈다.
+   await하지도 destruct하지도 않은 future의 스레드다(release op가 없는 `single_run`의 main 지역, panic 쓸기로 사라진 객체 안의
+   future). 컴파일된 drop 함수가 아직 있을 때 돈다.
+
+## Future 소유권 (await 없이 버린 future)
+
+pull로 worker가 `FutureValue`를 쓰지 않게 되어 해제 후 쓰기는 사라졌지만, 버린 future의 spawn된 스레드(스택 · 힙 · 결과)는
+VM 해제 때까지 남았다. 루프에서 future를 버리는 스크립트는 그만큼 메모리가 늘었다(lib 테스트의 300개 × 4회 eval에서 약 12 MiB).
+
+결정: spawn된 스레드는 소유자(future)와 생산자(worker) 둘이 공유하고, 나중에 끝나는 쪽이 해제한다. 별도 refcount 없이 공유
+상태의 원자적 상태 하나로 정한다.
+
+1. `FutureValue`에 `@deinit`을 둔다. `@future_drop(shared_state)`가 `cmpxchg 0 → 6`(버림)을 시도한다.
+   - 성공: 스레드가 아직 돈다(또는 큐에 있다). worker가 끝날 때 `cmpxchg 0 → 2`가 6을 보고 실패하면 자기 OS 스레드에서
+     `dropThreadResult`로 결과와 스레드를 해제한다. 실패 경로(3 · 4)의 `cmpxchg`도 6을 보면 panic 메시지를 되돌려 해제한다.
+   - 실패하고 2: 스레드가 이미 끝났다. 소유자가 2 → 5로 바꾸고 그 자리에서 해제한다.
+   - 실패하고 3 · 4 · 5: worker가 이미 해제했거나 결과를 받았다. 할 일이 없다.
+2. 경쟁하는 전이는 생산자의 0 → 2/3/4와 소유자의 0 → 6뿐이다. 2에서 5로 가는 것은 소유자만이다(`await`와 `@deinit`은 같은
+   스레드에서 돈다. `Future`는 `@send`가 없어 다른 스레드로 가지 않는다). 따라서 `cmpxchg` 하나로 해제 책임이 정확히 한 쪽에
+   간다.
+3. 공유 상태 자체는 이전처럼 `VM.shared_states`가 소유하고 VM과 같이 해제한다. 버린 future가 많은 스크립트에서 이 목록은
+   spawn 수만큼 자란다(한 항목 수십 바이트). 상태를 refcount로 바꿔 즉시 해제하는 것은 남은 것으로 둔다.
+
+구현: `core.cy` `FutureValue.@deinit` · `@future_drop` 바인딩, `worker.zig` `dropFuture`와 `run_task`의 `cmpxchg 0 → 2`
+(결과 버퍼 할당 실패의 0 → 3도 `cmpxchg`), `sync.zig` 상태 6. 호스트 future(`cl_future_new`)와 `Future.complete`는
+`shared_state`가 없어 `@future_drop`이 바로 돌아온다.
+
+확인: `drop.cy` Debug 200회 0 실패(수정 전 10회 모두 실패), ReleaseSafe 200회 0 실패. behavior `concurrency/spawn_drop.cy`
+(끝나기 전 · 뒤에 버린 future 섞기, 스레드 안에서 버린 future, `@deinit` 있는 결과, `Future.wait_any` 뒤 버림. Debug의
+refcount 검사가 spawn된 스레드마다 drop 뒤 0을 확인한다). lib `Futures dropped without await free their spawned threads.`(같은
+VM에서 300개씩 버리는 eval 5회의 메모리 증가가 2 MiB 이하. 소유권 수정 전 약 12 MiB).
 
 ## 구현 메모
 
@@ -61,3 +93,6 @@
 - 인자 쪽 `@send`도 같은 `#switch`라 참조 있는 option · result 인자는 빈 본문으로 컴파일된다. 인자는 spawn하는 스레드에서
   새 스레드(아직 돌지 않음)의 힙으로 복사하므로 경쟁은 없지만 값이 정의되지 않는다. `@check_sendable`을 인자에도 걸지는
   따로 정한다.
+- 아직 큐에 있는 작업의 future를 버려도 작업은 끝까지 돈다(결과는 곧 버려진다). 큐에서 빼거나 스레드 interrupt로 끊는 것은
+  필요해지면 한다.
+- `VM.shared_states`는 VM 수명 동안 자란다(위 3).

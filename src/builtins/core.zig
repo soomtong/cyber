@@ -134,6 +134,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"@cur_thread",    zErrFunc(cur_thread)},
     .{"@thread_result", zErrFunc(thread_result)},
     .{"@thread_result_done", zErrFunc(thread_result_done)},
+    .{"@future_drop",   zErrFunc(future_drop)},
     .{"@call",          zErrBuiltinFunc(call, null)},
 
     .{"EvalBuffer[].@index_addr", zErrConstEvalFunc(EvalBuffer_index_addr)},
@@ -1584,6 +1585,13 @@ pub fn thread_result_done(t: *cy.Thread) !C.Ret {
     _ = t.ret(void);
     const sync_state = t.param(*cy.sync.FutureSyncState);
     t.c.vm.worker_pool.claimThreadResult(sync_state);
+    return C.RetOk;
+}
+
+pub fn future_drop(t: *cy.Thread) !C.Ret {
+    _ = t.ret(void);
+    const sync_state = t.param(?*cy.sync.FutureSyncState) orelse return C.RetOk;
+    t.c.vm.worker_pool.dropFuture(sync_state);
     return C.RetOk;
 }
 

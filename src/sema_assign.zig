@@ -627,17 +627,14 @@ fn movedInBlock(c: *cy.Chunk, id: sema.LocalId) bool {
 /// The assignment gives the moved local `id` a value: it is alive again.
 fn reviveLocal(c: *cy.Chunk, id: sema.LocalId) !void {
     // The move is no longer one that the block leaves to its `if` statement or loop.
-    var taken: u32 = 0;
     var i: usize = c.block().moves_start;
     while (i < c.branch_moves.items.len) {
         if (c.branch_moves.items[i] == id) {
             _ = c.branch_moves.orderedRemove(i);
-            taken += 1;
         } else i += 1;
     }
     if (c.move_undo_depth > 0) {
-        try c.move_undo.append(c.alloc, .{ .id = id, .revive = true, .site = c.moved_sites.get(id), .has_site = true,
-            .branch_taken = taken });
+        try c.move_undo.append(c.alloc, .{ .id = id, .revive = true, .site = c.moved_sites.get(id), .has_site = true });
     }
     c.varStack.items[id].type = .local;
     _ = c.moved_sites.remove(id);

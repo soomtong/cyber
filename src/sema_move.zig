@@ -369,7 +369,6 @@ pub fn semaMove(c: *cy.Chunk, res_: sema.ExprResult, child: *ast.Node) !sema.Exp
                 .id = c.temp_access_path.var_id,
                 .site = c.moved_sites.get(c.temp_access_path.var_id),
                 .has_site = true,
-                .branch = cross,
             });
         }
         local.type = .dead;
@@ -416,12 +415,8 @@ pub const MoveUndo = struct {
     /// The site that `Chunk.moved_sites` had for the local before the move, when `has_site`.
     site: ?*ast.Node = null,
     has_site: bool = false,
-    /// The move was added to `Chunk.branch_moves`.
-    branch: bool = false,
-    /// Not a move: an assignment gave the moved local a value (`reviveLocal`), and took this many entries of it out of
-    /// `Chunk.branch_moves`.
+    /// Not a move: an assignment gave the moved local a value (`reviveLocal`).
     revive: bool = false,
-    branch_taken: u32 = 0,
     /// The move of a member: the range of the member state, and whether the move created the state of the local.
     member: bool = false,
     new_state: bool = false,
@@ -436,15 +431,61 @@ pub fn noteMove(c: *cy.Chunk, id: sema.LocalId) !void {
     try c.move_undo.append(c.alloc, .{ .id = id });
 }
 
-/// Takes back the moves recorded since `start`: an overload candidate did not match, and the next one checks the
+/// The state of the move analysis when the matching of an overload candidate began (`beginUndo`).
+pub const UndoMark = struct {
+    /// The length of `Chunk.move_undo`.
+    undo: usize,
+    /// Where the copy of `Chunk.branch_moves` starts in `Chunk.move_undo_branch_moves`, and its length.
+    branch_moves: usize,
+    branch_moves_len: usize,
+    break_moves: usize,
+    moved_breaks: usize,
+    try_exits: usize,
+    try_moves: usize,
+};
+
+/// Starts the recording of moves for an overload candidate. `endUndo` ends it, whether the candidate matched or not.
+pub fn beginUndo(c: *cy.Chunk) !UndoMark {
+    const mark = UndoMark{
+        .undo = c.move_undo.items.len,
+        .branch_moves = c.move_undo_branch_moves.items.len,
+        .branch_moves_len = c.branch_moves.items.len,
+        .break_moves = c.break_moves.items.len,
+        .moved_breaks = c.moved_breaks.items.len,
+        .try_exits = c.try_exits.items.len,
+        .try_moves = c.try_moves.items.len,
+    };
+    try c.move_undo_branch_moves.appendSlice(c.alloc, c.branch_moves.items);
+    c.move_undo_depth += 1;
+    return mark;
+}
+
+pub fn endUndo(c: *cy.Chunk, mark: UndoMark) void {
+    c.move_undo_branch_moves.items.len = mark.branch_moves;
+    c.move_undo_depth -= 1;
+    if (c.move_undo_depth == 0) c.move_undo.clearRetainingCapacity();
+}
+
+/// Takes back the moves made since `mark`: an overload candidate did not match, and the next one checks the
 /// arguments again. The locals from `var_start` on are discarded by the caller.
-pub fn undoMoves(c: *cy.Chunk, start: usize, var_start: usize) void {
+///
+/// `Chunk.branch_moves` is put back from the copy and not entry by entry: an `if` expression, a `switch` expression
+/// or an assignment inside an argument takes entries out again (`joinBranchMoves`, `reviveLocal`), so the entries
+/// that the arguments added are not the ones at the end. The notes of a failing `!` and of a `break` in an argument
+/// point into the statements that the caller discards.
+pub fn undoMoves(c: *cy.Chunk, mark: UndoMark, var_start: usize) void {
+    const start = mark.undo;
+    c.branch_moves.clearRetainingCapacity();
+    c.branch_moves.appendSliceAssumeCapacity(
+        c.move_undo_branch_moves.items[mark.branch_moves..mark.branch_moves + mark.branch_moves_len]);
+    c.break_moves.items.len = @min(c.break_moves.items.len, mark.break_moves);
+    c.moved_breaks.items.len = @min(c.moved_breaks.items.len, mark.moved_breaks);
+    c.try_exits.items.len = @min(c.try_exits.items.len, mark.try_exits);
+    c.try_moves.items.len = @min(c.try_moves.items.len, mark.try_moves);
     var i = c.move_undo.items.len;
     while (i > start) {
         i -= 1;
         const undo = c.move_undo.items[i];
-        if (undo.branch) _ = c.branch_moves.pop();
-        for (0..undo.branch_taken) |_| c.branch_moves.append(c.alloc, undo.id) catch @panic("OOM");
         if (undo.id >= var_start) continue;
         const local = &c.varStack.items[undo.id];
         if (undo.member) {

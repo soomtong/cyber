@@ -170,6 +170,8 @@ pub const Chunk = struct {
     /// locals as they were (`sema_move.undoMoves`). Recorded only while `move_undo_depth` is not 0.
     move_undo: std.ArrayList(cy.sema_move.MoveUndo) = .empty,
     move_undo_depth: u32 = 0,
+    /// The copies of `branch_moves` from when the candidates that are being matched began (`sema_move.beginUndo`).
+    move_undo_branch_moves: std.ArrayList(u32) = .empty,
     /// The call that `sema_call.reuseSliceBuffer` turned into an in-place method, for the error of a mismatch
     /// (`sema_func.reportCallFuncMismatch2` names the method that the script wrote).
     reuse_call: ?cy.sema_call.ReuseCall = null,
@@ -412,6 +414,7 @@ pub const Chunk = struct {
         self.try_exits.deinit(self.alloc);
         self.try_moves.deinit(self.alloc);
         self.move_undo.deinit(self.alloc);
+        self.move_undo_branch_moves.deinit(self.alloc);
         self.scope_start_borrows.deinit(self.alloc);
         self.scope_borrows.deinit(self.alloc);
         self.scope_blocks.deinit(self.alloc);

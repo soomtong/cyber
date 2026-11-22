@@ -786,12 +786,8 @@ fn matchRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end
     const start_stmt = c.ir.curBlock().last;
     const var_start = c.varStack.items.len;
     const saved_take = c.global_take;
-    const undo_start = c.move_undo.items.len;
-    c.move_undo_depth += 1;
-    defer {
-        c.move_undo_depth -= 1;
-        if (c.move_undo_depth == 0) c.move_undo.clearRetainingCapacity();
-    }
+    const undo_mark = try sema_move.beginUndo(c);
+    defer sema_move.endUndo(c, undo_mark);
 
     if (try matchOverloadedFunc(c, func, pre_args, end_args, loc, exact, match_err, node)) |res| {
         return .{
@@ -806,7 +802,7 @@ fn matchRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end
     }
 
     // A local that an argument moved is alive again for the next candidate.
-    sema_move.undoMoves(c, undo_start, var_start);
+    sema_move.undoMoves(c, undo_mark, var_start);
 
     // Discard any locals created during matching.
     if (var_start < c.varStack.items.len) {

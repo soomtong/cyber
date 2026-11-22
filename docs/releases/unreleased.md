@@ -234,15 +234,16 @@ F-170(위 "갈래가 주는 빌림의 주인")이 남긴 구멍 셋이다.
 - 결과를 spawn된 스레드가 부모 스레드의 힙에 직접 복사해, 부모가 할당하는 동안 두 OS 스레드가 같은 힙을 잠금 없이 고쳤다(Debug에서
   'hash_map' 잠금 단언 abort, 메모리 손상). 이제 결과는 spawn된 스레드의 힙에 남고, `await`가 자기 스레드에서 `@send`로 복사한 뒤
   그 스레드를 해제한다(`Future.@receive`). 사용자 `@send` 안의 할당도 받는 쪽 힙에 생긴다.
-- 결과 타입이 참조 없는 값이거나 `@send`가 있는 struct가 아니면 'Expected sendable: <타입>' 컴파일 오류다(깨지는 변경). 전에는
-  `?str`, `!str` 같은 결과가 빈 본문으로 컴파일돼 정의되지 않은 값을 돌려줬다. 참조 없는 `symbol`, `error`, `!int` 결과는 이제
-  정확히 온다.
+- 인자와 결과가 같은 보내기 규칙(`core.cy`의 `@sendable`)을 쓴다. 전에는 `?str` · `!str` 같은 결과가 빈 본문으로 컴파일돼
+  정의되지 않은 값을 돌려줬고, `?int` · `!int` · 참조 없는 struct는 결과로는 되고 인자로는 'Expected sendable: ?int'였다. 이제
+  payload를 보낼 수 있는 option · result는 payload의 `@send`로 보내고(`?str`, `!str`, `@send`가 있는 struct의 option), 참조 없는
+  값은 바이트로 보낸다. 보낼 수 없는 payload는 'Expected sendable: ?[]int'다. 인자로 `Ptr[T]`도 받는다. 확인:
+  `concurrency/spawn_send_option.cy`.
 - `await`하지 않고 버린 future: worker가 해제된 `FutureValue`에 결과를 쓸 수 있었고, 결과와 스레드는 VM을 해제할 때까지 남았다.
   이제 future가 destruct될 때 스레드가 아직 돌면 버림으로 표시하고(`cmpxchg`), 소유자와 스레드 중 나중에 끝나는 쪽이 스레드와
   결과를 해제한다.
 - 확인: `concurrency/spawn_send.cy`, `concurrency/spawn_drop.cy`, lib 테스트 'A spawned function returns only what await can
-  copy.', 'Futures dropped without await free their spawned threads.' 결정 `docs/decisions/project_spawn_result_ownership.md`(남은
-  것: 인자 쪽 `@send`의 참조 있는 option · result, 큐에 있는 작업은 버려도 끝까지 돈다, `VM.shared_states`가 계속 자란다).
+  copy.', 'Futures dropped without await free their spawned threads.' 결정 `docs/decisions/project_spawn_result_ownership.md`.
 
 ## 남은 것의 정리 (2026-11-22)
 
@@ -275,3 +276,9 @@ F-170(위 "갈래가 주는 빌림의 주인")이 남긴 구멍 셋이다.
   `h.b = &w.x`, `&&h`를 넘긴 뒤, `Local.borrow_places`) 복사본도 컨테이너에 묶인다.
 - 선언 뒤에 빌림을 저장한 컨테이너(`h.b = &z`)를 바깥 지역으로 복사하면(`r = h`) 블록 끝에서 컴파일러가 index out of bounds로 panic했다. 이제 '`r` can not outlive `z`.'.
 - 확인: `memory/borrow_copy_out.cy`와 `borrow_copy_out_*_error.cy`, `borrow_copy_loan_outlive_error.cy`.
+- spawn된 스레드의 공유 상태(`FutureSyncState`)를 future와 작업이 모두 끝나면 해제한다(`VM.releaseSharedState`). 전에는 spawn마다
+  한 항목이 VM 수명 동안 남아, 세션이나 루프에서 spawn을 반복하면 메모리가 계속 늘었다. 확인: lib 테스트 'The sync states of
+  spawned threads are freed when both sides are done.'
+- (동작 변경 없음, 결정) `await` 없이 버린 future의 스레드는 아직 큐에 있어도 끝까지 돈다(`_ = spawn log(msg)`). 프로그램이 끝날 때
+  남은 스레드는 멈춘다. 취소는 나중에 명시적 API로 한다. 확인: lib 테스트 'A spawned thread runs to its end when its future is
+  dropped before it started.'

@@ -398,8 +398,20 @@ fn semaStmt2(c: *cy.Chunk, node: *ast.Node) !void {
                                 // The moves of the body are not on the way to the next iteration.
                                 restoreMoves(c_, c_.block().moves_start);
                             }
-                            const block = try sema_local.popBlock(c_);
+                            // A move of the capture or of the index is a move in their block, which ends with the
+                            // iteration.
+                            endPlainBlockMoves(c_, block_idx);
+                            // The capture and the index end with the body: a `continue` that jumps to the end of
+                            // this block destructs them like this end does (`semaContinue`). A path that moved one
+                            // and a path that did not then meet with nothing left to destruct.
+                            if (c_.block().endReachable) {
+                                try sema_local.semaDestructBlock2(c_, &c_.semaBlocks.items[block_idx - 1]);
+                            }
+                            const block = try sema_local.popBlock2(c_, false);
                             _ = try c_.ir.pushStmt(.block, @ptrCast(data.stmt), .{ .bodyHead = block.first });
+                            for (c_.varStack.items[c_.block().varStart..]) |*local| {
+                                local.type = .dead;
+                            }
 
                             // Continue epilogue.
 
@@ -547,6 +559,7 @@ fn semaStmt2(c: *cy.Chunk, node: *ast.Node) !void {
             beginLoopBlock(c, wrap);
             {
                 const cond = try c.semaExprCstr(stmt.cond, c.sema.bool_t);
+                try checkLoopCondMoves(c, c.semaBlocks.items.len - 1, stmt.cond);
                 _ = try sema_local.pushBlock(c, node);
                 c.block().move_branch = .plain;
                 {
@@ -579,6 +592,8 @@ fn semaStmt2(c: *cy.Chunk, node: *ast.Node) !void {
                         _ = opt_local;
                         c_.block().move_branch = .plain;
                         const stmt_: *ast.WhileUnwrapStmt = @ptrCast(@alignCast(data));
+                        // The option expression is checked and owned by now.
+                        try checkLoopCondMoves(c_, c_.semaBlocks.items.len - 2, stmt_.opt);
                         try semaStmts(c_, stmt_.stmts);
                         try semaContinue(c_, @ptrCast(stmt_));
                     }
@@ -812,6 +827,19 @@ fn checkLoopMoves(c: *cy.Chunk, idx: usize, node: *ast.Node) !void {
     }
 }
 
+/// The condition of a `while` loop (or the option of `while opt |v|`) was checked in the loop block `idx`. It runs
+/// before every iteration, also the one that ends the loop: a local that is declared outside the loop can not move in
+/// it. A move that stayed in `Chunk.branch_moves` would count as a move of a body that then leaves the loop.
+fn checkLoopCondMoves(c: *cy.Chunk, idx: usize, node: *ast.Node) !void {
+    const b = c.semaBlocks.items[idx];
+    const wrap_start = c.semaBlocks.items[b.loop_wrap].varStart;
+    for (c.branch_moves.items[b.moves_start..]) |id| {
+        if (id >= wrap_start) continue;
+        const name = c.varStack.items[id].name();
+        return c.reportErrorFmt("Cannot move `{}` in the condition of a `while` loop: it is declared outside the loop, and the condition is evaluated before every iteration. Borrow it with `&{}`, or write `while:` and move it in the body where the body then leaves the loop with `break` or `return`.", &.{v(name), v(name)}, c.moved_sites.get(id) orelse node);
+    }
+}
+
 /// A `break` of the loop block `idx` after the body moved outer locals: it jumps to the end of the wrap block of the
 /// loop. Returns false when nothing was moved. The locals are dead after the loop: `popLoopWrap` destructs them on
 /// the other ways out, and the ones that another such `break` moved in the slot before this one.
@@ -872,7 +900,9 @@ fn semaContinue(c: *cy.Chunk, node: *ast.Node) !void {
     try checkLoopMoves(c, idx, node);
     const b = &c.semaBlocks.items[idx];
     if (b.pre_continue_block != cy.NullId) {
-        const pre_cont_block = &c.semaBlocks.items[b.pre_continue_block];
+        // With the locals of the block around the body (the capture and the index of `for xs |i, x|`): they are dead
+        // after the body, whichever path moved them.
+        const pre_cont_block = &c.semaBlocks.items[b.pre_continue_block - 1];
         try sema_local.semaDestructBlock2(c, pre_cont_block);
         _ = try c.ir.pushStmt(.break_, node, .{ .block_offset = @intCast(b.pre_continue_block - start) });
     } else {
@@ -1107,7 +1137,7 @@ fn semaIfBlock2(c: *cy.Chunk, cond_n: *ast.Node, stmts: []const *ast.Node, outer
     is_last: bool, end_reachable: *bool, if_stmt: ?**ir.Stmt, cond_moves_end: ?*usize, node: *ast.Node) !void {
 
     const cond = try c.semaExprCstr(cond_n, c.sema.bool_t);
-    if (c.semaBlocks.items[outer].move_branch == .if_cond) {
+    if (c.semaBlocks.items[outer].move_branch == .if_cond or c.semaBlocks.items[outer].move_branch == .else_cond) {
         c.semaBlocks.items[outer].move_branch = .if_outer;
     }
     if (cond_moves_end) |out| out.* = c.branch_moves.items.len;
@@ -1291,6 +1321,7 @@ fn semaIfUnwrapStmt(c: *cy.Chunk, stmt: *ast.IfUnwrapStmt) !void {
                     const else_ = node.cast(.elseif_block);
                     const start = c.branch_moves.items.len;
                     const is_last = i + 1 == stmt.else_blocks.len;
+                    c.semaBlocks.items[outer].move_branch = .else_cond;
                     try semaIfBlock2(c, else_.cond, else_.stmts, outer, is_last, &end_reachable, &if_stmt, null, node);
                     try endIfBranch(c, &branches, &kept, &if_stmt.cast(.if_block).body_head, end_reachable, start,
                         outer_start, branchVarEnd(c, outer_start, is_last));
@@ -1918,6 +1949,7 @@ fn semaIfStmt(c: *cy.Chunk, node: *ast.IfStmt) !void {
                     const elseif = else_block.cast(.elseif_block);
                     const start = c.branch_moves.items.len;
                     const is_last = i + 1 == node.else_blocks.len;
+                    c.semaBlocks.items[outer].move_branch = .else_cond;
                     try semaIfBlock2(c, elseif.cond, elseif.stmts, outer, is_last, &end_reachable, &if_stmt, null, else_block);
                     try endIfBranch(c, &branches, &kept, &if_stmt.cast(.if_block).body_head, end_reachable, start,
                         outer_start, branchVarEnd(c, outer_start, is_last));

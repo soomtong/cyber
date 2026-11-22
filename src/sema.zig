@@ -278,6 +278,10 @@ pub const MoveBranch = enum(u8) {
     /// The outer block of an `if` statement while its first condition is checked. The condition always runs, so a move
     /// in it is a move in the block of the statement (`moveBlock`).
     if_cond,
+    /// The outer block of an `if` statement while the condition of an `else` branch is checked. The condition runs
+    /// only when the branches before it did not: no outer local moves in it, also not from a branch of an `if`
+    /// expression in it.
+    else_cond,
     /// A block whose statements run in order: a `begin:` block, or a block of a loop statement. A move of an outer
     /// local in it is a move of the block around it. A loop checks where the move can go (`checkLoopMoves`).
     plain,

@@ -1038,9 +1038,10 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                 if (kept.items.len > 0) {
                     try sema_stmt.joinBranchMoves(c, node, outer, branches.items, kept.items, true);
                 }
-                // A local of a block further out is a move of the enclosing branch.
+                // A local of a block further out is a move of the enclosing branch. The block around the expression
+                // can be one that passes its moves on (the condition of an `if` statement, the left of an `and`).
                 c.branch_moves.items.len = moves_start;
-                const parent_start = c.semaBlocks.items[outer - 1].varStart;
+                const parent_start = c.semaBlocks.items[sema_move.moveBlockFrom(c, outer - 1)].varStart;
                 for (kept.items) |id| {
                     if (id < parent_start) try c.branch_moves.append(c.alloc, id);
                 }

@@ -194,8 +194,10 @@ pub fn semaSwitchExpr(c: *cy.Chunk, block: *ast.SwitchBlock, cstr: sema.Cstr) !s
     try semaSwitchBody(c, &info, block, control);
     if (case_moves.kept.items.len > 0) {
         try sema_stmt.joinBranchMoves(c, @ptrCast(block), 0, case_moves.branches.items, case_moves.kept.items, true);
+        // The block around the expression can be one that passes its moves on (the condition of an `if` statement).
+        const parent_start = c.semaBlocks.items[sema_move.moveBlockFrom(c, c.semaBlocks.items.len - 1)].varStart;
         for (case_moves.kept.items) |id| {
-            if (id < c.block().varStart) try c.branch_moves.append(c.alloc, id);
+            if (id < parent_start) try c.branch_moves.append(c.alloc, id);
         }
     }
 

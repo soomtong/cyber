@@ -244,7 +244,7 @@ fn reportMoveAcross(c: *cy.Chunk, id: sema.LocalId, node: *ast.Node) anyerror {
         while (i > c.proc().block_start) {
             i -= 1;
             if (id >= c.semaBlocks.items[i].varStart) break;
-            if (c.semaBlocks.items[i].move_branch == .none) {
+            if (c.semaBlocks.items[i].move_branch == .none or c.semaBlocks.items[i].move_branch == .else_cond) {
                 b = &c.semaBlocks.items[i];
                 break;
             }
@@ -263,7 +263,7 @@ fn reportMoveAcross(c: *cy.Chunk, id: sema.LocalId, node: *ast.Node) anyerror {
     if (expr_name) |expr| {
         return c.reportErrorFmt("Cannot move `{}` inside {}: a part of the expression is evaluated conditionally. Borrow it with `&{}`, or move it to a variable in a statement before this one.", &.{v(name), v(expr), v(name)}, node);
     }
-    if (b.move_branch == .if_outer) {
+    if (b.move_branch == .else_cond) {
         return c.reportErrorFmt("Cannot move `{}` in the condition of an `else` branch: the condition is evaluated conditionally. Move it inside the branch, or borrow it with `&{}`.", &.{v(name), v(name)}, node);
     }
     return c.reportErrorFmt("Cannot move `{}` here: it is declared outside this block. A branch of an `if` or `switch`, a `begin:` block, a `try` statement, a `scope` block and a loop body can move an outer variable, this block can not. Borrow it with `&{}`.", &.{v(name), v(name)}, node);
@@ -283,7 +283,7 @@ fn canMoveAcross(c: *cy.Chunk, id: sema.LocalId) bool {
         i -= 1;
         const b = c.semaBlocks.items[i];
         if (id >= b.varStart) return true;
-        if (b.move_branch == .none) return false;
+        if (b.move_branch == .none or b.move_branch == .else_cond) return false;
     }
     return false;
 }
@@ -291,7 +291,14 @@ fn canMoveAcross(c: *cy.Chunk, id: sema.LocalId) bool {
 /// The block that a move at this point is a move in: the current one, or the block of the `if` statement while its
 /// first condition is checked.
 fn moveBlock(c: *cy.Chunk) usize {
-    var i = c.semaBlocks.items.len - 1;
+    return moveBlockFrom(c, c.semaBlocks.items.len - 1);
+}
+
+/// The block that a move in the block `idx` is a move in (`moveBlock`). An expression that joins the moves of its
+/// branches (`if` expression, `switch` expression) passes on the locals below the start of this block: the ones from
+/// there on are dead like after a statement of the block.
+pub fn moveBlockFrom(c: *cy.Chunk, idx: usize) usize {
+    var i = idx;
     // The left operand of an `and` in the condition is two such blocks deep.
     while (c.semaBlocks.items[i].move_branch == .if_cond) i -= 1;
     return i;

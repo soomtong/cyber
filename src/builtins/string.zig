@@ -328,30 +328,22 @@ pub fn index_rune(t: *cy.Thread) !Ret {
     const str = obj.slice();
     const needle = t.param(i64);
 
-    if (needle > 0 and needle <= 0x10FFFF) {
+    // A negative number, a number beyond 0x10FFFF and a surrogate are no code points: no string holds them.
+    if (needle >= 0 and needle <= 0x10FFFF and std.unicode.utf8ValidCodepoint(@intCast(needle))) {
         const code: u21 = @intCast(needle);
-        const needleIsAscii = code < 128;
-        if (obj.ascii()) {
-            if (needleIsAscii) {
-                if (string.indexOfChar(str, @intCast(code))) |idx| {
-                    ret.* = cy.value.Option(i64).some(@intCast(idx));
-                    return RetOk;
-                }
+        if (code < 128) {
+            if (string.indexOfChar(str, @intCast(code))) |idx| {
+                ret.* = cy.value.Option(i64).some(@intCast(idx));
+                return RetOk;
             }
-        } else {
-            if (needleIsAscii) {
-                if (string.indexOfChar(str, @intCast(code))) |idx| {
+        } else if (!obj.ascii()) {
+            var buf: [4]u8 = undefined;
+            if (std.unicode.utf8Encode(code, &buf)) |n| {
+                if (string.indexOf(str, buf[0..n])) |idx| {
                     ret.* = cy.value.Option(i64).some(@intCast(idx));
                     return RetOk;
                 }
-            } else {
-                var slice: [4]u8 = undefined;
-                _ = std.unicode.utf8Encode(code, &slice) catch fatal();
-                if (string.indexOf(str, &slice)) |idx| {
-                    ret.* = cy.value.Option(i64).some(@intCast(idx));
-                    return RetOk;
-                }
-            }
+            } else |_| {}
         }
     }
     ret.* = cy.value.Option(i64).none();

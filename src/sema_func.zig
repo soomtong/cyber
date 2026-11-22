@@ -270,6 +270,8 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
     }
 
     const func_instance = try genFunc(c, template, &template_ctx, node);
+    const scope_idx = func_instance.sig.scope_param_idx;
+    if (scope_idx != cy.NullU8 and scope_idx < arg_idx) try borrows.lendScopeArg(c, scope_idx, arg_idx);
 
     return .{
         .func = func_instance,
@@ -608,6 +610,7 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
     }
 
     try borrows.check(c, arg_idx);
+    if (scope_arg_idx) |idx| try borrows.lendScopeArg(c, idx, arg_idx);
 
     if (tookReceiver(c, pre_args) and arg_idx > 0) {
         try sema_move.finishGlobalTake(c, args[1..arg_idx], borrows.nodes[1..arg_idx]);
@@ -637,6 +640,7 @@ const ArgBorrows = struct {
     ex_via: [256]?sema.LocalId = @splat(null),
     ex_field: [256]u16 = undefined,
     nodes: [256]*ast.Node = undefined,
+    results: [256]sema.ExprResult = undefined,
     // The other owners that each argument notes (`if c: &y else &a[0]`) in `Chunk.borrow_pending`.
     pending_start: [256]u32 = @splat(0),
     pending_end: [256]u32 = @splat(0),
@@ -664,6 +668,28 @@ const ArgBorrows = struct {
             self.ex_field[idx] = sema_borrow.borrowField(c, arg_res);
         }
         self.nodes[idx] = node;
+        self.results[idx] = arg_res;
+    }
+
+    /// A function can store a borrow that its `scope` parameter gives behind another borrow parameter
+    /// (`fn (&&Outer) set(scope p &int): self.v = View{a=p}`, `sema_borrow.checkFieldOwner`). So the value behind
+    /// each other borrow argument of a borrow container type borrows what the `scope` argument borrows, like a field
+    /// assignment: it can not outlive it, and it keeps it borrowed.
+    fn lendScopeArg(self: *const ArgBorrows, c: *cy.Chunk, scope_idx: u32, nargs: u32) !void {
+        const scope_arg = self.results[scope_idx];
+        if (!scope_arg.type.info.borrow_only) return;
+        for (0..nargs) |i| {
+            if (i == scope_idx) continue;
+            const arg = self.results[i];
+            switch (arg.type.kind()) {
+                .borrow, .ex_borrow => {},
+                else => continue,
+            }
+            const child = arg.type.getRefLikeChild() orelse continue;
+            if (!child.info.borrow_only) continue;
+            try sema_borrow.checkFieldBorrowOutlives(c, arg, scope_arg, self.nodes[scope_idx]);
+            try sema_borrow.addFieldBorrowLoan(c, arg, scope_arg);
+        }
     }
 
     /// Checks the first `nargs` arguments.

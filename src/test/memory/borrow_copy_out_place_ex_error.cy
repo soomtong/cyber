@@ -6,7 +6,7 @@ type W:
 type H:
     b &int
 
-fn put(h &&H, p &int):
+fn put(h &&H, scope p &int):
     h.b = p
 
 fn run():

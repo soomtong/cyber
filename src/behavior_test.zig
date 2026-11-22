@@ -374,6 +374,8 @@ fn test_memory(run: *Runner) void {
     run.case("memory/borrow_return_place_error.cy");
     run.case("memory/borrow_return_place_field_error.cy");
     run.case("memory/borrow_return_param_place_error.cy");
+    run.case("memory/borrow_param_store_error.cy");
+    run.case("memory/borrow_scope_param_store_error.cy");
     run.case("memory/borrow_switch_expr_ex_error.cy");
     run.case("memory/borrow_switch_expr_outlive_error.cy");
     run.case("memory/borrow_else_default_owner_error.cy");

@@ -912,11 +912,12 @@ pub fn checkFieldBorrowOutlives(c: *cy.Chunk, left: sema.ExprResult, right: sema
 fn checkFieldOwner(c: *cy.Chunk, root: sema.LocalId, owner: sema.LocalId, node: *ast.Node) !void {
     const root_local = c.varStack.items[root];
     const owner_local = c.varStack.items[owner];
-    const owner_is_param = owner_local.type == .local and owner_local.inner.local.isParam;
-    if (owner != root and root_local.type == .local and root_local.inner.local.isParam and !owner_is_param) {
+    if (owner != root and root_local.type == .local and root_local.inner.local.isParam and !isScopeParam(c, owner)) {
         switch (root_local.decl_t.kind()) {
             .borrow, .ex_borrow, .pointer => {
-                // The value behind a parameter is still there after the call.
+                // The value behind a parameter is still there after the call. What another parameter borrows can
+                // end before it: the caller knows only that the value can borrow the `scope` argument
+                // (`sema_func.ArgBorrows.lendScopeArg`).
                 if (owner_local.lifetime.kind == .temp) {
                     return c.reportError("The result can not borrow from a temporary value.", node);
                 }
@@ -926,6 +927,18 @@ fn checkFieldOwner(c: *cy.Chunk, root: sema.LocalId, owner: sema.LocalId, node: 
         }
     }
     return checkOwnerOutlives(c, root, owner, node);
+}
+
+/// Whether `local` is the `scope` parameter of the function that is checked, and a borrow (`scope p &int`). The
+/// caller checks what it borrows against the other borrow arguments. A `scope` parameter that is passed by value is
+/// a copy that ends with the call.
+fn isScopeParam(c: *cy.Chunk, local: sema.LocalId) bool {
+    const proc = c.proc();
+    const func = proc.func orelse return false;
+    if (!func.isResolved()) return false;
+    const idx = func.sig.scope_param_idx;
+    if (idx == cy.NullU8 or local != proc.varStart + idx) return false;
+    return isBorrowLocal(c, local);
 }
 
 fn checkOwnerOutlives(c: *cy.Chunk, var_idx: sema.LocalId, owner: sema.LocalId, node: *ast.Node) !void {

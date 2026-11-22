@@ -679,6 +679,8 @@ fn test_core(run: *Runner) void {
     run.case("core/Buffer.cy");
     run.case("core/Buffer_slice_neg_panic.cy");
     run.case("core/str_repeat_overflow_panic.cy");
+    run.case("core/str_init_rune_invalid_panic.cy");
+    run.case("core/str_init_rune_surrogate_panic.cy");
     run.case("core/Slice_neg_oob_panic.cy");
     run.case("core/str_new_line_error.cy");
     run.case("core/str_interpolation.cy");

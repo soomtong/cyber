@@ -83,8 +83,8 @@ t.eq(str(symbol.foo), 'symbol.foo')
 if meta.is_vm_target():
     t.eq(str.init_rune('a'), 'a')
     t.eq(str.init_rune('🦊'), '🦊')
-    -- t.eq(try runestr(2 ^ 22), error.InvalidRune)
-    -- t.eq(try runestr(-1), error.InvalidRune)
+    t.eq(str.init_rune(0x10FFFF).len(), 4)
+    t.eq(str.init_rune(0xE000).len(), 3)
 
 -- str.is_ascii_alpha()
 t.eq(false, str.is_ascii_alpha('3'))

@@ -1235,19 +1235,15 @@ pub fn abort(t: *cy.Thread) anyerror!C.Ret {
 
 pub fn str_initRune(t: *cy.Thread) anyerror!C.Ret {
     const ret = t.ret(cy.heap.Str);
-    const num = t.param(u64);
-    if (num >= 2 << 21) {
-        return t.ret_panic("InvalidRune");
+    const num = t.param(i64);
+    // A negative number, a number beyond 0x10FFFF and a surrogate are no Unicode scalar values.
+    if (num < 0 or num > 0x10FFFF or !std.unicode.utf8ValidCodepoint(@intCast(num))) {
+        return t.ret_panic_fmt("Invalid rune: {}", &.{cy.fmt.v(num)});
     }
-    const rune: u21 = @intCast(num);
-    if (std.unicode.utf8ValidCodepoint(rune)) {
-        var buf: [4]u8 = undefined;
-        const len = try std.unicode.utf8Encode(rune, &buf);
-        ret.* = try t.heap.init_str(buf[0..len]);
-        return C.RetOk;
-    } else {
-        return t.ret_panic("InvalidRune");
-    }
+    var buf: [4]u8 = undefined;
+    const len = try std.unicode.utf8Encode(@intCast(num), &buf);
+    ret.* = try t.heap.init_str(buf[0..len]);
+    return C.RetOk;
 }
 
 pub fn memory(t: *cy.Thread) !C.Ret {

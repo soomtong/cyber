@@ -3713,7 +3713,7 @@ fn str :: @init(x %T) -> str:
     #else:
         meta.error('Unsupported conversion to `str`: ' + type.name(T))
 
---| Converts a rune to a string.
+--| Converts a rune to a string. Panics for a negative number, a number beyond 0x10FFFF and a surrogate.
 #[bind]
 fn str :: init_rune(val int) -> str:
     panic('Unsupported')

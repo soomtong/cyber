@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.17-dev 1032-9343ffc</div>
+    <div class="sub-title">v0.4.17-dev 1041-23df09e</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1797,7 +1797,7 @@ ref := ^i
 <pre><code class="language-cy">var a ?str = 'abc'
 print(a)    --> abc
 </code></pre>
-<p>An optional borrow <code>?&T</code> is a borrow container: like <code>&T</code> it can not be lifted with <code>^</code>, it is returned with a <code>scope</code> parameter and a <code>scope</code> return type, and a generator can not take it as a parameter.</p>
+<p>An optional borrow <code>?&T</code> is a borrow container: like <code>&T</code> it can not be lifted with <code>^</code>, it is returned with a <code>scope</code> parameter and a <code>scope</code> return type, and a generator can not take it as a parameter. A result <code>!&T</code> is the same.</p>
 <p>The option type's constructor can also wrap a value:</p>
 <pre><code class="language-cy">a := ?str('abc')
 print(a)    --> abc
@@ -1852,7 +1852,7 @@ print(v)     --> 123
 if opt |value|:
     print(value)    --> abc
 </code></pre>
-<p>When the payload is a <code>NoCopy</code> type, the capture takes it out of the option. An option that is read from a variable is <a href="#moving" title="">moved</a> then, so the variable can not be used after the statement (<code>if make() |v|:</code> and <code>while it.next() |v|:</code> take the payload of a new value). An option in a member (<code>if s.opt |v|:</code>) is not moved: 'Cannot copy <code>?Foo</code>, type member implements <code>NoCopy</code>.'</p>
+<p>When the payload is a <code>NoCopy</code> type, the capture takes it out of the option. An option that is read from a variable is <a href="#moving" title="">moved</a> then, so the variable can not be used after the statement (<code>if make() |v|:</code> and <code>while it.next() |v|:</code> take the payload of a new value; <code>while o |v|:</code> with a variable <code>o</code> from outside the loop is an error, see <a href="#moving" title="">moving</a>). An option in a member (<code>if s.opt |v|:</code>) is not moved: 'Cannot copy <code>?Foo</code>, type member implements <code>NoCopy</code>.'</p>
 <p>The capture unwraps the whole condition. An operand of <code>and</code> or <code>or</code> is a <code>bool</code>, so <code>if ok and s.index('=') |i|:</code> is a compile error. Put the unwrap in an <code>if</code> of its own:</p>
 <pre><code class="language-cy">if ok:
     if s.index('=') |i|:
@@ -1915,6 +1915,13 @@ for {1, 2, 3} |n|:
     print(n)
 </code></pre>
 <p>A list literal uses braces. <code>['a', 'b']</code> is not a list literal: <code>[n]T</code> is a vector type.</p>
+<p>A slice copies its elements (two copies of a slice share the buffer until one of them is resized), so the element type can not be a <a href="#moving" title=""><code>NoCopy</code></a> type such as <code>Array[T]</code>. Use an <code>Array</code> for those, which moves its elements:</p>
+<pre><code class="language-cy">xs := []Array[int]{}
+--> error: A slice `[]Array[int]` copies its elements, so the element type `Array[int]` can not be `NoCopy`. Use `Array[Array[int]]`, which moves them.
+
+ys := Array[Array[int]]{}
+ys.append(Array[int]{1, 2})
+</code></pre>
 <p>The first element of the slice starts at index 0.</p>
 <pre><code class="language-cy">print(arr[0])    --> 1
 </code></pre>
@@ -2226,6 +2233,8 @@ v := Vec2{}
 print(v.x)       --> 0
 print(v.y)       --> 0
 </code></pre>
+<p>The names in a default value are looked up where the type is declared: in its module, including private declarations, and among its template parameters (<code>v T = T(3)</code>). The locals of the code that writes the initializer are not visible to it, so a local <code>K</code> does not change the default <code>x int = K</code>.</p>
+<p><code>meta.has_field_default(T, name)</code> tells whether a field has a default value, and <code>meta.field_default(T, name)</code> evaluates it.</p>
 <p>Unlike a <code>struct</code>, a <code>cstruct</code> can default to their <a href="#zero-values" title="">zero values</a>.</p>
 <a href="#custom-types">^topic</a>
 <h3 id="field-visibility">Field visibility. <a href="#field-visibility">#</a></h3>
@@ -2828,6 +2837,16 @@ for arr |i, &val|:
     print('index %{i}, length %{val.len()}')
 </code></pre>
 <p>Iteration by borrow is required when the element type can not be copied. <code>Array</code> and <code>Slice</code> support it. A type supports it by declaring <code>next_borrow(idx &int) -> scope ?&T</code> next to <code>next</code>. The iterable is borrowed during the loop, so it can not be modified in the loop body.</p>
+<p>A borrow of an iterable is iterated like the iterable. <code>for a.* |x|:</code> is the same loop:</p>
+<pre><code class="language-cy">fn total(a &[]int) -> int:
+    s := 0
+    for a |x|:
+        s += x
+    return s
+
+b := {1, 2, 3}
+print(total(&b))    --> 6
+</code></pre>
 <a href="#control-flow">^topic</a>
 <h3 id="break-statement"><code>break</code> statement. <a href="#break-statement">#</a></h3>
 <p>The <code>break</code> statement exits the current parent loop prematurely:</p>
@@ -3385,6 +3404,11 @@ for items |it|:
 -- `buf` is dead here. When the loop ends without that `break`, `buf` is deinitialized at the end of the loop.
 </code></pre>
 <p>After a <code>break</code> that follows a move, the variable is dead after the loop. The other ways out of the loop (its end, a <code>break</code> that moved nothing, a <code>break</code> that moved other variables) deinitialize it. A body that goes on to the next iteration after the move is an error at the move, because the next iteration reads the variable: 'Cannot move <code>f</code> here: it is declared outside the loop, and the next iteration reads it. A loop body can move it where it then leaves the loop with <code>break</code> or <code>return</code>, or gives it a value again. Borrow it with <code>&f</code>.'</p>
+<p>The condition of a <code>while</code> loop is evaluated before every iteration, so it can not move a variable that is declared outside the loop. Neither can the option of <code>while opt |v|:</code> (a <code>NoCopy</code> option in a variable would be moved by the first iteration): 'Cannot move <code>x</code> in the condition of a <code>while</code> loop: it is declared outside the loop, and the condition is evaluated before every iteration. Borrow it with <code>&x</code>, or write <code>while:</code> and move it in the body where the body then leaves the loop with <code>break</code> or <code>return</code>.'</p>
+<p>The each variable and the index of a <code>for</code> loop belong to one iteration. The body can move them:</p>
+<pre><code class="language-cy">for names |name|:
+    keep(move name)
+</code></pre>
 <p>The body of a <code>try</code> statement and its <code>else</code> block move a variable of an outer block too. A variable that the body moved before a <code>!</code> that can fail is dead in the <code>else</code> block, and a variable that either way through the statement moved is dead after it. The ways that did not move it deinitialize it: a failing <code>!</code> before it leaves the body, the body or the <code>else</code> block at its end.</p>
 <pre><code class="language-cy">buf := Array[int]{}
 try:
@@ -3687,7 +3711,8 @@ begin:
     r = Ref{p=&y}
 --> error: `r` can not outlive `y`.
 </code></pre>
-<p>The same holds when the value is wrapped in an option (<code>var o ?Ref</code>), comes from an <code>if</code> expression, or is assigned to a field or an element (<code>o.r = Ref{p=&y}</code>). A method can not store a borrow of one of its own locals behind a parameter: <code>self.r = Ref{p=&y}</code> is the compile error 'The value behind <code>self</code> can not outlive <code>y</code>.'</p>
+<p>The same holds when the value is wrapped in an option (<code>var o ?Ref</code>), comes from an <code>if</code> or <code>switch</code> expression or a <code>?else</code> or <code>!else</code> default, or is assigned to a field or an element (<code>o.r = Ref{p=&y}</code>). A method can not store a borrow of one of its own locals behind a parameter: <code>self.r = Ref{p=&y}</code> is the compile error 'The value behind <code>self</code> can not outlive <code>y</code>.'</p>
+<p>A borrow that can come from one of several branches (<code>if (c) &y else &a[0]</code>) borrows from the owner of each branch: <code>a</code> can not be modified while the borrow is in use.</p>
 <p>A borrow that is read through a borrow container (<code>&&r</code>, <code>&r.p</code>) can not outlive the container either, even when the local that the container borrows from lives longer.</p>
 <a href="#memory">^topic</a>
 <h3 id="sink-parameter"><code>sink</code> parameter. <a href="#sink-parameter">#</a></h3>
@@ -4943,7 +4968,7 @@ print(x[1].number_text().?)         --> 1.5
 <li>Write: <code>json.stringify(v)</code> is compact and <code>json.stringify(v, 2)</code> puts each element on its own line. NaN and infinities become <code>null</code>. A float uses the shortest digits that read back as the same value, without a trailing <code>.0</code>, and an exponent below <code>1e-6</code> or from <code>1e21</code> (<code>1e+21</code>).</li>
 <li>Convert: <code>json.encode(x)</code> and <code>json.from(x)</code> take a Cyber value: numbers, <code>bool</code>, <code>str</code>, slices, structs (fields in order), optionals (<code>none</code> is <code>null</code>), enums (the case name), choices (<code>{"case": payload}</code>) and <code>Map</code> with <code>str</code> keys (sorted). An <code>r64</code> from 2^63, which does not fit <code>int</code>, becomes a <code>number</code> with its unsigned digits (<code>18446744073709551615</code>). Pass a borrow for a value that can not be copied: <code>json.encode(&map)</code>.</li>
 </ul>
-<p><code>json.to(T, v)</code> converts a <code>Value</code> back to a Cyber type, and <code>json.decode(T, src)</code> parses and converts in one step. It takes the same types as <code>from</code>, except <code>Array</code> and fixed size arrays. A struct field must be present unless it is an optional (a missing member is <code>none</code>), and members that are not fields are ignored. An integer type takes a whole float such as <code>3e2</code>, a float type takes an integer, and <code>str</code> takes any number as its text, so a large ID can be read whole whatever its size. On failure it returns <code>error.Type</code> (another kind of value or an unknown case name), <code>error.MissingField</code> or <code>error.Overflow</code> (a number out of the type's range), and a <code>json.Diag</code> tells where through <code>path</code>:</p>
+<p><code>json.to(T, v)</code> converts a <code>Value</code> back to a Cyber type, and <code>json.decode(T, src)</code> parses and converts in one step. It takes the same types as <code>from</code>, except <code>Array</code> and fixed size arrays. A struct field must be present unless it has a default value (<code>port int = 8080</code>, a missing member takes it) or is an optional (a missing member is <code>none</code>), and members that are not fields are ignored. An integer type takes a whole float such as <code>3e2</code>, a float type takes an integer, and <code>str</code> takes any number as its text, so a large ID can be read whole whatever its size. On failure it returns <code>error.Type</code> (another kind of value or an unknown case name), <code>error.MissingField</code> or <code>error.Overflow</code> (a number out of the type's range), and a <code>json.Diag</code> tells where through <code>path</code>:</p>
 <pre><code class="language-cy">type User:
     id    int
     name  str

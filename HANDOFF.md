@@ -161,6 +161,15 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 ## 남은 작업
 
+- [x] `/code-review high` 0.4.0(3815c4c0)..23df09eb의 10건(2026-11-22, 사용자: "fix them step by step from easy one to difficult one.
+  ok to use sub agents max 7", 기존 커밋 제목의 80자 초과는 "no need to change commit messages"). 서브 에이전트 일곱이 worktree에서
+  고치고 쉬운 것부터 cherry-pick했다(`cde51cef`..`f4cca264`, 문서 `881c2581` · `91eb1664`). 내용은 `docs/releases/unreleased.md`의
+  마지막 두 절, F-172..F-181. 리뷰가 10건 제한으로 뺀 후보(`time.cy:379` Duration 곱셈, spawn Future UAF, 스레드 힙 잠금,
+  `str.init_rune(0x200000)` · `seek_pos(-1)` · `Raw.fmt` 큰 width의 호스트 panic, `lsp_main.zig` 응답 버퍼 이중 해제, `json.to(f32)`의
+  범위 초과 `inf`, wasm32의 `cl_vm_set_stack_limit` `@intCast`)는 손대지 않았다.
+  수정 중 새로 찾은 것: 복합 대입의 좌변 두 번 계산(`arr[say(1)] += 2`), 템플릿 함수 인자의 배타 빌림 충돌 검사 없음
+  (`matchGenericFuncRt`), `if o |q|: r = q`의 보수적 거짓 오류, `for` 캡처의 빌림 주인(시험 못 함).
+
 - [x] `/code-review high` 0.4.16..HEAD(2026-11-22)의 6건을 고쳤다(사용자: "let's fix them step by step. use sub agent as you
   can.", 7번 커밋 제목은 "no need to fix"). 서브 에이전트 셋이 worktree에서 고치고 cherry-pick으로 합쳤다. 내용은
   `docs/releases/unreleased.md`와 `docs/decisions/project_last_use.md`의 마지막 절.

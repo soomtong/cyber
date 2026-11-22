@@ -1,3 +1,4 @@
+use meta
 use test
 
 type Foo:
@@ -17,5 +18,37 @@ foo2 := Foo2{}
 test.eq(0, foo2.a)
 test.eq(0, foo2.b.len())
 test.eq(0, foo2.c.size())
+
+-- A default value names the struct's declarations, not the locals where the literal is written.
+const K = 7
+type Bar:
+    x int = K
+fn bar_x() -> int:
+    K := 100
+    bar := Bar{}
+    return bar.x + K
+test.eq(107, bar_x())
+
+-- A template parameter in a default value.
+type Box[T Any]:
+    v T = T(3)
+    n int = type.size(T)
+box := Box[int]{}
+test.eq(3, box.v)
+test.eq(8, box.n)
+
+-- A compile-time literal.
+type Lit:
+    x int = K * 2
+fn lit_x() -> int:
+    #lit := Lit{}
+    return #{lit.x}
+test.eq(14, lit_x())
+
+-- `meta.has_field_default` and `meta.field_default`.
+test.eq(true, #{meta.has_field_default(Bar, 'x')})
+test.eq(false, #{meta.has_field_default(Foo, 'b')})
+test.eq(7, meta.field_default(Bar, 'x'))
+test.eq(0, meta.field_default(Foo2, 'b').len())
 
 --cytest: pass

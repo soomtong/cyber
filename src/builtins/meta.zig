@@ -78,6 +78,8 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"new_struct",      zErrConstEvalFunc(new_struct)},
     .{"endian",          zErrConstEvalFunc(endian_)},
     .{"has_decl",        zErrConstEvalFunc(has_decl)},
+    .{"has_field_default", zErrConstEvalFunc(has_field_default)},
+    .{"field_default",   zErrBuiltinFunc(field_default, null)},
     .{"reachable",       zErrConstEvalFunc(reachable)},
     .{"dump_frame",      zErrFunc(dump_frame)},
     .{"trace_retains",   cFunc(trace_retains)},
@@ -721,6 +723,46 @@ fn has_decl(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
     const parent = try cy.cte.evalSym(c, parent_n);
     const res = try c.getResolvedSym(parent, name, ctx.node);
     return cy.TypeValue.init(ctx.func.sig.ret, cy.Value.initBool(res != null));
+}
+
+/// Returns the index of the struct field `name` of `type_`.
+fn structField(c: *cy.Chunk, type_: *cy.Type, name: []const u8, node: *ast.Node) !usize {
+    try sema_type.ensure_resolved_type(c, type_, node);
+    if (type_.kind() != .struct_t) {
+        const tname = try c.sema.allocTypeName(type_);
+        defer c.alloc.free(tname);
+        return c.reportErrorFmt("Expected a struct type, found `{}`.", &.{v(tname)}, node);
+    }
+    const sym = type_.sym().getMod().getSym(name) orelse {
+        return c.reportErrorFmt("No such field `{}`.", &.{v(name)}, node);
+    };
+    if (sym.type != .field) {
+        return c.reportErrorFmt("`{}` is not a field.", &.{v(name)}, node);
+    }
+    return sym.cast(.field).idx;
+}
+
+fn has_field_default(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
+    const type_ = ctx.args[0].asPtr(*cy.Type);
+    const name = ctx.args[1].as_eval_str();
+    defer c.heap.release(ctx.args[1]);
+    const idx = try structField(c, type_, name, ctx.node);
+    const has = type_.cast(.struct_t).fields()[idx].init_n != null;
+    return cy.TypeValue.init(ctx.func.sig.ret, cy.Value.initBool(has));
+}
+
+/// Evaluates the default initializer of a struct field, as a struct literal that leaves out the field does.
+pub fn field_default(c: *cy.Chunk, ctx: *cy.BuiltinContext, res: *sema.ExprResult) !void {
+    const type_ = try cte.evalType(c, ctx.args[0]);
+    const name_res = try cte.evalCheck(c, ctx.args[1], c.sema.eval_str_t);
+    const name = name_res.value.as_eval_str();
+    defer c.heap.release(name_res.value);
+    const idx = try structField(c, type_, name, ctx.node);
+    const struct_t = type_.cast(.struct_t);
+    if (struct_t.fields()[idx].init_n == null) {
+        return c.reportErrorFmt("The field `{}` has no default value.", &.{v(name)}, ctx.node);
+    }
+    res.* = try sema_init.semaFieldDefault(c, struct_t, idx);
 }
 
 pub fn type_id_(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {

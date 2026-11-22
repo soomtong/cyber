@@ -96,3 +96,14 @@
 - 테스트 `memory/borrow_branch_owner.cy`와 `memory/borrow_switch_expr_*_error.cy` 등 오류 테스트 열 개. 결정
   `project_borrow_model.md` "갈래가 주는 빌림", 발견 이슈 F-170.
 
+## `json.to`가 struct 필드 기본값을 쓴다, 기본값 식의 이름은 선언한 곳에서 찾는다 (2026-11-22)
+
+- `json.to` · `json.decode`가 없는 멤버에 필드 기본값을 쓴다(`port int = 8080`). 전에는 기본값이 있어도 'Missing the field `port`.'
+  (`error.MissingField`)였다. 기본값이 있는 옵션 필드는 없으면 기본값, `null`이면 `none`이다.
+- `meta.has_field_default(T, name)`, `meta.field_default(T, name)`를 더했다.
+- 필드 기본값 식의 이름을 struct를 선언한 곳(모듈, private 선언, 템플릿 인자)에서 찾는다. 전에는 리터럴을 쓴 곳에서 찾았다.
+  - 다른 모듈에서 `conf.Conf{...}`를 쓰면 기본값이 그 모듈의 상수(`const LIMIT = 20`, public이어도)를 쓸 때 'Undeclared variable
+    `LIMIT`.'였다.
+  - 템플릿 struct의 `v T = T(3)`은 'Undeclared variable `T`.'였다.
+  - 리터럴을 쓴 함수에 같은 이름의 지역이 있으면 그 지역이 기본값이 됐다(`K := 100` 뒤 `A{}`의 `x int = K`가 100). 이제 7이다.
+    동작이 바뀌는 수정이다.

@@ -68,6 +68,13 @@ fn get_closure_data(func Ptr[void]) -> ?Ptr[ClosureData]:
 --| Returns whether a type has a `name` declaration.
 #[bind] fn has_decl(parent Code, name EvalStr) -> bool
 
+--| Returns whether the field `name` of the struct `T` has a default value (`x int = 3`).
+#[bind] fn has_field_default(T type, name EvalStr) -> bool
+
+--| Returns the default value of the field `name` of the struct `T`, evaluated where it is called,
+--| as a struct literal that leaves out the field does. It is a compile error when the field has none.
+#[bind] fn field_default(T Code, name EvalStr) -> Any
+
 #[bind] fn init_choice(%T type, Tag T.Tag, payload Code) -> T
 
 --| Equivalent to the default T{} initializer.

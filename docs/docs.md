@@ -1466,6 +1466,10 @@ print(v.x)       --> 0
 print(v.y)       --> 0
 ```
 
+The names in a default value are looked up where the type is declared: in its module, including private declarations, and among its template parameters (`v T = T(3)`). The locals of the code that writes the initializer are not visible to it, so a local `K` does not change the default `x int = K`.
+
+`meta.has_field_default(T, name)` tells whether a field has a default value, and `meta.field_default(T, name)` evaluates it.
+
 Unlike a `struct`, a `cstruct` can default to their [zero values](#zero-values).
 
 ### Field visibility.
@@ -4631,7 +4635,7 @@ print(x[1].number_text().?)         --> 1.5
 - Write: `json.stringify(v)` is compact and `json.stringify(v, 2)` puts each element on its own line. NaN and infinities become `null`. A float uses the shortest digits that read back as the same value, without a trailing `.0`, and an exponent below `1e-6` or from `1e21` (`1e+21`).
 - Convert: `json.encode(x)` and `json.from(x)` take a Cyber value: numbers, `bool`, `str`, slices, structs (fields in order), optionals (`none` is `null`), enums (the case name), choices (`{"case": payload}`) and `Map` with `str` keys (sorted). An `r64` from 2^63, which does not fit `int`, becomes a `number` with its unsigned digits (`18446744073709551615`). Pass a borrow for a value that can not be copied: `json.encode(&map)`.
 
-`json.to(T, v)` converts a `Value` back to a Cyber type, and `json.decode(T, src)` parses and converts in one step. It takes the same types as `from`, except `Array` and fixed size arrays. A struct field must be present unless it is an optional (a missing member is `none`), and members that are not fields are ignored. An integer type takes a whole float such as `3e2`, a float type takes an integer, and `str` takes any number as its text, so a large ID can be read whole whatever its size. On failure it returns `error.Type` (another kind of value or an unknown case name), `error.MissingField` or `error.Overflow` (a number out of the type's range), and a `json.Diag` tells where through `path`:
+`json.to(T, v)` converts a `Value` back to a Cyber type, and `json.decode(T, src)` parses and converts in one step. It takes the same types as `from`, except `Array` and fixed size arrays. A struct field must be present unless it has a default value (`port int = 8080`, a missing member takes it) or is an optional (a missing member is `none`), and members that are not fields are ignored. An integer type takes a whole float such as `3e2`, a float type takes an integer, and `str` takes any number as its text, so a large ID can be read whole whatever its size. On failure it returns `error.Type` (another kind of value or an unknown case name), `error.MissingField` or `error.Overflow` (a number out of the type's range), and a `json.Diag` tells where through `path`:
 ```cy
 type User:
     id    int

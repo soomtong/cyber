@@ -71,7 +71,7 @@ ReleaseFast에서 1.5 MB JSON(객체 1만 개) 파싱 약 0.15초, 직렬화 약
 `json.to(T, v)` · `json.to(T, v, &diag)`, `json.decode(T, src)` · `json.decode(T, src, &diag)`. serde `Deserialize`의 기본 동작을 따랐다.
 
 - 받는 타입은 `from`과 같다(`Array` · 고정 길이 배열 제외). struct 필드는 있어야 하고(옵션 필드만 없으면 `none`), 필드가 아닌 멤버는
-  무시한다(serde 기본, `deny_unknown_fields` 없음). 필드 기본값(`x int = 3`)은 메타로 읽을 수 없어 쓰지 않는다.
+  무시한다(serde 기본, `deny_unknown_fields` 없음). 필드 기본값(`x int = 3`)은 2026-11-22부터 쓴다(아래 "필드 기본값").
 - 수: 정수 타입은 정수 `float`(`3e2`)도 받는다(serde는 거부). 에이전트가 쓴 JSON에 흔하고, 우리 `stringify`가 `1.0`을 `1`로 쓰는
   것과 짝이다. 범위 밖은 `error.Overflow`(`int.parse`와 같은 이름). 실수 타입은 정수도 받는다.
 - 오류: `error.Type`(다른 종류 · 모르는 case 이름), `error.MissingField`, `error.Overflow`. `Diag`에 `path` 필드를 더해 `$.users[1].id`
@@ -127,3 +127,17 @@ ReleaseFast에서 1.5 MB JSON(객체 1만 개) 파싱 약 0.15초, 직렬화 약
 ## 남은 일
 
 - core `@eq`의 choice 지원 여부. 결정(2026-11-20, 사용자): 0.5에 넣는다. 넣었다(core `@eq`의 `.choice` 갈래, case 비교 뒤 payload `==`).
+
+## 필드 기본값 (2026-11-22)
+
+`json.to`는 없는 멤버에 필드 기본값을 쓴다(serde `#[serde(default)]`를 필드마다 단 것과 같다). 옵션 필드에 기본값이 있으면 없는
+멤버는 기본값, `null`은 `none`이다.
+
+- meta에 `has_field_default(T, name)`(컴파일 타임 bool)와 `field_default(T, name)`(기본값 식을 부르는 자리에서 검사)를 더했다.
+  struct 갈래는 `#{has_default} and !o.contains(name)`이면 기본값으로, 아니면 전처럼 `field_to`로 채운다. 멤버가 있을 때 기본값을
+  미리 만들지 않는다.
+- 같이 고친 컴파일러 결함: 기본값 식이 struct 리터럴을 쓴 청크에서 해석됐다. 다른 모듈의 리터럴은 선언 모듈의 private 이름을
+  못 찾았고('Undeclared variable'), 템플릿 struct의 `v T = ...`는 `T`를 못 찾았고, 리터럴을 쓴 함수의 같은 이름 지역이 기본값의
+  이름을 가렸다(`K := 100` 뒤 `A{}`의 `x int = K`가 100). 이제 `sema_init.semaFieldDefault`가 struct 심볼의 해석 문맥
+  (`pushSymResolveContext`)을 쌓고, `Chunk.hide_locals_below`로 그때까지의 proc 지역을 감춘다(`lookupIdent2`). 기본값 안의 람다는
+  자기 지역을 본다. 컴파일 타임 리터럴(`cte`)도 같은 문맥을 쌓는다.

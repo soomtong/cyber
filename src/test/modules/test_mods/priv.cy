@@ -37,3 +37,7 @@ fn reveal() -> int:
     ht := HiddenT[int]{v=1}
     b := Box[int]{v=5, tag=1}
     return secret() + i.b + i.hidden_sum() + h.v + ht.v + LIMIT + b.tag + b.peek()
+
+-- A field default that names a private declaration of this module.
+type Limits:
+    n int = LIMIT

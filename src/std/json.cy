@@ -440,7 +440,8 @@ fn decode(%T type, src str, diag &&Diag) -> !T:
 --| `bool`, integers (`error.Overflow` out of range, a float only when it is a whole number), floats (an `int` converts),
 --| `str` (a number converts to its text, so a large ID reads whole), `Value`, `Object`, slices, `Map` with `str` keys, structs, optionals (`null` is `none`),
 --| enums (the case name) and choices (`"case"` or `{"case": payload}`).
---| A struct field must be present unless it is an optional. Members that are not fields are ignored.
+--| A struct field must be present unless it has a default value, which a missing member takes, or is an optional,
+--| which is `none` when missing. Members that are not fields are ignored.
 --| Returns `error.Type` for a value of another kind or an unknown case name and `error.MissingField` for a missing field.
 fn to(%T type, v Value) -> !T:
     var diag Diag = {}
@@ -667,16 +668,22 @@ fn to(%T type, v Value, diag &&Diag) -> !T:
                     case .object |o|:
                         -- Fields are initialized one by one. When one fails, it and the rest get zero values
                         -- so that `res` is whole and is destructed as usual.
+                        -- A missing member takes the field's default value (`x int = 3`) when it has one.
                         var res T = undef
                         #for 0..info.fields.len() |i|:
                             begin:
                                 #field := info.fields[i]
-                                elem := field_to(field.type, &o, #{field.name}, diag) !else |err|:
-                                    #for i..info.fields.len() |j|:
-                                        #rest := info.fields[j]
-                                        @ptr_init(*meta.access(res, rest.name), zero(rest.type))
-                                    return err
-                                @ptr_init(*meta.access(res, field.name), elem)
+                                #has_default := meta.has_field_default(T, field.name)
+                                if #{has_default} and !o.contains(#{field.name}):
+                                    #if has_default:
+                                        @ptr_init(*meta.access(res, field.name), meta.field_default(T, field.name))
+                                else:
+                                    elem := field_to(field.type, &o, #{field.name}, diag) !else |err|:
+                                        #for i..info.fields.len() |j|:
+                                            #rest := info.fields[j]
+                                            @ptr_init(*meta.access(res, rest.name), zero(rest.type))
+                                        return err
+                                    @ptr_init(*meta.access(res, field.name), elem)
                         return res
                     else:
                         return mismatch(diag, 'an object', v)

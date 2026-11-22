@@ -1274,6 +1274,9 @@ pub fn evalInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, init_lit: *ast.I
         const item = c.listDataStack.items[fieldsDataStart+i];
         if (item.node == null) {
             if (fields[i].init_n) |init_n| {
+                // The names in a default value are the struct's, as in `sema_init.semaFieldDefault`.
+                try cy.sema_resolve.pushSymResolveContext(c, @ptrCast(struct_t.base.sym()), init_n);
+                defer cy.sema_resolve.popResolveContext(c);
                 const arg = try evalCheck(c, init_n, fields[i].type);
                 try c.valueStack.append(c.alloc, arg.value);
             } else {

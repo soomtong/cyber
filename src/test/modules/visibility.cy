@@ -13,4 +13,8 @@ b := p.Box[int]{v=5}
 test.eq(b.tag_of(), 0)
 test.eq(b.v, 5)
 
+-- A field default may name a private declaration of its module.
+lim := p.Limits{}
+test.eq(3, lim.n)
+
 --cytest: pass

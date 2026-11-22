@@ -149,6 +149,30 @@ mm := json.decode(Map[str, []int], '{"a": [1, 2], "b": []}')!
 t.eq(2, mm['a'][1])
 t.eq(0, mm['b'].len())
 
+-- A missing member takes the field's default value. The default is the struct's, not a local of `json`.
+const DEFAULT_PORT = 8080
+type Conf:
+    host  str
+    port  int = DEFAULT_PORT
+    tags  []str = {'a', 'b'}
+    debug ?bool = true
+    size  Size = {w=1, h=2}
+conf := json.decode(Conf, '{"host": "h"}')!
+t.eq(8080, conf.port)
+t.eq('b', conf.tags[1])
+t.eq(true, conf.debug.?)
+t.eq(2, conf.size.h)
+conf2 := json.decode(Conf, '{"host": "h", "port": 1, "tags": [], "debug": null, "size": {"w": 3, "h": 4}}')!
+t.eq(1, conf2.port)
+t.eq(0, conf2.tags.len())
+t.eq(true, conf2.debug == none)
+t.eq(4, conf2.size.h)
+var conf_diag json.Diag = {}
+t.eq(error.MissingField, json.decode(Conf, '{"port": 1}', &&conf_diag).unwrap_error())
+t.eq('Missing the field `host`.', conf_diag.msg)
+t.eq(error.Type, json.decode(Conf, '{"host": "h", "debug": 1}', &&conf_diag).unwrap_error())
+t.eq('$.debug', conf_diag.path)
+
 -- Failures say where and why. A struct that fails part way releases the fields it has made.
 fn to_fails(src str, err error, path str, msg str):
     var diag json.Diag = {}

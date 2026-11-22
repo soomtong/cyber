@@ -83,6 +83,10 @@ pub const Chunk = struct {
     /// location context for helper methods that simply return no context errors.
     curNode: ?*ast.Node,
 
+    /// While sema checks a struct field's default value (`sema_init.semaFieldDefault`), the number of procs that
+    /// belong to the code that writes the struct literal. Their locals are not visible to the default value.
+    hide_locals_below: ?usize = null,
+
     /// The left side of a plain `x = y` that sema is resolving. An undeclared name there gets a `:=` hint.
     assign_left: ?*ast.Node = null,
 

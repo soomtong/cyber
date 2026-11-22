@@ -34,6 +34,8 @@
   빌린 값의 `for`)을 고쳤다. 이어서 리뷰 6건도 고쳤다("남은 작업"의 첫 항목).
 - 2026-11-22(사용자: "continue" 뒤 질문에 "빌림 검사의 남은 구멍"): 0.4.17 뒤 기능과 빌림 검사가 만나는 자리를 탐침해
   갈래가 주는 빌림의 구멍(F-170)을 고쳤다.
+- 2026-11-22(사용자: "continue" 뒤 질문에 "알려진 한계 하나 해소"): `json.to`의 struct 필드 기본값과, 그 길에 찾은 기본값 식의
+  이름 해석 결함(F-171)을 고쳤다.
 
 ## 현재 브랜치
 
@@ -143,6 +145,12 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - `bindBorrowLocal`이 빌림 지역에도 대여를 기록한다. `resolveResultType`이 `borrow_only` · `ex_borrow`를 전파한다. `!`는 새
     결과의 빌림 payload에 결과의 주인을 넘긴다(전에는 블록 끝에서 panic).
   - 저장소의 `.cy` 전부를 변경 전 · 후 CLI로 컴파일해 비교했다. 탐침 스크립트는 세션 scratchpad에만 있었다.
+
+- [x] `json.to`의 필드 기본값(2026-11-22). 결정 `project_std_json_toon.md` "필드 기본값", `unreleased.md` 같은 절, F-171.
+  - meta `has_field_default` · `field_default`. json의 struct 갈래는 멤버가 없을 때만 기본값을 만든다.
+  - 기본값 식은 `sema_init.semaFieldDefault`가 struct의 해석 문맥에서 검사하고, 리터럴을 쓴 쪽의 지역은 감춘다
+    (`Chunk.hide_locals_below`, `sema_local.lookupIdent2`). `cte`의 컴파일 타임 리터럴도 같은 문맥.
+  - 동작이 바뀜: 같은 이름의 지역이 기본값을 가리던 것(전에는 지역 값). 확인: 14단계 검증 rc=0.
 
 ## 시도했으나 실패한 접근
 
@@ -280,7 +288,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - 변수에 담은 `FnTuple`로는 빌림을 넘기지 못한다(사용자 코드에 `FnTuple`이 나오지 않아 하지 않기로 함).
 - 최상위 `#x := ...` 컴파일 타임 변수는 뒤의 최상위 실행문에서 못 쓴다(선언 단계에서만 평가).
 - 보간 안의 보간은 지원하지 않는다(토크나이저 상태가 한 단계). 원인을 말하는 오류만 낸다.
-- `json` 기본 파싱은 17자리 넘는 소수를 `float`으로 근사한다(`exact`면 원문). `json.to`는 struct 필드 기본값을 쓰지 않는다.
+- `json` 기본 파싱은 17자리 넘는 소수를 `float`으로 근사한다(`exact`면 원문).
 - `regex`: look-around · backreference · `(?-u)` · `(?R)` · 일반 범주와 스크립트 밖의 `\p{..}` 속성(`Emoji` 등)은 받지 않는다(컴파일
   오류). 반복자 없이 슬라이스를 돌려주고, 치환에 함수를 받지 않는다.
 - `peg`: 시간 보장이 없다(역추적). 함수를 부르는 캡처 · 오류 표지와 복구 · cut · left recursion · 대소문자 무시 리터럴 · Unicode
@@ -298,7 +306,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-170까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-171까지, 열린 것 없음).
 
 ## 작업 방식
 

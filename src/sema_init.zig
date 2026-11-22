@@ -14,6 +14,7 @@ const sema_expr = cy.sema_expr;
 const sema_access = cy.sema_access;
 const sema_move = cy.sema_move;
 const sema_lit = cy.sema_lit;
+const sema_resolve = cy.sema_resolve;
 
 pub fn semaTupleInit(c: *cy.Chunk, type_: *cy.Type, fields: []const cy.types.Field, lit: *ast.InitLit) !sema.ExprResult {
     if (lit.args.len != fields.len) {
@@ -146,8 +147,8 @@ pub fn semaInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, initializer: *as
         const item = c.listDataStack.items[fieldsDataStart+i];
         const fieldT = struct_t.fields_ptr[i].type;
         if (item.node == null) {
-            if (struct_t.fields_ptr[i].init_n) |init_n| {
-                ir_args[i] = (try sema_expr.semaExprCstr(c, init_n, fieldT)).ir;
+            if (struct_t.fields_ptr[i].init_n != null) {
+                ir_args[i] = (try semaFieldDefault(c, struct_t, i)).ir;
             } else {
                 if (!struct_t.cstruct) {
                     return c.reportErrorFmt("Initialization requires the field `{}`.", &.{v(struct_t.fields_ptr[i].sym.head.name())}, node);
@@ -174,6 +175,18 @@ pub fn semaInitStruct(c: *cy.Chunk, struct_t: *cy.types.Struct, initializer: *as
     var res = sema.ExprResult.initOwned(loc);
     res.data.value.parent_local = owner;
     return res;
+}
+
+/// Checks the default value of the field `idx` where a struct literal leaves it out. The names in it are looked up
+/// in the struct's declaration (its module and template parameters), not among the locals of the literal's code.
+pub fn semaFieldDefault(c: *cy.Chunk, struct_t: *cy.types.Struct, idx: usize) !sema.ExprResult {
+    const field = struct_t.fields_ptr[idx];
+    try sema_resolve.pushSymResolveContext(c, @ptrCast(struct_t.base.sym()), field.init_n);
+    defer sema_resolve.popResolveContext(c);
+    const prev_hide = c.hide_locals_below;
+    c.hide_locals_below = c.semaProcs.items.len;
+    defer c.hide_locals_below = prev_hide;
+    return sema_expr.semaExprCstr(c, field.init_n.?, field.type);
 }
 
 /// `initializerId` is a record literal node.

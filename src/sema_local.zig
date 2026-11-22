@@ -1053,6 +1053,12 @@ fn lookupIdent2(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdent
     }
 
     const proc = self.proc();
+    // A struct field's default value sees the names of the struct's module, not the locals of the code that
+    // writes the literal. A lambda in the default value still sees its own locals.
+    const hidden_depth = if (self.hide_locals_below) |below| self.semaProcs.items.len -| below else std.math.maxInt(usize);
+    if (hidden_depth == 0) {
+        return lookupStaticIdentOrFail(self, name, node);
+    }
     if (proc.var_cache_entries.get(name)) |varInfo| {
         switch (varInfo.type) {
             .local => {
@@ -1070,7 +1076,7 @@ fn lookupIdent2(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdent
         }
     }
 
-    if (try lookupParentLocal(self, name, node)) |res| {
+    if (if (hidden_depth > 1) try lookupParentLocal(self, name, node) else null) |res| {
         if (proc.isStaticFuncBlock) {
             // Can not capture local before static function block.
             const funcName = proc.func.?.name();
@@ -1116,6 +1122,12 @@ pub fn lookupStaticIdent(c: *cy.Chunk, name: []const u8, node: *ast.Node) !?Look
         }
     }
     return res;
+}
+
+fn lookupStaticIdentOrFail(c: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdentResult {
+    return (try lookupStaticIdent2(c, name, node)) orelse {
+        return c.reportErrorFmt("Undeclared variable `{}`.", &.{v(name)}, node);
+    };
 }
 
 fn lookupStaticIdent2(c: *cy.Chunk, name: []const u8, node: *ast.Node) !?LookupIdentResult {

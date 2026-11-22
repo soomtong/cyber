@@ -212,8 +212,13 @@ pub const VM = struct {
         }
 
         // A future that was never awaited can leave a spawned thread running or queued. Stop it before
-        // the main heap it writes to is freed, and before the worker threads are joined.
+        // the worker threads are joined.
         self.stopSpawnedThreads();
+        // A done thread keeps its result until its future is awaited or destructed. Free the ones whose
+        // future was neither, while their drop functions still exist.
+        if (comptime build_config.threads) {
+            self.worker_pool.dropUnclaimedResults(self.shared_states.items);
+        }
 
         // The REPL result shares its heap objects with an abandoned main local, so it is released before the
         // sweep below frees them.
@@ -1144,7 +1149,8 @@ fn zAwait(t: *cy.Thread, fut_value_bits: u64) callconv(.c) vmc.ResultCode {
         while (true) {
             const epoch = pool.progressEpoch();
             const state = @atomicLoad(u8, &shared_state.state, .acquire);
-            if (state == 2) {
+            // 2: done, `await` copies the result out next. 5: already received.
+            if (state == 2 or state == 5) {
                 return vmc.RES_SUCCESS;
             }
             if (state == 3) {

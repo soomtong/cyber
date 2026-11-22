@@ -2,14 +2,21 @@ const std = @import("std");
 
 /// Contains synchronized state between a thread that owns and consumes the future's result
 /// and the thread that produces the result.
-/// When a future has a sync state, `FutureValue.completed` should not be used.
+/// `FutureValue.completed` is set once the owner received the result.
+///
+/// The producer never touches the owner's heap or the owner's `FutureValue`: a thread heap is not thread-safe.
+/// The result stays in the spawned thread's heap (`thread`, with the returned value's bytes in `result`) until
+/// the owner takes it: `await` copies it into the owner's heap with `@send` on the owner's thread, then drops
+/// the spawned thread (`worker.dropThreadResult`).
+///
 /// 0, pending: Initially marked as pending. At this point, the future's result can not be read.
-/// 1, writing: Transition from `pending` by producer to prevent a race when the owner invalidates the future.
-/// 2, completed: Transition from `writing` by producer once it's done writing the result.
+/// 2, completed: Transition from `pending` by the producer once `thread` and `result` are set.
 /// 3, failed: Transition from `pending` by the worker when the spawned thread panicked.
-///    `panic_msg` carries the thread's panic message when it had one. Also reserved for the owner
-///    invalidating a pending future when it is deinitialized.
+///    `panic_msg` carries the thread's panic message when it had one.
 /// 4, stopped: Transition from `pending` by the worker when the spawned thread was interrupted or ran out of fuel.
+/// 5, received: Transition from `completed` by the owner once it took the result and freed the spawned thread.
+///    `await` reads the future's own `data` from then on.
+/// (1 was a writing state when the producer wrote into the owner's future. It is no longer used.)
 ///
 /// `state` is the first field: `core.cy` holds the state as `Ptr[byte]` and writes the initial 0 through it.
 /// Owned by `VM.shared_states` and freed with the VM (or its reset), so an awaiting thread only reads `panic_msg`.
@@ -17,6 +24,16 @@ pub const FutureSyncState = extern struct {
     state: u8,
     panic_msg_ptr: ?[*]const u8 = null,
     panic_msg_len: usize = 0,
+
+    /// Set by the producer before the transition to 2. A `*cy.Thread` that finished its entry function.
+    thread: ?*anyopaque = null,
+    /// The returned value's bytes, allocated with the pool's allocator. Not in the spawned thread's stack,
+    /// which can move while the drop function runs on it.
+    result: ?[*]align(8) u8 = null,
+    result_len: usize = 0,
+    /// The bytecode function `@thread_drop[Sig]` that destructs a result in the spawned thread's heap.
+    /// Set by `@start_thread`.
+    drop_func: u64 = 0,
 
     pub fn panic_msg(self: *const FutureSyncState) ?[]const u8 {
         const ptr = self.panic_msg_ptr orelse return null;

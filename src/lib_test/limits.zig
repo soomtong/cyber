@@ -600,6 +600,51 @@ test "cl_vm_interrupt stops a regex search without a failed search." {
     try zt.eq(false, S.failed);
 }
 
+test "A spawned function returns only what await can copy." {
+    if (is_wasm) return;
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+    var res: C.EvalResult = undefined;
+    // The `@send` of an option fell through and handed back an undefined value.
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\fn opt(n int) -> ?str:
+        \\  return 'a' + n.fmt()
+        \\_ = spawn opt(1)
+    , &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try zt.eq(true, std.mem.startsWith(u8, report, "CompileError: Expected sendable: ?str\n"));
+    }
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\type P:
+        \\  s str
+        \\fn mk(n int) -> P:
+        \\  return P{s = 'a' + n.fmt()}
+        \\_ = spawn mk(1)
+    , &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try zt.eq(true, std.mem.startsWith(u8, report, "CompileError: Expected sendable: P\n"));
+    }
+    // Values without references are copied as they are.
+    try zt.eq(C.Success, C.vm_eval(vm,
+        \\use test
+        \\fn sym(n int) -> symbol:
+        \\  return if (n > 0) symbol.up else symbol.down
+        \\fn res(n int) -> !int:
+        \\  if n > 0:
+        \\    return n * 2
+        \\  return error.Neg
+        \\test.eq(symbol.up, spawn sym(1).await())
+        \\test.eq(6, spawn res(3).await()!)
+        \\test.eq(-7, spawn res(-1).await() !else -7)
+    , &res));
+}
+
 test "Spawned threads stop with the eval and do not abort the host." {
     if (is_wasm) return;
     const vm = C.vm_init();

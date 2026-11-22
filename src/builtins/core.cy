@@ -4614,7 +4614,34 @@ type Future[T Any]:
 
 fn (&Future[]) await() -> T:
     @await_(as[&FutureValue[T]] self.inner)
+    if !self.inner.completed:
+        self.@receive()
     return meta.access_option_payload(self.inner.data)
+
+-- A spawned thread is done and its result is still in its own heap. Copies it into this thread's heap:
+-- `@send` runs on this thread, so it allocates only in the heap of the thread that runs it.
+-- Then the spawned thread is freed.
+-- Only a spawned thread's future gets here, and `spawn` takes only the results that this can copy
+-- (`@check_sendable`). Other types keep `await` compiling for the futures that the host completes.
+fn (&Future[]) @receive():
+    res := as[Ptr[T]] @thread_result(self.inner.shared_state)
+    #if type.managed(T):
+        #switch type.info(T):
+            #case .struct:
+                #if meta.has_decl(T, '@send'):
+                    self.inner.data = res.@send(@cur_thread())
+                #else:
+                    panic('Unexpected spawned result: ' + type.name(T))
+            #else:
+                panic('Unexpected spawned result: ' + type.name(T))
+    #else:
+        -- No references: the bytes are the value.
+        #if type.is_copyable(T):
+            self.inner.data = res.*
+        #else:
+            panic('Unexpected spawned result: ' + type.name(T))
+    self.inner.completed = true
+    @thread_result_done(self.inner.shared_state)
 
 type FutureValue[T Any]:
     cont_head int -- index to `vm.task_nodes` or NullId
@@ -4622,6 +4649,7 @@ type FutureValue[T Any]:
 
     -- `none` if not shared.
     shared_state Ptr[byte]
+    -- For a spawned thread's future, set once the result was copied into `data` (`Future.await`).
     completed bool
 
     -- Set by the host for a future it creates (`cl_future_new`). 0 for every other future.
@@ -5162,6 +5190,7 @@ type Dyn[T Any] _
 type Thread _
 
 fn @spawn(func funcptr_t[%Sig], args FnTuple[Sig]) -> Future[Sig.ret()]:
+    @check_sendable(Sig.ret())
     thread := @new_thread()
 
     -- TODO: Keep `thread_args` on the stack.
@@ -5177,8 +5206,26 @@ fn @spawn(func funcptr_t[%Sig], args FnTuple[Sig]) -> Future[Sig.ret()]:
 
     args_size := type.size(FnTuple[Sig])
     ret_size := type.size(Sig.ret())
-    @start_thread(thread, @thread_entry[Sig], func, args_size, move thread_args, future.inner, ret_size)
+    @start_thread(thread, @thread_entry[Sig], @thread_drop[Sig], func, args_size, move thread_args, future.inner.shared_state, ret_size)
     return future
+
+-- A spawned thread's result is copied by `Future.@receive`: the bytes of a value without references, or the
+-- type's `@send`.
+fn @check_sendable(%T type):
+    #if type.managed(T):
+        #switch type.info(T):
+            #case .struct:
+                #if meta.has_decl(T, '@send'):
+                    pass
+                #else:
+                    meta.error('Expected sendable: ' + type.name(T))
+            #else:
+                meta.error('Expected sendable: ' + type.name(T))
+    #else:
+        #if type.is_copyable(T):
+            pass
+        #else:
+            meta.error('Expected sendable: ' + type.name(T))
 
 #[bind]
 fn @new_shared_state() -> Ptr[byte]
@@ -5186,13 +5233,29 @@ fn @new_shared_state() -> Ptr[byte]
 #[bind]
 fn @new_thread() -> Thread
 
+--| The thread that runs the call.
 #[bind]
-fn @start_thread(thread Thread, entry funcptr_t[%EntrySig], func funcptr_t[%Sig], args_size int, args FnTuple[Sig], future ^FutureValue[Sig.ret()], ret_size int)
+fn @cur_thread() -> Thread
 
-fn @thread_entry[const Sig FuncSig](result_thread Thread, func funcptr_t[Sig], args FnTuple[Sig]) -> Sig.ret():
-    res := @call(func, &args)
-    -- TODO: Check that `result_thread` is still alive.
-    return @send(result_thread, *res)
+#[bind]
+fn @start_thread(thread Thread, entry funcptr_t[%EntrySig], drop funcptr_t[%DropSig], func funcptr_t[%Sig], args_size int, args FnTuple[Sig], shared_state Ptr[byte], ret_size int)
+
+-- The result stays in the spawned thread's heap. The owner of the future copies it out (`Future.await`)
+-- or drops it (`@thread_drop`).
+fn @thread_entry[const Sig FuncSig](func funcptr_t[Sig], args FnTuple[Sig]) -> Sig.ret():
+    return @call(func, &args)
+
+-- Runs on the spawned thread once its result was received or dropped. Destructs the result in its heap.
+fn @thread_drop[const Sig FuncSig](res Ptr[Sig.ret()]):
+    @destruct(Sig.ret(), res)
+
+-- The returned value of a spawned thread that is done (state 2). Its references point into the thread's heap.
+#[bind]
+fn @thread_result(shared_state Ptr[byte]) -> Ptr[void]
+
+-- The owner took the result: drops it in the spawned thread's heap and frees the thread.
+#[bind]
+fn @thread_result_done(shared_state Ptr[byte])
 
 -- TODO: &FnTuple[Sig] is a temporary fix for inlined builtins. Won't be necessary after struct inlining work.
 #[bind]

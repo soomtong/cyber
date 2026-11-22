@@ -131,6 +131,9 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"@new_thread",    zErrFunc(new_thread)},
     .{"@start_thread",  zErrFunc(start_thread)},
     .{"@new_shared_state", zErrFunc(new_shared_state)},
+    .{"@cur_thread",    zErrFunc(cur_thread)},
+    .{"@thread_result", zErrFunc(thread_result)},
+    .{"@thread_result_done", zErrFunc(thread_result_done)},
     .{"@call",          zErrBuiltinFunc(call, null)},
 
     .{"EvalBuffer[].@index_addr", zErrConstEvalFunc(EvalBuffer_index_addr)},
@@ -1544,19 +1547,43 @@ pub fn start_thread(t: *cy.Thread) !C.Ret {
     _ = t.ret(void);
     const thread = t.param(*cy.Thread);
     const entry_func = t.param(cy.Value);
+    const drop_func = t.param(cy.Value);
     const func = t.param(cy.Value);
     const args_size: usize = @intCast(t.param(i64));
     const func_args = t.param_sized(args_size);
-    const future = t.param(*cy.heap.FutureValue);
+    const sync_state = t.param(*cy.sync.FutureSyncState);
     const ret_size: usize = @intCast(t.param(i64));
     const ret_reg_size = (ret_size + 7) >> 3;
 
     // Prepare entry func call arguments.
-    thread.c.stack_ptr[ret_reg_size + 4] = Value.initPtr(t);
-    thread.c.stack_ptr[ret_reg_size + 5] = func;
-    @memcpy(thread.c.stack_ptr[ret_reg_size+6..ret_reg_size+6+func_args.len], func_args);
-    try t.c.vm.worker_pool.add_thread_task(thread, entry_func, future, ret_size);
+    thread.c.stack_ptr[ret_reg_size + 4] = func;
+    @memcpy(thread.c.stack_ptr[ret_reg_size+5..ret_reg_size+5+func_args.len], func_args);
+    sync_state.drop_func = drop_func.val;
+    try t.c.vm.worker_pool.add_thread_task(thread, entry_func, sync_state, ret_size);
 
+    return C.RetOk;
+}
+
+pub fn cur_thread(t: *cy.Thread) !C.Ret {
+    const ret = t.ret(*cy.Thread);
+    ret.* = t;
+    return C.RetOk;
+}
+
+/// The result of a spawned thread whose future is done (`Future.await`). `await` only gets here
+/// after it saw state 2, and only the owner moves the state on from 2.
+pub fn thread_result(t: *cy.Thread) !C.Ret {
+    const ret = t.ret(?[*]u8);
+    const sync_state = t.param(*cy.sync.FutureSyncState);
+    std.debug.assert(@atomicLoad(u8, &sync_state.state, .acquire) == 2);
+    ret.* = sync_state.result;
+    return C.RetOk;
+}
+
+pub fn thread_result_done(t: *cy.Thread) !C.Ret {
+    _ = t.ret(void);
+    const sync_state = t.param(*cy.sync.FutureSyncState);
+    t.c.vm.worker_pool.claimThreadResult(sync_state);
     return C.RetOk;
 }
 

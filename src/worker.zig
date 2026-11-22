@@ -4,6 +4,7 @@ const cy = @import("cyber.zig");
 const log = cy.log.scoped(.worker);
 const build_config = @import("build_config");
 const stdx = @import("stdx");
+const vmc = @import("vmc");
 
 const TaskKind = enum(u8) {
     thread,
@@ -17,7 +18,6 @@ pub const Task = struct {
             thread: *cy.Thread,
             func_ptr: cy.Value,
             fut_sync_state: *cy.sync.FutureSyncState,
-            fut: *cy.heap.FutureValue,
 
             // Byte size, not reg size. void return if ret_size == 0.
             ret_size: u16,
@@ -148,7 +148,7 @@ pub const Pool = struct {
         self.num_workers += 1;
     }
 
-    pub fn add_thread_task(self: *Pool, thread: *cy.Thread, func_ptr: cy.Value, fut: *cy.heap.FutureValue, ret_size: usize) !void {
+    pub fn add_thread_task(self: *Pool, thread: *cy.Thread, func_ptr: cy.Value, sync_state: *cy.sync.FutureSyncState, ret_size: usize) !void {
         if (!build_config.threads) {
             @panic("unsupported");
         }
@@ -165,8 +165,7 @@ pub const Pool = struct {
                 .data = .{ .thread = .{
                     .thread = thread,
                     .func_ptr = func_ptr,
-                    .fut = fut,
-                    .fut_sync_state = fut.shared_state.?,
+                    .fut_sync_state = sync_state,
                     .ret_size = @intCast(ret_size),
                 }},
             };
@@ -253,32 +252,90 @@ pub const Pool = struct {
                     return;
                 };
 
-                while (@cmpxchgWeak(u8, &sync_state.state, 0, 1, .acquire, .monotonic)) |actual| {
-                    if (actual == 3) {
-                        @panic("TODO: future was invalidated");
-                    }
+                // The result stays in this thread's heap. Nothing here touches the owner's heap or its
+                // `FutureValue`: the owner copies the result out on its own thread (`Future.await`).
+                // The bytes move out of the stack, which can move while the drop function runs on it.
+                var result: ?[*]align(8) u8 = null;
+                if (ret_byte_size > 0) {
+                    const buf = pool.alloc.alignedAlloc(u8, .@"8", ret_byte_size) catch {
+                        // No room to keep the result. Sweep the thread's heap like a panic does.
+                        _ = cy.thread.freeHeapPages(thread) catch {};
+                        @atomicStore(u8, &sync_state.state, 3, .release);
+                        thread.deinit(false);
+                        pool.alloc.destroy(thread);
+                        pool.notifyProgress();
+                        return;
+                    };
+                    @memcpy(buf, @as([*]const u8, @ptrCast(ret))[0..ret_byte_size]);
+                    result = buf.ptr;
                 }
-
-                @as(*u64, @ptrCast(&task.data.thread.fut.data)).* = 1;
-                if (ret_reg_size > 0) {
-                    const dst = @as([*]u8, @ptrCast(&task.data.thread.fut.data)) + 8;
-                    @memcpy(dst[0..ret_byte_size], @as([*]u8, @ptrCast(ret))[0..ret_byte_size]);
-                }
+                sync_state.thread = thread;
+                sync_state.result = result;
+                sync_state.result_len = ret_byte_size;
 
                 @atomicStore(u8, &sync_state.state, 2, .release);
                 pool.notifyProgress();
-
-                if (cy.Trace) {
-                    const grc = thread.heap.c.refCounts;
-                    if (grc != 0) {
-                        cy.C.thread_dump_live_objects(@ptrCast(thread));
-                        cy.panicFmt("unreleased refcount: {}", .{grc});
-                    }
-                }
-
-                thread.deinit(false);
-                pool.alloc.destroy(thread);
             },
+        }
+    }
+
+    /// Destructs a done thread's result in the thread's own heap and frees the thread. The caller owns the
+    /// thread exclusively: the owner after 2.
+    /// Runs the thread's drop function on the calling OS thread, like `run_queued_task` runs a task there.
+    pub fn dropThreadResult(pool: *Pool, sync_state: *cy.sync.FutureSyncState) void {
+        const thread: *cy.Thread = @ptrCast(@alignCast(sync_state.thread orelse return));
+        const result = sync_state.result;
+        const result_len = sync_state.result_len;
+        sync_state.thread = null;
+        sync_state.result = null;
+        sync_state.result_len = 0;
+
+        // The drop runs to its end even while the VM stops its spawned threads (`stopSpawnedThreads`) or the
+        // thread's fuel ran low: stopping it would leak the result.
+        var no_interrupt: u8 = 0;
+        thread.c.interrupt = &no_interrupt;
+        thread.c.fuel_limit = 0;
+        thread.resetFuel();
+
+        const prev_thread = vmc.cur_thread;
+        defer vmc.cur_thread = prev_thread;
+        thread.c.fp_end = thread.c.stack_ptr + 1;
+        // `@thread_drop(res Ptr[T])` returns `void`. Its argument is right after the call info.
+        thread.c.stack_ptr[cy.thread.CallArgStart] = cy.Value{ .val = @intFromPtr(result) };
+        if (thread.callFunc2(thread.c.stack_ptr, 0, .{ .val = sync_state.drop_func })) |_| {
+            if (cy.Trace) {
+                const grc = thread.heap.c.refCounts;
+                if (grc != 0) {
+                    cy.C.thread_dump_live_objects(@ptrCast(thread));
+                    cy.panicFmt("unreleased refcount: {}", .{grc});
+                }
+            }
+        } else |err| {
+            // A destructor panicked. The thread already unwound and freed its heap.
+            log.tracev("thread result drop failed: {}", .{err});
+        }
+        if (result) |ptr| {
+            pool.alloc.free(ptr[0..result_len]);
+        }
+        thread.deinit(false);
+        pool.alloc.destroy(thread);
+    }
+
+    /// The owner took a done thread's result (`Future.await`): 2 -> 5, and the thread is freed.
+    pub fn claimThreadResult(pool: *Pool, sync_state: *cy.sync.FutureSyncState) void {
+        // Only the owner moves the state on from 2.
+        std.debug.assert(@atomicLoad(u8, &sync_state.state, .acquire) == 2);
+        @atomicStore(u8, &sync_state.state, 5, .release);
+        pool.dropThreadResult(sync_state);
+    }
+
+    /// Frees the done threads whose futures were never awaited. Called after `stopSpawnedThreads`, while the
+    /// compiled code still exists.
+    pub fn dropUnclaimedResults(pool: *Pool, states: []const *cy.sync.FutureSyncState) void {
+        for (states) |sync_state| {
+            if (@atomicLoad(u8, &sync_state.state, .acquire) == 2) {
+                pool.claimThreadResult(sync_state);
+            }
         }
     }
 };

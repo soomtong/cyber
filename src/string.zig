@@ -587,8 +587,11 @@ test "ustringSeekByRuneIndex takes usize indexes." {
     try std.testing.expectEqual(3, try ustringSeekByRuneIndex(s, 0, 0, 2, &bad_byte));
     try std.testing.expectEqual(4, try ustringSeekByRuneIndex(s, 0, 0, 3, &bad_byte));
     try std.testing.expectError(error.OutOfBounds, ustringSeekByRuneIndex(s, 0, 0, 4, &bad_byte));
-    // An index past `u32` gives an error, not a cast abort.
-    try std.testing.expectError(error.OutOfBounds, ustringSeekByRuneIndex(s, 0, 0, 1 << 33, &bad_byte));
+    // An index past `u32` gives an error, not a cast abort. A 32-bit `usize` can not hold it.
+    if (@bitSizeOf(usize) >= 64) {
+        const big: usize = @intCast(@as(u64, 1) << 33);
+        try std.testing.expectError(error.OutOfBounds, ustringSeekByRuneIndex(s, 0, 0, big, &bad_byte));
+    }
 }
 
 test "string.indexOf matches std.mem.find." {

@@ -48,6 +48,9 @@ t.eq(3, s.index_any_rune({'🦊'}).?)        -- Find utf-8 rune.
 t.eq(0, s.index_any_rune({'🦊', 'a'}).?)   -- Find ascii rune.
 t.eq(7, s.index_any_rune({'x', 'y'}).?)
 t.assert(s.index_any_rune({'e', 'f'}) == none)
+-- index_any_rune(AsSpan[int]) called the byte search and did not compile.
+t.eq(3, s.index_any_rune([]int{'🦊'}).?)
+t.eq(1, 'héllo'.index_any_rune([]int{233}).?)
 
 -- index_rune
 t.eq(s.index_rune('a').?, 0)

@@ -4057,7 +4057,7 @@ fn (&str) index_any_rune(runes [&]int) -> ?int:
     return none
 
 fn (&str) index_any_rune(runes AsSpan[int]) -> ?int:
-    return self.index_any(runes.span())
+    return self.index_any_rune(runes.span())
 
 fn (&str) iterator() -> int:
     return 0

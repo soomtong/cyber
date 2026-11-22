@@ -652,18 +652,34 @@ test "The sync states of spawned threads are freed when both sides are done." {
         \\test.eq(57000, total)
         \\test.eq(285, spawn fan(10).await())
     ;
+    // Dropped futures leave threads that run on after the eval ends. Their stacks and heaps count in the
+    // memory used until they end, so measure only when no spawned thread is left (a slow runner can still
+    // have dozens queued).
+    const S = struct {
+        fn liveStates(zv: *cy.VM) usize {
+            zv.shared_state_mutex.lockUncancelable(stdx.io());
+            defer zv.shared_state_mutex.unlock(stdx.io());
+            return zv.shared_states.items.len;
+        }
+        fn waitIdle(zv: *cy.VM) usize {
+            var n = liveStates(zv);
+            var i: usize = 0;
+            while (n > 0 and i < 1000) : (i += 1) {
+                std.Io.sleep(stdx.io(), .fromMilliseconds(10), .awake) catch {};
+                n = liveStates(zv);
+            }
+            return n;
+        }
+    };
     try zt.eq(C.Success, C.vm_eval(vm, src, &res));
+    _ = S.waitIdle(zvm);
     const used = C.vm_memory_used(vm);
     for (0..4) |_| {
         try zt.eq(C.Success, C.vm_eval(vm, src, &res));
     }
-    // Only the states of threads that still run on workers when the eval ends can be left.
-    const states = blk: {
-        zvm.shared_state_mutex.lockUncancelable(stdx.io());
-        defer zvm.shared_state_mutex.unlock(stdx.io());
-        break :blk zvm.shared_states.items.len;
-    };
-    if (states > 64) {
+    // Every state is freed once its thread ends: none is left after the threads end.
+    const states = S.waitIdle(zvm);
+    if (states > 0) {
         std.debug.print("shared states: {}\n", .{states});
         return error.TestUnexpectedResult;
     }

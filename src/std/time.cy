@@ -376,13 +376,23 @@ fn (&Duration) `-`(o Duration) -> Duration:
 fn (&Duration) `*`(n int) -> Duration:
     if n == 0:
         return {sec=0, nsec=0}
-    if abs_int(self.sec) + 1 > MaxDurSec / abs_int(n) + 1:
+    -- `-n` of the least `int` is not an `int`. Half of it is, and doubling the half is exact.
+    if n == -9223372036854775807 - 1:
+        return (self.* * (n / 2)) * 2
+    -- Multiply the sizes and set the sign at the end. A negative duration keeps `nsec` above `sec`, so its size
+    -- is not `-sec`, and the range is the same on both sides, so the size is in range when the product is.
+    a := self.abs()
+    m := abs_int(n)
+    if a.sec > 0 and m > MaxDurSec / a.sec:
         panic('The duration is out of range.')
-    -- `nsec * n` can pass the range of `int`: multiply the billions of `n` apart.
-    q := n / NsPerSec
-    r := n % NsPerSec
-    low := self.nsec * r
-    return dur(self.sec * n + self.nsec * q + floor_div(low, NsPerSec), floor_mod(low, NsPerSec))
+    -- `nsec * m` can pass the range of `int`: multiply the billions of `m` apart. The sum stays below `m` when
+    -- `a.sec` is 0, and below `MaxDurSec + m` with `m <= MaxDurSec` otherwise.
+    q := m / NsPerSec
+    low := a.nsec * (m % NsPerSec)
+    res := dur(a.sec * m + a.nsec * q + low / NsPerSec, low % NsPerSec)
+    if (self.sec < 0) != (n < 0):
+        return -res
+    return res
 
 fn (&Duration) `<`(o Duration) -> bool:
     return self.sec < o.sec or (self.sec == o.sec and self.nsec < o.nsec)

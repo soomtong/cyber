@@ -170,6 +170,20 @@ t.eq(true, time.seconds(3) > time.seconds(2))
 t.eq(true, time.seconds(2) <= time.seconds(2))
 t.eq(true, time.millis(-1).is_negative())
 t.eq('87649h', (time.nanos(999999999) * 315537897).format()[0..6])
+-- A negative duration keeps its nanoseconds above its seconds: a large `n` must not look out of range.
+t.eq('-277777h46m40s', (time.nanos(-1) * 1000000000000000000).format())
+t.eq('-277777h46m40s', (time.nanos(1) * -1000000000000000000).format())
+t.eq('277777h46m40s', (time.nanos(-1) * -1000000000000000000).format())
+t.eq('416666h40m1s', (time.nanos(-1500000001) * -1000000000).format())
+t.eq('-87649h24m56.684462103s', (time.nanos(-999999999) * 315537897).format())
+t.eq('2562047h47m16.854775808s', (time.nanos(-1) * (-9223372036854775807 - 1)).format())
+t.eq('-2562047h47m16.854775808s', (time.nanos(1) * (-9223372036854775807 - 1)).format())
+min_dur := -time.seconds(315537897600)
+t.eq(true, min_dur * -1 == time.seconds(315537897600))
+t.eq(true, min_dur * 1 == min_dur)
+t.eq(true, time.nanos(-315537897600) * 1000000000 == min_dur)
+t.eq(true, time.seconds(-157768948800) * 2 == min_dur)
+t.eq(true, (-max_dur) * -1 == max_dur)
 
 -- RFC 3339.
 p := time.parse('2026-11-15T10:22:03.25+09:00')!

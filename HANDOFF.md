@@ -169,6 +169,12 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   범위 초과 `inf`, wasm32의 `cl_vm_set_stack_limit` `@intCast`)는 손대지 않았다.
   수정 중 새로 찾은 것: 복합 대입의 좌변 두 번 계산(`arr[say(1)] += 2`), 템플릿 함수 인자의 배타 빌림 충돌 검사 없음
   (`matchGenericFuncRt`), `if o |q|: r = q`의 보수적 거짓 오류, `for` 캡처의 빌림 주인(시험 못 함).
+- [x] 위 항목의 미룬 후보와 새로 찾은 것을 모두 고쳤다(2026-11-22, 사용자: "continue", 서브 에이전트 일곱, F-182..F-188).
+  `unreleased.md` "리뷰가 미룬 후보와 수정 중 찾은 결함" 절. spawn 결과 소유권은 결정 `project_spawn_result_ownership.md`.
+  남은 것: spawn 인자 쪽 `@send`의 참조 있는 option · result(빈 본문), 큐에 있는 작업은 future를 버려도 끝까지 돈다,
+  `VM.shared_states`가 VM 수명 동안 자란다, `r = xs[0]` · `r = h.b`는 컨테이너를 주인으로 본다(보수적), 순수로 보는 연산식
+  인덱스의 복합 대입은 사용자 연산자를 두 번 부른다, `intFmtExt`의 64바이트 버퍼(지금은 도달 불가), 4GB 넘는 문자열의 `u32`
+  캐스트, `zig build lib -Dtarget=wasm32-freestanding`의 Zig std 오류(기존).
 
 - [x] `/code-review high` 0.4.16..HEAD(2026-11-22)의 6건을 고쳤다(사용자: "let's fix them step by step. use sub agent as you
   can.", 7번 커밋 제목은 "no need to fix"). 서브 에이전트 셋이 worktree에서 고치고 cherry-pick으로 합쳤다. 내용은

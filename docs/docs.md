@@ -3657,6 +3657,7 @@ A method is named through its type, with the receiver as the first argument: `sp
 `spawn` returns a `Future[T]` where `T` is the return type of the entry function. If the runtime could not dispatch the thread, a panic is raised.
 The `Future` contains the asynchronous result of the new thread.
 A thread can not be stopped from the script and its status can not be queried. The `Future` is the only handle to it.
+The result stays in the heap of the spawned thread until `await` copies it to the awaiting thread. A `Future` that is dropped without `await` frees the spawned thread and its result when the thread ends.
 
 ### `Sendable` values.
 Values that can be transferred from one thread to another must be types that implement `Sendable`.
@@ -3667,7 +3668,7 @@ The arguments of `spawn` and the return value of the entry function are sent. Th
 * `str`. The string is copied to the receiving thread.
 * A struct that declares a `@send` method.
 
-Sending another type is a compile error: `Expected sendable: []int`.
+Sending another type is a compile error: `Expected sendable: []int`. An option or a result is sent only when its payload has no references (`?int`, `!int`): `?str` and `!str` are compile errors as a return type of a spawned function.
 
 A struct is sent with its `@send` method. It receives the thread that the value is sent to and returns the value for that thread:
 ```cy

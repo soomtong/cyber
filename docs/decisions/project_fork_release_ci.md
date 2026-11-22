@@ -205,6 +205,12 @@ zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Dd
   없이 통과했다. `sema.zig` 분할(`project_sema_split.md`)이 들어간 릴리스라 플랫폼별 분석 경로의 `pub` 누락을 CI의 Linux ·
   Windows · wasm 빌드로 확인한 셈이다. `docs/gen-api-json.cy`가 읽는 파일이 `src/sema_hint.zig`로 바뀌어 `gen-docs.yml`의
   `paths`도 고쳤다.
+- 0.4.18(2026-11-22): 태그 `0.4.18` → `80126d0e`, `build-1092-80126d0`, 에셋 15개. 릴리스 커밋 `456527dc`의 master run은
+  Linux 두 job에서 lib 테스트 'The sync states of spawned threads are freed when both sides are done.'가 실패했다(메모리 증가
+  1.55 MB, 기준 512 KiB). 버린 future의 스레드가 아직 도는 동안 쟀고, 스레드가 끝난 뒤에도 eval마다 VM이 20~40 KiB 자란다
+  (spawn 없이도, 0.4.17에서도 같다). 상태 수(0)로 검사하고 메모리는 2 MiB로 느슨하게 했다(`3ff30939`, `80126d0e`). 로컬 14단계는
+  macOS라 이 차이를 못 봤다. 태그 run은 macOS Intel의 'A thread that awaits a spawned thread sleeps instead of spinning.'(cpu 시간
+  200 ms 기준)이 한 번 실패해 그 job만 재실행해 통과했다(같은 커밋의 master run은 통과, 러너 부하로 본다).
 
 ## CI 시간 줄이기 (2026-11-18)
 

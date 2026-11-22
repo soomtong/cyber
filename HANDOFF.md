@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-22): 0.4.17 릴리스(마지막 사용 C · D · E · B와 그 뒤 변경, `sema.zig` 분할)
+# HANDOFF (2026-11-22): 0.4.18 릴리스(두 코드 리뷰의 수정, 빌림 검사의 구멍, spawn 소유권)
 
 ## 목표
 
@@ -37,11 +37,12 @@
 - 2026-11-22(사용자: "continue" 뒤 질문에 "알려진 한계 하나 해소"): `json.to`의 struct 필드 기본값과, 그 길에 찾은 기본값 식의
   이름 해석 결함(F-171)을 고쳤다.
 
+- 2026-11-22(사용자: `/code-review high from 0.4.0 to head` 뒤 "fix them step by step from easy one to difficult one. ok to use sub
+  agents max 7", "continue" 두 번, "go release 0.4.18"): 리뷰 10건, 미룬 후보, 남은 것을 고치고 0.4.18을 릴리스했다.
+
 ## 현재 브랜치
 
-`master`. 0.4.16 태그 `ca000225`와 `5e5765f9`까지 push돼 있다. 그 뒤 커밋(`7e8c5782` CI 기록, `90b55104` 비어휘적
-수명, `6e2a0206` D · E, `4149c6b8` B, 코드 리뷰 수정 `5fca44c6` · `ad24ee2c` · `a63c63c3`과 `if` 갈래 수정, 이동한 지역에 다시 대입, 갈래 종류와 반복 본문, 남은 다섯, `and` · `or` · `scope`, HANDOFF 커밋들)은
-push하지 않았다.
+`master`. 0.4.18 태그 `80126d0e`(`build-1092-80126d0`)까지 push돼 있다. 릴리스 기록 커밋도 push한다.
 PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지 못해 15분 뒤 취소된 탓이다(나머지 6개 통과).
 
 ## 완료된 작업
@@ -169,6 +170,11 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   범위 초과 `inf`, wasm32의 `cl_vm_set_stack_limit` `@intCast`)는 손대지 않았다.
   수정 중 새로 찾은 것: 복합 대입의 좌변 두 번 계산(`arr[say(1)] += 2`), 템플릿 함수 인자의 배타 빌림 충돌 검사 없음
   (`matchGenericFuncRt`), `if o |q|: r = q`의 보수적 거짓 오류, `for` 캡처의 빌림 주인(시험 못 함).
+- [x] 0.4.18 릴리스(2026-11-22): 노트 `docs/releases/0.4.18.md`, 기록 `project_fork_release_ci.md`. CI의 Linux에서 spawn 상태
+  테스트의 메모리 기준이 실패해 상태 수로 검사하게 고쳤다(`3ff30939`, `80126d0e`). 태그 run의 macOS Intel cpu 시간 테스트는
+  한 번 재실행.
+- [ ] 같은 VM에서 `vm_eval`을 거듭하면 VM 메모리가 eval마다 약 22 KiB(Linux는 더) 자란다. spawn과 무관하고 0.4.17에서도 같다.
+  컴파일 결과(청크, 심볼, 문자열 intern 등) 중 무엇이 남는지 조사한다. 세션 호스트(tars-agent)가 오래 돌면 쌓인다.
 - [x] 위 항목의 남은 것을 정리했다(2026-11-22, 사용자: "continue", F-189..F-194). `unreleased.md` 끝의 "남은 것의 정리" 절.
   spawn 인자 · 결과는 한 규칙(`@sendable`), 버린 future는 끝까지 돈다(결정), `FutureSyncState` 해제. wasm32-freestanding 빌드 복구와
   CI 단계 추가. 빌림 컨테이너 구멍 일곱(깨지는 변경: 매개변수 뒤에는 `scope` 매개변수만 저장).

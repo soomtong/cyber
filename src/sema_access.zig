@@ -51,9 +51,11 @@ fn semaSliceExpr(c: *cy.Chunk, left: *ast.Node, left_res: sema.ExprResult, range
         return c.reportError("A decreasing range can not be a slice index.", @ptrCast(range));
     }
     if (range.end_inclusive) {
-        // `a[i..=j]` is `a[i..j+1]`. The start is evaluated before the end.
+        // `a[i..=j]` is `a[i..j+1]`. The receiver and the start are evaluated before the end.
         const seq_start = c.seq_pending.items.len;
         errdefer sema_move.seqPop(c, seq_start);
+        var recv_res = left_res;
+        try sema_move.seqPushRes(c, &recv_res, left);
         var start_res = if (range.start) |start|
             try c.semaExprCstr(start, c.sema.i64_t)
         else
@@ -62,7 +64,7 @@ fn semaSliceExpr(c: *cy.Chunk, left: *ast.Node, left_res: sema.ExprResult, range
         const end_res = try semaRangeEndPlusOne(c, range.end.?);
         sema_move.seqPop(c, seq_start);
         const args = [_]sema_func.Argument{
-            sema_func.Argument.initReceiver(left, left_res),
+            sema_func.Argument.initReceiver(left, recv_res),
             sema_func.Argument.initPreResolved(range.start orelse @ptrCast(range), start_res),
             sema_func.Argument.initPreResolved(range.end.?, end_res),
         };
@@ -135,8 +137,14 @@ pub fn semaIndexExpr(c: *cy.Chunk, left: *ast.Node, left_res: sema.ExprResult, c
 
     const leftT = left_res.type;
     if (leftT.isPointer()) {
+        // The pointer is evaluated before a statement that the index adds (`seqFlush`).
+        var ptr_res = left_res;
+        const seq_start = c.seq_pending.items.len;
+        errdefer sema_move.seqPop(c, seq_start);
+        try sema_move.seqPushRes(c, &ptr_res, left);
         const idx = try c.semaExprCstr(index_expr.args.ptr[0], c.sema.i64_t);
-        const res = try sema_ptr_index(c, left_res, idx, node);
+        sema_move.seqPop(c, seq_start);
+        const res = try sema_ptr_index(c, ptr_res, idx, node);
         return sema_expr.semaDeref(c, res, node);
     }
 

@@ -793,12 +793,18 @@ pub fn semaCallValue(c: *cy.Chunk, callee: sema.ExprResult, callee_n: *ast.Node,
     }
 }
 
-pub fn semaCallPtr(c: *cy.Chunk, func: sema.ExprResult, sig: *sema.FuncSig, args: []*ast.Node, node: *ast.Node) !sema.ExprResult {
+pub fn semaCallPtr(c: *cy.Chunk, func_: sema.ExprResult, sig: *sema.FuncSig, args: []*ast.Node, node: *ast.Node) !sema.ExprResult {
     const ir_args = try c.ir.allocArray(*ir.Expr, args.len);
     var match_err: sema_func.FuncMatchError = undefined;
+    // The callee is evaluated before a statement that an argument adds (`seqFlush`).
+    var func = func_;
+    const seq_start = c.seq_pending.items.len;
+    errdefer sema_move.seqPop(c, seq_start);
+    try sema_move.seqPushRes(c, &func, node);
     _ = (try sema_func.matchFuncSig(c, sig, &.{}, args, ir_args, false, false, &match_err)) orelse {
         return sema_func.reportCallFuncMismatch(c, &.{}, args, "", sig, match_err, node);
     };
+    sema_move.seqPop(c, seq_start);
     if (sig.extern_) {
         func.type.cast(.func_ptr).extern_is_called = true;
     }

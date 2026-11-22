@@ -556,8 +556,12 @@ fn semaInitRecord(c: *cy.Chunk, init_pairs: *cy.Sym, init_n: *ast.InitLit) !sema
                 key = try c.semaExprCstr(kv.key, key_t);
                 key = try sema_move.semaOwn(c, key, kv.key);
             }
+            // The key is evaluated before a statement that the value adds (`seqFlush`).
+            const key_start = c.seq_pending.items.len;
+            try sema_move.seqPushRes(c, &key, kv.key);
             var val = try c.semaExprCstr(kv.value, val_t);
             val = try sema_move.semaOwn(c, val, kv.value);
+            sema_move.seqPop(c, key_start);
             const pair = try semaInitPair(c, pair_t, key, val, arg);
             pairs[i] = pair.ir;
             try sema_move.seqPush(c, &pairs[i], true, arg);

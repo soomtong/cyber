@@ -88,4 +88,54 @@ log = ^ArrayStore[str]{}
 test.eq(word(log, 'a') + word(log, 'b') + str(mk(log, 3).get(log)), 'a!b!3')
 test.eq(joined(log), 'word-aword-bmk3get3')
 
+-- A later operand that adds statements (`!`) runs after the operands before it.
+fn sayr(log ^ArrayStore[str], n int) -> !int:
+    log << 'r%{n}'
+    return n
+fn says(log ^ArrayStore[str], n int) -> str:
+    log << 's%{n}'
+    return 'abcdef'
+fn sayp(log ^ArrayStore[str], p Ptr[int]) -> Ptr[int]:
+    log << 'p'
+    return p
+type IntFn = fn(int) -> int
+fn inc(x int) -> int:
+    return x + 1
+fn getf(log ^ArrayStore[str]) -> IntFn:
+    log << 'f'
+    return inc
+
+-- Map literal: the key before the value.
+log = ^ArrayStore[str]{}
+m := Map[int,int]{(say(log, 1))=sayr(log, 2)!, (say(log, 3))=say(log, 4)}
+test.eq(m[1] + m[3], 6)
+test.eq(joined(log), 'say1r2say3say4')
+-- `..=` slice: the receiver and the start before the end.
+log = ^ArrayStore[str]{}
+test.eq(says(log, 1)[say(log, 0)..=sayr(log, 2)!], 'abc')
+test.eq(joined(log), 's1say0r2')
+log = ^ArrayStore[str]{}
+test.eq(says(log, 1)[say(log, 0)..sayr(log, 2)!], 'ab')
+test.eq(joined(log), 's1say0r2')
+-- Range: the start before the end.
+log = ^ArrayStore[str]{}
+rg := say(log, 1) .. sayr(log, 3)!
+test.eq(rg.end, 3)
+test.eq(joined(log), 'say1r3')
+log = ^ArrayStore[str]{}
+rg = say(log, 1) ..= sayr(log, 3)!
+test.eq(rg.end, 4)
+test.eq(joined(log), 'say1r3')
+-- Pointer index: the pointer before the index.
+pv := 123
+pv_ref := ^pv
+pv_ptr := as[Ptr[int]] pv_ref
+log = ^ArrayStore[str]{}
+test.eq(sayp(log, pv_ptr)[sayr(log, 0)!], 123)
+test.eq(joined(log), 'pr0')
+-- Function pointer callee before the arguments.
+log = ^ArrayStore[str]{}
+test.eq(getf(log)(sayr(log, 2)!), 3)
+test.eq(joined(log), 'fr2')
+
 --cytest: pass

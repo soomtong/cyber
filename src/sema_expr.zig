@@ -1705,14 +1705,18 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
             var b: sema_init.InitBuilder = .{ .c = c };
             try b.begin(c.sema.range_t, 2, node);
 
-            const start_res = try c.semaExprCstr(start, c.sema.i64_t);
-            try b.pushArg(start_res, start);
-
+            // The start is evaluated before a statement that the end adds (`seqFlush`).
+            var start_res = try c.semaExprCstr(start, c.sema.i64_t);
+            const seq_start = c.seq_pending.items.len;
+            errdefer sema_move.seqPop(c, seq_start);
+            try sema_move.seqPushRes(c, &start_res, start);
             // `Range` is `[start, end)`, so `a..=b` holds `b + 1`.
             const end_res = if (range.end_inclusive)
                 try sema_access.semaRangeEndPlusOne(c, end)
             else
                 try c.semaExprCstr(end, c.sema.i64_t);
+            sema_move.seqPop(c, seq_start);
+            try b.pushArg(start_res, start);
             try b.pushArg(end_res, end);
 
             const loc = b.end();

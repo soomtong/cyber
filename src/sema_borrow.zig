@@ -85,15 +85,85 @@ pub fn checkReturnOwners(c: *cy.Chunk, expr: sema.ExprResult, pending_start: usi
     } else if (isBorrowType(expr.type)) {
         return c.reportError("Expected parent lifetime local.", node);
     }
-    if (expr.resType == .value_local) {
-        for (c.borrow_loans.items) |loan| {
-            if (loan.local != expr.data.value_local) continue;
-            if (borrowOwnerOf(c, loan.owner) != param) return reportReturnOwner(c, param, node);
+    // The value can not point into a local of the function: a place in a local (`&w.x`, also of a parameter that is
+    // passed by value), or a borrow that a local container holds of one (`h := H{b=&w.x}`, `placeStart`).
+    if (pointsIntoFrame(c, expr) or hasPlaces(c, returnPlaceStart(c, expr))) return reportReturnOwner(c, param, node);
+    // The loans of a local that the value copies or is read out of, and of the containers it was read through.
+    if (copySource(c, expr)) |from| {
+        var cur = from;
+        var depth: usize = 0;
+        while (cur < c.varStack.items.len and depth < 16) : (depth += 1) {
+            for (c.borrow_loans.items) |loan| {
+                if (loan.local != cur) continue;
+                if (borrowOwnerOf(c, loan.owner) != param) return reportReturnOwner(c, param, node);
+            }
+            cur = c.varStack.items[cur].borrow_via;
         }
     }
     for (c.borrow_pending.items[pending_start..]) |p| {
         if (p.owner >= c.varStack.items.len) continue;
-        if (borrowOwnerOf(c, p.owner) != param) return reportReturnOwner(c, param, node);
+        if (p.place or borrowOwnerOf(c, p.owner) != param) return reportReturnOwner(c, param, node);
+    }
+}
+
+/// `placeStart` for a returned value that is no borrow of a place in a local (`pointsIntoFrame`). A value that a
+/// `scope` call gives from a local that is passed by value (`self[a..b]` of `scope Span`) points where the borrows of
+/// the local point.
+fn returnPlaceStart(c: *cy.Chunk, expr: sema.ExprResult) ?sema.LocalId {
+    const from = expr.recParentLocal() orelse return null;
+    if (expr.resType == .value_local or copyOutOf(c, expr) != null or isBorrowLocal(c, from)) return placeStart(c, expr);
+    return if (localPlaceFree(c, from)) null else from;
+}
+
+/// Whether the chain of `checkPlaces` from `start` has a local that a value can point into.
+fn hasPlaces(c: *cy.Chunk, start: ?sema.LocalId) bool {
+    var cur = start orelse return false;
+    var depth: usize = 0;
+    while (cur < c.varStack.items.len and depth < 16) : (depth += 1) {
+        if (!isBorrowLocal(c, cur)) return true;
+        cur = c.varStack.items[cur].borrow_via;
+    }
+    return false;
+}
+
+/// Whether `expr` is a borrow of a place in the memory of a local itself (`&w.x`, `&h` of a parameter `h H`), not
+/// behind a borrow, a pointer or a reference that the local holds.
+fn pointsIntoFrame(c: *cy.Chunk, expr: sema.ExprResult) bool {
+    if (expr.resType == .value_local or copyOutOf(c, expr) != null) return false;
+    var cur = expr.ir;
+    while (true) {
+        switch (cur.code) {
+            .address_of => cur = cur.cast(.address_of).expr,
+            .field => {
+                cur = cur.cast(.field).rec;
+                switch (cur.type.kind()) {
+                    .pointer, .borrow, .ex_borrow => return false,
+                    else => {},
+                }
+            },
+            .call => {
+                const call = cur.cast(.call);
+                const idx = call.func.sig.scope_param_idx;
+                if (idx == cy.NullU8 or idx >= call.numArgs) return false;
+                cur = call.args[idx];
+                // A `scope` argument that is passed by value (`self[a..b]` of `scope Span`) is a copy: the result
+                // points where its borrows point.
+                switch (cur.type.kind()) {
+                    .borrow, .ex_borrow => {},
+                    else => return false,
+                }
+            },
+            .local => {
+                const id = expr.recParentLocal() orelse return false;
+                const local = c.varStack.items[id];
+                if (local.type != .local or local.inner.local.id != cur.cast(.local).id) return false;
+                return switch (local.decl_t.kind()) {
+                    .pointer, .borrow, .ex_borrow => false,
+                    else => !local.decl_t.isRefPointer(),
+                };
+            },
+            else => return false,
+        }
     }
 }
 

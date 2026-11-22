@@ -3048,6 +3048,7 @@ append_to(&a[2], &&a)
 fn append_to(elem &int, arr &&Array[int]):
     arr << elem.*
 ```
+The same holds for a template function and a generic method (`fn f(%T type, r &T, b &&Array[T])`).
 
 While an exclusive borrow is stored in a local, no other borrow of the owner can be made, including the implicit `&self` borrow of a method call:
 ```cy
@@ -3206,6 +3207,10 @@ A borrow that can come from one of several branches (`if (c) &y else &a[0]`) bor
 A case capture of a `switch` borrows what the control borrows: a value capture `|p|` of a borrow payload borrows the value that the control borrows from, and a borrow capture `|&v|` borrows the local that holds the control. A borrow of a case local can not leave the case: `case .one |n| => &n` is the compile error 'The result of `switch` can not outlive `n`.'
 
 A borrow that is read through a borrow container (`&&r`, `&r.p`) can not outlive the container either, even when the local that the container borrows from lives longer.
+
+An unwrap capture of `if` and `while` (`if o |q|:`) borrows what the option borrows, like a `switch` capture: `r = q` compiles when `r` does not outlive that owner. A borrow of a capture of a value (`r = &q`) can not leave the branch.
+
+A vector of borrows (`[2]&int`) is a borrow container: it lives only as long as the shortest lived local that its elements borrow, and it keeps all of them borrowed. It can be iterated, also through a span (`for xs[1..] |p|:`), and a capture borrows what the vector borrows. A copy of a borrow container (`r = h`) keeps all the owners of `h` borrowed.
 
 ### `sink` parameter.
 The `sink` modifier accepts and consumes a value argument: *This is not much different from a `move` operation, so this feature may be removed.*
@@ -4639,7 +4644,7 @@ print(x[1].number_text().?)         --> 1.5
 - Write: `json.stringify(v)` is compact and `json.stringify(v, 2)` puts each element on its own line. NaN and infinities become `null`. A float uses the shortest digits that read back as the same value, without a trailing `.0`, and an exponent below `1e-6` or from `1e21` (`1e+21`).
 - Convert: `json.encode(x)` and `json.from(x)` take a Cyber value: numbers, `bool`, `str`, slices, structs (fields in order), optionals (`none` is `null`), enums (the case name), choices (`{"case": payload}`) and `Map` with `str` keys (sorted). An `r64` from 2^63, which does not fit `int`, becomes a `number` with its unsigned digits (`18446744073709551615`). Pass a borrow for a value that can not be copied: `json.encode(&map)`.
 
-`json.to(T, v)` converts a `Value` back to a Cyber type, and `json.decode(T, src)` parses and converts in one step. It takes the same types as `from`, except `Array` and fixed size arrays. A struct field must be present unless it has a default value (`port int = 8080`, a missing member takes it) or is an optional (a missing member is `none`), and members that are not fields are ignored. An integer type takes a whole float such as `3e2`, a float type takes an integer, and `str` takes any number as its text, so a large ID can be read whole whatever its size. On failure it returns `error.Type` (another kind of value or an unknown case name), `error.MissingField` or `error.Overflow` (a number out of the type's range), and a `json.Diag` tells where through `path`:
+`json.to(T, v)` converts a `Value` back to a Cyber type, and `json.decode(T, src)` parses and converts in one step. It takes the same types as `from`, except `Array` and fixed size arrays. A struct field must be present unless it has a default value (`port int = 8080`, a missing member takes it) or is an optional (a missing member is `none`), and members that are not fields are ignored. An integer type takes a whole float such as `3e2`, a float type takes an integer, and `str` takes any number as its text, so a large ID can be read whole whatever its size. On failure it returns `error.Type` (another kind of value or an unknown case name), `error.MissingField` or `error.Overflow` (a number out of the type's range, such as `1e39` for `f32`; a number too small for `f32` becomes 0), and a `json.Diag` tells where through `path`:
 ```cy
 type User:
     id    int
@@ -4872,7 +4877,7 @@ start := time.monotonic()
 work()
 print((time.monotonic() - start).format())   --> 1.204s
 ```
-A `Duration` is made with `time.nanos(n)`, `micros`, `millis`, `seconds`, `minutes`, `hours` and `days` (24 hours). It adds, subtracts, negates, multiplies by an `int` and compares. `d.secs()` and `d.millis()` return it as a whole number rounded toward zero, `d.to_float()` in seconds, and `d.format()` as text such as `1h2m3.5s`.
+A `Duration` is made with `time.nanos(n)`, `micros`, `millis`, `seconds`, `minutes`, `hours` and `days` (24 hours). It adds, subtracts, negates, multiplies by an `int` and compares. A result out of the range of `Duration`, about 10000 years either way, panics with 'The duration is out of range.'. `d.secs()` and `d.millis()` return it as a whole number rounded toward zero, `d.to_float()` in seconds, and `d.format()` as text such as `1h2m3.5s`.
 
 A `Time` has no calendar fields. `t.utc()` and `t.to_offset(minutes)` return a `DateTime`, which has `year()`, `month()` (1 to 12), `day()`, `hour()`, `minute()`, `second()`, `nanosecond()`, `offset()`, `weekday()`, `day_of_year()` and `date()`. `dt.time()` returns the instant, and `time.unix(sec)`, `time.unix(sec, nsec)`, `time.unix_millis(ms)`, `t.unix()` and `t.unix_millis()` convert between a `Time` and Unix time. `dt.to_offset(m)` is the same instant at another offset, `dt.replace_offset(m)` the same date and time of day at another offset. Two `DateTime` values are `==` only when the offset is the same too, and they have no `<`. Compare the instants:
 ```cy

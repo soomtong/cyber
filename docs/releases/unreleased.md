@@ -169,6 +169,62 @@ F-170(위 "갈래가 주는 빌림의 주인")이 남긴 구멍 셋이다.
   another active borrow to `a`.'와 'Cannot pass an exclusive borrow of `a` with another argument that borrows `a`.'. 확인:
   `memory/borrow_branch_store.cy`와 `borrow_branch_{field,elem,arg,arg_ex}_error.cy`.
 
-남은 것: 템플릿 함수(`matchGenericFuncRt`)는 인자끼리 배타 빌림 충돌을 검사하지 않는다(`f(int, &a[0], &&a)`가 컴파일된다, 갈래와
-무관한 기존 구멍). `if o |q|: r = q`는 '`r` can not outlive `q`.'로 막힌다(보수적, 캡처를 주인에 묶지 않음). 복합 대입
-(`arr[say(1)] += 2`)은 좌변을 두 번 계산한다.
+이 셋을 고치며 찾은 것(템플릿 함수 인자, 언랩 캡처, 복합 대입)은 아래 절에서 고쳤다.
+
+## 리뷰가 미룬 후보와 수정 중 찾은 결함 (2026-11-22)
+
+위 두 절의 리뷰가 10건 제한으로 미룬 후보와, 그 10건을 고치며 찾은 결함이다.
+
+빌림 검사(깨지는 변경):
+
+- 템플릿 함수의 인자 충돌: `fn f(%T type, r &T, b &&Array[T])`에 `f(int, &a[0], &&a)`가 컴파일돼, `f`가 `b`를 늘리면 `r`이
+  해제된 메모리를 읽었다. 인자 owner 충돌 검사가 `matchFuncSig`에만 있었다. 검사를 `ArgBorrows`로 떼어 `matchGenericFuncRt`도
+  쓴다. 추론 매개변수(`%R`), 갈래 빌림, 배타 수신자의 제네릭 메서드(`b.add_from(&b.items[0])`)도 같다. 오류는 'Cannot pass an
+  exclusive borrow of `a` with another argument that borrows `a`.'. 확인: `memory/borrow_generic_arg.cy`와
+  `borrow_generic_{arg_ex,arg_branch,method_arg}_error.cy`.
+- 언랩 캡처: `if o |q|: r = q`(`o`는 `?&int`)가 '`r` can not outlive `q`.'로 막혔다. 이제 `if` · `while` 언랩 캡처는 `switch`
+  캡처처럼 옵션이 빌린 대상을 빌린다. 값 캡처의 빌림 `r = &q`는 그대로 오류다.
+- 빌림 벡터: `[N]&T`가 빌림 컨테이너가 아니어서 검사에서 빠졌다. 블록 안 `r = [1]&int{&y}`가 블록 밖에서 쓰레기 값을 읽었고,
+  `xs := [1]&int{&a[0]}; a << 4`도 컴파일됐다. 이제 빌림 벡터는 빌림 컨테이너이고 리터럴은 원소마다 주인을 빌린다. core
+  `Vector.next` · `Span.next`가 `scope`가 돼 `for xs |p|`, `for xs[1..] |p|`로 돌 수 있다(전에는 'Returning a borrow container
+  requires a `scope` modifier.'). 캡처는 벡터가 빌린 대상을 빌린다.
+- 빌림 컨테이너의 복사(`r = h`)가 원본의 첫 주인만 이어받아 `a << 4`가 통과했다. 이제 모든 주인을 이어받는다(`copyBorrowLoans`).
+- 확인: `memory/borrow_unwrap_capture.cy`, `borrow_for_vector.cy`와 `borrow_{unwrap_capture,while_capture,for_vector,for_span,
+  vector_lit,copy_loans}_*_error.cy`. `r = xs[0]`, `r = h.b`는 아직 컨테이너 자신을 주인으로 본다(보수적).
+
+평가:
+
+- 복합 대입이 좌변의 수신자와 인덱스를 두 번 계산했다(`arr[say(1)] += 2`가 `say(1)`을 두 번, `getr(log, p).a += 1`이 `g g`).
+  `x op= y`를 `x = x op y`로 분석하며 좌변을 다시 분석했다. 이제 부작용이 있을 수 있는 수신자와 인덱스를 우변보다 먼저 숨은 지역에
+  한 번 담는다(`stabilizeOpAssignLeft`). 모든 복합 연산자, Map 키(`@index` · `@set_index`), 중첩 인덱스, 포인터 역참조에 적용된다.
+  변수 · 필드 경로만의 좌변은 바이트코드가 그대로다. 순수로 보는 연산식 인덱스(`a[i + 1]`)는 두 번 분석하므로 부작용이 있는
+  사용자 연산자 오버로드는 두 번 돈다. 확인: `functions/eval_order.cy`.
+
+호스트를 끝내던 입력(이제 스크립트 panic):
+
+- `str.init_rune(0x200000)`: 0x200000..0x3FFFFF가 검사를 지나 `u21` 캐스트에서 죽었다. 음수, 0x10FFFF 초과, surrogate는
+  'Invalid rune: N'이다(전에는 'InvalidRune').
+- `'héllo'.seek_pos(-1)`: 음수나 범위를 넘는 n은 'Out of bounds rune index: N'이다. `seek_pos(룬 개수)`는 ASCII 문자열에서도
+  길이를 돌려준다(전에는 UTF-8 문자열만). `str.rune_str_at`이 끝에서 잘린 UTF-8 시퀀스에서 문자열 밖을 읽던 것도 고쳐 첫 바이트
+  하나를 돌려준다.
+- `Raw.fmt`의 64자리를 넘는 `width`: 고정 버퍼에 패딩해 죽었다. 이제 어떤 폭이든 채운다. 음수 폭은 'Invalid width: N', 128
+  이상의 `pad`는 'Invalid pad: N, expected an ASCII rune'.
+- 확인: `core/str_init_rune_{invalid,surrogate}_panic.cy`, `core/str_seek_pos_neg_panic.cy`, `core/raw_fmt_neg_width_panic.cy`,
+  `core/strings.cy`, `core/strings_utf8.cy`, `core/byte.cy`.
+
+표준 라이브러리:
+
+- `time.Duration`의 `*`: 음수 Duration에 큰 `n`을 곱하면 결과가 범위 안이어도 'The duration is out of range.'였다
+  (`time.nanos(-1) * 1000000000000000000`). 음수 Duration은 초를 하나 내려 저장하는데, 검사가 그 초의 절댓값을 봤다. 크기끼리
+  곱하고 부호를 붙인다. 확인: `modules/time.cy`.
+- `json.to(f32, v)` · `json.decode(f32, src)`: `f32` 범위를 넘는 유한한 수(`1e39`)가 오류 없이 `inf`였다. 이제 `error.Overflow`와
+  'The number `1e+39` does not fit `f32`.'. 너무 작은 수는 Go처럼 0으로 반올림한다. 확인: `modules/json.cy`.
+
+호스트 · 도구:
+
+- `cyber-lsp`가 stdout 쓰기에 실패하면(클라이언트가 스트림을 닫음) 응답 버퍼를 두 번 해제했다. 이제 남은 응답을 한 번씩 해제하고
+  'cyber-lsp: can not write a message: ...'를 stderr에 낸 뒤 종료 코드 1로 끝난다(`transport.sendAll`, 단위 테스트).
+- `cl_vm_set_stack_limit`에 큰 값을 넘기면 32비트 대상(wasm32)에서 `@intCast` overflow panic이었다. `usize`를 넘는 값은 `usize`
+  최댓값(제한 없음과 같다)으로 맞춘다. `cl_vm_set_memory_limit`도 같은 helper를 쓴다.
+- 기존 문제(고치지 않음): `zig build lib -Doptimize=ReleaseSafe -Dtarget=wasm32-freestanding`는 Zig 0.17.1 std 안의 오류 71개로
+  실패한다(23df09eb에서도 같다). wasm32-wasi의 `build-test`는 빌드된다.

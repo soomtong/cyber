@@ -259,6 +259,7 @@ fn test_memory(run: *Runner) void {
     run.case("memory/move_assign_break_error.cy");
     run.case("memory/move_assign_try_error.cy");
     run.case("memory/slice_reuse_assign.cy");
+    run.case("memory/slice_reuse_assign_jump.cy");
     run.case("memory/unwrap_else_nocopy.cy");
     run.case("memory/unwrap_else_nocopy_var.cy");
     run.case("memory/slice_reuse_member.cy");

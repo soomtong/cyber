@@ -354,6 +354,10 @@ fn reuseSliceBuffer(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, rec_res:
     const text = sema_stmt.stmtText(c, ctx.stmts, ctx.idx) orelse return null;
     if (sema_assign.movesIntoAssign(c, id) and assignsToName(ctx.stmts[ctx.idx], local.name())) {
         if (sema_stmt.countNames(text, local.name()) != 2) return null;
+        // The move of the local comes before the arguments, and the assignment gives it a value after them. A jump
+        // from in between would arrive where the local is declared with the local moved (`checkAssignMoveJump`).
+        // The user wrote no move, so the statement copies instead.
+        if (canLeaveAssign(c, text, id)) return null;
     } else {
         if (id < c.block().varStart) return null;
         if (sema_stmt.countNames(text, local.name()) != 1) return null;
@@ -457,6 +461,28 @@ pub fn reuseMemberSliceBuffer(c: *cy.Chunk, left_n: *ast.Node, right: *ast.Node,
     c.slice_void_call = saved_void;
     _ = try c.ir.pushStmt(.discard, node, .{ .expr = own_call.ir });
     return true;
+}
+
+/// Whether the statement with the source `text`, an assignment to the local `id`, can jump from its right side to
+/// where the local is still declared: a `break` or `continue` (in an `?else:` block), or a failing `!` that goes
+/// to the handler of a `try` statement or leaves a `scope` block around the declaration. A `return` and a `!` that
+/// returns from the function are not such jumps. Like the other checks of the last use, this reads the text: a
+/// word in a string or a comment counts too, which only costs the reuse.
+fn canLeaveAssign(c: *cy.Chunk, text: []const u8, id: sema.LocalId) bool {
+    if (sema_stmt.countNames(text, "break") > 0 or sema_stmt.countNames(text, "continue") > 0) return true;
+    const try_ctx = c.proc().try_ctx orelse return false;
+    // A local of the body leaves with the body.
+    if (id >= c.semaBlocks.items[try_ctx.body_block].varStart) return false;
+    var pos: usize = 0;
+    while (std.mem.indexOfScalarPos(u8, text, pos, '!')) |idx| {
+        pos = idx + 1;
+        const rest = text[pos..];
+        // `!=`, and `!else` with a default value, which does not propagate.
+        if (rest.len > 0 and rest[0] == '=') continue;
+        if (std.mem.startsWith(u8, rest, "else") and (rest.len == 4 or !sema_move.isIdentChar(rest[4]))) continue;
+        return true;
+    }
+    return false;
 }
 
 /// Whether `stmt` is `name = ...`.

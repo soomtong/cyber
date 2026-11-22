@@ -282,3 +282,22 @@ F-170(위 "갈래가 주는 빌림의 주인")이 남긴 구멍 셋이다.
 - (동작 변경 없음, 결정) `await` 없이 버린 future의 스레드는 아직 큐에 있어도 끝까지 돈다(`_ = spawn log(msg)`). 프로그램이 끝날 때
   남은 스레드는 멈춘다. 취소는 나중에 명시적 API로 한다. 확인: lib 테스트 'A spawned thread runs to its end when its future is
   dropped before it started.'
+
+빌림 컨테이너의 남은 구멍(모두 전에는 컴파일돼 쓰레기 값이나 해제된 메모리를 읽었다):
+
+- 다른 컨테이너의 자리를 빌린 컨테이너(`h := H{b=&w.x}`, `h.b = &w.x`)의 복사가 `w`보다 오래 살 수 있었다. 바깥 `r = h`, 바깥
+  `h = H{b=&w.x}`, `h.o = &w.x` 뒤 `if h.o |q|: r = q`는 '`r` can not outlive `h`.' 같은 컴파일 오류다. `semaWrapSome`이 자리
+  정보를 버리던 것도 고쳤다.
+- 컨테이너의 빌림(`hr := &h`)을 거친 자리 빌림(`&hr.b`)과 그 복사(`r = hr`)도 컨테이너보다 오래 살 수 없다.
+- 비어휘적 수명이 컨테이너의 빌림을 너무 일찍 끝냈다. `hr := &h`가 살아 있는 동안 `h`가 나중에 빌린 것(`h.b = &z`,
+  `h.b = &a[0]`)도 계속 빌린 것으로 본다. 전에는 `a << 4` 뒤 `hr.b.*`가 해제된 메모리를 읽었다.
+- `pp.* = &z`처럼 빌림을 거쳐 넣은 빌림도 필드 대입처럼 수명과 대여를 검사한다.
+- `scope` 함수가 지역의 자리(`return &w.x`, `&w.x`를 담은 컨테이너, 값으로 받은 `scope` 매개변수의 `&h.x`)를 돌려주면
+  'Expected to return a borrow from the same scope as `p`.'다.
+- 깨지는 변경: 함수는 매개변수 뒤의 값에 다른 매개변수의 빌림을 넣지 못한다(`fn f(h &&H, p &int): h.b = p`는 'The value
+  behind `h` can not outlive `p`.'). 넣을 매개변수를 `scope`로 선언하면 되고, 부르는 쪽은 다른 빌림 인자가 그 `scope` 인자보다
+  오래 살지 않는지 검사한다. 전에는 `fn (&&Outer) set(scope p &int)` 꼴도 부르는 쪽 검사가 없었다.
+- 확인: `memory/borrow_place_valid.cy`와 `borrow_{place_copy,place_field_copy,place_assign,via_place,via_copy,unwrap_place,
+  last_use_via,last_use_via_lend,deref_store_outlive,deref_store_lend,return_place,return_place_field,return_param_place,
+  param_store,scope_param_store}_error.cy`. 결정 `project_borrow_model.md`. 알고 둔 오탐 둘(자리를 담은 지역이 살아 있는 동안
+  다른 컨테이너도 비어휘적으로 끝나지 않음, `hr := &h`의 `return hr.b`)은 `borrow_places`를 지역 id 목록으로 바꾸면 줄어든다.

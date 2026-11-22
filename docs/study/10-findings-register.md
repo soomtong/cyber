@@ -226,6 +226,12 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 | F-186 | 음수 Duration × 큰 n이 범위 안인데 panic, `json.to(f32)` 범위 초과가 `inf` | 음수 Duration의 초 표현을 절댓값으로 검사, f32 변환 검사 없음 | 0.4.0..0.4.17 리뷰 후보 · 수정 중 발견(2026-11-22) | 낮음 | 2026-11-22 수정. 크기 곱, `error.Overflow` |
 | F-187 | `cyber-lsp` stdout 쓰기 실패 시 응답 이중 해제, wasm32 `cl_vm_set_stack_limit` overflow | `defer free` 뒤 큐가 남음, `@intCast` | 0.4.0..0.4.17 리뷰 후보 · 수정 중 발견(2026-11-22) | 중간 | 2026-11-22 수정. `transport.sendAll`, clamp |
 | F-188 | `spawn` 결과를 worker가 부모 힙에 잠금 없이 복사, 버린 Future에 해제 후 쓰기 | 결과 복사 위치, Future 소유권 규약 없음 | 0.4.0..0.4.17 리뷰 후보 · 수정 중 발견(2026-11-22) | 높음. 메모리 손상 | 2026-11-22 수정. `await` 쪽 복사, 상태 `cmpxchg`(깨지는 변경: 참조 있는 option · result 결과) |
+| F-189 | wasm32-freestanding 라이브러리 빌드가 Zig std 오류로 실패 | `stdx.io()`가 freestanding에서도 `std.Io.Threaded`(d64bcde5), CI가 빌드하지 않음 | 남은 것 정리(2026-11-22) | 중간. 웹 빌드 불가 | 2026-11-22 수정. `std.Io.failing`, CI 단계 |
+| F-190 | `Int[24]` 등 지원하지 않는 비트 크기, `meta.eval`, `bind_lib` 거부가 호스트를 끝냄. 4 GB 넘는 문자열의 u32 캐스트 | `std.debug.panic` · `@panic`, u32 인덱스 | 남은 것 정리(2026-11-22) | 중간. 호스트 종료 | 2026-11-22 수정. 컴파일 오류 · usize |
+| F-191 | 복합 대입 좌변의 사용자 연산자 · `@get` · `@index`가 두 번 실행 | 순수로 본 식도 호출할 수 있음 | 남은 것 정리(2026-11-22) | 낮음 | 2026-11-22 수정. `ir.Buffer.call_count` |
+| F-192 | `&T` 수신자 단항 연산자가 'Expected argument `&Ix`, found `Ix`' | `semaUnExpr`가 수신자 경로를 쓰지 않음 | 남은 것 정리(2026-11-22) | 낮음 | 2026-11-22 수정. `semaCallFuncSymRec` |
+| F-193 | spawn 인자 · 결과의 보내기 규칙 불일치, `FutureSyncState`가 VM 수명 동안 쌓임 | 규칙이 둘, 해제 시점 없음 | 남은 것 정리(2026-11-22) | 중간. 메모리 증가 | 2026-11-22 수정. `@sendable`, `releaseSharedState` |
+| F-194 | 빌림 컨테이너 구멍 일곱: 다른 컨테이너 자리의 복사, 빌림을 거친 자리, 비어휘적 수명, 언랩 캡처, `pp.* =`, 지역 자리 반환, 매개변수 사이 저장 | 자리 정보 · 대여 전파 · 검사 누락 | 남은 것 정리(2026-11-22) | 높음. 해제된 메모리 읽기 | 2026-11-22 수정. `borrow_places`, 부르는 쪽 `scope` 검사(깨지는 변경) |
 
 ## 우선순위 한 장 요약
 

@@ -169,6 +169,11 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   범위 초과 `inf`, wasm32의 `cl_vm_set_stack_limit` `@intCast`)는 손대지 않았다.
   수정 중 새로 찾은 것: 복합 대입의 좌변 두 번 계산(`arr[say(1)] += 2`), 템플릿 함수 인자의 배타 빌림 충돌 검사 없음
   (`matchGenericFuncRt`), `if o |q|: r = q`의 보수적 거짓 오류, `for` 캡처의 빌림 주인(시험 못 함).
+- [x] 위 항목의 남은 것을 정리했다(2026-11-22, 사용자: "continue", F-189..F-194). `unreleased.md` 끝의 "남은 것의 정리" 절.
+  spawn 인자 · 결과는 한 규칙(`@sendable`), 버린 future는 끝까지 돈다(결정), `FutureSyncState` 해제. wasm32-freestanding 빌드 복구와
+  CI 단계 추가. 빌림 컨테이너 구멍 일곱(깨지는 변경: 매개변수 뒤에는 `scope` 매개변수만 저장).
+  남은 것: `borrow_places`가 지역 id 목록이 아니어서 생기는 오탐 둘, 사용자 정의 `scope` `next`의 `for` 캡처는 이터러블에 묶음,
+  시험 분석이 끌어올린 문장은 남는다는 가정(`project_eval_order.md`), 스크립트 취소 API 없음.
 - [x] 위 항목의 미룬 후보와 새로 찾은 것을 모두 고쳤다(2026-11-22, 사용자: "continue", 서브 에이전트 일곱, F-182..F-188).
   `unreleased.md` "리뷰가 미룬 후보와 수정 중 찾은 결함" 절. spawn 결과 소유권은 결정 `project_spawn_result_ownership.md`.
   남은 것: spawn 인자 쪽 `@send`의 참조 있는 option · result(빈 본문), 큐에 있는 작업은 future를 버려도 끝까지 돈다,

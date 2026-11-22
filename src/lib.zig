@@ -421,7 +421,31 @@ export fn cl_vm_set_fuel(vm: *cy.VM, fuel: i64) void {
 }
 
 export fn cl_vm_set_memory_limit(vm: *cy.VM, bytes: i64) void {
-    vm.memAccount().limit.store(if (bytes <= 0) 0 else @intCast(@min(bytes, std.math.maxInt(usize))), .monotonic);
+    vm.memAccount().limit.store(if (bytes <= 0) 0 else clampPositive(usize, bytes), .monotonic);
+}
+
+/// A positive `i64` of the C API as `Int`. A value that does not fit (`usize` of a 32-bit target) is the largest
+/// `Int`: a limit that high is no limit there.
+fn clampPositive(comptime Int: type, value: i64) Int {
+    return @intCast(@min(value, std.math.maxInt(Int)));
+}
+
+/// The stack limit in slots for `bytes`. Zero or less is no limit.
+fn stackLimitSlots(comptime Int: type, bytes: i64) Int {
+    if (bytes <= 0) return std.math.maxInt(Int);
+    return clampPositive(Int, @divTrunc(bytes, @sizeOf(cy.Value)));
+}
+
+test "A limit of the C API that does not fit a 32-bit usize is the largest one." {
+    const t = std.testing;
+    try t.expectEqual(@as(u32, std.math.maxInt(u32)), stackLimitSlots(u32, std.math.maxInt(i64)));
+    try t.expectEqual(@as(u32, std.math.maxInt(u32)), stackLimitSlots(u32, 1 << 40));
+    try t.expectEqual(@as(u32, std.math.maxInt(u32)), stackLimitSlots(u32, 0));
+    try t.expectEqual(@as(u32, std.math.maxInt(u32)), stackLimitSlots(u32, -1));
+    try t.expectEqual(@as(u32, 128), stackLimitSlots(u32, 1024));
+    try t.expectEqual(@as(u64, 1 << 37), stackLimitSlots(u64, 1 << 40));
+    try t.expectEqual(@as(u32, std.math.maxInt(u32)), clampPositive(u32, 1 << 40));
+    try t.expectEqual(@as(u32, 4096), clampPositive(u32, 4096));
 }
 
 export fn cl_vm_memory_used(vm: *cy.VM) usize {
@@ -429,11 +453,7 @@ export fn cl_vm_memory_used(vm: *cy.VM) usize {
 }
 
 export fn cl_vm_set_stack_limit(vm: *cy.VM, bytes: i64) void {
-    if (bytes <= 0) {
-        vm.main_thread.c.stack_limit = std.math.maxInt(usize);
-    } else {
-        vm.main_thread.c.stack_limit = @intCast(@divTrunc(bytes, @sizeOf(cy.Value)));
-    }
+    vm.main_thread.c.stack_limit = stackLimitSlots(usize, bytes);
 }
 
 export fn cl_vm_eval_path(vm: *cy.VM, uri: C.Bytes, config: C.EvalConfig, out: *C.EvalResult) C.ResultCode {

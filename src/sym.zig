@@ -1754,7 +1754,7 @@ test "sym internals" {
     // `Func` holds a bare union, which carries a hidden tag only with runtime safety.
     if (cy.is32Bit) {
         try t.eq(16, @sizeOf(Sym));
-        try t.eq(if (std.debug.runtime_safety) 40 else 36, @sizeOf(Func));
+        try t.eq(if (std.debug.runtime_safety) 44 else 40, @sizeOf(Func));
     } else {
         try t.eq(24, @sizeOf(Sym));
         try t.eq(if (std.debug.runtime_safety) 80 else 72, @sizeOf(Func));

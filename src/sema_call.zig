@@ -382,7 +382,12 @@ fn reuseSliceBuffer(c: *cy.Chunk, sym: *cy.sym.FuncSym, rec: *ast.Node, rec_res:
     _ = try c.ir.pushStmt(.discard, node, .{ .expr = call.ir });
     // An in-place method that does not grow the buffer can leave it shared (`remove` of the last element, `append`
     // of an empty span). The result of a new-list method shares its buffer with no other value.
-    const own_call = try c.semaCallFuncSymRec(own_sym.cast(.func), rec, try sema_expr.semaLocal(c, tmp.id, rec), &.{}, false, node);
+    c.reuse_call = .{ .node = node, .written = sym, .in_place = in_sym.cast(.func), .record = false };
+    const own_call = c.semaCallFuncSymRec(own_sym.cast(.func), rec, try sema_expr.semaLocal(c, tmp.id, rec), &.{}, false, node) catch |err| {
+        c.reuse_call = saved_reuse;
+        return err;
+    };
+    c.reuse_call = saved_reuse;
     c.slice_void_call = saved_void;
     _ = try c.ir.pushStmt(.discard, node, .{ .expr = own_call.ir });
     return try sema_move.semaMove(c, try sema_expr.semaLocal(c, tmp.id, rec), rec);
@@ -457,7 +462,13 @@ pub fn reuseMemberSliceBuffer(c: *cy.Chunk, left_n: *ast.Node, right: *ast.Node,
     c.reuse_call = saved_reuse;
     _ = try c.ir.pushStmt(.discard, node, .{ .expr = call.ir });
     // See `reuseSliceBuffer`: the result of a new-list method shares its buffer with no other value.
-    const own_call = try c.semaCallFuncSymRec(own_sym.cast(.func), recv, try c.semaExprSkipSym(left_n, .{}), &.{}, false, right);
+    const own_place = try c.semaExprSkipSym(left_n, .{});
+    c.reuse_call = .{ .node = right, .written = written_sym.cast(.func), .in_place = in_sym.cast(.func), .record = false };
+    const own_call = c.semaCallFuncSymRec(own_sym.cast(.func), recv, own_place, &.{}, false, right) catch |err| {
+        c.reuse_call = saved_reuse;
+        return err;
+    };
+    c.reuse_call = saved_reuse;
     c.slice_void_call = saved_void;
     _ = try c.ir.pushStmt(.discard, node, .{ .expr = own_call.ir });
     return true;
@@ -545,7 +556,7 @@ pub fn checkCallee(c: *cy.Chunk, func: *cy.Func, node: *ast.Node) !void {
 
 pub fn sema_call_ir(c: *cy.Chunk, func: *cy.Func, args: []const *ir.Expr, node: *ast.Node) !sema.ExprResult {
     try checkCallee(c, func, node);
-    if (c.compiler.record_refs) cy.refs.recordCall(c, node, func);
+    recordCallRef(c, node, func);
     markHotCall(c, func);
     try cy.global_init.recordCall(c, func);
     try semaCancelHoist(c);
@@ -861,7 +872,38 @@ pub const ReuseCall = struct {
     node: *ast.Node,
     written: *cy.sym.FuncSym,
     in_place: *cy.sym.FuncSym,
+    /// False for the `own_buffer` call after the in-place one: the script wrote no such call (`recordCallRef`).
+    record: bool = true,
+
+    /// The overload of the method that the script wrote for the overload `func` of the in-place method. The
+    /// overloads of the new-list method are declared in the order of the in-place ones.
+    pub fn writtenFunc(self: ReuseCall, func: *cy.Func) ?*cy.Func {
+        var in_place: ?*cy.Func = self.in_place.first;
+        var written: ?*cy.Func = self.written.first;
+        while (in_place != null and written != null) {
+            if (in_place.? == func) return written.?;
+            in_place = in_place.?.next;
+            written = written.?.next;
+        }
+        return null;
+    }
 };
+
+/// Records the call `node` to `func` for the language server (`refs.recordCall`). The calls that the reuse of a
+/// slice buffer makes have the node of the call that the script wrote: the in-place method is recorded as the
+/// written one, and `own_buffer` is not recorded. Two functions for one node would leave it without the names of
+/// its parameters (`refs.paramNames`).
+pub fn recordCallRef(c: *cy.Chunk, node: *ast.Node, func: *cy.Func) void {
+    if (!c.compiler.record_refs) return;
+    var rec_func = func;
+    if (c.reuse_call) |reuse| {
+        if (reuse.node == node) {
+            if (!reuse.record) return;
+            rec_func = reuse.writtenFunc(func) orelse func;
+        }
+    }
+    cy.refs.recordCall(c, node, rec_func);
+}
 
 const EmbeddedResult = struct {
     field_idx: usize,

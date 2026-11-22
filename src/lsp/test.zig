@@ -1744,11 +1744,30 @@ test "Inlay hints name the parameters at the arguments of a call." {
         \\print(gen[int](3))
         \\print(gen[float](1.5))
         \\
+        \\fn lists(v int) -> int:
+        \\    xs := []int{1}
+        \\    ys := xs.inserted(0, v)
+        \\    xs = xs.inserted(0, v)
+        \\    zs := xs.inserted(0, v)
+        \\    return ys.len() + zs.len()
+        \\
+        \\type Bag struct:
+        \\    xs []int
+        \\
+        \\fn (&&Bag) put(v int):
+        \\    self.xs = self.xs.inserted(0, v)
+        \\    ws := self.xs.inserted(0, v)
+        \\
+        \\fn bags(v int):
+        \\    b := Bag{xs=[]int{1}}
+        \\    b.xs = b.xs.inserted(0, v)
+        \\    b.put(1)
+        \\
     );
     _ = try s.flush();
     const body = try std.fmt.allocPrint(arena,
         \\{{"jsonrpc":"2.0","id":11,"method":"textDocument/inlayHint","params":{{"textDocument":{{"uri":"{s}"}},
-        \\"range":{{"start":{{"line":0,"character":0}},"end":{{"line":30,"character":0}}}}}}}}
+        \\"range":{{"start":{{"line":0,"character":0}},"end":{{"line":60,"character":0}}}}}}}}
     , .{main_uri});
     const out = try s.send(body);
     // The names of the parameters, not the inferred types.
@@ -1760,7 +1779,7 @@ test "Inlay hints name the parameters at the arguments of a call." {
     // `fiber worker(1, 2)` calls `@new_fiber`, whose parameters are not written. `area(x, x)` in the template calls
     // a different overload in each instance.
     // `height` says its parameter already. The float overload has names of its own.
-    try t.expectEqual(@as(usize, 3), hints.len);
+    try t.expectEqual(@as(usize, 15), hints.len);
     try t.expectEqualStrings("width:", str(hints[0], &.{"label"}));
     try t.expectEqual(@as(i64, 2), int(hints[0], &.{"kind"}));
     try t.expectEqual(@as(i64, 7), int(hints[0], &.{ "position", "line" }));
@@ -1769,6 +1788,20 @@ test "Inlay hints name the parameters at the arguments of a call." {
     try t.expectEqualStrings("radius:", str(hints[1], &.{"label"}));
     try t.expectEqualStrings("turns:", str(hints[2], &.{"label"}));
     try t.expectEqual(@as(i64, 16), int(hints[2], &.{ "position", "character" }));
+    // A new-list method of a slice at the last use of its receiver is checked as the in-place method and a call of
+    // `own_buffer` (the reuse of the buffer): the hints are the ones of the method that is written. In order: not
+    // the last use, `xs = xs.inserted(..)`, the last use, a member in a method, not reused, a member of a local.
+    const slice_hints = [_][2]i64{ .{ 22, 22 }, .{ 23, 21 }, .{ 24, 22 }, .{ 31, 31 }, .{ 32, 27 }, .{ 36, 25 } };
+    for (slice_hints, 0..) |pos, i| {
+        const idx = hints[3 + i * 2];
+        const val = hints[4 + i * 2];
+        try t.expectEqualStrings("idx:", str(idx, &.{"label"}));
+        try t.expectEqual(pos[0], int(idx, &.{ "position", "line" }));
+        try t.expectEqual(pos[1], int(idx, &.{ "position", "character" }));
+        try t.expectEqualStrings("val:", str(val, &.{"label"}));
+        try t.expectEqual(pos[0], int(val, &.{ "position", "line" }));
+        try t.expectEqual(pos[1] + 3, int(val, &.{ "position", "character" }));
+    }
 }
 
 /// The code actions for the diagnostics of `text`.

@@ -689,7 +689,7 @@ pub fn matchFuncSym2(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const 
             if (c.compiler.config.deny_spawn and func_sym == c.sema.spawn_sym and !c.is_builtin) {
                 return c.reportErrorFmt("`spawn` is not allowed. The host disabled threads for this script (`deny_spawn`). Use `fiber` or a `scope` block for concurrent work.", &.{}, node);
             }
-            if (c.compiler.record_refs) cy.refs.recordCall(c, node, res.func);
+            sema_call.recordCallRef(c, node, res.func);
             sema_call.markHotCall(c, res.func);
             try cy.global_init.recordCall(c, res.func);
             try sema_call.semaCancelHoist(c);
@@ -1472,17 +1472,8 @@ pub fn reportCallFuncMismatch2(c: *cy.Chunk, pre_args: []const Argument, end_arg
     var func = func_;
     if (c.reuse_call) |reuse| {
         if (reuse.node == node) {
-            // The script wrote the new-list method. Its overloads are declared in the order of the in-place ones.
-            var in_place: ?*cy.Func = reuse.in_place.first;
-            var written: ?*cy.Func = reuse.written.first;
-            while (in_place != null and written != null) {
-                if (in_place.? == func) {
-                    func = written.?;
-                    break;
-                }
-                in_place = in_place.?.next;
-                written = written.?.next;
-            }
+            // The script wrote the new-list method.
+            func = reuse.writtenFunc(func) orelse func;
         }
     }
     return reportCallFuncMismatch3(c, pre_args, end_args, func.name(), func.sig, func, match_err, node);

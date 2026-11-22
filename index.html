@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.17-dev 1041-23df09e</div>
+    <div class="sub-title">v0.4.18-dev 1090-456527d</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -2234,6 +2234,7 @@ print(v.x)       --> 0
 print(v.y)       --> 0
 </code></pre>
 <p>The names in a default value are looked up where the type is declared: in its module, including private declarations, and among its template parameters (<code>v T = T(3)</code>). The locals of the code that writes the initializer are not visible to it, so a local <code>K</code> does not change the default <code>x int = K</code>.</p>
+<p>A default value is owned like a value written in the initializer: a default that reads a global or another place copies it, and one that reads a <code>NoCopy</code> value from a place is the compile error 'Cannot copy <code>Array[int]</code>, type implements <code>NoCopy</code>.' at the default.</p>
 <p><code>meta.has_field_default(T, name)</code> tells whether a field has a default value, and <code>meta.field_default(T, name)</code> evaluates it.</p>
 <p>Unlike a <code>struct</code>, a <code>cstruct</code> can default to their <a href="#zero-values" title="">zero values</a>.</p>
 <a href="#custom-types">^topic</a>
@@ -3585,6 +3586,7 @@ append_to(&a[2], &&a)
 fn append_to(elem &int, arr &&Array[int]):
     arr << elem.*
 </code></pre>
+<p>The same holds for a template function and a generic method (<code>fn f(%T type, r &T, b &&Array[T])</code>).</p>
 <p>While an exclusive borrow is stored in a local, no other borrow of the owner can be made, including the implicit <code>&self</code> borrow of a method call:</p>
 <pre><code class="language-cy">a := Array[int]{1, 2, 3}
 ex := &&a
@@ -3688,7 +3690,7 @@ f.mutate()
 <pre><code class="language-cy">fn (scope &FooArray) @index_addr(idx int) -> scope &Foo:
     return &self.inner[idx]
 </code></pre>
-<p>The <code>scope</code> binding informs the callsite that the returned borrow belongs to the same scope as a borrowed argument. This ensures the returned borrow's lifetime does not exceed the lifetime of the borrowed argument.</p>
+<p>The <code>scope</code> binding informs the callsite that the returned borrow belongs to the same scope as a borrowed argument. This ensures the returned borrow's lifetime does not exceed the lifetime of the borrowed argument. The returned value can not point into a local of the function, also not into a <code>scope</code> parameter that is passed by value (<code>return &w.x</code>). Every branch of the returned value (<code>if</code>, <code>switch</code>, <code>?else</code>, <code>!else</code>) must borrow from a <code>scope</code> parameter, whatever their order, and the same check applies to <code>?&T</code>, <code>!&T</code> and borrow containers: <code>return if (k == 1) &p[0] else &y</code> is the compile error 'Expected to return a borrow from the same scope as <code>p</code>.'</p>
 <p>Any type that contains a borrow member becomes a borrow container and requires the <code>scope</code> binding:</p>
 <pre><code class="language-cy">type FooIterator:
     rec &FooArray
@@ -3711,9 +3713,12 @@ begin:
     r = Ref{p=&y}
 --> error: `r` can not outlive `y`.
 </code></pre>
-<p>The same holds when the value is wrapped in an option (<code>var o ?Ref</code>), comes from an <code>if</code> or <code>switch</code> expression or a <code>?else</code> or <code>!else</code> default, or is assigned to a field or an element (<code>o.r = Ref{p=&y}</code>). A method can not store a borrow of one of its own locals behind a parameter: <code>self.r = Ref{p=&y}</code> is the compile error 'The value behind <code>self</code> can not outlive <code>y</code>.'</p>
-<p>A borrow that can come from one of several branches (<code>if (c) &y else &a[0]</code>) borrows from the owner of each branch: <code>a</code> can not be modified while the borrow is in use.</p>
-<p>A borrow that is read through a borrow container (<code>&&r</code>, <code>&r.p</code>) can not outlive the container either, even when the local that the container borrows from lives longer.</p>
+<p>The same holds when the value is wrapped in an option (<code>var o ?Ref</code>), comes from an <code>if</code> or <code>switch</code> expression or a <code>?else</code> or <code>!else</code> default, or is assigned to a field or an element (<code>o.r = Ref{p=&y}</code>). A function can not store a borrow of one of its own locals, or of another parameter, behind a parameter: <code>self.r = Ref{p=&y}</code> is the compile error 'The value behind <code>self</code> can not outlive <code>y</code>.' Only a <code>scope</code> parameter can be stored there (<code>fn (&&Outer) set(scope p &int): self.v = View{a=p}</code>), and the caller checks each other borrow argument as if the <code>scope</code> argument were assigned to its field: <code>o.set(&z)</code> is the compile error '<code>o</code> can not outlive <code>z</code>.' when <code>z</code> ends first.</p>
+<p>A borrow that can come from one of several branches (<code>if (c) &y else &a[0]</code>) borrows from the owner of each branch: <code>a</code> can not be modified while the borrow is in use. This holds also when the borrow is stored in a field or an element, or passed as an argument: <code>f(if (c) &y else &a[0], &&a)</code> is a compile error.</p>
+<p>A case capture of a <code>switch</code> borrows what the control borrows: a value capture <code>|p|</code> of a borrow payload borrows the value that the control borrows from, and a borrow capture <code>|&v|</code> borrows the local that holds the control. A borrow of a case local can not leave the case: <code>case .one |n| => &n</code> is the compile error 'The result of <code>switch</code> can not outlive <code>n</code>.'</p>
+<p>A borrow of a place in a borrow container (<code>&&r</code>, <code>&r.p</code>) points into the container, so it can not outlive the container either, even when the local that the container borrows from lives longer. A copy of a borrow that is read out of a container (<code>p = r.p</code>, <code>p = xs[i]</code>, <code>p = r.inner.p</code>, an option field <code>r.o</code>) borrows what the container borrows instead: it can outlive the container, but not the locals that the container borrows, and it keeps all of them borrowed. When the container can hold a borrow of a place in another borrow container (<code>H{b=&w.x}</code>, <code>h.b = &w.x</code>, or after <code>&&h</code> was taken), the copy can not outlive the container. The same holds for a borrow of a place that is read through a borrow of the container (<code>&hr.b</code> of <code>hr := &h</code>), and for a copy of a container that holds a borrow of a place in another container (<code>r = h</code> of <code>h := H{b=&w.x}</code>).</p>
+<p>An unwrap capture of <code>if</code> and <code>while</code> (<code>if o |q|:</code>) borrows what the option borrows, like a <code>switch</code> capture: <code>r = q</code> compiles when <code>r</code> does not outlive that owner. A borrow of a capture of a value (<code>r = &q</code>) can not leave the branch.</p>
+<p>A vector of borrows (<code>[2]&int</code>) is a borrow container: it lives only as long as the shortest lived local that its elements borrow, and it keeps all of them borrowed. It can be iterated, also through a span (<code>for xs[1..] |p|:</code>), and a capture borrows what the vector borrows. A copy of a borrow container (<code>r = h</code>) keeps all the owners of <code>h</code> borrowed, and it can not outlive any of them, also a borrow that was stored in <code>h</code> after it was declared (<code>h.b = &z</code>). A borrow stored through a borrow (<code>pp.* = &z</code>) is checked like one stored in a field.</p>
 <a href="#memory">^topic</a>
 <h3 id="sink-parameter"><code>sink</code> parameter. <a href="#sink-parameter">#</a></h3>
 <p>The <code>sink</code> modifier accepts and consumes a value argument: <em>This is not much different from a <code>move</code> operation, so this feature may be removed.</em></p>
@@ -4098,7 +4103,8 @@ print(spawn inc(3).await())    --> 4
 <p>A method is named through its type, with the receiver as the first argument: <code>spawn Job.run(job)</code>. <code>spawn job.run()</code> is a compile error, and so is an entry function that takes a borrow (<code>&T</code>): the arguments are sent to the new thread.</p>
 <p><code>spawn</code> returns a <code>Future[T]</code> where <code>T</code> is the return type of the entry function. If the runtime could not dispatch the thread, a panic is raised.
 The <code>Future</code> contains the asynchronous result of the new thread.
-A thread can not be stopped from the script and its status can not be queried. The <code>Future</code> is the only handle to it.</p>
+A thread can not be stopped from the script and its status can not be queried. The <code>Future</code> is the only handle to it.
+The result stays in the heap of the spawned thread until <code>await</code> copies it to the awaiting thread. A <code>Future</code> that is dropped without <code>await</code> frees the spawned thread and its result when the thread ends. The thread still runs to its end, also when it had not started yet: <code>_ = spawn log(msg)</code> runs <code>log</code>. Threads that are still running or queued when the program ends are stopped.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="sendable-values"><code>Sendable</code> values. <a href="#sendable-values">#</a></h3>
 <p>Values that can be transferred from one thread to another must be types that implement <code>Sendable</code>.</p>
@@ -4108,8 +4114,10 @@ A thread can not be stopped from the script and its status can not be queried. T
 <li><code>bool</code>, <code>float</code>, <code>f32</code>, <code>symbol</code>, <code>error</code> and enums.</li>
 <li><code>str</code>. The string is copied to the receiving thread.</li>
 <li>A struct that declares a <code>@send</code> method.</li>
+<li>A struct without references is sent as its bytes.</li>
+<li><code>?T</code> and <code>!T</code> if <code>T</code> can be sent.</li>
 </ul>
-<p>Sending another type is a compile error: <code>Expected sendable: []int</code>.</p>
+<p>Sending another type is a compile error: <code>Expected sendable: []int</code>. An option or a result is sent when its payload can be sent: <code>?str</code> and <code>!str</code> are sent with the <code>@send</code> of <code>str</code>, and <code>?[]int</code> is a compile error: <code>Expected sendable: ?[]int</code>. The arguments and the result follow the same rules.</p>
 <p>A struct is sent with its <code>@send</code> method. It receives the thread that the value is sent to and returns the value for that thread:</p>
 <pre><code class="language-cy">type Point:
     x int
@@ -4125,8 +4133,6 @@ print(spawn sum(Point{x = 1, y = 2}).await())    --> 3
 </code></pre>
 <p>These types are not <code>Sendable</code> yet: <em>Planned Feature</em></p>
 <ul>
-<li><code>?T</code> if <code>T</code> is <code>Sendable</code></li>
-<li><code>!T</code> if <code>T</code> is <code>Sendable</code></li>
 <li><code>[]T</code> if <code>T</code> is <code>Sendable</code>. <code>[]T</code> is cloned when sending.</li>
 <li><code>Array[T]</code> if <code>T</code>  is <code>Sendable</code></li>
 <li><code>Map[K, V]</code> if <code>K</code> and <code>V</code> are <code>Sendable</code></li>
@@ -4968,7 +4974,7 @@ print(x[1].number_text().?)         --> 1.5
 <li>Write: <code>json.stringify(v)</code> is compact and <code>json.stringify(v, 2)</code> puts each element on its own line. NaN and infinities become <code>null</code>. A float uses the shortest digits that read back as the same value, without a trailing <code>.0</code>, and an exponent below <code>1e-6</code> or from <code>1e21</code> (<code>1e+21</code>).</li>
 <li>Convert: <code>json.encode(x)</code> and <code>json.from(x)</code> take a Cyber value: numbers, <code>bool</code>, <code>str</code>, slices, structs (fields in order), optionals (<code>none</code> is <code>null</code>), enums (the case name), choices (<code>{"case": payload}</code>) and <code>Map</code> with <code>str</code> keys (sorted). An <code>r64</code> from 2^63, which does not fit <code>int</code>, becomes a <code>number</code> with its unsigned digits (<code>18446744073709551615</code>). Pass a borrow for a value that can not be copied: <code>json.encode(&map)</code>.</li>
 </ul>
-<p><code>json.to(T, v)</code> converts a <code>Value</code> back to a Cyber type, and <code>json.decode(T, src)</code> parses and converts in one step. It takes the same types as <code>from</code>, except <code>Array</code> and fixed size arrays. A struct field must be present unless it has a default value (<code>port int = 8080</code>, a missing member takes it) or is an optional (a missing member is <code>none</code>), and members that are not fields are ignored. An integer type takes a whole float such as <code>3e2</code>, a float type takes an integer, and <code>str</code> takes any number as its text, so a large ID can be read whole whatever its size. On failure it returns <code>error.Type</code> (another kind of value or an unknown case name), <code>error.MissingField</code> or <code>error.Overflow</code> (a number out of the type's range), and a <code>json.Diag</code> tells where through <code>path</code>:</p>
+<p><code>json.to(T, v)</code> converts a <code>Value</code> back to a Cyber type, and <code>json.decode(T, src)</code> parses and converts in one step. It takes the same types as <code>from</code>, except <code>Array</code> and fixed size arrays. A struct field must be present unless it has a default value (<code>port int = 8080</code>, a missing member takes it) or is an optional (a missing member is <code>none</code>), and members that are not fields are ignored. An integer type takes a whole float such as <code>3e2</code>, a float type takes an integer, and <code>str</code> takes any number as its text, so a large ID can be read whole whatever its size. On failure it returns <code>error.Type</code> (another kind of value or an unknown case name), <code>error.MissingField</code> or <code>error.Overflow</code> (a number out of the type's range, such as <code>1e39</code> for <code>f32</code>; a number too small for <code>f32</code> becomes 0), and a <code>json.Diag</code> tells where through <code>path</code>:</p>
 <pre><code class="language-cy">type User:
     id    int
     name  str
@@ -4994,7 +5000,7 @@ else |err|:
 --> error.Syntax at 1:7: Expected a value, found `t`.
 </code></pre>
 <p><code>toon.encode(v)</code> follows the spec's forms: <code>key: value</code>, nested objects by indentation, inline primitive arrays (<code>tags[2]: a,b</code>), a table for an array of uniform objects (<code>users[2]{id,name}:</code>), a keyed table for an object whose values are uniform objects (<code>env[2:]{region}:</code>), and <code>- </code> items otherwise. <code>toon.EncodeOptions</code> sets <code>indent</code> (2) and <code>delim</code> (<code>.comma</code>, <code>.tab</code> or <code>.pipe</code>). It returns <code>error.Unicode</code> for a string that is not UTF-8.</p>
-<p><code>toon.decode(src)</code> checks declared lengths, table widths, indentation and duplicate keys. <code>toon.DecodeOptions{strict=false}</code> applies the spec's non-strict recoveries. Errors are <code>error.Syntax</code> with a <code>json.Diag</code> (line and column). An unquoted token that matches the JSON number grammar is a number, others are strings (<code>05</code> stays <code>"05"</code>); numbers decode as <code>json.parse</code> reads them, and <code>toon.DecodeOptions{exact=true}</code> keeps them as text like <code>json.ParseOptions</code>. A <code>number</code> encodes in the canonical form of <code>json.fmt_number</code>. <code>toon.from_json(src)</code> and <code>toon.to_json(src)</code> convert text directly. The implementation passes the spec's 564 conformance fixtures (<code>src/test/assets/toon-spec</code>).</p>
+<p><code>toon.decode(src)</code> checks declared lengths, table widths, indentation and duplicate keys. <code>toon.DecodeOptions{strict=false}</code> applies the spec's non-strict recoveries. Errors are <code>error.Syntax</code> with a <code>json.Diag</code> (line and column). <code>indent</code> in <code>toon.EncodeOptions</code> and <code>toon.DecodeOptions</code> must be at least 1: below that <code>encode</code> and <code>decode</code> return <code>error.Range</code>. An unquoted token that matches the JSON number grammar is a number, others are strings (<code>05</code> stays <code>"05"</code>); numbers decode as <code>json.parse</code> reads them, and <code>toon.DecodeOptions{exact=true}</code> keeps them as text like <code>json.ParseOptions</code>. A <code>number</code> encodes in the canonical form of <code>json.fmt_number</code>. <code>toon.from_json(src)</code> and <code>toon.to_json(src)</code> convert text directly. The implementation passes the spec's 564 conformance fixtures (<code>src/test/assets/toon-spec</code>).</p>
 <a href="#modules">^topic</a>
 <h3 id="regular-expressions">Regular expressions. <a href="#regular-expressions">#</a></h3>
 <p>The <code>regex</code> module searches text with regular expressions. Matching never backtracks: a search takes time linear in the length of the input, whatever the pattern. The syntax is a subset of the Rust <code>regex</code> crate's, which is the default syntax of <a href="https://github.com/BurntSushi/ripgrep" title="">ripgrep</a>. A pattern that compiles here matches what it matches there:</p>
@@ -5032,7 +5038,7 @@ else |err|:
     print('%{err} at %{diag.pos}: %{diag.msg}')
 --> error.Syntax at 8: Backreferences (`\1`) and octal escapes are not supported: matching never backtracks. Capture both parts and compare them in code. A character by number is `\x41` or `\x{1F600}`.
 </code></pre>
-<p>A counted repetition is expanded, so <code>\w{100}</code> is 100 steps of the program. A program over <code>regex.MaxInsts</code> (32768) instructions is <code>error.TooBig</code>, and groups, classes and repetitions nest at most <code>regex.MaxDepth</code> (250) deep. One search takes at most the size of the program times the length of the input. A compiled <code>Regex</code> does not change: compile once and use it for every search.</p>
+<p>A counted repetition is expanded, so <code>\w{100}</code> is 100 steps of the program. A program over <code>regex.MaxInsts</code> (32768) instructions is <code>error.TooBig</code>, and groups, classes and repetitions nest at most <code>regex.MaxDepth</code> (250) deep. The number of instructions times the capture slots (two per group, counting group 0) must not be over <code>regex.MaxSlotTable</code> (1048576), or <code>compile</code> returns <code>error.TooBig</code>, so a search with captures takes at most 16 MiB. Write <code>(?:...)</code> for a group that needs no capture. One search takes at most the size of the program times the length of the input. A compiled <code>Regex</code> does not change: compile once and use it for every search.</p>
 <a href="#modules">^topic</a>
 <h3 id="parsing-expression-grammars">Parsing expression grammars. <a href="#parsing-expression-grammars">#</a></h3>
 <p>The <code>peg</code> module matches text with a parsing expression grammar (PEG): patterns with rules that call each other. It is for input that a regular expression can not describe, such as nested brackets, and for a format with several parts that is easier to read as rules. The syntax is that of the <code>re</code> module of <a href="https://www.inf.puc-rio.br/~roberto/lpeg/re.html" title="">LPeg</a>:</p>
@@ -5145,7 +5151,7 @@ if time.now() - b > time.hours(24):
 work()
 print((time.monotonic() - start).format())   --> 1.204s
 </code></pre>
-<p>A <code>Duration</code> is made with <code>time.nanos(n)</code>, <code>micros</code>, <code>millis</code>, <code>seconds</code>, <code>minutes</code>, <code>hours</code> and <code>days</code> (24 hours). It adds, subtracts, negates, multiplies by an <code>int</code> and compares. <code>d.secs()</code> and <code>d.millis()</code> return it as a whole number rounded toward zero, <code>d.to_float()</code> in seconds, and <code>d.format()</code> as text such as <code>1h2m3.5s</code>.</p>
+<p>A <code>Duration</code> is made with <code>time.nanos(n)</code>, <code>micros</code>, <code>millis</code>, <code>seconds</code>, <code>minutes</code>, <code>hours</code> and <code>days</code> (24 hours). It adds, subtracts, negates, multiplies by an <code>int</code> and compares. A result out of the range of <code>Duration</code>, about 10000 years either way, panics with 'The duration is out of range.'. <code>d.secs()</code> and <code>d.millis()</code> return it as a whole number rounded toward zero, <code>d.to_float()</code> in seconds, and <code>d.format()</code> as text such as <code>1h2m3.5s</code>.</p>
 <p>A <code>Time</code> has no calendar fields. <code>t.utc()</code> and <code>t.to_offset(minutes)</code> return a <code>DateTime</code>, which has <code>year()</code>, <code>month()</code> (1 to 12), <code>day()</code>, <code>hour()</code>, <code>minute()</code>, <code>second()</code>, <code>nanosecond()</code>, <code>offset()</code>, <code>weekday()</code>, <code>day_of_year()</code> and <code>date()</code>. <code>dt.time()</code> returns the instant, and <code>time.unix(sec)</code>, <code>time.unix(sec, nsec)</code>, <code>time.unix_millis(ms)</code>, <code>t.unix()</code> and <code>t.unix_millis()</code> convert between a <code>Time</code> and Unix time. <code>dt.to_offset(m)</code> is the same instant at another offset, <code>dt.replace_offset(m)</code> the same date and time of day at another offset. Two <code>DateTime</code> values are <code>==</code> only when the offset is the same too, and they have no <code><</code>. Compare the instants:</p>
 <pre><code class="language-cy">a := time.parse('2026-11-15T10:22:03+09:00')!
 b := time.parse('2026-11-15T01:22:03Z')!

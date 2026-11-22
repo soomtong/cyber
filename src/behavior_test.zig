@@ -360,6 +360,13 @@ fn test_memory(run: *Runner) void {
     run.case("memory/borrow_copy_out_index_error.cy");
     run.case("memory/borrow_copy_out_return_error.cy");
     run.case("memory/borrow_copy_out_field_error.cy");
+    run.case("memory/borrow_place_valid.cy");
+    run.case("memory/borrow_place_copy_error.cy");
+    run.case("memory/borrow_place_field_copy_error.cy");
+    run.case("memory/borrow_place_assign_error.cy");
+    run.case("memory/borrow_via_place_error.cy");
+    run.case("memory/borrow_via_copy_error.cy");
+    run.case("memory/borrow_unwrap_place_error.cy");
     run.case("memory/borrow_switch_expr_ex_error.cy");
     run.case("memory/borrow_switch_expr_outlive_error.cy");
     run.case("memory/borrow_else_default_owner_error.cy");

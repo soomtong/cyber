@@ -483,7 +483,11 @@ fn semaStmt2(c: *cy.Chunk, node: *ast.Node) !void {
                         .counterv = counterv,
                         .outer = outer,
                     };
-                    _ = try semaIfUnwrapBlock2(c, next, node, each_n, S.body, &closure_data, outer, true, @ptrCast(stmt));
+                    // `next` of a vector or a span copies an element: the capture points where the element points.
+                    const copies = std.mem.eql(u8, next_name, "next") and
+                        (iterable_init.type.isInstanceOf(c.sema.vector_tmpl) or iterable_init.type.isInstanceOf(c.sema.span_tmpl));
+                    const elem_of: ?sema.LocalId = if (copies) iterable_v.id else null;
+                    _ = try semaIfUnwrapBlock2(c, next, node, each_n, elem_of, S.body, &closure_data, outer, true, @ptrCast(stmt));
                 }
                 restoreMoves(c, c.block().moves_start);
                 const block = try sema_local.popBlock(c);
@@ -609,7 +613,7 @@ fn semaStmt2(c: *cy.Chunk, node: *ast.Node) !void {
                     }
                 }; 
                 const opt = try c.sema_expr_cstr_template(stmt.opt, c.sema.option_tmpl);
-                _ = try semaIfUnwrapBlock2(c, opt, stmt.opt, stmt.capture, S.body, stmt, outer, true, @ptrCast(stmt));
+                _ = try semaIfUnwrapBlock2(c, opt, stmt.opt, stmt.capture, null, S.body, stmt, outer, true, @ptrCast(stmt));
             }
             restoreMoves(c, c.block().moves_start);
             const stmtBlock = try sema_local.popBlock(c);
@@ -1152,7 +1156,7 @@ fn semaIfBlock2(c: *cy.Chunk, cond_n: *ast.Node, stmts: []const *ast.Node, outer
 
 /// For `unwrap_or`, `unwrap_or_block`.
 fn semaIfUnwrapBlock2(c: *cy.Chunk, opt: sema.ExprResult, opt_n: *ast.Node, opt_unwrap: ?*ast.Node,
-    body: *const fn (*cy.Chunk, u32, sema.ExprResult, *anyopaque) anyerror!void,
+    elem_of: ?sema.LocalId, body: *const fn (*cy.Chunk, u32, sema.ExprResult, *anyopaque) anyerror!void,
     body_data: *anyopaque, outer: usize, is_last: bool, node: *ast.Node) !void {
 
     const opt_owner = opt.recParentLocal();
@@ -1171,7 +1175,7 @@ fn semaIfUnwrapBlock2(c: *cy.Chunk, opt: sema.ExprResult, opt_n: *ast.Node, opt_
     _ = try sema_local.pushBlock(c, @ptrCast(node));
     {
         if (opt_unwrap) |unwrap| {
-            try semaCaptureUnwrap(c, opt.type, opt_v.id, opt_owner orelse opt_v.id, get_opt, unwrap);
+            try semaCaptureUnwrap(c, opt, opt_v.id, opt_owner orelse opt_v.id, elem_of, get_opt, unwrap);
         }
 
         try body(c, opt_v.id, get_opt, body_data);
@@ -1197,9 +1201,11 @@ fn semaIfUnwrapBlock2(c: *cy.Chunk, opt: sema.ExprResult, opt_n: *ast.Node, opt_
 /// `opt_id` is the hidden local that owns the option. A `NoCopy` payload moves out of it to the capture: the option
 /// is then dead in the branch (it has nothing left to destruct). `opt_owner` is the local that the option was read
 /// from, or `opt_id` for a new value: a borrow payload points to what it borrows, so the capture borrows from it
-/// until the branch ends.
-fn semaCaptureUnwrap(c: *cy.Chunk, opt_t: *cy.Type, opt_id: sema.LocalId, opt_owner: sema.LocalId,
-    get_opt: sema.ExprResult, capture: *ast.Node) !void {
+/// until the branch ends. `elem_of` is the local that a `for` loop reads the elements of a vector or a span through
+/// (`sema_borrow.bindCaptureCopy`).
+fn semaCaptureUnwrap(c: *cy.Chunk, opt: sema.ExprResult, opt_id: sema.LocalId, opt_owner: sema.LocalId,
+    elem_of: ?sema.LocalId, get_opt: sema.ExprResult, capture: *ast.Node) !void {
+    const opt_t = opt.type;
     // _unwrap = _opt.?
     const unwrap_t = opt_t.cast(.option).child_t;
     var unwrap_name: []const u8 = undefined;
@@ -1224,6 +1230,7 @@ fn semaCaptureUnwrap(c: *cy.Chunk, opt_t: *cy.Type, opt_id: sema.LocalId, opt_ow
     }
     const unwrap_v = try sema_local.declareLocalInit(c, unwrap_name, unwrap_t, unwrap_init, capture);
     try sema_borrow.bindCaptureLocal(c, unwrap_v.id, unwrap_init);
+    sema_borrow.bindCaptureCopy(c, unwrap_v.id, opt, elem_of);
     const unwrap_local = try sema_expr.semaLocal(c, unwrap_v.id, capture);
 
     if (capture.type() == .seqDestructure) {
@@ -1271,7 +1278,7 @@ fn semaIfUnwrapBlock(c: *cy.Chunk, opt_n: *ast.Node, opt_unwrap: ?*ast.Node,
     c.block().move_branch = .branch;
     {
         if (opt_unwrap) |unwrap| {
-            try semaCaptureUnwrap(c, opt.type, opt_v.id, opt_owner orelse opt_v.id, get_opt, unwrap);
+            try semaCaptureUnwrap(c, opt, opt_v.id, opt_owner orelse opt_v.id, null, get_opt, unwrap);
         }
 
         try semaStmts(c, stmts);
@@ -2195,5 +2202,5 @@ pub fn semaUnwrapOrStmt(c: *cy.Chunk, opt: sema.ExprResult, res_ir_id: u32, oute
         .node = node,
         .res_ir_id = res_ir_id,
     };
-    try semaIfUnwrapBlock2(c, opt, node, null, S.body, @ptrCast(&data), outer, false, node);
+    try semaIfUnwrapBlock2(c, opt, node, null, null, S.body, @ptrCast(&data), outer, false, node);
 }

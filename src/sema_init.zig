@@ -600,6 +600,8 @@ pub fn semaInit2(c: *cy.Chunk, init_t: *cy.Type, arg0: sema.ExprResult, arg1: se
 pub fn semaWrapSome(c: *cy.Chunk, option_t: *cy.types.Option, res: sema.ExprResult, node: *ast.Node) !sema.ExprResult {
     // `?&T` and an option of a borrow container borrow from what the payload borrows from.
     const owner: ?sema.LocalId = if (option_t.base.info.borrow_only) sema_borrow.borrowOwner(c, res) else null;
+    // The value has the owner at its root: a place in a container (`&w.x`) and the other owners of a copy are noted.
+    if (owner != null) try sema_borrow.noteBorrowValue(c, res);
     const owned = try sema_move.semaOwn(c, res, node);
     var some: sema.ExprResult = undefined;
     if (option_t.zero_union) {
@@ -657,7 +659,10 @@ pub fn semaInitChoice(c: *cy.Chunk, union_t: *cy.Type, case: u32, val: u32, payl
     const irIdx = b.end();
     var res = sema.ExprResult.initOwned(irIdx);
     // `!&T` and a choice with a borrow payload borrow from what the payload borrows from, like `semaWrapSome`.
-    if (union_t.info.borrow_only) res.data.value.parent_local = sema_borrow.borrowOwner(c, payload);
+    if (union_t.info.borrow_only) {
+        res.data.value.parent_local = sema_borrow.borrowOwner(c, payload);
+        if (payload.type.info.borrow_only) try sema_borrow.noteBorrowValue(c, payload);
+    }
     return res;
 }
 

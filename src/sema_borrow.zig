@@ -52,7 +52,8 @@ pub fn bodyInstance(c: *cy.Chunk) ?*cy.Instance {
 }
 
 /// Of two borrow owners, the one that goes out of scope first. A value that borrows from both (a borrow container
-/// literal, a pinned closure) lives only as long as that one.
+/// literal, a pinned closure) lives only as long as that one. Of two locals of one block, the one declared later goes
+/// first (a body local before a parameter).
 pub fn shorterOwner(c: *cy.Chunk, cur: ?sema.LocalId, next: ?sema.LocalId) ?sema.LocalId {
     const b = next orelse return cur;
     const a = cur orelse return b;
@@ -61,7 +62,44 @@ pub fn shorterOwner(c: *cy.Chunk, cur: ?sema.LocalId, next: ?sema.LocalId) ?sema
     if (la.kind == .temp) return a;
     if (lb.kind == .temp) return b;
     if (lb.kind == .block and (la.kind != .block or lb.block_depth > la.block_depth)) return b;
+    if (lb.kind == .block and la.kind == .block and lb.block_depth == la.block_depth and b > a) return b;
     return a;
+}
+
+/// A `scope` function returns a borrow (or a value that holds one: `?&T`, `!&T`, a borrow container) only from its
+/// `scope` parameter. Every owner of the value counts: the owner of the result, the other owners that the branches of
+/// the expression note from `pending_start` on (`if c: &p[0] else &y`), and the loans of a returned local.
+pub fn checkReturnOwners(c: *cy.Chunk, expr: sema.ExprResult, pending_start: usize, node: *ast.Node) !void {
+    if (!expr.type.info.borrow_only) return;
+    const proc = c.proc();
+    // The main block has no function, and a lambda whose return type is being inferred from this expression
+    // (`fn() => borrow`) has no signature yet. Neither has a `scope` parameter to check against.
+    const func = proc.func orelse return;
+    if (!func.isResolved()) return;
+    const idx = func.sig.scope_param_idx;
+    if (idx == cy.NullU8) return;
+    const param: sema.LocalId = @intCast(proc.varStart + idx);
+
+    if (borrowOwner(c, expr)) |owner| {
+        if (owner != param) return reportReturnOwner(c, param, node);
+    } else if (isBorrowType(expr.type)) {
+        return c.reportError("Expected parent lifetime local.", node);
+    }
+    if (expr.resType == .value_local) {
+        for (c.borrow_loans.items) |loan| {
+            if (loan.local != expr.data.value_local) continue;
+            if (borrowOwnerOf(c, loan.owner) != param) return reportReturnOwner(c, param, node);
+        }
+    }
+    for (c.borrow_pending.items[pending_start..]) |p| {
+        if (p.owner >= c.varStack.items.len) continue;
+        if (borrowOwnerOf(c, p.owner) != param) return reportReturnOwner(c, param, node);
+    }
+}
+
+fn reportReturnOwner(c: *cy.Chunk, param: sema.LocalId, node: *ast.Node) anyerror {
+    const param_name = c.varStack.items[param].name();
+    return c.reportErrorFmt("Expected to return a borrow from the same scope as `{}`.", &.{v(param_name)}, node);
 }
 
 /// Notes the owner of a borrow that becomes a part of a value (a field of a literal, a branch of an `if` expression, a

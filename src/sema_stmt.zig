@@ -937,34 +937,6 @@ pub fn reportElseBlockEnd(c: *cy.Chunk, kind: enum { result, option }, node: *as
 
 /// Assumes `expr` is owned or has unmanaged type.
 pub fn semaReturnExpr(c: *cy.Chunk, expr: sema.ExprResult, node: *ast.Node) !void {
-    if (expr.type.kind() == .borrow) {
-        const proc = c.proc();
-        // The main block has no function, and a lambda whose return type is being inferred from this
-        // expression (`fn() => borrow`) has no signature yet. Neither has a `scope` parameter to check against.
-        var scope_param_idx: u8 = cy.NullU8;
-        if (proc.func) |func| {
-            if (func.isResolved()) scope_param_idx = func.sig.scope_param_idx;
-        }
-        if (scope_param_idx != cy.NullU8) {
-            if (expr.resType == .value) {
-                const parent_local = expr.data.value.parent_local orelse {
-                    return c.reportError("Expected parent lifetime local.", node);
-                };
-                if (parent_local != proc.varStart + scope_param_idx) {
-                    const param_name = c.varStack.items[proc.varStart + scope_param_idx].name();
-                    return c.reportErrorFmt("Expected to return a borrow from the same scope as `{}`.", &.{v(param_name)}, node);
-                }
-            } else if (expr.resType == .value_local) {
-                if (expr.data.value_local != proc.varStart + scope_param_idx) {
-                    const param_name = c.varStack.items[proc.varStart + scope_param_idx].name();
-                    return c.reportErrorFmt("Expected to return a borrow from the same scope as `{}`.", &.{v(param_name)}, node);
-                }
-            } else {
-                return c.reportErrorFmt("Unsupported resType `{}`", &.{v(expr.resType)}, node);
-            }
-        }
-    }
-
     _ = try c.ir.pushStmt(.set_ret, node, .{
         .right = expr.ir,
     });
@@ -1041,6 +1013,14 @@ pub fn semaReturnExprStmt(c: *cy.Chunk, child: *ast.Node, ret_opt: ?*cy.Type, no
     }
 
     const var_start = c.varStack.items.len;
+    // The borrow owners that the expression notes are checked against the `scope` parameter (`checkReturnOwners`).
+    // A lambda body is checked inside the statement that has the lambda, which notes its own owners.
+    const saved_pending_start = c.borrow_pending_start;
+    c.borrow_pending_start = @intCast(c.borrow_pending.items.len);
+    defer {
+        c.borrow_pending.items.len = c.borrow_pending_start;
+        c.borrow_pending_start = saved_pending_start;
+    }
 
     var expr: sema.ExprResult = undefined;
     // For a plain name, fit the return type after the move check so that wrapping a local
@@ -1072,6 +1052,7 @@ pub fn semaReturnExprStmt(c: *cy.Chunk, child: *ast.Node, ret_opt: ?*cy.Type, no
     if (defer_fit) {
         expr = try fitReturnType(c, expr, ret_opt.?, child);
     }
+    try sema_borrow.checkReturnOwners(c, expr, c.borrow_pending_start, node);
 
     if (moved_local) |local_id| {
         c.varStack.items[local_id].type = .dead;

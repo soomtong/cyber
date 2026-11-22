@@ -565,6 +565,11 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
     var arg_ex_via: [256]?sema.LocalId = @splat(null);
     var arg_ex_field: [256]u16 = undefined;
     var arg_nodes: [256]*ast.Node = undefined;
+    // The other owners that each argument notes (`if c: &y else &a[0]`) in `Chunk.borrow_pending`.
+    const call_pending_start = c.borrow_pending.items.len;
+    var arg_pending_start: [256]u32 = @splat(0);
+    var arg_pending_end: [256]u32 = @splat(0);
+    var scope_arg_idx: ?u32 = null;
 
     var arg_idx: u32 = 0;
 
@@ -593,13 +598,16 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         }
 
         var match: bool = undefined;
+        arg_pending_start[arg_idx] = @intCast(c.borrow_pending.items.len);
         const arg_res = try matchArg(c, arg, param, overloaded, exact, &match);
+        arg_pending_end[arg_idx] = @intCast(c.borrow_pending.items.len);
         if (!match) {
             match_err.* = FuncMatchError.init(param, arg_idx + 1, arg_res.type);
             return null;
         }
         if (capture_param_scope and sig.scope_param_idx == i) {
             ret_parent_scope_local = arg_res.recParentLocal();
+            scope_arg_idx = arg_idx;
         }
         arg_owners[arg_idx] = sema_borrow.borrowOwner(c, arg_res);
         if (!arg_res.type.isManaged() and !arg_res.type.info.borrow_only and !arg_res.type.isPointer()) {
@@ -652,6 +660,15 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
 
     if (tookReceiver(c, pre_args) and arg_idx > 0) {
         try sema_move.finishGlobalTake(c, args[1..arg_idx], arg_nodes[1..arg_idx]);
+    }
+
+    // The result borrows only from the `scope` argument, so the owners that the other arguments note end with the
+    // call.
+    if (c.borrow_pending.items.len > call_pending_start) {
+        var keep: []const sema.BorrowOwner = &.{};
+        if (scope_arg_idx) |idx| keep = c.borrow_pending.items[arg_pending_start[idx]..arg_pending_end[idx]];
+        std.mem.copyForwards(sema.BorrowOwner, c.borrow_pending.items[call_pending_start..], keep);
+        c.borrow_pending.items.len = call_pending_start + keep.len;
     }
 
     return .{

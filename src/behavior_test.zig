@@ -371,6 +371,13 @@ fn test_memory(run: *Runner) void {
     run.case("memory/scope_return_error.cy");
     run.case("memory/scope_return_too_ephemeral_error.cy");
     run.case("memory/scope_return.cy");
+    run.case("memory/scope_return_branch.cy");
+    run.case("memory/scope_return_branch_error.cy");
+    run.case("memory/scope_return_else_error.cy");
+    run.case("memory/scope_return_local_error.cy");
+    run.case("memory/scope_return_option_error.cy");
+    run.case("memory/scope_return_result_error.cy");
+    run.case("memory/scope_return_container_error.cy");
     run.case("memory/scope_assign_shorter_span_lifetime_error.cy");
     run.case("memory/scope_assign_shorter_borrow_lifetime_error.cy");
     run.case("memory/sink_use_rec_after_error.cy");

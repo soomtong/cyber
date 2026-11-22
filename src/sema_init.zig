@@ -638,7 +638,10 @@ pub fn semaInitChoice(c: *cy.Chunk, union_t: *cy.Type, case: u32, val: u32, payl
     const final_payload = sema.ExprResult.init2(case_arg);
     try b.pushArg2(final_payload, union_t, node);
     const irIdx = b.end();
-    return sema.ExprResult.initOwned(irIdx);
+    var res = sema.ExprResult.initOwned(irIdx);
+    // `!&T` and a choice with a borrow payload borrow from what the payload borrows from, like `semaWrapSome`.
+    if (union_t.info.borrow_only) res.data.value.parent_local = sema_borrow.borrowOwner(c, payload);
+    return res;
 }
 
 pub fn semaInitChoiceNoPayload(c: *cy.Chunk, case: *cy.sym.ChoiceCase, node: *ast.Node) !sema.ExprResult {

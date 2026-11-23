@@ -1873,6 +1873,10 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                 // As the argument of an overload, a body whose type is not the result type is a mismatch of
                 // the overload and not an error: the call tries the next one (`sema_func.matchFuncSym`).
                 var fits = true;
+                if (cstr.return_infer_error) {
+                    // For a `!` in the body that the result type can not pass on.
+                    c.proc().soft_ret_fits = &fits;
+                }
                 _ = try sema_stmt.semaReturnExprStmt2(c, lambda.expr, func.sig.ret, if (cstr.return_infer_error) &fits else null, lambda.expr);
                 if (!fits) {
                     try sema_local.dropLambdaProc(c, mark);
@@ -3002,8 +3006,9 @@ pub fn semaLambdaInferRet(c: *cy.Chunk, node: *ast.Node, params: []const sema.Fu
 /// is not checked without a signature, so a `!` in it is noted by the second check, which is dropped the same way
 /// for a third one with `!U`. A body that does not leave the lambda early is checked once.
 fn semaLambdaInferRetBody(c: *cy.Chunk, lambda: *ast.LambdaExpr, params: []const sema.FuncParam) !sema.ExprResult {
-    const func_blocks_start = c.ir.func_blocks.items.len;
     const func = try c.addUserLambda(@ptrCast(c.sym), @ptrCast(lambda));
+    // After the lambda itself: it is kept for the next check, the lambdas inside it are dropped.
+    const mark = sema_local.LambdaMark.take(c);
 
     var ret_opt: ?*cy.Type = null;
     while (true) {
@@ -3029,7 +3034,7 @@ fn semaLambdaInferRetBody(c: *cy.Chunk, lambda: *ast.LambdaExpr, params: []const
         if (proc.infer_ret_bang and !passesError(ret_t)) {
             ret_t = try sema.getResultType(c, ret_t);
         }
-        try sema_local.dropLambdaProc(c, func_blocks_start);
+        try sema_local.dropLambdaProc(c, mark);
         ret_opt = ret_t;
     }
 }

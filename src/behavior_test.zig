@@ -908,6 +908,8 @@ fn test_control_flow(run: *Runner) void {
     run.case("meta/infer_param_method.cy");
     run.case("meta/infer_param_overload.cy");
     run.case("meta/infer_param_overload_lambda.cy");
+    run.case("meta/infer_param_overload_lambda_bang.cy");
+    run.case("meta/infer_param_overload_lambda_bang_error.cy");
     run.case("meta/infer_param_overload_lambda_block.cy");
     run.case("meta/infer_param_overload_lambda_block_body_error.cy");
     run.case("meta/infer_param_overload_lambda_block_error.cy");

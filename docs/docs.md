@@ -2901,7 +2901,7 @@ print(convert(str, []float{1, 2}, |x| 'v%{x}'))   --> {'v1.0', 'v2.0'}
 
 A template parameter is declared once. `fn two(a %T, b %T) -> T` reports 'The template parameter `T` is already declared. Write `T` without `%` to use it.'
 
-Among [overloads](#function-overloading), a function that infers template parameters is tried only after the overloads that match the arguments exactly. An inferred expression lambda (`|x| expr`) does not match an overload when its body does not have the result type of the function parameter, like a named function with another result type, and the call goes on to the next overload:
+Among [overloads](#function-overloading), a function that infers template parameters is tried only after the overloads that match the arguments exactly. An inferred lambda (`|x| expr`, or `|x|` with a block) does not match an overload when its body does not have the result type of the function parameter, like a named function with another result type, and the call goes on to the next overload:
 ```cy
 fn conv(x int, f fn(int) -> str) -> str:
     return f(x)
@@ -2912,7 +2912,32 @@ fn conv(x %T, f fn(T) -> %U) -> U:
 print(conv(1, |x| 'v%{x}'))    --> v1
 print(conv(1, |x| x + 1))      --> 2
 ```
-When no overload takes the lambda, the call reports the error at its body, such as 'Expected type `str`, got `int`.' Any other error in the body, like an undeclared name, is reported right away. Only the type of the whole body is compared: a branch of an `if` expression with another type is an error, and so is a `return` with another type in a lambda with a block. An overload that infers template parameters does not go on either: when it is tried before another overload, a body that does not have the result type that its function parameter declares (`f fn(T) -> str`) is an error.
+The body does not have the result type when:
+* The type of an expression body is another type, or a literal in it can not be made for the result type (`{1, 2}` for `str`).
+* A branch of an `if` expression that is the body has another type. The same goes for a `return` with a `switch` expression.
+* A `return` in a block has another type, or the block needs a `return` and reaches its end without one.
+* A `!` leaves the lambda and the result type is not a `!T` or `error`.
+
+```cy
+fn pick(x int, f fn(int) -> str) -> str:
+    return 'str %{f(x)}'
+
+fn pick(x int, f fn(int) -> int) -> str:
+    return 'int %{f(x)}'
+
+print(pick(1, |x| if (x > 0) x else 0))    --> int 1
+
+r := pick(5, |x|):
+    if x > 3:
+        return 'big'
+    return 'small'
+print(r)                                   --> str big
+```
+An overload that infers template parameters is compared the same way when its function parameter declares the result type (`f fn(T) -> str`), also when it is tried before another overload.
+
+When no overload takes the lambda, the call reports the error of the overload that came closest at the body, such as 'Expected type `str`, got `int`.' at the branch or `return`. Any other error in the body, like an undeclared name, is reported right away.
+
+Two limits remain. A function parameter that wraps an infer parameter in its result type (`f fn(T) -> ?%U`) reports a body that is not of that form ('Expected template `Option`. Found `Float`.') and does not go on. And only an inferred lambda is compared softly by an overload that infers template parameters: another argument that does not have the type of its parameter is an error there.
 
 An infer parameter is declared in a parameter type only. `fn f(x int) -> %U` reports '`%U` can not be declared in a return type. Declare it in a parameter (`%U type`) instead.', and `%T` in a function body or outside of a function reports '`%T` can only be declared in the signature of a function.'
 

@@ -369,8 +369,9 @@ pub const Proc = struct {
     infer_ret_return: bool = false,
     infer_ret_open: bool = false,
 
-    /// Set for the block of an inferred lambda that is the argument of an overload (`sema_expr.semaLambdaMulti`):
-    /// a `return` whose expression does not fit the return type sets this to false instead of reporting it.
+    /// Set for an inferred lambda that is the argument of an overload (`sema_expr.semaLambdaMulti`, `|x| expr`):
+    /// a `return` whose expression does not fit the return type sets this to false instead of reporting it,
+    /// and so does a `!` that the return type can not pass on (`sema_stmt.semaPropagateError`).
     soft_ret_fits: ?*bool = null,
 
     ir: *ir.Stmt,

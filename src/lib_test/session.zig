@@ -289,6 +289,41 @@ test "persist_main keeps top level funcs across evals." {
     try zt.eq(123, @as(*i64, @ptrCast(res.res)).*);
 }
 
+test "A lambda that an overload did not take leaves nothing behind in a session." {
+    // The lambda is checked for each overload. The ones that are dropped are not generated, also in the
+    // evals that follow, and they are freed with the session (leak-checking allocator).
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\fn pick(x int, f fn(int) -> str) -> str:
+        \\  return 'str %{f(x)}'
+        \\fn pick(x int, f fn(int) -> int) -> str:
+        \\  return 'int %{f(x)}'
+        \\fn ap(x int, f fn(int) -> int) -> int:
+        \\  return f(x)
+        \\use test
+        \\test.eq('int 12', pick(1, |x| if (x > 0) ap(x, |y| y + 11) else 0))
+    , config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\use test
+        \\r := pick(1, |x|):
+        \\  if x > 5:
+        \\    return 3
+        \\  return ap(x, |y| y + 1)
+        \\test.eq('int 2', r)
+    , config, &res));
+    // No overload takes the lambda: the eval fails and the session goes on.
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = pick(1, |x| if (x > 0) 1.5 else ap(x, |y| y))", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use test\ntest.eq('int 3', pick(2, |x| ap(x, |y| y + 1)))\ntest.eq('int 2', r)", config, &res));
+}
+
 test "persist_main returns the last top level expression as the eval result." {
     // Leak-checking allocator: the VM owns a copy of each result until the next eval or deinit.
     const vm = C.vm_initx(zt.alloc);

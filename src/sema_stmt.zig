@@ -1486,6 +1486,13 @@ pub fn semaPropagateError(c: *cy.Chunk, err: sema.ExprResult, node: *ast.Node) !
             try semaReturnExpr(c, ret, node);
         } else {
             if (noteInferRetBang(c)) return;
+            if (proc.soft_ret_fits) |fits| {
+                // The lambda is the argument of an overload whose function parameter does not return a `!T`:
+                // a mismatch of the overload, like a `return` with another type. Nothing is generated.
+                fits.* = false;
+                c.block().endReachable = false;
+                return;
+            }
             const ret_name = try c.sema.allocTypeName(ret_t);
             defer c.alloc.free(ret_name);
             const func = proc.func.?;

@@ -1691,6 +1691,16 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
             if (ctx.infer_param == .ret) {
                 return c.reportErrorFmt("`%{}` can not be declared in a return type. Declare it in a parameter (`%{} type`) instead.", &.{v(name), v(name)}, node);
             }
+            if (ctx.infer_param == .bound or ctx.infer_param == .placeholder) {
+                // Matching a call. The parameter is known once an argument bound it.
+                if (ctx.ct_params.contains(name)) {
+                    return eval_ident(c, name, node);
+                }
+                if (ctx.infer_param == .placeholder) {
+                    return Expr.initSym(@ptrCast(c.sema.infer_t.sym()));
+                }
+                return error.FoundInferParam;
+            }
             if (ctx.type == .func and ctx.data.func.instance != null) {
                 // Resolving variant func.
                 const res = try sema_local.lookupStaticIdent(c, name, node) orelse {

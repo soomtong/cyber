@@ -1,20 +1,21 @@
-type MapFn[T Any, U Any] = fn(T) -> U
+-- The alias does not use its second parameter, so `U` is not in the type of the argument.
+type KeyFn[A Any, B Any] = fn(A) -> int
 
-fn map(items []%T, f MapFn[T, %U]) -> []U:
-    out := []U{}
+fn keys(items []%T, f KeyFn[T, %U]) -> []int:
+    out := []int{}
     for items |it|:
         out += f(it)
     return out
 
-fn name(x float) -> str:
-    return 'v%{x}'
+fn round(x float) -> int:
+    return int(x)
 
-print(map([]float{1, 2}, name))
+print(keys([]float{1, 2}, round))
 
 --cytest: error
 --CompileError: Can not infer the template parameter `U` from the argument for `f`. Declare it as its own parameter (`%U type`) and pass the type in the call.
 --
---@MainPath():12:26:
---print(map([]float{1, 2}, name))
---                         ^~~~
+--@MainPath():13:27:
+--print(keys([]float{1, 2}, round))
+--                          ^~~~~
 --

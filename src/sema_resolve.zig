@@ -298,6 +298,12 @@ pub const InferParamMode = enum(u8) {
     param,
     /// A return type. `%T` is reported as an error that points to the parameters.
     ret,
+    /// A parameter type at a call. `%T` is the value that an argument bound. `error.FoundInferParam` is returned
+    /// for a parameter that no argument bound yet.
+    bound,
+    /// Like `bound`, but a parameter that is not bound yet is the placeholder type `Sema.infer_t`.
+    /// Tells which parts of a parameter type are known before its argument is analysed.
+    placeholder,
 };
 
 pub const CtParam = struct {

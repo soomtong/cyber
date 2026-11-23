@@ -109,8 +109,8 @@ fn (&&Calculator) eval(expr str) -> !float:
 -- Functional helpers.
 -- ---------------------------------------------------------------------------------------------------------
 
--- The result type of a lambda is not inferred, so `U` is passed as an argument.
-fn map(%U type, items []%T, f fn(T) -> U) -> []U:
+-- `T` is inferred from the items and `U` from the result type of the function or the lambda.
+fn map(items []%T, f fn(T) -> %U) -> []U:
     out := []U{}
     for items |it|:
         out += f(it)
@@ -165,10 +165,10 @@ for exprs |expr|:
     print('%{expr} = %{res}')
 
 -- Only the expressions that succeeded are in the history.
-results := map(float, calc.history, |r| r.result)
+results := map(calc.history, |r| r.result)
 print('results: %{results}')
 print('sum:     %{fold(results, 0.0, |acc, x| acc + x)}')
 print('max:     %{fold(results, results[0], |acc, x| if (x > acc) x else acc)}')
 print('over 5:  %{filter(results, |x| x > 5.0)}')
-print('doubled: %{map(float, results, |x| x * 2)}')
-print('whole:   %{map(str, filter(calc.history, |r| r.result % 1 == 0), |r| r.expr).join(', ')}')
+print('doubled: %{map(results, |x| x * 2)}')
+print('whole:   %{map(filter(calc.history, |r| r.result % 1 == 0), |r| r.expr).join(', ')}')

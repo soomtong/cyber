@@ -8,6 +8,7 @@ const sema_borrow = cy.sema_borrow;
 const sema_call = cy.sema_call;
 const sema_expr = cy.sema_expr;
 const sema_hint = cy.sema_hint;
+const sema_lit = cy.sema_lit;
 const sema_local = cy.sema_local;
 const sema_move = cy.sema_move;
 const sema_resolve = cy.sema_resolve;
@@ -1235,7 +1236,7 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
     }
 }
 
-fn getFuncTemplateParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *sema_resolve.ResolveContext, idx: usize) !*cy.Type {
+fn getFuncTemplateParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *sema_resolve.ResolveContext, idx: usize, resolve_new_type: bool) !*cy.Type {
     if (idx == 0 and std.mem.eql(u8, template.func_params[idx].name_type.as_name(), "self")) {
         return template.head.parent.?.getStaticType().?;
     } else {
@@ -1243,60 +1244,170 @@ fn getFuncTemplateParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *
         try sema_resolve.pushSavedResolveContext(c, ctx.*);
         defer ctx.* = sema_resolve.saveResolveContext(c);
 
-        return try cte.eval_type2(c, true, template.func_params[spec_idx].type.?);
+        return try cte.eval_type2(c, resolve_new_type, template.func_params[spec_idx].type.?);
     }
 }
 
-/// The type of a parameter that depends on an earlier template parameter (`f MapFn[T, %U]`).
-/// The type is evaluated from the parameters that are known. It can not declare a new infer parameter.
-fn getDependentParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *sema_resolve.ResolveContext, idx: usize, arg_n: *ast.Node) !*cy.Type {
-    // An infer parameter exits the eval with `error.FoundInferParam` for a compile-time call too.
+/// The type of a parameter from the template parameters that the arguments before it bound (`b []T`,
+/// `f fn(T) -> %U`). Returns `null` when the type declares an infer parameter that is not bound yet:
+/// the argument is resolved first and the parameter is inferred from its type.
+/// With the mode `placeholder` such an infer parameter is `Sema.infer_t` and the type is always returned.
+fn evalParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *sema_resolve.ResolveContext, idx: usize, mode: sema_resolve.InferParamMode) !?*cy.Type {
     const prev = ctx.infer_param;
-    ctx.infer_param = .param;
+    ctx.infer_param = mode;
     defer ctx.infer_param = prev;
-    return getFuncTemplateParamType(c, template, ctx, idx) catch |err| {
-        if (err != error.FoundInferParam) {
-            return err;
+    // A type that is built from the placeholder is only looked at. It is not resolved.
+    return getFuncTemplateParamType(c, template, ctx, idx, mode != .placeholder) catch |err| {
+        if (err == error.FoundInferParam) {
+            return null;
         }
-        const param_name = template.func_params[idx].name_type.as_name();
-        const spec_idx = sema_resolve.indexOfTypedParam(template.func_params, idx).?;
-        if (firstInferParam(template.func_params[spec_idx].type.?)) |infer_n| {
-            const name = infer_n.cast(.infer_param).name.as_name();
-            return c.reportErrorFmt("Can not infer the template parameter `{}` from the argument for `{}`. Declare it as its own parameter (`%{} type`) and pass the type in the call.", &.{v(name), v(param_name), v(name)}, arg_n);
-        }
-        return c.reportErrorFmt("Can not infer a template parameter from the argument for `{}`. Declare it as its own parameter (`%T type`) and pass the type in the call.", &.{v(param_name)}, arg_n);
+        return err;
     };
 }
 
-/// The first infer parameter (`%T`) in a type specifier. Visits the same nodes as `sema_type.findInferParams`.
-fn firstInferParam(node: *ast.Node) ?*ast.Node {
-    switch (node.type()) {
-        .infer_param => return node,
-        .index_expr => {
-            for (node.cast(.index_expr).args.slice()) |arg| {
-                if (firstInferParam(arg)) |res| return res;
+/// The type specifier of the parameter at `idx`.
+fn paramTypeSpec(template: *cy.sym.FuncTemplate, idx: usize) *ast.Node {
+    const spec_idx = sema_resolve.indexOfTypedParam(template.func_params, idx).?;
+    return template.func_params[spec_idx].type.?;
+}
+
+/// Reports the first infer parameter of the parameter at `idx` that its argument did not bind.
+fn reportCanNotInfer(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *sema_resolve.ResolveContext, idx: usize, arg_n: *ast.Node) anyerror {
+    const param_name = template.func_params[idx].name_type.as_name();
+    if (firstInferParam(paramTypeSpec(template, idx), ctx)) |infer_n| {
+        const name = infer_n.cast(.infer_param).name.as_name();
+        return c.reportErrorFmt("Can not infer the template parameter `{}` from the argument for `{}`. Declare it as its own parameter (`%{} type`) and pass the type in the call.", &.{v(name), v(param_name), v(name)}, arg_n);
+    }
+    return c.reportErrorFmt("Can not infer a template parameter from the argument for `{}`. Declare it as its own parameter (`%T type`) and pass the type in the call.", &.{v(param_name)}, arg_n);
+}
+
+/// The signature of a function type: `fn(T) -> U`, `Func[fn(T) -> U]`, `&OpaqueFunc[fn(T) -> U]`.
+fn funcSigOfType(type_: *cy.Type) ?*cy.FuncSig {
+    switch (type_.kind()) {
+        .func_ptr => return type_.cast(.func_ptr).sig,
+        .func => return type_.cast(.func).sig,
+        .borrow => {
+            const child_t = type_.cast(.borrow).child_t;
+            if (child_t.kind() == .func) {
+                return child_t.cast(.func).sig;
             }
             return null;
         },
-        .ref => return firstInferParam(node.cast(.ref).child),
-        .borrow => return firstInferParam(node.cast(.borrow).child),
-        .span_type => return firstInferParam(node.cast(.span_type).child),
-        .slice_type => return firstInferParam(node.cast(.slice_type).child),
+        else => return null,
+    }
+}
+
+/// Whether a type that was evaluated with the mode `placeholder` is built from an infer parameter
+/// that is not bound.
+fn usesInferPlaceholder(c: *cy.Chunk, type_: *cy.Type) bool {
+    if (type_.id() == bt.Infer) {
+        return true;
+    }
+    if (funcSigOfType(type_)) |sig| {
+        for (sig.params()) |param| {
+            if (usesInferPlaceholder(c, param.get_type())) return true;
+        }
+        return usesInferPlaceholder(c, sig.ret);
+    }
+    if (type_.kind() == .null) {
+        return false;
+    }
+    const instance = type_.sym().instance orelse return false;
+    for (instance.params, 0..) |param, i| {
+        if (instance.param_types[i].id() == bt.Type) {
+            if (usesInferPlaceholder(c, param.asPtr(*cy.Type))) return true;
+        }
+    }
+    return false;
+}
+
+/// An inferred lambda (`|x| expr`) as the argument of a parameter that still has infer parameters to bind:
+/// `f fn(T) -> %U`. The parameters of the lambda are typed from the function type, which must be known from
+/// the arguments before it. The result type is the type of the body, and the parameter is then inferred
+/// from the function type of the lambda like from any other function.
+/// Returns `null` when the argument is not such a lambda.
+fn resolveInferLambdaArg(c: *cy.Chunk, arg: Argument, template: *cy.sym.FuncTemplate, ctx: *sema_resolve.ResolveContext, idx: usize) !?sema.ExprResult {
+    if (arg.type != .standard) {
+        return null;
+    }
+    var block_lambda = false;
+    var lambda_n = arg.node;
+    if (lambda_n.type() == .lambda_cont_expr) {
+        lambda_n = lambda_n.cast(.lambda_cont_expr).child;
+    }
+    switch (lambda_n.type()) {
+        .lambda_expr => {
+            if (lambda_n.cast(.lambda_expr).sig_t != .infer) return null;
+        },
+        .lambda_multi => {
+            if (lambda_n.cast(.lambda_multi).sig_t != .infer) return null;
+            block_lambda = true;
+        },
+        .lambda_cont => {
+            if (lambda_n.cast(.lambda_cont).sig_t != .infer) return null;
+            block_lambda = true;
+        },
+        else => return null,
+    }
+
+    const hint_t = (try evalParamType(c, template, ctx, idx, .placeholder)) orelse return null;
+    const sig = funcSigOfType(hint_t) orelse return null;
+
+    const param_name = template.func_params[idx].name_type.as_name();
+    const infer_n = firstInferParam(paramTypeSpec(template, idx), ctx) orelse return null;
+    const name = infer_n.cast(.infer_param).name.as_name();
+    if (block_lambda) {
+        return c.reportErrorFmt("Can not infer the template parameter `{}` from the lambda for `{}`. The result type of a lambda with a block is not inferred. Use an expression lambda (`|x| expr`), declare the types of the lambda (`fn(x T) -> {}:`), or declare `%{} type` as its own parameter and pass the type in the call.", &.{v(name), v(param_name), v(name), v(name)}, arg.node);
+    }
+    const lambda = lambda_n.cast(.lambda_expr);
+    if (lambda.params.len != sig.params().len) {
+        return c.reportErrorFmt("Expected a lambda with `{}` parameter(s) for `{}`. Found `{}`.", &.{v(sig.params().len), v(param_name), v(lambda.params.len)}, arg.node);
+    }
+    for (sig.params(), 0..) |param, i| {
+        if (usesInferPlaceholder(c, param.get_type())) {
+            const lambda_param = lambda.params[i].name_type.as_name();
+            return c.reportErrorFmt("Can not infer the template parameter `{}` from the lambda for `{}`. The type of the lambda parameter `{}` must be known from the arguments before the lambda. Declare the types of the lambda (`fn(x T) -> U: ...`), or declare `%{} type` as its own parameter and pass the type in the call.", &.{v(name), v(param_name), v(lambda_param), v(name)}, arg.node);
+        }
+    }
+    return try sema_expr.semaLambdaInferRet(c, lambda_n, sig.params());
+}
+
+/// The first infer parameter (`%T`) in a type specifier that is not bound in `ctx`.
+/// Visits the same nodes as `sema_type.findInferParams`.
+fn firstInferParam(node: *ast.Node, ctx: ?*sema_resolve.ResolveContext) ?*ast.Node {
+    switch (node.type()) {
+        .infer_param => {
+            if (ctx) |ctx_| {
+                if (ctx_.hasCtParam(node.cast(.infer_param).name.as_name())) return null;
+            }
+            return node;
+        },
+        .index_expr => {
+            for (node.cast(.index_expr).args.slice()) |arg| {
+                if (firstInferParam(arg, ctx)) |res| return res;
+            }
+            return null;
+        },
+        .ref => return firstInferParam(node.cast(.ref).child, ctx),
+        .borrow => return firstInferParam(node.cast(.borrow).child, ctx),
+        .option_type => return firstInferParam(node.cast(.option_type).child, ctx),
+        .span_type => return firstInferParam(node.cast(.span_type).child, ctx),
+        .slice_type => return firstInferParam(node.cast(.slice_type).child, ctx),
         .vector_type => {
             const vector_t = node.cast(.vector_type);
-            return firstInferParam(vector_t.child) orelse firstInferParam(vector_t.n);
+            return firstInferParam(vector_t.child, ctx) orelse firstInferParam(vector_t.n, ctx);
         },
         .partial_vector_type => {
             const vector_t = node.cast(.partial_vector_type);
-            return firstInferParam(vector_t.child) orelse firstInferParam(vector_t.n);
+            return firstInferParam(vector_t.child, ctx) orelse firstInferParam(vector_t.n, ctx);
         },
         .fn_type => {
             const func_type = node.cast(.fn_type);
             for (func_type.params.slice()) |param| {
-                if (firstInferParam(param.type orelse param.name_type)) |res| return res;
+                if (firstInferParam(param.type orelse param.name_type, ctx)) |res| return res;
             }
             if (func_type.ret) |ret| {
-                return firstInferParam(ret);
+                return firstInferParam(ret, ctx);
             }
             return null;
         },
@@ -1328,11 +1439,15 @@ fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, templa
         new_arg.res = .{ .template = ct_value };
         return new_arg;
     }
-    if (param_t.id() != bt.Infer) {
-        var target_t: *cy.Type = param_t;
-        if (param_t.id() == bt.Dependent) {
-            target_t = try getDependentParamType(c, template, template_ctx, param_idx, arg.node);
-        }
+    var infer = param_t.id() == bt.Infer;
+    var dep_target_t: ?*cy.Type = null;
+    if (param_t.id() == bt.Dependent) {
+        dep_target_t = try evalParamType(c, template, template_ctx, param_idx, .bound);
+        // The type declares an infer parameter that is not bound yet (`p Pair[T, %U]`).
+        infer = dep_target_t == null;
+    }
+    if (!infer) {
+        const target_t: *cy.Type = dep_target_t orelse param_t;
         var ct_value: cy.TypeValue = undefined;
 
         switch (arg.type) {
@@ -1378,13 +1493,15 @@ fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, templa
         }
     }
 
-    var ct_value: cy.TypeValue = undefined;
-    if (param_t.id() == bt.Infer) {
-        ct_value = try cte.eval(c, arg.node);
-        const targ = cy.TypeValue.init(c.sema.type_t, Value.initPtr(ct_value.type));
-        try inferCtArgs(c, targ, template, template_ctx, ast_param.type.?, arg.node);
-    } else {
-        return error.Unexpected;
+    const ct_value = try cte.eval(c, arg.node);
+    const targ = cy.TypeValue.init(c.sema.type_t, Value.initPtr(ct_value.type));
+    try inferCtArgs(c, targ, template, template_ctx, paramTypeSpec(template, param_idx), null, arg.node);
+    // The parts of the parameter type that are not inferred are checked against the argument here.
+    const target_t = (try evalParamType(c, template, template_ctx, param_idx, .bound)) orelse {
+        return reportCanNotInfer(c, template, template_ctx, param_idx, arg.node);
+    };
+    if (ct_value.type.id() != target_t.id()) {
+        return sema_expr.reportIncompatType(c, target_t, ct_value.type, arg.node);
     }
 
     var new_arg = arg;
@@ -1426,28 +1543,46 @@ fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template
 
     var target: ?sema.FuncParam = null;
 
-    if (param_t.id() != bt.Infer) {
-        if (param_t.id() == bt.Dependent) {
-            const target_t = try getDependentParamType(c, template, template_ctx, param_idx, arg.node);
+    var infer = param_t.id() == bt.Infer;
+    if (param_t.id() == bt.Dependent) {
+        if (try evalParamType(c, template, template_ctx, param_idx, .bound)) |target_t| {
             target = sema.FuncParam.init(target_t);
         } else {
-            target = param;
+            // The type declares an infer parameter that is not bound yet (`f fn(T) -> %U`).
+            infer = true;
         }
+    } else if (!infer) {
+        target = param;
     }
-    var res = try resolveRtArg(c, arg, arg.node, target, false, true);
-    if (!sema_func) {
-        res = try ownOrManageArg(c, res, arg.node);
+    var res: sema.ExprResult = undefined;
+    if (infer) {
+        res = (try resolveInferLambdaArg(c, arg, template, template_ctx, param_idx)) orelse
+            try resolveRtArg(c, arg, arg.node, null, false, true);
+    } else {
+        res = try resolveRtArg(c, arg, arg.node, target, false, true);
     }
 
-    const generic_param = param_t.id() == bt.Infer or param_t.is_generic();
-    if (generic_param) {
-        if (param_t.id() == bt.Infer) {
-            // Infer template params.
-            const targ = cy.TypeValue.init(c.sema.type_t, Value.initPtr(res.type));
-            try inferCtArgs(c, targ, template, template_ctx, ast_param.type.?, arg.node);
-            try sema_type.ensure_resolved_type(c, res.type, arg.node);
-            target = sema.FuncParam.init(res.type);
+    if (infer) {
+        // Infer template params.
+        const targ = cy.TypeValue.init(c.sema.type_t, Value.initPtr(res.type));
+        try inferCtArgs(c, targ, template, template_ctx, paramTypeSpec(template, param_idx), null, arg.node);
+        try sema_type.ensure_resolved_type(c, res.type, arg.node);
+
+        // The parts of the parameter type that are not inferred (`T` in `f fn(T) -> %U`) are checked against
+        // the argument below, with the type that the parameter has now.
+        const target_t = (try evalParamType(c, template, template_ctx, param_idx, .bound)) orelse {
+            return reportCanNotInfer(c, template, template_ctx, param_idx, arg.node);
+        };
+        if (res.type.id() != target_t.id()) {
+            // A function for a `Func[fn(T) -> %U]` parameter.
+            if (try sema_lit.semaFitTarget(c, res, target_t, arg.node)) |new| {
+                res = new;
+            }
         }
+        target = sema.FuncParam.init(target_t);
+    }
+    if (!sema_func) {
+        res = try ownOrManageArg(c, res, arg.node);
     }
 
     if (param_t.is_generic()) {
@@ -1774,74 +1909,178 @@ fn expectTypeFromTemplate(c: *cy.Chunk, type_: *cy.Type, exp: *cy.sym.Template, 
     return variant;
 }
 
-/// CtInfer types are extracted from `arg_t`.
-fn inferCtArgs(c: *cy.Chunk, arg: cy.TypeValue, template: *cy.sym.FuncTemplate, template_ctx: *sema_resolve.ResolveContext, template_n: *ast.Node, node: *ast.Node) !void {
+/// The arguments of a type alias template while its target is matched: `T` and `%U` of `f MapFn[T, %U]`
+/// for the target `fn(A) -> B` of `type MapFn[A Any, B Any] = fn(A) -> B`.
+const AliasArgs = struct {
+    template: *cy.sym.Template,
+    args: []const *ast.Node,
+    /// The alias arguments that `args` are written in. `null` for the signature of the function template.
+    parent: ?*const AliasArgs,
+
+    fn find(self: *const AliasArgs, name: []const u8) ?*ast.Node {
+        for (self.template.decl.params, 0..) |param, i| {
+            if (std.mem.eql(u8, param.name_type.as_name(), name)) {
+                return self.args[i];
+            }
+        }
+        return null;
+    }
+};
+
+/// The symbol that a node of a parameter type names, looked up where the node is written.
+fn evalInferSym(c: *cy.Chunk, template_ctx: *sema_resolve.ResolveContext, alias: ?*const AliasArgs, node: *ast.Node) !*cy.Sym {
+    if (alias) |alias_| {
+        try sema_resolve.pushSymResolveContext(c, @ptrCast(alias_.template), node);
+        defer sema_resolve.popResolveContext(c);
+        return cte.evalSym(c, node);
+    }
+    try sema_resolve.pushSavedResolveContext(c, template_ctx.*);
+    defer template_ctx.* = sema_resolve.saveResolveContext(c);
+    return cte.evalSym(c, node);
+}
+
+fn expectTypeArg(c: *cy.Chunk, arg: cy.TypeValue, node: *ast.Node) !*cy.Type {
+    if (arg.type.id() != bt.Type) {
+        return c.reportErrorFmt("Expected type.", &.{}, node);
+    }
+    return arg.value.asPtr(*cy.Type);
+}
+
+/// Binds the infer parameters (`%T`) of the type specifier `template_n` from the type of an argument.
+/// The specifier and the type are walked together: `[]%T` binds `T` from the element type of a slice,
+/// `fn(T) -> %U` binds `U` from the return type of a function.
+/// The parts of the specifier that declare no infer parameter are not checked here. The caller evaluates
+/// the specifier once its parameters are bound and checks the argument against that type.
+/// `alias` is set while `template_n` is a node of the target of a type alias template.
+fn inferCtArgs(c: *cy.Chunk, arg: cy.TypeValue, template: *cy.sym.FuncTemplate, template_ctx: *sema_resolve.ResolveContext, template_n: *ast.Node, alias: ?*const AliasArgs, node: *ast.Node) !void {
     switch (template_n.type()) {
         .infer_param => {
             const name = template_n.cast(.infer_param).name.as_name();
+            if (template_ctx.hasCtParam(name)) {
+                // Bound by an earlier use: `f Bin[%T]` for `type Bin[A Any] = fn(A, A) -> A`.
+                return;
+            }
             const new = try c.heap.copyValue2(arg.type, arg.value);
             try template_ctx.initCtParam(c.alloc, name, cy.TypeValue.init(arg.type, new));
         },
         .ident => {
-            // Resolve `template_n` from the template's context.
-            try sema_resolve.pushSavedResolveContext(c, template_ctx.*);
-            defer template_ctx.* = sema_resolve.saveResolveContext(c);
-
-            const act_v = try cte.eval(c, template_n);
-            defer c.heap.destructValue(act_v);
-            try assertValueEq(c, arg, act_v, template_n);
+            if (alias) |alias_| {
+                if (alias_.find(template_n.as_name())) |alias_arg| {
+                    // A parameter of the alias. Continue with the argument that it stands for.
+                    try inferCtArgs(c, arg, template, template_ctx, alias_arg, alias_.parent, node);
+                }
+            }
         },
         .span_type => {
             const span_type = template_n.cast(.span_type);
-            if (arg.type.id() != bt.Type) {
-                return c.reportErrorFmt("Expected type.", &.{}, node);
-            }
-            const arg_t = arg.value.asPtr(*cy.Type);
+            const arg_t = try expectTypeArg(c, arg, node);
             const variant = try expectTypeFromTemplate(c, arg_t, c.sema.span_tmpl, node);
-            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, span_type.child, node);
+            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, span_type.child, alias, node);
         },
         .slice_type => {
             const slice_type = template_n.cast(.slice_type);
-            const arg_t = arg.value.asPtr(*cy.Type);
+            const arg_t = try expectTypeArg(c, arg, node);
             const variant = try expectTypeFromTemplate(c, arg_t, c.sema.slice_tmpl, node);
-            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, slice_type.child, node);
+            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, slice_type.child, alias, node);
         },
         .vector_type => {
             const vector_t = template_n.cast(.vector_type);
-            const arg_t = arg.value.asPtr(*cy.Type);
+            const arg_t = try expectTypeArg(c, arg, node);
             const variant = try expectTypeFromTemplate(c, arg_t, c.sema.vector_tmpl, node);
-            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, vector_t.child, node);
-            try inferCtArgs(c, variant.getParamAt(1), template, template_ctx, vector_t.n, node);
+            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, vector_t.child, alias, node);
+            try inferCtArgs(c, variant.getParamAt(1), template, template_ctx, vector_t.n, alias, node);
         },
         .partial_vector_type => {
             const vector_t = template_n.cast(.partial_vector_type);
-            const arg_t = arg.value.asPtr(*cy.Type);
+            const arg_t = try expectTypeArg(c, arg, node);
             const variant = try expectTypeFromTemplate(c, arg_t, c.sema.partial_vector_tmpl, node);
-            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, vector_t.child, node);
-            try inferCtArgs(c, variant.getParamAt(1), template, template_ctx, vector_t.n, node);
+            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, vector_t.child, alias, node);
+            try inferCtArgs(c, variant.getParamAt(1), template, template_ctx, vector_t.n, alias, node);
         },
         .ref => {
             const ref = template_n.cast(.ref);
-            const arg_t = arg.value.asPtr(*cy.Type);
+            const arg_t = try expectTypeArg(c, arg, node);
             const variant = try expectTypeFromTemplate(c, arg_t, c.sema.ref_tmpl, node);
-            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, ref.child, node);
+            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, ref.child, alias, node);
+        },
+        .option_type => {
+            const option_type = template_n.cast(.option_type);
+            const arg_t = try expectTypeArg(c, arg, node);
+            const variant = try expectTypeFromTemplate(c, arg_t, c.sema.option_tmpl, node);
+            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, option_type.child, alias, node);
         },
         .borrow => {
             const borrow = template_n.cast(.borrow);
-            const arg_t = arg.value.asPtr(*cy.Type);
+            const arg_t = try expectTypeArg(c, arg, node);
+            if (arg_t.kind() == .func_ptr or arg_t.kind() == .func) {
+                // A function or a closure for a `&OpaqueFunc[fn(T) -> %U]` parameter. It is borrowed once
+                // the parameter type is known.
+                return inferCtArgs(c, arg, template, template_ctx, borrow.child, alias, node);
+            }
             const variant = try expectTypeFromTemplate(c, arg_t, c.sema.borrow_tmpl, node);
-            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, borrow.child, node);
+            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, borrow.child, alias, node);
+        },
+        .fn_type => {
+            // `fn(T) -> %U`. Each parameter type and the return type are matched with those of the function.
+            const func_type = template_n.cast(.fn_type);
+            const arg_t = try expectTypeArg(c, arg, node);
+            if (arg_t.kind() != .func_ptr) {
+                const name = try c.sema.allocTypeName(arg_t);
+                defer c.alloc.free(name);
+                if (arg_t.kind() == .func) {
+                    return c.reportErrorFmt("Expected a function for `{}`. Found the closure `{}`. A closure is passed to a `Func[fn(...)]` or a `&OpaqueFunc[fn(...)]` parameter.", &.{v(c.nodeString(template_n)), v(name)}, node);
+                }
+                return c.reportErrorFmt("Expected a function for `{}`. Found `{}`.", &.{v(c.nodeString(template_n)), v(name)}, node);
+            }
+            const sig = arg_t.cast(.func_ptr).sig;
+            const params = sig.params();
+            if (params.len != func_type.params.len) {
+                const name = try c.sema.allocTypeName(arg_t);
+                defer c.alloc.free(name);
+                return c.reportErrorFmt("Expected a function with `{}` parameter(s) for `{}`. Found `{}`.", &.{v(func_type.params.len), v(c.nodeString(template_n)), v(name)}, node);
+            }
+            for (func_type.params.slice(), 0..) |param, i| {
+                const param_arg = cy.TypeValue.init(c.sema.type_t, Value.initPtr(params[i].get_type()));
+                try inferCtArgs(c, param_arg, template, template_ctx, param.type orelse param.name_type, alias, node);
+            }
+            if (func_type.ret) |ret| {
+                const ret_arg = cy.TypeValue.init(c.sema.type_t, Value.initPtr(sig.ret));
+                try inferCtArgs(c, ret_arg, template, template_ctx, ret, alias, node);
+            }
         },
         .index_expr => {
             // Infer nested. (e.g. `A[%T]`)
             const index_expr = template_n.cast(.index_expr);
-            const template_t = try cte.evalSym(c, index_expr.left);
+            const template_t = try evalInferSym(c, template_ctx, alias, index_expr.left);
             if (template_t.type != .template) {
                 return c.reportErrorFmt("Expected template. Found `{}`.", &.{v(template_t.type)}, index_expr.left);
+            }
+            const exp_template = template_t.cast(.template);
+
+            if (exp_template.kind == .type_alias and exp_template.decl.child_decl.type() == .type_alias_decl) {
+                // `MapFn[T, %U]`. An alias has no type of its own: match the target with the alias arguments.
+                if (exp_template.decl.params.len != index_expr.args.len) {
+                    return c.reportErrorFmt("Expected `{}` args. Found `{}`.", &.{v(exp_template.decl.params.len), v(index_expr.args.len)}, template_n);
+                }
+                const alias_args = AliasArgs{
+                    .template = exp_template,
+                    .args = index_expr.args.slice(),
+                    .parent = alias,
+                };
+                const target_n = exp_template.decl.child_decl.cast(.type_alias_decl).target;
+                return inferCtArgs(c, arg, template, template_ctx, target_n, &alias_args, node);
             }
 
             if (arg.type.id() == bt.Type) {
                 const arg_t = arg.value.asPtr(*cy.Type);
+
+                if (arg_t.kind() == .func_ptr and index_expr.args.len == 1) {
+                    if (exp_template == c.sema.func_tmpl or exp_template == c.sema.opaque_func_tmpl) {
+                        // A function for a `Func[fn(T) -> %U]` parameter. It is wrapped once the parameter
+                        // type is known.
+                        return inferCtArgs(c, arg, template, template_ctx, index_expr.args.ptr[0], alias, node);
+                    }
+                }
 
                 const variant = arg_t.sym().instance orelse {
                     const name = try c.sema.allocTypeName(arg_t);
@@ -1849,41 +2088,33 @@ fn inferCtArgs(c: *cy.Chunk, arg: cy.TypeValue, template: *cy.sym.FuncTemplate, 
                     return c.reportErrorFmt("Expected `{}` to be an expanded type.", &.{v(name)}, node);
                 };
 
-                if (variant.type != .sym or variant.data.sym.template != template_t.cast(.template)) {
+                if (variant.type != .sym) {
+                    const name = try c.sema.allocTypeName(arg_t);
+                    defer c.alloc.free(name);
+                    return c.reportErrorFmt("Expected template `{}`. Found `{}`.", &.{v(template_t.name()), v(name)}, node);
+                }
+                if (variant.data.sym.template != exp_template) {
+                    const is_func = exp_template == c.sema.func_tmpl or exp_template == c.sema.opaque_func_tmpl;
+                    if (is_func and arg_t.kind() == .func and index_expr.args.len == 1) {
+                        // A `Func` closure for an `OpaqueFunc` parameter. Both hold the same function type.
+                        return inferCtArgs(c, variant.getParamAt(0), template, template_ctx, index_expr.args.ptr[0], alias, node);
+                    }
                     return c.reportErrorFmt("Expected template `{}`. Found `{}`.", &.{v(template_t.name()), v(variant.data.sym.template.head.name())}, node);
                 }
                 if (variant.params.len != index_expr.args.len) {
                     return c.reportErrorFmt("Expected `{}` args. Found `{}`.", &.{v(variant.params.len), v(index_expr.args.len)}, template_n);
                 }
                 for (0..variant.params.len) |i| {
-                    try inferCtArgs(c, variant.getParamAt(i), template, template_ctx, index_expr.args.ptr[i], node);
+                    try inferCtArgs(c, variant.getParamAt(i), template, template_ctx, index_expr.args.ptr[i], alias, node);
                 }
             } else {
                return c.reportErrorFmt("TODO: {}.", &.{v(arg.type.name())}, node);
             }
         },
         else => {
-            return c.reportErrorFmt("Unsupported infer node `{}`.", &.{v(template_n.type())}, template_n);
+            // A type form that is not walked. It is fine when it declares no infer parameter (`int`, `?T`):
+            // the caller checks it with the whole parameter type.
         }
     }
 }
 
-fn assertValueEq(c: *cy.Chunk, exp: cy.TypeValue, act: cy.TypeValue, node: *ast.Node) !void {
-    if (exp.type.id() != act.type.id()) {
-        return sema_expr.reportIncompatType(c, exp.type, act.type, node);
-    }
-
-    switch (exp.type.id()) {
-        bt.Type => {
-            const act_t = act.value.asPtr(*cy.Type);
-            if (exp.value.asPtr(*cy.Type).id() != act_t.id()) {
-                return sema_expr.reportIncompatType(c, exp.value.asPtr(*cy.Type), act_t, node);
-            }
-        },
-        else => {
-            const type_name = try c.sema.allocTypeName(exp.value.asPtr(*cy.Type));
-            defer c.alloc.free(type_name);
-            return c.reportErrorFmt("Unsupport value type: `{s}`", &.{v(type_name)}, node);
-        }
-    }
-}

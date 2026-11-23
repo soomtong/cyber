@@ -4,6 +4,45 @@
 사용자에게 보이는 동작이 바뀌는 커밋은 여기에 바로 적고, 언어 규칙이면 `docs/docs.md`에도 같이 적는다.
 전체 발견 이슈 표는 `docs/study/10-findings-register.md`, 컴파일러 한계의 결정은 `docs/decisions/project_compiler_limits.md`.
 
+## 함수 인자에서 템플릿 파라미터를 추론한다 (2026-11-23)
+
+함수 타입 안에서 선언한 infer 파라미터(`f fn(T) -> %U`)와, 앞선 템플릿 파라미터를 쓰면서 새 파라미터를 선언하는 파라미터 타입(`p Pair[T, %U]`, `f MapFn[T, %U]`)은
+호출 인자 위치에 'Can not infer the template parameter `U` from the argument for `f`...'을 보고했고, `%U type`을 따로 선언해 `map(str, items, name)`으로 타입을 넘겨야 했다.
+이제 인자의 타입에서 추론한다. 아래 두 항목(함수 포인터 타입, infer 파라미터 오류)의 '추론은 아직 지원하지 않는다'는 이 항목으로 대체된다.
+
+- 규칙: 호출 인자는 왼쪽에서 오른쪽으로 맞춘다. 파라미터 타입은 앞선 인자가 정한 템플릿 파라미터를 쓰면서 새 파라미터를 선언할 수 있다.
+  이미 정해진 부분은 인자와 맞아야 하고, 맞지 않으면 보통의 불일치 오류다. `fn second(x %T, p Pair[T, %U]) -> U`에 `second(1, Pair[str, str]{...})`는
+  'Expected type `Pair[int, str]`. Found `Pair[str, str]`.'이다.
+- 함수 인자: `fn map(items []%T, f fn(T) -> %U) -> []U`를 `map([]float{1, 2}, name)`으로 부르면 `name`의 타입 `fn(float) -> str`에서 `U`가 `str`이 된다.
+  함수 타입의 파라미터 타입과 반환 타입을 함수의 것과 하나씩 맞춘다. `fn(%A, %B) -> %C`, `fn(T) -> []%U`, `fn(T) -> ?%U`처럼 어느 자리에나 선언할 수 있다.
+  타입을 적은 람다(`fn(x int) => x * 2`, `fn(x int) -> str: ...`)도 같은 함수다. `map([]int{1, 2}, name)`은 'Expected type `fn(int) -> str`. Found `fn(float) -> str`.'이다.
+- 쓰는 형식: 인라인 함수 타입, 타입 별칭 템플릿(`f MapFn[T, %U]`, 별칭의 별칭과 파라미터를 두 번 쓰는 별칭 포함), 함수 유니온의 인자(`f Func[fn(T) -> %U]`, `f &OpaqueFunc[fn(T) -> %U]`).
+  함수 유니온 파라미터는 함수와 클로저를 모두 받는다. 메서드(`fn (&Box[]) map(f fn(T) -> %U) -> Box[U]`)에서도 같다.
+- 추론 람다: `|x| expr`은 자기 타입이 없다. 람다의 파라미터는 함수 타입에서 타입을 받고, 반환 타입의 템플릿 파라미터는 본문 식의 타입에서 추론한다.
+  `map([]int{1, 2}, |x| 'n%{x}')`는 `[]str`이다. 그래서 함수 타입의 파라미터 타입에 있는 템플릿 파라미터는 람다보다 앞선 인자가 정해야 한다.
+  `fn rmap(f fn(%T) -> %U, items []T)`에 `rmap(|x| x + 1, items)`는 'Can not infer the template parameter `T` from the lambda for `f`. The type of the lambda parameter `x` must be known
+  from the arguments before the lambda. ...'이다. 이름 있는 함수와 타입을 적은 람다는 스스로 `T`를 정하므로 앞에 와도 된다(`rmap(name, items)`).
+- 남은 한계: 블록 본문의 추론 람다(`f(items, |x|)):` 뒤에 본문)는 결과 타입을 추론하지 않는다. 템플릿 파라미터를 정해야 하는 자리에서는
+  'Can not infer the template parameter `U` from the lambda for `f`. The result type of a lambda with a block is not inferred. ...'을 보고한다. 식 람다, 타입을 적은 람다, `%U type` 중 하나를 쓴다.
+  어느 인자도 정하지 못하는 파라미터(별칭이 쓰지 않는 파라미터 등)는 전과 같은 'Can not infer the template parameter `U` from the argument for `f`. Declare it as its own parameter (`%U type`) ...'이다.
+  컴파일 타임 호출(`const r = f(...)`)은 함수를 함수 포인터 인자로 받지 못하는 기존 제약이 그대로여서 함수 타입 추론이 닿지 않는다. 값 타입의 추론(`fn size(x %T, v [%N]T)`)은 컴파일 타임 호출에서도 된다.
+- 그 밖의 오류: 함수가 아닌 인자는 'Expected a function for `fn(T) -> %U`. Found `int`.', 파라미터 수가 다르면 'Expected a function with `1` parameter(s) for `fn(T) -> %U`. Found `fn(int, int) -> int`.',
+  함수 포인터 자리에 클로저를 넘기면 'Expected a function for `fn(T) -> %U`. Found the closure `Func[fn(int) -> int]`. A closure is passed to a `Func[fn(...)]` or a `&OpaqueFunc[fn(...)]` parameter.',
+  람다의 파라미터 수가 다르면 'Expected a lambda with `1` parameter(s) for `f`. Found `2`.'이다.
+- 같은 파라미터를 두 번 선언한 `fn two(a %T, b %T) -> T`는 위치 없는 'CompileError: Error: DuplicateParam'으로 끝났다. 이제 두 번째 `%T` 위치에
+  'The template parameter `T` is already declared. Write `T` without `%` to use it.'를 보고한다.
+- `?%T`도 infer 파라미터를 선언하는 형식으로 받는다(`fn opt(x %T, f fn(T) -> ?%U) -> ?U`, `fn first(o ?%T) -> T`).
+- 이미 정해진 부분의 불일치는 선언 쪽 노드가 아니라 호출 인자 위치에, 파라미터 타입 전체로 보고한다. `fn f(m Map[str, %V])`에 `Map[int, int]`를 넘기면
+  전에는 시그니처의 `str` 위치에 'Expected type `int`. Found `str`.'이 났다. 이제 인자 위치에 'Expected type `Map[str, int]`. Found `Map[int, int]`.'이다.
+- 오버로드: 달라진 것이 없다. 템플릿 파라미터를 추론하는 후보는 인자와 정확히 맞는 후보가 없을 때만 시도한다(선언 순서와 무관).
+- 구현: `src/sema_func.zig`의 `matchTemplateArg` · `matchTemplateArgCt`가 Dependent 파라미터 타입을 지금까지 정해진 파라미터로 평가해 보고(`evalParamType`, `InferParamMode.bound`),
+  아직 정해지지 않은 infer 파라미터가 있으면 인자를 먼저 해석한 뒤 `inferCtArgs`로 묶는다. `inferCtArgs`는 `fn_type`, `option_type`, 별칭 템플릿(`AliasArgs`), 함수 유니온을 따라간다.
+  묶은 뒤 파라미터 타입 전체를 다시 평가해 인자와 비교하고, 함수를 `Func`로 감싸는 변환은 `sema_lit.semaFitTarget`이 한다.
+  추론 람다는 `resolveInferLambdaArg`가 정해지지 않은 파라미터를 자리표시 타입으로 둔 채(`InferParamMode.placeholder`) 함수 타입을 평가해 람다 파라미터 타입을 얻고, `sema_expr.semaLambdaInferRet`가 본문에서 결과 타입을 얻는다.
+- 예제: `examples/calculator.cy`의 `map`이 `%U type` 없이 `map(calc.history, |r| r.result)`로 불린다.
+- 테스트: `src/test/meta/infer_param_func_type*.cy`, `infer_param_lambda*.cy`, `infer_param_dependent*.cy`, `infer_param_method.cy`, `infer_param_overload.cy`, `infer_param_dup_error.cy`,
+  `src/test/functions/func_type_inline_infer_param*_error.cy`.
+
 ## trait의 기본 메서드 (2026-11-23)
 
 trait 메서드에 본문을 쓸 수 없어서('Trait methods should not have a body.') 구현 타입마다 같은 동작을 다시 적어야 했다.
@@ -76,9 +115,7 @@ type Shape trait:
   이제 타입마다 제 너비로 읽어 `-5`가 나온다. `r8` · `r16` · `r32`도 제 너비로 읽는다(출력은 그대로 `0xc8` 같은 16진수).
 - 바뀌지 않는 것: `print(obj)`와 문자열 보간 `'%{obj}'`은 `to_string()`을 부르지 않으며 전과 같이 `Object{inner=@0x...}`를 찍는다.
 - 테스트: `src/test/core/object_to_string.cy`.
-||||||| parent of d539623e (Allow a function pointer type inline wherever a type is expected)
 
-||||||| parent of 69f22ee0 (Add default method implementations to traits)
 
 
 ## float은 항상 소수점을 붙여 문자열로 바뀐다 (2026-11-23, 깨지는 변경)

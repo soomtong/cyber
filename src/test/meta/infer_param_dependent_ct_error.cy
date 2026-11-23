@@ -1,17 +1,14 @@
-type Pair[T Any, U Any]:
-    a T
-    b U
+-- `T` is `bool` from the first argument. A compile-time call reports the mismatch like a runtime call.
+fn size(x %T, v [%N]T) -> int:
+    return N
 
-fn second(x %T, p Pair[T, %U]) -> U:
-    return p.b
-
-const r = second(1, Pair[int, str]{a=1, b='x'})
-print(r)
+const n = size(true, [3]int{1, 2, 3})
+print(n)
 
 --cytest: error
---CompileError: Can not infer the template parameter `U` from the argument for `p`. Declare it as its own parameter (`%U type`) and pass the type in the call.
+--CompileError: Expected type `[3]bool`. Found `[3]int`.
 --
---@MainPath():8:21:
---const r = second(1, Pair[int, str]{a=1, b='x'})
---                    ^~~~~~~~~~~~~~~~~~~~~~~~~~
+--@MainPath():5:22:
+--const n = size(true, [3]int{1, 2, 3})
+--                     ^~~~~~~~~~~~~~~
 --

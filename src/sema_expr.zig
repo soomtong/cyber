@@ -2907,6 +2907,23 @@ pub fn semaCompare(c: *cy.Chunk, left_n: *ast.Node, left: sema.ExprResult, right
     }
 }
 
+/// An inferred lambda (`|x| expr`) whose parameter types are known and whose result type is not: the result type
+/// is the type of the body. `sema_func` types the parameters from a function type that still has an infer
+/// parameter in its return type (`f fn(T) -> %U`).
+pub fn semaLambdaInferRet(c: *cy.Chunk, node: *ast.Node, params: []const sema.FuncParam) !sema.ExprResult {
+    const lambda = node.cast(.lambda_expr);
+    const func = try c.addUserLambda(@ptrCast(c.sym), @ptrCast(lambda));
+    _ = try sema_local.pushLambdaProc(c, func);
+
+    try sema_local.appendFuncParamVars(c, lambda.params, params);
+
+    const ret_t = try sema_stmt.semaReturnExprStmt(c, lambda.expr, null, lambda.expr);
+    const sig = try c.sema.ensureFuncSig(@ptrCast(params), ret_t);
+    try c.resolveUserLambda(func, sig);
+
+    return sema_local.popLambdaProc(c);
+}
+
 /// Use of body stmts is extracted so that `lamda_multi` and `lambda_cont` have the same behavior.
 fn semaLambdaMulti(c: *cy.Chunk, lambda: *ast.LambdaMulti, stmts: []const *ast.Node, expr: sema.Cstr) !sema.ExprResult {
     const node: *ast.Node = @ptrCast(lambda);

@@ -2627,7 +2627,7 @@ fn compose(f fn(int) -> int, g fn(int) -> int) -> fn(int) -> int:
 
 Where an expression is expected, `fn(...)` is a [lambda](#lambdas) and must be followed by `:` or `=>`. It is read as a type only when `)`, `]`, `,` or `}` follows the signature, which is the case for a type argument (`Func[fn(int) -> int]`, `Map[str, fn(int) -> int]{}`). `f := fn(a int) -> int` with nothing after it reports 'Expected colon.' After a type prefix and in the positions listed above, `fn(...)` is always a type.
 
-An inline function type can use the template parameters of its function that are known from the earlier arguments. It can not declare a new one: a call to `fn map(items []%T, f fn(T) -> %U) -> []U` reports 'Can not infer the template parameter `U` from the argument for `f`. Declare it as its own parameter (`%U type`) and pass the type in the call.' See [infer parameter](#infer-parameter).
+An inline function type can use the template parameters of its function that are known from the earlier arguments. It can also declare a new one (`f fn(T) -> %U`), which is inferred from the function or the lambda that is passed. See [infer parameter](#infer-parameter).
 ```cy
 fn filter(items []%T, f fn(T) -> bool) -> []T:
     out := []T{}
@@ -2722,16 +2722,76 @@ fn set(m Map[%K, %V], key K, val V):
     m[key] = val
 ```
 
-A parameter type can not use an earlier template parameter and declare a new one at the same time, and a function type can not declare one at all. A call to `fn map(items []%T, f fn(T) -> %U) -> []U` (or with an alias, `f MapFn[T, %U]`) reports 'Can not infer the template parameter `U` from the argument for `f`. Declare it as its own parameter (`%U type`) and pass the type in the call.' Declare the parameter explicitly instead:
+The arguments of a call are matched from left to right. A parameter type can use the template parameters that the arguments before it bound and declare new ones at the same time:
 ```cy
-fn map(%U type, items []%T, f fn(T) -> U) -> []U:
+type Pair[T Any, U Any]:
+    a T
+    b U
+
+fn second(x %T, p Pair[T, %U]) -> U:
+    return p.b
+
+print(second(1, Pair[int, str]{a=1, b='x'}))    --> x
+```
+The parts of the type that are already known must match the argument: `second(1, Pair[str, str]{a='a', b='x'})` reports 'Expected type `Pair[int, str]`. Found `Pair[str, str]`.'
+
+A template parameter that is declared in a function type is inferred from the function that is passed. The parameter types and the return type of the function type are matched with those of the function:
+```cy
+fn map(items []%T, f fn(T) -> %U) -> []U:
     out := []U{}
     for items |it|:
         out += f(it)
     return out
 
-print(map(str, []float{1, 2}, |x| 'v%{x}'))   --> {'v1.0', 'v2.0'}
+fn name(x float) -> str:
+    return 'v%{x}'
+
+print(map([]float{1, 2}, name))                 --> {'v1.0', 'v2.0'}
+print(map([]int{1, 2}, fn(x int) => x * 2))     --> {2, 4}
+print(map([]int{1, 2}, |x| 'n%{x}'))            --> {'n1', 'n2'}
 ```
+`T` is bound to `float` by the first argument, so the function must take a `float`: `map([]int{1, 2}, name)` reports 'Expected type `fn(int) -> str`. Found `fn(float) -> str`.' `U` is bound to `str`, the return type of `name`.
+
+The function type can declare a parameter anywhere in its signature (`fn(%A, %B) -> %C`, `fn(T) -> []%U`, `fn(T) -> ?%U`). It can be written inline, as a type alias template (`f MapFn[T, %U]` for `type MapFn[A Any, B Any] = fn(A) -> B`), or as the argument of a function union (`f Func[fn(T) -> %U]`, `f &OpaqueFunc[fn(T) -> %U]`), which also takes a closure. This works the same for a method (`fn (&Box[]) map(f fn(T) -> %U) -> Box[U]`).
+
+An inferred lambda (`|x| expr`) has no types of its own. Its parameters are typed from the function type, and the template parameters in the return type are then inferred from the type of its body. So every template parameter in the parameter types of the function type must be bound by an argument before the lambda:
+```cy
+fn rmap(f fn(%T) -> %U, items []T) -> []U:
+    out := []U{}
+    for items |it|:
+        out += f(it)
+    return out
+
+fn name(x float) -> str:
+    return 'v%{x}'
+
+print(rmap(name, []float{1, 2}))                    --> {'v1.0', 'v2.0'}
+print(rmap(fn(x int) => x + 1, []int{1, 2}))        --> {2, 3}
+print(rmap(|x| x + 1, []int{1, 2}))
+--> error: Can not infer the template parameter `T` from the lambda for `f`. The type of the lambda parameter `x` must be known from the arguments before the lambda. Declare the types of the lambda (`fn(x T) -> U: ...`), or declare `%T type` as its own parameter and pass the type in the call.
+```
+A function or a lambda with declared types (`fn(x int) => x + 1`) binds `T` itself, so it can come first. Declare the function parameter after the parameters that its lambda depends on, like `map` above.
+
+The result type of an inferred lambda with a block is not inferred. Where it would bind a template parameter, the call reports 'Can not infer the template parameter `U` from the lambda for `f`. The result type of a lambda with a block is not inferred. Use an expression lambda (`|x| expr`), declare the types of the lambda (`fn(x T) -> U:`), or declare `%U type` as its own parameter and pass the type in the call.':
+```cy
+print(map([]int{1, 2}, |x|)):
+    return x + 1
+```
+
+When no argument binds a template parameter, the call reports 'Can not infer the template parameter `U` from the argument for `f`. Declare it as its own parameter (`%U type`) and pass the type in the call.' An explicit parameter is always an alternative to inference:
+```cy
+fn convert(%U type, items []%T, f fn(T) -> U) -> []U:
+    out := []U{}
+    for items |it|:
+        out += f(it)
+    return out
+
+print(convert(str, []float{1, 2}, |x| 'v%{x}'))   --> {'v1.0', 'v2.0'}
+```
+
+A template parameter is declared once. `fn two(a %T, b %T) -> T` reports 'The template parameter `T` is already declared. Write `T` without `%` to use it.'
+
+Among [overloads](#function-overloading), a function that infers template parameters is tried only after the overloads that match the arguments exactly.
 
 An infer parameter is declared in a parameter type only. `fn f(x int) -> %U` reports '`%U` can not be declared in a return type. Declare it in a parameter (`%U type`) instead.', and `%T` in a function body or outside of a function reports '`%T` can only be declared in the signature of a function.'
 

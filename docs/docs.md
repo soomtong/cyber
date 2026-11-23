@@ -2662,7 +2662,7 @@ fn map(%U type, items []%T, f fn(T) -> U) -> []U:
         out += f(it)
     return out
 
-print(map(str, []float{1, 2}, |x| 'v%{x}'))   --> {'v1', 'v2'}
+print(map(str, []float{1, 2}, |x| 'v%{x}'))   --> {'v1.0', 'v2.0'}
 ```
 
 An infer parameter is declared in a parameter type only. `fn f(x int) -> %U` reports '`%U` can not be declared in a return type. Declare it in a parameter (`%U type`) instead.', and `%T` in a function body or outside of a function reports '`%T` can only be declared in the signature of a function.'

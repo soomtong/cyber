@@ -19,6 +19,12 @@ const eqUserError = setup.eqUserError;
 const EvalResult = setup.EvalResult;
 const is_wasm = builtin.target.cpu.arch.isWasm();
 
+// test_runner.zig links to `test_init` and `zpanic`, which test/setup.zig exports. A test filter can leave no test that
+// uses `setup`, so the file is referenced here to keep the exports in the executable.
+comptime {
+    _ = setup;
+}
+
 const Case = struct {
     config: Config,
     skip: bool = false,
@@ -44,6 +50,7 @@ const Runner = struct {
     }
 };
 
+/// The cases to run when `CYBER_TEST_FILTER` is not set. `null` runs every case.
 const caseFilter: ?[]const u8 = null;
 // const caseFilter: ?[]const u8 = "meta.cy";
 const failFast: bool = true;
@@ -66,6 +73,19 @@ fn testShard() Shard {
     const count = std.fmt.parseInt(usize, val[slash + 1 ..], 10) catch return none;
     if (count == 0 or index >= count) return none;
     return .{ .index = index, .count = count };
+}
+
+/// `zig build test -Dtest-filter=<text>` sets `CYBER_TEST_FILTER=<text>` (build.zig). "Tests." then runs the cases
+/// whose path contains the text. The other tests of this file are selected by their name when the executable is built.
+/// The caller owns the result.
+fn testCaseFilter() ?[]const u8 {
+    if (is_wasm) return null;
+    const val = stdx.getEnvVarOwned(t.alloc, "CYBER_TEST_FILTER") catch return null;
+    if (val.len == 0) {
+        t.alloc.free(val);
+        return null;
+    }
+    return val;
 }
 
 /// The tests that are not split into cases run in the first shard only.
@@ -972,18 +992,22 @@ test "Tests." {
     run.case("../tokenizer.cy");
 
     const shard = testShard();
+    const env_filter = testCaseFilter();
+    defer if (env_filter) |filter| t.alloc.free(filter);
+    const case_filter = env_filter orelse caseFilter;
     var numPassed: u32 = 0;
     var skipped: u32 = 0;
     var num_cases: u32 = 0;
     defer std.debug.print("Tests passed: {}/{}, skipped: {} (shard {}/{})\n", .{numPassed, num_cases, skipped, shard.index + 1, shard.count});
     for (run.cases.items, 0..) |run_case, case_idx| {
         if (case_idx % shard.count != shard.index) continue;
-        num_cases += 1;
-        if (caseFilter) |filter| {
+        if (case_filter) |filter| {
             if (std.mem.find(u8, run_case.config.uri, filter) == null) {
                 continue;
             }
         }
+        // A filter that selects no case leaves 0 of 0 passed, which is not a failure.
+        num_cases += 1;
         std.debug.print("test: {s}\n", .{run_case.config.uri});
 
         if (run_case.skip) {

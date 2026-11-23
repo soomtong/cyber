@@ -7,7 +7,9 @@
 # Common overrides (all optional):
 #   task build OPT=ReleaseSafe          # optimize mode: Debug, ReleaseSafe, ReleaseFast, ReleaseSmall
 #   task build TARGET=aarch64-linux-gnu # cross compile (adds -Dcpu=baseline like CI)
-#   task test FILTER=switch             # only tests whose name contains the filter
+#   task test FILTER=switch             # only tests whose name contains the filter:
+#                                       # a behavior case by its path (control_flow/switch_range_open_error.cy),
+#                                       # the other tests by their Zig test name
 #   task build -- -Dmalloc=mimalloc     # any extra `zig build` flags after `--`
 
 version: '3'
@@ -121,7 +123,7 @@ tasks:
   # --------------------------------------------------------------------- test
 
   test:
-    desc: 'Run every test suite (lib, lib standalone, cli, trace, behavior). FILTER= narrows by name.'
+    desc: 'Run every test suite (lib, lib standalone, cli, trace, behavior). FILTER= narrows by test name and behavior case path.'
     cmds:
       - task: zig:build
         vars: { STEP: test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', CLI_ARGS: '{{.CLI_ARGS}}' }
@@ -133,7 +135,7 @@ tasks:
         vars: { OPT: ReleaseSafe, TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', CLI_ARGS: '{{.CLI_ARGS}}' }
 
   test:behavior:
-    desc: 'Run the behavior tests (src/test/**.cy scripts). The cases run in 4 processes at once; `-- -Dtest-shards=1` runs them in one.'
+    desc: 'Run the behavior tests (src/test/**.cy scripts). The cases run in 4 processes at once; `-- -Dtest-shards=1` runs them in one. FILTER= narrows by case path.'
     cmds:
       - task: zig:build
         vars: { STEP: behavior-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', CLI_ARGS: '{{.CLI_ARGS}}' }

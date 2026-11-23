@@ -42,7 +42,7 @@ pub fn build(b: *std.Build) !void {
     optimize = b.standardOptimizeOption(.{});
 
     selinux = b.option(bool, "selinux", "Whether you are building on linux distro with selinux. e.g. Fedora.") orelse false;
-    testFilter = b.option([]const u8, "test-filter", "Test filter.");
+    testFilter = non_empty(b.option([]const u8, "test-filter", "Run the tests whose name contains this text. A behavior case is named by its path."));
     vmEngine = b.option(config_.Engine, "vm", "Build with `zig` or `c` VM.") orelse .c;
     optMalloc = b.option(Allocator, "malloc", "Override default allocator: `malloc`, `mimalloc`, `zig`");
     optFFI = b.option(bool, "ffi", "Override default FFI: true, false");
@@ -155,7 +155,7 @@ pub fn build(b: *std.Build) !void {
         const lsp_test = b.addTest(.{
             .name = "lsp_test",
             .root_module = try create_lsp_module(b, vmc, lib, cli_test_config),
-            .filters = &.{testFilter orelse ""},
+            .filters = testFilters(b),
         });
         var run = b.addRunArtifact(lsp_test);
         run.has_side_effects = no_cache;
@@ -206,6 +206,8 @@ pub fn build(b: *std.Build) !void {
             var run = b.addRunArtifact(behavior_test);
             run.setName(b.fmt("run behavior_test {}/{}", .{ i + 1, shards }));
             run.setEnvironmentVariable("CYBER_TEST_SHARD", b.fmt("{}/{}", .{ i, shards }));
+            // "Tests." selects its cases with the filter (`testCaseFilter` in behavior_test.zig).
+            if (testFilter) |filter| run.setEnvironmentVariable("CYBER_TEST_FILTER", filter);
             runTestInParallel(run);
             behavior_test_cmd.dependOn(&run.step);
         }
@@ -494,11 +496,24 @@ fn non_empty(opt: ?[]const u8) ?[]const u8 {
     return s;
 }
 
+/// The filters of a test executable for `-Dtest-filter`. Without the option every test is built.
+fn testFilters(b: *std.Build) []const []const u8 {
+    const filter = testFilter orelse return &.{};
+    return b.dupeStrings(&.{filter});
+}
+
+/// A test is built when its name contains one of the filters. "Tests." of behavior_test.zig holds every `.cy` case,
+/// so it is always built, and it selects its cases at run time with `CYBER_TEST_FILTER`.
+fn behaviorTestFilters(b: *std.Build) []const []const u8 {
+    const filter = testFilter orelse return &.{};
+    return b.dupeStrings(&.{ filter, "test.Tests." });
+}
+
 fn add_cli_test(b: *std.Build, cli: *std.Build.Module) !*std.Build.Step.Compile {
     const step = b.addTest(.{
         .name = "cli_test",
         .root_module = cli,
-        .filters = &.{testFilter orelse ""},
+        .filters = testFilters(b),
     });
     return step;
 }
@@ -507,7 +522,7 @@ fn add_lib_test(b: *std.Build, lib: *std.Build.Module) !*std.Build.Step.Compile 
     const step = b.addTest(.{
         .name = "lib_test",
         .root_module = lib,
-        .filters = &.{testFilter orelse ""},
+        .filters = testFilters(b),
     });
     return step;
 }
@@ -521,7 +536,7 @@ fn addBehaviorTest(b: *std.Build, lib: *std.Build.Step.Compile, vmc: *std.Build.
     const step = b.addTest(.{
         .name = "behavior_test",
         .root_module = root,
-        .filters = &.{testFilter orelse ""},
+        .filters = behaviorTestFilters(b),
         .test_runner = .{
             .path = b.path("src/test_runner.zig"),
             .mode = .simple,
@@ -564,7 +579,7 @@ fn addTraceTest(b: *std.Build, lib_config_: Options, cli_config_: CliConfig) !*s
     const step = b.addTest(.{
         .name = "trace_test",
         .root_module = root,
-        .filters = &.{testFilter orelse ""},
+        .filters = testFilters(b),
         .test_runner = .{
             .path = b.path("src/test_runner.zig"),
             .mode = .simple,

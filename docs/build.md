@@ -21,6 +21,13 @@ zig build test
 # Runs just the tracing tests.
 zig build trace-test
 
+# Runs the tests whose name contains `switch`.
+# A behavior case is named by its path under `src/test`, like `control_flow/switch_range_open_error.cy`.
+# The other tests are named by their Zig `test` name.
+# A suite in which no name matches runs 0 tests and passes.
+zig build test -Dtest-filter=switch
+zig build behavior-test -Dtest-filter=control_flow/
+
 # A test that leaks memory fails. A behavior case that leaks prints `leaked N blocks in <path>`
 # and the allocator prints where each block was allocated.
 

@@ -14,6 +14,12 @@ const EvalResult = setup.EvalResult;
 const eqUserError = setup.eqUserError;
 const NullId = std.math.maxInt(u32);
 
+// test_runner.zig links to `test_init` and `zpanic`, which test/setup.zig exports. A test filter can leave no test that
+// uses `setup`, so the file is referenced here to keep the exports in the executable.
+comptime {
+    _ = setup;
+}
+
 // Tests that require `Trace` build option.
 
 test "ARC global ref." {

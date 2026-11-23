@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.18-dev 1097-2b49b50</div>
+    <div class="sub-title">v0.4.19-dev 1135-7184e27</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1521,7 +1521,7 @@ var b r64 = 18446744073709551615
 <p>When the target is a <code>float</code> or <code>f32</code>, a hexadecimal, octal or binary literal converts by its unsigned 64-bit value: <code>var f float = 0x10</code> is <code>16.0</code> and <code>var g float = 0xFFFFFFFFFFFFFFFF</code> is <code>18446744073709551615.0</code>. Without a float target the literal is an <code>int</code> first, so <code>float(0xFFFFFFFFFFFFFFFF)</code> is <code>-1.0</code>.</p>
 <p>A raw integer converts to a float by its unsigned value at every width, and a float converts to a raw integer the same way. The fraction is dropped. A negative value, a NaN or a value that does not fit the raw type panics:</p>
 <pre><code class="language-cy">var mask r64 = 0xFFFFFFFFFFFFFFFF
-print(float(mask))                -- 18446744073709552000
+print(float(mask))                -- 18446744073709552000.0
 print(r64(9223372036854775808.0)) -- 0x8000000000000000
 print(byte(255.9))                -- 0xff
 f := -1.0
@@ -1566,6 +1566,20 @@ b := float(a)
 <code>error.InvalidCharacter</code> instead. It reads <code>'1.5'</code>, <code>'-2'</code>, <code>'1e3'</code>, <code>'inf'</code> and <code>'nan'</code>, and does not allow spaces around the number:</p>
 <pre><code class="language-cy">x := float.parse('1.5') !else 0.0
 </code></pre>
+<p>A float always converts to text that reads back as a float. <code>print</code>, <code>str(x)</code>, string interpolation and <code>x.fmt()</code> use the shortest
+digits that give the same value, in plain decimals without an exponent. A finite value without a fraction gets <code>.0</code>, so the output
+tells a <code>float</code> from an <code>int</code>. Infinity and NaN print as <code>inf</code>, <code>-inf</code> and <code>nan</code>. <code>f32</code> follows the same rule:</p>
+<pre><code class="language-cy">print(3.0)              --> 3.0
+print(1.5)              --> 1.5
+print(-0.0)             --> -0.0
+print(1e21)             --> 1000000000000000000000.0
+print(1e-7)             --> 0.0000001
+print(1.0 / 0)          --> inf
+print('%{float(7)}')    --> 7.0
+print([]float{3, 5.5})  --> {3.0, 5.5}
+print(3)                --> 3
+</code></pre>
+<p><code>json.stringify</code> and <code>toon.encode</code> follow their own formats and write <code>3.0</code> as <code>3</code>.</p>
 <p>Float types can perform <a href="#arithmetic-operators" title="">arithmetic</a> and <a href="#comparison-operators" title="">comparison</a> operations.</p>
 <a href="#basic-types">^topic</a>
 <h2 id="strings">Strings. <a href="#strings">#</a></h2>
@@ -1802,6 +1816,7 @@ print(a)    --> abc
 <pre><code class="language-cy">a := ?str('abc')
 print(a)    --> abc
 </code></pre>
+<p>The type after <code>?</code> ends before the call or the initializer, also when it is a result type: <code>?!int(int.parse(s))</code> calls <code>?!int</code>, and <code>[]?int{1, none}</code> and <code>[]!int{int.parse(s)}</code> are slices. The argument is wrapped one level only: <code>?!int(1)</code> is a compile error, since an <code>int</code> is not a <code>!int</code>. At the start of an expression <code>!</code> is logic not, so <code>!int(x)</code> is <code>not int(x)</code>.</p>
 <a href="#basic-types">^topic</a>
 <h3 id="wrap-none">Wrap <code>none</code>. <a href="#wrap-none">#</a></h3>
 <p><code>none</code> is automatically initialized to the inferred optional's <code>none</code> case:</p>
@@ -2155,6 +2170,7 @@ small = as[i8] i
 <li><a href="#@init_sequence" title=""><code>@init_sequence</code>.</a></li>
 <li><a href="#@init_record" title=""><code>@init_record</code>.</a></li>
 <li><a href="#methods" title="">Methods.</a><ul>
+<li><a href="#choosing-a-receiver" title="">Choosing a receiver.</a></li>
 <li><a href="#operator-methods" title="">Operator methods.</a></li>
 <li><a href="#special-methods" title="">Special methods.</a></li>
 </ul>
@@ -2176,6 +2192,7 @@ small = as[i8] i
 </ul>
 </li>
 <li><a href="#traits" title="">Traits.</a><ul>
+<li><a href="#receivers-of-trait-methods" title="">Receivers of trait methods.</a></li>
 <li><a href="#dynamic-dispatch" title="">Dynamic dispatch.</a></li>
 </ul>
 </li>
@@ -2206,7 +2223,7 @@ type Vec2:
 <h3 id="initialize-struct">Initialize struct. <a href="#initialize-struct">#</a></h3>
 <p>Structs are constructed from an initializer expression:</p>
 <pre><code class="language-cy">v := Vec2{x=30, y=40}
-print(v.x)      --> 30
+print(v.x)      --> 30.0
 </code></pre>
 <p>An initializer literal can infer the target struct type:</p>
 <pre><code class="language-cy">var v Vec2 = {x=30, y=40}
@@ -2219,8 +2236,8 @@ print(v.x)      --> 30
 <pre><code class="language-cy">v := Vec2{x=30, y=40}
 w := v
 v.x = 100
-print(w.x)     --> 30
-print(v.x)     --> 100
+print(w.x)     --> 30.0
+print(v.x)     --> 100.0
 </code></pre>
 <a href="#custom-types">^topic</a>
 <h3 id="default-field-values">Default field values. <a href="#default-field-values">#</a></h3>
@@ -2230,8 +2247,8 @@ print(v.x)     --> 100
     y float = 0
 
 v := Vec2{}
-print(v.x)       --> 0
-print(v.y)       --> 0
+print(v.x)       --> 0.0
+print(v.y)       --> 0.0
 </code></pre>
 <p>The names in a default value are looked up where the type is declared: in its module, including private declarations, and among its template parameters (<code>v T = T(3)</code>). The locals of the code that writes the initializer are not visible to it, so a local <code>K</code> does not change the default <code>x int = K</code>.</p>
 <p>A default value is owned like a value written in the initializer: a default that reads a global or another place copies it, and one that reads a <code>NoCopy</code> value from a place is the compile error 'Cannot copy <code>Array[int]</code>, type implements <code>NoCopy</code>.' at the default.</p>
@@ -2366,6 +2383,69 @@ fn (^Node) inc(n int)
 fn (Ptr[Node]) inc(n int)
 </code></pre>
 <p>It's recommended to use a borrow for the receiver unless there is a good reason not to.</p>
+<a href="#custom-types">^topic</a>
+<h3 id="choosing-a-receiver">Choosing a receiver. <a href="#choosing-a-receiver">#</a></h3>
+<p>Start with a shared borrow <code>&T</code>. Change the receiver to an exclusive borrow <code>&&T</code> when the method does something that can invalidate another borrow of the value. The rules behind this are in <a href="#exclusive-borrows" title="">Exclusive borrows</a>.</p>
+<p>A <code>&T</code> receiver can:</p>
+<ul>
+<li>Read every field.</li>
+<li>Assign a field that is not managed (<code>int</code>, <code>float</code>, <code>bool</code>, a struct of those), and an element of a slice field (<code>self.items[0] = x</code>).</li>
+<li>Call the methods that take <code>&T</code>.</li>
+</ul>
+<p>A <code>&&T</code> receiver is needed to:</p>
+<ul>
+<li>Append to a field or resize it (<code>self.items += x</code>, <code>self.items.append(x)</code>, <code>self.items.clear()</code>).</li>
+<li>Assign a managed field: a <code>str</code>, a slice, a <code>Map</code>, a struct that holds one of them, or a field of such a struct (<code>self.tag.label = 'z'</code>).</li>
+<li>Call a method that takes <code>&&T</code>.</li>
+</ul>
+<pre><code class="language-cy">type Tag:
+    label str
+
+type Counter:
+    n     int
+    name  str
+    items []int
+    tag   Tag
+
+fn (&Counter) count() -> int:
+    return self.items.len() + self.n
+
+fn (&Counter) inc():
+    self.n += 1               -- `n` is not managed.
+    print(self.count())       -- A `&Counter` method.
+
+fn (&&Counter) add(x int):
+    self.items += x           -- Appends.
+    self.name = 'added'       -- Replaces a `str`.
+    self.tag = Tag{label='new'}
+    self.inc()                -- A `&&Counter` receiver can call a `&Counter` method.
+
+c := Counter{n=0, name='c', items={}, tag=Tag{label='t'}}
+c.inc()         --> 1
+c.add(5)        --> 3
+</code></pre>
+<p>A <code>&T</code> receiver that does one of these things is a compile error. Each error has its own message:</p>
+<pre><code class="language-cy">fn (&Counter) push(x int):
+    self.items += x
+    --> error: Cannot borrow exclusively through a shared borrow. Declare the borrow as `&&T`.
+
+fn (&Counter) rename(name str):
+    self.name = name
+    --> error: Cannot replace a managed value through a shared borrow. Declare the borrow as `&&T`.
+
+fn (&Counter) add_one():
+    self.add(1)
+    --> error: Expected argument `&>Counter`, found `&Counter`, when calling `fn add(&>Counter, int) -> void`.
+</code></pre>
+<p>The first is 'Cannot borrow exclusively through a shared borrow. Declare the borrow as <code>&&T</code>.' and the second is 'Cannot replace a managed value through a shared borrow. Declare the borrow as <code>&&T</code>.' In the third message, <code>&>Counter</code> is the exclusive borrow <code>&&Counter</code>.</p>
+<p>A call of a <code>&&T</code> method needs exclusive access to the value. No other borrow of the value can be in use:</p>
+<pre><code class="language-cy">c := Counter{n=0, name='c', items={1}, tag=Tag{label='t'}}
+first := &c.items[0]
+c.add(2)
+--> error: Expected exclusive access. There is another active borrow to `c`.
+print(first.*)
+</code></pre>
+<p>A method that implements a <a href="#traits" title="">trait</a> method takes <code>&T</code>. A <code>&&T</code> method does not implement a trait method. See <a href="#receivers-of-trait-methods" title="">Receivers of trait methods</a>.</p>
 <a href="#custom-types">^topic</a>
 <h3 id="operator-methods">Operator methods. <a href="#operator-methods">#</a></h3>
 <p>Most operators are implemented as type methods.</p>
@@ -2606,7 +2686,7 @@ print(s.!line)     --> 20
     radius float
 
 fn (&Circle) area() -> float:
-    return 3.14 * self.radius^2
+    return 3.14 * self.radius**2
 
 type Rectangle:
     with Shape
@@ -2617,15 +2697,109 @@ fn (&Rectangle) area() -> float:
     return self.width * self.height
 </code></pre>
 <p>A type that intends to implement a trait but does not satisfy the trait's interface results in a compile error. The implementing method must have the same number of parameters, the same parameter types and the same return type as the trait method. Implicit conversions such as <code>int</code> to <code>float</code> do not count, so <code>fn (&Circle) scale(k int)</code> does not implement <code>fn scale(k float)</code>.</p>
+<p>A trait method without a body is a required method. A trait method with a body is a <a href="#default-methods" title="">default method</a>.</p>
+<a href="#custom-types">^topic</a>
+<h3 id="receivers-of-trait-methods">Receivers of trait methods. <a href="#receivers-of-trait-methods">#</a></h3>
+<p>A trait method is declared without a receiver. It is called through a shared view of the value (<code>^Dyn[Shape]</code>, <code>&Dyn[Shape]</code>, <code>self</code> of a default method), and other borrows of the value can be in use at that time. So the method that implements it takes a shared borrow <code>&T</code>.</p>
+<p>A method with an exclusive receiver <code>&&T</code> does not implement a trait method:</p>
+<pre><code class="language-cy">type Grow trait:
+    fn push(x int)
+
+type Box:
+    with Grow
+    --> CompileError: `Box` does not implement `fn push(Grow, int) -> void` from `Grow`. The method `push` takes an exclusive borrow `&&Box`, but a trait method takes a shared borrow `&Box`. Keep what `push` changes behind a reference `^T`, or call `push` on `Box` without the trait.
+    xs []int
+
+fn (&&Box) push(x int):
+    self.xs += x
+</code></pre>
+<p>There are two ways out. Call the <code>&&T</code> method on the type itself and keep it out of the trait. Or keep the value that the method changes behind a reference. The exclusive borrow rule does not hold behind a <code>^T</code>, so the method can take <code>&T</code>:</p>
+<pre><code class="language-cy">type Items:
+    xs []int
+
+type Box:
+    with Grow
+    items ^Items
+
+fn (&Box) push(x int):
+    self.items.xs += x
+
+var g ^Dyn[Grow] = ^Box{items=^Items{xs={}}}
+g.push(1)
+</code></pre>
+<p>The compiler does not check a borrow that points into a value behind a <code>^T</code>. Do not keep such a borrow over a call that can resize the value.</p>
+<p>When a type has both a <code>&T</code> and a <code>&&T</code> method with the signature of the trait method, the <code>&T</code> method implements the trait.</p>
+<p>A method that takes the receiver by value, as <code>^T</code> or as <code>sink T</code> implements the trait for a template constraint (<code>fn size_of[T Sized](x T)</code>), but the type can not be used as a <code>Dyn</code> value and does not get the default methods of the trait: '<code>Unit</code> can not be used as <code>Dyn[Sized]</code>. The method <code>size</code> takes the receiver as <code>Unit</code>, but a call through <code>Dyn</code> passes a shared borrow <code>&Unit</code>. Declare the method as <code>fn (&Unit) size(...)</code>.'</p>
 <a href="#custom-types">^topic</a>
 <h3 id="dynamic-dispatch">Dynamic dispatch. <a href="#dynamic-dispatch">#</a></h3>
 <p>Since traits are a generic type, they need to be wrapped in a <code>Dyn</code> container to be materialized into a dynamic dispatch value. Implementing types become assignable to a <code>Dyn</code> reference type:</p>
 <pre><code class="language-cy">var s ^Dyn[Shape] = ^Circle{radius=2}
-print(s.area())       --> 12.57
+print(s.area())       --> 12.56
 
 s = ^Rectangle{width=4, height=5}
-print(s.area())       --> 20
+print(s.area())       --> 20.0
 </code></pre>
+<a href="#custom-types">^topic</a>
+<h3 id="default-methods">Default methods. <a href="#default-methods">#</a></h3>
+<p>A trait method with a body is a default method. An implementing type that does not declare the method gets it:</p>
+<pre><code class="language-cy">type Shape trait:
+    fn area() -> float
+    fn name() -> str
+
+    fn describe() -> str:
+        return '%{self.name()} with area %{self.area()}'
+
+type Circle:
+    with Shape
+    radius float
+
+fn (&Circle) area() -> float:
+    return 3.14 * self.radius**2
+
+fn (&Circle) name() -> str:
+    return 'circle'
+
+c := Circle{radius=2}
+print(c.describe())       --> circle with area 12.56
+
+var s ^Dyn[Shape] = ^Circle{radius=1}
+print(s.describe())       --> circle with area 3.14
+</code></pre>
+<p>The default method can be called on the implementing type and through a <code>Dyn</code> value.</p>
+<p>A type overrides a default method when it declares a method with the same name and the same signature:</p>
+<pre><code class="language-cy">type Square:
+    with Shape
+    width float
+
+fn (&Square) area() -> float:
+    return self.width * self.width
+
+fn (&Square) name() -> str:
+    return 'square'
+
+fn (&Square) describe() -> str:
+    return 'a square of %{self.width}'
+
+print(Square{width=2}.describe())       --> a square of 2.0
+</code></pre>
+<p>A method of the type with the same name and the same parameter types takes the place of the default method. If its return type is not the one from the trait, the type does not implement the trait: '<code>Square</code> does not implement <code>fn describe(Shape) -> str</code> from <code>Shape</code>.' A method with the same name and other parameter types is another overload, and the type still gets the default method. A trait can have overloads too, with a default for some or for all of them, and a default method can call another overload on <code>self</code>. A field or a function without a receiver that has the same name keeps the default methods of that name out.</p>
+<p>Inside a default method, <code>self</code> is the receiver seen through the trait. Its type is the shared borrow <code>&Dyn[Shape]</code>. It can call the other methods of the trait, required or default, and it can be passed to a function that takes a <code>&Dyn[Shape]</code>. A call on <code>self</code> is a dynamic dispatch, so it reaches the method of the implementing type, including an override of another default method.</p>
+<p><code>self</code> knows nothing else about the implementing type. A field access is a compile error:</p>
+<pre><code class="language-cy">type Shape trait:
+    fn describe() -> str:
+        return 'radius %{self.radius}'
+        --> CompileError: Field `radius` does not exist in `&Dyn[Shape]`. A default method of a trait can not access the fields of the implementing type, only the methods of the trait.
+</code></pre>
+<p>To use a value of the type, declare a required method that returns it and call that method.</p>
+<p>The other rules:</p>
+<ul>
+<li>A trait method is declared without a receiver, and a default method always takes the receiver as a shared borrow. There is no default method with an exclusive receiver <code>&&T</code>, and a <code>&&T</code> method does not implement a trait method. See <a href="#receivers-of-trait-methods" title="">Receivers of trait methods</a>.</li>
+<li>A default method of a generic trait can use the template parameters of the trait. A template type gets default methods like any other type.</li>
+<li>The body is compiled for each type that gets the default method. A default method that every implementing type overrides is not checked.</li>
+<li>When two traits of a type have a default method with the same name and the same parameter types, the type must declare the method itself. Otherwise: '<code>Both</code> gets the default method <code>side</code> from both <code>Left</code> and <code>Right</code>. Declare <code>side</code> for <code>Both</code> to say what it does.' The declared method implements both traits when its signature matches both.</li>
+<li>A default method of one trait does not implement a required method of another trait: '<code>Both</code> has the method <code>side</code> only as a default method of <code>Left</code>. Declare <code>side</code> for <code>Both</code> to implement <code>Right</code>.'</li>
+<li>A default method can not be a generator ('A default method of a trait can not be a generator.') and can not have a template parameter ('A default method of a trait can not have a template parameter.').</li>
+</ul>
 <a href="#custom-types">^topic</a>
 <h2 id="type-evaluation">Type evaluation. <a href="#type-evaluation">#</a></h2>
 <p>Types can be declared from const evaluation:</p>
@@ -2983,6 +3157,17 @@ fn dist(x0, y0, x1, y1 float) -> float:
 fn foo():
     print(a)    --> error: Undeclared variable `a`.
 </code></pre>
+<p>A <code>return</code> without a value returns from a function that returns <code>void</code> (or has no return type) or <code>!void</code>, where it is the success. In a function, method or lambda with any other return type it is a compile error: 'Expected a return value of type <code>int</code>. A <code>return</code> without a value is for a function that returns <code>void</code> or <code>!void</code>.' It does not return <code>none</code> from a function that returns <code>?T</code>: write <code>return none</code>. In a <a href="#generators" title="">generator</a> it ends the generator.</p>
+<pre><code class="language-cy">fn log(x int):
+    if x < 0:
+        return          -- OK
+    print(x)
+
+fn half(x int) -> int:
+    if x == 0:
+        return          --> CompileError: Expected a return value of type `int`.
+    return x / 2
+</code></pre>
 <p>Functions can only return one value. To return several, declare a <a href="#tuples" title="">tuple</a> type and return that:</p>
 <pre><code class="language-cy">type Pair(a int, b int)
 
@@ -3028,6 +3213,24 @@ print(show(n))       --> int
 print(show(2.5))     --> float
 print(show(4))       --> int
 </code></pre>
+<p>An argument that takes its type from the parameter does not match an overload whose parameter it can not be made for: <code>none</code> for a parameter that is not a <code>?T</code>, an enum literal like <code>.red</code> for a type without that member, an initializer literal like <code>{1, 2}</code> for <code>int</code>, or an <a href="#inferred-lambdas" title="">inferred lambda</a> for a parameter that is not a function type or that has another number of parameters. The call goes on to the next overload. When more than one overload can take the argument, the first declared one is used:</p>
+<pre><code class="language-cy">type Color enum:
+    case red
+    case blue
+
+fn tag(x int) -> str:
+    return 'int'
+fn tag(c Color) -> str:
+    return 'color'
+fn tag(x ?str) -> str:
+    return 'str'
+fn tag(x ?int) -> str:
+    return 'option int'
+
+print(tag(.red))     --> color
+print(tag(none))     --> str
+</code></pre>
+<p>When no overload takes the arguments, the call reports the error of the overload that got the furthest through the arguments, and of the first declared one among those. For a literal that is the error of that overload alone, such as 'Expected <code>?T</code> to infer <code>none</code> value, found <code>Int</code>.' A closure that is passed to overloads that only take a function pointer reports 'Expected argument <code>fn(int) -> int</code>, found <code>Func[fn(int) -> int]</code>, when calling <code>fn m(int, fn(int) -> int) -> int</code>. A closure is passed to a <code>Func[fn(...)]</code> or a <code>&OpaqueFunc[fn(...)]</code> parameter.'</p>
 <p>Overloads must differ in their parameter types. Declaring two functions with the same parameters and only a different return type is a compile error.</p>
 <a href="#functions">^topic</a>
 <h2 id="parameter-groups">Parameter groups. <a href="#parameter-groups">#</a></h2>
@@ -3077,6 +3280,7 @@ symbol_name(|word, prefix| prefix + word.upper())
 -- Assigning a lambda.
 app.on_update = |delta_ms| update_physics(delta_ms)
 </code></pre>
+<p>The lambda declares as many parameters as the function type. <code>apply(|a, b| a)</code> for <code>f fn(int) -> int</code> reports 'Expected a lambda with <code>1</code> parameter(s) for <code>fn(int) -> int</code>. Found <code>2</code>.'</p>
 <p>A blockless statement can contain one lambda that has their function body continued in a new block:</p>
 <pre><code class="language-cy">queue_task(.high_priority, |_|):
     print('My important task.')
@@ -3108,8 +3312,24 @@ fn make() -> OpaqueFunc[F]:
 </code></pre>
 <a href="#functions">^topic</a>
 <h3 id="function-pointer-types">Function pointer types. <a href="#function-pointer-types">#</a></h3>
-<p>A function pointer type is denoted as <code>fn(P1, P2, ...) -> R</code> where <code>P</code>s are parameter types and <code>R</code> is the return type. Currently, function pointer types can only only be declared as a type alias:</p>
+<p>A function pointer type is denoted as <code>fn(P1, P2, ...) -> R</code> where <code>P</code>s are parameter types and <code>R</code> is the return type. Without <code>-> R</code> the function returns <code>void</code>. It can be written wherever a type is expected: a parameter, a return type, a field, a variable, a type argument and a trait method:</p>
+<pre><code class="language-cy">fn apply(x int, f fn(int) -> int) -> int:
+    return f(x)
+
+fn make() -> fn(int) -> int:
+    return |x| x * 2
+
+type Button:
+    on_click fn(str)
+
+var ops []fn(int) -> int = {make(), |x| x + 1}
+print(apply(3, ops[0]))    --> 6
+</code></pre>
+<p>A type alias gives a function pointer type a name. The alias and the inline form are the same type:</p>
 <pre><code class="language-cy">type AddFn = fn(int, int) -> int
+
+var a AddFn = |a, b| a + b
+var b fn(int, int) -> int = a
 </code></pre>
 <p>Function pointer types can include optional parameter names.
 If one parameter has a name, the other parameters must also have names.
@@ -3120,10 +3340,30 @@ Parameter names do not alter the function signature and only serve as documentat
 <pre><code class="language-cy">fn add(a, b int) -> int:
     return a + b
 
-type AddFn = fn(int, int) -> int
-
-var func AddFn = add
+var func fn(int, int) -> int = add
 func = |a, b| a + b + 123
+</code></pre>
+<p>The return type of a function type takes everything to its right, and a prefix (<code>?</code>, <code>!</code>, <code>[]</code>, <code>^</code>, <code>&</code>) takes the whole function type after it. Use parentheses for the other reading:</p>
+<pre><code class="language-cy">fn(int) -> fn(int) -> int      -- Returns a function: `fn(int) -> (fn(int) -> int)`.
+?fn() -> int                   -- An optional function: `?(fn() -> int)`.
+fn() -> ?int                   -- A function that returns an optional `int`.
+!fn() -> int                   -- A function or an error: `!(fn() -> int)`.
+[]fn(int) -> int               -- A slice of functions.
+</code></pre>
+<p>In a signature, the <code>-> R</code> inside the parentheses of the parameters belongs to the parameter and the one after <code>)</code> belongs to the function. The <code>:</code> that begins a body is never part of a type:</p>
+<pre><code class="language-cy">fn compose(f fn(int) -> int, g fn(int) -> int) -> fn(int) -> int:
+    return f
+</code></pre>
+<p>Where an expression is expected, <code>fn(...)</code> is a <a href="#lambdas" title="">lambda</a> and must be followed by <code>:</code> or <code>=></code>. It is read as a type only when <code>)</code>, <code>]</code>, <code>,</code> or <code>}</code> follows the signature, which is the case for a type argument (<code>Func[fn(int) -> int]</code>, <code>Map[str, fn(int) -> int]{}</code>). <code>f := fn(a int) -> int</code> with nothing after it reports 'Expected colon.' After a type prefix and in the positions listed above, <code>fn(...)</code> is always a type.</p>
+<p>An inline function type can use the template parameters of its function that are known from the earlier arguments. It can also declare a new one (<code>f fn(T) -> %U</code>), which is inferred from the function or the lambda that is passed. See <a href="#infer-parameter" title="">infer parameter</a>.</p>
+<pre><code class="language-cy">fn filter(items []%T, f fn(T) -> bool) -> []T:
+    out := []T{}
+    for items |it|:
+        if f(it):
+            out += it
+    return out
+
+print(filter([]float{1, 4, 5}, |x| x > 3.0))    --> {4.0, 5.0}
 </code></pre>
 <a href="#functions">^topic</a>
 <h3 id="function-union-types">Function union types. <a href="#function-union-types">#</a></h3>
@@ -3131,9 +3371,7 @@ func = |a, b| a + b + 123
 <p>It can hold closures in addition to functions and lambdas:</p>
 <pre><code class="language-cy">c := ^5
 
-type AddFn = fn(int, int) -> int
-
-var func Func[AddFn] = |a, b| a + b + c.*
+var func Func[fn(int, int) -> int] = |a, b| a + b + c.*
 func(10, 20)       --> 35
 </code></pre>
 <p>A parameter of type <code>&OpaqueFunc[FN]</code> (such as the <code>less</code> function of <code>sort</code>) takes a function, a lambda, or a closure that captures <code>^T</code> or <code>&T</code> variables. A local variable that is not a reference can not be captured yet: borrow it first.</p>
@@ -3193,6 +3431,114 @@ print(add(1.0, 2.0))    --> 3.0
 <pre><code class="language-cy">fn set(m Map[%K, %V], key K, val V):
     m[key] = val
 </code></pre>
+<p>The arguments of a call are matched from left to right. A parameter type can use the template parameters that the arguments before it bound and declare new ones at the same time:</p>
+<pre><code class="language-cy">type Pair[T Any, U Any]:
+    a T
+    b U
+
+fn second(x %T, p Pair[T, %U]) -> U:
+    return p.b
+
+print(second(1, Pair[int, str]{a=1, b='x'}))    --> x
+</code></pre>
+<p>The parts of the type that are already known must match the argument: <code>second(1, Pair[str, str]{a='a', b='x'})</code> reports 'Expected type <code>Pair[int, str]</code>. Found <code>Pair[str, str]</code>.'</p>
+<p>A template parameter that is declared in a function type is inferred from the function that is passed. The parameter types and the return type of the function type are matched with those of the function:</p>
+<pre><code class="language-cy">fn map(items []%T, f fn(T) -> %U) -> []U:
+    out := []U{}
+    for items |it|:
+        out += f(it)
+    return out
+
+fn name(x float) -> str:
+    return 'v%{x}'
+
+print(map([]float{1, 2}, name))                 --> {'v1.0', 'v2.0'}
+print(map([]int{1, 2}, fn(x int) => x * 2))     --> {2, 4}
+print(map([]int{1, 2}, |x| 'n%{x}'))            --> {'n1', 'n2'}
+</code></pre>
+<p><code>T</code> is bound to <code>float</code> by the first argument, so the function must take a <code>float</code>: <code>map([]int{1, 2}, name)</code> reports 'Expected type <code>fn(int) -> str</code>. Found <code>fn(float) -> str</code>.' <code>U</code> is bound to <code>str</code>, the return type of <code>name</code>.</p>
+<p>The function type can declare a parameter anywhere in its signature (<code>fn(%A, %B) -> %C</code>, <code>fn(T) -> []%U</code>, <code>fn(T) -> ?%U</code>, <code>fn(T) -> !%U</code>). It can be written inline, as a type alias template (<code>f MapFn[T, %U]</code> for <code>type MapFn[A Any, B Any] = fn(A) -> B</code>), or as the argument of a function union (<code>f Func[fn(T) -> %U]</code>, <code>f &OpaqueFunc[fn(T) -> %U]</code>), which also takes a closure. This works the same for a method (<code>fn (&Box[]) map(f fn(T) -> %U) -> Box[U]</code>).</p>
+<p>An inferred lambda (<code>|x| expr</code>) has no types of its own. Its parameters are typed from the function type, and the template parameters in the return type are then inferred from the type of its body. So every template parameter in the parameter types of the function type must be bound by an argument before the lambda:</p>
+<pre><code class="language-cy">fn rmap(f fn(%T) -> %U, items []T) -> []U:
+    out := []U{}
+    for items |it|:
+        out += f(it)
+    return out
+
+fn name(x float) -> str:
+    return 'v%{x}'
+
+print(rmap(name, []float{1, 2}))                    --> {'v1.0', 'v2.0'}
+print(rmap(fn(x int) => x + 1, []int{1, 2}))        --> {2, 3}
+print(rmap(|x| x + 1, []int{1, 2}))
+--> error: Can not infer the template parameter `T` from the lambda for `f`. The type of the lambda parameter `x` must be known from the arguments before the lambda. Declare the types of the lambda (`fn(x T) -> U: ...`), or declare `%T type` as its own parameter and pass the type in the call.
+</code></pre>
+<p>A function or a lambda with declared types (<code>fn(x int) => x + 1</code>) binds <code>T</code> itself, so it can come first. Declare the function parameter after the parameters that its lambda depends on, like <code>map</code> above.</p>
+<p>The result type of an inferred lambda with a block is not inferred. Where it would bind a template parameter, the call reports 'Can not infer the template parameter <code>U</code> from the lambda for <code>f</code>. The result type of a lambda with a block is not inferred. Use an expression lambda (<code>|x| expr</code>), declare the types of the lambda (<code>fn(x T) -> U:</code>), or declare <code>%U type</code> as its own parameter and pass the type in the call.':</p>
+<pre><code class="language-cy">print(map([]int{1, 2}, |x|)):
+    return x + 1
+</code></pre>
+<p>When no argument binds a template parameter, the call reports 'Can not infer the template parameter <code>U</code> from the argument for <code>f</code>. Declare it as its own parameter (<code>%U type</code>) and pass the type in the call.' An explicit parameter is always an alternative to inference:</p>
+<pre><code class="language-cy">fn convert(%U type, items []%T, f fn(T) -> U) -> []U:
+    out := []U{}
+    for items |it|:
+        out += f(it)
+    return out
+
+print(convert(str, []float{1, 2}, |x| 'v%{x}'))   --> {'v1.0', 'v2.0'}
+</code></pre>
+<p>A template parameter is declared once. <code>fn two(a %T, b %T) -> T</code> reports 'The template parameter <code>T</code> is already declared. Write <code>T</code> without <code>%</code> to use it.'</p>
+<p>Among <a href="#function-overloading" title="">overloads</a>, a function that infers template parameters is tried only after the overloads that match the arguments exactly. An inferred lambda (<code>|x| expr</code>, or <code>|x|</code> with a block) does not match an overload when its body does not have the result type of the function parameter, like a named function with another result type, and the call goes on to the next overload:</p>
+<pre><code class="language-cy">fn conv(x int, f fn(int) -> str) -> str:
+    return f(x)
+
+fn conv(x %T, f fn(T) -> %U) -> U:
+    return f(x)
+
+print(conv(1, |x| 'v%{x}'))    --> v1
+print(conv(1, |x| x + 1))      --> 2
+</code></pre>
+<p>The body does not have the result type when:</p>
+<ul>
+<li>The type of an expression body is another type, or a literal in it can not be made for the result type (<code>{1, 2}</code> for <code>str</code>).</li>
+<li>A branch of an <code>if</code> expression that is the body has another type. The same goes for a <code>return</code> with a <code>switch</code> expression.</li>
+<li>A <code>return</code> in a block has another type, or the block needs a <code>return</code> and reaches its end without one.</li>
+<li>A <code>!</code> leaves the lambda and the result type is not a <code>!T</code> or <code>error</code>.</li>
+</ul>
+<pre><code class="language-cy">fn pick(x int, f fn(int) -> str) -> str:
+    return 'str %{f(x)}'
+
+fn pick(x int, f fn(int) -> int) -> str:
+    return 'int %{f(x)}'
+
+print(pick(1, |x| if (x > 0) x else 0))    --> int 1
+
+r := pick(5, |x|):
+    if x > 3:
+        return 'big'
+    return 'small'
+print(r)                                   --> str big
+</code></pre>
+<p>An overload that infers template parameters is compared the same way when its function parameter declares the result type (<code>f fn(T) -> str</code>), also when it is declared before another overload. Such an overload does not match either, and the call goes on to the next one, when:</p>
+<ul>
+<li>An argument does not have the type of its parameter (<code>2</code> for <code>y str</code>).</li>
+<li>The type of an argument does not have the form that the parameter declares: a function or a lambda that returns <code>float</code> for <code>f fn(T) -> ?%U</code> (the same goes for <code>!%U</code>, <code>[]%U</code> and <code>Map[%K, int]</code>), or a closure for <code>f fn(T) -> %U</code>.</li>
+<li>The argument is a lambda with a block and the parameter infers its result type (<code>f fn(T) -> %U</code>), or the lambda has another number of parameters.</li>
+</ul>
+<pre><code class="language-cy">fn opt(x %T, f fn(T) -> ?%U) -> str:
+    return 'option'
+
+fn opt(x float, f fn(float) -> float) -> str:
+    return 'float'
+
+fn some(x int) -> ?int:
+    return x
+
+print(opt(1, some))           --> option
+print(opt(1, |x| x / 2))      --> float
+</code></pre>
+<p>When no overload takes the arguments, the call reports the error of the overload that came closest, as if it were the only one: 'Expected type <code>str</code>, got <code>int</code>.' at the branch or <code>return</code> of a lambda, 'Expected template <code>Option</code>. Found <code>Float</code>.' for <code>opt(1, |x| 1.5)</code> without the second overload, or 'Expected type <code>str</code>. Found <code>bool</code>.' Any other error in an argument, like an undeclared name in the body of a lambda, is reported right away.</p>
+<p>An infer parameter is declared in a parameter type only. <code>fn f(x int) -> %U</code> reports '<code>%U</code> can not be declared in a return type. Declare it in a parameter (<code>%U type</code>) instead.', and <code>%T</code> in a function body or outside of a function reports '<code>%T</code> can only be declared in the signature of a function.'</p>
 <a href="#functions">^topic</a>
 <h1 id="memory">Memory. <a href="#memory">#</a></h1>
 <table><tr>
@@ -3678,7 +4024,7 @@ fn (&Foo) count():
 fn (&Foo) mutate():
     self.a = 123
 </code></pre>
-<p>A <code>&Foo</code> receiver writes the fields that are not managed (<code>int</code>, <code>float</code>, <code>bool</code>, a struct of those). To replace or change a managed field (<code>str</code>, <code>[]T</code>, <code>Map</code>, a struct with one), declare the receiver as <code>&&Foo</code>.</p>
+<p>A <code>&Foo</code> receiver writes the fields that are not managed (<code>int</code>, <code>float</code>, <code>bool</code>, a struct of those). To replace or change a managed field (<code>str</code>, <code>[]T</code>, <code>Map</code>, a struct with one), declare the receiver as <code>&&Foo</code>. <a href="#choosing-a-receiver" title="">Choosing a receiver</a> lists what each receiver can do, with the error messages.</p>
 <p>Invoking methods automatically attempts to obtain the correct borrow type as specified by the method:</p>
 <pre><code class="language-cy">f := Foo{a=1}
 f.mutate()
@@ -3982,6 +4328,7 @@ print(count)
         return 0
 </code></pre>
 <p>Nested <code>try</code> blocks are resolved from the inside out. A <code>!</code> inside the <code>else</code> block belongs to the enclosing <code>try</code>, or to the function when there is none. A lambda declared in the body has its own rules: its <code>!</code> follows the lambda's return type.</p>
+<p>An expression lambda without a declared return type (<code>fn(x str) => expr</code>, <code>|x| expr</code>) takes its return type from its body. A <code>!</code> in the body that leaves the lambda makes the return type <code>!U</code>, where <code>U</code> is the type of the body: <code>fn(x str) => int.parse(x)!</code> is a <code>fn(str) -> !int</code>, the same as the declared <code>fn(x str) -> !int => int.parse(x)!</code>. A body that is a <code>!T</code> or an <code>error</code> already keeps its type. For a function type that infers its result (<code>f fn(T) -> %U</code>), <code>U</code> is bound to that type: <code>map(items, |x| int.parse(x)! * 2)</code> returns a <code>[]!int</code>. A <code>return</code> in the body (in an <code>!else:</code> block) returns the type of the body, and its value is checked against that type: <code>fn(x str) => int.parse(x) !else:</code> with <code>return 0</code> in the block is a <code>fn(str) -> int</code>.</p>
 <a href="#error-handling">^topic</a>
 <h2 id="panics">Panics. <a href="#panics">#</a></h2>
 <p>The builtin <code>panic</code> is a fail-fast mechanism to quickly exit the current thread with an error message:</p>
@@ -4157,7 +4504,7 @@ print(spawn sum(Point{x = 1, y = 2}).await())    --> 3
 <h3 id="growable-stacks">Growable stacks. <a href="#growable-stacks">#</a></h3>
 <p>When running on Cyber's VM, threads can grow their stack on demand.
 The compiler generates pointer layouts that tells the runtime where pointer values are so they can be patched with new addresses.</p>
-<p>Growable stacks allow threads to be lighter. They can be initialized with a smaller stack and grow on demand. However, this feature is not available when compiling AOT where stacks are fixed in size.</p>
+<p>Growable stacks allow threads to be lighter. They can be initialized with a smaller stack and grow on demand.</p>
 <p>A <a href="#fibers" title="">fiber</a> has a growable stack of its own.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="fuel-and-interrupts">Fuel and interrupts. <a href="#fuel-and-interrupts">#</a></h3>
@@ -4232,7 +4579,7 @@ _ = f.resume()         --> a: last
 print(f.status())      --> FiberStatus.done
 </code></pre>
 <p><code>fiber</code> takes the first call only: <code>fiber f(x).resume()</code> resumes the new fiber.</p>
-<p>Each fiber starts with a stack of 512 bytes that grows on demand like the thread's stack. A spawned thread can create fibers of its own. Fibers are not available when compiling AOT.</p>
+<p>Each fiber starts with a stack of 512 bytes that grows on demand like the thread's stack. A spawned thread can create fibers of its own.</p>
 <a href="#concurrency">^topic</a>
 <h3 id="suspend-and-resume"><code>suspend</code> and <code>resume</code>. <a href="#suspend-and-resume">#</a></h3>
 <p><code>suspend</code> gives control back to the <code>resume</code> call that is running the fiber. It takes no value and it can be used at any call depth, in a function of any signature:</p>
@@ -4595,7 +4942,7 @@ while gen.next() |res|:
 print(gen.status())
 --> GeneratorStatus.done
 </code></pre>
-<p><code>next</code> returns <code>none</code> once when the function returns. After that the generator is <code>.done</code>, and another <code>next</code> panics: <code>Generator is already done.</code></p>
+<p><code>next</code> returns <code>none</code> once when the function returns: at the end of its body or at a <code>return</code> without a value. After that the generator is <code>.done</code>, and another <code>next</code> panics: <code>Generator is already done.</code></p>
 <a href="#concurrency">^topic</a>
 <h3 id="ending-a-generator">Ending a generator. <a href="#ending-a-generator">#</a></h3>
 <p><code>end</code> ends a generator that is not done. The values of its body are destructed and the status becomes <code>.done</code>:</p>
@@ -4749,7 +5096,7 @@ fn path_sep() -> str:
 <p>The <code>meta</code> module provides the conditions:</p>
 <ul>
 <li><code>meta.system()</code> returns the target system (<code>.macos</code>, <code>.linux</code>, <code>.windows</code>, ...), <code>meta.cpu()</code> the CPU architecture, <code>meta.endian()</code> the byte order and <code>meta.pointer_width()</code> the width of a pointer in bits.</li>
-<li><code>meta.is_vm_target()</code> tells whether the program is compiled for the VM and not for the C backend.</li>
+<li><code>meta.is_vm_target()</code> tells whether the program is compiled for the VM. It is always <code>true</code>: the bytecode VM is the only backend.</li>
 <li><code>meta.build_mode()</code> returns the build mode of the compiler, and <code>meta.build_flag(name)</code> and <code>meta.build_option(name)</code> read the options of the build.</li>
 </ul>
 <p>At the top level of a file, an <code>#if</code> can only hold compile-time statements such as <code>#c.bind_lib(...)</code> or a compile-time variable. A statement that runs is a compile error: <code>Only compile-time statements are allowed in this context.</code> A declaration (<code>fn</code>, <code>type</code>, <code>use</code>) can not be placed in an <code>#if</code>. Declare one function and select inside its body, as in the example above.</p>
@@ -5354,7 +5701,6 @@ use Vec2 -> eng.Vector2
 </td><td valign="top">
 <ul>
 <li><a href="#binding-to-c" title="">Binding to C.</a><ul>
-<li><a href="#static-binding" title="">Static binding.</a></li>
 <li><a href="#runtime-binding" title="">Runtime binding.</a></li>
 <li><a href="#open_lib-binding" title=""><code>open_lib</code> binding.</a></li>
 <li><a href="#extern-functions" title=""><code>extern</code> functions.</a></li>
@@ -5415,7 +5761,7 @@ print(a)
 
 v := Vec2{x=30, y=40}
 ptr := *v
-print(ptr.x)   --> 30
+print(ptr.x)   --> 30.0
 </code></pre>
 <a href="#ffi">^topic</a>
 <h3 id="pointer-indexing">Pointer indexing. <a href="#pointer-indexing">#</a></h3>
@@ -5513,38 +5859,21 @@ print(cdata.i)
     y float
 
 v := Vec2{}
-print(v.x)      --> 0
-print(v.y)      --> 0
+print(v.x)      --> 0.0
+print(v.y)      --> 0.0
 </code></pre>
 <p>The following shows the zero values of C and C compatible types:</p>
 <table><thead><tr><th>Type</th><th>Zero value</th></tr></thead><tbody><tr><td><code>bool</code></td><td><code>false</code></td></tr><tr><td><code>i8</code></td><td><code>0</code></td></tr><tr><td><code>i16</code></td><td><code>0</code></td></tr><tr><td><code>i32</code></td><td><code>0</code></td></tr><tr><td><code>i64</code>, <code>int</code></td><td><code>0</code></td></tr><tr><td><code>r8</code>, <code>byte</code></td><td><code>0</code></td></tr><tr><td><code>r16</code></td><td><code>0</code></td></tr><tr><td><code>r32</code></td><td><code>0</code></td></tr><tr><td><code>r64</code></td><td><code>0</code></td></tr><tr><td><code>f32</code></td><td><code>0.0</code></td></tr><tr><td><code>f64</code>, <code>float</code></td><td><code>0.0</code></td></tr><tr><td><code>Ptr[T]</code></td><td><code>none</code></td></tr><tr><td><code>type T cstruct</code></td><td><code>{}</code></td></tr><tr><td><code>type T cunion</code></td><td><code>{}</code></td></tr></tbody></table><a href="#ffi">^topic</a>
 <h2 id="binding-to-c">Binding to C. <a href="#binding-to-c">#</a></h2>
 <p>Cyber supports binding to an existing C ABI compatible library at runtime.
 This allows calling into dynamic libraries created in C or other languages.
-When compiled AOT, the libraries can be linked statically.</p>
+Static linking is not available: the bytecode VM is the only backend.</p>
 <p>There are different approaches to binding a C library:</p>
 <ol>
-<li>Static binding. The application and C library is compiled into a single executable.</li>
 <li>Runtime binding. The C library is loaded and binded upon program start-up.</li>
 <li><code>os.open_lib</code> binding. The user is responsible for loading the C library at runtime. <em>Planned Feature</em></li>
 <li>When embedding <a href="#libcyber" title=""><code>libcyber</code></a>, compiler hooks can bind VM or C functions with the host language.</li>
 </ol>
-<a href="#ffi">^topic</a>
-<h3 id="static-binding">Static binding. <a href="#static-binding">#</a></h3>
-<p>When targeting the C backend, the C library's source or static library can be included for compilation. The final output will be a statically linked executable. <em>Incomplete: the C backend is in progress. <code>c.flag</code> and <code>c.include</code> exist, <code>c.source</code> and <code>c.static_lib</code> do not yet.</em></p>
-<p><code>extern</code> functions and variables are required to link with the C library. They can be autogenerated with <a href="#cbindgency" title=""><code>cbindgen.cy</code></a> and the library's header file.</p>
-<p>Source code for the library can be declared with <code>c.source</code>:</p>
-<pre><code class="language-cy">use c
-
-#c.source('mylib.c')
-</code></pre>
-<p><code>cc</code> build flags can be declared with <code>c.flag</code>:</p>
-<pre><code class="language-cy">#if meta.system() == .macos:
-    #c.flag('-Dmacos')
-</code></pre>
-<p>A static library can be linked with <code>c.static_lib</code>:</p>
-<pre><code class="language-cy">#c.static_lib('mylib.a')
-</code></pre>
 <a href="#ffi">^topic</a>
 <h3 id="runtime-binding">Runtime binding. <a href="#runtime-binding">#</a></h3>
 <p>Cyber uses <code>libtcc</code> to JIT compile the bindings from <code>extern</code> declarations.
@@ -5554,10 +5883,6 @@ An example can be found in <a href="https://github.com/fubark/cyber/blob/master/
 <pre><code class="language-cy">#c.bind_lib('./mylib.dylib')
 </code></pre>
 <p>A path with a directory component is opened as is. A bare file name is searched by the system loader (<code>LD_LIBRARY_PATH</code>, the directory of the <code>cyber</code> executable, then the system library paths), so use an explicit path like <code>./mylib.so</code> to load a library from the current directory.</p>
-<p>A module can be configured to use static binding when building an executable or a runtime binding for faster iterations. The same <code>#extern</code> declarations are reused in both cases:</p>
-<pre><code class="language-cy">#if meta.is_vm_target():
-    #c.bind_lib('mylib.dylib')
-</code></pre>
 <a href="#ffi">^topic</a>
 <h3 id="open_lib-binding"><code>open_lib</code> binding. <a href="#open_lib-binding">#</a></h3>
 <blockquote><p><em>Planned Feature</em></p>
@@ -5982,7 +6307,6 @@ typedef struct MyNode {
 <li><a href="#format-source" title="">Format source.</a></li>
 <li><a href="#documentation" title="">Documentation.</a></li>
 <li><a href="#jit-compiler" title="">JIT compiler.</a></li>
-<li><a href="#c-backend" title="">C backend.</a></li>
 </ul>
 <p><a href="#table-of-contents" title="">^top</a></p>
 <h2 id="run-program">Run program. <a href="#run-program">#</a></h2>
@@ -6124,13 +6448,8 @@ cyber doc --api json      # Print the functions and types of the json module.
 <p>Since <code>doc</code> is a command, a script file named <code>doc</code> without an extension is run as <code>cyber ./doc</code>.</p>
 <a href="#cli">^topic</a>
 <h2 id="jit-compiler">JIT compiler. <a href="#jit-compiler">#</a></h2>
-<p>The JIT compiler is not supported. Passing <code>-jit</code> (or <code>CL_JIT</code> through the embedding API) fails with a compile error. Use the default bytecode VM, or the C backend (<code>-tcc</code>, <code>-cc</code>) for native performance.</p>
+<p>The JIT compiler is not supported. Passing <code>-jit</code> (or <code>CL_JIT</code> through the embedding API) fails with a compile error. Use the default bytecode VM.</p>
 <p>The JIT was an experiment that stitched together pregenerated machine code targeting the same runtime stack slots used by the VM, a technique known as <code>copy-and-patch</code>. Its code generator did not keep up with the current IR and bytecode, and the code was removed.</p>
-<a href="#cli">^topic</a>
-<h2 id="c-backend">C backend. <a href="#c-backend">#</a></h2>
-<p>The C backend generates a static binary from Cyber source code by transpiling to C code and relying on a local C compiler.
-The user can specify the system's <code>cc</code> compiler or the builtin <code>tinyc</code> compiler that is bundled with the CLI.
-<em>This is currently in progress.</em></p>
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 

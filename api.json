@@ -1,5 +1,5 @@
 {
-  "version": "v0.4.18-dev 1097-2b49b50",
+  "version": "v0.4.19-dev 1135-7184e27",
   "types": [
     {"module": "core", "name": "void", "syntax": "void", "kind": "builtin",
       "methods": [],
@@ -127,7 +127,7 @@
         {"name": "%", "recv": "Float[]", "sig": "%(right Self) -> Self"},
         {"name": "**", "recv": "Float[]", "sig": "**(right Self) -> Self"},
         {"name": "abs", "recv": "Float[]", "sig": "abs() -> Self"},
-        {"name": "fmt", "recv": "Float[]", "sig": "fmt() -> str"}
+        {"name": "fmt", "recv": "Float[]", "sig": "fmt() -> str", "doc": "Returns the text of the float, the same as `str(x)` and `print`: the shortest digits that read back as the same value, in plain decimals. A finite value without a fraction gets `.0` (`3.0`, `-0.0`). Infinity and NaN are `inf`, `-inf` and `nan`."}
       ],
       "funcs": [
         {"name": "parse", "sig": "parse(s str) -> !Self", "doc": "Reads a decimal number such as `'1.5'`, `'-2'`, `'1e3'`, `'inf'` or `'nan'`. Unlike `float(s)`, which gives 0 for a string that is not a number, returns `error.InvalidCharacter`. Spaces around the number are not allowed."}

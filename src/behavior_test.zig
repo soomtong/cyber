@@ -839,6 +839,7 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/for_iter_borrow_unsupported_error.cy");
     run.case("control_flow/for_iter_borrowed_iterable.cy");
     run.case("control_flow/for_iter_index_borrow_error.cy");
+    run.case("meta/infer_param_dependent_error.cy");
     run.case("meta/infer_param_outside_func_error.cy");
     run.case("meta/infer_param_type_arg_error.cy");
     run.case("meta/type_size_str_arg_error.cy");

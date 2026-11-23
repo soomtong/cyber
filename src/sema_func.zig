@@ -1247,6 +1247,49 @@ fn getFuncTemplateParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *
     }
 }
 
+/// The type of a parameter that depends on an earlier template parameter (`f MapFn[T, %U]`).
+/// The type is evaluated from the parameters that are known. It can not declare a new infer parameter.
+fn getDependentParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *sema_resolve.ResolveContext, idx: usize, arg_n: *ast.Node) !*cy.Type {
+    return getFuncTemplateParamType(c, template, ctx, idx) catch |err| {
+        if (err != error.FoundInferParam) {
+            return err;
+        }
+        const param_name = template.func_params[idx].name_type.as_name();
+        const spec_idx = sema_resolve.indexOfTypedParam(template.func_params, idx).?;
+        if (firstInferParam(template.func_params[spec_idx].type.?)) |infer_n| {
+            const name = infer_n.cast(.infer_param).name.as_name();
+            return c.reportErrorFmt("Can not infer the template parameter `{}` from the argument for `{}`. Declare it as its own parameter (`%{} type`) and pass the type in the call.", &.{v(name), v(param_name), v(name)}, arg_n);
+        }
+        return c.reportErrorFmt("Can not infer a template parameter from the argument for `{}`. Declare it as its own parameter (`%T type`) and pass the type in the call.", &.{v(param_name)}, arg_n);
+    };
+}
+
+/// The first infer parameter (`%T`) in a type specifier. Visits the same nodes as `sema_type.findInferParams`.
+fn firstInferParam(node: *ast.Node) ?*ast.Node {
+    switch (node.type()) {
+        .infer_param => return node,
+        .index_expr => {
+            for (node.cast(.index_expr).args.slice()) |arg| {
+                if (firstInferParam(arg)) |res| return res;
+            }
+            return null;
+        },
+        .ref => return firstInferParam(node.cast(.ref).child),
+        .borrow => return firstInferParam(node.cast(.borrow).child),
+        .span_type => return firstInferParam(node.cast(.span_type).child),
+        .slice_type => return firstInferParam(node.cast(.slice_type).child),
+        .vector_type => {
+            const vector_t = node.cast(.vector_type);
+            return firstInferParam(vector_t.child) orelse firstInferParam(vector_t.n);
+        },
+        .partial_vector_type => {
+            const vector_t = node.cast(.partial_vector_type);
+            return firstInferParam(vector_t.child) orelse firstInferParam(vector_t.n);
+        },
+        else => return null,
+    }
+}
+
 fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template: *cy.sym.FuncTemplate,
     template_ctx: *sema_resolve.ResolveContext, param_idx: usize, ct_return: bool) !Argument {
 
@@ -1274,7 +1317,7 @@ fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, templa
     if (param_t.id() != bt.Infer) {
         var target_t: *cy.Type = param_t;
         if (param_t.id() == bt.Dependent) {
-            target_t = try getFuncTemplateParamType(c, template, template_ctx, param_idx);
+            target_t = try getDependentParamType(c, template, template_ctx, param_idx, arg.node);
         }
         var ct_value: cy.TypeValue = undefined;
 
@@ -1371,7 +1414,7 @@ fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template
 
     if (param_t.id() != bt.Infer) {
         if (param_t.id() == bt.Dependent) {
-            const target_t = try getFuncTemplateParamType(c, template, template_ctx, param_idx);
+            const target_t = try getDependentParamType(c, template, template_ctx, param_idx, arg.node);
             target = sema.FuncParam.init(target_t);
         } else {
             target = param;

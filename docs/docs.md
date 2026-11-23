@@ -2595,6 +2595,19 @@ fn set(m Map[%K, %V], key K, val V):
     m[key] = val
 ```
 
+A parameter type can not use an earlier template parameter and declare a new one at the same time. A call to `fn map(items []%T, f MapFn[T, %U]) -> []U` reports 'Can not infer the template parameter `U` from the argument for `f`. Declare it as its own parameter (`%U type`) and pass the type in the call.' Declare the parameter explicitly instead:
+```cy
+type MapFn[T Any, U Any] = fn(T) -> U
+
+fn map(%U type, items []%T, f MapFn[T, U]) -> []U:
+    out := []U{}
+    for items |it|:
+        out += f(it)
+    return out
+
+print(map(str, []float{1, 2}, |x| 'v%{x}'))   --> {'v1', 'v2'}
+```
+
 # Memory.
 
 <table><tr>

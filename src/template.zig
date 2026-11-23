@@ -487,16 +487,23 @@ pub fn isInferPlaceholder(val: cy.TypeValue) bool {
 /// can be read back from the instance: a type alias, `Func[fn(T) -> U]`, `OpaqueFunc[fn(T) -> U]`, `&T`.
 /// Such a template is expanded with the placeholder of an infer parameter.
 fn keepsInferPlaceholder(c: *cy.Chunk, template: *cy.sym.Template) bool {
-    if (template.kind == .type_alias and template.decl.child_decl.type() == .type_alias_decl) {
+    if (isTypeAlias(template)) {
         return true;
     }
     return template == c.sema.func_tmpl or template == c.sema.opaque_func_tmpl or template == c.sema.borrow_tmpl;
+}
+
+/// Whether `template` is a type alias template (`type VecFn[const N int, T Any] = fn(T) -> [N]T`).
+fn isTypeAlias(template: *cy.sym.Template) bool {
+    return template.kind == .type_alias and template.decl.child_decl.type() == .type_alias_decl;
 }
 
 /// Evaluates the template arguments onto the value and type stacks.
 /// Returns `false` when an argument is built from the placeholder of an infer parameter and the template
 /// can not be expanded with it: a type with a layout (`Map[Infer, int]`), or a parameter that is not a type
 /// (`[Infer]T`). The stacks are then incomplete and the caller must not expand the template.
+/// A type alias is expanded with the placeholder for a value parameter too (`VecFn[Infer, T]`): its
+/// declaration only passes the parameter on, and the template that it reaches decides again.
 pub fn resolveTemplateArgs(c: *cy.Chunk, args: []const *ast.Node, template: *cy.sym.Template, template_ctx: *sema_resolve.ResolveContext, node: *ast.Node) !bool {
     if (args.len != template.params.len) {
         return c.reportErrorFmt("Expected {} template parameters.", &.{v(template.params.len)}, node);
@@ -545,17 +552,23 @@ pub fn resolveTemplateArgs(c: *cy.Chunk, args: []const *ast.Node, template: *cy.
         try c.valueStack.ensureUnusedCapacity(c.alloc, 1);
         try c.typeStack.ensureUnusedCapacity(c.alloc, 1);
         const res = try evalParamValue(c, arg, param_t, eff_param.const_param, true);
+        var placeholder_value = false;
         if (isInferPlaceholder(res)) {
             const type_param = !eff_param.const_param or param_t.id() == bt.Type;
-            if (!type_param or !keepsInferPlaceholder(c, template)) {
+            if (!keepsInferPlaceholder(c, template) or (!type_param and !isTypeAlias(template))) {
                 c.heap.destructValue(res);
                 return false;
             }
+            placeholder_value = !type_param;
         }
 
         c.valueStack.appendAssumeCapacity(res.value);
 
-        if (eff_param.const_param) {
+        if (placeholder_value) {
+            // A value parameter of a type alias (`VecFn[%N, T]`). The argument is the placeholder type, and
+            // the instance is keyed with it as a type so that it never meets an instance of a value.
+            c.typeStack.appendAssumeCapacity(c.sema.type_t);
+        } else if (eff_param.const_param) {
             c.typeStack.appendAssumeCapacity(param_t);
         } else {
             c.typeStack.appendAssumeCapacity(c.sema.type_t);

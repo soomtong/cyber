@@ -2501,9 +2501,19 @@ fn eval_bin_expr(c: *cy.Chunk, left_n: *ast.Node, op: ast.BinaryExprOp, right_n:
             }
             const left = try eval(c, left_n);
             defer c.heap.destructValue(left);
+            // An operand that is the placeholder of an infer parameter: a value parameter of a type alias
+            // that is not known yet (`[N + 1]T`). The result is not known either.
+            if (cy.template.isInferPlaceholder(left)) {
+                return TypeValue.init(c.sema.type_t, Value.initPtr(c.sema.infer_t));
+            }
             if (left.type.kind() == .int or left.type.kind() == .raw or left.type.kind() == .float or left.type.id() == bt.EvalInt) {
-                const right = try evalCheck(c, right_n, left.type);
+                var right_cstr = ExprCstr.init_check(left.type);
+                right_cstr.pass_infer_placeholder = true;
+                const right = try exprToValue(c, try evalExpr(c, right_n, right_cstr), right_n);
                 defer c.heap.destructValue(right);
+                if (cy.template.isInferPlaceholder(right)) {
+                    return TypeValue.init(c.sema.type_t, Value.initPtr(c.sema.infer_t));
+                }
                 return eval_bin_expr2(c, left, left_n, right, right_n, op, node);
             }
 

@@ -682,6 +682,7 @@ fn test_core(run: *Runner) void {
     run.case("core/int_unsupported_notation_error.cy");
     run.case("core/int_literal_overflow_error.cy");
     run.case("core/literal_many_elems.cy");
+    run.case("core/object_to_string.cy");
     run.case("core/logic_ops.cy");
     run.case("core/map_index_panic.cy");
     run.case("core/Map.cy");

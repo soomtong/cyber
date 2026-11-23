@@ -4,6 +4,19 @@
 사용자에게 보이는 동작이 바뀌는 커밋은 여기에 바로 적고, 언어 규칙이면 `docs/docs.md`에도 같이 적는다.
 전체 발견 이슈 표는 `docs/study/10-findings-register.md`, 컴파일러 한계의 결정은 `docs/decisions/project_compiler_limits.md`.
 
+## `Object.to_string()`이 상자를 해제하던 버그 수정 (2026-11-23)
+
+`Object(^1).to_string()`처럼 `bool`, 정수, `float`, `error`, `symbol`, `str`을 담은 `Object`에 `to_string()`을 부르면 결과는 맞게 나오지만
+호출이 끝날 때 상자가 해제됐다. 그 뒤 `Object`가 범위를 벗어나거나 다시 쓰이면 이미 해제된 메모리를 건드렸다.
+디버그 빌드는 'double free' 또는 'retaining dangling pointer'로 멈춘다. 이 검사가 없는 빌드에서는 해제된 메모리를 다시 쓰게 된다.
+
+- 원인: `Object.to_string`(`src/builtins/core.cy`)이 `self.inner`를 `as[^T]`로 캐스팅했다. `Ptr[void]`에서 `^T`로 가는 캐스팅은 retain 없이 소유권을 넘겨받는 참조를 만들기 때문에
+  임시 참조가 해제되면서 `Object`가 가진 참조 카운트를 하나 깎았다. 이제 `as[Ptr[T]]`로 빌려서 읽는다. 0.4.18 이전부터 있던 버그다.
+- 같이 고친 것: `i8` · `i16` · `i32`를 담은 `Object`가 부호 없이 찍혔다(`Object(^(as[i8] -5)).to_string()`이 `251`). 상자를 `int`로 읽었기 때문이다.
+  이제 타입마다 제 너비로 읽어 `-5`가 나온다. `r8` · `r16` · `r32`도 제 너비로 읽는다(출력은 그대로 `0xc8` 같은 16진수).
+- 바뀌지 않는 것: `print(obj)`와 문자열 보간 `'%{obj}'`은 `to_string()`을 부르지 않으며 전과 같이 `Object{inner=@0x...}`를 찍는다.
+- 테스트: `src/test/core/object_to_string.cy`.
+
 ## float은 항상 소수점을 붙여 문자열로 바뀐다 (2026-11-23, 깨지는 변경)
 
 값이 정수인 float은 소수점 없이 문자열이 됐다. `print(3.0)`이 `3`을 찍어서 출력만으로는 `int`와 `float`을 구별할 수 없었고,

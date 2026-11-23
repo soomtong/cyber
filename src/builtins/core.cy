@@ -814,29 +814,38 @@ fn (&Object) downcast(%Ref type) -> Ref:
 #[bind] fn (&Object) type() -> int
 
 fn (&Object) to_string() -> str:
+    -- `self.inner` is read through `Ptr[T]`. A cast to `^T` would make an owning reference
+    -- without a retain, and its release would free the box that `self` still owns.
+    -- Each case reads the box with its own type so a narrow value is not read past its size.
     obj_type := self.type()
     switch obj_type:
         case type.id(bool):
-            value := (as[^bool] self.inner).*
+            value := (as[Ptr[bool]] self.inner).*
             return if (value) 'true' else 'false'
-        case type.id(r8)
-        case type.id(r16)
-        case type.id(r32)
+        case type.id(r8):
+            return (as[Ptr[r8]] self.inner).*.fmt()
+        case type.id(r16):
+            return (as[Ptr[r16]] self.inner).*.fmt()
+        case type.id(r32):
+            return (as[Ptr[r32]] self.inner).*.fmt()
         case type.id(r64):
-            return (as[^r64] self.inner).*.fmt()
-        case type.id(i8)
-        case type.id(i16)
-        case type.id(i32)
+            return (as[Ptr[r64]] self.inner).*.fmt()
+        case type.id(i8):
+            return (as[Ptr[i8]] self.inner).*.fmt()
+        case type.id(i16):
+            return (as[Ptr[i16]] self.inner).*.fmt()
+        case type.id(i32):
+            return (as[Ptr[i32]] self.inner).*.fmt()
         case type.id(int):
-            return (as[^int] self.inner).*.fmt()
+            return (as[Ptr[int]] self.inner).*.fmt()
         case type.id(float):
-            return (as[^float] self.inner).*.fmt()
+            return (as[Ptr[float]] self.inner).*.fmt()
         case type.id(error):
-            return 'error.' + (as[^error] self.inner).*.sym().name()
+            return 'error.' + (as[Ptr[error]] self.inner).*.sym().name()
         case type.id(symbol):
-            return 'symbol.' + (as[^symbol] self.inner).*.name()
+            return 'symbol.' + (as[Ptr[symbol]] self.inner).*.name()
         case type.id(str):
-            return (as[^str] self.inner).*
+            return (as[Ptr[str]] self.inner).*
         else:
             return 'Object'
 

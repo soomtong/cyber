@@ -67,9 +67,18 @@ vim.api.nvim_create_autocmd('LspAttach', {
 
 ### Tree-sitter highlighting
 
-The grammar is in [exts/tree-sitter](../tree-sitter). Register it with the `main` branch
-of nvim-treesitter. `parser.c` is not committed, so the install generates it and needs
-the `tree-sitter` CLI and a C compiler.
+The grammar is in [exts/tree-sitter](../tree-sitter). Register it with nvim-treesitter.
+
+Use the `main` branch of `nvim-treesitter/nvim-treesitter`. It needs Neovim 0.12 or later.
+
+With lazy.nvim, select the branch in the plugin spec.
+
+```lua
+{ 'nvim-treesitter/nvim-treesitter', branch = 'main' }
+```
+
+`parser.c` is not committed, so the install generates it and needs the `tree-sitter` CLI
+and a C compiler.
 
 ```lua
 -- Must run before nvim-treesitter loads, with lazy.nvim put it in `init`.
@@ -107,7 +116,7 @@ install_info = {
 },
 ```
 
-The `main` branch does not start highlighting by itself. NvChad already does it, otherwise add:
+The `main` branch of `nvim-treesitter/nvim-treesitter` does not start highlighting by itself. NvChad already does it, otherwise add:
 
 ```lua
 vim.api.nvim_create_autocmd('FileType', {

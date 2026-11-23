@@ -45,9 +45,10 @@ tree-sitter highlight --scope source.cyber ../../examples/account.cy
 
 ## Neovim
 
-Register the parser with the `main` branch of nvim-treesitter. The `master` branch
-(`get_parser_configs`) does not support Neovim 0.12. The install generates `parser.c`
-and copies the queries, so it needs the `tree-sitter` CLI and a C compiler.
+Use the `main` branch of `nvim-treesitter/nvim-treesitter`. It needs Neovim 0.12 or later.
+
+The install generates `parser.c` and copies the queries, so it needs the `tree-sitter`
+CLI and a C compiler.
 
 ```lua
 vim.filetype.add { extension = { cy = 'cyber' } }

@@ -120,6 +120,11 @@ fn test_syntax(run: *Runner) void {
     run.case("syntax/oct_digit_separator_error.cy");
     run.case("syntax/dot_lit_space_error.cy");
     run.case("syntax/func_param_name_second_error.cy");
+    run.case("syntax/func_type_inline_expr_error.cy");
+    run.case("syntax/func_type_inline_lambda_error.cy");
+    run.case("syntax/func_type_inline_paren_error.cy");
+    run.case("syntax/func_type_inline_return_error.cy");
+    run.case("syntax/func_type_inline_unnamed_param_error.cy");
     run.case("syntax/lambda_param_name_error.cy");
     run.case("syntax/func_param_group.cy");
     run.case("syntax/indentation.cy");
@@ -190,6 +195,15 @@ fn test_functions(run: *Runner) void {
     run.case("functions/func_type.cy");
     run.case("functions/func_type_closure_error.cy");
     run.case("functions/func_type_error.cy");
+    run.case("functions/func_type_inline.cy");
+    run.case("functions/func_type_inline_alias.cy");
+    run.case("functions/func_type_inline_arg_error.cy");
+    run.case("functions/func_type_inline_assign_error.cy");
+    run.case("functions/func_type_inline_closure_error.cy");
+    run.case("functions/func_type_inline_dup_error.cy");
+    run.case("functions/func_type_inline_infer_param_error.cy");
+    run.case("functions/func_type_inline_infer_param_only_error.cy");
+    run.case("functions/func_type_inline_template.cy");
     run.case("functions/func_union_type.cy");
     run.case("functions/func_union_type_error.cy");
     run.case("functions/stack_grow_ptr_patch.cy");

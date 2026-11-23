@@ -541,16 +541,32 @@ pub const Parser = struct {
         });
     }
 
-    fn parseFuncType(self: *Parser, call_attr: ?*ast.Attribute) !*ast.Node {
+    /// `fn(P1, P2) -> R`. The return type extends as far to the right as it can, so a function type that
+    /// returns a function type needs no parentheses: `fn(int) -> fn(int) -> int`.
+    /// `ret_config` is the term config of the return type: `[]fn() -> int{f}` initializes the slice and not `int`.
+    fn parseFuncType(self: *Parser, call_attr: ?*ast.Attribute, ret_config: ParseTermConfig) !*ast.Node {
         const start = self.next_pos;
 
         // Assume first token is `fn`.
         self.advance();
 
         const params = try self.parseParenAndFuncParams();
-        const ret = try self.parseFuncReturn();
+        const ret = try self.parseFuncReturn(ret_config);
+        return self.newFuncType(start, params, ret, call_attr);
+    }
 
-        // Parse as function type.
+    fn newFuncType(self: *Parser, start: u32, params: []*ast.FuncParam, ret: ?FuncReturn, call_attr: ?*ast.Attribute) !*ast.Node {
+        for (params) |param| {
+            if (param.template_param and param.type == null) {
+                // `fn(%T)`. The parameter is a type, so `%T` is an infer parameter and not a template parameter
+                // of the function type.
+                param.name_type = try self.ast.newNodeErase(.infer_param, .{
+                    .name = param.name_type,
+                    .pos = param.pos,
+                });
+                param.template_param = false;
+            }
+        }
         return self.ast.newNodeErase(.fn_type, .{
             .params = .{ .ptr = params.ptr, .len = params.len },
             .src = self.ast.src_id,
@@ -560,6 +576,32 @@ pub const Parser = struct {
         });
     }
 
+    /// `fn(...)` where an expression is expected is a function type when `)`, `]`, `,` or `}` follows its
+    /// signature (`Func[fn(int) -> int]`, `Map[str, fn(int) -> int]{}`) and a lambda otherwise, which needs
+    /// `:` or `=>` there.
+    fn parseLambdaOrFuncType(self: *Parser) !*ast.Node {
+        const start = self.next_pos;
+
+        // Assume first token is `fn`.
+        self.advance();
+
+        const params = try self.parseParenAndFuncParams();
+        const ret_start = self.next_pos;
+        const ret = try self.parseFuncReturn(.{});
+        switch (self.peek().tag()) {
+            .right_paren,
+            .right_bracket,
+            .right_brace,
+            .comma => {
+                return self.newFuncType(start, params, ret, null);
+            },
+            else => {
+                try self.checkParamNames(params);
+                return self.parseFuncLambda(ret_start, params, ret);
+            },
+        }
+    }
+
     fn parseFuncSymType(self: *Parser) !*ast.Node {
         const start = self.next_pos;
 
@@ -567,7 +609,7 @@ pub const Parser = struct {
         self.advance();
 
         const params = try self.parseParenAndFuncParams();
-        const ret = try self.parseFuncReturn();
+        const ret = try self.parseFuncReturn(.{});
 
         // Parse as function type.
         return self.ast.newNodeErase(.fnsym_type, .{
@@ -578,9 +620,8 @@ pub const Parser = struct {
         });
     }
 
-    fn parseFuncLambda(self: *Parser, params: []*ast.FuncParam) !*ast.Node {
-        const start = self.next_pos;
-        const ret = try self.parseFuncReturn();
+    /// Assumes the signature was parsed. `start` is the token after the parameters.
+    fn parseFuncLambda(self: *Parser, start: u32, params: []*ast.FuncParam, ret: ?FuncReturn) !*ast.Node {
 
         if (self.peek().tag() == .equal_right_angle) {
             self.advance();
@@ -872,7 +913,7 @@ pub const Parser = struct {
         }
     }
 
-    fn parseFuncReturn(self: *Parser) !?FuncReturn {
+    fn parseFuncReturn(self: *Parser, config: ParseTermConfig) !?FuncReturn {
         var scope_ret = false;
         if (self.peek().tag() != .minus_right_angle) {
             return null;
@@ -887,7 +928,7 @@ pub const Parser = struct {
         if (self.peek().tag() == .left_paren and self.isTupleAhead()) {
             return self.reportError("A return type can not list several types. Declare a tuple type and return that: `type Pair(a int, b int)`, `fn f() -> Pair:`, `return {1, 2}`.", &.{});
         }
-        const ret = (try self.parseOptTypeSpec()) orelse {
+        const ret = (try self.parseOptTypeSpecWith(config)) orelse {
             return self.reportError("Expected return type.", &.{});
         };
         return .{
@@ -1194,7 +1235,7 @@ pub const Parser = struct {
                 var target: *ast.Node = undefined;
 
                 if (self.peek().tag() == .fn_k) {
-                    target = try self.parseFuncType(null);
+                    target = try self.parseFuncType(null, .{});
                 } else if (self.peek().tag() == .fnsym_k) {
                     target = try self.parseFuncSymType();
                 } else if (self.peek().tag() == .pound) {
@@ -1214,7 +1255,7 @@ pub const Parser = struct {
                     }
                     self.advance();
                     if (self.peek().tag() == .fn_k) {
-                        target = try self.parseFuncType(attr);
+                        target = try self.parseFuncType(attr, .{});
                     } else {
                         return self.reportError("Expected `fn` type.", &.{});
                     }
@@ -1263,6 +1304,12 @@ pub const Parser = struct {
     }
 
     fn parseOptTypeSpec(self: *Parser) anyerror!?*ast.Node {
+        return self.parseOptTypeSpecWith(.{});
+    }
+
+    fn parseOptTypeSpecWith(self: *Parser, config_: ParseTermConfig) anyerror!?*ast.Node {
+        var config = config_;
+        config.type_spec = true;
         const token = self.peek();
         switch (token.tag()) {
             .left_paren,
@@ -1283,7 +1330,11 @@ pub const Parser = struct {
             .error_k,
             .percent,
             .ident => {
-                return try self.parseTermExpr(.{});
+                return try self.parseTermExpr(config);
+            },
+            // A function type. Never a lambda: `fn make() -> fn(int) -> int:` returns a function.
+            .fn_k => {
+                return try self.parseFuncType(null, config);
             },
             else => {
                 return null;
@@ -1794,7 +1845,7 @@ pub const Parser = struct {
 
             const params = try self.parseFuncParams(&.{ self_param });
             try self.checkParamNames(params);
-            const ret = try self.parseFuncReturn();
+            const ret = try self.parseFuncReturn(.{});
 
             var stmts: []*ast.Node = undefined;
             if (self.peek().tag() == .colon) {
@@ -1861,7 +1912,7 @@ pub const Parser = struct {
 
         const params = try self.parseFuncParams(&.{});
         try self.checkParamNames(params);
-        const ret = try self.parseFuncReturn();
+        const ret = try self.parseFuncReturn(.{});
 
         // const nameStr = self.ast.nodeString(name);
         // const block = &self.blockStack.items[self.blockStack.items.len-1];
@@ -4122,6 +4173,11 @@ pub const Parser = struct {
                     .pos = self.tokenPos(start),
                 });
             },
+            .fn_k => {
+                // The operand of a type prefix: `?fn() -> int`, `[]fn(int) -> int`, `!fn() -> int`.
+                // The prefix takes the whole function type.
+                return try self.parseFuncType(null, .{ .parse_call_expr = config.parse_call_expr, .parse_record_expr = config.parse_record_expr });
+            },
             .underscore => {
                 self.advance();
                 return try self.newTokenNode(.void_lit, start);
@@ -4209,7 +4265,7 @@ pub const Parser = struct {
                     if (self.peek().tag() != .fn_k) {
                         return self.reportError("Expected `fn`.", &.{});
                     }
-                    return self.parseFuncType(attrs[0]);
+                    return self.parseFuncType(attrs[0], .{ .parse_call_expr = config.parse_call_expr, .parse_record_expr = config.parse_record_expr });
                 }
                 return @ptrCast(try self.parseComptimeExpr());
             },
@@ -4413,7 +4469,10 @@ pub const Parser = struct {
             },
             .question => {
                 self.advance();
-                const child = (try self.parseTermExpr(.{ .parse_call_expr = false })) orelse {
+                // `?fn() -> int` is an optional function. The child of `?` is a type, so `fn` is not a lambda.
+                const child = if (self.peek().tag() == .fn_k)
+                    try self.parseFuncType(null, .{ .parse_call_expr = false, .parse_record_expr = config.parse_record_expr })
+                else (try self.parseTermExpr(.{ .parse_call_expr = false })) orelse {
                     return self.reportError("Expected `Option` child type.", &.{});
                 };
                 return self.ast.newNodeErase(.option_type, .{
@@ -4566,14 +4625,10 @@ pub const Parser = struct {
                 });
             },
             .fn_k => {
-                if (self.parse_func_types) {
-                    return self.parseFuncType(null);
+                if (self.parse_func_types or config.type_spec) {
+                    return self.parseFuncType(null, .{ .parse_call_expr = config.parse_call_expr, .parse_record_expr = config.parse_record_expr });
                 } else {
-                    // Parse typed lambda.
-                    self.advance();
-                    const params = try self.parseParenAndFuncParams();
-                    try self.checkParamNames(params);
-                    return self.parseFuncLambda(params);
+                    return self.parseLambdaOrFuncType();
                 }
             },
             .fnsym_k => {
@@ -5372,6 +5427,8 @@ const ParseTermConfig = struct {
     parse_infer_lambda: bool = true,
     /// Stop after the first call: `spawn f(x).await()` is `(spawn f(x)).await()`.
     stop_after_call: bool = false,
+    /// The term is a type specifier. `fn(...)` is a function type and never a lambda: `-> ^fn(int) -> int:`.
+    type_spec: bool = false,
 };
 
 const list_literal_hint = "A list literal uses braces: `{a, b}` or `[]T{a, b}`.";

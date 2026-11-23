@@ -1380,8 +1380,56 @@ fn findInferParams(c: *cy.Chunk, node: *ast.Node) !void {
             try findInferParams(c, vector_t.child);
             try findInferParams(c, vector_t.n);
         },
+        .fn_type => {
+            // `f fn(T) -> %U`. The parameter is declared so that the rest of the signature resolves.
+            // It is not inferred from a function type: the call reports that.
+            const func_type = node.cast(.fn_type);
+            for (func_type.params.slice()) |param| {
+                try findInferParams(c, param.type orelse param.name_type);
+            }
+            if (func_type.ret) |ret| {
+                try findInferParams(c, ret);
+            }
+        },
         else => {
         },
+    }
+}
+
+/// Whether the type specifier declares an infer parameter inside a function type: `f fn(int) -> %U`, `f Func[fn(%U)]`.
+/// Visits the same nodes as `findInferParams`.
+fn hasInferParamInFuncType(node: *ast.Node, in_func_type: bool) bool {
+    switch (node.type()) {
+        .infer_param => return in_func_type,
+        .index_expr => {
+            for (node.cast(.index_expr).args.slice()) |arg| {
+                if (hasInferParamInFuncType(arg, in_func_type)) return true;
+            }
+            return false;
+        },
+        .ref => return hasInferParamInFuncType(node.cast(.ref).child, in_func_type),
+        .borrow => return hasInferParamInFuncType(node.cast(.borrow).child, in_func_type),
+        .span_type => return hasInferParamInFuncType(node.cast(.span_type).child, in_func_type),
+        .slice_type => return hasInferParamInFuncType(node.cast(.slice_type).child, in_func_type),
+        .vector_type => {
+            const vector_t = node.cast(.vector_type);
+            return hasInferParamInFuncType(vector_t.child, in_func_type) or hasInferParamInFuncType(vector_t.n, in_func_type);
+        },
+        .partial_vector_type => {
+            const vector_t = node.cast(.partial_vector_type);
+            return hasInferParamInFuncType(vector_t.child, in_func_type) or hasInferParamInFuncType(vector_t.n, in_func_type);
+        },
+        .fn_type => {
+            const func_type = node.cast(.fn_type);
+            for (func_type.params.slice()) |param| {
+                if (hasInferParamInFuncType(param.type orelse param.name_type, true)) return true;
+            }
+            if (func_type.ret) |ret| {
+                return hasInferParamInFuncType(ret, true);
+            }
+            return false;
+        },
+        else => return false,
     }
 }
 
@@ -1393,6 +1441,11 @@ pub fn resolveAnyParamType(c: *cy.Chunk, param_idx: usize, resolve_new_type: boo
             return c.sema.dependent_t;
         } else if (err == error.FoundInferParam) {
             try findInferParams(c, node);
+            if (hasInferParamInFuncType(node, false)) {
+                // A template parameter is not inferred from a function type. As a dependent type the parameter
+                // is evaluated at the call, which reports the infer parameter at the argument.
+                return c.sema.dependent_t;
+            }
             return c.sema.infer_t;
         } else {
             return err;

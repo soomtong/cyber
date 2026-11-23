@@ -496,7 +496,7 @@ range
 - 매개변수 이름 뒤에 타입이 온다(Go/Zig 식, TS와 순서는 같고 `:`만 없다).
 - 오버로딩이 된다(인자 타입 시그니처로 구분).
 - 값을 반환하는 함수의 결과를 그냥 버리는 호출문은 에러다. "Expected assignment to a variable or placeholder for `int`." 버리려면 `_ = f()`.
-- 함수는 값이다: `f := add`. 람다는 `fn(a, b int) -> int:` 블록 또는 목표 타입이 있는 곳의 `|a, b| 식`이다. 함수 포인터 타입은 `type BinFn = fn(int, int) -> int`처럼 별칭으로 선언한다.
+- 함수는 값이다: `f := add`. 람다는 `fn(a, b int) -> int:` 블록 또는 목표 타입이 있는 곳의 `|a, b| 식`이다. 함수 포인터 타입은 타입 자리에 `fn(int, int) -> int`로 바로 쓰거나 `type BinFn = fn(int, int) -> int`처럼 별칭으로 이름을 붙인다.
 - 클로저가 캡처할 수 있는 것은 참조 타입(`^T`, `&T`) 변수뿐이다. 나머지는 컴파일 에러다. 클로저를 값으로 반환하거나 저장하려면 타입을 `Func[FnType]`으로 쓴다(`src/test/functions/call_closure.cy`).
 
 ```cy

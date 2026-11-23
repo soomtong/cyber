@@ -270,3 +270,166 @@ var buf [4]byte = undef
       (number)
       (identifier))
     (undef)))
+
+============================================================
+Inline function types
+============================================================
+
+fn apply(x int, f fn(int) -> int) -> int:
+    return f(x)
+
+fn make() -> fn(int) -> fn(int) -> int:
+    return g
+
+fn opt() -> ?fn(int) -> int:
+    return none
+
+type Box:
+    f fn(a int, b int) -> int
+    g fn(int)
+
+type Visitor trait:
+    fn visit(f fn(int) -> int) -> int
+
+var fs []fn(int) -> int = {g}
+var fu Func[fn(int, int) -> int] = g
+l := fn(f fn(int) -> int) -> fn(int) -> int => f
+
+------------------------------------------------------------
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier))
+      (parameter
+        (identifier)
+        (function_type
+          (parameters
+            (parameter
+              (identifier)))
+          (return_type
+            (identifier)))))
+    (return_type
+      (identifier))
+    (block
+      (return_statement
+        (call_expression
+          (identifier)
+          (arguments
+            (identifier))))))
+  (function_definition
+    (identifier)
+    (parameters)
+    (return_type
+      (function_type
+        (parameters
+          (parameter
+            (identifier)))
+        (return_type
+          (function_type
+            (parameters
+              (parameter
+                (identifier)))
+            (return_type
+              (identifier))))))
+    (block
+      (return_statement
+        (identifier))))
+  (function_definition
+    (identifier)
+    (parameters)
+    (return_type
+      (option_type
+        (function_type
+          (parameters
+            (parameter
+              (identifier)))
+          (return_type
+            (identifier)))))
+    (block
+      (return_statement
+        (none))))
+  (type_declaration
+    (identifier)
+    (member_block
+      (field_declaration
+        (identifier)
+        (function_type
+          (parameters
+            (parameter
+              (identifier)
+              (identifier))
+            (parameter
+              (identifier)
+              (identifier)))
+          (return_type
+            (identifier))))
+      (field_declaration
+        (identifier)
+        (function_type
+          (parameters
+            (parameter
+              (identifier)))))))
+  (type_declaration
+    (identifier)
+    (block
+      (function_definition
+        (identifier)
+        (parameters
+          (parameter
+            (identifier)
+            (function_type
+              (parameters
+                (parameter
+                  (identifier)))
+              (return_type
+                (identifier)))))
+        (return_type
+          (identifier)))))
+  (var_declaration
+    (identifier)
+    (slice_type
+      (function_type
+        (parameters
+          (parameter
+            (identifier)))
+        (return_type
+          (identifier))))
+    (initializer
+      (identifier)))
+  (var_declaration
+    (identifier)
+    (generic_type
+      (identifier)
+      (function_type
+        (parameters
+          (parameter
+            (identifier))
+          (parameter
+            (identifier)))
+        (return_type
+          (identifier))))
+    (identifier))
+  (variable_declaration
+    (identifier)
+    (lambda
+      (parameters
+        (parameter
+          (identifier)
+          (function_type
+            (parameters
+              (parameter
+                (identifier)))
+            (return_type
+              (identifier)))))
+      (return_type
+        (function_type
+          (parameters
+            (parameter
+              (identifier)))
+          (return_type
+            (identifier))))
+      (identifier))))

@@ -99,25 +99,21 @@ fn (&&Calculator) eval(expr str) -> !float:
 -- Functional helpers.
 -- ---------------------------------------------------------------------------------------------------------
 
-type MapFn[T Any, U Any] = fn(T) -> U
-type PredFn[T Any] = fn(T) -> bool
-type FoldFn[T Any, A Any] = fn(A, T) -> A
-
 -- The result type of a lambda is not inferred, so `U` is passed as an argument.
-fn map(%U type, items []%T, f MapFn[T, U]) -> []U:
+fn map(%U type, items []%T, f fn(T) -> U) -> []U:
     out := []U{}
     for items |it|:
         out += f(it)
     return out
 
-fn filter(items []%T, f PredFn[T]) -> []T:
+fn filter(items []%T, f fn(T) -> bool) -> []T:
     out := []T{}
     for items |it|:
         if f(it):
             out += it
     return out
 
-fn fold(items []%T, init %A, f FoldFn[T, A]) -> A:
+fn fold(items []%T, init %A, f fn(A, T) -> A) -> A:
     acc := init
     for items |it|:
         acc = f(acc, it)

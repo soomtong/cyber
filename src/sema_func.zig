@@ -1290,6 +1290,16 @@ fn firstInferParam(node: *ast.Node) ?*ast.Node {
             const vector_t = node.cast(.partial_vector_type);
             return firstInferParam(vector_t.child) orelse firstInferParam(vector_t.n);
         },
+        .fn_type => {
+            const func_type = node.cast(.fn_type);
+            for (func_type.params.slice()) |param| {
+                if (firstInferParam(param.type orelse param.name_type)) |res| return res;
+            }
+            if (func_type.ret) |ret| {
+                return firstInferParam(ret);
+            }
+            return null;
+        },
         else => return null,
     }
 }

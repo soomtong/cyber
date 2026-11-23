@@ -4,6 +4,34 @@
 사용자에게 보이는 동작이 바뀌는 커밋은 여기에 바로 적고, 언어 규칙이면 `docs/docs.md`에도 같이 적는다.
 전체 발견 이슈 표는 `docs/study/10-findings-register.md`, 컴파일러 한계의 결정은 `docs/decisions/project_compiler_limits.md`.
 
+## 함수 포인터 타입을 타입 자리에 바로 쓴다 (2026-11-23)
+
+함수 포인터 타입은 타입 별칭의 오른쪽에만 쓸 수 있었다. `fn apply(x int, f fn(int) -> int) -> int:`는 `fn`에서 'Expected type specifier.'가 났고,
+고차 함수는 시그니처마다 별칭(`type MapFn[T Any, U Any] = fn(T) -> U`)을 따로 선언해야 했다. 이제 타입을 쓰는 자리 어디에나 `fn(P1, P2) -> R`을 쓴다.
+
+- 쓸 수 있는 자리: 함수 · 메서드 · 람다의 파라미터와 반환 타입, 구조체 필드, choice 케이스의 payload, `var` · `global` 선언, `as[...]`의 대상,
+  타입 인자(`[]fn(int) -> int`, `Map[str, fn(float, float) -> float]`, `?fn() -> int`, `Func[fn(int, int) -> int]`, `&OpaqueFunc[fn(T, T) -> bool]`), 트레이트 메서드 시그니처.
+  `-> R`이 없으면 `void`를 반환한다. 별칭 형식처럼 파라미터 이름을 붙일 수 있다(`fn(a int, b int) -> int`).
+- 같은 타입: 인라인 형식과 별칭 형식은 같은 타입이다. 서로 대입되고, 타입 이름도 같고(`fn(int) -> int`), 오버로드 판정에서도 같다.
+  `fn over(f IntFn)`과 `fn over(f fn(int) -> int)`를 함께 선언하면 '`over` has already been declared with the same function signature.'이다.
+- 반환 타입의 결합: 함수 타입의 반환 타입은 오른쪽 끝까지 차지한다(오른쪽 결합). `fn(int) -> fn(int) -> int`는 함수를 반환하는 함수이고,
+  `fn make() -> fn(int) -> int:`는 `fn(int) -> int`를 반환한다. 본문을 여는 `:`는 타입에 들어가지 않는다.
+  파라미터 괄호 안의 `-> R`은 그 파라미터의 것이고, `)` 뒤의 `-> R`은 바깥 함수의 것이다(`fn g(f fn(int) -> int) -> int:`).
+- 접두사: `?`, `!`, `[]`, `^`, `&`는 뒤따르는 함수 타입 전체에 붙는다. `?fn() -> int`는 옵션 함수, `fn() -> ?int`는 옵션을 반환하는 함수다.
+  다르게 묶으려면 괄호를 쓴다(`?(fn() -> int)`, `fn(int) -> (fn(int) -> int)`).
+- 식 자리의 `fn(...)`: 람다다. 시그니처 뒤에 `:`나 `=>`가 와야 하고, 없으면 전과 같이 'Expected colon.'이다.
+  시그니처 뒤에 `)`, `]`, `,`, `}`가 올 때만 타입으로 읽는다. 타입 인자(`Func[fn(int) -> int]`, `Map[str, fn(int) -> int]{}`, `type.name(fn(int) -> int)`)가 이 경우다.
+  타입 자리와 타입 접두사 뒤에서는 항상 타입이다. `^fn(a int) -> int:`처럼 식에서 람다 앞에 붙는 `^` · `&`는 전과 같이 람다를 받는다.
+- 템플릿 파라미터: 인라인 함수 타입은 앞선 인자로 정해진 템플릿 파라미터를 쓸 수 있다. `fn filter(items []%T, f fn(T) -> bool) -> []T`를 `filter(xs, |x| x > 3.0)`으로 부른다.
+  함수 타입 안에서 새 infer 파라미터를 선언할 수는 없다. `f fn(T) -> %U`, `f fn(%T) -> int`, `f Func[fn(T) -> %U]`는 호출 인자 위치에
+  'Can not infer the template parameter `U` from the argument for `f`. Declare it as its own parameter (`%U type`) and pass the type in the call.'을 보고한다.
+  추론은 아직 지원하지 않는다. `fn map(%U type, items []%T, f fn(T) -> U) -> []U`처럼 따로 선언한다.
+- 구현: `src/parser.zig`의 `parseOptTypeSpecWith`가 `fn`을 받아 별칭과 같은 `fn_type` 노드를 만든다(`parseFuncType`). 식 자리는 `parseLambdaOrFuncType`이 시그니처 뒤 토큰으로 가른다.
+  `ParseTermConfig.type_spec`이 타입 자리임을 접두사 아래로 전달한다. `src/sema_type.zig`의 `findInferParams`와 `src/sema_func.zig`의 `firstInferParam`이 `fn_type`을 방문한다.
+- 도구: `cyber fmt`와 `examples/fmt.cy`는 새 문법을 그대로 둔다. tree-sitter 문법(`exts/tree-sitter/grammar.js`)은 이미 `function_type`을 타입으로 받아서 바꾸지 않았고, 코퍼스 테스트만 더했다.
+- 예제: `examples/calculator.cy`의 `map` · `filter` · `fold`가 별칭 대신 인라인 타입을 쓴다.
+- 테스트: `src/test/functions/func_type_inline*.cy`, `src/test/syntax/func_type_inline_*_error.cy`, `exts/tree-sitter/test/corpus/declarations.txt`의 'Inline function types'.
+
 ## `Object.to_string()`이 상자를 해제하던 버그 수정 (2026-11-23)
 
 `Object(^1).to_string()`처럼 `bool`, 정수, `float`, `error`, `symbol`, `str`을 담은 `Object`에 `to_string()`을 부르면 결과는 맞게 나오지만
@@ -16,6 +44,8 @@
   이제 타입마다 제 너비로 읽어 `-5`가 나온다. `r8` · `r16` · `r32`도 제 너비로 읽는다(출력은 그대로 `0xc8` 같은 16진수).
 - 바뀌지 않는 것: `print(obj)`와 문자열 보간 `'%{obj}'`은 `to_string()`을 부르지 않으며 전과 같이 `Object{inner=@0x...}`를 찍는다.
 - 테스트: `src/test/core/object_to_string.cy`.
+||||||| parent of d539623e (Allow a function pointer type inline wherever a type is expected)
+
 
 ## float은 항상 소수점을 붙여 문자열로 바뀐다 (2026-11-23, 깨지는 변경)
 

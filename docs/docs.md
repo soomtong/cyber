@@ -2503,9 +2503,27 @@ fn make() -> OpaqueFunc[F]:
 ```
 
 ### Function pointer types.
-A function pointer type is denoted as `fn(P1, P2, ...) -> R` where `P`s are parameter types and `R` is the return type. Currently, function pointer types can only only be declared as a type alias:
+A function pointer type is denoted as `fn(P1, P2, ...) -> R` where `P`s are parameter types and `R` is the return type. Without `-> R` the function returns `void`. It can be written wherever a type is expected: a parameter, a return type, a field, a variable, a type argument and a trait method:
+```cy
+fn apply(x int, f fn(int) -> int) -> int:
+    return f(x)
+
+fn make() -> fn(int) -> int:
+    return |x| x * 2
+
+type Button:
+    on_click fn(str)
+
+var ops []fn(int) -> int = {make(), |x| x + 1}
+print(apply(3, ops[0]))    --> 6
+```
+
+A type alias gives a function pointer type a name. The alias and the inline form are the same type:
 ```cy
 type AddFn = fn(int, int) -> int
+
+var a AddFn = |a, b| a + b
+var b fn(int, int) -> int = a
 ```
 
 Function pointer types can include optional parameter names.
@@ -2520,10 +2538,37 @@ Functions and lambdas (excluding closures) can be assigned to a function pointer
 fn add(a, b int) -> int:
     return a + b
 
-type AddFn = fn(int, int) -> int
-
-var func AddFn = add
+var func fn(int, int) -> int = add
 func = |a, b| a + b + 123
+```
+
+The return type of a function type takes everything to its right, and a prefix (`?`, `!`, `[]`, `^`, `&`) takes the whole function type after it. Use parentheses for the other reading:
+```cy
+fn(int) -> fn(int) -> int      -- Returns a function: `fn(int) -> (fn(int) -> int)`.
+?fn() -> int                   -- An optional function: `?(fn() -> int)`.
+fn() -> ?int                   -- A function that returns an optional `int`.
+!fn() -> int                   -- A function or an error: `!(fn() -> int)`.
+[]fn(int) -> int               -- A slice of functions.
+```
+
+In a signature, the `-> R` inside the parentheses of the parameters belongs to the parameter and the one after `)` belongs to the function. The `:` that begins a body is never part of a type:
+```cy
+fn compose(f fn(int) -> int, g fn(int) -> int) -> fn(int) -> int:
+    return f
+```
+
+Where an expression is expected, `fn(...)` is a [lambda](#lambdas) and must be followed by `:` or `=>`. It is read as a type only when `)`, `]`, `,` or `}` follows the signature, which is the case for a type argument (`Func[fn(int) -> int]`, `Map[str, fn(int) -> int]{}`). `f := fn(a int) -> int` with nothing after it reports 'Expected colon.' After a type prefix and in the positions listed above, `fn(...)` is always a type.
+
+An inline function type can use the template parameters of its function that are known from the earlier arguments. It can not declare a new one: a call to `fn map(items []%T, f fn(T) -> %U) -> []U` reports 'Can not infer the template parameter `U` from the argument for `f`. Declare it as its own parameter (`%U type`) and pass the type in the call.' See [infer parameter](#infer-parameter).
+```cy
+fn filter(items []%T, f fn(T) -> bool) -> []T:
+    out := []T{}
+    for items |it|:
+        if f(it):
+            out += it
+    return out
+
+print(filter([]float{1, 4, 5}, |x| x > 3.0))    --> {4.0, 5.0}
 ```
 
 ### Function union types.
@@ -2533,9 +2578,7 @@ It can hold closures in addition to functions and lambdas:
 ```cy
 c := ^5
 
-type AddFn = fn(int, int) -> int
-
-var func Func[AddFn] = |a, b| a + b + c.*
+var func Func[fn(int, int) -> int] = |a, b| a + b + c.*
 func(10, 20)       --> 35
 ```
 
@@ -2611,11 +2654,9 @@ fn set(m Map[%K, %V], key K, val V):
     m[key] = val
 ```
 
-A parameter type can not use an earlier template parameter and declare a new one at the same time. A call to `fn map(items []%T, f MapFn[T, %U]) -> []U` reports 'Can not infer the template parameter `U` from the argument for `f`. Declare it as its own parameter (`%U type`) and pass the type in the call.' Declare the parameter explicitly instead:
+A parameter type can not use an earlier template parameter and declare a new one at the same time, and a function type can not declare one at all. A call to `fn map(items []%T, f fn(T) -> %U) -> []U` (or with an alias, `f MapFn[T, %U]`) reports 'Can not infer the template parameter `U` from the argument for `f`. Declare it as its own parameter (`%U type`) and pass the type in the call.' Declare the parameter explicitly instead:
 ```cy
-type MapFn[T Any, U Any] = fn(T) -> U
-
-fn map(%U type, items []%T, f MapFn[T, U]) -> []U:
+fn map(%U type, items []%T, f fn(T) -> U) -> []U:
     out := []U{}
     for items |it|:
         out += f(it)

@@ -955,6 +955,12 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/if_stmt.cy");
     run.case("control_flow/if_unwrap.cy");
     run.case("control_flow/return.cy");
+    run.case("control_flow/return_no_value.cy");
+    run.case("control_flow/return_no_value_error.cy");
+    run.case("control_flow/return_no_value_option_error.cy");
+    run.case("control_flow/return_no_value_result_error.cy");
+    run.case("control_flow/return_no_value_infer_ret_lambda_error.cy");
+    run.case("control_flow/return_no_value_trait_default_error.cy");
     run.case("control_flow/switch.cy");
     run.case("control_flow/switch_error.cy");
     run.case("control_flow/switch_expr_lambda.cy");

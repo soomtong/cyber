@@ -992,10 +992,38 @@ pub fn semaReturnExpr(c: *cy.Chunk, expr: sema.ExprResult, node: *ast.Node) !voi
     c.block().endReachable = false;
 }
 
+/// Ends a generator without a value: `next` returns `none` and the generator is done.
+pub fn semaGeneratorEnd(c: *cy.Chunk, node: *ast.Node) !void {
+    const proc = c.proc();
+    const b = c.procBlock();
+    try sema_local.semaDestructBlock2(c, b);
+
+    const gen_t = proc.func.?.sig.ret.cast(.pointer).child_t;
+    const funcptr_t = gen_t.instanceOf(c.sema.generator_tmpl).?.params[0].asPtr(*cy.Type);
+    const val_t = funcptr_t.cast(.func_ptr).sig.ret;
+    const opt_t = try sema.getOptionType(c, val_t);
+    const none = try c.semaNone(opt_t, node);
+    _ = try c.ir.pushStmt(.set_ret, node, .{
+        .right = none.ir,
+    });
+    _ = try c.ir.pushStmt(.yield, node, .{
+        .deinit_head = null,
+        .ret_opt_t = opt_t,
+        .end = true,
+    });
+    c.block().endReachable = false;
+}
+
+/// A `return` without a value. It returns from a function that returns `void` or `!void` (as a success), and it ends
+/// a generator. Any other return type needs a value.
 pub fn semaReturn(c: *cy.Chunk, node: *ast.Node) !void {
     const proc = c.proc();
     const b = c.procBlock();
     const var_start = c.varStack.items.len;
+
+    if (proc.func != null and proc.func.?.info.generator) {
+        return semaGeneratorEnd(c, node);
+    }
 
     const ret_t = proc.getReturnType(c.sema);
     if (ret_t.id() == bt.Void) {
@@ -1006,11 +1034,19 @@ pub fn semaReturn(c: *cy.Chunk, node: *ast.Node) !void {
         }
 
         _ = try c.ir.pushStmt(.ret, node, .{ .return_value = false });
-    }
-    if (ret_t.kind() == .result and ret_t.cast(.result).child_t.id() == bt.Void) {
+    } else if (ret_t.kind() == .result and ret_t.cast(.result).child_t.id() == bt.Void) {
         const voidv = try c.semaVoid(node);
         const expr = try sema_init.semaInitChoice(c, ret_t, 1, 1, voidv, node);
         try semaReturnExpr(c, expr, node);
+    } else if (proc.soft_ret_fits) |fits| {
+        // The lambda is the argument of an overload: a mismatch of the overload, like a value of another type
+        // (`semaReturnExprStmt2`).
+        fits.* = false;
+    } else {
+        const ret_name = try c.sema.allocTypeName(ret_t);
+        defer c.alloc.free(ret_name);
+        const hint: []const u8 = if (ret_t.kind() == .option) " Use `return none` for no value." else "";
+        return c.reportErrorFmt("Expected a return value of type `{}`. A `return` without a value is for a function that returns `void` or `!void`.{}", &.{v(ret_name), v(hint)}, node);
     }
     try sema_local.popLocals2(c, var_start, false, node);
     c.block().endReachable = false;

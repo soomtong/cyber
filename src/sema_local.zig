@@ -1372,23 +1372,7 @@ pub fn procPrologue(c: *cy.Chunk) !void {
 
     if (c.block().endReachable) {
         if (proc.func != null and proc.func.?.info.generator) {
-            const b = c.procBlock(); 
-            try semaDestructBlock2(c, b);
-
-            const gen_t = proc.func.?.sig.ret.cast(.pointer).child_t;
-            const funcptr_t = gen_t.instanceOf(c.sema.generator_tmpl).?.params[0].asPtr(*cy.Type);
-            const val_t = funcptr_t.cast(.func_ptr).sig.ret;
-            const opt_t = try sema.getOptionType(c, val_t);
-            const none = try c.semaNone(opt_t, proc.node);
-            _ = try c.ir.pushStmt(.set_ret, proc.node, .{
-                .right = none.ir,
-            });
-            _ = try c.ir.pushStmt(.yield, proc.node, .{
-                .deinit_head = null,
-                .ret_opt_t = opt_t,
-                .end = true,
-            });
-            c.block().endReachable = false;
+            try sema_stmt.semaGeneratorEnd(c, proc.node);
         } else {
             const ret_t = proc.getReturnType(c.sema);
             if (ret_t.id() == bt.Void or (ret_t.kind() == .result and ret_t.cast(.result).child_t.id() == bt.Void)) {

@@ -2540,6 +2540,19 @@ fn foo():
     print(a)    --> error: Undeclared variable `a`.
 ```
 
+A `return` without a value returns from a function that returns `void` (or has no return type) or `!void`, where it is the success. In a function, method or lambda with any other return type it is a compile error: 'Expected a return value of type `int`. A `return` without a value is for a function that returns `void` or `!void`.' It does not return `none` from a function that returns `?T`: write `return none`. In a [generator](#generators) it ends the generator.
+```cy
+fn log(x int):
+    if x < 0:
+        return          -- OK
+    print(x)
+
+fn half(x int) -> int:
+    if x == 0:
+        return          --> CompileError: Expected a return value of type `int`.
+    return x / 2
+```
+
 Functions can only return one value. To return several, declare a [tuple](#tuples) type and return that:
 ```cy
 type Pair(a int, b int)
@@ -4559,7 +4572,7 @@ print(gen.status())
 --> GeneratorStatus.done
 ```
 
-`next` returns `none` once when the function returns. After that the generator is `.done`, and another `next` panics: `Generator is already done.`
+`next` returns `none` once when the function returns: at the end of its body or at a `return` without a value. After that the generator is `.done`, and another `next` panics: `Generator is already done.`
 
 ### Ending a generator.
 `end` ends a generator that is not done. The values of its body are destructed and the status becomes `.done`:

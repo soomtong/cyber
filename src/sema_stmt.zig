@@ -724,6 +724,7 @@ fn semaStmt2(c: *cy.Chunk, node: *ast.Node) !void {
             if (proc.func == null) {
                 return c.reportErrorFmt("Return statement is not allowed in the main block.", &.{}, node);
             }
+            try checkReturnTypeKnown(c, "`return`", "(`fn(x T) -> U => expr`)", node);
             try semaScopeExitJoin(c, null, node);
             _ = try semaReturn(c, node);
         },
@@ -733,6 +734,7 @@ fn semaStmt2(c: *cy.Chunk, node: *ast.Node) !void {
             if (proc.func == null) {
                 return c.reportErrorFmt("Return statement is not allowed in the main block.", &.{}, node);
             }
+            try checkReturnTypeKnown(c, "`return`", "(`fn(x T) -> U => expr`)", node);
             const retType = proc.getReturnType(c.sema);
             // The fibers are done before the result is evaluated.
             try semaScopeExitJoin(c, null, node);
@@ -1395,6 +1397,17 @@ fn semaIfUnwrapStmt(c: *cy.Chunk, stmt: *ast.IfUnwrapStmt) !void {
     }
 }
 
+/// A lambda whose return type is inferred from its body (`fn(x str) => expr`, or `|x| expr` for a function type that
+/// infers its result, `fn(T) -> %U`) has no signature while the body is analyzed. Nothing in the body can leave the
+/// lambda before the type of the body is known, so `what` is reported instead of reading the missing signature.
+fn checkReturnTypeKnown(c: *cy.Chunk, what: []const u8, how: []const u8, node: *ast.Node) !void {
+    const func = c.proc().func orelse return;
+    if (func.isResolved()) return;
+    return c.reportErrorFmt("{} can not leave a lambda whose return type is inferred from its body: the return type is not known yet. Declare the return type of the lambda {}.", &.{
+        v(what), v(how),
+    }, node);
+}
+
 /// What a failing `!` does with its error: it goes to the `else` block of the enclosing `try`, or the function
 /// returns it, or the main block panics.
 pub fn semaPropagateError(c: *cy.Chunk, err: sema.ExprResult, node: *ast.Node) !void {
@@ -1412,6 +1425,7 @@ pub fn semaPropagateError(c: *cy.Chunk, err: sema.ExprResult, node: *ast.Node) !
             try semaBreakTo(c, try_ctx.body_block, node);
         }
     } else if (proc.func != null) {
+        try checkReturnTypeKnown(c, "`!`", "(`fn(x T) -> !U => expr`), or handle the error here with `!else` or `try`", node);
         const ret_t = proc.getReturnType(c.sema);
         if (ret_t.id() == bt.Error) {
             try semaReturnExpr(c, err, node);
@@ -1465,6 +1479,7 @@ fn sema_scope_stmt(c: *cy.Chunk, stmt: *ast.ScopeStmt) !void {
         const proc = c.proc();
         if (proc.try_ctx == null) {
             if (proc.func != null) {
+                try checkReturnTypeKnown(c, "A `scope` block", "(`fn(x T) -> !U => expr`), or put the block in a `try` block", node);
                 const ret_t = proc.getReturnType(c.sema);
                 if (ret_t.id() != bt.Error and ret_t.kind() != .result) {
                     return c.reportError("A `scope` block needs a function that returns `!T` or `error`, or an enclosing `try` block. An error of its fibers leaves the block like a failing `!`.", node);

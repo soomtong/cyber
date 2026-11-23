@@ -392,6 +392,8 @@ pub const Proc = struct {
 
     pub fn getReturnType(self: *const Proc, s: *Sema) *cy.Type {
         if (self.func) |func| {
+            // The signature of a lambda that infers its return type is set after its body (`checkReturnTypeKnown`).
+            std.debug.assert(func.isResolved());
             return func.sig.ret;
         } else {
             return s.object_t;

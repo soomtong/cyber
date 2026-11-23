@@ -872,6 +872,7 @@ fn test_control_flow(run: *Runner) void {
     run.case("meta/infer_param_func_type_value_error.cy");
     run.case("meta/infer_param_lambda.cy");
     run.case("meta/infer_param_lambda_arity_error.cy");
+    run.case("meta/infer_param_lambda_bang_error.cy");
     run.case("meta/infer_param_lambda_body_error.cy");
     run.case("meta/infer_param_lambda_no_func_error.cy");
     run.case("meta/infer_param_lambda_param_error.cy");
@@ -929,8 +930,11 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/result_unhandled_error.cy");
     run.case("control_flow/unwrap_not_result_error.cy");
     run.case("control_flow/unwrap_option_with_bang_error.cy");
+    run.case("control_flow/bang_in_infer_ret_lambda.cy");
+    run.case("control_flow/bang_in_infer_ret_lambda_error.cy");
     run.case("control_flow/bang_in_non_result_func_error.cy");
     run.case("control_flow/bang_in_non_result_lambda_error.cy");
+    run.case("control_flow/return_in_infer_ret_lambda_error.cy");
     run.case("control_flow/else_not_option_error.cy");
     run.case("control_flow/else_block_not_option_error.cy");
     run.case("types/none_compare_not_option_error.cy");

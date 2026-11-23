@@ -3835,6 +3835,8 @@ fn content_length(path str) -> int:
 
 Nested `try` blocks are resolved from the inside out. A `!` inside the `else` block belongs to the enclosing `try`, or to the function when there is none. A lambda declared in the body has its own rules: its `!` follows the lambda's return type.
 
+An expression lambda without a declared return type (`fn(x str) => expr`, `|x| expr`) takes its return type from its body, so the body can not leave it early. A `!` there reports '`!` can not leave a lambda whose return type is inferred from its body: the return type is not known yet.' Declare the return type (`fn(x str) -> !int => int.parse(x)!`), or handle the error in the body with `!else`.
+
 ## Panics.
 The builtin `panic` is a fail-fast mechanism to quickly exit the current thread with an error message:
 ```cy

@@ -233,6 +233,11 @@ pub const Chunk = struct {
     /// Includes lambdas which are not linked from a named sym.
     funcs: std.ArrayList(*cy.Func),
 
+    /// Lambdas that were checked as the argument of an overload that did not take them
+    /// (`sema_local.dropLambdaProc`). They have no body and are not in `funcs`: nothing is generated or looked
+    /// up for them. Owned by this chunk like `funcs`, since what was checked with them can still point to them.
+    dropped_funcs: std.ArrayList(*cy.Func) = .empty,
+
     host_funcs: std.StringHashMapUnmanaged(C.BindFunc),
     fallback_bind_func: ?C.BindFunc = null,
     host_types: std.StringHashMapUnmanaged(C.BindType),
@@ -453,6 +458,10 @@ pub const Chunk = struct {
             func.destroy(self.alloc);
         }
         self.funcs.deinit(self.alloc);
+        for (self.dropped_funcs.items) |func| {
+            func.destroy(self.alloc);
+        }
+        self.dropped_funcs.deinit(self.alloc);
 
         self.host_funcs.deinit(self.alloc);
         self.host_types.deinit(self.alloc);

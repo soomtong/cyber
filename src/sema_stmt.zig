@@ -738,7 +738,7 @@ fn semaStmt2(c: *cy.Chunk, node: *ast.Node) !void {
             try semaScopeExitJoin(c, null, node);
             if (noteInferRetExit(c, .ret)) return;
             const retType = proc.getReturnType(c.sema);
-            _ = try semaReturnExprStmt(c, child, retType, node);
+            _ = try semaReturnExprStmt2(c, child, retType, proc.soft_ret_fits, node);
         },
         else => return c.reportErrorFmt("Unsupported statement: {}", &.{v(node.type())}, node),
     }
@@ -1022,9 +1022,9 @@ pub fn semaReturnExprStmt(c: *cy.Chunk, child: *ast.Node, ret_opt: ?*cy.Type, no
 
 /// With `opt_fits`, an expression whose type does not fit `ret_opt` is not reported: `opt_fits` is set to false,
 /// no return is generated and the type of the expression is returned. The caller drops the function
-/// (`sema_local.dropLambdaProc`). An error inside the expression is reported as usual.
+/// (`sema_local.dropLambdaProc`). `opt_fits` is never set to true: the `return`s of a block share it.
+/// An error inside the expression is reported as usual.
 pub fn semaReturnExprStmt2(c: *cy.Chunk, child: *ast.Node, ret_opt: ?*cy.Type, opt_fits: ?*bool, node: *ast.Node) !*cy.Type {
-    if (opt_fits) |fits| fits.* = true;
     const proc = c.proc();
     if (proc.func != null and proc.func.?.info.generator) {
         const gen_t = c.proc().getReturnType(c.sema).cast(.pointer).child_t;
@@ -1080,17 +1080,18 @@ pub fn semaReturnExprStmt2(c: *cy.Chunk, child: *ast.Node, ret_opt: ?*cy.Type, o
                 .fit_target = false,
             });
         } else if (opt_fits) |fits| {
-            expr = try sema_expr.semaExprCstrSoft(c, child, ret_t, fits);
+            // This expression only: an earlier `return` of the block can have set `fits` to false.
+            var expr_fits = true;
+            expr = try sema_expr.semaExprCstrSoft(c, child, ret_t, &expr_fits);
+            if (!expr_fits) {
+                fits.* = false;
+                return dropReturnExpr(c, expr, var_start, node);
+            }
         } else {
             expr = try c.semaExprCstr(child, ret_t);
         }
     } else {
         expr = try c.semaExpr(child, .{});
-    }
-    if (opt_fits) |fits| {
-        if (!fits.*) {
-            return dropReturnExpr(c, expr, var_start, node);
-        }
     }
 
     // Returning a local moves it instead of copying it. A type without `@copy` is copied bitwise,

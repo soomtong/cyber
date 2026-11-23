@@ -1317,12 +1317,54 @@ pub fn popLambdaProc(c: *cy.Chunk) !sema.ExprResult {
     return res;
 }
 
+/// What a lambda adds to the chunk while it is checked, taken before `Chunk.addUserLambda` for `dropLambdaProc`.
+pub const LambdaMark = struct {
+    funcs: usize,
+    func_blocks: usize,
+    ref_lens: [4]usize,
+
+    pub fn take(c: *cy.Chunk) LambdaMark {
+        return .{
+            .funcs = c.funcs.items.len,
+            .func_blocks = c.ir.func_blocks.items.len,
+            .ref_lens = c.compiler.refLens(),
+        };
+    }
+};
+
 /// Drops the lambda that was being checked instead of `popLambdaProc`: no code is generated for it or for a
-/// lambda inside it. `func_blocks_start` is the number of `ir.func_blocks` before `pushLambdaProc`.
-/// The `Func` of the lambda stays in `Chunk.funcs` without a body, like a function that is never emitted.
-pub fn dropLambdaProc(c: *cy.Chunk, func_blocks_start: usize) !void {
+/// lambda inside it. The `Func` of each of them leaves `Chunk.funcs` for `Chunk.dropped_funcs`, so that code
+/// generation, the global initializer check and the symbol info do not see a function without a body.
+/// A function that a template expanded to for the body stays: it is an instance of its template.
+/// The symbol info that the body recorded (`refs.zig`) is dropped too: the body is checked again for the
+/// next overload, or once more to report its error.
+pub fn dropLambdaProc(c: *cy.Chunk, mark: LambdaMark) !void {
     _ = try popProc(c);
-    c.ir.func_blocks.items.len = func_blocks_start;
+    c.ir.func_blocks.items.len = mark.func_blocks;
+
+    try c.dropped_funcs.ensureUnusedCapacity(c.alloc, c.funcs.items.len - mark.funcs);
+    var kept = mark.funcs;
+    for (c.funcs.items[mark.funcs..]) |func| {
+        if (func.type == .userLambda) {
+            c.dropped_funcs.appendAssumeCapacity(func);
+        } else {
+            c.funcs.items[kept] = func;
+            kept += 1;
+        }
+    }
+    c.funcs.items.len = kept;
+
+    c.compiler.truncateRefs(mark.ref_lens);
+}
+
+/// Whether the block of the current function reaches its end without a `return` that its return type needs
+/// (`procPrologue` reports 'Missing return statement.').
+pub fn missingReturn(c: *cy.Chunk) bool {
+    const proc = c.proc();
+    if (!c.block().endReachable) return false;
+    if (proc.func != null and proc.func.?.info.generator) return false;
+    const ret_t = proc.getReturnType(c.sema);
+    return !(ret_t.id() == bt.Void or (ret_t.kind() == .result and ret_t.cast(.result).child_t.id() == bt.Void));
 }
 
 pub fn procPrologue(c: *cy.Chunk) !void {

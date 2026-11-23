@@ -290,6 +290,14 @@ pub const Compiler = struct {
         return lens;
     }
 
+    /// Drops what was added to the lists of `refListNames` since `refLens` returned `lens`.
+    pub fn truncateRefs(self: *Compiler, lens: [4]usize) void {
+        inline for (refListNames, 0..) |name, i| {
+            const list = &@field(self, name);
+            if (list.items.len > lens[i]) list.items.len = lens[i];
+        }
+    }
+
     pub fn deinit(self: *Compiler, comptime reset: bool) void {
         // The chunks own what the lists point to.
         if (reset) {

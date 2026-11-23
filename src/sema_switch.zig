@@ -367,7 +367,11 @@ fn semaSwitchElseCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt) !*ir
     try pushCaseBlock(c, info, case);
     if (case.body_kind == .expr) {
         const body = case.body_data.expr;
-        var expr = try c.semaExpr(body, info.opts);
+        // `opts.soft_fits` is only set with a target type (`sema_expr.semaExprCstrSoft`).
+        var expr = if (info.opts.soft_fits) |fits|
+            try sema_expr.semaExprCstrSoft(c, body, info.opts.target_t.?, fits)
+        else
+            try c.semaExpr(body, info.opts);
         info.borrow_owner = try sema_borrow.joinCaseOwner(c, info.borrow_owner, expr, c.block().varStart, body);
         expr = try sema_move.semaOwn(c, expr, body);
 
@@ -484,7 +488,7 @@ fn semaSwitchCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt, control:
             body_expr = try c.semaExpr(body, info.opts);
             info.setTargetType(c, body_expr.type);
         } else {
-            body_expr = try c.semaExprCstr(body, info.opts.target_t.?);
+            body_expr = try sema_expr.semaExprCstrOptSoft(c, body, info.opts.target_t.?, info.opts.soft_fits);
         }
         info.borrow_owner = try sema_borrow.joinCaseOwner(c, info.borrow_owner, body_expr, c.block().varStart, body);
         body_expr = try sema_move.semaOwn(c, body_expr, body);

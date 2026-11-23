@@ -720,8 +720,10 @@ pub fn semaExprCstr(c: *cy.Chunk, node: *ast.Node, target_t: *cy.Type) !sema.Exp
 }
 
 /// `semaExprCstr` for a caller that tries something else when the type does not fit `target_t`: `fits` is set
-/// to false and the expression is returned with its own type instead of a report. An error inside the
-/// expression is reported as usual.
+/// to false and the expression is returned with its own type instead of a report. `fits` is never set to true,
+/// so that one flag can be shared by the branches of an `if` or `switch` expression, which are checked the
+/// same way (`Cstr.soft_fits`): the expression is then returned with the type `target_t` and `fits` is false.
+/// An error inside the expression is reported as usual.
 pub fn semaExprCstrSoft(c: *cy.Chunk, node_: *ast.Node, target_t: *cy.Type, fits: *bool) !sema.ExprResult {
     // A group hands its constraint to the child, which would report.
     var node = node_;
@@ -732,9 +734,17 @@ pub fn semaExprCstrSoft(c: *cy.Chunk, node_: *ast.Node, target_t: *cy.Type, fits
         .target_t = target_t,
         .reqTypeCstr = true,
         .fit_target = true,
+        .return_infer_error = true,
+        .soft_fits = fits,
     });
+    if (res.resType == .infer_error) {
+        // A literal that can not be made for `target_t` (`{1, 2}` for `str`), or an inferred lambda whose
+        // body does not have the result type that `target_t` declares. There is no expression: the caller
+        // gets a placeholder to go on with.
+        fits.* = false;
+        return sema_lit.semaVoid(c, node);
+    }
     // `checkExprCstr` without the report.
-    fits.* = true;
     if (res.type == target_t) {
         return res;
     }
@@ -745,6 +755,14 @@ pub fn semaExprCstrSoft(c: *cy.Chunk, node_: *ast.Node, target_t: *cy.Type, fits
         fits.* = false;
     }
     return res;
+}
+
+/// `semaExprCstr`, or `semaExprCstrSoft` with `opt_fits`.
+pub fn semaExprCstrOptSoft(c: *cy.Chunk, node: *ast.Node, target_t: *cy.Type, opt_fits: ?*bool) !sema.ExprResult {
+    if (opt_fits) |fits| {
+        return semaExprCstrSoft(c, node, target_t, fits);
+    }
+    return semaExprCstr(c, node, target_t);
 }
 
 pub fn semaExpr(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) !sema.ExprResult {
@@ -1030,7 +1048,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                 {
                     var body: sema.ExprResult = undefined;
                     if (cstr.target_t) |cstr_target_t| {
-                        body = try c.semaExprCstr(if_expr.body, cstr_target_t);
+                        body = try semaExprCstrOptSoft(c, if_expr.body, cstr_target_t, cstr.soft_fits);
                         target_t = cstr_target_t;
                     } else {
                         body = try c.semaExpr(if_expr.body, .{});
@@ -1059,7 +1077,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                 const else_moves_start = c.branch_moves.items.len;
                 c.semaBlocks.items[outer].move_branch = .branch;
                 c.semaBlocks.items[outer].moves_start = @intCast(else_moves_start);
-                var else_body = try c.semaExprCstr(if_expr.else_expr, target_t);
+                // Without a target type, the type is the one of the first branch and the other must have it.
+                const else_fits = if (cstr.target_t != null) cstr.soft_fits else null;
+                var else_body = try semaExprCstrOptSoft(c, if_expr.else_expr, target_t, else_fits);
                 if_owner = try sema_borrow.joinBranchOwner(c, if_owner, else_body);
                 else_body = try sema_move.semaOwn(c, else_body, if_expr.else_expr);
                 _ = try c.ir.pushStmt(.set_local, if_expr.else_expr, .{
@@ -1806,6 +1826,10 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                 if (target_t.kind() == .option) {
                     const option = target_t.cast(.option);
                     const payload = try sema_init.semaInitLitTarget(c, init_lit, option.child_t, cstr.return_infer_error, cstr.assign_to_local);
+                    if (payload.resType == .infer_error) {
+                        // Only with `return_infer_error`: there is no payload to wrap.
+                        return payload;
+                    }
                     const tag = try c.semaConst(1, c.sema.i64_t, node);
                     return sema_init.semaInit2(c, target_t, tag, payload, node);
                 } else {
@@ -1838,7 +1862,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
             const lambda = node.cast(.lambda_expr);
 
             if (try sema_resolve.inferLambdaFuncSig(c, lambda.sig_t, cstr.target_t, node)) |sig| {
-                const func_blocks_start = c.ir.func_blocks.items.len;
+                const mark = sema_local.LambdaMark.take(c);
                 const func = try c.addUserLambda(@ptrCast(c.sym), @ptrCast(lambda));
                 _ = try sema_local.pushLambdaProc(c, func);
 
@@ -1851,7 +1875,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                 var fits = true;
                 _ = try sema_stmt.semaReturnExprStmt2(c, lambda.expr, func.sig.ret, if (cstr.return_infer_error) &fits else null, lambda.expr);
                 if (!fits) {
-                    try sema_local.dropLambdaProc(c, func_blocks_start);
+                    try sema_local.dropLambdaProc(c, mark);
                     return sema.ExprResult.initInferError(error.LambdaResult);
                 }
 
@@ -1888,6 +1912,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
             const cont_expr = c.cur_cont_expr orelse {
                 return c.reportError("Expected lambda body.", node);
             };
+            // The statements of the block clear `cur_cont_expr`. The lambda is checked again when the call tries
+            // another overload.
+            defer c.cur_cont_expr = cont_expr;
             return semaLambdaMulti(c, lambda, cont_expr.stmts, cstr);
         },
         .lambda_multi => {
@@ -1923,6 +1950,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
             return sema_switch.semaSwitchExpr(c, node.cast(.switchExpr), .{
                 .target_t = cstr.target_t,
                 .reqTypeCstr = cstr.reqTypeCstr,
+                .soft_fits = if (cstr.target_t != null) cstr.soft_fits else null,
             });
         },
         .fiber_expr => {
@@ -3019,14 +3047,33 @@ fn semaLambdaMulti(c: *cy.Chunk, lambda: *ast.LambdaMulti, stmts: []const *ast.N
     // defer popResolveContext(c);
 
     if (try sema_resolve.inferLambdaFuncSig(c, lambda.sig_t, expr.target_t, node)) |sig| {
+        const mark = sema_local.LambdaMark.take(c);
         const func = try c.addUserLambda(@ptrCast(c.sym), @ptrCast(lambda));
         _ = try sema_local.pushLambdaProc(c, func);
 
         try c.resolveUserLambda(func, sig);
         try sema_local.appendFuncParamVars(c, lambda.params, @ptrCast(sig.params()));
 
+        // As the argument of an overload, a `return` that does not have the result type is a mismatch of the
+        // overload and not an error, like the body of an expression lambda. So is a block that needs a `return`
+        // and has none. The rest of the block is still checked: another error in it is reported.
+        var fits = true;
+        if (expr.return_infer_error) {
+            c.proc().soft_ret_fits = &fits;
+        }
+
         // Generate function body.
         try sema_stmt.semaStmts(c, stmts);
+
+        if (expr.return_infer_error) {
+            if (fits and sema_local.missingReturn(c)) {
+                fits = false;
+            }
+            if (!fits) {
+                try sema_local.dropLambdaProc(c, mark);
+                return sema.ExprResult.initInferError(error.LambdaResult);
+            }
+        }
 
         return sema_local.popLambdaProc(c);
     } else {

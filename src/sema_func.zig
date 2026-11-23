@@ -209,7 +209,6 @@ const MatchGenericFuncRt = struct {
 pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
     pre_args: []const Argument, end_args: []const *ast.Node, args: []*ir.Expr,
     overloaded: bool, match_err: *FuncMatchError, node: *ast.Node) !?MatchGenericFuncRt {
-    _ = overloaded;
 
     const template = func.data.generic;
 
@@ -244,7 +243,14 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
             arg = Argument.init(end_args[i - pre_args.len]);
         }
         const pending_start: u32 = @intCast(c.borrow_pending.items.len);
-        const final_arg = try matchTemplateArg(c, params[i], arg, template, &template_ctx, i, false);
+        const final_arg = try matchTemplateArg(c, params[i], arg, template, &template_ctx, i, overloaded, false);
+        if (final_arg.resolve_t == .incompat) {
+            // Only for an overload: an inferred lambda whose body does not have the result type that the
+            // parameter declares (`f fn(T) -> str`). The call tries the next overload (`matchFuncSym`).
+            match_err.* = FuncMatchError.init(params[i], i + 1, c.sema.void_t);
+            match_err.lambda_result = true;
+            return null;
+        }
         if (final_arg.resolve_t == .rt) {
             args[arg_idx] = final_arg.res.rt.ir;
             const arg_res = final_arg.res.rt;
@@ -259,8 +265,6 @@ pub fn matchGenericFuncRt(c: *cy.Chunk, func: *cy.Func,
         } else if (final_arg.resolve_t == .template) {
             const name = template.func_params[i].name_type.as_name();
             try template_ctx.initCtParam(c.alloc, name, final_arg.res.template);
-        } else if (final_arg.resolve_t == .incompat) {
-            return error.Unexpected;
         }
     }
 
@@ -871,7 +875,11 @@ pub fn matchFuncSym(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const A
         // The overload that came closest fails at the body of an inferred lambda. Matching it alone reports
         // the error at the body, like a function without overloads does.
         var match_err: FuncMatchError = undefined;
-        _ = try matchFuncSig(c, best_func.sig, pre_args, end_args, loc, false, false, &match_err);
+        if (best_func.type == .generic) {
+            _ = try matchGenericFuncRt(c, best_func, pre_args, end_args, loc, false, &match_err, node);
+        } else {
+            _ = try matchFuncSig(c, best_func.sig, pre_args, end_args, loc, false, false, &match_err);
+        }
     }
     return reportCallFuncMismatch2(c, pre_args, end_args, best_func, best_match_err, node);
 }
@@ -1380,6 +1388,23 @@ fn resolveInferLambdaArg(c: *cy.Chunk, arg: Argument, template: *cy.sym.FuncTemp
     return try sema_expr.semaLambdaInferRet(c, lambda_n, sig.params());
 }
 
+/// Whether the argument is an inferred lambda: `|x| expr`, or `|x|` with a block.
+fn isInferLambdaArg(arg: Argument) bool {
+    if (arg.type != .standard) {
+        return false;
+    }
+    var node = arg.node;
+    if (node.type() == .lambda_cont_expr) {
+        node = node.cast(.lambda_cont_expr).child;
+    }
+    return switch (node.type()) {
+        .lambda_expr => node.cast(.lambda_expr).sig_t == .infer,
+        .lambda_multi => node.cast(.lambda_multi).sig_t == .infer,
+        .lambda_cont => node.cast(.lambda_cont).sig_t == .infer,
+        else => false,
+    };
+}
+
 /// The first infer parameter (`%T`) in a type specifier that is not bound in `ctx`.
 /// Visits the same nodes as `sema_type.findInferParams`.
 fn firstInferParam(node: *ast.Node, ctx: ?*sema_resolve.ResolveContext) ?*ast.Node {
@@ -1523,8 +1548,10 @@ fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, templa
     return new_arg;
 }
 
+/// With `overloaded`, an inferred lambda whose body does not have the result type of the parameter is not
+/// reported: the argument is returned as `.incompat`.
 fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template: *cy.sym.FuncTemplate,
-    template_ctx: *sema_resolve.ResolveContext, param_idx: usize, comptime sema_func: bool) !Argument {
+    template_ctx: *sema_resolve.ResolveContext, param_idx: usize, overloaded: bool, comptime sema_func: bool) !Argument {
 
     const param_t = param.get_type();
     const ast_param = template.func_params[param_idx];
@@ -1572,7 +1599,14 @@ fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template
         res = (try resolveInferLambdaArg(c, arg, template, template_ctx, param_idx)) orelse
             try resolveRtArg(c, arg, arg.node, null, false, true);
     } else {
-        res = try resolveRtArg(c, arg, arg.node, target, false, true);
+        // Only a lambda is checked softly: other arguments of a template are reported as before.
+        res = try resolveRtArg(c, arg, arg.node, target, overloaded and isInferLambdaArg(arg), true);
+        if (res.resType == .infer_error) {
+            var incompat_arg = arg;
+            incompat_arg.resolve_t = .incompat;
+            incompat_arg.res = .{ .incompat = {} };
+            return incompat_arg;
+        }
     }
 
     if (infer) {

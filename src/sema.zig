@@ -369,6 +369,10 @@ pub const Proc = struct {
     infer_ret_return: bool = false,
     infer_ret_open: bool = false,
 
+    /// Set for the block of an inferred lambda that is the argument of an overload (`sema_expr.semaLambdaMulti`):
+    /// a `return` whose expression does not fit the return type sets this to false instead of reporting it.
+    soft_ret_fits: ?*bool = null,
+
     ir: *ir.Stmt,
 
     node: *ast.Node,
@@ -627,6 +631,11 @@ pub const Cstr = struct {
     /// This is set when targeting overloaded function parameters so that
     /// inferring literals don't return a CompileError.
     return_infer_error: bool = false,
+
+    /// Set with `reqTypeCstr` by `sema_expr.semaExprCstrSoft`: an expression that hands `target_t` on to its
+    /// branches (`if` and `switch` expressions) sets this to false for a branch that does not fit it instead of
+    /// reporting the branch. It is never set back to true.
+    soft_fits: ?*bool = null,
 
     allow_ct_sym: bool = false,
 

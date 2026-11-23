@@ -1103,6 +1103,12 @@ fn semaChunkFuncsRecover(c: *cy.Chunk) !void {
         if (!func.isResolved()) {
             continue;
         }
+        // A method of a type that failed to resolve (`[]Array[int]`: a slice of a `NoCopy` type). The type is
+        // half set and so are the types that only its bodies ask for: `Slice.span` once read the number of
+        // fields of a `[&]T` that was never resolved.
+        if (ownerTypeFailed(c, func)) {
+            continue;
+        }
         var marks = try RecoverMarks.take(self);
         defer marks.deinit(self);
         var body = BodyRecover.begin(self, c);
@@ -1124,6 +1130,15 @@ fn semaChunkFuncsRecover(c: *cy.Chunk) !void {
             break;
         }
     }
+}
+
+/// Whether `func` belongs to a type whose declaration failed to resolve (`sema_resolve.declFailed`).
+fn ownerTypeFailed(c: *cy.Chunk, func: *cy.Func) bool {
+    var cur: ?*cy.Sym = func.parent.parent;
+    while (cur) |s| : (cur = s.parent) {
+        if (s.type == .type and sema_resolve.declFailed(c, s.cast(.type).type)) return true;
+    }
+    return false;
 }
 
 /// The lists of the symbol info that a body adds to (`refs.zig`). Each pass of `BodyRecover` adds to them.

@@ -28,6 +28,7 @@ const sema_expr = cy.sema_expr;
 const sema_access = cy.sema_access;
 const sema_resolve = cy.sema_resolve;
 const sema_move = cy.sema_move;
+const sema_borrow = cy.sema_borrow;
 
 pub const LocalId = u32;
 
@@ -729,6 +730,9 @@ pub const StackMark = struct {
             c.cur_sema_proc = &c.semaProcs.items[c.semaProcs.items.len - 1];
         }
         truncate(&c.semaBlocks, self.blocks);
+        // The loans of the locals that go. A loan that stays would be taken for the loan of the local that gets
+        // the same id in the next pass over the body, and end a borrow that its owner never counted.
+        sema_borrow.truncateBorrowLoans(c, self.vars);
         truncate(&c.varStack, self.vars);
         truncate(&c.varShadowStack, self.var_shadows);
         truncate(&c.active_field_stack, self.active_fields);

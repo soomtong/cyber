@@ -1106,6 +1106,76 @@ test "With error recovery every declaration reports its error." {
     try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
 }
 
+test "With error recovery a body that failed leaves no borrow loan to the next pass." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_error_recovery(vm, true);
+
+    var res: C.EvalResult = undefined;
+    var rep: C.Report = undefined;
+
+    // `h` borrows from `p` and from `y`: the borrow of `y` is a loan. The `return` fails and the body is checked
+    // again without it. The loan of the first pass once stayed, and the end of `h` in the second pass took it for
+    // its own: the count of the borrows of `y` went below zero (a panic in a safe build).
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\type H:
+        \\    a &int
+        \\    b &int
+        \\
+        \\fn pick(scope p &int) -> scope &int:
+        \\    y := 5
+        \\    h := H{a=p, b=&y}
+        \\    return h.b
+        \\
+        \\fn next(scope p &int) -> scope &int:
+        \\    z := 6
+        \\    h := H{a=p, b=&z}
+        \\    k := H{a=&z, b=p}
+        \\    return k.a
+        \\
+        \\x := 1
+        \\print(pick(&x).*)
+    , &res));
+    try zt.eq(@as(usize, 2), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("Expected to return a borrow from the same scope as `p`.", C.from_bytes(rep.msg));
+    try zt.expect(C.vm_compile_report(vm, 1, &rep));
+    try zt.eqStr("Expected to return a borrow from the same scope as `p`.", C.from_bytes(rep.msg));
+
+    // The same VM checks a source without errors afterwards.
+    C.vm_reset(vm);
+    try zt.eq(C.Success, C.vm_eval(vm, "fn main() -> int:\n    return 7", &res));
+    try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
+}
+
+test "With error recovery the methods of a type that failed to resolve are not checked." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_error_recovery(vm, true);
+
+    var res: C.EvalResult = undefined;
+    var rep: C.Report = undefined;
+
+    // `[]Array[int]` fails when it is resolved: a slice copies its elements. Its methods in `core` were checked
+    // all the same, against types that only they ask for and that were never resolved: one more error from
+    // inside `core`, and a read of a number of fields that was never set.
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\xs := []Array[int]{}
+        \\
+        \\fn other() -> int:
+        \\    return nope
+    , &res));
+    try zt.eq(@as(usize, 2), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("A slice `[]Array[int]` copies its elements, so the element type `Array[int]` can not be `NoCopy`. Use `Array[Array[int]]`, which moves them.", C.from_bytes(rep.msg));
+    try zt.expect(C.vm_compile_report(vm, 1, &rep));
+    try zt.eqStr("Undeclared variable `nope`.", C.from_bytes(rep.msg));
+
+    C.vm_reset(vm);
+    try zt.eq(C.Success, C.vm_eval(vm, "fn main() -> int:\n    return 7", &res));
+    try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
+}
+
 test "With error recovery a template that failed to expand is reported once." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

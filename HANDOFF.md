@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-22): 0.4.18 릴리스(두 코드 리뷰의 수정, 빌림 검사의 구멍, spawn 소유권)
+# HANDOFF (2026-11-24): 0.4.19 릴리스(템플릿 파라미터 추론, trait 기본 메서드, 0.4.18..HEAD 코드 리뷰의 수정)
 
 ## 목표
 
@@ -39,10 +39,13 @@
 
 - 2026-11-22(사용자: `/code-review high from 0.4.0 to head` 뒤 "fix them step by step from easy one to difficult one. ok to use sub
   agents max 7", "continue" 두 번, "go release 0.4.18"): 리뷰 10건, 미룬 후보, 남은 것을 고치고 0.4.18을 릴리스했다.
+- 2026-11-23 ~ 24(사용자: `/code-review high from 0.4.18 to head` 뒤 "fix step by step. use sub-agents max 20", 이어서
+  "fix and clean up them all. then release next patch version 0.4.19 no ask to me"): 리뷰 8건, 남은 한계, 고치며 찾은 결함을
+  고치고 0.4.19를 릴리스했다. 서브 에이전트가 worktree에서 고치고 master에 cherry-pick했다. 내용은 `docs/releases/0.4.19.md`.
 
 ## 현재 브랜치
 
-`master`. 0.4.18 태그 `80126d0e`(`build-1092-80126d0`)까지 push돼 있다. 릴리스 기록 커밋도 push한다.
+`master`. 0.4.19 태그 `7184e279`(`build-1135-7184e27`, 에셋 15개)까지 push돼 있다. 릴리스 기록 커밋도 push한다.
 PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지 못해 15분 뒤 취소된 탓이다(나머지 6개 통과).
 
 ## 완료된 작업
@@ -298,12 +301,18 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 ## 다음 에이전트에게
 
-1. 0.4.17이 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(지금은 머리말뿐).
+1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(지금은 머리말뿐).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 
 ## 알려진 한계
 
+- 0.4.19에서 남긴 것: 시그니처에 직접 쓴 `fn(T) -> [%N + 1]T`는 infer 파라미터로 찾지 않는다(이항식 안을 보지 않는다).
+  템플릿 오버로드끼리 infer 위치만 다르면(`fn(T) -> ?%U`와 `fn(T) -> []%U`) 선언이 'already been declared with the same
+  function signature'로 거부된다. `%T type` 명시 인자의 평가 오류와 컴파일 타임 호출(`matchGenericFuncCt`)은 오버로드에서 바로 오류다.
+  실패한 오버로드 후보에서 끝까지 검사된 타입 선언형 람다는 죽은 코드로 남는다. `cyber src/builtins/cy.cy`(내장 모듈 소스를
+  main으로 실행)는 panic 'No such field `name`.'이다. wasm 빌드의 테스트는 `CYBER_TEST_FILTER`를 읽지 않는다.
+  '변수를 캡처하는 블록 람다를 오버로드 인자로 주면 Missing return statement.'라는 보고는 재현되지 않았다(leak만 고쳤다).
 - 이동: 조건부로 평가되는 식의 부분(`and` · `or`의 오른쪽, `?else` · `!else`의 기본값 · 블록)은 바깥 변수를 옮기지 못한다.
   `try` 문 · `scope` 블록 안의 `!`마다 빈 IR `block` 문장이 하나 붙는다(bytecode는 없다).
   `while` 조건식의 이동은 반복문 문구('the next iteration reads it')로 막힌다. `if` 언랩의 옵션 식은 옮길 수 있다. 버퍼를 재사용한 호출의 런타임

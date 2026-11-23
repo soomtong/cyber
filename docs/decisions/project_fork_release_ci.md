@@ -211,6 +211,10 @@ zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Dd
   (spawn 없이도, 0.4.17에서도 같다). 상태 수(0)로 검사하고 메모리는 2 MiB로 느슨하게 했다(`3ff30939`, `80126d0e`). 로컬 14단계는
   macOS라 이 차이를 못 봤다. 태그 run은 macOS Intel의 'A thread that awaits a spawned thread sleeps instead of spinning.'(cpu 시간
   200 ms 기준)이 한 번 실패해 그 job만 재실행해 통과했다(같은 커밋의 master run은 통과, 러너 부하로 본다).
+- 0.4.19(2026-11-24): 태그 `0.4.19` → `7184e279`, `build-1135-7184e27`, 에셋 15개. master와 태그를 함께 push해 master run은
+  concurrency로 취소됐다(태그 run만 본다). 태그 run `45217802270`은 arm64 macOS job(`macos-26`)이 러너를 받지 못해 15분 뒤
+  취소되기를 되풀이했고, 실패한 job만 재실행(`gh run rerun --failed`)하기를 다섯 번 한 뒤 통과했다. 나머지 job은 첫 실행에서
+  모두 통과했다. 설치 확인은 `install.sh 0.4.19`(arm64 macOS): 버전 문자열, `cyber-lsp` `initialize`, 추론 람다 예제.
 
 ## CI 시간 줄이기 (2026-11-18)
 

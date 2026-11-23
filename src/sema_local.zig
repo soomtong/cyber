@@ -1340,6 +1340,13 @@ pub const LambdaMark = struct {
 /// next overload, or once more to report its error.
 pub fn dropLambdaProc(c: *cy.Chunk, mark: LambdaMark) !void {
     _ = try popProc(c);
+    try dropLambdas(c, mark);
+}
+
+/// `dropLambdaProc` for lambdas that are checked to their end (`popLambdaProc`): the argument of an overload that
+/// infers template parameters, when the type of the lambda does not have the form of the parameter
+/// (`sema_func.matchTemplateArg`). The expression of the lambda is not used.
+pub fn dropLambdas(c: *cy.Chunk, mark: LambdaMark) !void {
     c.ir.func_blocks.items.len = mark.func_blocks;
 
     try c.dropped_funcs.ensureUnusedCapacity(c.alloc, c.funcs.items.len - mark.funcs);

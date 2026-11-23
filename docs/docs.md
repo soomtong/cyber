@@ -2603,6 +2603,26 @@ print(show(n))       --> int
 print(show(2.5))     --> float
 print(show(4))       --> int
 ```
+An argument that takes its type from the parameter does not match an overload whose parameter it can not be made for: `none` for a parameter that is not a `?T`, an enum literal like `.red` for a type without that member, an initializer literal like `{1, 2}` for `int`, or an [inferred lambda](#inferred-lambdas) for a parameter that is not a function type or that has another number of parameters. The call goes on to the next overload. When more than one overload can take the argument, the first declared one is used:
+```cy
+type Color enum:
+    case red
+    case blue
+
+fn tag(x int) -> str:
+    return 'int'
+fn tag(c Color) -> str:
+    return 'color'
+fn tag(x ?str) -> str:
+    return 'str'
+fn tag(x ?int) -> str:
+    return 'option int'
+
+print(tag(.red))     --> color
+print(tag(none))     --> str
+```
+When no overload takes the arguments, the call reports the error of the overload that got the furthest through the arguments, and of the first declared one among those. For a literal that is the error of that overload alone, such as 'Expected `?T` to infer `none` value, found `Int`.' A closure that is passed to overloads that only take a function pointer reports 'Expected argument `fn(int) -> int`, found `Func[fn(int) -> int]`, when calling `fn m(int, fn(int) -> int) -> int`. A closure is passed to a `Func[fn(...)]` or a `&OpaqueFunc[fn(...)]` parameter.'
+
 Overloads must differ in their parameter types. Declaring two functions with the same parameters and only a different return type is a compile error.
 
 ## Parameter groups.
@@ -2656,6 +2676,7 @@ symbol_name(|word, prefix| prefix + word.upper())
 -- Assigning a lambda.
 app.on_update = |delta_ms| update_physics(delta_ms)
 ```
+The lambda declares as many parameters as the function type. `apply(|a, b| a)` for `f fn(int) -> int` reports 'Expected a lambda with `1` parameter(s) for `fn(int) -> int`. Found `2`.'
 
 A blockless statement can contain one lambda that has their function body continued in a new block:
 ```cy
@@ -2946,11 +2967,26 @@ r := pick(5, |x|):
     return 'small'
 print(r)                                   --> str big
 ```
-An overload that infers template parameters is compared the same way when its function parameter declares the result type (`f fn(T) -> str`), also when it is tried before another overload.
+An overload that infers template parameters is compared the same way when its function parameter declares the result type (`f fn(T) -> str`), also when it is declared before another overload. Such an overload does not match either, and the call goes on to the next one, when:
+* An argument does not have the type of its parameter (`2` for `y str`).
+* The type of an argument does not have the form that the parameter declares: a function or a lambda that returns `float` for `f fn(T) -> ?%U` (the same goes for `!%U`, `[]%U` and `Map[%K, int]`), or a closure for `f fn(T) -> %U`.
+* The argument is a lambda with a block and the parameter infers its result type (`f fn(T) -> %U`), or the lambda has another number of parameters.
 
-When no overload takes the lambda, the call reports the error of the overload that came closest at the body, such as 'Expected type `str`, got `int`.' at the branch or `return`. Any other error in the body, like an undeclared name, is reported right away.
+```cy
+fn opt(x %T, f fn(T) -> ?%U) -> str:
+    return 'option'
 
-Two limits remain. A function parameter that wraps an infer parameter in its result type (`f fn(T) -> ?%U`) reports a body that is not of that form ('Expected template `Option`. Found `Float`.') and does not go on. And only an inferred lambda is compared softly by an overload that infers template parameters: another argument that does not have the type of its parameter is an error there.
+fn opt(x float, f fn(float) -> float) -> str:
+    return 'float'
+
+fn some(x int) -> ?int:
+    return x
+
+print(opt(1, some))           --> option
+print(opt(1, |x| x / 2))      --> float
+```
+
+When no overload takes the arguments, the call reports the error of the overload that came closest, as if it were the only one: 'Expected type `str`, got `int`.' at the branch or `return` of a lambda, 'Expected template `Option`. Found `Float`.' for `opt(1, |x| 1.5)` without the second overload, or 'Expected type `str`. Found `bool`.' Any other error in an argument, like an undeclared name in the body of a lambda, is reported right away.
 
 An infer parameter is declared in a parameter type only. `fn f(x int) -> %U` reports '`%U` can not be declared in a return type. Declare it in a parameter (`%U type`) instead.', and `%T` in a function body or outside of a function reports '`%T` can only be declared in the signature of a function.'
 

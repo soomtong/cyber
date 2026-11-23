@@ -178,6 +178,13 @@ fn test_functions(run: *Runner) void {
     run.case("functions/call_excess_args_overloaded_error.cy");
     run.case("functions/call_overload_incompat_arg_error.cy");
     run.case("functions/call_overload_exact.cy");
+    run.case("functions/call_overload_closure_error.cy");
+    run.case("functions/call_overload_dot_lit_error.cy");
+    run.case("functions/call_overload_literal.cy");
+    run.case("functions/call_overload_none_error.cy");
+    run.case("functions/lambda_param_count_error.cy");
+    run.case("functions/lambda_param_count_less_error.cy");
+    run.case("functions/lambda_param_count_zero_error.cy");
     run.case("functions/cond_attr.cy");
     run.case("functions/cond_attr_skipped_error.cy");
     run.case("functions/cond_attr_skipped_method_error.cy");
@@ -924,6 +931,13 @@ fn test_control_flow(run: *Runner) void {
     run.case("meta/infer_param_overload_lambda_template.cy");
     run.case("meta/infer_param_overload_lambda_template_body_error.cy");
     run.case("meta/infer_param_overload_lambda_template_error.cy");
+    run.case("meta/infer_param_overload_closure.cy");
+    run.case("meta/infer_param_overload_closure_error.cy");
+    run.case("meta/infer_param_overload_template.cy");
+    run.case("meta/infer_param_overload_template_arg_error.cy");
+    run.case("meta/infer_param_overload_template_form_body_error.cy");
+    run.case("meta/infer_param_overload_template_form_error.cy");
+    run.case("meta/infer_param_overload_template_form_func_error.cy");
     run.case("meta/infer_param_outside_func_error.cy");
     run.case("meta/infer_param_result_type.cy");
     run.case("meta/infer_param_result_type_error.cy");

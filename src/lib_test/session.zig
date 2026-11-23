@@ -324,6 +324,45 @@ test "A lambda that an overload did not take leaves nothing behind in a session.
     try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use test\ntest.eq('int 3', pick(2, |x| ap(x, |y| y + 1)))\ntest.eq('int 2', r)", config, &res));
 }
 
+test "An argument that an overload with template parameters did not take leaves nothing behind in a session." {
+    // The lambda is checked to its end for the overload that infers, and dropped when its type does not have
+    // the form of the parameter. A literal that an overload can not take is not made.
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\fn opt(x %T, f fn(T) -> ?%U) -> str:
+        \\  return 'option'
+        \\fn opt(x float, f fn(float) -> float) -> str:
+        \\  return 'float %{f(x)}'
+        \\fn ap(x float, f fn(float) -> float) -> float:
+        \\  return f(x)
+        \\fn tag(x %T, y str) -> str:
+        \\  return 'str'
+        \\fn tag(x int, y ?[]int) -> str:
+        \\  return 'option'
+        \\use test
+        \\test.eq('float 3.0', opt(1, |x| ap(x, |y| y + 2)))
+        \\test.eq('option', tag(1, none))
+        \\test.eq('option', tag(1, {1, 2}))
+    , config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\use test
+        \\k := ^1.5
+        \\test.eq('float 2.0', opt(1, fn(x float) -> float => ap(x, |y| y * 2)))
+    , config, &res));
+    // No overload takes the arguments: the eval fails and the session goes on.
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = opt('a', |x| ap(1, |y| y))", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = tag(1, true)", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use test\ntest.eq('float 4.0', opt(2, |x| ap(x, |y| y + 2)))", config, &res));
+}
+
 test "persist_main returns the last top level expression as the eval result." {
     // Leak-checking allocator: the VM owns a copy of each result until the next eval or deinit.
     const vm = C.vm_initx(zt.alloc);

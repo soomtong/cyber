@@ -858,8 +858,15 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
     switch (node.type()) {
         .noneLit => {
             const target_t = cstr.target_t orelse {
+                if (cstr.return_infer_error) {
+                    return sema.ExprResult.initInferError(error.NoneTarget);
+                }
                 return c.reportErrorFmt("Could not determine optional type for `none`.", &.{}, node);
             };
+            if (cstr.return_infer_error and !noneFits(target_t)) {
+                // The argument of an overload whose parameter is not a `?T`: the call tries the next one.
+                return sema.ExprResult.initInferError(error.NoneTarget);
+            }
             return c.semaNone(target_t, node);
         },
         .error_lit => {
@@ -872,6 +879,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
             if (cstr.target_t) |target_t| {
                 if (target_t.kind() == .enum_t) {
                     const case = target_t.cast(.enum_t).getCase(name) orelse {
+                        if (cstr.return_infer_error) {
+                            return sema.ExprResult.initInferError(error.DotLitTarget);
+                        }
                         return c.reportErrorFmt("Could not infer `{}` enum case from `{}`.", &.{v(target_t.name()), v(name)}, node);
                     };
                     return c.semaConst(@intCast(case.val), target_t, node);
@@ -880,6 +890,10 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                 if (try c.getResolvedSym(&target_t.sym().head, name, node)) |sym| {
                     return symbol(c, sym, false, node);
                 }
+            }
+            if (cstr.return_infer_error) {
+                // The argument of an overload whose parameter type has no such member: the call tries the next one.
+                return sema.ExprResult.initInferError(error.DotLitTarget);
             }
             return c.reportErrorFmt("Can not infer symbol from `.{}`.", &.{v(name)}, node);
         },
@@ -1861,7 +1875,12 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
         .lambda_expr => {
             const lambda = node.cast(.lambda_expr);
 
-            if (try sema_resolve.inferLambdaFuncSig(c, lambda.sig_t, cstr.target_t, node)) |sig| {
+            var mismatch = false;
+            const opt_sig = try inferLambdaSig(c, lambda.sig_t, lambda.params, cstr, &mismatch, node);
+            if (mismatch) {
+                return sema.ExprResult.initInferError(error.LambdaTarget);
+            }
+            if (opt_sig) |sig| {
                 const mark = sema_local.LambdaMark.take(c);
                 const func = try c.addUserLambda(@ptrCast(c.sym), @ptrCast(lambda));
                 _ = try sema_local.pushLambdaProc(c, func);
@@ -3044,6 +3063,53 @@ fn passesError(ret_t: *cy.Type) bool {
     return ret_t.kind() == .result or ret_t.id() == bt.Error;
 }
 
+/// The signature that an inferred lambda (`|x| expr`, `|x|` with a block) takes from the target type, or `null`
+/// for a lambda that declares its types (`sema_resolve.inferLambdaFuncSig`). The lambda must declare as many
+/// parameters as the function type.
+/// As the argument of an overload (`cstr.return_infer_error`), a target type that is not a function type or that
+/// has another number of parameters is a mismatch of the overload and not an error: `mismatch` is set and the
+/// call tries the next one (`sema_func.matchFuncSym`).
+fn inferLambdaSig(c: *cy.Chunk, sig_t: ast.FuncSigType, ast_params: []const *ast.FuncParam, cstr: sema.Cstr, mismatch: *bool, node: *ast.Node) !?*sema.FuncSig {
+    mismatch.* = false;
+    if (sig_t != .infer) {
+        return null;
+    }
+    if (cstr.return_infer_error and !isLambdaTarget(c, cstr.target_t)) {
+        mismatch.* = true;
+        return null;
+    }
+    const sig = (try sema_resolve.inferLambdaFuncSig(c, sig_t, cstr.target_t, node)) orelse return null;
+    var nparams: usize = 0;
+    for (ast_params) |param| {
+        if (!param.template_param) nparams += 1;
+    }
+    if (nparams != sig.params().len) {
+        // `|_|` is the lambda without parameters.
+        if (sig.params().len == 0 and ast_params.len == 1 and nparams == 1 and std.mem.eql(u8, ast_params[0].name_type.as_name(), "_")) {
+            return sig;
+        }
+        if (cstr.return_infer_error) {
+            mismatch.* = true;
+            return null;
+        }
+        const name = try c.sema.allocTypeName(cstr.target_t.?);
+        defer c.alloc.free(name);
+        const hint: []const u8 = if (sig.params().len == 0) " A lambda without parameters is written `|_| expr`." else "";
+        return c.reportErrorFmt("Expected a lambda with `{}` parameter(s) for `{}`. Found `{}`.{}", &.{v(sig.params().len), v(name), v(nparams), v(hint)}, node);
+    }
+    return sig;
+}
+
+/// Whether `sema_resolve.inferLambdaFuncSig` takes the target type for an inferred lambda without a report.
+fn isLambdaTarget(c: *cy.Chunk, opt_target_t: ?*cy.Type) bool {
+    const target_t = opt_target_t orelse return false;
+    return switch (target_t.kind()) {
+        .func_ptr, .func => true,
+        .borrow => target_t.cast(.borrow).child_t.kind() == .func,
+        else => target_t == c.sema.object_t,
+    };
+}
+
 /// Use of body stmts is extracted so that `lamda_multi` and `lambda_cont` have the same behavior.
 fn semaLambdaMulti(c: *cy.Chunk, lambda: *ast.LambdaMulti, stmts: []const *ast.Node, expr: sema.Cstr) !sema.ExprResult {
     const node: *ast.Node = @ptrCast(lambda);
@@ -3051,7 +3117,12 @@ fn semaLambdaMulti(c: *cy.Chunk, lambda: *ast.LambdaMulti, stmts: []const *ast.N
     // try pushResolveContext(c, node);
     // defer popResolveContext(c);
 
-    if (try sema_resolve.inferLambdaFuncSig(c, lambda.sig_t, expr.target_t, node)) |sig| {
+    var mismatch = false;
+    const opt_sig = try inferLambdaSig(c, lambda.sig_t, lambda.params, expr, &mismatch, node);
+    if (mismatch) {
+        return sema.ExprResult.initInferError(error.LambdaTarget);
+    }
+    if (opt_sig) |sig| {
         const mark = sema_local.LambdaMark.take(c);
         const func = try c.addUserLambda(@ptrCast(c.sym), @ptrCast(lambda));
         _ = try sema_local.pushLambdaProc(c, func);

@@ -14,6 +14,7 @@ const log = cy.log.scoped(.sema);
 const sema = cy.sema;
 const sema_stmt = cy.sema_stmt;
 const sema_borrow = cy.sema_borrow;
+const sema_type = cy.sema_type;
 const sema_call = cy.sema_call;
 const sema_expr = cy.sema_expr;
 const sema_access = cy.sema_access;
@@ -915,6 +916,7 @@ fn pushDefaultMethodParamVars(c: *cy.Chunk, rec_t: *cy.Type, func: *const cy.Fun
     const dyn_sym = c.compiler.builtins_chunk.sym.getMod().getSym("Dyn").?;
     const dyn_t = (try cy.template.expand_template(c, dyn_sym.cast(.template), &.{c.sema.type_t}, &.{cy.Value.initType(&trait_t.base)})).getStaticType().?;
     const self_t = try sema.getBorrowType(c, dyn_t);
+    try sema_type.checkDynReceivers(c, rec_t.cast(.borrow).child_t, trait_t, node);
     const rec = try sema_expr.semaLocal(c, rec_id, node);
     const loc = try c.ir.newExpr(.trait, self_t, node, .{
         .ref = rec.ir,

@@ -2180,6 +2180,21 @@ fn resolveImplFuncs(self: *Compiler, type_: *cy.Type) !void {
                     v(type_name), v(member.func.name()), v(sig_str), 
                     v(impl.trait.base.name()) }, @ptrCast(sym.decl.?.cast(.struct_decl).impls.ptr[j].trait));
             };
+            // A trait method is called through a shared view (`^Dyn[Trait]`, `&Dyn[Trait]`, `self` of a default
+            // method) while other borrows of the value can be alive. A method that needs exclusive access can
+            // not be reached that way.
+            const receiver_t = func.sig.params()[0].get_type();
+            if (receiver_t.kind() == .ex_borrow) {
+                const sig_str = try self.sema.allocFuncSigStr(member.func.sig, true, chunk);
+                defer self.alloc.free(sig_str);
+                const type_name = try self.sema.allocTypeName(type_);
+                defer self.alloc.free(type_name);
+                const name = member.func.name();
+                return chunk.reportErrorFmt("`{}` does not implement `fn {}{}` from `{}`. The method `{}` takes an exclusive borrow `&&{}`, but a trait method takes a shared borrow `&{}`. Keep what `{}` changes behind a reference `^T`, or call `{}` on `{}` without the trait.", &.{
+                    v(type_name), v(name), v(sig_str), v(impl.trait.base.name()),
+                    v(name), v(type_name), v(type_name), v(name), v(name), v(type_name),
+                }, @ptrCast(sym.decl.?.cast(.struct_decl).impls.ptr[j].trait));
+            }
             // A default method from another trait of the type views `self` as that trait.
             if (func.default_trait) |other| {
                 if (other != impl.trait) {

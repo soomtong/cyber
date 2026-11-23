@@ -4,6 +4,34 @@
 사용자에게 보이는 동작이 바뀌는 커밋은 여기에 바로 적고, 언어 규칙이면 `docs/docs.md`에도 같이 적는다.
 전체 발견 이슈 표는 `docs/study/10-findings-register.md`, 컴파일러 한계의 결정은 `docs/decisions/project_compiler_limits.md`.
 
+## trait 메서드의 수신자는 공유 빌림이다 (2026-11-23, 깨지는 변경)
+
+타입의 메서드가 trait 메서드를 구현하는지 볼 때 수신자를 비교하지 않았다(`Type.get_trait_method_impl`이 첫 파라미터를 건너뛴다).
+그래서 배타 수신자 `fn (&&Box) push(x int)`가 trait의 `fn push(x int)` 구현으로 받아들여졌고, `^Dyn[Grow]` · `&Dyn[Grow]` · 기본 메서드의 `self`로
+다른 빌림이 살아 있는 동안 검사 없이 호출됐다. `first := &b.xs[0]` 뒤 `d.push(4)`가 버퍼를 다시 잡아도 `first`를 그대로 읽었다.
+값 수신자 `fn (Box) get()`은 `Dyn` 호출이 넘기는 주소를 값으로 읽어 쓰레기 값을 돌려줬다.
+
+- 규칙: trait 메서드는 공유 빌림 `&T`로 호출된다. `&&T` 수신자 메서드는 trait 메서드를 구현하지 않는다. `with Trait` 줄에 다음을 보고한다.
+  '`Box` does not implement `fn push(Grow, int) -> void` from `Grow`. The method `push` takes an exclusive borrow `&&Box`, but a trait method takes a shared borrow `&Box`.
+  Keep what `push` changes behind a reference `^T`, or call `push` on `Box` without the trait.'
+- 근거: 구체 타입에서도 `&&T` 메서드는 `&T`나 `^T`로 부를 수 없다('Expected argument `&>Box`, found `&Box`, ...'). `^T`는 `b.*.push(4)`로 풀어 써야 하고 그 호출은 정적으로 검사된다.
+  trait 경로만 이보다 약했다. 런타임 유일성 검사는 어디에도 없으므로 `Dyn`에 새 장치를 넣지 않고 거부한다.
+- 고치는 법: `&&T` 메서드를 trait 밖에 두고 타입에서 직접 부르거나, 메서드가 바꾸는 값을 참조 뒤에 둔다(`items ^Items`, `fn (&Box) push(x int): self.items.xs += x`).
+  `^T` 뒤는 배타 빌림 규칙이 적용되지 않는다(기존 규칙).
+- 같은 시그니처의 `&T` 메서드와 `&&T` 메서드가 둘 다 있으면 `&T` 메서드가 trait을 구현한다. 전에는 오버로드 목록에서 먼저 찾은 쪽이었다.
+- 값 · `^T` · `sink T` 수신자: 템플릿 제약으로는 계속 trait을 구현한다(core의 `Span[T].span()`이 값 수신자로 `AsSpan[T]`를 구현한다).
+  `Dyn`으로 바꾸는 자리와 기본 메서드를 받는 자리에서 거부한다. '`Unit` can not be used as `Dyn[Sized]`. The method `size` takes the receiver as `Unit`,
+  but a call through `Dyn` passes a shared borrow `&Unit`. Declare the method as `fn (&Unit) size(...)`.'
+  `^T` 수신자를 `^Dyn`으로만 쓰던 프로그램은 전에 동작했고 이제 오류다. 수신자를 `&T`로 바꾼다.
+- 영향 범위: 저장소의 `src/builtins`, `src/std`, `src/test`, `examples`, `docs`에 `&&T` 수신자로 trait을 구현한 곳은 없다. `&T`가 아닌 수신자는 `Span[T].span()` 하나다.
+- 남은 한계: trait 제약 템플릿(`fn add[T Grow](r &&T)`)에서 `&&T` 메서드를 trait 메서드로 부르던 코드도 타입이 trait을 구현하지 않게 되므로 막힌다.
+  trait 메서드 선언에 배타 수신자를 표시하는 문법은 넣지 않았다. 쓰는 코드가 없고, `Dyn` 뒤의 값에는 배타성을 검사할 장치가 없다.
+- 문서: `docs/docs.md`의 'Methods -> Choosing a receiver'(수신자 고르는 법과 오류 문구), 'Traits -> Receivers of trait methods'.
+- 구현: `Compiler.resolveImplFuncs`(`src/compiler.zig`)가 `&&T` 수신자를 거부하고, `sema_type.checkDynReceivers`가 `Dyn` 변환 두 곳(`src/sema_lit.zig`)과
+  기본 메서드의 `self`(`src/sema_local.zig`)에서 나머지 수신자를 거부한다. `get_trait_method_impl`(`src/types.zig`)은 `&T` 수신자 오버로드를 먼저 고른다.
+- 테스트: `src/test/types/trait_receiver.cy`, `trait_ex_receiver_error.cy`, `trait_default_ex_receiver_error.cy`, `trait_value_receiver_dyn_error.cy`,
+  `trait_ref_receiver_dyn_error.cy`, `trait_value_receiver_default_error.cy`.
+
 ## C 백엔드(`-tcc`, `-cc`)는 동작하지 않는다고 밝히고 거절한다 (2026-11-23)
 
 C 백엔드는 어떤 스크립트도 컴파일하지 못한다. `cyber -tcc x.cy`는 `print(1.5)` 한 줄에도 `core:17`에서 'CompileError: Expected function implementation.'으로 끝났다.
@@ -21,6 +49,7 @@ upstream에서 물려받은 상태이고 CI는 이 백엔드를 돌리지 않는
   CLI는 환경 변수 `CYBER_C_BACKEND=1`을 주면 거절하지 않는다. `docs/build.md`에만 적었다. 헤더에는 이 둘이 켜는 `clCBackendDev`가 추가됐다.
 - 문서: `docs/docs.md`의 'C backend.' · 'JIT compiler.' · 'Static binding.' 절과 AOT를 언급한 문장, `Taskfile.yml`의 `BACKEND=` 설명.
 - 테스트: lib 테스트 'C backend is rejected with a clear compile error.', CLI 테스트 'CLI: -tcc and -cc are refused without the developer opt-in.'.
+
 
 ## 함수 인자에서 템플릿 파라미터를 추론한다 (2026-11-23)
 

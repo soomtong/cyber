@@ -619,12 +619,17 @@ pub const Type = extern struct {
     }
 
     /// Assumes types and functions are already resolved.
+    ///
+    /// The receiver is not compared here. A trait method is called with a shared borrow of the implementing
+    /// value, so an overload with a `&T` receiver is preferred. Any other receiver is returned for the caller
+    /// to refuse (`Compiler.resolveImplFuncs` for `&&T`, `sema_type.checkDynReceivers` for the rest).
     pub fn get_trait_method_impl(self: *cy.Type, member: cy.types.TraitMember) ?*cy.Func {
         const func_sym = self.sym().getMod().getSym(member.func.name()) orelse return null;
         if (func_sym.type != .func) {
             return null;
         }
 
+        var other_receiver: ?*cy.Func = null;
         var next: ?*cy.Func = func_sym.cast(.func).first;
         while (next) |func| {
             if (!func.isMethod()) {
@@ -647,9 +652,14 @@ pub const Type = extern struct {
                 next = func.next;
                 continue;
             }
-            return func;
+            const receiver = func.sig.params()[0];
+            if (receiver.get_type().kind() == .borrow and !receiver.sink) {
+                return func;
+            }
+            if (other_receiver == null) other_receiver = func;
+            next = func.next;
         }
-        return null;
+        return other_receiver;
     }
 
     pub fn eqUnderlyingType(self: *Type, other: *Type) bool {

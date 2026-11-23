@@ -1568,6 +1568,29 @@ fn resolveCopiedType(c: *cy.Chunk, sym: *cy.sym.TypeSym, src_t: *cy.Type, node: 
     }
 }
 
+/// A call through `Dyn[Trait]` passes the address of the implementing value as the receiver. That is a shared
+/// borrow `&T`: a method that takes the receiver by value, as `^T` or as a pointer would read the address as
+/// something else. An exclusive receiver `&&T` is reported for the type (`Compiler.resolveImplFuncs`).
+pub fn checkDynReceivers(c: *cy.Chunk, impl_t: *cy.Type, trait: *cy.types.GenericTrait, node: *ast.Node) !void {
+    for (trait.members()) |member| {
+        const func = impl_t.get_trait_method_impl(member) orelse continue;
+        const receiver = func.sig.params()[0];
+        const receiver_t = receiver.get_type();
+        if (receiver_t.kind() == .ex_borrow) continue;
+        if (receiver_t.kind() == .borrow and !receiver.sink) continue;
+        const type_name = try c.sema.allocTypeName(impl_t);
+        defer c.alloc.free(type_name);
+        const receiver_name = try c.sema.allocTypeName(receiver_t);
+        defer c.alloc.free(receiver_name);
+        const trait_name = try c.sema.allocTypeName(&trait.base);
+        defer c.alloc.free(trait_name);
+        const sink: []const u8 = if (receiver.sink) "sink " else "";
+        return c.reportErrorFmt("`{}` can not be used as `Dyn[{}]`. The method `{}` takes the receiver as `{}{}`, but a call through `Dyn` passes a shared borrow `&{}`. Declare the method as `fn (&{}) {}(...)`.", &.{
+            v(type_name), v(trait_name), v(func.name()), v(sink), v(receiver_name), v(type_name), v(type_name), v(func.name()),
+        }, node);
+    }
+}
+
 pub fn implements(c: *cy.Chunk, impl_t: *cy.Type, trait: *cy.types.GenericTrait, node: *ast.Node) !bool {
     const impls = trait.zimpls();
     if (impls.contains(impl_t)) {

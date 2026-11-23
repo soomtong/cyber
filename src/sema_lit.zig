@@ -9,6 +9,7 @@ const ast = cy.ast;
 const Value = cy.Value;
 const sema = cy.sema;
 const sema_borrow = cy.sema_borrow;
+const sema_type = cy.sema_type;
 const sema_call = cy.sema_call;
 const sema_expr = cy.sema_expr;
 const sema_hint = cy.sema_hint;
@@ -343,6 +344,7 @@ pub fn semaFitTarget(c: *cy.Chunk, expr: sema.ExprResult, target_t: *cy.Type, no
                 const child_t = expr.type.cast(.pointer).child_t;
                 if (child_t.kind() == .struct_t) {
                     if (child_t.cast(.struct_t).implements(target_t.cast(.ref_trait).generic)) {
+                        try sema_type.checkDynReceivers(c, child_t, target_t.cast(.ref_trait).generic, node);
                         _ = try sema.getDeinitObjFunc(c, child_t, node);
                         const loc = try c.ir.newExpr(.trait, target_t, node, .{
                             .ref = expr.ir,
@@ -393,6 +395,7 @@ pub fn semaFitTarget(c: *cy.Chunk, expr: sema.ExprResult, target_t: *cy.Type, no
                 const child_t = expr.type.cast(.borrow).child_t;
                 if (child_t.kind() == .struct_t) {
                     if (child_t.cast(.struct_t).implements(target_t.cast(.borrow_trait).generic)) {
+                        try sema_type.checkDynReceivers(c, child_t, target_t.cast(.borrow_trait).generic, node);
                         const loc = try c.ir.newExpr(.trait, target_t, node, .{
                             .ref = expr.ir,
                             .impl_t = child_t,

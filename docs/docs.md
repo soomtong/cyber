@@ -1402,6 +1402,7 @@ Type casting supports all [implicit casts](#implicit-casts) in addition to the f
 * [`@init_sequence`.](#@init_sequence)
 * [`@init_record`.](#@init_record)
 * [Methods.](#methods)
+  * [Choosing a receiver.](#choosing-a-receiver)
   * [Operator methods.](#operator-methods)
   * [Special methods.](#special-methods)
 * [Tuples.](#tuples)
@@ -1416,6 +1417,7 @@ Type casting supports all [implicit casts](#implicit-casts) in addition to the f
   * [Choice `switch`.](#choice-switch)
   * [Unwrap choice.](#unwrap-choice)
 * [Traits.](#traits)
+  * [Receivers of trait methods.](#receivers-of-trait-methods)
   * [Dynamic dispatch.](#dynamic-dispatch)
 * [Type evaluation.](#type-evaluation)
 * [Type templates.](#type-templates)
@@ -1637,6 +1639,74 @@ fn (^Node) inc(n int)
 fn (Ptr[Node]) inc(n int)
 ```
 It's recommended to use a borrow for the receiver unless there is a good reason not to.
+
+### Choosing a receiver.
+Start with a shared borrow `&T`. Change the receiver to an exclusive borrow `&&T` when the method does something that can invalidate another borrow of the value. The rules behind this are in [Exclusive borrows](#exclusive-borrows).
+
+A `&T` receiver can:
+- Read every field.
+- Assign a field that is not managed (`int`, `float`, `bool`, a struct of those), and an element of a slice field (`self.items[0] = x`).
+- Call the methods that take `&T`.
+
+A `&&T` receiver is needed to:
+- Append to a field or resize it (`self.items += x`, `self.items.append(x)`, `self.items.clear()`).
+- Assign a managed field: a `str`, a slice, a `Map`, a struct that holds one of them, or a field of such a struct (`self.tag.label = 'z'`).
+- Call a method that takes `&&T`.
+
+```cy
+type Tag:
+    label str
+
+type Counter:
+    n     int
+    name  str
+    items []int
+    tag   Tag
+
+fn (&Counter) count() -> int:
+    return self.items.len() + self.n
+
+fn (&Counter) inc():
+    self.n += 1               -- `n` is not managed.
+    print(self.count())       -- A `&Counter` method.
+
+fn (&&Counter) add(x int):
+    self.items += x           -- Appends.
+    self.name = 'added'       -- Replaces a `str`.
+    self.tag = Tag{label='new'}
+    self.inc()                -- A `&&Counter` receiver can call a `&Counter` method.
+
+c := Counter{n=0, name='c', items={}, tag=Tag{label='t'}}
+c.inc()         --> 1
+c.add(5)        --> 3
+```
+
+A `&T` receiver that does one of these things is a compile error. Each error has its own message:
+```cy
+fn (&Counter) push(x int):
+    self.items += x
+    --> error: Cannot borrow exclusively through a shared borrow. Declare the borrow as `&&T`.
+
+fn (&Counter) rename(name str):
+    self.name = name
+    --> error: Cannot replace a managed value through a shared borrow. Declare the borrow as `&&T`.
+
+fn (&Counter) add_one():
+    self.add(1)
+    --> error: Expected argument `&>Counter`, found `&Counter`, when calling `fn add(&>Counter, int) -> void`.
+```
+The first is 'Cannot borrow exclusively through a shared borrow. Declare the borrow as `&&T`.' and the second is 'Cannot replace a managed value through a shared borrow. Declare the borrow as `&&T`.' In the third message, `&>Counter` is the exclusive borrow `&&Counter`.
+
+A call of a `&&T` method needs exclusive access to the value. No other borrow of the value can be in use:
+```cy
+c := Counter{n=0, name='c', items={1}, tag=Tag{label='t'}}
+first := &c.items[0]
+c.add(2)
+--> error: Expected exclusive access. There is another active borrow to `c`.
+print(first.*)
+```
+
+A method that implements a [trait](#traits) method takes `&T`. A `&&T` method does not implement a trait method. See [Receivers of trait methods](#receivers-of-trait-methods).
 
 ### Operator methods.
 Most operators are implemented as type methods.
@@ -1970,6 +2040,44 @@ A type that intends to implement a trait but does not satisfy the trait's interf
 
 A trait method without a body is a required method. A trait method with a body is a [default method](#default-methods).
 
+### Receivers of trait methods.
+A trait method is declared without a receiver. It is called through a shared view of the value (`^Dyn[Shape]`, `&Dyn[Shape]`, `self` of a default method), and other borrows of the value can be in use at that time. So the method that implements it takes a shared borrow `&T`.
+
+A method with an exclusive receiver `&&T` does not implement a trait method:
+```cy
+type Grow trait:
+    fn push(x int)
+
+type Box:
+    with Grow
+    --> CompileError: `Box` does not implement `fn push(Grow, int) -> void` from `Grow`. The method `push` takes an exclusive borrow `&&Box`, but a trait method takes a shared borrow `&Box`. Keep what `push` changes behind a reference `^T`, or call `push` on `Box` without the trait.
+    xs []int
+
+fn (&&Box) push(x int):
+    self.xs += x
+```
+
+There are two ways out. Call the `&&T` method on the type itself and keep it out of the trait. Or keep the value that the method changes behind a reference. The exclusive borrow rule does not hold behind a `^T`, so the method can take `&T`:
+```cy
+type Items:
+    xs []int
+
+type Box:
+    with Grow
+    items ^Items
+
+fn (&Box) push(x int):
+    self.items.xs += x
+
+var g ^Dyn[Grow] = ^Box{items=^Items{xs={}}}
+g.push(1)
+```
+The compiler does not check a borrow that points into a value behind a `^T`. Do not keep such a borrow over a call that can resize the value.
+
+When a type has both a `&T` and a `&&T` method with the signature of the trait method, the `&T` method implements the trait.
+
+A method that takes the receiver by value, as `^T` or as `sink T` implements the trait for a template constraint (`fn size_of[T Sized](x T)`), but the type can not be used as a `Dyn` value and does not get the default methods of the trait: '`Unit` can not be used as `Dyn[Sized]`. The method `size` takes the receiver as `Unit`, but a call through `Dyn` passes a shared borrow `&Unit`. Declare the method as `fn (&Unit) size(...)`.'
+
 ### Dynamic dispatch.
 Since traits are a generic type, they need to be wrapped in a `Dyn` container to be materialized into a dynamic dispatch value. Implementing types become assignable to a `Dyn` reference type:
 ```cy
@@ -2039,7 +2147,7 @@ type Shape trait:
 To use a value of the type, declare a required method that returns it and call that method.
 
 The other rules:
-- A trait method is declared without a receiver, and a default method always takes the receiver as a shared borrow. There is no default method with an exclusive receiver `&&T`.
+- A trait method is declared without a receiver, and a default method always takes the receiver as a shared borrow. There is no default method with an exclusive receiver `&&T`, and a `&&T` method does not implement a trait method. See [Receivers of trait methods](#receivers-of-trait-methods).
 - A default method of a generic trait can use the template parameters of the trait. A template type gets default methods like any other type.
 - The body is compiled for each type that gets the default method. A default method that every implementing type overrides is not checked.
 - When two traits of a type have a default method with the same name, the type must declare the method itself. Otherwise: '`Both` gets the default method `side` from both `Left` and `Right`. Declare `side` for `Both` to say what it does.' The declared method implements both traits when its signature matches both.
@@ -3357,7 +3465,7 @@ fn (&Foo) mutate():
     self.a = 123
 ```
 
-A `&Foo` receiver writes the fields that are not managed (`int`, `float`, `bool`, a struct of those). To replace or change a managed field (`str`, `[]T`, `Map`, a struct with one), declare the receiver as `&&Foo`.
+A `&Foo` receiver writes the fields that are not managed (`int`, `float`, `bool`, a struct of those). To replace or change a managed field (`str`, `[]T`, `Map`, a struct with one), declare the receiver as `&&Foo`. [Choosing a receiver](#choosing-a-receiver) lists what each receiver can do, with the error messages.
 
 Invoking methods automatically attempts to obtain the correct borrow type as specified by the method:
 ```cy

@@ -140,6 +140,17 @@
 - 구현: `sema_type.reserveDefaultMethods`가 타입의 같은 이름 메서드 시그니처를 먼저 푼 뒤(`ensure_resolved_func`) 수신자 뒤 파라미터 타입으로 비교한다(`sameMethodParams`).
 - 테스트: `src/test/types/trait_default_overload.cy`, `trait_default_overload_clash_error.cy`. `trait_default_sig_error.cy`는 파라미터가 같고 반환 타입이 다른 경우로 바꿨다(예전 입력은 이제 올바른 프로그램이다).
 
+### 릴리스 전 검증에서 찾은 결함
+
+ReleaseSafe · wasm32-wasi · 크로스 컴파일과, 저장소의 `.cy` 882개를 언어 서버로 여는 검사에서 찾았다. 넷 모두 0.4.18 이전부터 있었다.
+
+- trait 제약이 있는 템플릿 인자로 아래쪽에 선언된 타입을 쓰면(`type Holder: w Wrap[I]`가 `type I: with Num`보다 위, `Wrap[T Num]`) 아직 정해지지 않은 trait 목록을 읽어 컴파일러가 죽을 수 있었다(메모리 상태에 따라 달랐다).
+  언어 서버에서는 resolve에 실패한 struct에서도 같았다. `sema_type.implements`가 struct를 먼저 resolve한다. 테스트: `src/test/types/trait_constraint_forward_type.cy`, `src/lib_test/compile.zig`.
+- `use *`로 가져온 두 모듈의 타입에 같은 이름의 메서드가 있으면 '`show` has already been declared as a `use_alias`' 오류가 났다. `use *`는 모듈의 이름만 가져오고 타입의 메서드는 가져오지 않는다(`sema_resolve`).
+  테스트: `src/test/modules/trait_default_overload_import.cy`, `trait_default_overload_import_all.cy`, `trait_default_overload_import_clash_error.cy`(다른 모듈에 선언된 trait · 타입의 기본 메서드 오버로드도 확인한다).
+- 언어 서버: 여러 지역에서 빌린 값을 가진 함수 본문에 오류가 있으면 본문을 다시 검사할 때 앞 pass의 빌림 기록이 남아 서버가 'integer overflow'로 끝났다.
+- 언어 서버: `xs := []Array[int]{}`처럼 resolve에 실패한 타입이 있으면 그 타입의 메서드 본문을 계속 검사해 메모리를 끝없이 썼다. 테스트: `src/lib_test/compile.zig`.
+
 ### 테스트 필터와 정리
 
 - `zig build test -Dtest-filter=<문자열>`(`task test FILTER=<문자열>`)이 'undefined symbol: _test_init', 'undefined symbol: _zpanic' 링크 오류로 실패했다. 필터가 test를 모두 걸러내면 테스트 러너가 쓰는 export 심볼이 빌드에서 빠졌다.

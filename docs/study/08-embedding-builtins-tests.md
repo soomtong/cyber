@@ -608,7 +608,7 @@ docs/build.md 는 `zig build test-trace` 라고 쓰지만 실제 이름은 `trac
 | `-Dvm=zig\|c` | c | `zig` 엔진은 `exec_auto` 가 `error.Unsupported` 를 돌려줘 사실상 `c` 뿐 | build.zig:46, thread.zig exec_auto |
 | `-Dmalloc` | 비 debug: mimalloc, debug: zig, msvc: malloc, wasm: zig | CLI 할당자. 라이브러리 `cl_vm_init` 은 항상 `c_allocator` | build.zig:434-460(`CliConfig.default`) |
 | `-Dstatic` | true | `lib` 이 정적/동적 라이브러리 | build.zig:49 |
-| `-Dtest-backend`, `-Dtest-filter`, `-Dno-cache` | vm, 없음, false | 테스트 백엔드(vm/jit/tcc/cc), 필터, 캐시 무시 | build.zig:44-45, 53 |
+| `-Dtest-filter`, `-Dno-cache` | 없음, false | 필터, 캐시 무시(`-Dtest-backend`는 C 백엔드와 함께 삭제) | build.zig |
 | `-Dselinux`, `-Dthreads`, `-Dstrip`, `-Djit`, `-Ddev` | false, true(wasm 제외), 비 debug 이면 strip, false(죽은 코드), true | SELinux 에서 TCC 메모리 확보 방식, 워커 풀, 심볼, JIT, 버전 접미사 `-DEV` | build.zig:43-68, 476-483 |
 
 - 버전: `Version = "0.4.2"`(build.zig:10), `-Ddev`(기본 true)이면 `0.4.2-DEV`. 빌드 번호와 커밋은 환경 변수 `BUILD`, `COMMIT` 에서 온다(build.zig:474-475).

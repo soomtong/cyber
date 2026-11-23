@@ -277,8 +277,6 @@ extern bool CL_TRACE;
 typedef enum {
     CL_VM = 0,
     CL_JIT,
-    CL_TCC,
-    CL_CC,
     CL_LLVM,
 } CLBackend;
 
@@ -288,8 +286,6 @@ typedef struct CLEvalConfig {
     bool gen_all_debug_syms;
     CLBackend backend;
 
-    bool spawn_exe;
-    
     /// Persist main locals / use imports into the VM env. For REPL-like behavior.
     bool persist_main;
 
@@ -917,10 +913,6 @@ extern bool clVerbose;
 
 // Silent flag. Whether to print errors.
 extern bool clSilent;
-
-// Developer switch for the C backend (`CL_TCC`, `CL_CC`). The C backend does not work in this version:
-// a compile with it fails with a compile error unless this flag is set. Set it only to work on the backend.
-extern bool clCBackendDev;
 
 // -----------------------------------
 // [ Threads ]

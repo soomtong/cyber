@@ -1226,15 +1226,12 @@ fn repl(read_line ReadLineFn) -> void:
 type Backend enum:
     case vm
     case jit
-    case tcc
-    case cc
     case llvm
 
 type EvalConfig:
     single_run          bool    = false
     gen_all_debug_syms  bool    = false
     backend             Backend = .vm
-    spawn_exe           bool    = false
     persist_main        bool    = false
 
 type EvalResult:

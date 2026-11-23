@@ -143,7 +143,6 @@ const UserEvalConfig = extern struct {
     single_run: bool,
     gen_all_debug_syms: bool, 
     backend: u64,
-    spawn_exe: bool,
     persist_main: bool,
 };
 
@@ -163,7 +162,6 @@ pub fn UserVM_eval(t: *cy.Thread) !C.Ret {
         .single_run = config.single_run,
         .gen_all_debug_syms = config.gen_all_debug_syms,
         .backend = @intCast(config.backend),
-        .spawn_exe = config.spawn_exe,
         .persist_main = config.persist_main,
     };
 

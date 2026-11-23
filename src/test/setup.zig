@@ -10,18 +10,6 @@ const os_mod = @import("../std/os.zig");
 const c = @import("../capi.zig");
 const log = std.log.scoped(.setup);
 
-/// `-Dtest-backend=tcc|cc` is the developer path to the C backend, so it also sets the switch that
-/// lets a compile reach it. Every compile of the test harness takes its backend from here.
-pub fn fromTestBackend(backend: @TypeOf(test_config.test_backend)) c.Backend {
-    if (backend != .vm) {
-        c.setCBackendDev(true);
-    }
-    return switch (backend) {
-        .vm => c.BackendVM,
-        .tcc => c.BackendTCC,
-        .cc => c.BackendCC,
-    };
-}
 
 pub const Config = struct {
     uri: []const u8 = "src/test/main.cy",
@@ -296,8 +284,7 @@ pub const VMrunner = struct {
         const c_config = c.EvalConfig{
             .single_run = false,
             .gen_all_debug_syms = config.debug,
-            .backend = fromTestBackend(test_config.test_backend),
-            .spawn_exe = false,
+            .backend = c.BackendVM,
         };
         c.vm_reset(vm);
         var res_code: c.ResultCode = undefined;
@@ -400,7 +387,6 @@ fn compileInner(run: *VMrunner, config: Config, opt_src: ?[]const u8) !void {
     var compile_c = c.defaultCompileConfig();
     compile_c.single_run = false;
     // .genAllDebugSyms = config.debug,
-    compile_c.backend = fromTestBackend(test_config.test_backend);
 
     var res_code: c.ResultCode = undefined;
     if (opt_src) |src| {

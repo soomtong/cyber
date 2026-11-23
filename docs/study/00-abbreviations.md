@@ -112,7 +112,7 @@ const cstr = sema.Cstr.initRequire(int_t);   // target_t = int, reqTypeCstr = tr
 | `aot` | Ahead-Of-Time | `aot.c`, `aot.h` | C 백엔드 런타임 지원 |
 | `jit` | Just-In-Time | `src/jit/` | 동작하지 않는 복사-패치 JIT. 컴파일 오류로 거절된다 |
 | `ffi` | Foreign Function Interface | `os_ffi.zig`, 빌드 옵션 `-Dffi` | `zig build lib`는 FFI를 끈다 |
-| `tcc` | Tiny C Compiler | `tcc_stub.zig`, `-Dtest-backend=tcc` | C 백엔드 결과를 컴파일 |
+| `tcc` | Tiny C Compiler | `tcc_stub.zig`, `src/builtins/c.zig` | FFI의 `extern` 바인딩 C 코드를 메모리에서 컴파일 |
 | `dynlib` | dynamic library | `dynlib.zig` | `dlopen` 계열 |
 | `cli` | Command-Line Interface | `cli.zig`, `std/cli.cy` | CLI 전용 모듈 로더(`os` · `libc` · `cli`) |
 | `ln` | linenoise | `ln_stub.zig` | REPL 줄 편집 라이브러리 |

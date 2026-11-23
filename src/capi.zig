@@ -20,18 +20,6 @@ pub fn setSilent(v: bool) void {
     c.clSilent = v;
 }
 
-/// What a compile with the C backend reports when `cBackendDev()` is false. The CLI prints the same text.
-pub const c_backend_refusal = "The C backend (-tcc, -cc) does not work in this version. Run with the bytecode VM (the default).";
-
-/// Whether the C backend (`BackendTCC`, `BackendCC`) is let through. It does not work in this version,
-/// so this is only for developers who repair it.
-pub fn cBackendDev() bool {
-    return c.clCBackendDev;
-}
-pub fn setCBackendDev(v: bool) void {
-    c.clCBackendDev = v;
-}
-
 pub fn set_logger(logger_: GlobalLogFn) void {
     c.cl_logger = logger_;
 }
@@ -462,8 +450,6 @@ pub const BindFuncDecl = c.CL_BIND_FUNC_DECL;
 pub const Backend = c.CLBackend;
 pub const BackendVM = c.CL_VM;
 pub const BackendJIT = c.CL_JIT;
-pub const BackendTCC = c.CL_TCC;
-pub const BackendCC = c.CL_CC;
 pub const BackendLLVM = c.CL_LLVM;
 
 pub const str = c.CLstr;

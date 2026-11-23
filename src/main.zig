@@ -65,12 +65,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
                 reload = true;
             } else if (std.mem.eql(u8, arg, "-vm")) {
                 backend = c.BackendVM;
-            } else if (std.mem.eql(u8, arg, "-cc")) {
-                backend = c.BackendCC;
-            } else if (std.mem.eql(u8, arg, "-tcc")) {
-                backend = c.BackendTCC;
             } else if (std.mem.eql(u8, arg, "-jit")) {
                 backend = c.BackendJIT;
+            } else if (isRemovedBackendOption(arg)) {
+                // Unrecognized options are ignored, so say that these two are gone instead of running on the VM.
+                std.debug.print("error: The C backend ({s}) was removed. Run without the option.\n", .{arg});
+                exit(1);
             } else if (std.mem.eql(u8, arg, "-h")) {
                 cmd = .help;
             } else if (std.mem.eql(u8, arg, "--help")) {
@@ -121,14 +121,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
     }
 
-    if (cBackendRefused(backend, envIsSet(alloc, c_backend_env))) {
-        std.debug.print("error: {s}\n", .{c.c_backend_refusal});
-        exit(1);
-    }
-    if (isCBackend(backend)) {
-        c.setCBackendDev(true);
-    }
-
     switch (cmd) {
         .eval => {
             const path = arg0 orelse return error.MissingFilePath;
@@ -169,30 +161,6 @@ fn exit(code: u8) noreturn {
     std.process.exit(code);
 }
 
-/// Developer opt-in for `-tcc` and `-cc`. Documented in docs/build.md only.
-const c_backend_env = "CYBER_C_BACKEND";
-
-fn isCBackend(backend_: c.Backend) bool {
-    return backend_ == c.BackendTCC or backend_ == c.BackendCC;
-}
-
-/// `-tcc` and `-cc` stop before any compile: the C backend does not work in this version.
-/// `opt_in` is whether the developer set `CYBER_C_BACKEND`.
-fn cBackendRefused(backend_: c.Backend, opt_in: bool) bool {
-    return isCBackend(backend_) and !opt_in;
-}
-
-test "CLI: -tcc and -cc are refused without the developer opt-in." {
-    try std.testing.expect(cBackendRefused(c.BackendTCC, false));
-    try std.testing.expect(cBackendRefused(c.BackendCC, false));
-    try std.testing.expect(!cBackendRefused(c.BackendTCC, true));
-    try std.testing.expect(!cBackendRefused(c.BackendCC, true));
-    try std.testing.expect(!cBackendRefused(c.BackendVM, false));
-    // `-jit` is refused by the compiler with its own message.
-    try std.testing.expect(!cBackendRefused(c.BackendJIT, false));
-    try std.testing.expect(std.mem.indexOf(u8, c.c_backend_refusal, "does not work in this version") != null);
-}
-
 const Command = enum {
     eval,
     compile,
@@ -211,6 +179,17 @@ fn stderrTakesColor(alloc: std.mem.Allocator) bool {
 }
 
 /// Present and not empty.
+fn isRemovedBackendOption(arg: []const u8) bool {
+    return std.mem.eql(u8, arg, "-tcc") or std.mem.eql(u8, arg, "-cc");
+}
+
+test "CLI: -tcc and -cc are reported as removed." {
+    try std.testing.expect(isRemovedBackendOption("-tcc"));
+    try std.testing.expect(isRemovedBackendOption("-cc"));
+    try std.testing.expect(!isRemovedBackendOption("-vm"));
+    try std.testing.expect(!isRemovedBackendOption("-c"));
+}
+
 fn envIsSet(alloc: std.mem.Allocator, key: []const u8) bool {
     const val = stdx.getEnvVarOwned(alloc, key) catch return false;
     defer alloc.free(val);
@@ -268,7 +247,6 @@ fn repl(alloc: std.mem.Allocator) !void {
     var config = c.defaultEvalConfig();
     config.single_run = builtin.mode == .fast;
     config.backend = c.BackendVM;
-    config.spawn_exe = false;
 
     const src =
         \\use cli
@@ -352,7 +330,6 @@ fn evalPath(alloc: std.mem.Allocator, path: []const u8) !void {
     var config = c.defaultEvalConfig();
     config.single_run = builtin.mode == .fast;
     config.backend = backend;
-    config.spawn_exe = true;
 
     var eval_res: c.EvalResult = undefined;
     const res = c.vm_eval_path(vm, path, config, &eval_res);
@@ -434,8 +411,6 @@ fn help() void {
         \\Backend options:
         \\  -vm     Compile to bytecode. (Default)
         \\          Fast build, slow perf.
-        \\  -cc     Compile to C with optimizations. Not working in this version.
-        \\  -tcc    Compile to C with builtin TinyC compiler. Not working in this version.
         \\
         \\General options:
         \\  -r      Refetch url imports and cached assets.

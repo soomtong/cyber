@@ -4,9 +4,3 @@ pub const Engine = enum {
     /// Bytecode executed using C VM.
     c,
 };
-
-pub const TestBackend = enum {
-    vm,
-    tcc,
-    cc,
-};

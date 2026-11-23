@@ -13,7 +13,6 @@ var optMalloc: ?Allocator = undefined;
 var selinux: bool = undefined;
 var vmEngine: config_.Engine = undefined;
 var testFilter: ?[]const u8 = undefined;
-var test_backend: config_.TestBackend = undefined;
 var trace: bool = undefined;
 var log_mem: bool = undefined;
 var no_cache: bool = undefined;
@@ -44,7 +43,6 @@ pub fn build(b: *std.Build) !void {
 
     selinux = b.option(bool, "selinux", "Whether you are building on linux distro with selinux. e.g. Fedora.") orelse false;
     testFilter = b.option([]const u8, "test-filter", "Test filter.");
-    test_backend = b.option(config_.TestBackend, "test-backend", "Test compiler backend.") orelse .vm;
     vmEngine = b.option(config_.Engine, "vm", "Build with `zig` or `c` VM.") orelse .c;
     optMalloc = b.option(Allocator, "malloc", "Override default allocator: `malloc`, `mimalloc`, `zig`");
     optFFI = b.option(bool, "ffi", "Override default FFI: true, false");
@@ -401,13 +399,11 @@ fn getDefaultOptions() Options {
 }
 
 const TestConfig = struct {
-    test_backend: config_.TestBackend,
     ffi: bool,
 };
 
 fn create_test_config(b: *std.Build, config: TestConfig) !*std.Build.Module {
     const options = b.addOptions();
-    options.addOption(config_.TestBackend, "test_backend", config.test_backend);
     options.addOption(bool, "ffi", config.ffi);
     return options.createModule();
 }
@@ -539,7 +535,6 @@ fn addBehaviorTest(b: *std.Build, lib: *std.Build.Step.Compile, vmc: *std.Build.
     step.root_module.linkLibrary(lib);
 
     const test_config = try create_test_config(b, .{
-        .test_backend = test_backend,
         .ffi = ffi,
     });
     step.root_module.addImport("test_config", test_config);
@@ -578,7 +573,6 @@ fn addTraceTest(b: *std.Build, lib_config_: Options, cli_config_: CliConfig) !*s
     step.root_module.addIncludePath(b.path("src"));
 
     const test_config = try create_test_config(b, .{
-        .test_backend = test_backend,
         .ffi = lib_config.ffi,
     });
     step.root_module.addImport("test_config", test_config);

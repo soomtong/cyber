@@ -32,23 +32,26 @@
 - 테스트: `src/test/types/trait_receiver.cy`, `trait_ex_receiver_error.cy`, `trait_default_ex_receiver_error.cy`, `trait_value_receiver_dyn_error.cy`,
   `trait_ref_receiver_dyn_error.cy`, `trait_value_receiver_default_error.cy`.
 
-## C 백엔드(`-tcc`, `-cc`)는 동작하지 않는다고 밝히고 거절한다 (2026-11-23)
+## C 백엔드(`-tcc`, `-cc`)를 삭제했다 (2026-11-23, 깨지는 변경)
 
-C 백엔드는 어떤 스크립트도 컴파일하지 못한다. `cyber -tcc x.cy`는 `print(1.5)` 한 줄에도 `core:17`에서 'CompileError: Expected function implementation.'으로 끝났다.
-upstream에서 물려받은 상태이고 CI는 이 백엔드를 돌리지 않는다. 그런데 `cyber help`는 두 옵션을 'Experimental.'로, 매뉴얼은 네이티브 성능이 필요할 때 쓰라고 적고 있었다.
-이번에는 고치지 않고, 옵션이 바로 거절하고 문서가 실제 상태를 말하게 했다. 백엔드 코드는 그대로 둔다.
+C 백엔드는 어떤 스크립트도 컴파일하지 못했다. `cyber -tcc x.cy`는 `print(1.5)` 한 줄에도 `core:17`에서 'CompileError: Expected function implementation.'으로 끝났다.
+upstream에서 물려받은 상태이고 CI는 이 백엔드를 돌린 적이 없다. 그런데 `cyber help`는 두 옵션을 'Experimental.'로, 매뉴얼은 네이티브 성능이 필요할 때 쓰라고 적고 있었다.
+점검해 보니 막힌 곳이 다섯 겹이고 IR의 문장 9종 · 식 17종과 런타임 대부분이 없어, 고치는 일이 백엔드를 새로 만드는 크기였다. 그래서 코드를 지웠다.
+바이트코드 VM이 유일한 백엔드다. 네이티브 백엔드는 필요해지면 LLVM으로 새로 만든다(결정 `docs/decisions/project_direction.md`).
 
-- CLI: `-tcc`, `-cc`를 주면 컴파일 전에 'error: The C backend (-tcc, -cc) does not work in this version. Run with the bytecode VM (the default).'을 stderr에 찍고 종료 코드 1로 끝난다.
-  스크립트 실행, `cyber compile`, REPL 모두 같다(전에는 `cyber -tcc`만 주면 옵션을 무시하고 VM REPL이 떴다). `cyber help`는 두 옵션을 'Not working in this version.'으로 적는다.
-- 임베딩 API: `CLCompileConfig` · `CLEvalConfig`의 `backend`가 `CL_TCC` · `CL_CC`이면 `CL_ERROR_COMPILE`이고, 요약은 'CompileError: The C backend (-tcc, -cc) does not work in this version. ...'이다.
-  JIT 거절과 같은 자리(`Compiler.compile()`)에서 막는다. JIT 거절 문구는 C 백엔드를 권하던 부분을 빼서 'The JIT backend is not supported. Use the bytecode VM (default).'이 됐다.
-- 원인(고치지 않음): VM에 묶인 `#[bind]` 함수 63개에 `.cy` 본문이 없고(`src/sema_resolve.zig`), `src/cgen.zig`의 `mapType`이 템플릿 별칭이 된 `int` · `float` 등을 찾지 못하고,
-  cgen의 이름 표가 옛 `$name` 훅 이름을 쓴다. 자세한 것은 `docs/decisions/project_direction.md`의 2026-11-23 덧붙임, 발견 표 F-195.
-- 꺼진 백엔드의 알려진 결함: `src/aot.c`의 `cb_float_fmt`는 1e21 이상의 값에서 버퍼 밖을 읽는다. `cb_utf8_seq_len`은 본문이 비어 있다. 백엔드를 되살릴 때 같이 고쳐야 한다.
-- 개발자 경로: `zig build behavior-test -Dtest-backend=tcc|cc`(`task test:behavior BACKEND=tcc`)는 전처럼 백엔드까지 가서 첫 케이스에서 실패한다.
-  CLI는 환경 변수 `CYBER_C_BACKEND=1`을 주면 거절하지 않는다. `docs/build.md`에만 적었다. 헤더에는 이 둘이 켜는 `clCBackendDev`가 추가됐다.
-- 문서: `docs/docs.md`의 'C backend.' · 'JIT compiler.' · 'Static binding.' 절과 AOT를 언급한 문장, `Taskfile.yml`의 `BACKEND=` 설명.
-- 테스트: lib 테스트 'C backend is rejected with a clear compile error.', CLI 테스트 'CLI: -tcc and -cc are refused without the developer opt-in.'.
+- CLI: `-tcc`, `-cc`를 주면 'error: The C backend (-tcc) was removed. Run without the option.'을 stderr에 찍고 종료 코드 1로 끝난다.
+  CLI는 모르는 옵션을 무시하므로, 이 안내가 없으면 스크립트가 조용히 VM에서 돈다. `cyber help`에서 두 옵션이 빠졌다.
+- 임베딩 API(깨지는 변경):
+  - `CLBackend`에서 `CL_TCC` · `CL_CC`가 빠졌다. `CL_LLVM`의 값이 4에서 2가 됐다(`CL_VM` 0, `CL_JIT` 1은 그대로).
+  - `CLEvalConfig`에서 `spawn_exe` 필드가 빠졌다(AOT 실행 파일을 띄우는 방식이었다). 구조체 배치가 바뀌니 헤더와 라이브러리를 함께 올린다.
+  - `cy` 모듈의 `Backend` enum에서 `tcc` · `cc`가, `EvalConfig`에서 `spawn_exe`가 빠졌다.
+  - JIT 거절 문구는 C 백엔드를 권하던 부분을 빼서 'The JIT backend is not supported. Use the bytecode VM (default).'이다.
+- 지운 것: `src/aot.c` · `src/aot.h`, `src/cgen.zig`의 프로그램 생성 쪽(`gen` · `genStmt` · `genExpr`과 그 아래, 3,162줄 → 약 1,030줄),
+  `Compiler`의 `AotCompileResult`, `VM.eval`의 실행 파일 경로와 `VM.last_exe_error`, 빌드 옵션 `-Dtest-backend`와 `Taskfile.yml`의 `BACKEND=`.
+- 남긴 것: `src/cgen.zig`의 나머지는 FFI(`src/builtins/c.zig`)가 `extern` 바인딩의 C 코드를 만들 때 쓴다. `libtcc`도 FFI가 쓴다. 동작은 그대로다.
+  `meta.is_vm_target()`은 남아 있고 항상 `true`다.
+- 문서: `docs/docs.md`에서 'C backend.' · 'Static binding.' 절과 AOT를 언급한 문장을 지웠다. `docs/build.md`의 'C backend (not working)' 절도 지웠다.
+- 테스트: CLI 테스트 'CLI: -tcc and -cc are reported as removed.'. 발견 표 F-195.
 
 
 ## 함수 인자에서 템플릿 파라미터를 추론한다 (2026-11-23)
@@ -179,8 +182,6 @@ type Shape trait:
 - 구현: 규칙은 `src/fmt.zig`의 `renderFloat` 한 곳에 있다. `f64_fmt` · `f32_fmt`(`src/builtins/core.zig`), `Heap.writeValue`(`src/heap_value.zig`),
   디버거 값 설명(`src/debug.zig`)이 이것을 부른다. `json.fmt_float`는 `float.fmt()` 결과에서 `.0`을 떼어 JSON 형식을 유지한다.
 - 테스트: `src/test/core/float_to_str.cy`, `src/fmt.zig`의 'renderFloat'.
-- C 백엔드(`-tcc`, `-cc`)의 `cb_float_fmt`(`src/aot.c`)는 건드리지 않았다. 정수 값에는 이미 `.0`을 붙이지만 `%.10f`를 써서 자릿수가 VM과 다르다.
-  이 백엔드는 동작하지 않는다(맨 위 항목).
 
 ## 추론할 수 없는 템플릿 파라미터의 오류 문구 (2026-11-23)
 

@@ -73,10 +73,6 @@ fn inFirstShard() bool {
     return testShard().index == 0;
 }
 
-pub fn isAot(backend: c.Backend) bool {
-    return backend == c.BackendTCC or backend == c.BackendCC;
-}
-
 fn test_syntax(run: *Runner) void {
     run.case("syntax/adjacent_stmt_error.cy");
     run.case("syntax/range_no_end_error.cy");
@@ -542,8 +538,6 @@ fn test_types(run: *Runner) void {
 }
 
 fn test_modules(run: *Runner) void {
-    const backend = setup.fromTestBackend(test_config.test_backend);
-    const aot = isAot(backend);
     if (!is_wasm) {
         run.case("modules/type_spec.cy");
         run.case("modules/type_alias.cy");
@@ -584,10 +578,8 @@ fn test_modules(run: *Runner) void {
         run.case("modules/core_private_error.cy");
     }
     run.case("modules/core.cy");
-if (!aot) {
     run.case("modules/cy.cy");
     run.case("modules/path_basename_error.cy");
-}
 
     run.case("modules/math.cy");
     run.case("modules/meta.cy");
@@ -631,9 +623,6 @@ fn test_meta(run: *Runner) void {
 }
 
 fn test_concurrency(run: *Runner) void {
-    const backend = setup.fromTestBackend(test_config.test_backend);
-    const aot = isAot(backend);
-if (!aot) {
     run.case("concurrency/await.cy");
     run.case("concurrency/generator.cy");
     run.case("concurrency/generator_method.cy");
@@ -685,7 +674,6 @@ if (!aot) {
     run.case("concurrency/spawn_old_form_error.cy");
     run.case("concurrency/spawn_method_entry_error.cy");
     run.case("concurrency/spawn_borrow_param_error.cy");
-}
 }
 
 fn test_core(run: *Runner) void {
@@ -1235,48 +1223,23 @@ fn case2(config: Config) !void {
         const cur = buf[0..len];
         _ = cur;
 
-        var exp_str: []const u8 = undefined;
-        const backend = setup.fromTestBackend(test_config.test_backend);
-        const aot = isAot(backend);
-
         const trace_idx = std.mem.find(u8, buf[0..len], "[trace]") orelse {
             return error.MissingExpectedTrace;
         };
-        if (!aot) {
-            const starts_with = buf[1..trace_idx];
-            const ends_with = buf[trace_idx+8..len];
-            const Context2 = struct {
-                exp_start: []const u8,
-                exp_end: []const u8,
-            };
-            var ctx = Context2{ .exp_start = starts_with, .exp_end = ends_with };
-            var fconfig: Config = config;
-            fconfig.uri = final_path;
-            fconfig.ctx = &ctx;
-            try eval(fconfig, null
-            , struct { fn func(run: *VMrunner, res: EvalResult) !void {
-                const ctx_: *Context2 = @ptrCast(@alignCast(run.ctx));
-                try run.expectErrorReport3(res, ctx_.exp_start, ctx_.exp_end);
-            }}.func);
-            return;
-        } else {
-            exp_str = buf[1..trace_idx-1];
-        }
-
-        const Context = struct {
-            exp: []const u8,
+        const starts_with = buf[1..trace_idx];
+        const ends_with = buf[trace_idx+8..len];
+        const Context2 = struct {
+            exp_start: []const u8,
+            exp_end: []const u8,
         };
-        var ctx = Context{ .exp = exp_str };
+        var ctx = Context2{ .exp_start = starts_with, .exp_end = ends_with };
         var fconfig: Config = config;
         fconfig.uri = final_path;
-        fconfig.silent = true;
         fconfig.ctx = &ctx;
         try eval(fconfig, null
         , struct { fn func(run: *VMrunner, res: EvalResult) !void {
-            const ctx_: *Context = @ptrCast(@alignCast(run.ctx));
-            const backend_ = setup.fromTestBackend(test_config.test_backend);
-            const aot_ = isAot(backend_);
-            try run.expectErrorReport2(res, ctx_.exp, aot_);
+            const ctx_: *Context2 = @ptrCast(@alignCast(run.ctx));
+            try run.expectErrorReport3(res, ctx_.exp_start, ctx_.exp_end);
         }}.func);
     } else if (std.mem.eql(u8, test_t, "pass")) {
         var fconfig: Config = config;

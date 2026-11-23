@@ -52,6 +52,13 @@
   `genExternToVmFunc`, `genVmToExternFunc`, `gen_extern_func_ptr_wrapper`, 타입 이름 · 값 변환). 이 길은 `ffi/ffi.cy` 등으로
   CI에서 돈다. 그래서 파일을 통째로 지울 수는 없고, 지운다면 `gen` · `genStmt` · `genExpr` 쪽과 `aot.c` · `aot.h`만이다.
   판단: 되살리는 일은 버그 수정이 아니라 백엔드를 새로 만드는 크기다(관문 다섯 + IR 26개 + 런타임). 거절을 유지한다.
+  2026-11-23 결정(사용자: "죽은 백엔드 코드는 삭제하자. 나중에 LLVM을 사용할 기회가 있으면 새로 만들도록 하자"): C 백엔드를
+  지웠다. 위의 거절 · 개발자 경로(`clCBackendDev`, `CYBER_C_BACKEND`, `-Dtest-backend`)도 함께 없앴다. 지운 것은 `src/aot.c` ·
+  `src/aot.h`, `cgen.zig`의 `gen` 계열, `CL_TCC` · `CL_CC`, `CLEvalConfig.spawn_exe`, `VM.last_exe_error`, `AotCompileResult`.
+  `cgen.zig`의 FFI 쪽과 `libtcc`는 남는다. CLI는 `-tcc` · `-cc`에 'The C backend (-tcc) was removed. Run without the option.'을
+  낸다(모르는 옵션은 무시하는 CLI라서 안내가 없으면 조용히 VM에서 돈다). `VM`에서 필드를 지우면 `vm.h`의 `ZVM` 패딩 넷을 다시
+  잰다(빌드 오류가 값을 알려 준다). 네이티브 백엔드를 다시 한다면 LLVM으로 새로 만든다. `CL_LLVM`은 자리만 있고 컴파일은
+  `error.TODO`다. 옛 코드를 보려면 `git show b9be5709:src/cgen.zig`.
 - LLVM 백엔드(`src/llvm.zig` · `src/llvm_gen.zig`, `-Djit`)는 켜지 않는다. upstream도 2025-11 이후
   손대지 않은 미완성 경로다. Zig 0.17 업그레이드의 남은 항목 7(LLVM-C 번역 모듈)은 이 이유로 닫았다.
   당시에는 `cy.hasJIT` 뒤에 있어 빌드에 영향이 없으므로 두었고, 2026-11-04 죽은 코드 정리에서 파일을 지웠다.

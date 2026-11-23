@@ -906,13 +906,13 @@ extern _Thread_local ZThread* cur_thread;
 
 typedef struct ZVM {
 #if defined(__wasm__) && RT_SAFETY
-    u8 padding[220];
+    u8 padding[16];
 #elif defined(__wasm__)
-    u8 padding[172];
+    u8 padding[16];
 #elif RT_SAFETY
-    u8 padding[536];
+    u8 padding[104];
 #else
-    u8 padding[432];
+    u8 padding[88];
 #endif
     VM c;
 } ZVM;

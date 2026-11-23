@@ -30,7 +30,6 @@ const regex_mod = @import("std/regex.zig");
 const toon_mod = @import("std/toon.zig");
 const path_mod = @import("std/path.zig");
 const time_mod = @import("std/time.zig");
-const cgen = cy.cgen;
 const bcgen = @import("bc_gen.zig");
 const bindings = cy.bindings;
 const module = cy.module;
@@ -485,13 +484,6 @@ pub const Compiler = struct {
             return error.CompileError;
         }
 
-        // The C backend can not compile any script at present. See the 2026-11-23 note in
-        // docs/decisions/project_direction.md. `clCBackendDev` lets a developer reach it.
-        if ((config.backend == C.BackendTCC or config.backend == C.BackendCC) and !C.cBackendDev()) {
-            _ = try self.addReportFmt(.compile_err, C.c_backend_refusal, &.{}, null, 0);
-            return error.CompileError;
-        }
-
         const first_compile = !self.cont;
         // `VM.validate` sets this again after the compile.
         defer self.main_discarded = false;
@@ -623,7 +615,6 @@ pub const Compiler = struct {
         const res = try self.compileInner(uri, src_opt, config);
         // A callback failed without a way to say so and the compile went on. Nothing was run yet.
         if (self.host_error) |err| {
-            if (config.backend != C.BackendVM and !config.skip_codegen) res.aot.deinit(self.alloc);
             return err;
         }
         return res;
@@ -834,11 +825,6 @@ pub const Compiler = struct {
             log.tracev("Perform codegen.", .{});
 
             switch (self.config.backend) {
-                C.BackendTCC, C.BackendCC => {
-                    if (cy.isWasm or !cy.hasCLI) return error.Unsupported;
-                    const res = try cgen.gen(self);
-                    return .{ .aot = res };
-                },
                 C.BackendLLVM => {
                     return error.TODO;
                 },
@@ -927,14 +913,6 @@ pub const ReportFix = struct {
     pos: u32,
     end_pos: u32,
     text: []const u8,
-};
-
-pub const AotCompileResult = struct {
-    exePath: [:0]const u8,
-
-    pub fn deinit(self: AotCompileResult, alloc: std.mem.Allocator) void {
-        alloc.free(self.exePath);
-    }
 };
 
 /// Tokenize and parse.
@@ -1974,7 +1952,6 @@ pub fn failCreateType(c: *cy.Chunk, err: anyerror) ?*C.Type {
 
 pub const CompileResult = union {
     vm: *cy.ByteCodeBuffer,
-    aot: AotCompileResult,
 };
 
 const VarInfo = struct {

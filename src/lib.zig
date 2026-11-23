@@ -13,8 +13,6 @@ const vmc = cy.vmc;
 export var clVerbose = false;
 export var clSilent = false;
 
-/// Developer switch. When false, a compile with the C backend is refused. See `Compiler.compile`.
-export var clCBackendDev = false;
 
 export var cl_logger: C.GlobalLogFn = default_logger;
 export var CL_TRACE: bool = build_config.trace;
@@ -253,7 +251,6 @@ export fn clDefaultEvalConfig() C.EvalConfig {
         .single_run = false,
         .backend = C.BackendVM,
         .gen_all_debug_syms = false,
-        .spawn_exe = false,
         .persist_main = false,
         .deny_raw_ptrs = false,
         .deny_spawn = false,

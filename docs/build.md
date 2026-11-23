@@ -32,17 +32,6 @@ wasm3 zig-out/bin/behaviour_test.wasm
 wasm3 zig-out/bin/trace_test.wasm
 ```
 
-### C backend (not working)
-The C backend (`-tcc`, `-cc`) can not compile any script at present, so the CLI and the embedding API refuse it. To work on the backend, use one of the developer paths. Both set the `clCBackendDev` switch of the library (`src/lib.zig`).
-```sh
-# Behavior tests with the C backend. Fails at the first case with 'Expected function implementation.'
-zig build behavior-test -Dtest-backend=tcc
-
-# Let the CLI reach the backend.
-CYBER_C_BACKEND=1 zig-out/bin/cyber -tcc foo.cy
-```
-The causes are listed in the 2026-11-23 note of `docs/decisions/project_direction.md`.
-
 ## Build the CLI.
 Cyber is optimized for the ReleaseSafe build.
 ```sh

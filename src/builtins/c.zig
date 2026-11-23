@@ -235,8 +235,6 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
         .alloc = t.alloc,
         .syms = .empty,
         .c_names = .empty,
-        .vtables = .empty,
-        .next_vtable_id = 0,
     };
     defer compiler.deinit();
 
@@ -279,47 +277,6 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
     const w = stdx.listWriter(&csrc, t.alloc);
 
     try cy.cgen.genVmHeaders(w);
-
-    // const builtins_c = vm.compiler.chunk_map.get("core").?;
-    // const core_sym: *cy.Sym = @ptrCast(builtins_c.sym);
-    // _ = core_sym;
-    // try compiler.mapType(builtins_c, "str", "CB_str");
-    // try compiler.mapType(builtins_c, "StrBuffer", "CB_StrBuffer");
-    // try compiler.mapType(builtins_c, "int", "CB_int");
-    // try compiler.mapType(builtins_c, "bool", "CB_bool");
-    // try compiler.mapType(builtins_c, "error", "CB_error");
-    // try compiler.mapType(builtins_c, "symbol", "CB_symbol");
-    // try compiler.mapType(builtins_c, "float", "CB_float");
-    // try compiler.mapType(builtins_c, "Object", "CB_Object");
-    // compiler.markDeclared(builtins_c, "Object");
-    // try compiler.mapType(builtins_c, "NumberFormat", "CB_NumberFormat");
-    // try compiler.mapType(builtins_c, "MetaType", "CB_MetaType");
-    // try compiler.mapFunc2(core_sym, "free", "cb_free");
-    // try compiler.mapFunc2(core_sym, "alloc_", "cb_alloc");
-    // try compiler.mapFunc(core_sym, "eprint", "cb_eprint");
-    // try compiler.mapFunc2(core_sym, "print", "cb_print");
-    // try compiler.mapFunc2(core_sym, "utf8_check", "cb_utf8_check");
-    // try compiler.mapFunc2(core_sym, "utf8_decode", "cb_utf8_decode");
-    // try compiler.mapFunc2(core_sym, "utf8_seq_len", "cb_utf8_seq_len");
-    // try compiler.mapFunc2(core_sym, "$newObjectUndef", "cb_object_undef");
-    // try compiler.mapFunc2(core_sym, "$getDeinitObject", "cb_get_deinit_object");
-    // try compiler.mapFunc(core_sym, "$newAstrUndef", "cb_astr_undef");
-    // try compiler.mapFunc(core_sym, "$newUstrUndef", "cb_ustr_undef");
-    // try compiler.mapTypeFuncVariants(self.sema.func_tmpl, "$size", "cb_func_union_size");
-    // if (self.chunk_map.get("test")) |chunk| {
-    //     _ = chunk;
-    //     // try compiler.mapFunc(@ptrCast(chunk.sym), "eq", "cb_test_eq");
-    // }
-    // try compiler.mapFunc2(core_sym, "$freeObject", "cb_free_object");
-    // try compiler.mapFunc2(core_sym, "$releaseOnly", "cb_release_only");
-    // try compiler.mapFunc(core_sym, "panic", "cb_panic");
-    // try compiler.mapFunc(core_sym, "$memcpy", "cb_memcpy");
-
-    // try cgen.genStructDecls(w);
-    // try cgen.genArrayConvDecls(w);
-
-    // try cgen.genStructConvs(w);
-    // try cgen.genArrayConvs(vm, w);
 
     // Begin func binding generation.
 

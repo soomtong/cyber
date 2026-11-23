@@ -117,7 +117,6 @@ pub const VM = struct {
 
     tempBuf: [128]u8 align(4),
 
-    last_exe_error: []const u8,
     last_res: C.ResultCode,
 
     num_evals: u32,
@@ -168,7 +167,6 @@ pub const VM = struct {
             .print_err = default_print_err,
             .log_fn = default_log,
             .tempBuf = undefined,
-            .last_exe_error = "",
             .last_res = C.Success,
             .num_evals = 0,
             .num_cont_evals = 0,
@@ -360,9 +358,6 @@ pub const VM = struct {
         if (!reset) {
             self.alloc.destroy(self.main_thread);
         }
-
-        self.alloc.free(self.last_exe_error);
-        self.last_exe_error = "";
 
         if (!reset) {
             const acct = cy.MemAccount.of(self.alloc).?;
@@ -641,63 +636,31 @@ pub const VM = struct {
         const res = try self.compiler.compile(src_uri, src, compile_c);
         tt.endPrintVerbose("compile");
 
-        if (config.backend == C.BackendVM) {
-            if (C.verbose()) {
-                try debug.dumpBytecode(self, .{});
-            }
-
-            if (cy.Trace) {
-                var i: u32 = 0;
-                while (i < self.main_thread.c.trace.opCounts.len) : (i += 1) {
-                    self.main_thread.c.trace.opCounts[i] = .{
-                        .code = i,
-                        .count = 0,
-                    };
-                }
-                self.main_thread.c.trace.totalOpCounts = 0;
-                self.main_thread.heap.c.numReleases = 0;
-                self.main_thread.heap.c.numRetains = 0;
-            }
-
-            tt = cy.debug.timer();
-            defer tt.endPrintVerbose("eval");
-
-            const val = self.exec_bytecode(res.vm) catch |err| {
-                self.failExec(err);
-                return err;
-            };
-            return self.finishExec(val);
-        } else {
-            defer res.aot.deinit(self.alloc);
-            if (cy.isWasm or !cy.hasCLI) {
-                return error.Unsupported;
-            }
-
-            if (self.config.spawn_exe) {
-                const term = try spawn(.{
-                    .argv = &.{res.aot.exePath},
-                });
-                if (term != .exited or term.exited != 0) {
-                    self.alloc.free(self.last_exe_error);
-                    self.last_exe_error = "";
-                    return error.Panic;
-                }
-            } else {
-                const exeRes = try std.process.run(self.alloc, stdx.io(), .{
-                    .argv = &.{res.aot.exePath},
-                });
-                self.alloc.free(exeRes.stdout);
-                if (exeRes.term != .exited or exeRes.term.exited != 0) {
-                    self.alloc.free(self.last_exe_error);
-                    self.last_exe_error = exeRes.stderr;
-                    return error.Panic;
-                }
-            }
-            return .{
-                .res = null,
-                .res_t = bt.Void,
-            };
+        if (C.verbose()) {
+            try debug.dumpBytecode(self, .{});
         }
+
+        if (cy.Trace) {
+            var i: u32 = 0;
+            while (i < self.main_thread.c.trace.opCounts.len) : (i += 1) {
+                self.main_thread.c.trace.opCounts[i] = .{
+                    .code = i,
+                    .count = 0,
+                };
+            }
+            self.main_thread.c.trace.totalOpCounts = 0;
+            self.main_thread.heap.c.numReleases = 0;
+            self.main_thread.heap.c.numRetains = 0;
+        }
+
+        tt = cy.debug.timer();
+        defer tt.endPrintVerbose("eval");
+
+        const val = self.exec_bytecode(res.vm) catch |err| {
+            self.failExec(err);
+            return err;
+        };
+        return self.finishExec(val);
     }
 
     pub fn getData(self: *cy.VM, comptime T: type, key: []const u8) T {
@@ -1444,19 +1407,6 @@ fn zEnsureListCap(vm: *VM, list: *std.ArrayList(Value), cap: usize) callconv(.c)
 
 /// pc -> number of retains.
 pub var traceObjRetains: std.AutoHashMapUnmanaged(u32, u32) = .empty;
-
-fn spawn(args: struct {
-    argv: []const []const u8,
-}) !std.process.Child.Term {
-    const io = stdx.io();
-    var child = try std.process.spawn(io, .{
-        .argv = args.argv,
-        .stdin = .ignore,
-        .stdout = .inherit,
-        .stderr = .inherit,
-    });
-    return try child.wait(io);
-}
 
 /// A main local kept for the next `persist_main` eval (REPL).
 /// See `Compiler.main_res`.

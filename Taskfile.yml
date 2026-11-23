@@ -8,7 +8,6 @@
 #   task build OPT=ReleaseSafe          # optimize mode: Debug, ReleaseSafe, ReleaseFast, ReleaseSmall
 #   task build TARGET=aarch64-linux-gnu # cross compile (adds -Dcpu=baseline like CI)
 #   task test FILTER=switch             # only tests whose name contains the filter
-#   task test:behavior BACKEND=tcc      # compiler backend for behavior tests: vm, tcc, cc
 #                                       # tcc and cc do not work at present: they fail at the first case
 #   task build -- -Dmalloc=mimalloc     # any extra `zig build` flags after `--`
 
@@ -19,7 +18,6 @@ vars:
   OPT: '{{.OPT | default "Debug"}}'
   TARGET: '{{.TARGET | default ""}}'
   FILTER: '{{.FILTER | default ""}}'
-  BACKEND: '{{.BACKEND | default ""}}'
   BIN: zig-out/bin/cyber
   DEPS_DIR: .deps
   MD4C_DIR: '{{.DEPS_DIR}}/md4c'
@@ -48,7 +46,7 @@ tasks:
         fi
         echo "zig $got"
 
-  # Runs one `zig build` step with the flags assembled from OPT/TARGET/FILTER/BACKEND.
+  # Runs one `zig build` step with the flags assembled from OPT/TARGET/FILTER.
   # Every build and test task goes through here so the overrides behave the same way.
   zig:build:
     internal: true
@@ -60,7 +58,6 @@ tasks:
         -Doptimize={{.OPT}}
         {{if .TARGET}}-Dtarget={{.TARGET}} -Dcpu=baseline{{end}}
         {{if .FILTER}}-Dtest-filter={{.FILTER}}{{end}}
-        {{if .BACKEND}}-Dtest-backend={{.BACKEND}}{{end}}
     cmds:
       - zig build {{.STEP}} {{.FLAGS}} {{.CLI_ARGS}}
 
@@ -128,19 +125,19 @@ tasks:
     desc: 'Run every test suite (lib, lib standalone, cli, trace, behavior). FILTER= narrows by name.'
     cmds:
       - task: zig:build
-        vars: { STEP: test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+        vars: { STEP: test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', CLI_ARGS: '{{.CLI_ARGS}}' }
 
   test:release:
     desc: 'Run every test suite against a ReleaseSafe build, as CI does.'
     cmds:
       - task: test
-        vars: { OPT: ReleaseSafe, TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+        vars: { OPT: ReleaseSafe, TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', CLI_ARGS: '{{.CLI_ARGS}}' }
 
   test:behavior:
-    desc: 'Run the behavior tests (src/test/**.cy scripts). BACKEND=vm|tcc|cc picks the compiler (tcc and cc currently fail at the first case: the C backend does not work). The cases run in 4 processes at once; `-- -Dtest-shards=1` runs them in one.'
+    desc: 'Run the behavior tests (src/test/**.cy scripts). The cases run in 4 processes at once; `-- -Dtest-shards=1` runs them in one.'
     cmds:
       - task: zig:build
-        vars: { STEP: behavior-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '{{.CLI_ARGS}}' }
+        vars: { STEP: behavior-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', CLI_ARGS: '{{.CLI_ARGS}}' }
 
   test:lib:
     desc: 'Run the lib unit tests.'
@@ -185,7 +182,7 @@ tasks:
     desc: 'Run every test suite with Zig result caching disabled.'
     cmds:
       - task: test
-        vars: { OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '-Dno-cache {{.CLI_ARGS}}' }
+        vars: { OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', CLI_ARGS: '-Dno-cache {{.CLI_ARGS}}' }
 
   test:wasi:
     desc: 'Build the test binaries for wasm32-wasi and run them with wasm3.'

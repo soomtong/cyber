@@ -30,6 +30,28 @@
   `-Dtest-backend=tcc|cc`(`task test:behavior BACKEND=tcc`)는 전처럼 백엔드에 닿고, CLI는 환경 변수 `CYBER_C_BACKEND=1`을 주면
   거절하지 않는다. 둘 다 라이브러리의 `clCBackendDev` 스위치를 켠다(`src/lib.zig`, `docs/build.md`). 고칠 때는 위 1 → 2 → 3 순서로
   막힌다. 발견 표 F-33 · F-195.
+  2026-11-23 점검(관문을 하나씩 풀어 본 탐침, 코드는 고치지 않음): 위 셋 뒤에 둘이 더 있고, 그 뒤는 보지 못했다.
+  `print(1.5)` 한 줄을 `CYBER_C_BACKEND=1 cyber -tcc`로 돌리며 scratchpad의 worktree에서 막는 줄만 임시로 풀었다.
+  1. 관문 1(본문 검사): 실행으로 확인. 본문 없는 `#[bind]` 함수에는 컴파일 타임 전용(`EvalStr` · `EvalBuffer` · `FuncSig`의
+     메서드, `meta`의 대부분)도 섞여 있다. 이들은 C로 나갈 일이 없으니 검사 자체가 지금 구조와 맞지 않는다.
+  2. 관문 2(`mapType`): `cgen.zig`의 `c.syms.getPtr(sym).?`가 null panic. `int` · `i32` · `r32` · `r64` · `byte` · `float`는
+     `type_alias` 심볼이고 `MetaType`은 없다.
+  3. 관문 3(이름 표): `$newObjectUndef` · `$getDeinitObject` · `$newAstrUndef` · `$newUstrUndef` · `$freeObject` ·
+     `$releaseOnly` · `$memcpy` · `uge` · `` $infix** ``를 찾지 못한다(같은 `.?` panic).
+  4. 관문 4(타입 선언): `declareType`이 `eval_int` · `eval_ref` · `ex_borrow` · `generic` 종류에서 'Unsupported: EvalInt'
+     panic. `ex_borrow`(`&&T`)는 런타임 타입이라 건너뛸 수 없고 구현이 필요하다. `dyn_trait` · `partial_vector` 등도 갈래가 없다.
+  5. 관문 5(Zig 0.17): `genFuncBlock`의 첫 `pushSpanFmt("{f} ...", typeNameRet(...))`가 `ArrayList`의 `pointer_stability`
+     assert에 걸린다. 포맷 중에 같은 출력 버퍼를 다시 건드리는 것으로 보인다(원인은 확인하지 않음). 함수 하나도 내보내지 못한다.
+  IR 범위: `genStmt`는 `ir.StmtCode` 30개 중 21개, `genExpr`는 `ir.ExprCode` 73개 중 56개를 다룬다. 빠진 것은 문장
+  `discard` · `pop_locals` · `yield` · `suspend_` · `ret_gen` · `trap` · `setCaptured` · `breakpoint` · `dumpBytecode`, 식
+  `closure` · `case_cond` · `switch_case` · `const16` · `init_zero` · `undef` · `asr` · `imul` · `idiv` · `imod` · `fmod` ·
+  `gen_next` · `gen_end` · `fiber_resume` · `unwrap_nz` · `vector` · `partial_vector`. 부호 있는 정수 산술, 클로저,
+  `switch` 식, 제너레이터, fiber가 통째로 없다. 런타임 `src/aot.c`는 376줄이고 스레드 · fiber · Future · `Map` 쪽 host
+  함수가 없다.
+  살아 있는 부분: `cgen.zig`는 FFI(`src/builtins/c.zig`)가 쓴다(`cgen.Chunk`, `genFuncForwardDecl`,
+  `genExternToVmFunc`, `genVmToExternFunc`, `gen_extern_func_ptr_wrapper`, 타입 이름 · 값 변환). 이 길은 `ffi/ffi.cy` 등으로
+  CI에서 돈다. 그래서 파일을 통째로 지울 수는 없고, 지운다면 `gen` · `genStmt` · `genExpr` 쪽과 `aot.c` · `aot.h`만이다.
+  판단: 되살리는 일은 버그 수정이 아니라 백엔드를 새로 만드는 크기다(관문 다섯 + IR 26개 + 런타임). 거절을 유지한다.
 - LLVM 백엔드(`src/llvm.zig` · `src/llvm_gen.zig`, `-Djit`)는 켜지 않는다. upstream도 2025-11 이후
   손대지 않은 미완성 경로다. Zig 0.17 업그레이드의 남은 항목 7(LLVM-C 번역 모듈)은 이 이유로 닫았다.
   당시에는 `cy.hasJIT` 뒤에 있어 빌드에 영향이 없으므로 두었고, 2026-11-04 죽은 코드 정리에서 파일을 지웠다.

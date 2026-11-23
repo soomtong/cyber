@@ -1002,6 +1002,10 @@ pub const Func = struct {
     instance: ?*cy.Instance,
     info: FuncInfo,
 
+    /// For a method that a type got from a default method of this trait (`sema_type.reserveDefaultMethods`).
+    /// `decl` is the trait's method declaration, which has no receiver parameter.
+    default_trait: ?*cy.types.GenericTrait = null,
+
     /// The globals and functions that the body uses. Null if it uses none (`global_init.zig`).
     deps: ?*cy.global_init.Deps = null,
 
@@ -1754,10 +1758,10 @@ test "sym internals" {
     // `Func` holds a bare union, which carries a hidden tag only with runtime safety.
     if (cy.is32Bit) {
         try t.eq(16, @sizeOf(Sym));
-        try t.eq(if (std.debug.runtime_safety) 44 else 40, @sizeOf(Func));
+        try t.eq(if (std.debug.runtime_safety) 48 else 44, @sizeOf(Func));
     } else {
         try t.eq(24, @sizeOf(Sym));
-        try t.eq(if (std.debug.runtime_safety) 80 else 72, @sizeOf(Func));
+        try t.eq(if (std.debug.runtime_safety) 88 else 80, @sizeOf(Func));
     }
 
     try t.eq(@offsetOf(Template, "head"), 0);

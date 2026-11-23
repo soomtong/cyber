@@ -828,8 +828,10 @@ pub fn resolveUserFuncVariant(c: *cy.Chunk, func: *cy.Func, resolve_new_types: b
 }
 
 pub fn reserveImplicitTraitMethod(c: *cy.Chunk, parent: *cy.Sym, decl: *ast.FuncDecl, vtable_idx: usize) !*cy.Func {
-    if (decl.stmts.len > 0) {
-        return c.reportErrorFmt("Trait methods should not have a body.", &.{}, @ptrCast(decl));
+    // A method with a body is a default method. Each implementing type that does not define the method gets
+    // its own copy (`sema_type.reserveDefaultMethods`).
+    if (decl.stmts.len > 0 and decl.generator) {
+        return c.reportErrorFmt("A default method of a trait can not be a generator.", &.{}, @ptrCast(decl));
     }
     const func = try c.reserveTraitFunc(parent, decl.name.declName(), decl, vtable_idx);
     return func;
@@ -1113,6 +1115,16 @@ pub fn getResolvedName(c: *cy.Chunk, name: []const u8, node: *ast.Node) !?NameRe
             if (variant.getParam(name)) |param| {
                 const new_value = try c.heap.copyValue2(param.type, param.value);
                 return NameResult.initCtValue2(param.type, new_value);
+            }
+        }
+
+        // The body of a default method belongs to its trait. It sees the template parameters of the trait.
+        if (ctx.data.func.default_trait) |trait_t| {
+            if (trait_t.base.sym().instance) |variant| {
+                if (variant.getParam(name)) |param| {
+                    const new_value = try c.heap.copyValue2(param.type, param.value);
+                    return NameResult.initCtValue2(param.type, new_value);
+                }
             }
         }
 

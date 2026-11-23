@@ -350,6 +350,14 @@ fn semaAccessFieldName(c: *cy.Chunk, rec_n: *ast.Node, rec: sema.ExprResult, nam
         } else {
             const type_name = try c.sema.allocTypeName(type_);
             defer c.alloc.free(type_name);
+            // `self` of a default method is the trait view of the receiver.
+            if (type_.kind() == .borrow_trait and c.semaProcs.items.len > 0) {
+                if (c.proc().func) |func| {
+                    if (func.default_trait != null) {
+                        return c.reportErrorFmt("Field `{}` does not exist in `{}`. A default method of a trait can not access the fields of the implementing type, only the methods of the trait.", &.{v(name), v(type_name)}, field);
+                    }
+                }
+            }
             const hint = try sema_hint.suggestField(c, type_, name, field);
             return c.reportErrorFix("Field `{}` does not exist in `{}`.{}", &.{v(name), v(type_name), v(hint)}, field, sema_hint.suggestedFix(c, name, field));
         }

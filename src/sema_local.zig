@@ -76,10 +76,13 @@ pub fn semaMethodBody(c: *cy.Chunk, func: *cy.Func) !void {
 pub fn semaMethodBody2(c: *cy.Chunk, func: *cy.Func) !void {
     // Object method.
     const blockId = try pushFuncProc(c, func);
-    c.semaProcs.items[blockId].isMethodBlock = true;
-
     const parent_t = func.sig.params()[0].get_type();
-    try pushMethodParamVars(c, parent_t, func);
+    if (func.default_trait) |trait_t| {
+        try pushDefaultMethodParamVars(c, parent_t, func, trait_t);
+    } else {
+        c.semaProcs.items[blockId].isMethodBlock = true;
+        try pushMethodParamVars(c, parent_t, func);
+    }
     if (func.info.generator) {
         try semaGeneratorPrologue(c, func);
     }
@@ -876,6 +879,50 @@ fn pushMethodParamVars(c: *cy.Chunk, self_t: *cy.Type, func: *const cy.Func) !vo
         try declareParam(c, param_decl, false, rt_param_idx, params[rt_param_idx].get_type());
         rt_param_idx += 1;
     }
+}
+
+/// The parameters of a method that a type got from a default method of `trait_t`. The declaration is the
+/// trait's, so it has no receiver parameter. The receiver `&T` is a hidden parameter, and `self` is a local that
+/// views it as `&Dyn[Trait]`: the body can call the methods of the trait and nothing else of the type.
+fn pushDefaultMethodParamVars(c: *cy.Chunk, rec_t: *cy.Type, func: *const cy.Func, trait_t: *cy.types.GenericTrait) !void {
+    const curNode = c.curNode;
+    defer c.curNode = curNode;
+
+    const node: *ast.Node = func.decl.?;
+    const params = func.sig.params();
+    const param_decls = node.cast(.funcDecl).params.slice();
+
+    const proc = c.proc();
+    try checkLocalLimit(c, 0, node);
+    const rec_id = try pushLocalVar(c, .local, "$self", rec_t, true);
+    c.varStack.items[rec_id].inner = .{
+        .local = .{
+            .id = 0,
+            .isParam = true,
+            .hasInit = false,
+            .declIrStart = undefined,
+            .hidden = true,
+        },
+    };
+    proc.numParams += 1;
+
+    var rt_param_idx: usize = 1;
+    for (param_decls) |param_decl| {
+        try declareParam(c, param_decl, false, rt_param_idx, params[rt_param_idx].get_type());
+        rt_param_idx += 1;
+    }
+
+    const dyn_sym = c.compiler.builtins_chunk.sym.getMod().getSym("Dyn").?;
+    const dyn_t = (try cy.template.expand_template(c, dyn_sym.cast(.template), &.{c.sema.type_t}, &.{cy.Value.initType(&trait_t.base)})).getStaticType().?;
+    const self_t = try sema.getBorrowType(c, dyn_t);
+    const rec = try sema_expr.semaLocal(c, rec_id, node);
+    const loc = try c.ir.newExpr(.trait, self_t, node, .{
+        .ref = rec.ir,
+        .impl_t = rec_t.cast(.borrow).child_t,
+        .trait_t = self_t,
+        .generic_t = trait_t,
+    });
+    _ = try declareLocalInit(c, "self", self_t, sema.ExprResult.init(loc, self_t), node);
 }
 
 pub fn appendFuncParamVars(c: *cy.Chunk, ast_params: []const *ast.FuncParam, params: []const sema.FuncParam) !void {

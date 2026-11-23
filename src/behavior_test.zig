@@ -521,6 +521,12 @@ fn test_types(run: *Runner) void {
     run.case("types/trait_param_count_error.cy");
     run.case("types/trait_param_extra_error.cy");
     run.case("types/trait.cy");
+    run.case("types/trait_default.cy");
+    run.case("types/trait_default_field_error.cy");
+    run.case("types/trait_default_clash_error.cy");
+    run.case("types/trait_default_other_trait_error.cy");
+    run.case("types/trait_default_sig_error.cy");
+    run.case("types/trait_default_generator_error.cy");
     run.case("types/tuple.cy");
     run.case("types/type_alias.cy");
     run.case("types/type_alias_path_decl_error.cy");

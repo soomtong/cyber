@@ -1137,6 +1137,7 @@ pub fn resolve_type_impls(c: *cy.Chunk, type_: *cy.Type, impl_decls: []*ast.Impl
                 _ = try c.getResolvedSym(&type_.sym().head, member.func.name(), impl.trait);
             }
         }
+        try reserveDefaultMethods(c, type_, trait_t.cast(.generic_trait), impl.trait);
     }
 
     type_.info.no_copy = no_copy;
@@ -1150,6 +1151,63 @@ pub fn resolve_type_impls(c: *cy.Chunk, type_: *cy.Type, impl_decls: []*ast.Impl
         else => {
             return error.TODO;
         },
+    }
+}
+
+/// Gives `type_` the default methods of `trait_t` that it does not define: for each one a method of `type_`
+/// with the receiver `&type_` and the body of the trait's method. A direct call and the vtable of the type
+/// (`Compiler.resolveImplFuncs`) then find it like a method that the type declares. Inside the body `self` is
+/// the receiver as `&Dyn[Trait]` (`sema_local.semaMethodBody2`).
+///
+/// A member of the type with the same name keeps the default out, whatever its signature: a method that does
+/// not match the trait's is the usual `does not implement` error.
+fn reserveDefaultMethods(c: *cy.Chunk, type_: *cy.Type, trait_t: *cy.types.GenericTrait, node: *ast.Node) !void {
+    const trait_decl = trait_t.base.sym().decl orelse return;
+    if (trait_decl.type() != .trait_decl) return;
+    const has_default = for (trait_decl.cast(.trait_decl).funcs.slice()) |func_decl| {
+        if (func_decl.stmts.len > 0) break true;
+    } else false;
+    if (!has_default) return;
+
+    try ensure_resolved_type(c, &trait_t.base, node);
+    const sym = type_.sym();
+    for (trait_t.members()) |member| {
+        const decl = member.func.decl.?.cast(.funcDecl);
+        if (decl.stmts.len == 0) continue;
+        // A method with a template parameter was resolved as a function template. It has no signature to copy.
+        if (member.func.type != .trait) {
+            return c.reportError("A default method of a trait can not have a template parameter.", @ptrCast(decl));
+        }
+        const name = member.func.name();
+        if (sym.getMod().getSym(name)) |existing| {
+            if (existing.type == .func) {
+                var next: ?*cy.Func = existing.cast(.func).first;
+                while (next) |func| : (next = func.next) {
+                    const other = func.default_trait orelse continue;
+                    const type_name = try c.sema.allocTypeName(type_);
+                    defer c.alloc.free(type_name);
+                    const other_name = try c.sema.allocTypeName(&other.base);
+                    defer c.alloc.free(other_name);
+                    const trait_name = try c.sema.allocTypeName(&trait_t.base);
+                    defer c.alloc.free(trait_name);
+                    return c.reportErrorFmt("`{}` gets the default method `{}` from both `{}` and `{}`. Declare `{}` for `{}` to say what it does.", &.{
+                        v(type_name), v(name), v(other_name), v(trait_name), v(name), v(type_name),
+                    }, node);
+                }
+            }
+            continue;
+        }
+
+        const start = c.func_param_stack.items.len;
+        defer c.func_param_stack.items.len = start;
+        const trait_sig = member.func.sig;
+        try c.func_param_stack.append(c.alloc, sema.FuncParam.init(try sema.getBorrowType(c, type_)));
+        try c.func_param_stack.appendSlice(c.alloc, trait_sig.params()[1..]);
+        const scope_param_idx: ?u8 = if (trait_sig.scope_param_idx == cy.NullU8) null else trait_sig.scope_param_idx;
+        const sig = try c.sema.ensureFuncSig2(c.func_param_stack.items[start..], trait_sig.ret, false, scope_param_idx);
+
+        const func = try cy.module.reserveDefaultMethod(c, &sym.head, name, decl, trait_t);
+        try c.resolveUserFunc(func, sig);
     }
 }
 

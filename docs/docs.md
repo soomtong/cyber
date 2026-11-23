@@ -1968,6 +1968,8 @@ fn (&Rectangle) area() -> float:
 ```
 A type that intends to implement a trait but does not satisfy the trait's interface results in a compile error. The implementing method must have the same number of parameters, the same parameter types and the same return type as the trait method. Implicit conversions such as `int` to `float` do not count, so `fn (&Circle) scale(k int)` does not implement `fn scale(k float)`.
 
+A trait method without a body is a required method. A trait method with a body is a [default method](#default-methods).
+
 ### Dynamic dispatch.
 Since traits are a generic type, they need to be wrapped in a `Dyn` container to be materialized into a dynamic dispatch value. Implementing types become assignable to a `Dyn` reference type:
 ```cy
@@ -1977,6 +1979,72 @@ print(s.area())       --> 12.56
 s = ^Rectangle{width=4, height=5}
 print(s.area())       --> 20.0
 ```
+
+### Default methods.
+A trait method with a body is a default method. An implementing type that does not declare the method gets it:
+```cy
+type Shape trait:
+    fn area() -> float
+    fn name() -> str
+
+    fn describe() -> str:
+        return '%{self.name()} with area %{self.area()}'
+
+type Circle:
+    with Shape
+    radius float
+
+fn (&Circle) area() -> float:
+    return 3.14 * self.radius**2
+
+fn (&Circle) name() -> str:
+    return 'circle'
+
+c := Circle{radius=2}
+print(c.describe())       --> circle with area 12.56
+
+var s ^Dyn[Shape] = ^Circle{radius=1}
+print(s.describe())       --> circle with area 3.14
+```
+The default method can be called on the implementing type and through a `Dyn` value.
+
+A type overrides a default method when it declares a method with the same name and the same signature:
+```cy
+type Square:
+    with Shape
+    width float
+
+fn (&Square) area() -> float:
+    return self.width * self.width
+
+fn (&Square) name() -> str:
+    return 'square'
+
+fn (&Square) describe() -> str:
+    return 'a square of %{self.width}'
+
+print(Square{width=2}.describe())       --> a square of 2.0
+```
+A member of the type with the same name always takes the place of the default method. If its signature is not the one from the trait, the type does not implement the trait: '`Square` does not implement `fn describe(Shape) -> str` from `Shape`.'
+
+Inside a default method, `self` is the receiver seen through the trait. Its type is the shared borrow `&Dyn[Shape]`. It can call the other methods of the trait, required or default, and it can be passed to a function that takes a `&Dyn[Shape]`. A call on `self` is a dynamic dispatch, so it reaches the method of the implementing type, including an override of another default method.
+
+`self` knows nothing else about the implementing type. A field access is a compile error:
+```cy
+type Shape trait:
+    fn describe() -> str:
+        return 'radius %{self.radius}'
+        --> CompileError: Field `radius` does not exist in `&Dyn[Shape]`. A default method of a trait can not access the fields of the implementing type, only the methods of the trait.
+```
+To use a value of the type, declare a required method that returns it and call that method.
+
+The other rules:
+- A trait method is declared without a receiver, and a default method always takes the receiver as a shared borrow. There is no default method with an exclusive receiver `&&T`.
+- A default method of a generic trait can use the template parameters of the trait. A template type gets default methods like any other type.
+- The body is compiled for each type that gets the default method. A default method that every implementing type overrides is not checked.
+- When two traits of a type have a default method with the same name, the type must declare the method itself. Otherwise: '`Both` gets the default method `side` from both `Left` and `Right`. Declare `side` for `Both` to say what it does.' The declared method implements both traits when its signature matches both.
+- A default method of one trait does not implement a required method of another trait: '`Both` has the method `side` only as a default method of `Left`. Declare `side` for `Both` to implement `Right`.'
+- A default method can not be a generator ('A default method of a trait can not be a generator.') and can not have a template parameter ('A default method of a trait can not have a template parameter.').
 
 ## Type evaluation.
 Types can be declared from const evaluation:

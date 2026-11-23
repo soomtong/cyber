@@ -5,7 +5,8 @@
 --
 -- The object-oriented part: each operator is a type that implements the `Operation` trait, and a
 -- `Calculator` keeps the operators and the history of its results. A new operator is added with
--- `register`, the calculator itself does not change.
+-- `register`, the calculator itself does not change. `describe` is a default method of the trait: an
+-- operator gets it without declaring it, and `Mod` overrides it.
 --
 -- The functional part: `map`, `filter` and `fold` take a function value and are used with inferred
 -- lambdas to query the history.
@@ -17,6 +18,10 @@
 type Operation trait:
     fn symbol() -> str
     fn apply(a float, b float) -> !float
+
+    -- A default method. `self` can call the methods of the trait.
+    fn describe() -> str:
+        return 'operator %{self.symbol()}'
 
 type Add:
     with Operation
@@ -86,6 +91,11 @@ fn (&&Calculator) calc(a float, sym str, b float) -> !float:
     self.history += Record{expr = '%{a} %{sym} %{b}', result = res}
     return res
 
+fn (&Calculator) describe(sym str) -> str:
+    op := self.ops.get(sym) ?else:
+        return 'unknown operator %{sym}'
+    return op.describe()
+
 -- Evaluates an expression of the form `<number> <operator> <number>`.
 fn (&&Calculator) eval(expr str) -> !float:
     parts := expr.split(' ')
@@ -138,8 +148,14 @@ fn (&Mod) apply(a float, b float) -> !float:
         return error.DivisionByZero
     return a % b
 
+fn (&Mod) describe() -> str:
+    return 'operator % (remainder)'
+
 calc := Calculator()
 calc.register(^Mod{})
+
+for []str{'+', '%', '^'} |sym|:
+    print(calc.describe(sym))
 
 exprs := []str{'1 + 2', '10 - 4.5', '6 * 7', '9 / 2', '17 % 5', '1 / 0', '2 ^ 8', '3 +'}
 for exprs |expr|:

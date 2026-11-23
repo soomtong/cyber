@@ -4,6 +4,38 @@
 사용자에게 보이는 동작이 바뀌는 커밋은 여기에 바로 적고, 언어 규칙이면 `docs/docs.md`에도 같이 적는다.
 전체 발견 이슈 표는 `docs/study/10-findings-register.md`, 컴파일러 한계의 결정은 `docs/decisions/project_compiler_limits.md`.
 
+## trait의 기본 메서드 (2026-11-23)
+
+trait 메서드에 본문을 쓸 수 없어서('Trait methods should not have a body.') 구현 타입마다 같은 동작을 다시 적어야 했다.
+이제 본문이 있는 trait 메서드는 기본 메서드다. `with Trait`으로 선언한 타입이 그 메서드를 선언하지 않으면 기본 메서드를 받는다.
+
+```cy
+type Shape trait:
+    fn area() -> float
+    fn name() -> str
+    fn describe() -> str:
+        return '%{self.name()} with area %{self.area()}'
+```
+
+- 호출: 구현 타입에서 바로(`Circle{radius=2}.describe()`), `^Dyn[Shape]` · `&Dyn[Shape]`를 거쳐서, 템플릿 파라미터를 거쳐서 모두 된다.
+- 재정의: 타입이 같은 이름 · 같은 시그니처의 메서드를 선언하면 그것이 쓰인다. 같은 이름의 멤버가 있으면 기본 메서드는 들어가지 않으므로,
+  시그니처가 다르면 기존 오류 그대로다('`Circle` does not implement `fn describe(Shape) -> str` from `Shape`.').
+- `self`: 기본 메서드 안의 `self`는 trait으로 본 수신자, 타입은 공유 빌림 `&Dyn[Shape]`이다. trait의 다른 메서드(필수 · 기본)를 부를 수 있고
+  `&Dyn[Shape]`를 받는 함수에 넘길 수 있다. `self`의 호출은 동적 디스패치라서 구현 타입이 재정의한 메서드에 닿는다.
+- 필드 접근은 오류다: 'Field `radius` does not exist in `&Dyn[Shape]`. A default method of a trait can not access the fields of the implementing type, only the methods of the trait.'
+  값이 필요하면 그 값을 돌려주는 필수 메서드를 선언해서 부른다.
+- 수신자: trait 메서드는 수신자 없이 선언하고 기본 메서드는 항상 공유 빌림으로 받는다. 배타 수신자 `&&T`의 기본 메서드는 없다.
+- 제네릭 trait(`type Source[T Any] trait`)의 기본 메서드는 trait의 템플릿 파라미터를 쓸 수 있다. 템플릿 타입(`Box[T]`)도 기본 메서드를 받는다.
+- 두 trait의 기본 메서드 이름이 같으면 타입이 직접 선언해야 한다: '`Both` gets the default method `side` from both `Left` and `Right`. Declare `side` for `Both` to say what it does.'
+  한 trait의 기본 메서드는 다른 trait의 필수 메서드를 구현하지 않는다: '`Both` has the method `side` only as a default method of `Left`. Declare `side` for `Both` to implement `Right`.'
+- 제한: 기본 메서드는 제너레이터일 수 없고('A default method of a trait can not be a generator.') 템플릿 파라미터를 가질 수 없다
+  ('A default method of a trait can not have a template parameter.'). 본문은 기본 메서드를 받는 타입마다 컴파일되므로, 모든 구현 타입이 재정의한 기본 메서드의 본문은 검사되지 않는다.
+- 구현: 타입의 `with`를 풀 때(`sema_type.reserveDefaultMethods`) 타입에 없는 기본 메서드마다 수신자 `&T`인 메서드를 타입에 예약한다(`Func.default_trait`).
+  직접 호출과 vtable 구성(`Compiler.resolveImplFuncs`)은 이것을 타입이 선언한 메서드처럼 찾는다. 본문을 검사할 때(`sema_local.semaMethodBody2`) 수신자는 숨은 파라미터이고
+  `self`는 그것을 `&Dyn[Trait]`로 감싼 지역 변수다. VM · 바이트코드 변경은 없다.
+- 테스트: `src/test/types/trait_default.cy`, `trait_default_field_error.cy`, `trait_default_clash_error.cy`, `trait_default_other_trait_error.cy`,
+  `trait_default_sig_error.cy`, `trait_default_generator_error.cy`. 예제 `examples/calculator.cy`의 `Operation.describe`.
+
 ## 함수 포인터 타입을 타입 자리에 바로 쓴다 (2026-11-23)
 
 함수 포인터 타입은 타입 별칭의 오른쪽에만 쓸 수 있었다. `fn apply(x int, f fn(int) -> int) -> int:`는 `fn`에서 'Expected type specifier.'가 났고,
@@ -45,6 +77,8 @@
 - 바뀌지 않는 것: `print(obj)`와 문자열 보간 `'%{obj}'`은 `to_string()`을 부르지 않으며 전과 같이 `Object{inner=@0x...}`를 찍는다.
 - 테스트: `src/test/core/object_to_string.cy`.
 ||||||| parent of d539623e (Allow a function pointer type inline wherever a type is expected)
+
+||||||| parent of 69f22ee0 (Add default method implementations to traits)
 
 
 ## float은 항상 소수점을 붙여 문자열로 바뀐다 (2026-11-23, 깨지는 변경)

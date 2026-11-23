@@ -2173,6 +2173,20 @@ fn resolveImplFuncs(self: *Compiler, type_: *cy.Type) !void {
                     v(type_name), v(member.func.name()), v(sig_str), 
                     v(impl.trait.base.name()) }, @ptrCast(sym.decl.?.cast(.struct_decl).impls.ptr[j].trait));
             };
+            // A default method from another trait of the type views `self` as that trait.
+            if (func.default_trait) |other| {
+                if (other != impl.trait) {
+                    const type_name = try self.sema.allocTypeName(type_);
+                    defer self.alloc.free(type_name);
+                    const other_name = try self.sema.allocTypeName(&other.base);
+                    defer self.alloc.free(other_name);
+                    const trait_name = try self.sema.allocTypeName(&impl.trait.base);
+                    defer self.alloc.free(trait_name);
+                    return chunk.reportErrorFmt("`{}` has the method `{}` only as a default method of `{}`. Declare `{}` for `{}` to implement `{}`.", &.{
+                        v(type_name), v(member.func.name()), v(other_name), v(member.func.name()), v(type_name), v(trait_name),
+                    }, @ptrCast(sym.decl.?.cast(.struct_decl).impls.ptr[j].trait));
+                }
+            }
             funcs[i] = func;
         }
 

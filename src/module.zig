@@ -355,6 +355,24 @@ pub fn reserveTraitFunc(
     return func;
 }
 
+/// Reserves the method that the type `parent` gets from the default method `decl` of `trait_t`.
+/// The caller resolves its signature.
+pub fn reserveDefaultMethod(
+    c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: *ast.FuncDecl, trait_t: *cy.types.GenericTrait,
+) !*cy.Func {
+    const mod = parent.getMod().?;
+    const sym = try prepareFuncSym(c, parent, mod, name, decl);
+    const config = cy.sym.FuncConfig{
+        .is_method = true,
+        .extern_ = false,
+    };
+    const func = try c.createFunc(.userFunc, @ptrCast(sym), config, @ptrCast(decl));
+    func.default_trait = trait_t;
+    try c.funcs.append(c.alloc, func);
+    sym.addFunc(func);
+    return func;
+}
+
 pub fn reserveFunc(
     c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: *ast.FuncDecl,
 ) !?*cy.Func {

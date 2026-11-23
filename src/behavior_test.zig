@@ -963,6 +963,7 @@ test "Compile." {
         try compileCase("../examples/ffi.cy");
     }
     try compileCase("../examples/account.cy");
+    try compileCase("../examples/calculator.cy");
     try compileCase("../examples/fibonacci.cy");
 
     // tools.

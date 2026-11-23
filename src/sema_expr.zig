@@ -719,7 +719,41 @@ pub fn semaExprCstr(c: *cy.Chunk, node: *ast.Node, target_t: *cy.Type) !sema.Exp
     });
 }
 
+/// `semaExprCstr` for a caller that tries something else when the type does not fit `target_t`: `fits` is set
+/// to false and the expression is returned with its own type instead of a report. An error inside the
+/// expression is reported as usual.
+pub fn semaExprCstrSoft(c: *cy.Chunk, node_: *ast.Node, target_t: *cy.Type, fits: *bool) !sema.ExprResult {
+    // A group hands its constraint to the child, which would report.
+    var node = node_;
+    while (node.type() == .group) {
+        node = node.cast(.group).child;
+    }
+    const res = try semaExprUnchecked(c, node, .{
+        .target_t = target_t,
+        .reqTypeCstr = true,
+        .fit_target = true,
+    });
+    // `checkExprCstr` without the report.
+    fits.* = true;
+    if (res.type == target_t) {
+        return res;
+    }
+    if (try sema_lit.semaFitTarget(c, res, target_t, node)) |new| {
+        return new;
+    }
+    if (res.type.id() != bt.Never) {
+        fits.* = false;
+    }
+    return res;
+}
+
 pub fn semaExpr(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) !sema.ExprResult {
+    const res = try semaExprUnchecked(c, node, cstr);
+    return checkExprCstr(c, res, cstr, node);
+}
+
+/// `semaExpr` before the result is checked against the constraint.
+fn semaExprUnchecked(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) !sema.ExprResult {
     // Set current node for unexpected errors.
     c.curNode = node;
     const res = try c.semaExprNoCheck(node, cstr);
@@ -732,8 +766,7 @@ pub fn semaExpr(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) !sema.ExprResult
     if (c.compiler.config.deny_raw_ptrs) {
         try check_raw_ptr(c, res.type, node);
     }
-
-    return checkExprCstr(c, res, cstr, node);
+    return res;
 }
 
 fn checkExprCstr(c: *cy.Chunk, res: sema.ExprResult, cstr: sema.Cstr, node: *ast.Node) !sema.ExprResult {
@@ -1805,6 +1838,7 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
             const lambda = node.cast(.lambda_expr);
 
             if (try sema_resolve.inferLambdaFuncSig(c, lambda.sig_t, cstr.target_t, node)) |sig| {
+                const func_blocks_start = c.ir.func_blocks.items.len;
                 const func = try c.addUserLambda(@ptrCast(c.sym), @ptrCast(lambda));
                 _ = try sema_local.pushLambdaProc(c, func);
 
@@ -1812,7 +1846,14 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                 try c.resolveUserLambda(func, sig);
                 try sema_local.appendFuncParamVars(c, lambda.params, sig.params());
 
-                _ = try sema_stmt.semaReturnExprStmt(c, lambda.expr, func.sig.ret, lambda.expr);
+                // As the argument of an overload, a body whose type is not the result type is a mismatch of
+                // the overload and not an error: the call tries the next one (`sema_func.matchFuncSym`).
+                var fits = true;
+                _ = try sema_stmt.semaReturnExprStmt2(c, lambda.expr, func.sig.ret, if (cstr.return_infer_error) &fits else null, lambda.expr);
+                if (!fits) {
+                    try sema_local.dropLambdaProc(c, func_blocks_start);
+                    return sema.ExprResult.initInferError(error.LambdaResult);
+                }
 
                 return sema_local.popLambdaProc(c);
             } else {

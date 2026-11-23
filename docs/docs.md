@@ -2899,7 +2899,18 @@ print(convert(str, []float{1, 2}, |x| 'v%{x}'))   --> {'v1.0', 'v2.0'}
 
 A template parameter is declared once. `fn two(a %T, b %T) -> T` reports 'The template parameter `T` is already declared. Write `T` without `%` to use it.'
 
-Among [overloads](#function-overloading), a function that infers template parameters is tried only after the overloads that match the arguments exactly.
+Among [overloads](#function-overloading), a function that infers template parameters is tried only after the overloads that match the arguments exactly. An inferred expression lambda (`|x| expr`) does not match an overload when its body does not have the result type of the function parameter, like a named function with another result type, and the call goes on to the next overload:
+```cy
+fn conv(x int, f fn(int) -> str) -> str:
+    return f(x)
+
+fn conv(x %T, f fn(T) -> %U) -> U:
+    return f(x)
+
+print(conv(1, |x| 'v%{x}'))    --> v1
+print(conv(1, |x| x + 1))      --> 2
+```
+When no overload takes the lambda, the call reports the error at its body, such as 'Expected type `str`, got `int`.' Any other error in the body, like an undeclared name, is reported right away. Only the type of the whole body is compared: a branch of an `if` expression with another type is an error, and so is a `return` with another type in a lambda with a block. An overload that infers template parameters does not go on either: when it is tried before another overload, a body that does not have the result type that its function parameter declares (`f fn(T) -> str`) is an error.
 
 An infer parameter is declared in a parameter type only. `fn f(x int) -> %U` reports '`%U` can not be declared in a return type. Declare it in a parameter (`%U type`) instead.', and `%T` in a function body or outside of a function reports '`%T` can only be declared in the signature of a function.'
 

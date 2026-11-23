@@ -1017,6 +1017,14 @@ pub fn semaReturn(c: *cy.Chunk, node: *ast.Node) !void {
 }
 
 pub fn semaReturnExprStmt(c: *cy.Chunk, child: *ast.Node, ret_opt: ?*cy.Type, node: *ast.Node) !*cy.Type {
+    return semaReturnExprStmt2(c, child, ret_opt, null, node);
+}
+
+/// With `opt_fits`, an expression whose type does not fit `ret_opt` is not reported: `opt_fits` is set to false,
+/// no return is generated and the type of the expression is returned. The caller drops the function
+/// (`sema_local.dropLambdaProc`). An error inside the expression is reported as usual.
+pub fn semaReturnExprStmt2(c: *cy.Chunk, child: *ast.Node, ret_opt: ?*cy.Type, opt_fits: ?*bool, node: *ast.Node) !*cy.Type {
+    if (opt_fits) |fits| fits.* = true;
     const proc = c.proc();
     if (proc.func != null and proc.func.?.info.generator) {
         const gen_t = c.proc().getReturnType(c.sema).cast(.pointer).child_t;
@@ -1071,11 +1079,18 @@ pub fn semaReturnExprStmt(c: *cy.Chunk, child: *ast.Node, ret_opt: ?*cy.Type, no
                 .reqTypeCstr = false,
                 .fit_target = false,
             });
+        } else if (opt_fits) |fits| {
+            expr = try sema_expr.semaExprCstrSoft(c, child, ret_t, fits);
         } else {
             expr = try c.semaExprCstr(child, ret_t);
         }
     } else {
         expr = try c.semaExpr(child, .{});
+    }
+    if (opt_fits) |fits| {
+        if (!fits.*) {
+            return dropReturnExpr(c, expr, var_start, node);
+        }
     }
 
     // Returning a local moves it instead of copying it. A type without `@copy` is copied bitwise,
@@ -1087,7 +1102,18 @@ pub fn semaReturnExprStmt(c: *cy.Chunk, child: *ast.Node, ret_opt: ?*cy.Type, no
         expr.owned = true;
     }
     if (defer_fit) {
-        expr = try fitReturnType(c, expr, ret_opt.?, child);
+        if (opt_fits) |fits| {
+            if (expr.type != ret_opt.?) {
+                if (try sema_lit.semaFitTarget(c, expr, ret_opt.?, child)) |new| {
+                    expr = new;
+                } else if (expr.type.id() != bt.Never) {
+                    fits.* = false;
+                    return dropReturnExpr(c, expr, var_start, node);
+                }
+            }
+        } else {
+            expr = try fitReturnType(c, expr, ret_opt.?, child);
+        }
     }
     try sema_borrow.checkReturnOwners(c, expr, c.borrow_pending_start, node);
 
@@ -1100,6 +1126,14 @@ pub fn semaReturnExprStmt(c: *cy.Chunk, child: *ast.Node, ret_opt: ?*cy.Type, no
         try semaReturnExpr(c, expr, node);
     }
     try sema_local.popLocals2(c, var_start, false, node);
+    return expr.type;
+}
+
+/// Ends `semaReturnExprStmt2` for an expression that does not fit the return type. Nothing is returned:
+/// the caller drops the function.
+fn dropReturnExpr(c: *cy.Chunk, expr: sema.ExprResult, var_start: usize, node: *ast.Node) !*cy.Type {
+    try sema_local.popLocals2(c, var_start, false, node);
+    c.block().endReachable = false;
     return expr.type;
 }
 

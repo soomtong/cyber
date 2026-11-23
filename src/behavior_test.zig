@@ -882,6 +882,9 @@ fn test_control_flow(run: *Runner) void {
     run.case("meta/infer_param_lambda_template_ret.cy");
     run.case("meta/infer_param_method.cy");
     run.case("meta/infer_param_overload.cy");
+    run.case("meta/infer_param_overload_lambda.cy");
+    run.case("meta/infer_param_overload_lambda_body_error.cy");
+    run.case("meta/infer_param_overload_lambda_error.cy");
     run.case("meta/infer_param_outside_func_error.cy");
     run.case("meta/infer_param_result_type.cy");
     run.case("meta/infer_param_result_type_error.cy");

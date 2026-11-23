@@ -1317,6 +1317,14 @@ pub fn popLambdaProc(c: *cy.Chunk) !sema.ExprResult {
     return res;
 }
 
+/// Drops the lambda that was being checked instead of `popLambdaProc`: no code is generated for it or for a
+/// lambda inside it. `func_blocks_start` is the number of `ir.func_blocks` before `pushLambdaProc`.
+/// The `Func` of the lambda stays in `Chunk.funcs` without a body, like a function that is never emitted.
+pub fn dropLambdaProc(c: *cy.Chunk, func_blocks_start: usize) !void {
+    _ = try popProc(c);
+    c.ir.func_blocks.items.len = func_blocks_start;
+}
+
 pub fn procPrologue(c: *cy.Chunk) !void {
     const proc = c.proc();
 

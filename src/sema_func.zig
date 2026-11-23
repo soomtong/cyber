@@ -464,6 +464,10 @@ pub const FuncMatchError = struct {
     arg_t: *cy.Type,
     param: sema.FuncParam,
 
+    /// The argument is an inferred lambda whose body does not have the result type of the parameter
+    /// (`error.LambdaResult`). `arg_t` is not the type of the lambda.
+    lambda_result: bool = false,
+
     fn init(param: sema.FuncParam, arg: usize, arg_t: *cy.Type) FuncMatchError {
         return .{
             .arg = arg,
@@ -594,6 +598,7 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
         const arg_res = try matchArg(c, arg, param, overloaded, exact, &match);
         if (!match) {
             match_err.* = FuncMatchError.init(param, arg_idx + 1, arg_res.type);
+            match_err.lambda_result = arg_res.resType == .infer_error and arg_res.data.infer_error == error.LambdaResult;
             return null;
         }
         if (capture_param_scope and sig.scope_param_idx == i) {
@@ -862,6 +867,12 @@ pub fn matchFuncSym(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const A
         }
     }
 
+    if (best_match_err.lambda_result) {
+        // The overload that came closest fails at the body of an inferred lambda. Matching it alone reports
+        // the error at the body, like a function without overloads does.
+        var match_err: FuncMatchError = undefined;
+        _ = try matchFuncSig(c, best_func.sig, pre_args, end_args, loc, false, false, &match_err);
+    }
     return reportCallFuncMismatch2(c, pre_args, end_args, best_func, best_match_err, node);
 }
 
@@ -1726,6 +1737,11 @@ fn matchArg(c: *cy.Chunk, arg: Argument, param: sema.FuncParam, overloaded: bool
         return sema.ExprResult.initVoid(c.sema.i64_t);
     }
     var res = try resolveRtArg(c, arg, arg.node, param, overloaded, !exact);
+    if (res.resType == .infer_error) {
+        // Only set for an overload: the argument can not take the type of the parameter.
+        out_match.* = false;
+        return res;
+    }
     res = try ownOrManageArg(c, res, arg.node);
 
     const ct_compat = cy.types.isTypeCompat(c.compiler, res.type, param.get_type());

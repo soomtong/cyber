@@ -925,6 +925,8 @@ fn test_control_flow(run: *Runner) void {
     run.case("meta/infer_param_overload_lambda_branch.cy");
     run.case("meta/infer_param_overload_lambda_branch_body_error.cy");
     run.case("meta/infer_param_overload_lambda_branch_error.cy");
+    run.case("meta/infer_param_overload_lambda_capture.cy");
+    run.case("meta/infer_param_overload_lambda_capture_missing_return_error.cy");
     run.case("meta/infer_param_overload_lambda_error.cy");
     run.case("meta/infer_param_overload_lambda_switch.cy");
     run.case("meta/infer_param_overload_lambda_switch_error.cy");

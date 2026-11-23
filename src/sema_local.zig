@@ -1251,6 +1251,8 @@ pub fn popLambdaProc(c: *cy.Chunk) !sema.ExprResult {
     const params = c.getProcParams(proc);
     
     const captures = try proc.captures.toOwnedSlice(c.alloc);
+    // Also when the function ends with an error ('Missing return statement.').
+    defer c.alloc.free(captures);
     try procPrologue(c);
     const stmtBlock = try popProc(c);
 
@@ -1280,7 +1282,6 @@ pub fn popLambdaProc(c: *cy.Chunk) !sema.ExprResult {
             try sema_borrow.noteBorrowLocal(c, pId);
             owner = sema_borrow.shorterOwner(c, owner, sema_borrow.borrowOwnerOf(c, pId));
         }
-        c.alloc.free(captures);
         const funcptr_t = try sema.getFuncPtrType(c, proc.func.?.sig);
         if (captures_scope_locals) {
             type_ = try sema.getOpaqueFuncType(c, funcptr_t);

@@ -269,6 +269,12 @@ pub fn declareUseImport(c: *cy.Chunk, node: *ast.ImportStmt) !void {
 
         // Import all symbols into this module.
         for (import_c.syms.items) |sym| {
+            // `syms` also holds what the declarations of the module own, like the methods of a type.
+            // Those are reached through their owner. As names of this module, the methods `show` of
+            // two imported types would be the same name declared twice.
+            if (sym.parent != @as(*cy.Sym, @ptrCast(import_c.sym))) {
+                continue;
+            }
             if (sym.getMetadata().private) {
                 continue;
             }

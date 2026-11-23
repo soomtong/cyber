@@ -589,6 +589,9 @@ fn test_modules(run: *Runner) void {
         run.case("modules/use_dotted_name_error.cy");
         run.case("modules/visibility.cy");
         run.case("modules/visibility_import_all.cy");
+        run.case("modules/trait_default_overload_import.cy");
+        run.case("modules/trait_default_overload_import_all.cy");
+        run.case("modules/trait_default_overload_import_clash_error.cy");
         run.case("modules/private_field_meta.cy");
         run.case("modules/private_choice.cy");
         run.case("modules/private_func_error.cy");

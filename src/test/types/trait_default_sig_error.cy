@@ -1,3 +1,5 @@
+-- A method with the parameters of a default method takes its place. With another return type it does not
+-- implement the trait.
 type Shape trait:
     fn describe() -> str:
         return 'shape'
@@ -5,16 +7,16 @@ type Shape trait:
 type Circle:
     with Shape
 
-fn (&Circle) describe(prefix str) -> str:
-    return prefix + 'circle'
+fn (&Circle) describe() -> int:
+    return 1
 
 --cytest: error
 --CompileError: `Circle` does not implement `fn describe(Shape) -> str` from `Shape`.
 --
---@MainPath():6:10:
+--@MainPath():8:10:
 --    with Shape
 --         ^~~~~
---@MainPath():5:1:
+--@MainPath():7:1:
 --type Circle:
 --^~~~~~~~~~~
 --

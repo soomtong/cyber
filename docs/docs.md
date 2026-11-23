@@ -2133,7 +2133,7 @@ fn (&Square) describe() -> str:
 
 print(Square{width=2}.describe())       --> a square of 2.0
 ```
-A member of the type with the same name always takes the place of the default method. If its signature is not the one from the trait, the type does not implement the trait: '`Square` does not implement `fn describe(Shape) -> str` from `Shape`.'
+A method of the type with the same name and the same parameter types takes the place of the default method. If its return type is not the one from the trait, the type does not implement the trait: '`Square` does not implement `fn describe(Shape) -> str` from `Shape`.' A method with the same name and other parameter types is another overload, and the type still gets the default method. A trait can have overloads too, with a default for some or for all of them, and a default method can call another overload on `self`. A field or a function without a receiver that has the same name keeps the default methods of that name out.
 
 Inside a default method, `self` is the receiver seen through the trait. Its type is the shared borrow `&Dyn[Shape]`. It can call the other methods of the trait, required or default, and it can be passed to a function that takes a `&Dyn[Shape]`. A call on `self` is a dynamic dispatch, so it reaches the method of the implementing type, including an override of another default method.
 
@@ -2150,7 +2150,7 @@ The other rules:
 - A trait method is declared without a receiver, and a default method always takes the receiver as a shared borrow. There is no default method with an exclusive receiver `&&T`, and a `&&T` method does not implement a trait method. See [Receivers of trait methods](#receivers-of-trait-methods).
 - A default method of a generic trait can use the template parameters of the trait. A template type gets default methods like any other type.
 - The body is compiled for each type that gets the default method. A default method that every implementing type overrides is not checked.
-- When two traits of a type have a default method with the same name, the type must declare the method itself. Otherwise: '`Both` gets the default method `side` from both `Left` and `Right`. Declare `side` for `Both` to say what it does.' The declared method implements both traits when its signature matches both.
+- When two traits of a type have a default method with the same name and the same parameter types, the type must declare the method itself. Otherwise: '`Both` gets the default method `side` from both `Left` and `Right`. Declare `side` for `Both` to say what it does.' The declared method implements both traits when its signature matches both.
 - A default method of one trait does not implement a required method of another trait: '`Both` has the method `side` only as a default method of `Left`. Declare `side` for `Both` to implement `Right`.'
 - A default method can not be a generator ('A default method of a trait can not be a generator.') and can not have a template parameter ('A default method of a trait can not have a template parameter.').
 

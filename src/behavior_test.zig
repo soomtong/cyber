@@ -523,6 +523,8 @@ fn test_types(run: *Runner) void {
     run.case("types/trait_default_other_trait_error.cy");
     run.case("types/trait_default_sig_error.cy");
     run.case("types/trait_default_generator_error.cy");
+    run.case("types/trait_default_overload.cy");
+    run.case("types/trait_default_overload_clash_error.cy");
     run.case("types/trait_receiver.cy");
     run.case("types/trait_ex_receiver_error.cy");
     run.case("types/trait_default_ex_receiver_error.cy");

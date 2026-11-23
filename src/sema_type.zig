@@ -1159,8 +1159,10 @@ pub fn resolve_type_impls(c: *cy.Chunk, type_: *cy.Type, impl_decls: []*ast.Impl
 /// (`Compiler.resolveImplFuncs`) then find it like a method that the type declares. Inside the body `self` is
 /// the receiver as `&Dyn[Trait]` (`sema_local.semaMethodBody2`).
 ///
-/// A member of the type with the same name keeps the default out, whatever its signature: a method that does
-/// not match the trait's is the usual `does not implement` error.
+/// A method of the type with the same name and the same parameter types keeps the default out: it is the
+/// type's own version, or with another return type the usual `does not implement` error. A method with other
+/// parameters is another overload and the default is added next to it. A member that is not a method (a field,
+/// a function without a receiver) keeps the default out whatever its signature.
 fn reserveDefaultMethods(c: *cy.Chunk, type_: *cy.Type, trait_t: *cy.types.GenericTrait, node: *ast.Node) !void {
     const trait_decl = trait_t.base.sym().decl orelse return;
     if (trait_decl.type() != .trait_decl) return;
@@ -1179,28 +1181,41 @@ fn reserveDefaultMethods(c: *cy.Chunk, type_: *cy.Type, trait_t: *cy.types.Gener
             return c.reportError("A default method of a trait can not have a template parameter.", @ptrCast(decl));
         }
         const name = member.func.name();
+        const trait_sig = member.func.sig;
         if (sym.getMod().getSym(name)) |existing| {
-            if (existing.type == .func) {
-                var next: ?*cy.Func = existing.cast(.func).first;
-                while (next) |func| : (next = func.next) {
-                    const other = func.default_trait orelse continue;
-                    const type_name = try c.sema.allocTypeName(type_);
-                    defer c.alloc.free(type_name);
-                    const other_name = try c.sema.allocTypeName(&other.base);
-                    defer c.alloc.free(other_name);
-                    const trait_name = try c.sema.allocTypeName(&trait_t.base);
-                    defer c.alloc.free(trait_name);
-                    return c.reportErrorFmt("`{}` gets the default method `{}` from both `{}` and `{}`. Declare `{}` for `{}` to say what it does.", &.{
-                        v(type_name), v(name), v(other_name), v(trait_name), v(name), v(type_name),
-                    }, node);
+            if (existing.type != .func) continue;
+            // The methods of the type are compared by their parameters, so their signatures are needed now.
+            // The default is added to the same list, which is why the taken overload is looked up first.
+            var taken = false;
+            var next: ?*cy.Func = existing.cast(.func).first;
+            while (next) |func| : (next = func.next) {
+                if (!func.isMethod()) {
+                    taken = true;
+                    break;
                 }
+                try sema_resolve.ensure_resolved_func(c, func, false, node);
+                // A function template has no signature to compare.
+                if (func.type == .generic) continue;
+                if (!sameMethodParams(trait_sig, func.sig)) continue;
+                taken = true;
+                const other = func.default_trait orelse break;
+                // The same trait listed again. Its default is already there.
+                if (other == trait_t) break;
+                const type_name = try c.sema.allocTypeName(type_);
+                defer c.alloc.free(type_name);
+                const other_name = try c.sema.allocTypeName(&other.base);
+                defer c.alloc.free(other_name);
+                const trait_name = try c.sema.allocTypeName(&trait_t.base);
+                defer c.alloc.free(trait_name);
+                return c.reportErrorFmt("`{}` gets the default method `{}` from both `{}` and `{}`. Declare `{}` for `{}` to say what it does.", &.{
+                    v(type_name), v(name), v(other_name), v(trait_name), v(name), v(type_name),
+                }, node);
             }
-            continue;
+            if (taken) continue;
         }
 
         const start = c.func_param_stack.items.len;
         defer c.func_param_stack.items.len = start;
-        const trait_sig = member.func.sig;
         try c.func_param_stack.append(c.alloc, sema.FuncParam.init(try sema.getBorrowType(c, type_)));
         try c.func_param_stack.appendSlice(c.alloc, trait_sig.params()[1..]);
         const scope_param_idx: ?u8 = if (trait_sig.scope_param_idx == cy.NullU8) null else trait_sig.scope_param_idx;
@@ -1209,6 +1224,18 @@ fn reserveDefaultMethods(c: *cy.Chunk, type_: *cy.Type, trait_t: *cy.types.Gener
         const func = try cy.module.reserveDefaultMethod(c, &sym.head, name, decl, trait_t);
         try c.resolveUserFunc(func, sig);
     }
+}
+
+/// Whether two method signatures take the same parameters after the receiver. The return type is not compared:
+/// overloads can not differ only in it (`module.resolveFunc`).
+fn sameMethodParams(a: *cy.FuncSig, b: *cy.FuncSig) bool {
+    const a_params = a.params()[1..];
+    const b_params = b.params()[1..];
+    if (a_params.len != b_params.len) return false;
+    for (a_params, b_params) |a_param, b_param| {
+        if (a_param.get_type() != b_param.get_type()) return false;
+    }
+    return true;
 }
 
 pub fn resolveFuncType(c: *cy.Chunk, func_type: *ast.FuncType) !*cy.FuncSig {

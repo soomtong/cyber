@@ -876,12 +876,16 @@ fn test_control_flow(run: *Runner) void {
     run.case("meta/infer_param_lambda_body_error.cy");
     run.case("meta/infer_param_lambda_no_func_error.cy");
     run.case("meta/infer_param_lambda_param_error.cy");
+    run.case("meta/infer_param_lambda_reuse_error.cy");
+    run.case("meta/infer_param_lambda_template_ret.cy");
     run.case("meta/infer_param_method.cy");
     run.case("meta/infer_param_overload.cy");
     run.case("meta/infer_param_outside_func_error.cy");
     run.case("meta/infer_param_result_type.cy");
     run.case("meta/infer_param_result_type_error.cy");
     run.case("meta/infer_param_return_type_error.cy");
+    run.case("meta/infer_param_template_body_error.cy");
+    run.case("meta/infer_param_template_body_new_error.cy");
     run.case("meta/infer_param_type_arg_error.cy");
     run.case("meta/type_size_str_arg_error.cy");
     run.case("meta/type_size_trait_error.cy");

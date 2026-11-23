@@ -1251,18 +1251,39 @@ fn getFuncTemplateParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *
 /// The type of a parameter from the template parameters that the arguments before it bound (`b []T`,
 /// `f fn(T) -> %U`). Returns `null` when the type declares an infer parameter that is not bound yet:
 /// the argument is resolved first and the parameter is inferred from its type.
-/// With the mode `placeholder` such an infer parameter is `Sema.infer_t` and the type is always returned.
-fn evalParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *sema_resolve.ResolveContext, idx: usize, mode: sema_resolve.InferParamMode) !?*cy.Type {
+fn evalParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *sema_resolve.ResolveContext, idx: usize, resolve_new_type: bool) !?*cy.Type {
     const prev = ctx.infer_param;
-    ctx.infer_param = mode;
+    ctx.infer_param = .bound;
     defer ctx.infer_param = prev;
-    // A type that is built from the placeholder is only looked at. It is not resolved.
-    return getFuncTemplateParamType(c, template, ctx, idx, mode != .placeholder) catch |err| {
+    return getFuncTemplateParamType(c, template, ctx, idx, resolve_new_type) catch |err| {
         if (err == error.FoundInferParam) {
             return null;
         }
         return err;
     };
+}
+
+/// The type of a parameter before its argument is analysed, to tell which parts of it are known.
+/// An infer parameter that is not bound yet is the placeholder type `Sema.infer_t` for the evaluation, and
+/// so is every later use of its name (`Pair[%U, U]`). A type that can not be expanded with the placeholder
+/// (`Map[%K, int]`, `[%N]T`) is the placeholder too, see `template.resolveTemplateArgs`.
+/// The type is only looked at. It is not resolved.
+fn evalParamTypeHint(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *sema_resolve.ResolveContext, idx: usize) !?*cy.Type {
+    const spec = paramTypeSpec(template, idx);
+    var names: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer {
+        for (names.items) |name| {
+            ctx.unsetCtParam(c.heap, name);
+        }
+        names.deinit(c.alloc);
+    }
+    while (firstInferParam(spec, ctx)) |infer_n| {
+        const name = infer_n.cast(.infer_param).name.as_name();
+        try names.ensureUnusedCapacity(c.alloc, 1);
+        try ctx.initCtParam2(c.alloc, name, c.sema.type_t, Value.initPtr(c.sema.infer_t));
+        names.appendAssumeCapacity(name);
+    }
+    return evalParamType(c, template, ctx, idx, false);
 }
 
 /// The type specifier of the parameter at `idx`.
@@ -1282,7 +1303,7 @@ fn reportCanNotInfer(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *sema_re
 }
 
 /// The signature of a function type: `fn(T) -> U`, `Func[fn(T) -> U]`, `&OpaqueFunc[fn(T) -> U]`.
-fn funcSigOfType(type_: *cy.Type) ?*cy.FuncSig {
+pub fn funcSigOfType(type_: *cy.Type) ?*cy.FuncSig {
     switch (type_.kind()) {
         .func_ptr => return type_.cast(.func_ptr).sig,
         .func => return type_.cast(.func).sig,
@@ -1295,30 +1316,6 @@ fn funcSigOfType(type_: *cy.Type) ?*cy.FuncSig {
         },
         else => return null,
     }
-}
-
-/// Whether a type that was evaluated with the mode `placeholder` is built from an infer parameter
-/// that is not bound.
-fn usesInferPlaceholder(c: *cy.Chunk, type_: *cy.Type) bool {
-    if (type_.id() == bt.Infer) {
-        return true;
-    }
-    if (funcSigOfType(type_)) |sig| {
-        for (sig.params()) |param| {
-            if (usesInferPlaceholder(c, param.get_type())) return true;
-        }
-        return usesInferPlaceholder(c, sig.ret);
-    }
-    if (type_.kind() == .null) {
-        return false;
-    }
-    const instance = type_.sym().instance orelse return false;
-    for (instance.params, 0..) |param, i| {
-        if (instance.param_types[i].id() == bt.Type) {
-            if (usesInferPlaceholder(c, param.asPtr(*cy.Type))) return true;
-        }
-    }
-    return false;
 }
 
 /// An inferred lambda (`|x| expr`) as the argument of a parameter that still has infer parameters to bind:
@@ -1350,12 +1347,12 @@ fn resolveInferLambdaArg(c: *cy.Chunk, arg: Argument, template: *cy.sym.FuncTemp
         else => return null,
     }
 
-    const hint_t = (try evalParamType(c, template, ctx, idx, .placeholder)) orelse return null;
-    const sig = funcSigOfType(hint_t) orelse return null;
-
     const param_name = template.func_params[idx].name_type.as_name();
     const infer_n = firstInferParam(paramTypeSpec(template, idx), ctx) orelse return null;
     const name = infer_n.cast(.infer_param).name.as_name();
+
+    const hint_t = (try evalParamTypeHint(c, template, ctx, idx)) orelse return null;
+    const sig = funcSigOfType(hint_t) orelse return null;
     if (block_lambda) {
         return c.reportErrorFmt("Can not infer the template parameter `{}` from the lambda for `{}`. The result type of a lambda with a block is not inferred. Use an expression lambda (`|x| expr`), declare the types of the lambda (`fn(x T) -> {}:`), or declare `%{} type` as its own parameter and pass the type in the call.", &.{v(name), v(param_name), v(name), v(name)}, arg.node);
     }
@@ -1364,7 +1361,7 @@ fn resolveInferLambdaArg(c: *cy.Chunk, arg: Argument, template: *cy.sym.FuncTemp
         return c.reportErrorFmt("Expected a lambda with `{}` parameter(s) for `{}`. Found `{}`.", &.{v(sig.params().len), v(param_name), v(lambda.params.len)}, arg.node);
     }
     for (sig.params(), 0..) |param, i| {
-        if (usesInferPlaceholder(c, param.get_type())) {
+        if (cy.template.usesInferPlaceholder(param.get_type())) {
             const lambda_param = lambda.params[i].name_type.as_name();
             return c.reportErrorFmt("Can not infer the template parameter `{}` from the lambda for `{}`. The type of the lambda parameter `{}` must be known from the arguments before the lambda. Declare the types of the lambda (`fn(x T) -> U: ...`), or declare `%{} type` as its own parameter and pass the type in the call.", &.{v(name), v(param_name), v(lambda_param), v(name)}, arg.node);
         }
@@ -1447,7 +1444,7 @@ fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, templa
     var infer = param_t.id() == bt.Infer;
     var dep_target_t: ?*cy.Type = null;
     if (param_t.id() == bt.Dependent) {
-        dep_target_t = try evalParamType(c, template, template_ctx, param_idx, .bound);
+        dep_target_t = try evalParamType(c, template, template_ctx, param_idx, true);
         // The type declares an infer parameter that is not bound yet (`p Pair[T, %U]`).
         infer = dep_target_t == null;
     }
@@ -1502,7 +1499,7 @@ fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, templa
     const targ = cy.TypeValue.init(c.sema.type_t, Value.initPtr(ct_value.type));
     try inferCtArgs(c, targ, template, template_ctx, paramTypeSpec(template, param_idx), null, arg.node);
     // The parts of the parameter type that are not inferred are checked against the argument here.
-    const target_t = (try evalParamType(c, template, template_ctx, param_idx, .bound)) orelse {
+    const target_t = (try evalParamType(c, template, template_ctx, param_idx, true)) orelse {
         return reportCanNotInfer(c, template, template_ctx, param_idx, arg.node);
     };
     if (ct_value.type.id() != target_t.id()) {
@@ -1550,7 +1547,7 @@ fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template
 
     var infer = param_t.id() == bt.Infer;
     if (param_t.id() == bt.Dependent) {
-        if (try evalParamType(c, template, template_ctx, param_idx, .bound)) |target_t| {
+        if (try evalParamType(c, template, template_ctx, param_idx, true)) |target_t| {
             target = sema.FuncParam.init(target_t);
         } else {
             // The type declares an infer parameter that is not bound yet (`f fn(T) -> %U`).
@@ -1575,7 +1572,7 @@ fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template
 
         // The parts of the parameter type that are not inferred (`T` in `f fn(T) -> %U`) are checked against
         // the argument below, with the type that the parameter has now.
-        const target_t = (try evalParamType(c, template, template_ctx, param_idx, .bound)) orelse {
+        const target_t = (try evalParamType(c, template, template_ctx, param_idx, true)) orelse {
             return reportCanNotInfer(c, template, template_ctx, param_idx, arg.node);
         };
         if (res.type.id() != target_t.id()) {

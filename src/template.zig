@@ -453,7 +453,51 @@ pub fn failedInstance(c: *cy.Chunk, node: *ast.Node) anyerror {
     return c.reportError("The template could not be expanded with these arguments because of an earlier error.", node);
 }
 
-pub fn resolveTemplateArgs(c: *cy.Chunk, args: []const *ast.Node, template: *cy.sym.Template, template_ctx: *sema_resolve.ResolveContext, node: *ast.Node) !void {
+/// Whether `type_` is built from the placeholder of an infer parameter that is not bound (`Sema.infer_t`).
+/// Such a type only exists while the type of a parameter is looked at before its argument is analysed,
+/// see `sema_func.evalParamTypeHint`.
+pub fn usesInferPlaceholder(type_: *cy.Type) bool {
+    if (type_.id() == bt.Infer) {
+        return true;
+    }
+    if (cy.sema_func.funcSigOfType(type_)) |sig| {
+        for (sig.params()) |param| {
+            if (usesInferPlaceholder(param.get_type())) return true;
+        }
+        return usesInferPlaceholder(sig.ret);
+    }
+    if (type_.kind() == .null) {
+        return false;
+    }
+    const instance = type_.sym().instance orelse return false;
+    for (instance.params, 0..) |param, i| {
+        if (instance.param_types[i].id() == bt.Type) {
+            if (usesInferPlaceholder(param.asPtr(*cy.Type))) return true;
+        }
+    }
+    return false;
+}
+
+/// Whether `val` is a type that is built from the placeholder of an infer parameter.
+pub fn isInferPlaceholder(val: cy.TypeValue) bool {
+    return val.type.id() == bt.Type and usesInferPlaceholder(val.value.asPtr(*cy.Type));
+}
+
+/// Whether `template` only names or wraps the type of its argument, so that the parts of the argument
+/// can be read back from the instance: a type alias, `Func[fn(T) -> U]`, `OpaqueFunc[fn(T) -> U]`, `&T`.
+/// Such a template is expanded with the placeholder of an infer parameter.
+fn keepsInferPlaceholder(c: *cy.Chunk, template: *cy.sym.Template) bool {
+    if (template.kind == .type_alias and template.decl.child_decl.type() == .type_alias_decl) {
+        return true;
+    }
+    return template == c.sema.func_tmpl or template == c.sema.opaque_func_tmpl or template == c.sema.borrow_tmpl;
+}
+
+/// Evaluates the template arguments onto the value and type stacks.
+/// Returns `false` when an argument is built from the placeholder of an infer parameter and the template
+/// can not be expanded with it: a type with a layout (`Map[Infer, int]`), or a parameter that is not a type
+/// (`[Infer]T`). The stacks are then incomplete and the caller must not expand the template.
+pub fn resolveTemplateArgs(c: *cy.Chunk, args: []const *ast.Node, template: *cy.sym.Template, template_ctx: *sema_resolve.ResolveContext, node: *ast.Node) !bool {
     if (args.len != template.params.len) {
         return c.reportErrorFmt("Expected {} template parameters.", &.{v(template.params.len)}, node);
     }
@@ -500,7 +544,14 @@ pub fn resolveTemplateArgs(c: *cy.Chunk, args: []const *ast.Node, template: *cy.
         // fails to land on its stack would not be destructed.
         try c.valueStack.ensureUnusedCapacity(c.alloc, 1);
         try c.typeStack.ensureUnusedCapacity(c.alloc, 1);
-        const res = try evalParamValueCheck(c, arg, param_t, eff_param.const_param);
+        const res = try evalParamValue(c, arg, param_t, eff_param.const_param, true);
+        if (isInferPlaceholder(res)) {
+            const type_param = !eff_param.const_param or param_t.id() == bt.Type;
+            if (!type_param or !keepsInferPlaceholder(c, template)) {
+                c.heap.destructValue(res);
+                return false;
+            }
+        }
 
         c.valueStack.appendAssumeCapacity(res.value);
 
@@ -516,6 +567,7 @@ pub fn resolveTemplateArgs(c: *cy.Chunk, args: []const *ast.Node, template: *cy.
         const ctx_value = try c.heap.copyValue2(res.type, res.value);
         try template_ctx.initCtParam(c.alloc, name, cy.TypeValue.init(res.type, ctx_value));
     }
+    return true;
 }
 
 /// Whether a `const` template parameter can have this type.
@@ -557,7 +609,14 @@ pub fn check_const_param_type(c: *cy.Chunk, param_t: *cy.Type, node: *ast.Node) 
 }
 
 pub fn evalParamValueCheck(c: *cy.Chunk, node: *ast.Node, target_t: *cy.Type, const_param: bool) !cy.TypeValue {
-    const cstr: cte.ExprCstr = if (const_param) .init_check(target_t) else .init_check_generic(target_t);
+    return evalParamValue(c, node, target_t, const_param, false);
+}
+
+/// With `pass_infer_placeholder`, a type that is built from the placeholder of an infer parameter is returned
+/// as it is, whatever the parameter expects.
+fn evalParamValue(c: *cy.Chunk, node: *ast.Node, target_t: *cy.Type, const_param: bool, pass_infer_placeholder: bool) !cy.TypeValue {
+    var cstr: cte.ExprCstr = if (const_param) .init_check(target_t) else .init_check_generic(target_t);
+    cstr.pass_infer_placeholder = pass_infer_placeholder;
     const expr = try cte.evalExpr(c, node, cstr);
     switch (expr.kind) {
         .ct_var,
@@ -598,7 +657,10 @@ pub fn expand_template_ast2(c: *cy.Chunk, template: *cy.sym.Template, args: []co
         c.typeStack.items.len = param_type_start;
     }
 
-    try resolveTemplateArgs(c, args, template, &template_ctx, node);
+    if (!try resolveTemplateArgs(c, args, template, &template_ctx, node)) {
+        // The instance would be built from the placeholder too. Stand for it with the placeholder itself.
+        return @ptrCast(c.sema.infer_t.sym());
+    }
 
     const arg_types = c.typeStack.items[param_type_start..];
     const arg_vals = c.valueStack.items[param_start..];

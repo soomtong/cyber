@@ -870,6 +870,10 @@ pub const ExprCstr = struct {
     /// This only affects newly created types (instance types).
     resolve_new_type: bool = true,
 
+    /// A type that is built from the placeholder of an infer parameter (`Sema.infer_t`) is returned without
+    /// the check. The caller must look for it, see `template.resolveTemplateArgs`.
+    pass_infer_placeholder: bool = false,
+
     fn initTarget(type_: ?*cy.Type) ExprCstr {
         return .{
             .check = false,
@@ -1126,6 +1130,10 @@ pub fn evalExpr(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!Expr {
     const target_t = cstr.type orelse {
         return Expr.initValue(res_val);
     };
+
+    if (cstr.pass_infer_placeholder and cy.template.isInferPlaceholder(res_val)) {
+        return Expr.initValue(res_val);
+    }
 
     if (cstr.match_generic_type) {
         if (res_val.type.id() == bt.Type) {
@@ -1691,15 +1699,16 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
             if (ctx.infer_param == .ret) {
                 return c.reportErrorFmt("`%{}` can not be declared in a return type. Declare it in a parameter (`%{} type`) instead.", &.{v(name), v(name)}, node);
             }
-            if (ctx.infer_param == .bound or ctx.infer_param == .placeholder) {
+            if (ctx.infer_param == .bound) {
                 // Matching a call. The parameter is known once an argument bound it.
                 if (ctx.ct_params.contains(name)) {
                     return eval_ident(c, name, node);
                 }
-                if (ctx.infer_param == .placeholder) {
-                    return Expr.initSym(@ptrCast(c.sema.infer_t.sym()));
-                }
                 return error.FoundInferParam;
+            }
+            if (ctx.infer_param != .param) {
+                // Not a signature: the body of a function, a type declaration.
+                return c.reportErrorFmt("`%{}` can only be declared in the signature of a function.", &.{v(name)}, node);
             }
             if (ctx.type == .func and ctx.data.func.instance != null) {
                 // Resolving variant func.
@@ -1721,12 +1730,9 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
                         return Expr.initValue(ct_value);
                     },
                 }
-            } else if (ctx.infer_param == .param) {
-                // Exit eval and visit type spec node to find all infer params not just this one.
-                return error.FoundInferParam;
-            } else {
-                return c.reportErrorFmt("`%{}` can only be declared in the signature of a function.", &.{v(name)}, node);
             }
+            // Exit eval and visit type spec node to find all infer params not just this one.
+            return error.FoundInferParam;
         },
         .generic_expand => {
             const ctx = sema_resolve.getResolveContext(c);

@@ -291,6 +291,15 @@ const ResolveContextType = enum(u8) {
     func,
 };
 
+pub const InferParamMode = enum(u8) {
+    /// Not a place that declares infer parameters. `%T` is reported as an error.
+    none,
+    /// A parameter type. `error.FoundInferParam` is returned to the caller, which must handle it.
+    param,
+    /// A return type. `%T` is reported as an error that points to the parameters.
+    ret,
+};
+
 pub const CtParam = struct {
     type_header: u64,
     value: Value,
@@ -330,6 +339,9 @@ pub const ResolveContext = struct {
     ct_locals: std.ArrayList([]const u8),
 
     is_inline_eval: bool = false,
+
+    /// What an infer parameter (`%T`) means for the type specifier that is being evaluated.
+    infer_param: InferParamMode = .none,
 
     chunk: *cy.Chunk,
     caller: ?*ast.Node,

@@ -1387,7 +1387,7 @@ fn findInferParams(c: *cy.Chunk, node: *ast.Node) !void {
 
 /// Handles generic and dependent types.
 pub fn resolveAnyParamType(c: *cy.Chunk, param_idx: usize, resolve_new_type: bool, node: *ast.Node, comptime variant: bool) !*cy.Type {
-    const res = cte.eval_type2(c, resolve_new_type, node) catch |err| {
+    const res = evalTypeInferMode(c, .param, resolve_new_type, node) catch |err| {
         if (err == error.FoundDependentType) {
             try findInferParams(c, node);
             return c.sema.dependent_t;
@@ -1451,13 +1451,22 @@ pub fn resolve_return_type_spec(c: *cy.Chunk, node: ?*ast.Node, resolve_new_type
     const n = node orelse {
         return c.sema.void_t;
     };
-    return cte.eval_type2(c, resolve_new_type, n) catch |err| {
+    return evalTypeInferMode(c, .ret, resolve_new_type, n) catch |err| {
         if (err == error.FoundDependentType) {
             return c.sema.dependent_t;
         } else {
             return err;
         }
     };
+}
+
+/// Evaluates a type specifier of a function signature. `mode` tells `cte` what an infer parameter (`%T`) means there.
+fn evalTypeInferMode(c: *cy.Chunk, mode: sema_resolve.InferParamMode, resolve_new_type: bool, node: *ast.Node) !*cy.Type {
+    const prev = sema_resolve.getResolveContext(c).infer_param;
+    sema_resolve.getResolveContext(c).infer_param = mode;
+    // The resolve stack can grow during the eval. Get the context again.
+    defer sema_resolve.getResolveContext(c).infer_param = prev;
+    return cte.eval_type2(c, resolve_new_type, node);
 }
 
 fn resolveCopiedType(c: *cy.Chunk, sym: *cy.sym.TypeSym, src_t: *cy.Type, node: *ast.Node) !void {

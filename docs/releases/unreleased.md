@@ -11,7 +11,11 @@
 
 - 이제 해당 호출 인자 위치와 함께 'Can not infer the template parameter `U` from the argument for `f`. Declare it as its own parameter (`%U type`) and pass the type in the call.'을 보고한다.
 - 추론 자체는 아직 지원하지 않는다. `fn map(%U type, items []%T, f MapFn[T, U]) -> []U`처럼 따로 선언하고 `map(str, items, name)`으로 타입을 넘긴다.
-- 테스트: `src/test/meta/infer_param_dependent_error.cy`. 매뉴얼: `docs/docs.md`의 'Infer parameter'.
+- 컴파일 타임 호출(`const r = second(1, Pair[int, str]{a=1, b='x'})`)은 같은 경우에 '`%U` can only be declared in the signature of a function.'이라고 틀리게 보고했다. 이제 런타임 호출과 같은 'Can not infer the template parameter `U` from the argument for `p`...' 문구를 호출 인자 위치에 보고한다.
+- 반환 타입의 infer 파라미터(`fn f(x int) -> %U:`)는 호출이 없어도 위치 없는 'CompileError: Error: FoundInferParam'으로 끝났다. 이제 `%U` 위치에 '`%U` can not be declared in a return type. Declare it in a parameter (`%U type`) instead.'를 보고한다.
+- 제네릭이 아닌 함수의 본문에 쓴 infer 파라미터(`fn main():` 안의 `a := []%T{}`)는 위치는 있었지만 문구가 'CompileError: error.FoundInferParam'이었다. 이제 최상위에서 쓴 경우와 같은 '`%T` can only be declared in the signature of a function.'을 `%T` 위치에 보고한다.
+- 구현: infer 파라미터를 선언할 수 있는 자리(파라미터 타입)를 평가할 때만 내부 오류 `FoundInferParam`을 내보내고, 그 밖의 자리에서는 바로 오류를 보고한다. 받아 줄 곳이 없는 경로로 내부 오류 이름이 새지 않는다.
+- 테스트: `src/test/meta/infer_param_dependent_error.cy`, `infer_param_dependent_ct_error.cy`, `infer_param_return_type_error.cy`, `infer_param_func_body_error.cy`. 매뉴얼: `docs/docs.md`의 'Infer parameter'.
 
 ## wasm32-freestanding 빌드 제거 (2026-11-22, 깨지는 변경)
 

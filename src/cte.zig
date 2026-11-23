@@ -1688,10 +1688,10 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
             const name = node.cast(.infer_param).name.as_name();
 
             const ctx = sema_resolve.getResolveContext(c);
-            if (ctx.type != .func) {
-                return c.reportErrorFmt("`%{}` can only be declared in the signature of a function.", &.{v(name)}, node);
+            if (ctx.infer_param == .ret) {
+                return c.reportErrorFmt("`%{}` can not be declared in a return type. Declare it in a parameter (`%{} type`) instead.", &.{v(name), v(name)}, node);
             }
-            if (ctx.data.func.instance != null) {
+            if (ctx.type == .func and ctx.data.func.instance != null) {
                 // Resolving variant func.
                 const res = try sema_local.lookupStaticIdent(c, name, node) orelse {
                     return c.reportErrorFmt("Could not find the symbol `{}`.", &.{v(name)}, node);
@@ -1711,9 +1711,11 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
                         return Expr.initValue(ct_value);
                     },
                 }
-            } else {
+            } else if (ctx.infer_param == .param) {
                 // Exit eval and visit type spec node to find all infer params not just this one.
                 return error.FoundInferParam;
+            } else {
+                return c.reportErrorFmt("`%{}` can only be declared in the signature of a function.", &.{v(name)}, node);
             }
         },
         .generic_expand => {

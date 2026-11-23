@@ -1250,6 +1250,10 @@ fn getFuncTemplateParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *
 /// The type of a parameter that depends on an earlier template parameter (`f MapFn[T, %U]`).
 /// The type is evaluated from the parameters that are known. It can not declare a new infer parameter.
 fn getDependentParamType(c: *cy.Chunk, template: *cy.sym.FuncTemplate, ctx: *sema_resolve.ResolveContext, idx: usize, arg_n: *ast.Node) !*cy.Type {
+    // An infer parameter exits the eval with `error.FoundInferParam` for a compile-time call too.
+    const prev = ctx.infer_param;
+    ctx.infer_param = .param;
+    defer ctx.infer_param = prev;
     return getFuncTemplateParamType(c, template, ctx, idx) catch |err| {
         if (err != error.FoundInferParam) {
             return err;

@@ -972,6 +972,9 @@ fn test_control_flow(run: *Runner) void {
     run.case("types/none_compare_not_option_error.cy");
     run.case("types/compare_str_int_error.cy");
     run.case("types/str_plus_int_error.cy");
+    run.case("types/type_prefix_bang_callee.cy");
+    run.case("types/type_prefix_bang_callee_arg_error.cy");
+    run.case("types/option_type_record_init_error.cy");
 }
 
 // TODO: This could be split into compiler only tests and backend tests.

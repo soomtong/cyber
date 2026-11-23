@@ -929,6 +929,8 @@ a := ?str('abc')
 print(a)    --> abc
 ```
 
+The type after `?` ends before the call or the initializer, also when it is a result type: `?!int(int.parse(s))` calls `?!int`, and `[]?int{1, none}` and `[]!int{int.parse(s)}` are slices. The argument is wrapped one level only: `?!int(1)` is a compile error, since an `int` is not a `!int`. At the start of an expression `!` is logic not, so `!int(x)` is `not int(x)`.
+
 ### Wrap `none`.
 `none` is automatically initialized to the inferred optional's `none` case:
 ```cy

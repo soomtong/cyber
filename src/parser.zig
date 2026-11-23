@@ -4470,9 +4470,11 @@ pub const Parser = struct {
             .question => {
                 self.advance();
                 // `?fn() -> int` is an optional function. The child of `?` is a type, so `fn` is not a lambda.
+                // The child ends before a call or an initializer: `?int(1)` calls `?int` and `[]?int{1}` is a
+                // slice of `?int`.
                 const child = if (self.peek().tag() == .fn_k)
                     try self.parseFuncType(null, .{ .parse_call_expr = false, .parse_record_expr = config.parse_record_expr })
-                else (try self.parseTermExpr(.{ .parse_call_expr = false })) orelse {
+                else (try self.parseTermExpr(.{ .parse_call_expr = false, .parse_record_expr = false })) orelse {
                     return self.reportError("Expected `Option` child type.", &.{});
                 };
                 return self.ast.newNodeErase(.option_type, .{
@@ -4482,7 +4484,12 @@ pub const Parser = struct {
             },
             .bang => {
                 self.advance();
-                const child = try self.parseTightTerm(.{});
+                // As the operand of a type prefix (`?!int(x)`, `[]!int{}`), `!T` ends before the call or the
+                // initializer like any other type operand. Otherwise `?!int(x)` would read as `?(!int(x))`.
+                const child = try self.parseTightTerm(.{
+                    .parse_call_expr = config.parse_call_expr,
+                    .parse_record_expr = config.parse_record_expr,
+                });
                 return self.ast.newNodeErase(.unary_expr, .{
                     .child = child,
                     .op = .lnot,

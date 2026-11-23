@@ -1426,6 +1426,13 @@ fn findInferParams(c: *cy.Chunk, node: *ast.Node) !void {
         .option_type => {
             try findInferParams(c, node.cast(.option_type).child);
         },
+        .unary_expr => {
+            // `!%T`. The result type is parsed as a unary expression.
+            const unary = node.cast(.unary_expr);
+            if (unary.op == .lnot) {
+                try findInferParams(c, unary.child);
+            }
+        },
         .span_type => {
             const span_type = node.cast(.span_type);
             try findInferParams(c, span_type.child);

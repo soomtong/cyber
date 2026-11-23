@@ -2860,7 +2860,7 @@ print(map([]int{1, 2}, |x| 'n%{x}'))            --> {'n1', 'n2'}
 ```
 `T` is bound to `float` by the first argument, so the function must take a `float`: `map([]int{1, 2}, name)` reports 'Expected type `fn(int) -> str`. Found `fn(float) -> str`.' `U` is bound to `str`, the return type of `name`.
 
-The function type can declare a parameter anywhere in its signature (`fn(%A, %B) -> %C`, `fn(T) -> []%U`, `fn(T) -> ?%U`). It can be written inline, as a type alias template (`f MapFn[T, %U]` for `type MapFn[A Any, B Any] = fn(A) -> B`), or as the argument of a function union (`f Func[fn(T) -> %U]`, `f &OpaqueFunc[fn(T) -> %U]`), which also takes a closure. This works the same for a method (`fn (&Box[]) map(f fn(T) -> %U) -> Box[U]`).
+The function type can declare a parameter anywhere in its signature (`fn(%A, %B) -> %C`, `fn(T) -> []%U`, `fn(T) -> ?%U`, `fn(T) -> !%U`). It can be written inline, as a type alias template (`f MapFn[T, %U]` for `type MapFn[A Any, B Any] = fn(A) -> B`), or as the argument of a function union (`f Func[fn(T) -> %U]`, `f &OpaqueFunc[fn(T) -> %U]`), which also takes a closure. This works the same for a method (`fn (&Box[]) map(f fn(T) -> %U) -> Box[U]`).
 
 An inferred lambda (`|x| expr`) has no types of its own. Its parameters are typed from the function type, and the template parameters in the return type are then inferred from the type of its body. So every template parameter in the parameter types of the function type must be bound by an argument before the lambda:
 ```cy

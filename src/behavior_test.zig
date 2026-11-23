@@ -878,6 +878,8 @@ fn test_control_flow(run: *Runner) void {
     run.case("meta/infer_param_method.cy");
     run.case("meta/infer_param_overload.cy");
     run.case("meta/infer_param_outside_func_error.cy");
+    run.case("meta/infer_param_result_type.cy");
+    run.case("meta/infer_param_result_type_error.cy");
     run.case("meta/infer_param_return_type_error.cy");
     run.case("meta/infer_param_type_arg_error.cy");
     run.case("meta/type_size_str_arg_error.cy");

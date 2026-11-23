@@ -1391,6 +1391,11 @@ fn firstInferParam(node: *ast.Node, ctx: ?*sema_resolve.ResolveContext) ?*ast.No
         .ref => return firstInferParam(node.cast(.ref).child, ctx),
         .borrow => return firstInferParam(node.cast(.borrow).child, ctx),
         .option_type => return firstInferParam(node.cast(.option_type).child, ctx),
+        .unary_expr => {
+            const unary = node.cast(.unary_expr);
+            if (unary.op != .lnot) return null;
+            return firstInferParam(unary.child, ctx);
+        },
         .span_type => return firstInferParam(node.cast(.span_type).child, ctx),
         .slice_type => return firstInferParam(node.cast(.slice_type).child, ctx),
         .vector_type => {
@@ -2008,6 +2013,17 @@ fn inferCtArgs(c: *cy.Chunk, arg: cy.TypeValue, template: *cy.sym.FuncTemplate, 
             const arg_t = try expectTypeArg(c, arg, node);
             const variant = try expectTypeFromTemplate(c, arg_t, c.sema.option_tmpl, node);
             try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, option_type.child, alias, node);
+        },
+        .unary_expr => {
+            // `!%T`. The result type is parsed as a unary expression. Any other unary expression is a
+            // value (`not flag`) that declares no infer parameter.
+            const unary = template_n.cast(.unary_expr);
+            if (unary.op != .lnot or arg.type.id() != bt.Type) {
+                return;
+            }
+            const arg_t = arg.value.asPtr(*cy.Type);
+            const variant = try expectTypeFromTemplate(c, arg_t, c.sema.result_tmpl, node);
+            try inferCtArgs(c, variant.getParamAt(0), template, template_ctx, unary.child, alias, node);
         },
         .borrow => {
             const borrow = template_n.cast(.borrow);

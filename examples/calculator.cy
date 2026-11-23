@@ -127,7 +127,10 @@ fn fold(items []%T, init %A, f FoldFn[T, A]) -> A:
 -- Main.
 -- ---------------------------------------------------------------------------------------------------------
 
--- An operator that is declared outside of the calculator.
+-- An operator that is not one of the built-in operators of the calculator.
+-- `Calculator :: @init` registers `Add`, `Sub`, `Mul` and `Div`. `Mod` is declared here, in the code that
+-- uses the calculator, to show how to extend it: implement `Operation` and call `register`.
+-- The code of `Calculator` does not change.
 type Mod:
     with Operation
 

@@ -8,7 +8,6 @@
 #   task build OPT=ReleaseSafe          # optimize mode: Debug, ReleaseSafe, ReleaseFast, ReleaseSmall
 #   task build TARGET=aarch64-linux-gnu # cross compile (adds -Dcpu=baseline like CI)
 #   task test FILTER=switch             # only tests whose name contains the filter
-#                                       # tcc and cc do not work at present: they fail at the first case
 #   task build -- -Dmalloc=mimalloc     # any extra `zig build` flags after `--`
 
 version: '3'

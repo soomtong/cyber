@@ -782,15 +782,6 @@ typedef struct FuncSymbol {
 //     void* sym;
 //} GlobalSym;
 
-typedef struct EvalConfig {
-    bool single_run;
-    bool file_modules;
-    bool gen_all_debug_syms;
-    u8 backend;
-    bool reload;
-    bool spawn_exe;
-} EvalConfig;
-
 typedef struct TypeInfo {
     const char* name_ptr;
     size_t name_len;

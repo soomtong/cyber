@@ -4,20 +4,35 @@
 사용자에게 보이는 동작이 바뀌는 커밋은 여기에 바로 적고, 언어 규칙이면 `docs/docs.md`에도 같이 적는다.
 전체 발견 이슈 표는 `docs/study/10-findings-register.md`, 컴파일러 한계의 결정은 `docs/decisions/project_compiler_limits.md`.
 
-## 추론 람다와 오버로드, 기본 메서드의 버그 수정 (2026-11-23)
+## 값 없는 `return`은 값을 돌려주는 함수에서 오류다 (2026-11-24, 깨지는 변경)
 
-0.4.18 이후 변경을 리뷰하면서 찾은 문제를 고쳤다. 아래 '함수 인자에서 템플릿 파라미터를 추론한다'와 'trait의 기본 메서드' 항목의 일부 서술은 이 항목으로 대체된다.
+값을 돌려주는 함수 · 메서드 · 람다 · trait 기본 메서드에서 값 없는 `return`은 조용히 무시되어 다음 문장으로 실행이 이어졌다.
+`fn f(x int) -> int:`에서 `if x > 3: return` 뒤 `return 1`이면 `f(5)`가 1을 냈다. 0.4.18에서도 같다.
 
-### 반환 타입을 추론하는 람다 본문의 `!`가 컴파일러를 segfault로 죽였다
+- 이제 그 위치의 컴파일 오류다: 'Expected a return value of type `int`. A `return` without a value is for a function that returns `void` or `!void`.'
+  반환 타입이 `?T`이면 ' Use `return none` for no value.'가 덧붙는다.
+- 허용되는 경우: `-> void`, 반환 타입 생략, `-> !void`(성공으로 반환), 본문 타입이 `void`인 식 람다.
+- 제너레이터의 값 없는 `return`은 제너레이터를 끝낸다. `next`가 `none`을 돌려주고 상태가 `.done`이 된다. 전에는 무시되어 뒤의 `yield`가 실행됐다.
+- 고치는 방법: 돌려줄 값을 적는다(`return 0`). `?T`는 `return none`, `!T`는 값이나 `return error.Name`을 적는다. 값이 필요 없는 함수라면 반환 타입을 `void`나 `!void`로 바꾼다.
+  이전 동작에 기대던 제너레이터는 그 `return`을 지운다.
+- 구현: `sema_stmt.semaReturn`은 반환 타입이 `void` · `!void`가 아니면 코드를 만들지 않았다. 오류 분기와 제너레이터 분기(`semaGeneratorEnd`)를 넣었다.
+- 테스트: `src/test/control_flow/return_no_value.cy`, `return_no_value_error.cy`, `return_no_value_option_error.cy`, `return_no_value_result_error.cy`,
+  `return_no_value_infer_ret_lambda_error.cy`, `return_no_value_trait_default_error.cy`. 매뉴얼: `docs/docs.md`의 'Function declaration'.
+
+## 0.4.18..HEAD 코드 리뷰에서 나온 수정 (2026-11-23 ~ 24)
+
+`/code-review high` 0.4.18..HEAD의 8건과, 그것을 고치며 찾은 결함을 고쳤다. 아래 '함수 인자에서 템플릿 파라미터를 추론한다'와 'trait의 기본 메서드' 항목의 일부 서술은 이 항목으로 대체된다.
+
+### 반환 타입을 추론하는 식 람다의 `!`와 `return`
 
 - 무엇이 틀렸나: `fn(x str) => int.parse(x)!`와 `map(items, |x| int.parse(x)!)`(`f fn(T) -> %U`)처럼 반환 타입을 본문에서 추론하는 람다는 본문 분석이 끝난 뒤에야 시그니처가 정해지는데,
-  `!`와 `!else:` 블록의 `return`이 아직 없는 시그니처에서 반환 타입을 읽었다. 반환 타입을 선언한 식 람다(`fn(x str) -> !int => int.parse(x)!`)도 시그니처를 본문 뒤에 정해서 같은 값을 읽었다.
-- 이제 어떻게 되나: 추론 중인 람다의 `!`는 '`!` can not leave a lambda whose return type is inferred from its body: the return type is not known yet. Declare the return type of the lambda (`fn(x T) -> !U => expr`), or handle the error here with `!else` or `try`.'를,
-  `return`은 '`return` can not leave a lambda whose return type is inferred from its body: the return type is not known yet. Declare the return type of the lambda (`fn(x T) -> U => expr`).'를 위치와 함께 보고한다.
-  반환 타입을 선언한 식 람다의 `!`는 정상 동작하고, `fn(T) -> %U` 인자로 넘기면 `U`가 `!int`로 추론된다. 본문에서 `!U`를 추론하는 것은 지원하지 않는다.
-- 구현: `sema_stmt.checkReturnTypeKnown`이 `func.isResolved()`를 확인한다(`!`, `return`, `scope` 블록). `sema_expr`의 `lambda_expr`는 반환 타입이 선언된 경우 본문 전에 `resolveUserLambda`를 부른다.
-  `Proc.getReturnType`에 assert를 추가했다.
-- 테스트: `src/test/control_flow/bang_in_infer_ret_lambda.cy`, `bang_in_infer_ret_lambda_error.cy`, `return_in_infer_ret_lambda_error.cy`, `src/test/meta/infer_param_lambda_bang_error.cy`.
+  `!`와 `!else:` 블록의 `return`이 아직 없는 시그니처에서 반환 타입을 읽어 컴파일러가 segfault로 죽었다. 반환 타입을 선언한 식 람다(`fn(x str) -> !int => int.parse(x)!`)도 시그니처를 본문 뒤에 정해서 같았다.
+- 이제 어떻게 되나: 본문 타입이 U일 때 람다를 떠나는 `!`가 있으면 반환 타입이 `!U`로 추론된다(본문이 이미 `!T`나 `error`면 그대로). `fn(x str) => int.parse(x)!`는 `fn(str) -> !int`이고,
+  `map([]str{'1', 'b'}, |x| int.parse(x)! * 2)`는 `U = !int`다. 본문 안의 `return v`는 본문 타입으로 검사하고, 다르면 'Expected type `int`, got `str`.'이다.
+  반환 타입을 선언한 식 람다의 `!`도 정상 동작한다.
+- 구현: `sema_expr.semaLambdaInferRetBody`가 본문을 시그니처 없이 먼저 분석하며 람다를 떠나는 `!` · `return` · `scope` 블록을 `Proc.infer_ret_bang` · `infer_ret_return`에 기록만 하고(`sema_stmt.noteInferRetExit`),
+  기록이 있으면 `sema_local.dropLambdaProc`로 버린 뒤 정해진 시그니처로 다시 분석한다. 최대 3회이고, 떠나는 문장이 없는 본문은 1회다. 반환 타입이 선언된 식 람다는 본문 전에 `resolveUserLambda`를 부른다.
+- 테스트: `src/test/control_flow/bang_in_infer_ret_lambda.cy`, `return_in_infer_ret_lambda.cy`, `return_in_infer_ret_lambda_error.cy`, `src/test/meta/infer_param_lambda_bang.cy`.
 
 ### 추론 람다의 함수 타입에서 `%T` 자리표시 평가
 
@@ -26,15 +41,16 @@
   `fn(T) -> Pair[%U, U]`처럼 `%U`로 선언한 이름을 같은 함수 타입 안에서 다시 쓰면 'Could not find the symbol `U`.'였다. 두 경우 모두 이름 있는 함수를 넘기면 통과했다.
   `fn twice(f fn(%T) -> T, x T)`에 `twice(|x| x * 2, 3)`도 선언 위치에 'Could not find the symbol `T`.'가 나왔다.
 - 이제 어떻게 되나: 위 람다 호출들이 이름 있는 함수를 넘긴 경우와 똑같이 통과한다. 타입 별칭 템플릿과 `Func[fn(T) -> Pair[%U, U]]`도 같다.
-  `twice(|x| x * 2, 3)`는 호출 인자 위치에 'Can not infer the template parameter `T` from the lambda for `f`. The type of the lambda parameter `x` must be known from the arguments before the lambda. ...'를 보고한다.
-- 남은 한계: 값 파라미터가 있는 별칭(`type VecFn[const N int, T Any] = fn(T) -> [N]T`, `f VecFn[%N, T]`)에 추론 람다를 넘기면
-  'Can not infer function type. Consider using an explicit `fn` declaration.'이 호출 위치에 나온다. 이름 있는 함수나 타입을 적은 람다를 쓴다.
+  값 파라미터가 있는 별칭(`type VecFn[const N int, T Any] = fn(T) -> [N]T`, `f VecFn[%N, T]`)에 `vf(4, |x| [3]int{x, x, x})`를 넘기면 `N = 3`이 추론된다. 별칭의 별칭, `Func[VecFn[%N, T]]`, `?[N]T`도 같다.
+  `twice(|x| x * 2, 3)`와 값 파라미터가 람다 파라미터 타입 쪽에 있는 별칭(`fn([N]T) -> T`)은 호출 인자 위치에 'Can not infer the template parameter `T` from the lambda for `f`. The type of the lambda parameter `x` must be known from the arguments before the lambda. ...'를,
+  별칭이 값을 계산해 쓰면(`[N + 1]T`) 'Can not infer the template parameter `N` from the argument for `f`. ...'를 보고한다.
+- 남은 한계: 시그니처에 직접 쓴 `fn(T) -> [%N + 1]T`는 infer 파라미터로 찾지 않는다(이항식 안을 보지 않는다). 추론 람다는 'Can not infer function type. Consider using an explicit `fn` declaration.'이다.
 - 구현: `InferParamMode.placeholder`를 없앴다. `sema_func.evalParamTypeHint`가 정해지지 않은 infer 이름을 `Sema.infer_t`로 임시로 묶고 `.bound` 모드로 평가한 뒤 푼다.
-  `template.resolveTemplateArgs`는 자리표시로 만든 인자를 받으면 템플릿을 확장하지 않고 자리표시 자체를 결과로 삼는다. 타입 별칭, `Func`, `OpaqueFunc`, `&T`는 예외로 확장한다.
-  이 경로의 인자 검사는 `ExprCstr.pass_infer_placeholder`로 건너뛴다.
-- 테스트: `src/test/meta/infer_param_lambda_template_ret.cy`, `infer_param_lambda_reuse_error.cy`.
+  `template.resolveTemplateArgs`는 자리표시로 만든 인자를 받으면 템플릿을 확장하지 않고 자리표시 자체를 결과로 삼는다. 타입 별칭(값 파라미터 포함), `Func`, `OpaqueFunc`, `&T`는 예외로 확장한다.
+  이 경로의 인자 검사는 `ExprCstr.pass_infer_placeholder`로 건너뛴다. `cte.eval_bin_expr`는 피연산자가 자리표시면 결과도 자리표시로 돌려준다.
+- 테스트: `src/test/meta/infer_param_lambda_template_ret.cy`, `infer_param_lambda_reuse_error.cy`, `infer_param_lambda_alias_value.cy`, `infer_param_lambda_alias_value_param_error.cy`, `infer_param_lambda_alias_value_expr_error.cy`.
 
-### 함수 본문의 `%T`는 항상 오류다
+### 함수 본문의 `%T`는 항상 오류다 (깨지는 변경)
 
 - 무엇이 틀렸나: 템플릿 함수 본문의 `%T`가 이름이 묶여 있으면 오류 없이 `T`로 통과했고(`fn g(x []%T) -> T:` 안의 `var y %T = x[0]`), 없으면 'Could not find the symbol `Q`.'가 나왔다.
 - 이제 어떻게 되나: 템플릿 함수 여부, 이름이 묶였는지와 관계없이 '`%T` can only be declared in the signature of a function.'을 보고한다.
@@ -52,16 +68,66 @@
 - 구현: `sema_type.findInferParams`, `sema_func.firstInferParam`, `sema_func.inferCtArgs`에 `unary_expr`(`.lnot`) 분기를 추가했다. `inferCtArgs`는 인자 타입이 `Result` 템플릿의 인스턴스인지 보고 child와 맞춘다.
 - 테스트: `src/test/meta/infer_param_result_type.cy`, `infer_param_result_type_error.cy`.
 
-### 오버로드에 넘긴 추론 람다의 본문 타입이 안 맞으면 다음 오버로드로 넘어간다
+### 오버로드: 맞지 않는 후보는 건너뛰고 다음 후보를 시도한다
 
-- 무엇이 틀렸나: `fn conv(x int, f fn(int) -> str)`와 `fn conv(x %T, f fn(T) -> %U)`가 있을 때 `conv(1, |x| x + 1)`이 추론 오버로드로 넘어가지 않고 'Expected type `str`, got `int`.'로 실패했다.
-  이름 있는 함수(`conv(1, toi)`)는 넘어갔다.
-- 이제 어떻게 되나: 식 람다(`|x| expr`)의 본문 타입이 함수 파라미터의 결과 타입과 다르면 그 오버로드의 불일치로 보고 다음 오버로드를 시도한다.
-  어떤 오버로드도 받지 못하면 가장 가까웠던 오버로드 기준으로 본문 위치에 전과 같은 오류를 낸다. 본문 안의 다른 오류(선언되지 않은 이름 등)는 바로 오류다.
-- 남은 한계: `if` 식 분기의 타입 불일치, 블록 람다의 `return`, 템플릿 파라미터를 추론하는 오버로드 안에서의 불일치는 여전히 바로 오류다.
-- 구현: 오버로드 인자인 추론 람다는 본문의 최상위 타입 검사만 보고하지 않고 플래그로 돌린다(`semaExprCstrSoft`, `semaReturnExprStmt2`). 불일치면 람다를 코드 생성 없이 버리고(`sema_local.dropLambdaProc`)
-  `FuncMatchError.lambda_result`를 돌려준다. `matchFuncSym`은 모든 후보가 실패하고 가장 멀리 간 후보가 람다 본문에서 실패했으면 그 후보만 다시 맞춰 본문의 오류를 낸다.
-- 테스트: `src/test/meta/infer_param_overload_lambda.cy`, `infer_param_overload_lambda_error.cy`, `infer_param_overload_lambda_body_error.cy`.
+- 무엇이 틀렸나: 후보를 맞춰 보는 중에 난 여러 불일치가 '그 후보의 불일치'가 아니라 바로 컴파일 오류였다.
+  - 추론 람다의 본문: `fn conv(x int, f fn(int) -> str)`와 `fn conv(x %T, f fn(T) -> %U)`에 `conv(1, |x| x + 1)` → 'Expected type `str`, got `int`.' 이름 있는 함수는 넘어갔다.
+    `if` · `switch` 식의 분기, 블록 람다의 `return`(두 번째 후보에서 'Expected lambda body.'), 결과 타입이 `!T`가 아닌 후보에서의 `!`도 같았다.
+  - 템플릿 후보: 결과 타입을 선언했거나(`f fn(T) -> str`) infer 파라미터를 감싼 형태(`f fn(T) -> ?%U`, `!%U`, `[]%U`, `Map[%K, int]`)에 형태가 다른 함수 · 람다를 넘기면 'Expected template `Option`. Found `Float`.',
+    람다가 아닌 인자의 타입이 다르면(`fn g(x %T, y str)`와 `fn g(x int, y float)`에 `g(1, 2)`) 'Expected type `str`. Found `int`.'였다.
+  - 대상 타입이 필요한 리터럴: `fn h(x int)`, `fn h(x ?str)`에 `h(none)` → 'Expected `?T` to infer `none` value, found `Int`.', `fn k(x int)`, `fn k(c Color)`에 `k(.red)` → 'Can not infer symbol from `.red`.',
+    `fn p(x int)`, `fn p(f fn(int) -> int)`에 `p(|x| x)` → 'Can not infer function type.'
+  - `{1, 2}`를 `?str` 파라미터 오버로드에 넘기면 컴파일러가 죽었다.
+- 이제 어떻게 되나: 위 경우 모두 그 후보의 불일치로 보고 다음 후보로 넘어간다. `return`이 필요한데 없는 블록, 결과 타입으로 만들 수 없는 리터럴 본문, 파라미터 수가 다른 람다도 같다.
+  둘 이상이 받을 수 있으면(`?str`, `?int`에 `none`) 먼저 선언된 후보를 쓴다. 어느 후보도 받지 못하면 인자를 가장 멀리까지 맞춘 후보(같으면 먼저 선언된 것)를 단독 호출 때와 같은 문구로, 분기 · `return` · `!` 위치에 보고한다.
+  인자 안의 다른 오류(선언되지 않은 이름 등)는 바로 보고한다.
+- 문구가 달라진 곳: 후보가 모두 실패할 때 보고되는 후보가 달라질 수 있다. 전에는 템플릿 후보의 오류가 항상 먼저 나왔다. `foo({1, 2})`가 모두 실패하면 'found `_`' 대신 'Can not infer initializer type `int`.'이다.
+- 남은 한계: 템플릿 오버로드끼리 infer 위치만 다르면(`fn(T) -> ?%U`와 `fn(T) -> []%U`) 선언이 'already been declared with the same function signature'로 거부된다(기존 제약).
+  `%T type` 명시 인자의 평가 오류와 컴파일 타임 호출은 바로 오류다. 실패한 후보에서 끝까지 검사된 타입 선언형 람다는 죽은 코드로 남는다.
+- 구현: `Cstr.soft_fits`(`if` · `switch` 분기)와 `Proc.soft_ret_fits`(블록 `return`, `!`), `semaExprCstrSoft`로 보고 전에 불일치를 표시한다. `sema_func.matchTemplateArg`는 오버로드 매칭 중 불일치를 `.incompat`로 돌리고,
+  `inferCtArgs`는 `soft`일 때 보고 대신 `error.InferMismatch`를 낸다. `none`, `.name`, 추론 람다는 `Cstr.return_infer_error`에서 infer error를 돌려준다. `FuncMatchError.rematch`로 마지막 오류를 다시 보고한다.
+  버린 람다의 `Func`는 `Chunk.dropped_funcs`로 옮겨(`sema_local.dropLambdaProc` · `dropLambdas`) 코드 생성과 전역 초기화 검사에서 빠지고, 버린 본문이 남긴 LSP 심볼 기록도 되돌린다.
+- 테스트: `src/test/meta/infer_param_overload_lambda*.cy`(`branch`, `block`, `template`, `bang`, `switch`, `capture`와 각 `*_error.cy`), `infer_param_overload_template*.cy`, `infer_param_overload_closure*.cy`,
+  `src/test/functions/call_overload_literal.cy`, `call_overload_none_error.cy`, `call_overload_dot_lit_error.cy`, `src/lib_test/session.zig`의 세션 leak 테스트 둘.
+
+### 추론 람다의 파라미터 수를 함수 타입과 비교한다 (깨지는 변경)
+
+- 무엇이 틀렸나: `apply(|a, b| a)`(`f fn(int) -> int`)에서 컴파일러가 panic했다(index out of bounds). 수가 적어도 panic했다('TODO: .null size'). `fn()` 대상에 `|x| ...`는 조용히 통과했다.
+- 이제 어떻게 되나: 'Expected a lambda with `1` parameter(s) for `fn(int) -> int`. Found `2`.'이다. 오버로드에서는 불일치로 다음 후보를 시도한다.
+  파라미터 없는 람다는 `|_|`로 쓴다. `fn()` 대상의 `|x| ...`는 오류이므로 `|_| ...`로 고친다.
+- 구현: `sema_expr.inferLambdaSig`.
+- 테스트: `src/test/functions/lambda_param_count_error.cy`, `lambda_param_count_less_error.cy`, `lambda_param_count_zero_error.cy`.
+
+### 클로저를 함수 포인터 파라미터에 넘길 때의 문구
+
+- 일반 불일치 문구 뒤에 안내를 붙였다(오버로드 · 비오버로드 공통): 'Expected argument `fn(int) -> int`, found `Func[fn(int) -> int]`, when calling `fn m(int, fn(int) -> int) -> int`. A closure is passed to a `Func[fn(...)]` or a `&OpaqueFunc[fn(...)]` parameter.'
+- 변수를 캡처하는 람다가 'Missing return statement.'로 끝날 때 캡처 목록이 해제되지 않던 leak을 고쳤다(`sema_local.popLambdaProc`).
+- 구현: `sema_func.closureArgHint`. 테스트: `src/test/functions/call_overload_closure_error.cy`, `func_type_inline_closure_error.cy`, `src/test/meta/infer_param_overload_lambda_capture*.cy`.
+
+### 람다 안의 switch 식이 컴파일 중 panic을 냈다
+
+- 무엇이 틀렸나: 람다 안에서 switch 식을 쓰면(`return switch x: ...`, `v := switch x: ...`, `v = switch x: ...`) 'expected mapping to IR local' panic이 났다.
+  람다를 둘러싼 함수(또는 최상위 코드)에 람다보다 먼저 선언된 지역 변수가 하나라도 있으면 났고, 이름 있는 함수에서는 같은 코드가 정상이었다. 0.4.18에서도 같다.
+- 이제 어떻게 되나: 람다(블록 람다, 호출 인자 블록 람다, 클로저, 중첩 람다, 메서드 · 제너레이터 안의 람다)에서 switch 식이 이름 있는 함수와 같게 동작한다.
+- 구현: switch 식의 case가 결과를 대입할 때 결과 지역 변수의 IR local id 대신 `varStack` 인덱스를 썼다. 람다는 바깥 함수와 `varStack`을 공유하므로 두 값이 어긋났다. `sema_switch.zig`의 두 `set_local`을 고쳤다.
+- 테스트: `src/test/control_flow/switch_expr_lambda.cy`, `src/test/meta/infer_param_overload_lambda_switch.cy`.
+
+### `?`와 `!` 뒤의 타입은 호출과 초기화식 앞에서 끝난다
+
+- 무엇이 틀렸나: `?!int(int.parse('1'))`이 `?(!int(...))`로 읽혀 인자가 컴파일 타임에 평가됐고, 'Expected argument `str`, found `EvalStr`, when calling `fn parse(str) -> !int`.'(변수 인자는 'Could not find the symbol `x`.')가 나왔다.
+  `[]?int{1, none}`, `[]!int{...}`, `[n]!int{...}`도 원소 타입이 초기화식까지 가져가 'TODO: int'를 냈다.
+- 이제 어떻게 되나: `?!int(int.parse(s))`는 `?!int`를 호출하고, `[]?int{1, none}`과 `[]!int{int.parse(s)}`는 슬라이스다. 인자는 한 단계만 감싸므로 `?!int(1)`은 'Expected argument `?!int`, found `int`, ...'이다.
+  `?P{x=1}`은 'Can not infer initializer type `?P`.'를 낸다. 식 맨 앞의 `!`는 여전히 logic not이라 `!int(x)`는 `not int(x)`다.
+- 구현: `src/parser.zig`의 `parseTightTermLeft`에서 `.bang`이 `parse_call_expr` · `parse_record_expr`를 피연산자에 전달하고, `.question`은 피연산자를 `parse_record_expr = false`로 파싱한다.
+- 테스트: `src/test/types/type_prefix_bang_callee.cy`, `type_prefix_bang_callee_arg_error.cy`, `option_type_record_init_error.cy`.
+
+### `?T` · `!T` 대상에서 `!` · `not` · `~`가 실패했다
+
+- 무엇이 틀렸나: `var a ?bool = !b`, `var a ?bool = not b`, `?bool(!g(1))`, `fn f() -> !bool: return !b`가 '`not` takes a `bool`. Found `?bool`.'(또는 `!bool`)로 실패했다.
+  대상 타입이 피연산자에 그대로 전달되어 피연산자가 먼저 옵션 · 결과로 감싸졌다. `var e ?byte = ~1`도 리터럴을 `int`로 읽어 'Expected type `?byte`, got `int`.'였다. 0.4.18에서도 같다.
+- 이제 어떻게 되나: 단항 연산자는 대상이 `?T` · `!T`이면 피연산자를 `T`로 분석하고 결과를 대상 타입으로 감싼다. 피연산자가 실제로 `?bool`이면 전과 같은 오류다.
+- 구현: `sema_expr.semaUnExpr`의 `unaryOperandTarget`이 `-`, `not`, `~`의 대상 타입을 같은 규칙으로 벗긴다.
+- 테스트: `src/test/core/unary_option_target.cy`, `not_option_target_error.cy`.
 
 ### trait의 기본 메서드가 같은 이름의 오버로드와 함께 동작하지 않았다
 
@@ -74,8 +140,11 @@
 - 구현: `sema_type.reserveDefaultMethods`가 타입의 같은 이름 메서드 시그니처를 먼저 푼 뒤(`ensure_resolved_func`) 수신자 뒤 파라미터 타입으로 비교한다(`sameMethodParams`).
 - 테스트: `src/test/types/trait_default_overload.cy`, `trait_default_overload_clash_error.cy`. `trait_default_sig_error.cy`는 파라미터가 같고 반환 타입이 다른 경우로 바꿨다(예전 입력은 이제 올바른 프로그램이다).
 
-### 정리
+### 테스트 필터와 정리
 
+- `zig build test -Dtest-filter=<문자열>`(`task test FILTER=<문자열>`)이 'undefined symbol: _test_init', 'undefined symbol: _zpanic' 링크 오류로 실패했다. 필터가 test를 모두 걸러내면 테스트 러너가 쓰는 export 심볼이 빌드에서 빠졌다.
+  이제 링크되고, behavior 케이스를 경로로 거른다(`-Dtest-filter=switch`는 경로에 `switch`가 든 `.cy` 케이스만 돌린다). 나머지 test는 전과 같이 Zig test 이름으로 거른다. 맞는 케이스가 없는 스위트는 0개 통과로 끝난다.
+  빌드가 behavior 실행에 `CYBER_TEST_FILTER` 환경 변수로 필터를 넘긴다. wasm 빌드는 환경 변수를 읽지 않아 케이스 필터가 적용되지 않는다.
 - `Taskfile.yml` 머리말에 남은 `tcc` · `cc` 주석과 `src/vm.h`의 쓰이지 않는 `EvalConfig` 구조체를 지웠다. 동작 변화는 없다.
 
 ## trait 메서드의 수신자는 공유 빌림이다 (2026-11-23, 깨지는 변경)
@@ -158,11 +227,11 @@ upstream에서 물려받은 상태이고 CI는 이 백엔드를 돌린 적이 �
 - `?%T`도 infer 파라미터를 선언하는 형식으로 받는다(`fn opt(x %T, f fn(T) -> ?%U) -> ?U`, `fn first(o ?%T) -> T`).
 - 이미 정해진 부분의 불일치는 선언 쪽 노드가 아니라 호출 인자 위치에, 파라미터 타입 전체로 보고한다. `fn f(m Map[str, %V])`에 `Map[int, int]`를 넘기면
   전에는 시그니처의 `str` 위치에 'Expected type `int`. Found `str`.'이 났다. 이제 인자 위치에 'Expected type `Map[str, int]`. Found `Map[int, int]`.'이다.
-- 오버로드: 템플릿 파라미터를 추론하는 후보는 인자와 정확히 맞는 후보가 없을 때만 시도한다(선언 순서와 무관). 추론 람다의 본문 타입이 안 맞는 후보는 건너뛴다(맨 위 항목).
+- 오버로드: 템플릿 파라미터를 추론하는 후보는 인자와 정확히 맞는 후보가 없을 때만 시도한다(선언 순서와 무관). 맞지 않는 후보는 건너뛴다('0.4.18..HEAD 코드 리뷰에서 나온 수정').
 - 구현: `src/sema_func.zig`의 `matchTemplateArg` · `matchTemplateArgCt`가 Dependent 파라미터 타입을 지금까지 정해진 파라미터로 평가해 보고(`evalParamType`, `InferParamMode.bound`),
   아직 정해지지 않은 infer 파라미터가 있으면 인자를 먼저 해석한 뒤 `inferCtArgs`로 묶는다. `inferCtArgs`는 `fn_type`, `option_type`, 별칭 템플릿(`AliasArgs`), 함수 유니온을 따라간다.
   묶은 뒤 파라미터 타입 전체를 다시 평가해 인자와 비교하고, 함수를 `Func`로 감싸는 변환은 `sema_lit.semaFitTarget`이 한다.
-  추론 람다는 `resolveInferLambdaArg`가 정해지지 않은 파라미터를 자리표시 타입으로 둔 채(`evalParamTypeHint`, 맨 위 항목) 함수 타입을 평가해 람다 파라미터 타입을 얻고, `sema_expr.semaLambdaInferRet`가 본문에서 결과 타입을 얻는다.
+  추론 람다는 `resolveInferLambdaArg`가 정해지지 않은 파라미터를 자리표시 타입으로 둔 채(`evalParamTypeHint`) 함수 타입을 평가해 람다 파라미터 타입을 얻고, `sema_expr.semaLambdaInferRet`가 본문에서 결과 타입을 얻는다.
 - 예제: `examples/calculator.cy`의 `map`이 `%U type` 없이 `map(calc.history, |r| r.result)`로 불린다.
 - 테스트: `src/test/meta/infer_param_func_type*.cy`, `infer_param_lambda*.cy`, `infer_param_dependent*.cy`, `infer_param_method.cy`, `infer_param_overload.cy`, `infer_param_dup_error.cy`,
   `src/test/functions/func_type_inline_infer_param*_error.cy`.
@@ -181,7 +250,7 @@ type Shape trait:
 ```
 
 - 호출: 구현 타입에서 바로(`Circle{radius=2}.describe()`), `^Dyn[Shape]` · `&Dyn[Shape]`를 거쳐서, 템플릿 파라미터를 거쳐서 모두 된다.
-- 재정의: 타입이 같은 이름 · 같은 파라미터 타입의 메서드를 선언하면 그것이 쓰인다. 파라미터가 다른 메서드는 별개의 오버로드다(맨 위 항목).
+- 재정의: 타입이 같은 이름 · 같은 파라미터 타입의 메서드를 선언하면 그것이 쓰인다. 파라미터가 다른 메서드는 별개의 오버로드다.
   파라미터는 같고 반환 타입만 다르면 기존 오류 그대로다('`Circle` does not implement `fn describe(Shape) -> str` from `Shape`.').
 - `self`: 기본 메서드 안의 `self`는 trait으로 본 수신자, 타입은 공유 빌림 `&Dyn[Shape]`이다. trait의 다른 메서드(필수 · 기본)를 부를 수 있고
   `&Dyn[Shape]`를 받는 함수에 넘길 수 있다. `self`의 호출은 동적 디스패치라서 구현 타입이 재정의한 메서드에 닿는다.

@@ -1634,7 +1634,14 @@ pub fn implements(c: *cy.Chunk, impl_t: *cy.Type, trait: *cy.types.GenericTrait,
     var res = false;
     switch (impl_t.kind()) {
         .struct_t => {
-            res = impl_t.cast(.struct_t).implements(trait);
+            const struct_t = impl_t.cast(.struct_t);
+            // The traits of a struct are set when it is resolved. One that is declared later than its use
+            // (a field `w Wrap[I]` above `type I`, with `Wrap[T Num]`) is resolved here: its list of
+            // traits was read before it was set. A struct that failed to resolve ends the check.
+            if (struct_t.impls_len == cy.NullId) {
+                try ensure_resolved_type(c, impl_t, node);
+            }
+            res = struct_t.implements(trait);
         },
         else => {
         },

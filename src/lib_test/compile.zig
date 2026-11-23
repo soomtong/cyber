@@ -1176,6 +1176,48 @@ test "With error recovery the methods of a type that failed to resolve are not c
     try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
 }
 
+test "With error recovery the traits of a struct that failed to resolve are not read." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+    C.vm_set_error_recovery(vm, true);
+
+    var res: C.EvalResult = undefined;
+    var rep: C.Report = undefined;
+
+    // `I` fails at its trait and `K` at a field: neither has a list of traits. `Wrap[I]` and `Wrap[K]` ask
+    // whether they implement `Num`, which once read that list (a segmentation fault).
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm,
+        \\type Num trait:
+        \\    fn val() -> int
+        \\
+        \\type I:
+        \\    with Nope
+        \\    v int
+        \\
+        \\type K:
+        \\    with Num
+        \\    v nope
+        \\
+        \\type Wrap[T Num]:
+        \\    inner T
+        \\
+        \\fn wrap_i(x int) -> Wrap[I]:
+        \\    return Wrap[I]{inner=I{v=x}}
+        \\
+        \\fn wrap_k(x int) -> Wrap[K]:
+        \\    return Wrap[K]{inner=K{v=x}}
+    , &res));
+    try zt.eq(@as(usize, 2), C.vm_compile_report_count(vm));
+    try zt.expect(C.vm_compile_report(vm, 0, &rep));
+    try zt.eqStr("Could not find the symbol `Nope`.", C.from_bytes(rep.msg));
+    try zt.expect(C.vm_compile_report(vm, 1, &rep));
+    try zt.eqStr("Could not find the symbol `nope`.", C.from_bytes(rep.msg));
+
+    C.vm_reset(vm);
+    try zt.eq(C.Success, C.vm_eval(vm, "fn main() -> int:\n    return 7", &res));
+    try zt.eq(@as(usize, 0), C.vm_compile_report_count(vm));
+}
+
 test "With error recovery a template that failed to expand is reported once." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

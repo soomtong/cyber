@@ -1861,27 +1861,24 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
                 defer c.func_param_stack.items.len = start;
                 try sema_resolve.pushLambdaFuncParams(c, lambda.params);
 
+                if (lambda.ret == null) {
+                    // The body is checked before the signature is made, and a lambda in it moves the stack.
+                    const params = try c.alloc.dupe(sema.FuncParam, c.func_param_stack.items[start..]);
+                    defer c.alloc.free(params);
+                    return semaLambdaInferRetBody(c, lambda, params);
+                }
+                const params = c.func_param_stack.items[start..];
+
                 const func = try c.addUserLambda(@ptrCast(c.sym), @ptrCast(lambda));
                 _ = try sema_local.pushLambdaProc(c, func);
 
-                // Generate function body.
-                const params = c.func_param_stack.items[start..];
+                // Generate function body. The signature is set before the body: a `!` in the body returns the
+                // error as the declared type.
                 try sema_local.appendFuncParamVars(c, lambda.params, params);
-
-                if (lambda.ret == null) {
-                    // Infer return type. The lambda has no signature until its body is done, so the body can
-                    // not leave it early (`sema_stmt.checkReturnTypeKnown`).
-                    const func_ret_t = try sema_stmt.semaReturnExprStmt(c, lambda.expr, null, lambda.expr);
-                    const sig = try c.sema.ensureFuncSig(@ptrCast(params), func_ret_t);
-                    try c.resolveUserLambda(func, sig);
-                } else {
-                    // The signature is set before the body: a `!` in the body returns the error as the
-                    // declared type.
-                    const func_ret_t = try sema_type.resolveReturnType(c, lambda.ret);
-                    const sig = try c.sema.ensureFuncSig(@ptrCast(params), func_ret_t);
-                    try c.resolveUserLambda(func, sig);
-                    _ = try sema_stmt.semaReturnExprStmt(c, lambda.expr, func_ret_t, lambda.expr);
-                }
+                const func_ret_t = try sema_type.resolveReturnType(c, lambda.ret);
+                const sig = try c.sema.ensureFuncSig(@ptrCast(params), func_ret_t);
+                try c.resolveUserLambda(func, sig);
+                _ = try sema_stmt.semaReturnExprStmt(c, lambda.expr, func_ret_t, lambda.expr);
 
                 return sema_local.popLambdaProc(c);
             }
@@ -2955,17 +2952,54 @@ pub fn semaCompare(c: *cy.Chunk, left_n: *ast.Node, left: sema.ExprResult, right
 /// is the type of the body. `sema_func` types the parameters from a function type that still has an infer
 /// parameter in its return type (`f fn(T) -> %U`).
 pub fn semaLambdaInferRet(c: *cy.Chunk, node: *ast.Node, params: []const sema.FuncParam) !sema.ExprResult {
-    const lambda = node.cast(.lambda_expr);
+    return semaLambdaInferRetBody(c, node.cast(.lambda_expr), params);
+}
+
+/// An expression lambda without a declared return type: the return type is the type of the body `U`.
+/// A `!` in the body that leaves the lambda makes it `!U` (`U` when the body is a `!T` or an `error` already), like
+/// the declared `fn(x T) -> !U => expr`.
+///
+/// The body is checked without a signature first. A `!` or a `return` that would leave the lambda needs the
+/// return type, so that check only notes it (`sema_stmt.noteInferRetExit`). The lambda of the check is then
+/// dropped, with the lambdas inside it, and the body is checked again with the signature. The value of a `return`
+/// is not checked without a signature, so a `!` in it is noted by the second check, which is dropped the same way
+/// for a third one with `!U`. A body that does not leave the lambda early is checked once.
+fn semaLambdaInferRetBody(c: *cy.Chunk, lambda: *ast.LambdaExpr, params: []const sema.FuncParam) !sema.ExprResult {
+    const func_blocks_start = c.ir.func_blocks.items.len;
     const func = try c.addUserLambda(@ptrCast(c.sym), @ptrCast(lambda));
-    _ = try sema_local.pushLambdaProc(c, func);
 
-    try sema_local.appendFuncParamVars(c, lambda.params, params);
+    var ret_opt: ?*cy.Type = null;
+    while (true) {
+        _ = try sema_local.pushLambdaProc(c, func);
+        if (ret_opt) |ret_t| {
+            const sig = try c.sema.ensureFuncSig(@ptrCast(params), ret_t);
+            try c.resolveUserLambda(func, sig);
+            c.proc().infer_ret_open = !passesError(ret_t);
+        }
+        try sema_local.appendFuncParamVars(c, lambda.params, params);
 
-    const ret_t = try sema_stmt.semaReturnExprStmt(c, lambda.expr, null, lambda.expr);
-    const sig = try c.sema.ensureFuncSig(@ptrCast(params), ret_t);
-    try c.resolveUserLambda(func, sig);
+        const body_t = try sema_stmt.semaReturnExprStmt(c, lambda.expr, ret_opt, lambda.expr);
+        const proc = c.proc();
+        if (!proc.infer_ret_bang and !proc.infer_ret_return) {
+            if (ret_opt == null) {
+                const sig = try c.sema.ensureFuncSig(@ptrCast(params), body_t);
+                try c.resolveUserLambda(func, sig);
+            }
+            return sema_local.popLambdaProc(c);
+        }
 
-    return sema_local.popLambdaProc(c);
+        var ret_t = ret_opt orelse body_t;
+        if (proc.infer_ret_bang and !passesError(ret_t)) {
+            ret_t = try sema.getResultType(c, ret_t);
+        }
+        try sema_local.dropLambdaProc(c, func_blocks_start);
+        ret_opt = ret_t;
+    }
+}
+
+/// Whether a function that returns `ret_t` can return the error of a failing `!` (`sema_stmt.semaPropagateError`).
+fn passesError(ret_t: *cy.Type) bool {
+    return ret_t.kind() == .result or ret_t.id() == bt.Error;
 }
 
 /// Use of body stmts is extracted so that `lamda_multi` and `lambda_cont` have the same behavior.

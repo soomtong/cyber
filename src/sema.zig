@@ -362,6 +362,13 @@ pub const Proc = struct {
     /// instead of returning or panicking. A lambda starts a new proc, so it does not inherit it.
     try_ctx: ?TryCtx = null,
 
+    /// A lambda that infers its return type from its body (`sema_expr.semaLambdaInferRetBody`). What would leave the
+    /// lambda early before its return type is settled is noted here instead of generated, and the body is checked
+    /// again. `infer_ret_open`: the lambda has a signature, but a `!` can still make its return type a `!T`.
+    infer_ret_bang: bool = false,
+    infer_ret_return: bool = false,
+    infer_ret_open: bool = false,
+
     ir: *ir.Stmt,
 
     node: *ast.Node,
@@ -392,7 +399,7 @@ pub const Proc = struct {
 
     pub fn getReturnType(self: *const Proc, s: *Sema) *cy.Type {
         if (self.func) |func| {
-            // The signature of a lambda that infers its return type is set after its body (`checkReturnTypeKnown`).
+            // The signature of a lambda that infers its return type is set after its body (`noteInferRetExit`).
             std.debug.assert(func.isResolved());
             return func.sig.ret;
         } else {

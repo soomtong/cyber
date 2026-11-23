@@ -29,6 +29,8 @@ pub const SwitchInfo = struct {
     opts: sema.Cstr,
 
     // For switch expression. When inferring the target type, the result is initially empty.
+    // A `sema.LocalId` like `cond_local`: an index of `Chunk.varStack`, which a lambda shares with the functions
+    // around it. The IR local id is `inner.local.id` of that entry.
     res_local: u32,
 
     cond_local: u32,
@@ -382,7 +384,7 @@ fn semaSwitchElseCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt) !*ir
 
         // Assign to res.
         _ = try c.ir.pushStmt(.set_local, body, .{
-            .id = @intCast(info.res_local),
+            .id = c.varStack.items[info.res_local].inner.local.id,
             .right = expr.ir,
         });
     } else {
@@ -495,7 +497,7 @@ fn semaSwitchCase(c: *cy.Chunk, info: *SwitchInfo, case: *ast.CaseStmt, control:
 
         // Assign to res.
         _ = try c.ir.pushStmt(.set_local, body, .{
-            .id = @intCast(info.res_local),
+            .id = c.varStack.items[info.res_local].inner.local.id,
             .right = body_expr.ir,
         });
     } else if (case.body_kind == .fallthrough) {

@@ -919,6 +919,7 @@ fn test_control_flow(run: *Runner) void {
     run.case("meta/infer_param_overload_lambda_branch_body_error.cy");
     run.case("meta/infer_param_overload_lambda_branch_error.cy");
     run.case("meta/infer_param_overload_lambda_error.cy");
+    run.case("meta/infer_param_overload_lambda_switch.cy");
     run.case("meta/infer_param_overload_lambda_switch_error.cy");
     run.case("meta/infer_param_overload_lambda_template.cy");
     run.case("meta/infer_param_overload_lambda_template_body_error.cy");
@@ -956,6 +957,7 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/return.cy");
     run.case("control_flow/switch.cy");
     run.case("control_flow/switch_error.cy");
+    run.case("control_flow/switch_expr_lambda.cy");
     run.case("control_flow/switch_capture_non_choice_error.cy");
     run.case("control_flow/switch_choice_else_error.cy");
     run.case("control_flow/switch_choice_dup_case_error.cy");

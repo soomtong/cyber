@@ -35,7 +35,7 @@ zig build behavior-test -Dtest-filter=control_flow/
 zig build build-test -Doptimize=ReleaseSafe -Dtarget=wasm32-wasi
 wasm3 zig-out/bin/cli_test.wasm
 wasm3 zig-out/bin/lib_test.wasm
-wasm3 zig-out/bin/behaviour_test.wasm
+wasm3 zig-out/bin/behavior_test.wasm
 wasm3 zig-out/bin/trace_test.wasm
 ```
 

@@ -6,6 +6,37 @@ const cy = @import("cyber.zig");
 
 const log = cy.log.scoped(.fmt);
 
+/// Buffer size that `renderFloat` needs for any `f32` or `f64`.
+pub const float_buf_size = std.fmt.float.bufferSize(.decimal, f64) + 2;
+
+/// The default text of a `float` or `f32`. Every float to string conversion (`print`, `str`, interpolation,
+/// `float.fmt`, value dumps) goes through here so that the text always reads back as a float.
+/// The digits are the shortest that read back as the same value, in plain decimals.
+/// A finite result without a `.` or an exponent gets `.0` appended: `3.0`, `-0.0`. `inf`, `-inf` and `nan` stay as they are.
+pub fn renderFloat(buf: *[float_buf_size]u8, val: anytype) []const u8 {
+    const res = std.fmt.float.render(buf[0 .. buf.len - 2], val, .{ .mode = .decimal }) catch unreachable;
+    if (!std.math.isFinite(val)) return res;
+    if (std.mem.indexOfAny(u8, res, ".eE") != null) return res;
+    buf[res.len..][0..2].* = ".0".*;
+    return buf[0 .. res.len + 2];
+}
+
+test "renderFloat" {
+    var buf: [float_buf_size]u8 = undefined;
+    try t.eqStr("3.0", renderFloat(&buf, @as(f64, 3)));
+    try t.eqStr("-0.0", renderFloat(&buf, @as(f64, -0.0)));
+    try t.eqStr("1.5", renderFloat(&buf, @as(f64, 1.5)));
+    try t.eqStr("1000000000000000000000.0", renderFloat(&buf, @as(f64, 1e21)));
+    try t.eqStr("0.0000001", renderFloat(&buf, @as(f64, 1e-7)));
+    try t.eqStr("inf", renderFloat(&buf, std.math.inf(f64)));
+    try t.eqStr("-inf", renderFloat(&buf, -std.math.inf(f64)));
+    try t.eqStr("nan", renderFloat(&buf, std.math.nan(f64)));
+    try t.eqStr("0.1", renderFloat(&buf, @as(f32, 0.1)));
+    try t.eqStr("2.0", renderFloat(&buf, @as(f32, 2)));
+    _ = renderFloat(&buf, std.math.floatMax(f64));
+    _ = renderFloat(&buf, -std.math.floatTrueMin(f64));
+}
+
 // This provides a simple string interpolation without comptime.
 
 const FmtValueType = enum(u8) {

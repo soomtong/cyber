@@ -537,7 +537,7 @@ When the target is a `float` or `f32`, a hexadecimal, octal or binary literal co
 A raw integer converts to a float by its unsigned value at every width, and a float converts to a raw integer the same way. The fraction is dropped. A negative value, a NaN or a value that does not fit the raw type panics:
 ```cy
 var mask r64 = 0xFFFFFFFFFFFFFFFF
-print(float(mask))                -- 18446744073709552000
+print(float(mask))                -- 18446744073709552000.0
 print(r64(9223372036854775808.0)) -- 0x8000000000000000
 print(byte(255.9))                -- 0xff
 f := -1.0
@@ -597,6 +597,22 @@ b := float(a)
 ```cy
 x := float.parse('1.5') !else 0.0
 ```
+
+A float always converts to text that reads back as a float. `print`, `str(x)`, string interpolation and `x.fmt()` use the shortest
+digits that give the same value, in plain decimals without an exponent. A finite value without a fraction gets `.0`, so the output
+tells a `float` from an `int`. Infinity and NaN print as `inf`, `-inf` and `nan`. `f32` follows the same rule:
+```cy
+print(3.0)              --> 3.0
+print(1.5)              --> 1.5
+print(-0.0)             --> -0.0
+print(1e21)             --> 1000000000000000000000.0
+print(1e-7)             --> 0.0000001
+print(1.0 / 0)          --> inf
+print('%{float(7)}')    --> 7.0
+print([]float{3, 5.5})  --> {3.0, 5.5}
+print(3)                --> 3
+```
+`json.stringify` and `toon.encode` follow their own formats and write `3.0` as `3`.
 
 Float types can perform [arithmetic](#arithmetic-operators) and [comparison](#comparison-operators) operations.
 
@@ -1431,7 +1447,7 @@ Field names are unique in a type. Declaring a second field with the same name is
 Structs are constructed from an initializer expression:
 ```cy
 v := Vec2{x=30, y=40}
-print(v.x)      --> 30
+print(v.x)      --> 30.0
 ```
 
 An initializer literal can infer the target struct type:
@@ -1450,8 +1466,8 @@ Structs by default are copyable (unless a child member is not):
 v := Vec2{x=30, y=40}
 w := v
 v.x = 100
-print(w.x)     --> 30
-print(v.x)     --> 100
+print(w.x)     --> 30.0
+print(v.x)     --> 100.0
 ```
 
 ### Default field values.
@@ -1462,8 +1478,8 @@ type Vec2:
     y float = 0
 
 v := Vec2{}
-print(v.x)       --> 0
-print(v.y)       --> 0
+print(v.x)       --> 0.0
+print(v.y)       --> 0.0
 ```
 
 The names in a default value are looked up where the type is declared: in its module, including private declarations, and among its template parameters (`v T = T(3)`). The locals of the code that writes the initializer are not visible to it, so a local `K` does not change the default `x int = K`.
@@ -1940,7 +1956,7 @@ type Circle:
     radius float
 
 fn (&Circle) area() -> float:
-    return 3.14 * self.radius^2
+    return 3.14 * self.radius**2
 
 type Rectangle:
     with Shape
@@ -1956,10 +1972,10 @@ A type that intends to implement a trait but does not satisfy the trait's interf
 Since traits are a generic type, they need to be wrapped in a `Dyn` container to be materialized into a dynamic dispatch value. Implementing types become assignable to a `Dyn` reference type:
 ```cy
 var s ^Dyn[Shape] = ^Circle{radius=2}
-print(s.area())       --> 12.57
+print(s.area())       --> 12.56
 
 s = ^Rectangle{width=4, height=5}
-print(s.area())       --> 20
+print(s.area())       --> 20.0
 ```
 
 ## Type evaluation.
@@ -5229,7 +5245,7 @@ type Vec2 cstruct:
 
 v := Vec2{x=30, y=40}
 ptr := *v
-print(ptr.x)   --> 30
+print(ptr.x)   --> 30.0
 ```
 
 ### Pointer indexing.
@@ -5345,8 +5361,8 @@ type Vec2 cstruct:
     y float
 
 v := Vec2{}
-print(v.x)      --> 0
-print(v.y)      --> 0
+print(v.x)      --> 0.0
+print(v.y)      --> 0.0
 ```
 
 The following shows the zero values of C and C compatible types:

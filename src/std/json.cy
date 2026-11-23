@@ -777,7 +777,10 @@ fn fmt_float(x float) -> str:
     if x == 0:
         return '0'
     a := x.abs()
-    s := a.fmt()
+    -- `float.fmt` gives `100.0` for a value without a fraction. This format writes `100`.
+    var s str = a.fmt()
+    if s.ends_with('.0'):
+        s = s[0..s.len() - 2]
     if a >= 1e-6 and a < 1e21:
         return if (x < 0) '-' + s else s
     var digits str = ''

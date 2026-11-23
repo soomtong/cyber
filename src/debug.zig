@@ -1048,12 +1048,9 @@ fn read_struct_field(type_: *cy.Type, ptr: [*]const u8, name: []const u8, compti
     std.debug.panic("Missing field: {s}", .{name});
 }
 
-fn write_float(w: *std.Io.Writer, f: f64) !void {
-    if (cy.Value.floatCanBeInteger(f)) {
-        try w.print("{d:.1}", .{f});
-    } else {
-        try w.print("{d}", .{f});
-    }
+fn write_float(w: *std.Io.Writer, f: anytype) !void {
+    var buf: [fmt.float_buf_size]u8 = undefined;
+    try w.writeAll(fmt.renderFloat(&buf, f));
 }
 
 /// A nested value stops at `DescMaxDepth` so cyclic references and deep records stay short.

@@ -773,6 +773,8 @@ fn (Float[]) abs() -> Self:
 
 #[bind] fn @fabs(x Float[%Bits]) -> Float[Bits]
 
+--| Returns the text of the float, the same as `str(x)` and `print`: the shortest digits that read back as the same value,
+--| in plain decimals. A finite value without a fraction gets `.0` (`3.0`, `-0.0`). Infinity and NaN are `inf`, `-inf` and `nan`.
 fn (Float[]) fmt() -> str:
     #if Self == float:
         return f64_fmt(self)

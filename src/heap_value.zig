@@ -985,16 +985,8 @@ pub fn writeValue2(self: *const cy.Heap, w: anytype, val_static_t: cy.TypeId, va
 pub fn writeValue(self: *const cy.Heap, w: *std.Io.Writer, val_t: cy.TypeId, val: Value, skip_full_type_names: bool) !bool {
     switch (val_t) {
         bt.F64 => {
-            const f = val.asF64();
-            if (Value.floatIsSpecial(f)) {
-                try w.print("{}", .{f});
-            } else {
-                if (Value.floatCanBeInteger(f)) {
-                    try w.print("{d:.1}", .{f});
-                } else {
-                    try w.print("{d}", .{f});
-                }
-            }
+            var buf: [cy.fmt.float_buf_size]u8 = undefined;
+            try w.writeAll(cy.fmt.renderFloat(&buf, val.asF64()));
             return true;
         },
         bt.Bool => {

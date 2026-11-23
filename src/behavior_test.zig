@@ -677,6 +677,7 @@ fn test_core(run: *Runner) void {
     run.case("core/error_values.cy");
     run.case("core/escape_sequences.cy");
     run.case("core/floats.cy");
+    run.case("core/float_to_str.cy");
     run.case("core/ints.cy");
     run.case("core/int_unsupported_notation_error.cy");
     run.case("core/int_literal_overflow_error.cy");

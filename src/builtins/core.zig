@@ -2456,20 +2456,16 @@ fn Func_size(t: *cy.Thread) callconv(.c) C.Ret {
 fn f32_fmt(t: *cy.Thread) anyerror!C.Ret {
     const ret = t.ret(cy.heap.Str);
     const val = t.param(f32);
-    const BufSize = std.fmt.float.bufferSize(.decimal, f32);
-    var buf: [BufSize]u8 = undefined;
-    const str = try std.fmt.float.render(&buf, val, .{ .mode = .decimal });
-    ret.* = try t.heap.init_astr(str);
+    var buf: [cy.fmt.float_buf_size]u8 = undefined;
+    ret.* = try t.heap.init_astr(cy.fmt.renderFloat(&buf, val));
     return C.RetOk;
 }
 
 fn f64_fmt(t: *cy.Thread) anyerror!C.Ret {
     const ret = t.ret(cy.heap.Str);
     const val = t.param(f64);
-    const BufSize = std.fmt.float.bufferSize(.decimal, f64);
-    var buf: [BufSize]u8 = undefined;
-    const str = try std.fmt.float.render(&buf, val, .{ .mode = .decimal });
-    ret.* = try t.heap.init_astr(str);
+    var buf: [cy.fmt.float_buf_size]u8 = undefined;
+    ret.* = try t.heap.init_astr(cy.fmt.renderFloat(&buf, val));
     return C.RetOk;
 }
 

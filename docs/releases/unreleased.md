@@ -4,6 +4,22 @@
 사용자에게 보이는 동작이 바뀌는 커밋은 여기에 바로 적고, 언어 규칙이면 `docs/docs.md`에도 같이 적는다.
 전체 발견 이슈 표는 `docs/study/10-findings-register.md`, 컴파일러 한계의 결정은 `docs/decisions/project_compiler_limits.md`.
 
+## float은 항상 소수점을 붙여 문자열로 바뀐다 (2026-11-23, 깨지는 변경)
+
+값이 정수인 float은 소수점 없이 문자열이 됐다. `print(3.0)`이 `3`을 찍어서 출력만으로는 `int`와 `float`을 구별할 수 없었고,
+`docs/docs.md`의 예제(`print(add[float](1, 2)) --> 3.0`)와도 달랐다. 이제 float은 다시 읽으면 float이 되는 문자열로 바뀐다.
+
+- 규칙: 유한한 값의 결과에 `.`이 없으면 `.0`을 붙인다. `3.0`은 `3.0`, `-0.0`은 `-0.0`, `1e21`은 `1000000000000000000000.0`.
+  자릿수 생성(같은 값으로 읽히는 가장 짧은 십진수, 지수 표기 없음)은 그대로다. `1.5`, `0.0000001`, `inf`, `-inf`, `nan`은 바뀌지 않는다.
+- 적용 범위: `print`, `str(x)`, 문자열 보간 `'%{x}'`, `x.fmt()`, 슬라이스 · 구조체 · 옵션 · `Object` 안의 float, `f32`.
+  `print([]float{3, 5.5})`는 `{3.0, 5.5}`, `print(Point{x=1, y=2})`는 필드가 float이면 `Point{x=1.0, y=2.0}`.
+- 바뀌지 않는 것: `json.stringify` · `json.encode` · `json.fmt_float`(`3.0`은 `3`), `toon.encode`, `time`의 `format`. 정수 `print(3)`은 `3` 그대로다.
+- 고치는 방법: 소수점 없는 출력이 필요하면 `int(x)`로 바꿔서 찍는다. float 출력을 문자열로 비교하던 코드는 기대값에 `.0`을 붙인다.
+- 구현: 규칙은 `src/fmt.zig`의 `renderFloat` 한 곳에 있다. `f64_fmt` · `f32_fmt`(`src/builtins/core.zig`), `Heap.writeValue`(`src/heap_value.zig`),
+  디버거 값 설명(`src/debug.zig`)이 이것을 부른다. `json.fmt_float`는 `float.fmt()` 결과에서 `.0`을 떼어 JSON 형식을 유지한다.
+- 테스트: `src/test/core/float_to_str.cy`, `src/fmt.zig`의 'renderFloat'.
+- C 백엔드(`-tcc`, `-cc`)의 `cb_float_fmt`(`src/aot.c`)는 건드리지 않았다. 정수 값에는 이미 `.0`을 붙이지만 `%.10f`를 써서 자릿수가 VM과 다르다.
+
 ## 추론할 수 없는 템플릿 파라미터의 오류 문구 (2026-11-23)
 
 앞선 템플릿 파라미터를 쓰면서 새 infer 파라미터를 함께 선언하는 파라미터 타입(`f MapFn[T, %U]`, `p Pair[T, %U]`)으로 제네릭 함수를 호출하면

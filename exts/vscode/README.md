@@ -78,9 +78,10 @@ On Linux without a display, run it under `xvfb-run -a`.
 ## Other editors
 
 `cyber-lsp` speaks the Language Server Protocol over stdin and stdout, so any client can start it.
-Neovim (0.11 or later):
+For Neovim use [cyber.nvim](https://github.com/soomtong/cyber.nvim). Without the plugin (Neovim 0.11 or later):
 
 ```lua
+vim.filetype.add { extension = { cy = 'cyber' } }
 vim.lsp.config('cyber', { cmd = { 'cyber-lsp' }, filetypes = { 'cyber' } })
 vim.lsp.enable('cyber')
 ```

@@ -40,3 +40,15 @@ GitHub 라이선스 표시는 없다.
 - 결과: 컴파일러가 파싱하는 `.cy` 417개(`src` · `examples` · `docs` · `exts`) 모두 오류 노드 없음. tree-sitter CLI 0.27.2.
 - 쿼리 네 개(`highlights` · `indents` · `locals` · `tags`)는 `tree-sitter query`로 로드되는 것만 확인했다. 에디터에서의 실제
   하이라이트는 확인하지 않았다.
+
+## 2026-11-23 갱신 (Neovim 플러그인)
+
+- Neovim 지원을 별도 저장소 [soomtong/cyber.nvim](https://github.com/soomtong/cyber.nvim)으로 옮겼다. filetype, `cyber-lsp`
+  클라이언트, 파서 빌드, 들여쓰기, `:checkhealth cyber`를 플러그인이 맡는다. Neovim 0.12 이상.
+- 문법의 원본은 계속 이 폴더다. 플러그인은 `grammar.js` · `src/scanner.c` · `tree-sitter.json`과 쿼리 세 개(`highlights` ·
+  `indents` · `locals`)의 복사본을 갖고, 플러그인 저장소의 `task sync -- <이 저장소 경로>`로만 갱신한다. 가져온 커밋은
+  플러그인의 `grammar/SOURCE`에 적힌다. 여기서 문법이나 쿼리를 고치면 커밋한 뒤 플러그인에서 sync를 돌린다(커밋 안 된
+  변경이 있으면 sync가 거부한다).
+- nvim-treesitter(`main`)에 직접 등록하는 안내는 `exts/vim/README.md` · `exts/tree-sitter/README.md`에서 뺐다. 그 안내에는
+  `master`와의 비호환, `lazy = false` · `build` 누락, `main`에 없는 `ensure_installed`, CLI 버전(0.26.1 이상) 누락이 있었다.
+- 에디터에서의 실제 하이라이트는 Neovim 0.12.6에서 확인했다(플러그인의 `task test`, 캡처 `keyword.type` · `string` · `comment`).

@@ -45,41 +45,17 @@ tree-sitter highlight --scope source.cyber ../../examples/account.cy
 
 ## Neovim
 
-Use the `main` branch of `nvim-treesitter/nvim-treesitter`. It needs Neovim 0.12 or later.
+[cyber.nvim](https://github.com/soomtong/cyber.nvim) carries a copy of `grammar.js`, `src/scanner.c` and
+the queries, and builds the parser itself. nvim-treesitter is not needed. See
+[exts/vim/README.md](../vim/README.md#neovim).
 
-The install generates `parser.c` and copies the queries, so it needs the `tree-sitter`
-CLI and a C compiler.
+The copy does not follow this folder by itself. After a change of the grammar or of a query, commit it
+here and run this in a checkout of cyber.nvim. It copies the files, records the commit in
+`grammar/SOURCE` and runs the tests of the plugin.
 
-```lua
-vim.filetype.add { extension = { cy = 'cyber' } }
-
--- Must run before nvim-treesitter loads, with lazy.nvim put it in `init`.
-vim.api.nvim_create_autocmd('User', {
-  pattern = 'TSUpdate',
-  callback = function()
-    require('nvim-treesitter.parsers').cyber = {
-      install_info = {
-        url = 'https://github.com/soomtong/cyber',
-        branch = 'master',
-        location = 'exts/tree-sitter',
-        generate = true,
-        generate_from_json = false,
-        -- Relative to the repository root, not to `location`.
-        queries = 'exts/tree-sitter/queries',
-      },
-    }
-  end,
-})
+```sh
+task sync -- ~/path/to/cyber
 ```
-
-Then run `:TSInstall cyber`. No revision is pinned, so `:TSUpdate` does not see a
-grammar change. Run `:TSInstall! cyber` to fetch it again.
-
-To work on the grammar from a local checkout, replace `url` and `branch` with
-`path = '~/path/to/cyber'`. The queries are then linked instead of copied.
-
-See [exts/vim/README.md](../vim/README.md#neovim) for how to start the highlighting
-and for the `cyber-lsp` setup.
 
 ## Coverage
 

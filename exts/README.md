@@ -11,9 +11,12 @@
 
 * [cyber-vscode](https://github.com/daelonsuzuka/cyber-vscode), [Marketplace](https://marketplace.visualstudio.com/items?itemName=DaelonSuzuka.cyber) by @daelonsuzuka
 
-## Vim
+## Vim and Neovim
 
-* [nvim-cyber](https://github.com/instance-id/nvim-cyber) by @instance-id
+* [cyber.nvim](https://github.com/soomtong/cyber.nvim) Neovim plugin for the current syntax: filetype, the client of
+  `cyber-lsp`, tree-sitter highlighting and indent. It carries a copy of the grammar in [tree-sitter](./tree-sitter).
+* [vim](./vim) Filetype, regex syntax highlighting and indent for Vim.
+* [nvim-cyber](https://github.com/instance-id/nvim-cyber) by @instance-id. For the 2023 syntax.
 
 ## Tree-sitter
 

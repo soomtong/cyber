@@ -9,6 +9,7 @@
 #   task build TARGET=aarch64-linux-gnu # cross compile (adds -Dcpu=baseline like CI)
 #   task test FILTER=switch             # only tests whose name contains the filter
 #   task test:behavior BACKEND=tcc      # compiler backend for behavior tests: vm, tcc, cc
+#                                       # tcc and cc do not work at present: they fail at the first case
 #   task build -- -Dmalloc=mimalloc     # any extra `zig build` flags after `--`
 
 version: '3'
@@ -136,7 +137,7 @@ tasks:
         vars: { OPT: ReleaseSafe, TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '{{.CLI_ARGS}}' }
 
   test:behavior:
-    desc: 'Run the behavior tests (src/test/**.cy scripts). BACKEND=vm|tcc|cc picks the compiler. The cases run in 4 processes at once; `-- -Dtest-shards=1` runs them in one.'
+    desc: 'Run the behavior tests (src/test/**.cy scripts). BACKEND=vm|tcc|cc picks the compiler (tcc and cc currently fail at the first case: the C backend does not work). The cases run in 4 processes at once; `-- -Dtest-shards=1` runs them in one.'
     cmds:
       - task: zig:build
         vars: { STEP: behavior-test, OPT: '{{.OPT}}', TARGET: '{{.TARGET}}', FILTER: '{{.FILTER}}', BACKEND: '{{.BACKEND}}', CLI_ARGS: '{{.CLI_ARGS}}' }

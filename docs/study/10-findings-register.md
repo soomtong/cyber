@@ -232,6 +232,7 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 | F-192 | `&T` 수신자 단항 연산자가 'Expected argument `&Ix`, found `Ix`' | `semaUnExpr`가 수신자 경로를 쓰지 않음 | 남은 것 정리(2026-11-22) | 낮음 | 2026-11-22 수정. `semaCallFuncSymRec` |
 | F-193 | spawn 인자 · 결과의 보내기 규칙 불일치, `FutureSyncState`가 VM 수명 동안 쌓임 | 규칙이 둘, 해제 시점 없음 | 남은 것 정리(2026-11-22) | 중간. 메모리 증가 | 2026-11-22 수정. `@sendable`, `releaseSharedState` |
 | F-194 | 빌림 컨테이너 구멍 일곱: 다른 컨테이너 자리의 복사, 빌림을 거친 자리, 비어휘적 수명, 언랩 캡처, `pp.* =`, 지역 자리 반환, 매개변수 사이 저장 | 자리 정보 · 대여 전파 · 검사 누락 | 남은 것 정리(2026-11-22) | 높음. 해제된 메모리 읽기 | 2026-11-22 수정. `borrow_places`, 부르는 쪽 `scope` 검사(깨지는 변경) |
+| F-195 | C 백엔드(`-tcc`, `-cc`, `CL_TCC`, `CL_CC`)가 어떤 스크립트도 컴파일하지 못하는데 `cyber help`는 'Experimental.', 매뉴얼은 네이티브 성능용으로 권함(F-33의 후속). 꺼진 백엔드의 `cb_float_fmt`는 1e21 이상에서 버퍼 밖 읽기, `cb_utf8_seq_len`은 본문 없음 | `#[bind]` 함수 63개에 `.cy` 본문 없음(`sema_resolve.zig`), `mapType`이 템플릿 별칭이 된 `int` 등을 못 찾음(`cgen.zig`), cgen 이름 표가 옛 `$name` 훅. upstream에서 물려받음, CI 미실행 | C 백엔드 조사(2026-11-23) | 중간. 문서와 동작 불일치 | 2026-11-23 고치지 않고 거절로 바꿈: 컴파일 오류 'The C backend (-tcc, -cc) does not work in this version. ...', 문서 정정. 개발자 경로 `-Dtest-backend`, `CYBER_C_BACKEND=1`. 결정 `project_direction.md` |
 
 ## 우선순위 한 장 요약
 

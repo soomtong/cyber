@@ -14,6 +14,22 @@
 ## 백엔드
 
 - 기본 백엔드는 바이트코드 VM이다. 네이티브가 필요하면 TCC/C AOT(`-Dtest-backend=tcc|cc`)로 충분하다.
+  2026-11-23 덧붙임: 위 문장은 확인 없이 적은 것이다. C 백엔드(`-tcc`, `-cc`, `CL_TCC`, `CL_CC`)는 지금 어떤 스크립트도
+  컴파일하지 못한다. `print(1.5)`가 `core:17`(`#[bind] fn abort`)에서 'CompileError: Expected function implementation.'으로
+  끝난다. upstream에서 물려받은 상태이고 CI는 이 백엔드를 돌린 적이 없다. 원인은 세 겹이다.
+  1. `src/sema_resolve.zig`의 `#[bind]` 함수 해소가 백엔드가 VM이 아니면 VM에 묶인 함수마다 `.cy` 본문을 요구한다
+     (`c.compiler.config.backend != C.BackendVM and decl.stmts.len == 0`). core · meta의 63개 함수에 본문이 없다.
+  2. `src/cgen.zig`의 `mapType(builtins_c, "int", ...)` 계열이 null을 만난다. `int` · `i32` · `byte` · `r32` · `r64` ·
+     `float`가 이제 템플릿의 별칭이라 이름으로 찾는 타입 심볼이 아니다.
+  3. cgen의 이름 표가 옛 `$name` 훅 이름을 쓴다. `core.cy`는 지금 `@name`을 쓴다.
+  런타임 쪽 결함도 있다. `src/aot.c`의 `cb_float_fmt`는 1e21 이상의 값에서 버퍼 밖을 읽고, `cb_utf8_seq_len`은 본문이 비어 있다.
+  2026-11-23 결정: 지금은 고치지 않고 제품이 사실대로 말하게 한다. `Compiler.compile()`이 JIT 거절 바로 뒤에서 `C.BackendTCC` ·
+  `C.BackendCC`를 'The C backend (-tcc, -cc) does not work in this version. Run with the bytecode VM (the default).' 컴파일 오류로
+  거절하고, CLI는 컴파일 전에 같은 문구를 찍고 종료 코드 1로 끝난다. `cyber help`는 두 옵션을 'Not working in this version.'으로
+  적는다. 백엔드 코드(`src/cgen.zig`, `src/aot.c`, `src/aot.h`)는 남긴다. 고치는 사람을 위한 길은 둘이다.
+  `-Dtest-backend=tcc|cc`(`task test:behavior BACKEND=tcc`)는 전처럼 백엔드에 닿고, CLI는 환경 변수 `CYBER_C_BACKEND=1`을 주면
+  거절하지 않는다. 둘 다 라이브러리의 `clCBackendDev` 스위치를 켠다(`src/lib.zig`, `docs/build.md`). 고칠 때는 위 1 → 2 → 3 순서로
+  막힌다. 발견 표 F-33 · F-195.
 - LLVM 백엔드(`src/llvm.zig` · `src/llvm_gen.zig`, `-Djit`)는 켜지 않는다. upstream도 2025-11 이후
   손대지 않은 미완성 경로다. Zig 0.17 업그레이드의 남은 항목 7(LLVM-C 번역 모듈)은 이 이유로 닫았다.
   당시에는 `cy.hasJIT` 뒤에 있어 빌드에 영향이 없으므로 두었고, 2026-11-04 죽은 코드 정리에서 파일을 지웠다.

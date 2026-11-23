@@ -121,6 +121,14 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
     }
 
+    if (cBackendRefused(backend, envIsSet(alloc, c_backend_env))) {
+        std.debug.print("error: {s}\n", .{c.c_backend_refusal});
+        exit(1);
+    }
+    if (isCBackend(backend)) {
+        c.setCBackendDev(true);
+    }
+
     switch (cmd) {
         .eval => {
             const path = arg0 orelse return error.MissingFilePath;
@@ -159,6 +167,30 @@ fn exit(code: u8) noreturn {
         _ = win32.SetConsoleOutputCP(prevWinConsoleOutputCP);
     }
     std.process.exit(code);
+}
+
+/// Developer opt-in for `-tcc` and `-cc`. Documented in docs/build.md only.
+const c_backend_env = "CYBER_C_BACKEND";
+
+fn isCBackend(backend_: c.Backend) bool {
+    return backend_ == c.BackendTCC or backend_ == c.BackendCC;
+}
+
+/// `-tcc` and `-cc` stop before any compile: the C backend does not work in this version.
+/// `opt_in` is whether the developer set `CYBER_C_BACKEND`.
+fn cBackendRefused(backend_: c.Backend, opt_in: bool) bool {
+    return isCBackend(backend_) and !opt_in;
+}
+
+test "CLI: -tcc and -cc are refused without the developer opt-in." {
+    try std.testing.expect(cBackendRefused(c.BackendTCC, false));
+    try std.testing.expect(cBackendRefused(c.BackendCC, false));
+    try std.testing.expect(!cBackendRefused(c.BackendTCC, true));
+    try std.testing.expect(!cBackendRefused(c.BackendCC, true));
+    try std.testing.expect(!cBackendRefused(c.BackendVM, false));
+    // `-jit` is refused by the compiler with its own message.
+    try std.testing.expect(!cBackendRefused(c.BackendJIT, false));
+    try std.testing.expect(std.mem.indexOf(u8, c.c_backend_refusal, "does not work in this version") != null);
 }
 
 const Command = enum {
@@ -402,10 +434,8 @@ fn help() void {
         \\Backend options:
         \\  -vm     Compile to bytecode. (Default)
         \\          Fast build, slow perf.
-        \\  -cc     Compile to C with optimizations. Experimental.
-        \\          Slow build, fast perf.
-        \\  -tcc    Compile to C with builtin TinyC compiler. Experimental.
-        \\          Mid build, mid perf.
+        \\  -cc     Compile to C with optimizations. Not working in this version.
+        \\  -tcc    Compile to C with builtin TinyC compiler. Not working in this version.
         \\
         \\General options:
         \\  -r      Refetch url imports and cached assets.

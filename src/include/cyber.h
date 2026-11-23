@@ -918,6 +918,10 @@ extern bool clVerbose;
 // Silent flag. Whether to print errors.
 extern bool clSilent;
 
+// Developer switch for the C backend (`CL_TCC`, `CL_CC`). The C backend does not work in this version:
+// a compile with it fails with a compile error unless this flag is set. Set it only to work on the backend.
+extern bool clCBackendDev;
+
 // -----------------------------------
 // [ Threads ]
 // -----------------------------------

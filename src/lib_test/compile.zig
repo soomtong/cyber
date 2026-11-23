@@ -21,6 +21,37 @@ test "JIT backend is rejected with a clear compile error." {
     try zt.expect(std.mem.indexOf(u8, summary, "The JIT backend is not supported.") != null);
 }
 
+test "C backend is rejected with a clear compile error." {
+    const vm = C.vm_init();
+    defer C.vm_deinit(vm);
+
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    for ([_]C.Backend{ C.BackendTCC, C.BackendCC }) |backend| {
+        var config = C.defaultEvalConfig();
+        config.backend = backend;
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "t", "_ = 1 + 2", config, &res));
+        {
+            const summary = C.vm_compile_error_summary(vm);
+            defer C.vm_freeb(vm, summary);
+            try zt.expect(std.mem.startsWith(u8, summary, "CompileError: The C backend (-tcc, -cc) does not work in this version. Run with the bytecode VM (the default)."));
+        }
+
+        var compile_c = C.defaultCompileConfig();
+        compile_c.backend = backend;
+        try zt.eq(C.ErrorCompile, C.vm_compile(vm, "t", "_ = 1 + 2", compile_c));
+        const summary = C.vm_compile_error_summary(vm);
+        defer C.vm_freeb(vm, summary);
+        try zt.expect(std.mem.indexOf(u8, summary, C.c_backend_refusal) != null);
+    }
+
+    // The VM still compiles on the same instance.
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "t2", "_ = 1 + 2", C.defaultEvalConfig(), &res));
+}
+
 /// Builds a source with `n` repetitions of `item` (`{}` is the index) between `head` and `tail`, joined by `sep`.
 fn repeat_src(w: *std.Io.Writer, head: []const u8, item: []const u8, sep: []const u8, n: usize, tail: []const u8) !void {
     try w.writeAll(head);

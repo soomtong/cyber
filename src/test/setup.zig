@@ -10,7 +10,12 @@ const os_mod = @import("../std/os.zig");
 const c = @import("../capi.zig");
 const log = std.log.scoped(.setup);
 
+/// `-Dtest-backend=tcc|cc` is the developer path to the C backend, so it also sets the switch that
+/// lets a compile reach it. Every compile of the test harness takes its backend from here.
 pub fn fromTestBackend(backend: @TypeOf(test_config.test_backend)) c.Backend {
+    if (backend != .vm) {
+        c.setCBackendDev(true);
+    }
     return switch (backend) {
         .vm => c.BackendVM,
         .tcc => c.BackendTCC,

@@ -481,7 +481,14 @@ pub const Compiler = struct {
         
         // The copy-and-patch JIT was removed. See docs/decisions/project_direction.md.
         if (config.backend == C.BackendJIT) {
-            _ = try self.addReportFmt(.compile_err, "The JIT backend is not supported. Use the bytecode VM (default) or the C backend (-tcc, -cc).", &.{}, null, 0);
+            _ = try self.addReportFmt(.compile_err, "The JIT backend is not supported. Use the bytecode VM (default).", &.{}, null, 0);
+            return error.CompileError;
+        }
+
+        // The C backend can not compile any script at present. See the 2026-11-23 note in
+        // docs/decisions/project_direction.md. `clCBackendDev` lets a developer reach it.
+        if ((config.backend == C.BackendTCC or config.backend == C.BackendCC) and !C.cBackendDev()) {
+            _ = try self.addReportFmt(.compile_err, C.c_backend_refusal, &.{}, null, 0);
             return error.CompileError;
         }
 

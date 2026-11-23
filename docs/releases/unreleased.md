@@ -4,6 +4,24 @@
 사용자에게 보이는 동작이 바뀌는 커밋은 여기에 바로 적고, 언어 규칙이면 `docs/docs.md`에도 같이 적는다.
 전체 발견 이슈 표는 `docs/study/10-findings-register.md`, 컴파일러 한계의 결정은 `docs/decisions/project_compiler_limits.md`.
 
+## C 백엔드(`-tcc`, `-cc`)는 동작하지 않는다고 밝히고 거절한다 (2026-11-23)
+
+C 백엔드는 어떤 스크립트도 컴파일하지 못한다. `cyber -tcc x.cy`는 `print(1.5)` 한 줄에도 `core:17`에서 'CompileError: Expected function implementation.'으로 끝났다.
+upstream에서 물려받은 상태이고 CI는 이 백엔드를 돌리지 않는다. 그런데 `cyber help`는 두 옵션을 'Experimental.'로, 매뉴얼은 네이티브 성능이 필요할 때 쓰라고 적고 있었다.
+이번에는 고치지 않고, 옵션이 바로 거절하고 문서가 실제 상태를 말하게 했다. 백엔드 코드는 그대로 둔다.
+
+- CLI: `-tcc`, `-cc`를 주면 컴파일 전에 'error: The C backend (-tcc, -cc) does not work in this version. Run with the bytecode VM (the default).'을 stderr에 찍고 종료 코드 1로 끝난다.
+  스크립트 실행, `cyber compile`, REPL 모두 같다(전에는 `cyber -tcc`만 주면 옵션을 무시하고 VM REPL이 떴다). `cyber help`는 두 옵션을 'Not working in this version.'으로 적는다.
+- 임베딩 API: `CLCompileConfig` · `CLEvalConfig`의 `backend`가 `CL_TCC` · `CL_CC`이면 `CL_ERROR_COMPILE`이고, 요약은 'CompileError: The C backend (-tcc, -cc) does not work in this version. ...'이다.
+  JIT 거절과 같은 자리(`Compiler.compile()`)에서 막는다. JIT 거절 문구는 C 백엔드를 권하던 부분을 빼서 'The JIT backend is not supported. Use the bytecode VM (default).'이 됐다.
+- 원인(고치지 않음): VM에 묶인 `#[bind]` 함수 63개에 `.cy` 본문이 없고(`src/sema_resolve.zig`), `src/cgen.zig`의 `mapType`이 템플릿 별칭이 된 `int` · `float` 등을 찾지 못하고,
+  cgen의 이름 표가 옛 `$name` 훅 이름을 쓴다. 자세한 것은 `docs/decisions/project_direction.md`의 2026-11-23 덧붙임, 발견 표 F-195.
+- 꺼진 백엔드의 알려진 결함: `src/aot.c`의 `cb_float_fmt`는 1e21 이상의 값에서 버퍼 밖을 읽는다. `cb_utf8_seq_len`은 본문이 비어 있다. 백엔드를 되살릴 때 같이 고쳐야 한다.
+- 개발자 경로: `zig build behavior-test -Dtest-backend=tcc|cc`(`task test:behavior BACKEND=tcc`)는 전처럼 백엔드까지 가서 첫 케이스에서 실패한다.
+  CLI는 환경 변수 `CYBER_C_BACKEND=1`을 주면 거절하지 않는다. `docs/build.md`에만 적었다. 헤더에는 이 둘이 켜는 `clCBackendDev`가 추가됐다.
+- 문서: `docs/docs.md`의 'C backend.' · 'JIT compiler.' · 'Static binding.' 절과 AOT를 언급한 문장, `Taskfile.yml`의 `BACKEND=` 설명.
+- 테스트: lib 테스트 'C backend is rejected with a clear compile error.', CLI 테스트 'CLI: -tcc and -cc are refused without the developer opt-in.'.
+
 ## 함수 인자에서 템플릿 파라미터를 추론한다 (2026-11-23)
 
 함수 타입 안에서 선언한 infer 파라미터(`f fn(T) -> %U`)와, 앞선 템플릿 파라미터를 쓰면서 새 파라미터를 선언하는 파라미터 타입(`p Pair[T, %U]`, `f MapFn[T, %U]`)은
@@ -133,6 +151,7 @@ type Shape trait:
   디버거 값 설명(`src/debug.zig`)이 이것을 부른다. `json.fmt_float`는 `float.fmt()` 결과에서 `.0`을 떼어 JSON 형식을 유지한다.
 - 테스트: `src/test/core/float_to_str.cy`, `src/fmt.zig`의 'renderFloat'.
 - C 백엔드(`-tcc`, `-cc`)의 `cb_float_fmt`(`src/aot.c`)는 건드리지 않았다. 정수 값에는 이미 `.0`을 붙이지만 `%.10f`를 써서 자릿수가 VM과 다르다.
+  이 백엔드는 동작하지 않는다(맨 위 항목).
 
 ## 추론할 수 없는 템플릿 파라미터의 오류 문구 (2026-11-23)
 

@@ -2212,14 +2212,7 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: sema.Cstr) !sema.ExprRe
         .minus => {
             var child: sema.ExprResult = undefined;
             // `return -x` in a function that returns `?T` or `!T` negates a `T` and wraps it after.
-            var neg_target_t = expr.target_t;
-            if (neg_target_t) |target_t| {
-                switch (target_t.kind()) {
-                    .option => neg_target_t = target_t.cast(.option).child_t,
-                    .result => neg_target_t = target_t.cast(.result).child_t,
-                    else => {},
-                }
-            }
+            const neg_target_t = unaryOperandTarget(expr.target_t);
             if (unary.child.type() == .decLit) {
                 const literal = unary.child.cast(.decLit).value.slice();
                 if (neg_target_t) |target_t| {
@@ -2301,7 +2294,9 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: sema.Cstr) !sema.ExprRe
             return c.semaCallFuncSymRec(func_sym, unary.child, child, &.{}, false, node);
         },
         .lnot => {
-            const child = try c.semaExprTarget(unary.child, expr.target_t);
+            // `var a ?bool = !b` negates a `bool` and wraps it after. With the `?bool` target the operand was
+            // wrapped first and `not` found a `?bool`.
+            const child = try c.semaExprTarget(unary.child, unaryOperandTarget(expr.target_t));
             switch (child.type.id()) {
                 bt.Bool => {
                     const op = try c.ir.newExpr(.unary_op, c.sema.bool_t, node, .{
@@ -2332,8 +2327,9 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: sema.Cstr) !sema.ExprRe
         .bitwiseNot => {
             // Only an int or raw target reaches the operand. Another target (float) would convert
             // the operand to a type that has no `~`.
+            // A `?T` or `!T` target gives its `T`, so that `var a ?byte = ~1` reads the literal as a `byte`.
             var child_target: ?*cy.Type = null;
-            if (expr.target_t) |target_t| {
+            if (unaryOperandTarget(expr.target_t)) |target_t| {
                 if (target_t.kind() == .int or target_t.kind() == .raw) {
                     child_target = target_t;
                 }
@@ -2364,6 +2360,19 @@ pub fn semaUnExpr(c: *cy.Chunk, unary: *ast.Unary, expr: sema.Cstr) !sema.ExprRe
             return c.semaCallFuncSymRec(func_sym, unary.child, child, &.{}, false, node);
         },
         else => return c.reportErrorFmt("Unsupported unary op: {}", &.{v(unary.op)}, node),
+    }
+}
+
+/// The target type for the operand of a unary operator. A `?T` or `!T` target gives `T`: the operator works on
+/// a `T` and its result is wrapped after. Passing the target as is wraps the operand before the operator sees it.
+fn unaryOperandTarget(target_opt: ?*cy.Type) ?*cy.Type {
+    var target_t = target_opt orelse return null;
+    while (true) {
+        switch (target_t.kind()) {
+            .option => target_t = target_t.cast(.option).child_t,
+            .result => target_t = target_t.cast(.result).child_t,
+            else => return target_t,
+        }
     }
 }
 

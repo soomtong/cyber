@@ -28,11 +28,11 @@ The areas of focus for the language include:
 * Value ownership and deinitializers.
 * Metaprogramming with templates, inline evaluation, and compiler hooks.
 * Concurrency. Threads that run in parallel, futures and `await` to wait for them, fibers and `scope` blocks for structured concurrency, and generators.
-* Compilation ahead-of-time to C or interpeted from its virtual machine.
-* Sandbox mode that restricts the language to only safe constructs. *Planned Feature*
+* Interpreted by a bytecode virtual machine. A CLI runs scripts, and `libcyber` embeds the VM in a host application.
+* Embedding controls that let a host restrict a script: raw pointers, the modules it can load, its memory, its stack and its run time.
 * Introspection. Much of the internals such as the builtin types and runtime is written in Cyber and can be inspected from the source code or the [API docs](api.html).
 
-These docs provide a reference manual for the language. It can be read in order or browsed from the navigation. Features that are marked `Incomplete` or `Planned` have not been completed at the time of writing.
+These docs provide a reference manual for the language. It can be read in order or browsed from the navigation. Features that are marked `Planned` have not been completed at the time of writing.
 
 ## Hello World.
 Here is a simple example that offers a sneak peek into the language:
@@ -203,7 +203,7 @@ fn foo():
 ```
 
 ### `global` variables.
-Global variables live until the end of the program and can be accessed from any context (unless they have a private modifier). Globals are considered *unsafe*. A sandbox mode that forbids them is planned.
+Global variables live until the end of the program and can be accessed from any context (unless they have a private modifier). Globals are considered *unsafe*.
 
 Global variables are declared with `global` and require a type specifier:
 ```cy
@@ -453,8 +453,6 @@ See [Custom types -> Operator methods](#operator-methods).
   * [String concatenation.](#string-concatenation)
   * [String interpolation.](#string-interpolation)
   * [String formatting.](#string-formatting)
-  * [Line-join literal.](#line-join-literal)
-  * [Mutable strings.](#mutable-strings) 
 * [Symbols.](#symbols)
 * [References.](#references)
 
@@ -834,38 +832,11 @@ Alternatively, a custom placeholder can be specified:
 print('if (%PH) {\n\t%PH}'.fmt('%PH', {cond, body}))
 ```
 
-*Named placeholders will be supported.*
-
 Values that can be formatted into a string typically have a `fmt` method:
 ```cy
 x := 123
 print(x.fmt(.hex))  --> 7b
 ```
-
-### Line-join literal.
-The line-join literal joins string literals with the new line character `\n`. *Planned Feature*
-
-This has several properties:
-* Ensures the use of a consistent line separator: `\n`
-* Allows lines to have a mix of raw string or string literals.
-* Single quotes and double quotes do not need to be escaped.
-* Allows each line to be indented along with the surrounding syntax.
-* Allows comments in between adjacent lines.
-* The starting whitespace for each line is made explicit.
-
-```cy
-paragraph := {
-    \`raw string literal
-    \hello\nworld
-    \hello %{name}
-    -- This is a comment.
-    \last line
-    \
-}
-```
-
-### Mutable strings.
-`Str` is a mutable string type. *Planned Feature*
 
 ## Symbols.
 A symbol literal is written `symbol.` followed by an identifier, like an error value is written `error.Name`.
@@ -970,12 +941,6 @@ An `?else` block executes a block of statements for the `none` case:
 ```cy
 value := opt ?else:
     return error.Missing
-```
-
-A value can be returned with `break`: *Planned Feature*
-```cy
-value := opt ?else:
-    break 'empty'
 ```
 
 ### Optional chaining.
@@ -1119,13 +1084,6 @@ print('%{arr[0]} %{slice[0]')   --> 100 100
 slice += 4
 slice[0] = 101
 print('%{arr[0]} %{slice[0]')   --> 100 101
-```
-
-The `+..` invokes the slice operator with an end position that is an increment from the start: *Planned Feature*
-
-```cy
-arr := []int{1, 2, 3, 4, 5}
-print(arr[2+..2])   --> {3, 4}
 ```
 
 ### Slice operations.
@@ -2248,7 +2206,6 @@ a := MyContainer[int]{1, 2, 3}
   * [`switch` expression.](#switch-expression)
 * [`begin` block.](#begin-block)
 * [Error branching.](#error-branching)
-* [Deferred execution.](#deferred-execution)
 </td>
 </tr></table>
 
@@ -2490,9 +2447,6 @@ print(a)
 ## Error branching.
 See [Error handling](#error-handling).
 
-## Deferred execution.
-> _Planned Feature_
-
 # Functions.
 
 <table><tr>
@@ -2511,8 +2465,6 @@ See [Error handling](#error-handling).
 </td><td valign="top">
 
 * [Function calls.](#function-calls)
-  * [No parameter calls.](#no-parameter-calls)
-  * [Shorthand calls.](#shorthand-calls)
 * [Function templates.](#function-templates)
   * [Generic functions.](#generic-functions)
   * [Infer parameter.](#infer-parameter)
@@ -2564,16 +2516,6 @@ p := f()
 print(p.a + p.b)    --> 3
 ```
 A return type that lists several types, `-> (int, int)`, and `return 1, 2` are parse errors that say so.
-
-The returned value can also be destructured: *Planned Feature*
-```cy
-use math
-
-fn compute(rad float) -> [2]float:
-    return {math.cos(rad), math.sin(rad)}
-
-{x, y} := compute(pi)
-```
 
 ### Function overloading.
 Functions can be overloaded by their type signature:
@@ -2814,12 +2756,6 @@ Named arguments are required for named parameters:
 d := dist(x0=10, x1=20, y0=30, y1=40)
 ```
 
-### No parameter calls.
-> _Planned Feature_
-
-### Shorthand calls.
-> _Planned Feature_
-
 ## Function templates.
 Function declarations become function templates if they have template parameters:
 ```cy
@@ -3012,7 +2948,7 @@ An infer parameter is declared in a parameter type only. `fn f(x int) -> %U` rep
   * [ARC.](#arc)
   * [Retain optimizations.](#retain-optimizations)
   * [Default allocator.](#default-allocator)
-  * [Weak references.](#weak-references)
+  * [Back references.](#back-references)
   * [Cycle detection.](#cycle-detection)
 * [Manual memory.](#manual-memory)
   * [Pointers.](#pointers)
@@ -3023,7 +2959,7 @@ An infer parameter is declared in a parameter type only. `fn f(x int) -> %U` rep
 [^top](#table-of-contents)
 
 Cyber provides memory safety by default by providing structured memory semantics.
-Manual memory is also supported. A safe mode that forbids it is planned. An embedding host can already reject raw pointers in scripts with the `deny_raw_ptrs` compile option.
+Manual memory is also supported. An embedding host can reject raw pointers in scripts with the `deny_raw_ptrs` compile option.
 
 ## Structured memory.
 Cyber supports value ownership, borrowing, and deinitializers.
@@ -3160,26 +3096,18 @@ The methods that copy an element, such as `clone`, `last`, `contains` and `index
 Some types such as `Array` disallows copying but can still be [cloned](#cloning) or [moved](#moving).
 
 ### Cloning.
-Some value types cannot be implicitly copied but can be explicitly cloned. The builtin `clone` is not available yet. Until then, a type provides its own method, such as `Array.clone`: `b := a.clone()`. *Planned Feature*
+Some value types cannot be implicitly copied but can be explicitly cloned. A type that can be cloned provides a `clone` method, such as `Array.clone`:
 ```cy
 a := Array[int]{1, 2, 3}
-b := clone(a)
+b := a.clone()
 ```
 
-Any implicitly `Copyable` type is also implicitly `Cloneable`. By default, `clone` will invoke the type's copy constructor:
-```cy
-a := 123
-
-b := clone(a)
--- Equivalent to a copy.
-```
-
-The default `clone` behavior can be overridden by declaring a `@clone` method on the type:
+A user type declares its own method. There is no builtin `clone` function:
 ```cy
 type Foo:
     a int
 
-fn (&Foo) @clone() -> Self:
+fn (&Foo) clone() -> Foo:
     return {a=self.a}
 ```
 
@@ -3671,34 +3599,13 @@ For example, passing a reference to a function call doesn't need a retain since 
 ### Default allocator.
 Currently, `mimalloc` is used as the default heap allocator for objects, but it can be swapped with libc `malloc` or a custom allocator.
 
-### Weak references.
-> _Planned Feature_
-
-There is no weak reference type. A back reference from a child to its parent can not be a `^T` without forming a cycle. Keep an index or a key of the parent instead, or pass the parent to the function that needs it.
+### Back references.
+There is no weak reference type, and none is planned: a reference cycle is a bug, not a structure to support. A back reference from a child to its parent can not be a `^T` without forming a cycle. Keep an index or a key of the parent instead, or pass the parent to the function that needs it.
 
 ### Cycle detection.
 When shared references form a reference cycle, it's considered a runtime error.
 Cycle detection is dispatched at the end of a thread.
 The thread will panic if a cycle is detected which subsequently begins the runtime's [fatal deinitialization procedure](#deinitializers).
-
-Invoking the cycle detector manually with `@check_cycles` is not available yet: *Planned Feature*
-```cy
-fn foo():
-    -- Create a reference cycle.
-    a := ^Foo{child=none}
-    b := ^Foo{child=none}
-    a.child = b
-    b.child = a
-
-    -- Cycle still alive in the current stack so it reports no cyclic objects.
-    res := @check_cycles()
-    print(res.num_cyc_objs)   --> 0
-
-foo()
--- `a` and `b` are no longer reachable.
-res := @check_cycles()
-print(res.num_cyc_objs)       --> 2
-```
 
 ## Manual memory.
 Memory can be managed by hand with pointers. This memory is not tracked: the compiler and the runtime do not check its lifetime or its bounds.
@@ -3724,15 +3631,12 @@ A negative length panics, and a length of zero returns an empty span without an 
 
 An embedding host can reject raw pointers in scripts with the `deny_raw_ptrs` compile option (see [Denying raw pointers](#denying-raw-pointers)).
 
-An allocator that is chosen per allocation is not available yet. *Planned Feature*
-
 # Error handling.
 <table><tr>
 <td valign="top">
 
 * [Errors.](#errors)
   * [`error` literal.](#error-literal)
-  * [`error` payload.](#error-payload)
   * [`error` set type.](#error-set-type)
 * [Results.](#results)
   * [Unwrap or rethrow.](#unwrap-or-rethrow)
@@ -3763,10 +3667,7 @@ if err == error.Oops:
     handle_oops()
 ```
 
-### `error` payload.
-An `error` value holds only its name. Attaching a payload value when creating an error is not available yet. *Planned Feature*
-
-To return details with a failure, return a struct or a choice type that describes it, or keep the details in a value that the caller passes in.
+An `error` value holds only its name, and it does not carry a payload. To return details with a failure, return a struct or a choice type that describes it, or fill a value that the caller passes in, as the standard modules do with a `Diag` (`json.parse(s, &&diag)`).
 
 ### `error` set type.
 An error set type is an exhaustive type of possible error values: *Planned Feature*
@@ -3932,7 +3833,7 @@ panic('oops')
 Panics can not be caught. Once `panic` is invoked, the current thread stops execution and begins to unwind its call stack. Afterwards, the thread can not be used and transitions to a panic state.
 If the main thread panics, then the program aborts without unwinding other child threads.
 
-A panic of a spawned thread reaches the thread that awaits its `Future`: `await` panics with `Spawned thread panicked: <message>`. A parent thread can not query the status of a child thread in another way. *Planned Feature*
+A panic of a spawned thread reaches the thread that awaits its `Future`: `await` panics with `Spawned thread panicked: <message>`. A parent thread can not query the status of a child thread in another way.
 
 A panic reports the [stack trace](#stack-traces) automatically to the console.
 
@@ -4623,14 +4524,15 @@ A generator that is destructed before it is done is ended the same way.
 A generator can not be reset to its entry point. Call the function again for a new generator.
 
 ## Planned concurrency features.
-These features are not implemented. The names are not final:
+More `Sendable` types are planned (see [`Sendable` values](#sendable-values)).
 
-* Future chains. A `Future.then_spawn` that spawns a thread with the result of a future. Until then, a fiber that awaits the future and continues does the same on one thread.
-* Shared memory between threads, and channels to pass messages between them. Until then, threads exchange values through the arguments and the result of `spawn`.
+These are not planned. Use the way that is given:
+
+* Future chains (`then_spawn`). A fiber that awaits the future and continues does the same on one thread.
+* Shared memory between threads, and channels. Threads exchange values through the arguments and the result of `spawn`.
 * An `await` that waits for futures of different types. `Future.wait_any` takes futures of one type.
-* Thread status. A parent thread can only `await` the result of a child thread.
+* Thread status. A parent thread `await`s the result of a child thread, and a panic of the child reaches it there.
 * SIMD vector types. The runtime uses SIMD internally (for example in `str.index`), but the language has no vector operations.
-* More `Sendable` types (see [`Sendable` values](#sendable-values)).
 
 
 # Metaprogramming.
@@ -4859,15 +4761,9 @@ fn less(a Shape, b Shape):
 ```
 When a function parameter contains a generic type, the function becomes generic. The function is then specialized by the call site arguments.
 
-Type templates are planned to be generic types. Until then, expand the template or use an inferred parameter (`c MyContainer[%T]`): *Planned Feature*
+A type template is not a generic type: `fn size(c MyContainer)` is a compile error. Use an inferred parameter instead, which also works when the template is composed (`?MyContainer[%T]`):
 ```cy
-fn size(c MyContainer) -> int:
-    return type.size(type.of(c))
-```
-
-Composing a generic type is planned to create another generic type: *Planned Feature*
-```cy
-fn size(c ?MyContainer) -> int:
+fn size(c MyContainer[%T]) -> int:
     return type.size(type.of(c))
 ```
 
@@ -5453,7 +5349,7 @@ However, this doesn't imply that circular symbol dependencies are allowed. Diffe
 Modules can also be destructured using the following syntax:
 > _Planned Feature_
 ```cy
-use { cos, pi } 'math'
+use { cos, pi } from 'math'
 
 print(cos(pi))
 ```
@@ -5517,7 +5413,6 @@ use Vec2 -> eng.Vector2
 
 * [Binding to C.](#binding-to-c)
   * [Runtime binding.](#runtime-binding)
-  * [`open_lib` binding.](#open_lib-binding)
   * [`extern` functions.](#extern-functions)
   * [`extern` variables.](#extern-globals)
   * [cbindgen.cy](#cbindgency)
@@ -5754,10 +5649,9 @@ Cyber supports binding to an existing C ABI compatible library at runtime.
 This allows calling into dynamic libraries created in C or other languages.
 Static linking is not available: the bytecode VM is the only backend.
 
-There are different approaches to binding a C library:
+There are two approaches to binding a C library:
 1. Runtime binding. The C library is loaded and binded upon program start-up.
-2. `os.open_lib` binding. The user is responsible for loading the C library at runtime. *Planned Feature*
-3. When embedding [`libcyber`](#libcyber), compiler hooks can bind VM or C functions with the host language.
+2. When embedding [`libcyber`](#libcyber), compiler hooks can bind VM or C functions with the host language.
 
 ### Runtime binding.
 Cyber uses `libtcc` to JIT compile the bindings from `extern` declarations.
@@ -5771,15 +5665,8 @@ An example can be found in [ffi.cy](https://github.com/fubark/cyber/blob/master/
 ```
 A path with a directory component is opened as is. A bare file name is searched by the system loader (`LD_LIBRARY_PATH`, the directory of the `cyber` executable, then the system library paths), so use an explicit path like `./mylib.so` to load a library from the current directory.
 
-### `open_lib` binding.
-> _Planned Feature_
-
-`os.open_lib` is declared but not implemented: calling it panics. Use [runtime binding](#runtime-binding) with `c.bind_lib` instead. The paragraph below describes the planned behavior.
-
-If the path argument to `open_lib` is just a filename, the search steps for the library is specific to the operating system. Provide an absolute (eg. '/foo/mylib.so') or relative (eg. './mylib.so') path to load from a direct location instead. When the path argument is `none`, it loads the currently running executable as a library.
-
 ### `extern` functions.
-An `extern` function is configured with a C call convention and registered for static or runtime binding:
+An `extern` function is configured with a C call convention and registered for runtime binding:
 ```cy
 #[extern]
 fn SDL_CreateWindow(title Ptr[c_char], w c_int, h c_int, flags WindowFlags) -> Ptr[Window]
@@ -5799,7 +5686,7 @@ SDL_Window* SDL_CreateWindow(const char *title, int w, int h, SDL_WindowFlags fl
 An `extern` function is bound by the `c` module, so the `c` module must be loaded: `use c`, or a module that imports it. Otherwise the declaration is a compile error: 'An `#[extern]` function needs the `c` module. Add `use c`.'
 
 ### `extern` globals.
-An `extern` global is registered for static or runtime binding. It is declared with the type of the C variable, and the script reads and writes the variable of the library:
+An `extern` global is registered for runtime binding. It is declared with the type of the C variable, and the script reads and writes the variable of the library:
 ```cy
 #[extern] global count i32
 #[extern] fn bump() -> i32

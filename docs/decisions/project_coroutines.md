@@ -233,7 +233,7 @@ Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator 
   그 뒤 `exitFibers`가 스레드를 루트 스택으로 돌려놓는다. `prepEval`도 같은 일을 한다.
 - `Thread.host_depth`는 `callFunc2`가 바이트코드를 도는 동안 1 늘어난다. resume 때의 값과 다른 깊이의 `suspend`는
   `Cannot suspend across a host call.` panic이다. 지금은 스크립트에서 닿는 경로가 없다(호스트가 VM으로 되부르는 곳은
-  spawn 스레드 진입과 AOT뿐이고, C API에는 스크립트 함수 호출이 없다). 그런 API가 생길 때를 위한 가드다.
+  spawn 스레드 진입뿐이고(AOT는 2026-11-23 C 백엔드와 함께 삭제), C API에는 스크립트 함수 호출이 없다). 그런 API가 생길 때를 위한 가드다.
 
 검사.
 
@@ -258,7 +258,7 @@ Nim처럼 `iterator`를 `proc`과 다른 선언 종류로 두는 길(`generator 
    규칙은 넣지 않았다.
 6. `Future.await()`는 fiber 안에서도 spin했다(spawn의 Future). 2026-11-12 단계 3부터 fiber를 멈춘다(아래 "단계 3 구현" 절).
 7. 루트 맥락의 `suspend`는 no-op이다. 임베딩의 `CL_YIELD`는 없다.
-8. AOT(`cgen.zig`)는 미지원.
+8. AOT(`cgen.zig`)는 미지원. 2026-11-23 C 백엔드를 지워 해당 없다.
 
 테스트: behavior `concurrency/fiber.cy`(성장 · 중첩 · 제너레이터 소비 · 블록 형태 포함)와 오류 6개 · panic 3개,
 lib 테스트 3개(누수 검사 할당자: 정상 종료, 중첩 fiber 안 panic 뒤 재사용, `single_run`에서 진행 중인 fiber).
@@ -350,7 +350,7 @@ void cl_vm_abandon(CLVM* vm);
 멈춘 동안의 거부 · fiber 안에서 버리기 · reset · deinit, resume 뒤 연료 · interrupt · 메모리 상한 · panic, 스크립트 Future와
 spawn 스레드. 예제 `examples/libcyber/host_await.c`(`lib-standalone-test`에 등록).
 
-남은 것: 단계 3(fiber 안 await를 양보로) · 단계 4의 취소, `CL_YIELD`, AOT. 호스트 함수가 부른 스크립트 안의 await는 panic이다.
+남은 것: 단계 3(fiber 안 await를 양보로) · 단계 4의 취소, `CL_YIELD`, AOT(2026-11-23 C 백엔드 삭제로 해당 없음). 호스트 함수가 부른 스크립트 안의 await는 panic이다.
 
 ## `Future.wait_any` (2026-11-12)
 
@@ -414,7 +414,7 @@ spawn 스레드. 예제 `examples/libcyber/host_await.c`(`lib-standalone-test`�
 generator 본문), lib `Fibers that await host futures run interleaved, and the host sees all of their futures.`와
 기존 fiber · abandon 테스트 갱신.
 
-남은 것: 취소(멈춘 fiber의 스택 풀기) · 범위 문법 · 오류 전파(구조적 동시성), `CL_YIELD`, AOT.
+남은 것: 취소(멈춘 fiber의 스택 풀기) · 범위 문법 · 오류 전파(구조적 동시성), `CL_YIELD`, AOT(2026-11-23 C 백엔드 삭제로 해당 없음).
 
 ## 구조적 동시성 (2026-11-12 시작)
 

@@ -914,14 +914,6 @@ type DirEntry:
     kind FileKind
     name str
 
-type DynLib
-
---| Creates a handle to a dynamic library.
-#[bind] fn open_lib(path ?str) -> DynLib:
-    panic('TODO')
-
--- #[bind] fn FFI.bindLibTcc(self, path ?str) -> TccState
-
 type FileInfo:
     inode int
     size  int

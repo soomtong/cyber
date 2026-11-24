@@ -395,7 +395,7 @@ perl -e 'alarm 5; exec @ARGV' cyber lit.cy   # 4464
 | 2b. 표준 라이브러리 | LLM 스크립트가 바로 닿는 결함 | F-70 · F-71 · F-72 · F-74 · F-76 모두 2026-11-06 수정 | S ~ M | 각 재현 스크립트가 정상 결과. 규칙 12 삭제 가능 |
 | 3. 임베딩 하드닝 | 호스트가 자원과 권한을 쥔다 | F-42 (F-40 스택 상한 · F-06 `deny_raw_ptrs` · F-07 비-main await는 2026-11-08, F-50 print 콜백 · F-51 헤더 동기화 · F-41 메모리 한도 · C용 메모리 함수 · 할당 실패 처리 · F-52 오류 요약의 색과 구조화된 위치는 2026-11-10 수정) | M ~ L | 메모리 상한 턴은 `examples/libcyber/host_tool.c`에 추가됨(2026-11-10). 규칙 4, 5, 8 삭제 가능 |
 | 4. 메모리 안전 | 소유권 검사의 구멍 | F-27, F-29 (F-25 · F-26은 2026-11-08 수정, `project_borrow_model.md` · `project_array_append_move.md`) | L | 빌림 모델 문서 → 검사 수정 → 테스트 |
-| 5. 언어 완성도 | 스크립트 CLI 1순위 | Unwrap block(F-32, 2026-11-09 구현), error payload, Attributes 문서, Named parameters | L | 문서의 TBD 40곳 중 1순위 항목 감소 |
+| 5. 언어 완성도 | 스크립트 CLI 1순위 | Unwrap block(F-32, 2026-11-09 구현), error payload(2026-11-24 계획에서 뺌, `project_planned_features.md`), Attributes 문서, Named parameters | L | 문서의 TBD 40곳 중 1순위 항목 감소 |
 | 6. 중단과 재개 | 길 2 시제품 | `CALL_HOST` 대기 + `cl_vm_resume` | L | 호스트가 도구 응답을 기다리는 동안 스크립트가 멈췄다 이어지는 시나리오 테스트 |
 | 7. 정리 | 읽기 쉬운 코드베이스 | F-60~F-66, 죽은 코드 삭제(fiber.zig, map.zig 등), `write_inst` 정정 | S ~ M | 덤프가 실제 인코딩과 일치 |
 
@@ -472,7 +472,7 @@ A: 3~8, 11~13은 런타임에 버그나 한계가 있어서 생긴 임시 규칙
 
 ### Q6. 로드맵에서 JIT, LLVM, C 백엔드를 아예 넣지 않은 이유는?
 
-A: `project_direction.md`가 이 fork의 용도를 스크립트 CLI와 임베딩 라이브러리로 정했고 네이티브 산출물을 범위 밖으로 두었기 때문이다. 확인된 사실로, JIT는 `compile()` 맨 앞에서 거절되고 gen.zig는 현재 IR과 맞지 않는 옛 API 그대로이며, `-cc`와 `-tcc`도 sema 단계에서 실패한다(F-33). 에이전트 루프에는 빠른 시작과 작은 크기가 중요하고 이 둘은 바이트코드 VM이 이미 만족한다.
+A: `project_direction.md`가 이 fork의 용도를 스크립트 CLI와 임베딩 라이브러리로 정했고 네이티브 산출물을 범위 밖으로 두었기 때문이다. 확인된 사실로, JIT는 `compile()` 맨 앞에서 거절되고 gen.zig는 현재 IR과 맞지 않는 옛 API 그대로이며, `-cc`와 `-tcc`도 sema 단계에서 실패한다(F-33). 둘 다 그 뒤 코드를 지웠다(JIT 2026-11-06, C 2026-11-23, F-195). 에이전트 루프에는 빠른 시작과 작은 크기가 중요하고 이 둘은 바이트코드 VM이 이미 만족한다.
 
 ### Q7. 첫 기여로 F-01 수정이 아니라 F-01의 회귀 테스트를 권하는 이유는?
 

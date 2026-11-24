@@ -70,7 +70,7 @@ TS/Node 개발자에게는 `ts.createScanner` → `parseSourceFile` → binder/c
  실행 (computed goto 디스패치 루프, thread.zig/heap.zig 가 헬퍼)
 ```
 
-백엔드는 `compileInner`의 `switch (self.config.backend)`(`compiler.zig:494`)에서 갈라진다. 기본은 `BackendVM`(바이트코드). `-cc`/`-tcc`는 `cgen.gen`(C 코드 생성)으로 가고, `BackendJIT`는 `compile()` 맨 앞에서 "The JIT backend is not supported"로 거부된다(`compiler.zig:287-290`). 05 챕터까지는 VM 경로만 본다.
+백엔드는 `compileInner`의 `switch (self.config.backend)`(`compiler.zig:494`)에서 갈라진다. 기본은 `BackendVM`(바이트코드). `-cc`/`-tcc`는 `cgen.gen`(C 코드 생성)으로 갔다(2026-11-23에 C 백엔드를 지웠다(`project_direction.md`), 지금 CLI는 두 옵션을 '... was removed.' 오류로 끝낸다), `BackendJIT`는 `compile()` 맨 앞에서 "The JIT backend is not supported"로 거부된다(`compiler.zig:287-290`). 05 챕터까지는 VM 경로만 본다.
 
 ### 2.2 `src/` 파일 지도
 
@@ -84,7 +84,7 @@ TS/Node 개발자에게는 `ts.createScanner` → `parseSourceFile` → binder/c
 | 코드 생성 | `bc_gen.zig`(3432), `bytecode.zig`(1252) | 04 챕터 |
 | 실행 | `vm.c`(1813), `vm.h`(959), `vm.zig`(1463), `thread.zig`(1274), `heap.zig`(1865), `heap_value.zig`(1169) | 05, 06 챕터 |
 | 표준 | `builtins/core.cy`(4415), `builtins/core.zig`(2302), `std/*.cy` | 08 챕터 |
-| 대체 백엔드 | `cgen.zig`(3187), `jit/`, `llvm_gen.zig` | C 백엔드는 실험적, JIT/LLVM은 범위 밖(`docs/decisions/project_direction.md`) |
+| 대체 백엔드 | `cgen.zig`(3187), `jit/`, `llvm_gen.zig` | 셋 다 삭제됐다(JIT · LLVM 2026-11-04 ~ 06, C 2026-11-23). `cgen.zig`에는 FFI 쪽 약 1,030줄만 남았다(`docs/decisions/project_direction.md`) |
 
 ### 2.3 `Compiler.compile`과 `compileInner`를 따라가기
 
@@ -139,7 +139,7 @@ loadChunk(c)
 |---|---|---|
 | `-v` | `verbose = true`. ReleaseSafe 빌드에서는 실행 전 바이트코드 덤프(`vm.zig:452`의 `C.verbose()` 분기)와 비-void `main`의 반환값 출력(`main.zig:303-308`)을 한다. 트레이스 빌드에서는 추가로 모든 단계 로그가 나온다 | `main.zig:59`, `vm.zig:452` |
 | `-r` | URL import/캐시 재요청(`reload`) | `main.zig:61`, `cli.App.config.reload` |
-| `-vm` / `-cc` / `-tcc` | 백엔드 선택: 바이트코드(기본) / C 컴파일 / TinyC. `-jit`는 도움말에 없고 `compile()`에서 거부된다 | `main.zig:63-70`, `compiler.zig:287` |
+| `-vm` / `-cc` / `-tcc` | 백엔드 선택: 바이트코드(기본) / C 컴파일 / TinyC. `-cc` · `-tcc`는 2026-11-23부터 삭제 안내 오류. `-jit`는 도움말에 없고 `compile()`에서 거부된다 | `main.zig:63-70`, `compiler.zig:287` |
 | `-h`, `--help` | 도움말 | `main.zig:71-74` |
 | 그 외 `-xxx` | 에러 없이 무시(스크립트가 자기 옵션을 쓰도록). 트레이스 빌드만 `-stats` 인식 | `main.zig:75-83` |
 

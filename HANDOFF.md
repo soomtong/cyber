@@ -362,9 +362,8 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - `docs/releases/0.4.17.md`, `docs/releases/unreleased.md`.
 - `docs/decisions/project_fork_release_ci.md`(러너 미배정 · 재태깅 · 로컬 arm64 빌드 절차).
 
-- [ ] F-199(치명, 미수정): `persist_main` 세션에서 앞 입력이 선언한 타입에 뒤 입력이 메서드 · 타입 함수를 선언하면
-  `module.reserveFunc`의 `parent.getMod().?`가 null이라 호스트가 abort한다. REPL에 `type V:` 블록 뒤 `fn (&V) twice() -> float:`.
-  REPL에서는 메서드를 선언할 길이 없다. tars-agent 세션도 같은 길이다.
+- [x] F-199: `persist_main` 세션에서 앞 입력이 선언한 타입에 뒤 입력이 메서드 · 타입 함수를 선언하면 호스트가 abort하던 것.
+  고쳤다(위 "완료된 작업"의 "세션의 뒤 입력이 앞 입력의 타입에 메서드를 선언한다", `project_session_methods.md`).
 - [ ] F-200(미수정): CLI의 REPL에서 `use os`가 실패한다(REPL의 격리 VM에 CLI의 resolver · loader가 없다, `UserVM_init`).
   `cy.eval`의 VM이 호스트 설정을 받지 않는다는 계약과 닿아 있어 사용자 결정이 필요하다.
 - `os.cmd`의 다음 단계(`project_os_cmd.md` "가져오지 않은 것"): 줄 단위 스트리밍, 실행 중 중단 · 시간 제한, 파일 리다이렉션.

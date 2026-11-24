@@ -390,7 +390,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   타입 연산자의 양쪽 조회, `2.0 * v`), C(오버로드 모호성을 LSP Warning으로 먼저), D(컬렉션 식. 꼴은 정했고 넣을지와 `map` ·
   `filter`와의 순서는 미정), F(컴파일 타임 검증 리터럴, 평가기 확장 뒤). 사용자가 고를 때만 한다.
 - [x] 컴파일 타임 수 연산(2026-11-24, F-206 · F-207): 내장 수 타입의 모든 산술 · 비트 · 순서 연산, 정수 넓히기, float `==`.
-  정수 `/` · `%` 0은 컴파일 오류. 남은 것: `error` 리터럴은 컴파일 타임 식이 아니다. `>>`는 매뉴얼대로 논리 시프트(산술은
+  정수 `/` · `%` 0은 컴파일 오류. `error` 리터럴도 컴파일 타임 식이다. `>>`는 매뉴얼대로 논리 시프트(산술은
   `.asr()`).
 
 ## 다음 에이전트에게
@@ -405,9 +405,8 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 - 0.4.19에서 남긴 것: 시그니처에 직접 쓴 `fn(T) -> [%N + 1]T`는 이제 `N`을 짚는 'Can not infer the template parameter'
   오류다(2026-11-24, 거꾸로 풀지는 않는다).
-  템플릿 오버로드끼리 infer 위치만 다르면(`fn(T) -> ?%U`와 `fn(T) -> []%U`) 선언이 'already been declared with the same
-  function signature'로 거부된다. `%T type` 명시 인자의 평가 오류와 컴파일 타임 호출(`matchGenericFuncCt`)은 오버로드에서 바로 오류다.
-  실패한 오버로드 후보에서 끝까지 검사된 타입 선언형 람다는 죽은 코드로 남는다. `cyber src/builtins/cy.cy`의 panic은
+  템플릿 오버로드의 꼴 차이 · 타입 인자 · 컴파일 타임 호출은 2026-11-24에 고쳤다(`unreleased.md` "템플릿 오버로드의 남은 한계").
+  컴파일 타임 호출의 `str` 인자는 `EvalStr`라 `fn f(x str)`에 맞지 않는다. 실패한 오버로드 후보에서 끝까지 검사된 타입 선언형 람다는 죽은 코드로 남는다. `cyber src/builtins/cy.cy`의 panic은
   F-205로 고쳤다(이제 호스트 함수 로드 실패 컴파일 오류). wasm 빌드의 behavior 테스트는 `-Dtest-filter`를 빌드 때 넣어
   따른다(`test_config.case_filter`, 2026-11-24).
   '변수를 캡처하는 블록 람다를 오버로드 인자로 주면 Missing return statement.'라는 보고는 재현되지 않았다(leak만 고쳤다).

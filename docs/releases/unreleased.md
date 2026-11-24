@@ -232,3 +232,25 @@ CLI의 REPL에서 `use os`가 'Failed to load module: os'였다(F-200). 세션�
   비교에서 부호 있는 정수는 raw 타입으로 바뀌지 않는다(`a < r`(`a i8`, `r r64`)는 런타임처럼 타입 오류).
 - float의 `==` · `!=`, 정수와 float의 `==`(`const t = k == 7.0`)가 된다. 전에는 'Unsupported float.'와 타입 오류였다.
 - 확인: behavior 테스트 `core/number_const_ops.cy`(같은 연산을 `const`와 런타임 변수로 계산해 비교), `core/number_const_div_zero_error.cy`.
+- `error.Name`이 컴파일 타임 식이 됐다. `const e = error.Foo`, `const t = e == error.Foo`가 된다. 전에는 'Unsupported compile-time
+  expression: `error_lit`' 오류였다.
+
+## 템플릿 오버로드의 남은 한계 (2026-11-24)
+
+0.4.19에서 남긴 템플릿 오버로드 한계 셋 가운데 둘을 고쳤다(`docs/releases/0.4.19.md` "남은 한계").
+
+- infer 파라미터가 든 파라미터 타입의 꼴만 다른 템플릿 오버로드를 선언할 수 있다. `fn f(x ?%T)`, `fn f(x []%T)`, `fn f(x %T)`,
+  `f fn(T) -> ?%U`와 `f fn(T) -> []%U`. 전에는 둘째 선언이 'already been declared with the same function signature'였다. infer
+  파라미터의 이름만 다른 같은 꼴(`fn f(x []%T)`와 `fn f(y []%U)`)은 그대로 그 오류다. 둘 이상이 받을 수 있으면 먼저 선언된 것을
+  쓴다(`f({1, 2})`는 `%T`가 먼저면 그쪽).
+  구현: `module.resolveFunc`가 infer 자리표시 타입(`infer_t` · `dependent_t`)이 있는 템플릿 서명이면 `checkTemplateOverloadUnique`로
+  파라미터 타입의 소스(공백 없이, infer 이름은 순서 번호로)를 비교한다. 서명이 같은 자리표시라 서명 맵으로는 가를 수 없다.
+- 타입 인자(`make(int, 1)`)가 `make(x str, n int)` 오버로드를 만나면 'Compile-time symbol cannot be used here.'로 끝나던 것이
+  다음 후보(`make(%T type, n int)`)로 넘어간다. 오버로드 매칭 중 런타임 인자 자리의 타입 심볼은 infer 오류다
+  (`sema_expr.semaIdent2`).
+- 컴파일 타임 호출(`const a = f(3)`)에서 템플릿 후보가 인자를 받지 못하면 다음 후보로 넘어간다. 전에는 그 후보의 오류
+  ('Expected template `Slice`. Found `Int`.', 'Expected type `type`. Found `int`.')로 끝났다. `matchGenericFuncCt` ·
+  `matchTemplateArgCt`가 런타임 경로처럼 `overloaded`를 받고, 모두 실패하면 가장 멀리 간 후보를 혼자 다시 맞춰 보고한다.
+- 남은 것: 실패한 오버로드 후보에서 끝까지 검사된 타입 선언형 람다는 죽은 코드로 남는다(동작에는 영향 없음). 컴파일 타임 호출의
+  `str` 인자는 `EvalStr`라 `fn f(x str)`에 맞지 않는다('Expected argument `str`, found `EvalStr`', 전부터).
+- 확인: behavior 테스트 `meta/infer_param_overload_form.cy`, `meta/infer_param_overload_form_error.cy`.

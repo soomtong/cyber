@@ -119,9 +119,12 @@ const MatchGenericFuncCtResult = struct {
     res: sema.ExprResult,
 };
 
+/// With `overloaded`, an argument that the template can not take returns null with `match_err.rematch` (see
+/// `matchTemplateArgCt`), so the call tries the next overload.
 pub fn matchGenericFuncCt(c: *cy.Chunk, template: *cy.sym.FuncTemplate,
-    pre_args: []const Argument, end_args: []const *ast.Node, cstr: cte.CallCstr,
+    pre_args: []const Argument, end_args: []const *ast.Node, cstr: cte.CallCstr, overloaded: bool,
     match_err: *FuncMatchError, node: *ast.Node) !?MatchGenericFuncCtResult {
+    _ = cstr;
 
     try sema_resolve.ensureResolvedFuncTemplate(c, template);
 
@@ -174,7 +177,7 @@ pub fn matchGenericFuncCt(c: *cy.Chunk, template: *cy.sym.FuncTemplate,
         } else {
             arg = Argument.init(end_args[i - pre_args.len]);
         }
-        const final_arg = try matchTemplateArgCt(c, params[i], arg, template, &template_ctx, i, cstr.req_value);
+        const final_arg = try matchTemplateArgCt(c, params[i], arg, template, &template_ctx, i, overloaded);
         if (final_arg.resolve_t == .ct) {
             c.valueStack.items[arg_start + arg_idx] = final_arg.res.ct.value;
             c.typeStack.items[argt_start + arg_idx] = final_arg.res.ct.type;
@@ -183,7 +186,10 @@ pub fn matchGenericFuncCt(c: *cy.Chunk, template: *cy.sym.FuncTemplate,
             const name = template.func_params[i].name_type.as_name();
             try template_ctx.initCtParam(c.alloc, name, final_arg.res.template);
         } else if (final_arg.resolve_t == .incompat) {
-            return error.Unexpected;
+            // Only for an overload.
+            match_err.* = FuncMatchError.init(params[i], i + 1, c.sema.void_t);
+            match_err.rematch = true;
+            return null;
         }
     }
 
@@ -879,7 +885,10 @@ pub fn matchFuncSym(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const A
         // lambda, a literal that needs a target type, or an argument of an overload that infers template
         // parameters. Matching it alone reports the error, like a function without overloads does.
         var match_err: FuncMatchError = undefined;
-        if (best_func.type == .generic) {
+        if (best_func.type == .generic and (req_value or best_func.info.const_eval_only)) {
+            const cstr = cte.CallCstr{ .req_value = req_value };
+            _ = try matchGenericFuncCt(c, best_func.data.generic, pre_args, end_args, cstr, false, &match_err, node);
+        } else if (best_func.type == .generic) {
             _ = try matchGenericFuncRt(c, best_func, pre_args, end_args, loc, false, &match_err, node);
         } else {
             _ = try matchFuncSig(c, best_func.sig, pre_args, end_args, loc, false, false, &match_err);
@@ -937,7 +946,7 @@ pub fn matchFuncCt(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end
     switch (func.type) {
         .generic => {
             var match_err: FuncMatchError = undefined;
-            const res = (try matchGenericFuncCt(c, func.data.generic, pre_args, end_args, cstr, &match_err, node)) orelse {
+            const res = (try matchGenericFuncCt(c, func.data.generic, pre_args, end_args, cstr, false, &match_err, node)) orelse {
                 return reportCallFuncMismatch2(c, pre_args, end_args, func, match_err, node);
             };
             return .{
@@ -1011,7 +1020,7 @@ fn matchOverloadedFuncCt(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argumen
     };
 
     if (func.type == .generic) {
-        const res = try matchGenericFuncCt(c, func.data.generic, pre_args, end_args, call_cstr, match_err, node) orelse {
+        const res = try matchGenericFuncCt(c, func.data.generic, pre_args, end_args, call_cstr, true, match_err, node) orelse {
             return null;
         };
         return .{
@@ -1448,10 +1457,10 @@ fn firstInferParam(node: *ast.Node, ctx: ?*sema_resolve.ResolveContext) ?*ast.No
     }
 }
 
+/// With `overloaded`, an argument that does not have the type of its parameter, or whose type does not have the form
+/// that the infer parameters are bound from, is returned as `.incompat` instead of reported.
 fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template: *cy.sym.FuncTemplate,
-    template_ctx: *sema_resolve.ResolveContext, param_idx: usize, ct_return: bool) !Argument {
-
-    _ = ct_return;
+    template_ctx: *sema_resolve.ResolveContext, param_idx: usize, overloaded: bool) !Argument {
 
     const param_t = param.get_type();
     const ast_param = template.func_params[param_idx];
@@ -1466,7 +1475,7 @@ fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, templa
             tparam_t = try cte.eval_type2(c, false, template.func_params[type_idx].type.?);
         }
 
-        const ct_value = try cte.evalCheck(c, arg.node, tparam_t);
+        const ct_value = (try evalCtArg(c, arg.node, tparam_t, overloaded)) orelse return incompatArg(arg);
         var new_arg = arg;
         new_arg.resolve_t = .template;
         new_arg.res = .{ .template = ct_value };
@@ -1516,7 +1525,7 @@ fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, templa
                     const val = cy.Value.initPtr(arg.node);
                     ct_value = cy.TypeValue.init(c.sema.code_t, val);
                 } else {
-                    ct_value = try cte.evalCheck(c, arg.node, target_t);
+                    ct_value = (try evalCtArg(c, arg.node, target_t, overloaded)) orelse return incompatArg(arg);
                 }
                 var new_arg = arg;
                 new_arg.resolve_t = .ct;
@@ -1527,15 +1536,26 @@ fn matchTemplateArgCt(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, templa
     }
 
     const ct_value = try cte.eval(c, arg.node);
+    var keep = false;
+    defer if (!keep) c.heap.destructValue(ct_value);
     const targ = cy.TypeValue.init(c.sema.type_t, Value.initPtr(ct_value.type));
-    try inferCtArgs(c, targ, template, template_ctx, paramTypeSpec(template, param_idx), null, false, arg.node);
+    inferCtArgs(c, targ, template, template_ctx, paramTypeSpec(template, param_idx), null, overloaded, arg.node) catch |err| {
+        if (err == error.InferMismatch) {
+            return incompatArg(arg);
+        }
+        return err;
+    };
     // The parts of the parameter type that are not inferred are checked against the argument here.
     const target_t = (try evalParamType(c, template, template_ctx, param_idx, true)) orelse {
         return reportCanNotInfer(c, template, template_ctx, param_idx, arg.node);
     };
     if (ct_value.type.id() != target_t.id()) {
+        if (overloaded) {
+            return incompatArg(arg);
+        }
         return sema_expr.reportIncompatType(c, target_t, ct_value.type, arg.node);
     }
+    keep = true;
 
     var new_arg = arg;
     new_arg.resolve_t = .ct;
@@ -1687,6 +1707,22 @@ fn matchTemplateArg(c: *cy.Chunk, param: sema.FuncParam, arg: Argument, template
 }
 
 /// The argument that an overload does not take (`matchTemplateArg`).
+/// Evaluates a compile-time argument for a parameter of type `target_t`. With `overloaded`, an argument of another
+/// type is null instead of a type error.
+fn evalCtArg(c: *cy.Chunk, node: *ast.Node, target_t: *cy.Type, overloaded: bool) !?cy.TypeValue {
+    if (!overloaded) {
+        return try cte.evalCheck(c, node, target_t);
+    }
+    var cstr = cte.ExprCstr.init_check(target_t);
+    cstr.check = false;
+    const val = try cte.exprToValue(c, try cte.evalExpr(c, node, cstr), node);
+    if (val.type.id() != target_t.id()) {
+        c.heap.destructValue(val);
+        return null;
+    }
+    return val;
+}
+
 fn incompatArg(arg: Argument) Argument {
     var incompat_arg = arg;
     incompat_arg.resolve_t = .incompat;

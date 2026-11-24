@@ -357,6 +357,11 @@ fn semaIdent2(c: *cy.Chunk, cstr: sema.Cstr, prefer_ct_sym: bool, name: []const 
             return semaCaptured(c, idx, node);
         },
         .static => |sym| {
+            if (cstr.return_infer_error and !prefer_ct_sym and sym.type == .type) {
+                // A type is not a runtime argument: the overload does not match (`make(int, 1)` with a
+                // `make(x str, n int)` overload). The call tries the next one.
+                return sema.ExprResult.initInferError(error.CtSymbol);
+            }
             return symbol2(c, sym, prefer_ct_sym, cstr.target_t, node);
         },
         .ct_var => {

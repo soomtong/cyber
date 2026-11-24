@@ -546,6 +546,18 @@ pub fn resolveUserFunc(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig) !void {
 }
 
 pub fn resolveFunc(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig) !void {
+    if (func.instance == null and func.type == .generic and hasInferParamType(c, sig)) {
+        // Every parameter type with an infer parameter is the same placeholder in the signature: `x ?%T` and
+        // `x []%T` have the same `FuncSig`. Two such overloads are the same only when their parameters are
+        // declared the same way.
+        const sym = func.parent.cast(.func);
+        try checkTemplateOverloadUnique(c, sym, func, sig);
+        if (sym.first == func) {
+            sym.firstFuncSig = sig;
+        }
+        resolveFuncInfo(c, func, sig);
+        return;
+    }
     if (func.instance == null) {
         const sym = func.parent.cast(.func);
         const mod = sym.head.parent.?.getMod().?;
@@ -581,6 +593,79 @@ pub fn resolveFunc(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig) !void {
         }
     }
     resolveFuncInfo(c, func, sig);
+}
+
+fn hasInferParamType(c: *cy.Chunk, sig: *cy.FuncSig) bool {
+    for (sig.params()) |param| {
+        const param_t = param.get_type();
+        if (param_t == c.sema.infer_t or param_t == c.sema.dependent_t) return true;
+    }
+    return false;
+}
+
+/// Reports `func` when an earlier template overload with the same placeholder signature declares the same
+/// parameter types. The parameter types are compared by their source without spaces, with each infer parameter
+/// named by its order: `fn f(x []%T)` and `fn f(y []%U)` are the same, `fn f(x ?%T)` and `fn f(x []%T)` are not.
+fn checkTemplateOverloadUnique(c: *cy.Chunk, sym: *cy.sym.FuncSym, func: *cy.Func, sig: *cy.FuncSig) !void {
+    var key: std.ArrayListUnmanaged(u8) = .empty;
+    defer key.deinit(c.alloc);
+    try templateParamsKey(c, func, &key);
+    var other_key: std.ArrayListUnmanaged(u8) = .empty;
+    defer other_key.deinit(c.alloc);
+    var cur: ?*cy.Func = sym.first;
+    while (cur) |other| : (cur = other.next) {
+        if (other == func) break;
+        if (!other.info.resolved or other.type != .generic or other.sig != sig) continue;
+        other_key.clearRetainingCapacity();
+        try templateParamsKey(c, other, &other_key);
+        if (std.mem.eql(u8, key.items, other_key.items)) {
+            return c.reportErrorFmt("`{}` has already been declared with the same function signature.", &.{v(func.name())}, @ptrCast(func.decl));
+        }
+    }
+}
+
+fn templateParamsKey(c: *cy.Chunk, func: *cy.Func, out: *std.ArrayListUnmanaged(u8)) !void {
+    const decl = func.decl.?.cast(.funcDecl);
+    var names: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer names.deinit(c.alloc);
+    var buf: [24]u8 = undefined;
+    for (decl.params.slice()) |param| {
+        const type_n = param.type orelse {
+            try out.appendSlice(c.alloc, "_,");
+            continue;
+        };
+        const src = c.nodeString(type_n);
+        var i: usize = 0;
+        while (i < src.len) {
+            const ch = src[i];
+            if (std.ascii.isAlphabetic(ch) or ch == '_') {
+                var end = i + 1;
+                while (end < src.len and (std.ascii.isAlphanumeric(src[end]) or src[end] == '_')) end += 1;
+                const name = src[i..end];
+                const declares = i > 0 and src[i - 1] == '%';
+                var idx: ?usize = null;
+                for (names.items, 0..) |n, ni| {
+                    if (std.mem.eql(u8, n, name)) idx = ni;
+                }
+                if (declares and idx == null) {
+                    try names.append(c.alloc, name);
+                    idx = names.items.len - 1;
+                }
+                if (idx) |ni| {
+                    try out.appendSlice(c.alloc, try std.fmt.bufPrint(&buf, "#{}", .{ni}));
+                } else {
+                    try out.appendSlice(c.alloc, name);
+                }
+                i = end;
+                continue;
+            }
+            if (!std.ascii.isWhitespace(ch)) {
+                try out.append(c.alloc, ch);
+            }
+            i += 1;
+        }
+        try out.append(c.alloc, ',');
+    }
 }
 
 pub fn resolveFuncInfo(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig) void {

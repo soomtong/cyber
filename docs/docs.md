@@ -2956,6 +2956,8 @@ print(opt(1, |x| x / 2))      --> float
 
 When no overload takes the arguments, the call reports the error of the overload that came closest, as if it were the only one: 'Expected type `str`, got `int`.' at the branch or `return` of a lambda, 'Expected template `Option`. Found `Float`.' for `opt(1, |x| 1.5)` without the second overload, or 'Expected type `str`. Found `bool`.' Any other error in an argument, like an undeclared name in the body of a lambda, is reported right away.
 
+Two overloads that infer template parameters can differ only in the form of a parameter type: `fn f(x ?%T)`, `fn f(x []%T)` and `fn f(x %T)` are three overloads, and so are `f fn(T) -> ?%U` and `f fn(T) -> []%U`. Overloads whose parameter types are written the same way, apart from the names of the infer parameters (`fn f(x []%T)` and `fn f(y []%U)`), report '`f` has already been declared with the same function signature.' A type argument (`make(int, 1)`) goes on to an overload that takes a `%T type`, and a compile-time call (`const a = f(3)`) goes on to the next overload the same way as a runtime call.
+
 An infer parameter is declared in a parameter type only. `fn f(x int) -> %U` reports '`%U` can not be declared in a return type. Declare it in a parameter (`%U type`) instead.', and `%T` in a function body or outside of a function reports '`%T` can only be declared in the signature of a function.'
 
 # Memory.

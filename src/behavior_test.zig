@@ -965,6 +965,8 @@ fn test_control_flow(run: *Runner) void {
     run.case("meta/infer_param_overload_closure.cy");
     run.case("meta/infer_param_overload_closure_error.cy");
     run.case("meta/infer_param_overload_template.cy");
+    run.case("meta/infer_param_overload_form.cy");
+    run.case("meta/infer_param_overload_form_error.cy");
     run.case("meta/infer_param_overload_template_arg_error.cy");
     run.case("meta/infer_param_overload_template_form_body_error.cy");
     run.case("meta/infer_param_overload_template_form_error.cy");

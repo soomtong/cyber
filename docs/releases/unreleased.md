@@ -20,3 +20,24 @@ C 백엔드를 지운 뒤 `docs/docs.md`에 남은 흔적과 `Planned Feature` �
   Errors는 `Diag`, 타입 템플릿은 `MyContainer[%T]`).
 - C 백엔드의 흔적: 매뉴얼 소개의 "Compilation ahead-of-time to C"와 `extern`의 "static or runtime binding"을 고쳤다.
   `MEMORY.md`, `project_direction.md`, `project_coroutines.md`, `docs/study`의 해당 줄에 삭제 사실을 덧붙였다.
+
+## 수 피연산자의 대칭 변환 (2026-11-24)
+
+산술 연산자와 비교에서 정수와 float를 어느 순서로 써도 된다. 결정과 구현은 `docs/decisions/project_number_operands.md`,
+계기는 Julia 검토(`docs/study/11-design-principles-review.md` 3.4 B).
+
+- `i * f`가 `f * i`와 같다. 전에는 'Expected `int`, found `float`.' 오류였다. `+ - * / % **`와 `< <= > >= == !=`에 적용된다.
+  정수가 float 피연산자의 타입으로 변환되고 결과는 float다. `i * 2.5`, `i < 7.5`, `i == 7.0`도 된다.
+- `f32`와 `float`를 섞으면 어느 순서든 `float`다. 비교에서는 폭이 다른 정수도 왼쪽이 넓혀진다(`i8 < int`).
+- 결과는 정수로 되돌아가지 않는다. `i += f`, `var n int = i * f`는 'Expected type `int`, got `float`.' 오류다. `int(i * f)`로 쓴다.
+- 두 정수의 나눗셈은 그대로 정수 나눗셈이다(`i / 2`). 비트 연산자는 정수만 받는다(`i && f`는 전과 같은 오류).
+- 컴파일 타임 평가도 같은 규칙이다. `const r = k * 2.5`가 된다. float의 컴파일 타임 연산은 여전히 `*`뿐이다.
+- 호환성(전에 틀린 값을 내던 코드가 오류나 다른 값이 된다):
+  - `f + 'abc'`, `f * true`처럼 왼쪽이 float이고 오른쪽이 수가 아닌 산술이 컴파일 오류가 됐다('Expected `float`, found `str`.').
+    전에는 오른쪽의 비트를 float로 읽은 값이 나왔다(F-196).
+  - `f32 op float`의 결과가 바뀐다. `var g f32 = 1.5`, `f := 2.5`에서 `g * f`는 `0.0`이 아니라 `3.75`(`float`)다.
+    `g += f`는 아무 일도 하지 않던 것이 'Expected type `f32`, got `float`.' 오류가 됐다(F-196).
+  - `const r = 2.5 * k`(정수 상수 `k`)가 비정규 수 대신 맞는 값을 낸다(F-197).
+- 매뉴얼: Arithmetic operators · Comparison operators · Implicit casts · Inline evaluation 절. 에이전트 안내의 정수 · float 항목과
+  오류 문구 둘.
+- 하지 않은 것: 사용자 타입 연산자의 양쪽 조회(`2.0 * v`), 컴파일 타임의 float 연산 확장.

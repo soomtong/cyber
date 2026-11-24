@@ -2460,6 +2460,58 @@ fn eval_bin_expr2(c: *cy.Chunk, left: cy.TypeValue, left_n: *ast.Node, right: cy
     }
 }
 
+/// The compile-time form of the implicit casts that the operands of an arithmetic operator or a comparison use:
+/// an integer to a float, and `f32` to `float`. Returns null for any other pair of types.
+fn evalNumberToFloat(tval: TypeValue, target_t: *cy.Type) ?Value {
+    switch (target_t.id()) {
+        bt.F64 => {
+            if (tval.type.id() == bt.F32) {
+                return Value.initFloat64(tval.value.asF32());
+            }
+            return Value.initFloat64(evalIntToFloat(f64, tval) orelse return null);
+        },
+        bt.F32 => return Value.initFloat32(evalIntToFloat(f32, tval) orelse return null),
+        else => return null,
+    }
+}
+
+/// A signed integer converts by its value and a raw integer by its unsigned value, as at runtime.
+fn evalIntToFloat(comptime F: type, tval: TypeValue) ?F {
+    return switch (tval.type.id()) {
+        bt.EvalInt => @floatFromInt(tval.value.as_eval_int()),
+        bt.I64 => @floatFromInt(tval.value.asInt()),
+        bt.I32 => @floatFromInt(tval.value.asI32()),
+        bt.I16 => @floatFromInt(tval.value.asI16()),
+        bt.I8 => @floatFromInt(tval.value.asI8()),
+        bt.R64 => @floatFromInt(tval.value.asUint()),
+        bt.R32 => @floatFromInt(tval.value.asU32()),
+        bt.R16 => @floatFromInt(tval.value.asU16()),
+        bt.R8 => @floatFromInt(tval.value.asU8()),
+        else => null,
+    };
+}
+
+/// Gives the operands of an arithmetic operator or a comparison one type, like `sema_expr.semaBinExpr` does at
+/// runtime: the right operand converts to the type of the left one, and when it can not, the left one converts
+/// to the type of the right one. `n * 2.5` is `2.5 * n`. A pair that no implicit cast joins is the type error
+/// of the right operand.
+fn evalFitNumbers(c: *cy.Chunk, left: *TypeValue, right: *TypeValue, right_n: *ast.Node) !void {
+    if (left.type.id() == right.type.id()) return;
+    if (evalNumberToFloat(right.*, left.type)) |val| {
+        right.* = TypeValue.init(left.type, val);
+        return;
+    }
+    if (evalNumberToFloat(left.*, right.type)) |val| {
+        left.* = TypeValue.init(right.type, val);
+        return;
+    }
+    const exp_name = try c.sema.allocTypeName(left.type);
+    defer c.alloc.free(exp_name);
+    const act_name = try c.sema.allocTypeName(right.type);
+    defer c.alloc.free(act_name);
+    return c.reportErrorFmt("Expected type `{}`. Found `{}`.", &.{v(exp_name), v(act_name)}, right_n);
+}
+
 fn eval_bin_expr(c: *cy.Chunk, left_n: *ast.Node, op: ast.BinaryExprOp, right_n: *ast.Node, node: *ast.Node) !TypeValue {
     switch (op) {
         .bang_equal => {
@@ -2493,13 +2545,18 @@ fn eval_bin_expr(c: *cy.Chunk, left_n: *ast.Node, op: ast.BinaryExprOp, right_n:
             switch (left_n.type()) {
                 .floatLit => {
                     // Infer type from right.
-                    const right = try eval(c, right_n);
-                    const left = try evalHint(c, left_n, right.type);
+                    var right = try eval(c, right_n);
+                    defer c.heap.destructValue(right);
+                    var left = try evalHint(c, left_n, right.type);
+                    // The literal stays a float when the right operand is not one (`2.5 * n`).
+                    if (op != .bitwiseLeftShift) {
+                        try evalFitNumbers(c, &left, &right, right_n);
+                    }
                     return eval_bin_expr2(c, left, left_n, right, right_n, op, node);
                 },
                 else => {},
             }
-            const left = try eval(c, left_n);
+            var left = try eval(c, left_n);
             defer c.heap.destructValue(left);
             // An operand that is the placeholder of an infer parameter: a value parameter of a type alias
             // that is not known yet (`[N + 1]T`). The result is not known either.
@@ -2509,10 +2566,15 @@ fn eval_bin_expr(c: *cy.Chunk, left_n: *ast.Node, op: ast.BinaryExprOp, right_n:
             if (left.type.kind() == .int or left.type.kind() == .raw or left.type.kind() == .float or left.type.id() == bt.EvalInt) {
                 var right_cstr = ExprCstr.init_check(left.type);
                 right_cstr.pass_infer_placeholder = true;
-                const right = try exprToValue(c, try evalExpr(c, right_n, right_cstr), right_n);
+                // An arithmetic operator or a comparison converts either operand, so the mismatch is checked below.
+                right_cstr.check = op == .bitwiseLeftShift;
+                var right = try exprToValue(c, try evalExpr(c, right_n, right_cstr), right_n);
                 defer c.heap.destructValue(right);
                 if (cy.template.isInferPlaceholder(right)) {
                     return TypeValue.init(c.sema.type_t, Value.initPtr(c.sema.infer_t));
+                }
+                if (op != .bitwiseLeftShift) {
+                    try evalFitNumbers(c, &left, &right, right_n);
                 }
                 return eval_bin_expr2(c, left, left_n, right, right_n, op, node);
             }

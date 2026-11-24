@@ -315,6 +315,8 @@ print(i + f)
 CompileError: Expected `int`, found `float`.
 ```
 
+(2026-11-24 갱신: `int + float`는 이제 `float + int`와 같은 `float` 연산이다. 위의 `i + f`는 `9.5`다. `docs/decisions/project_number_operands.md`)
+
 반대 방향은 막혀 있다. `int + float`는 에러이고, `float -> int`는 `int(f)` 또는 `as[int] f`로 명시해야 한다(실수를 버림 방식으로 잘라 정수로 만든다. `int(-2.5)`는 `-2`).
 
 ```cy

@@ -45,6 +45,10 @@
 - 2026-11-24(사용자: "C 백엔드를 제거하고 ... 문서에 보면 아직 옛 흔적이 남아 있어 ... 몇 가지는 구현하지 않아도 된다고 보는 게
   있어", 질문에 항목별로 답함): 매뉴얼의 C 백엔드 흔적과 Planned 항목을 정리하고 `os.open_lib`을 지웠다. 결정
   `docs/decisions/project_planned_features.md`, `unreleased.md` 같은 절. 작업 브랜치 `claude/clever-hypatia-eqz5vt`.
+- 2026-11-24(사용자: "우리 Cyber lang 디자인에 Julia 언어에서 차용할만한 좋은 점이 있을까?", 이어서 컬렉션 식의 꼴과
+  import 중괄호를 정하고 "B의 int op float 대칭부터 넣자"): Julia 검토(`docs/study/11-design-principles-review.md` 3절)를 쓰고
+  3.4 B의 1(수 피연산자의 대칭 변환)을 넣었다. 결정 `docs/decisions/project_number_operands.md`, `unreleased.md` 같은 이름의 절.
+  작업 브랜치 `claude/sharp-faraday-c5yjxa`.
 
 ## 현재 브랜치
 
@@ -158,6 +162,15 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - 기본값 식은 `sema_init.semaFieldDefault`가 struct의 해석 문맥에서 검사하고, 리터럴을 쓴 쪽의 지역은 감춘다
     (`Chunk.hide_locals_below`, `sema_local.lookupIdent2`). `cte`의 컴파일 타임 리터럴도 같은 문맥.
   - 동작이 바뀜: 같은 이름의 지역이 기본값을 가리던 것(전에는 지역 값). 확인: 14단계 검증 rc=0.
+
+- [x] 수 피연산자의 대칭 변환(2026-11-24). 결정 `project_number_operands.md`, `unreleased.md` 같은 이름의 절, F-196 · F-197.
+  - `i * f` = `f * i`, `i < f` = `f > i`, `f32 op float` = `float`. 산술(`+ - * / % **`)과 비교 모두. 결과는 정수로 되돌아가지
+    않는다(`i += f` 오류). 정수 나눗셈과 비트 연산자는 그대로다.
+  - `sema_expr.semaBinExpr`의 세 갈래(정수 왼쪽 산술, float 왼쪽 산술, 비교의 `semaComparedOperand`)와 `cte.evalFitNumbers`.
+  - 함께 고친 조용한 오답: 왼쪽이 float인 산술이 오른쪽 타입을 검사하지 않던 것(`f + 'abc'`가 `2.5`, `f32 * float`가 `0.0`),
+    컴파일 타임의 `2.5 * k`가 비정규 수이던 것.
+  - 같은 날 정한 문법 꼴(구현은 안 함): 컬렉션 식은 `[]int{x * 2 from xs |x| if x > limit}`(검토 3.4 D), destructure import의
+    중괄호는 안쪽을 띄운다(`project_fmt_brace_style.md`의 예외).
 
 ## 시도했으나 실패한 접근
 
@@ -302,9 +315,15 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - `docs/releases/0.4.17.md`, `docs/releases/unreleased.md`.
 - `docs/decisions/project_fork_release_ci.md`(러너 미배정 · 재태깅 · 로컬 arm64 빌드 절차).
 
+- Julia 검토(설계 원칙 3.7)의 남은 결정: A `os.cmd`(명령을 값으로, 파이프 · 디렉터리 · 환경 · 실패한 종료는 `!T`), B의 2(사용자
+  타입 연산자의 양쪽 조회, `2.0 * v`), C(오버로드 모호성을 LSP Warning으로 먼저), D(컬렉션 식. 꼴은 정했고 넣을지와 `map` ·
+  `filter`와의 순서는 미정), E(REPL `?name` · `.which` · `.bc`), F(컴파일 타임 검증 리터럴, 평가기 확장 뒤). 사용자가 고를 때만 한다.
+- 컴파일 타임 평가기는 float 연산이 `*`뿐이고 정수 폭을 넓히지 않는다(`const z = k * a`에서 `a`가 `i8`이면 오류). 런타임과의
+  차이로 남아 있다(`project_number_operands.md` "하지 않은 것").
+
 ## 다음 에이전트에게
 
-1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(지금은 머리말뿐).
+1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 

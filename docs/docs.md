@@ -349,6 +349,18 @@ Some types such as `math.Vec` and `math.Mat` also overload these operators.
 -(10)     --> -10 (Negative)
 ```
 
+An integer and a float can be mixed. The integer converts to the type of the float, whichever side it is on, and the result is a float. An `f32` with a `float` gives a `float` the same way:
+```cy
+i := 7
+f := 2.5
+print(i * f)      --> 17.5
+print(f * i)      --> 17.5
+print(i + 0.5)    --> 7.5
+print(i / 2)      --> 3    (Both are integers: integer division.)
+print(i / 2.0)    --> 3.5
+```
+The result does not convert back to an integer. `i += f` and `var n int = i * f` report 'Expected type `int`, got `float`.' Write `int(i * f)`. The bitwise operators take integers only, so `i && f` is an error. An operand that is not a number is an error on either side: `f + 'abc'` reports 'Expected `float`, found `str`.'
+
 ### Comparison operators.
 The following comparison operators are supported and evaluate to a [Boolean](#booleans) value.
 
@@ -383,6 +395,14 @@ a > b           --> `true` if a is greater than b
 a >= b          --> `true` if a is greater than or equal to b
 a < b           --> `true` if a is less than b
 a <= b          --> `true` if a is less than or equal to b
+```
+
+A comparison converts its operands like an [arithmetic operator](#arithmetic-operators) does. An integer converts to the type of a float on the other side, and an integer of a narrower type converts to the wider one:
+```cy
+i := 7
+print(i < 7.5)    --> true
+print(i == 7.0)   --> true
+print(7.0 == i)   --> true
 ```
 
 ### Logic operators.
@@ -1269,6 +1289,7 @@ f = i
 
 Implicit casts avoid lossy conversions (with the exception of int to float)
 and they never produce runtime errors.
+The two operands of an [arithmetic operator](#arithmetic-operators) or a comparison use the casts between the number types in either direction: the right operand converts to the type of the left one, and when it can not, the left one converts to the type of the right one.
 The following implicit casts are supported:
 
 | Source | Target | Behavior |
@@ -4590,7 +4611,7 @@ An expression needs to be wrapped with `#{}` to perform inline evaluation if it'
 res := #{fib(30)}
 ```
 
-Inside a compile-time body, locals (`t := 0`), compound assignment (`t += 1`), `for` ranges, `if`, `switch` and fixed-size vectors (`v := [3]int(0)`, `v[i]`, `v[i] += 1`) evaluate the same as at runtime. A vector index out of range is a compile error. Operations the evaluator does not support yet (for example `float` addition) are reported as `Unsupported inline eval`.
+Inside a compile-time body, locals (`t := 0`), compound assignment (`t += 1`), `for` ranges, `if`, `switch` and fixed-size vectors (`v := [3]int(0)`, `v[i]`, `v[i] += 1`) evaluate the same as at runtime. A vector index out of range is a compile error. Operations the evaluator does not support yet (for example `float` addition) are reported as `Unsupported inline eval`. An integer and a float mix as they do at runtime: `const r = k * 2.5` and `const r = 2.5 * k` are the same float for an integer constant `k`.
 
 ### Inline type creation.
 Types can be created from inline evaluation. Currently, only structs can be created with `meta.new_struct`:

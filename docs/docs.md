@@ -6295,6 +6295,51 @@ Records, slices, maps and optionals are shown with their contents. Nesting stops
 `?int` none
 ```
 
+### REPL commands.
+A line that starts with `.` and a command name is a command of the REPL. It is not Cyber code and is not evaluated. A command is read where an input starts, not inside a block:
+
+| Command | |
+|---|---|
+| `.exit` | Leaves the REPL. |
+| `.help` | Prints this list. |
+| `.doc [topic]` | Prints a section of the manual, like [`cyber doc`](#documentation). `.doc` alone prints the topics, `.doc --api os` the functions of a module. |
+| `.which <expr>` | Shows the function that a call picks, or what a name is. |
+| `.bc <function>` | Prints the bytecode of a function. |
+
+`.which` compiles the expression against the session and does not run it. It shows the function that the outermost call picks out of the overloads: the first line of its declaration, the instance when it comes from a template, the number of overloads when there are several, where it is declared, and its doc comment. Without a call it describes the name at the end of the expression. A compile error is printed as the answer:
+```bash
+> fn largest(a %T, b T) -> T:
+    | return if (a > b) a else b
+    |
+> .which largest(1.5, 2.5)
+fn largest(a %T, b T) -> T
+  as fn largest[float](float, float) -> float
+  at eval:1:1
+> xs := []int{3, 1, 2}
+> .which xs.sort()
+fn (&Slice[]) sort()
+  one of 2 overloads
+  at core:1636:1
+  Sorts in ascending order with `<`. The element type needs a `<` operator.
+> .which xs
+xs []int
+```
+
+`.bc` prints every compiled function of a name: the overloads, and the instances of a template that calls have made. The name is the function name alone (`len2`) or with its type (`Vec2.len2`):
+```bash
+> fn sq(x int) -> int:
+    | return x * x
+    |
+> .bc sq
+fn sq(int) -> int  (eval)
+3:25 .chk_stk: ret=1, frame=6
+3:28 .imul: %0 = %5 * %5
+3:32 .ret: 
+3:33 .trap: 
+```
+
+A script can ask the same of a `cy.VM`: `vm.which(code)` and `vm.bytecode(name)` return the text.
+
 ## Format source.
 `cyber fmt` rewrites source files in one fixed style and prints the paths that changed. There are no options for the style.
 ```bash

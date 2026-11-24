@@ -56,6 +56,8 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"VM.panic_summary",   zErrFunc(UserVM_panic_summary)},
     .{"VM.value_desc",      zErrFunc(UserVM_value_desc)}, 
     .{"VM.main_thread",     zErrFunc(UserVM_main_thread)}, 
+    .{"VM.which",           zErrFunc(UserVM_which)},
+    .{"VM.bytecode",        zErrFunc(UserVM_bytecode)},
     .{"Thread.deinit_str",  zErrFunc(UserThread_deinit_str)}, 
 };
 
@@ -108,6 +110,30 @@ pub fn UserVM_panic_summary(t: *cy.Thread) anyerror!C.Ret {
     const summary = C.thread_panic_summary(@ptrCast(uvm.vm.main_thread));
     defer C.vm_freeb(@ptrCast(uvm.vm), summary);
     ret.* = try t.heap.init_str(summary);
+    return C.RetOk;
+}
+
+pub fn UserVM_which(t: *cy.Thread) anyerror!C.Ret {
+    const ret = t.ret(cy.heap.Str);
+    const uvm = t.param(*UserVM);
+    const code_s = t.param(cy.heap.Str);
+    defer t.heap.destructStr(&code_s);
+
+    const text = try cy.refs.which(uvm.vm, code_s.slice());
+    defer uvm.vm.alloc.free(text);
+    ret.* = try t.heap.init_str(text);
+    return C.RetOk;
+}
+
+pub fn UserVM_bytecode(t: *cy.Thread) anyerror!C.Ret {
+    const ret = t.ret(cy.heap.Str);
+    const uvm = t.param(*UserVM);
+    const name_s = t.param(cy.heap.Str);
+    defer t.heap.destructStr(&name_s);
+
+    const text = try cy.debug.allocFuncBytecode(uvm.vm, name_s.slice());
+    defer uvm.vm.alloc.free(text);
+    ret.* = try t.heap.init_str(text);
     return C.RetOk;
 }
 

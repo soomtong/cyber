@@ -49,6 +49,8 @@
   import 중괄호를 정하고 "B의 int op float 대칭부터 넣자"): Julia 검토(`docs/study/11-design-principles-review.md` 3절)를 쓰고
   3.4 B의 1(수 피연산자의 대칭 변환)을 넣었다. 결정 `docs/decisions/project_number_operands.md`, `unreleased.md` 같은 이름의 절.
   이어서 "A의 os.cmd도 넣자": 3.4 A(`os.cmd`)를 넣었다. 결정 `docs/decisions/project_os_cmd.md`.
+  이어서 "E의 REPL 조회 명령도 넣자": 3.4 E(`.doc` · `.which` · `.bc` · `.help`)를 넣었다. 결정
+  `docs/decisions/project_repl_commands.md`.
   작업 브랜치 `claude/sharp-faraday-c5yjxa`.
 
 ## 현재 브랜치
@@ -179,6 +181,11 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
     `Cmd`는 복사되는 값, `os.exec`는 그대로. 결정 문서 "정한 것"에 이유가 있다.
   - 함께 고친 것: 자식이 `os.set_env` 변수를 받지 못하던 것(`os.exec` 포함).
   - macOS · Windows에서는 실행해 보지 못했다(교차 컴파일만). 테스트 `modules/os_cmd.cy`는 Windows에서 본문을 건너뛴다.
+
+- [x] REPL 조회 명령(2026-11-24). 결정 `project_repl_commands.md`, `unreleased.md` 같은 이름의 절.
+  - `cy.cy`의 `REPL.command` · `VM.which` · `VM.bytecode` · `repl(read_line, doc)`, `refs.zig`의 `which`, `debug.zig`의
+    `allocFuncBytecode`, `cli.zig`의 `doc_hook` · `replDoc`, `main.zig`의 `replDoc`.
+  - 테스트는 `modules/cy.cy` 끝. `.doc`은 CLI에서 손으로 확인했다(자동 테스트 없음: REPL을 stdin으로 모는 테스트가 없다).
 
 ## 시도했으나 실패한 접근
 
@@ -323,17 +330,22 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - `docs/releases/0.4.17.md`, `docs/releases/unreleased.md`.
 - `docs/decisions/project_fork_release_ci.md`(러너 미배정 · 재태깅 · 로컬 arm64 빌드 절차).
 
+- [ ] F-199(치명, 미수정): `persist_main` 세션에서 앞 입력이 선언한 타입에 뒤 입력이 메서드 · 타입 함수를 선언하면
+  `module.reserveFunc`의 `parent.getMod().?`가 null이라 호스트가 abort한다. REPL에 `type V:` 블록 뒤 `fn (&V) twice() -> float:`.
+  REPL에서는 메서드를 선언할 길이 없다. tars-agent 세션도 같은 길이다.
+- [ ] F-200(미수정): CLI의 REPL에서 `use os`가 실패한다(REPL의 격리 VM에 CLI의 resolver · loader가 없다, `UserVM_init`).
+  `cy.eval`의 VM이 호스트 설정을 받지 않는다는 계약과 닿아 있어 사용자 결정이 필요하다.
 - `os.cmd`의 다음 단계(`project_os_cmd.md` "가져오지 않은 것"): 줄 단위 스트리밍, 실행 중 중단 · 시간 제한, 파일 리다이렉션.
   Windows에서의 실행 확인도 남았다.
 - Julia 검토(설계 원칙 3.7)의 남은 결정: B의 2(사용자
   타입 연산자의 양쪽 조회, `2.0 * v`), C(오버로드 모호성을 LSP Warning으로 먼저), D(컬렉션 식. 꼴은 정했고 넣을지와 `map` ·
-  `filter`와의 순서는 미정), E(REPL `?name` · `.which` · `.bc`), F(컴파일 타임 검증 리터럴, 평가기 확장 뒤). 사용자가 고를 때만 한다.
+  `filter`와의 순서는 미정), F(컴파일 타임 검증 리터럴, 평가기 확장 뒤). 사용자가 고를 때만 한다.
 - 컴파일 타임 평가기는 float 연산이 `*`뿐이고 정수 폭을 넓히지 않는다(`const z = k * a`에서 `a`가 `i8`이면 오류). 런타임과의
   차이로 남아 있다(`project_number_operands.md` "하지 않은 것").
 
 ## 다음 에이전트에게
 
-1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환, `os.cmd`).
+1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환, `os.cmd`, REPL 조회 명령).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 

@@ -228,8 +228,14 @@ fn compilePath(alloc: std.mem.Allocator, path: []const u8) !void {
     c.vm_dump_bytecode(vm);
 }
 
+/// The command `.doc` of the REPL prints what `cyber doc` prints.
+fn replDoc(alloc: std.mem.Allocator, args: []const []const u8) anyerror!void {
+    _ = try doc_cli.main(alloc, args, c.version());
+}
+
 fn repl(alloc: std.mem.Allocator) !void {
     c.setVerbose(verbose);
+    cli.doc_hook = &replDoc;
 
     const vm: *c.VM = c.vm_initx(alloc);
     defer c.vm_deinit(vm);

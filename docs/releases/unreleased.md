@@ -67,3 +67,21 @@ C 백엔드를 지운 뒤 `docs/docs.md`에 남은 흔적과 `Planned Feature` �
 - 확인 못 한 것: macOS · Windows에서의 실행. 세 대상 모두 교차 컴파일은 된다. 테스트는 POSIX 프로그램을 써서 Windows에서는
   본문을 건너뛴다.
 - 하지 않은 것: 파일 리다이렉션, 줄 단위 스트리밍, 실행 중 중단 · 시간 제한.
+- 확인: 14단계 검증 rc=0(9~12단계는 Python `wasmtime` 패키지로 만든 `wasmtime` 대역으로 실행).
+
+## REPL 조회 명령 `.doc` · `.which` · `.bc` (2026-11-24)
+
+REPL에서 문서, 호출이 고르는 함수, 바이트코드를 본다. 결정과 구현은 `docs/decisions/project_repl_commands.md`, 계기는 Julia
+검토(`docs/study/11-design-principles-review.md` 3.4 E).
+
+- `.help`: 명령 목록. 시작 줄이 `Commands: .exit, .help`가 됐다.
+- `.doc [topic]`: `cyber doc`이 찍는 것(`.doc optionals`, `.doc --list`, `.doc --api os`). CLI의 REPL에만 있다.
+- `.which <expr>`: 식을 세션에 대해 컴파일만 하고, 가장 바깥 호출이 고른 함수의 선언 첫 줄 · 템플릿 인스턴스 · 오버로드 수 ·
+  선언 위치 · `--|` 문서 주석을 보여 준다. 호출이 없으면 끝의 이름이 무엇인지. 아무것도 실행하지 않는다.
+- `.bc <function>`: 그 이름의 컴파일된 함수(오버로드, 템플릿 인스턴스 전부)의 바이트코드.
+- 명령은 입력이 시작하는 자리에서만 읽는다. 블록 안에서는 전처럼 코드의 한 줄이다.
+- 스크립트용: `cy.VM.which(code) -> str`, `cy.VM.bytecode(name) -> str`, `cy.repl(read_line, doc)` 오버로드, `cli.repl_doc(query)`.
+- 호환성: 줄 맨 앞의 `.help`, `.doc ...`, `.which ...`, `.bc ...`가 REPL에서 코드로 평가되지 않는다. 전에는 컴파일 오류였다.
+- 매뉴얼: REPL 장의 REPL commands 절. `docs/api.json`.
+- 작업 중 찾은 기존 결함(고치지 않음): 세션에서 앞 입력의 타입에 메서드를 선언하면 호스트가 죽는다(F-199), CLI의 REPL에서
+  `use os`가 실패한다(F-200).

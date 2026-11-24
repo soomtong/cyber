@@ -819,6 +819,145 @@ pub fn recordCall(c: *cy.Chunk, node: *ast.Node, func: *cy.Func) void {
     c.compiler.ref_calls.append(c.compiler.alloc, .{ .node = node, .func = func }) catch {};
 }
 
+/// For the REPL command `.which`. Compiles `src` against the session of `vm` without running it and describes
+/// the function that the outermost call of `src` picks out of the overloads and the template instances.
+/// When `src` has no call, it describes what the name at its end is. A compile error is returned as its summary.
+/// The caller frees the result with `vm.alloc`.
+pub fn which(vm: *cy.VM, src: []const u8) ![]const u8 {
+    const compiler = vm.compiler;
+    const prev = compiler.record_refs;
+    compiler.record_refs = true;
+    defer compiler.record_refs = prev;
+
+    var buf = std.Io.Writer.Allocating.init(vm.alloc);
+    defer buf.deinit();
+    const w = &buf.writer;
+
+    vm.validate("which", src, .{}) catch |err| {
+        if (compiler.reports.items.len == 0) return err;
+        const summary = try cy.debug.allocReportSummary(compiler, compiler.reports.items[0]);
+        defer vm.alloc.free(summary);
+        try w.writeAll(std.mem.trimEnd(u8, summary, "\n"));
+        return buf.toOwnedSlice();
+    };
+
+    // The outermost call covers the widest range. An argument that is a call lies inside it.
+    var picked: ?Call = null;
+    var picked_len: u32 = 0;
+    for (compiler.ref_calls.items) |call| {
+        const len = call.node.end() - call.node.pos();
+        if (picked == null or len > picked_len) {
+            picked = call;
+            picked_len = len;
+        }
+    }
+
+    if (picked) |call| {
+        try writeFuncDesc(compiler, w, call.func);
+        return buf.toOwnedSlice();
+    }
+
+    // No call: the name at the end of the source.
+    const end = std.mem.trimEnd(u8, src, " \t\r\n").len;
+    if (end > 0) {
+        if (try find(compiler, @intCast(end - 1))) |info| {
+            try w.writeAll(info.detail);
+            if (info.def_uri.len > 0) {
+                try writePlace(compiler, w, info.def_uri, info.def_pos);
+                for (compiler.chunks.items) |chunk| {
+                    if (!std.mem.eql(u8, chunk.srcUri, info.def_uri)) continue;
+                    if (info.def_pos <= chunk.src.len) try writeDocComment(w, chunk.src, info.def_pos);
+                    break;
+                }
+            }
+            return buf.toOwnedSlice();
+        }
+    }
+    try w.writeAll("Nothing to describe: expected a call or a name.");
+    return buf.toOwnedSlice();
+}
+
+/// The header of the declaration of `func`, the instance if it comes from a template, the place and the doc comment.
+fn writeFuncDesc(compiler: *cy.Compiler, w: *std.Io.Writer, func: *cy.Func) !void {
+    const sema = &compiler.sema;
+    var has_header = false;
+    if (func.decl) |decl| {
+        const chunk_id = decl.src();
+        if (decl.type() != .null and decl.pos() != cy.NullId and chunk_id < compiler.chunks.items.len) {
+            const chunk = compiler.chunks.items[chunk_id];
+            try w.writeAll(headerLine(chunk.src, decl));
+            has_header = true;
+        }
+    }
+    if (!has_header or func.instance != null) {
+        // A function without a declaration in a source, or one instance of a template.
+        try w.writeAll(if (has_header) "\n  as fn " else "fn ");
+        try cy.sym.writeFuncName(sema, w, func, .{});
+        try sema.writeFuncSigStr(w, func.sig, null);
+    }
+    if (func.parent.type == .func) {
+        const num = func.parent.cast(.func).numFuncs;
+        if (num > 1) try w.print("\n  one of {} overloads", .{num});
+    }
+    if (func.decl) |decl| {
+        const chunk_id = decl.src();
+        if (decl.type() != .null and decl.pos() != cy.NullId and chunk_id < compiler.chunks.items.len) {
+            const chunk = compiler.chunks.items[chunk_id];
+            try writePlace(compiler, w, chunk.srcUri, decl.pos());
+            try writeDocComment(w, chunk.src, decl.pos());
+        }
+    }
+}
+
+/// `  at uri:line:col`, with the line and column counted from 1.
+fn writePlace(compiler: *cy.Compiler, w: *std.Io.Writer, uri: []const u8, pos: u32) !void {
+    for (compiler.chunks.items) |chunk| {
+        if (!std.mem.eql(u8, chunk.srcUri, uri)) continue;
+        if (pos > chunk.src.len) break;
+        var line: usize = 1;
+        var line_start: usize = 0;
+        for (chunk.src[0..pos], 0..) |ch, i| {
+            if (ch == '\n') {
+                line += 1;
+                line_start = i + 1;
+            }
+        }
+        try w.print("\n  at {s}:{}:{}", .{ uri, line, pos - line_start + 1 });
+        return;
+    }
+    try w.print("\n  at {s}", .{uri});
+}
+
+/// The `--|` lines right above the declaration at `pos`, without the markers. Attribute lines in between are skipped.
+fn writeDocComment(w: *std.Io.Writer, src: []const u8, pos: u32) !void {
+    var line_start: usize = @min(pos, src.len);
+    while (line_start > 0 and src[line_start - 1] != '\n') line_start -= 1;
+
+    // Walk up to the first line of the comment.
+    var first = line_start;
+    while (first > 0) {
+        var prev_start = first - 1;
+        while (prev_start > 0 and src[prev_start - 1] != '\n') prev_start -= 1;
+        const line = std.mem.trim(u8, src[prev_start .. first - 1], " \t\r");
+        if (std.mem.startsWith(u8, line, "--|")) {
+            first = prev_start;
+        } else if (std.mem.startsWith(u8, line, "#[") and first == line_start) {
+            // An attribute on a line of its own belongs to the declaration.
+            first = prev_start;
+            line_start = prev_start;
+        } else break;
+    }
+
+    var iter = std.mem.splitScalar(u8, src[first..line_start], '\n');
+    while (iter.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (!std.mem.startsWith(u8, line, "--|")) continue;
+        var text = line[3..];
+        if (std.mem.startsWith(u8, text, " ")) text = text[1..];
+        try w.print("\n  {s}", .{text});
+    }
+}
+
 pub const HintKind = enum(u32) {
     /// `x := expr`: the type that was inferred for `x`. The range is the name, `detail` is the type.
     local_type = 0,

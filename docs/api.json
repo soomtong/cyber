@@ -1036,13 +1036,16 @@
         {"name": "compile_error_summary", "recv": "&VM", "sig": "compile_error_summary() -> str"},
         {"name": "panic_summary", "recv": "&VM", "sig": "panic_summary() -> str"},
         {"name": "value_desc", "recv": "&VM", "sig": "value_desc(val_t int, value Value) -> str"},
-        {"name": "main_thread", "recv": "&VM", "sig": "main_thread() -> Thread"}
+        {"name": "main_thread", "recv": "&VM", "sig": "main_thread() -> Thread"},
+        {"name": "which", "recv": "&VM", "sig": "which(code str) -> str", "doc": "Compiles `code` against the session without running it and describes the function that its outermost call picks: the header of the declaration, the instance of a template, where it is declared and its doc comment. Without a call it describes the name at the end of `code`. A compile error is returned as its summary."},
+        {"name": "bytecode", "recv": "&VM", "sig": "bytecode(name str) -> str", "doc": "Returns the bytecode of the compiled functions that `name` names: a function name, or a name with its type or module as the dump prints it (`Vec2.len2`). Empty if no compiled function matches."}
       ],
       "funcs": [],
       "aliases": {}},
     {"module": "cy", "name": "REPL", "syntax": "REPL", "kind": "struct",
       "methods": [
         {"name": "print_intro", "recv": "&REPL", "sig": "print_intro()"},
+        {"name": "command", "recv": "&REPL", "sig": "command(line str) -> bool", "doc": "Runs `line` if it is a command of the REPL. Returns false if it is not one. A command is a line that starts with `.` and a command name. It is not Cyber code and is not evaluated."},
         {"name": "read", "recv": "&&REPL", "sig": "read(read_line ReadLineFn) -> ?str", "doc": "Reads lines until a complete input is ready. A line ending with `:` opens a block; an empty line closes one. An attribute line (`#[...]`) is held until the declaration it annotates is complete."},
         {"name": "append_line", "recv": "&&REPL", "sig": "append_line(line str)"},
         {"name": "eval_print", "recv": "&REPL", "sig": "eval_print(code str)"},
@@ -1710,6 +1713,7 @@
     {"module": "cy", "name": "new_parser", "sig": "new_parser() -> ZParser"},
     {"module": "cy", "name": "destroy_parser", "sig": "destroy_parser(parser Ptr[void])"},
     {"module": "cy", "name": "repl", "sig": "repl(read_line ReadLineFn) -> void", "doc": "Starts an isolated REPL session. The callback `read_line(prefix string) string` is responsible for obtaining the input."},
+    {"module": "cy", "name": "repl", "sig": "repl(read_line ReadLineFn, doc DocFn) -> void", "doc": "Starts an isolated REPL session like `repl(read_line)`, with `doc` behind the command `.doc`. `doc(query)` gets the text after `.doc` and prints what the host has to say about it."},
     {"module": "meta", "name": "access", "sig": "access(rec Code, field EvalStr) -> Any", "doc": "Access a receiver with a given field as a string."},
     {"module": "meta", "name": "build_flag", "sig": "build_flag(name str) -> bool", "doc": "Returns whether a build flag is set."},
     {"module": "meta", "name": "build_mode", "sig": "build_mode() -> BuildMode"},
@@ -1756,6 +1760,7 @@
     {"module": "meta", "name": "trace_releases", "sig": "trace_releases() -> int"},
     {"module": "meta", "name": "unsupported", "sig": "unsupported() -> never", "doc": "Raise compile-time error."},
     {"module": "cli", "name": "repl", "sig": "repl() -> void", "doc": "Starts an isolated REPL session. Invokes `cy.repl(repl_read_line)`."},
+    {"module": "cli", "name": "repl_doc", "sig": "repl_doc(query str) -> void", "doc": "Prints what `cyber doc <query>` prints: a section of the manual, the topics for an empty query, or the functions of a module for `--api <module>`. This is the command `.doc` of the REPL."},
     {"module": "cli", "name": "repl_read_line", "sig": "repl_read_line(prefix str) -> str"},
     {"module": "cli", "name": "repl_read_line_", "sig": "repl_read_line_(prefix str) -> Future[str]"},
     {"module": "io", "name": "index_newline", "sig": "index_newline(buf [&]byte) -> ?int", "doc": "SIMD accelerated."},

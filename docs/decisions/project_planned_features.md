@@ -68,5 +68,7 @@
   뿐이라 이번에는 두었다.
 - 남긴 계획 중 destructure import는 꼴이 바뀌었으므로 구현할 때 `from`을 문맥 키워드로 둘지 예약어로 둘지 정해야 한다.
   `json.from` 함수와 `regex.cy`의 지역 변수 `from`이 있어 예약어로 하면 둘을 고쳐야 한다.
+  컬렉션 식의 후보 꼴 `[]int{x * 2 from xs |x| if x > limit}`도 같은 낱말을 쓴다(`docs/study/11-design-principles-review.md` 3.4 D,
+  2026-11-24 사용자 결정. 넣을지는 아직 정하지 않았다). 둘이 같은 문맥 키워드를 나눠 쓰게 된다.
 - destructure import의 중괄호는 안쪽을 띄운다(`use { cos, pi } from 'math'`, 2026-11-24 사용자 결정). 포매터의 "중괄호 안쪽은
   붙인다"에 대한 유일한 예외이고, 구현할 때 `cyber fmt`가 함께 따라야 한다. `project_fmt_brace_style.md` 결정 절.

@@ -805,7 +805,7 @@ print(tag(none))
 ~~~cy
 -- 제안 모양(가상). 문법은 결정 문서에서 정한다.
 limit := 3
-big := []int{x * 2 for xs |x| if x > limit}
+big := []int{x * 2 from xs |x| if x > limit}
 
 -- 낮춘 결과
 big := []int{}
@@ -819,22 +819,17 @@ for xs |x|:
 `{x * 2`가 보통 리터럴 `[]int{a * 2, b}`와 같은 모양으로 시작해 "중괄호 안쪽은 붙여 쓴다"는 포매터 규칙
 (`project_fmt_brace_style.md`)이 그대로 맞는다. 대가는 `x`가 선언(`|x|`)보다 먼저 나온다는 것이다.
 
-절을 여는 낱말은 정하지 않았다. `for`는 사이버에서 늘 줄 맨 앞에서 블록을 여는 문장 키워드이고, `for xs |x|`는 반복 대상이
-먼저라 Python의 `for x in xs`처럼 영어 문장으로 읽히지도 않는다. 후보:
+절을 여는 낱말은 `from`이다(2026-11-24 사용자 결정). 문장의 `for`를 그대로 쓰지 않는 이유는 둘이다. `for`는 사이버에서 늘 줄
+맨 앞에서 블록을 여는 문장 키워드이고, `for xs |x|`는 반복 대상이 먼저라 Python의 `for x in xs`처럼 영어 문장으로 읽히지 않는다.
 
-~~~cy
-big := []int{x * 2 for xs |x| if x > limit}     -- 문장과 같은 낱말. 새 낱말이 없다
-big := []int{x * 2 from xs |x| if x > limit}    -- 권고. "xs에서 꺼낸 x * 2"
-big := []int{x * 2 each xs |x| if x > limit}    -- 매뉴얼의 용어("for each", "each variable")
-~~~
-
-- `from`: 반복 대상이 먼저 오는 순서와 맞게 읽힌다. destructure import(`use { cos, pi } from 'math'`)로 이미 들어올 낱말이고 뜻도
-  같다(출처에서 꺼낸다). SQL · LINQ의 `select ... from ...` 계보다. `json.from` 함수와 `regex.cy`의 지역 변수 `from`이 있어
-  예약어가 아니라 문맥 키워드여야 한다. 원소 식 바로 뒤에 식별자가 오는 자리는 지금 문법에 없어 모호하지 않을 것으로 보지만,
-  파서로 확인하지는 않았다.
-- `each`: 매뉴얼의 용어와 맞지만 새 낱말이고, 영어로는 "for each"의 반쪽이다.
-- `loop`: `for`와 같은 문장 낱말이라 어색함이 그대로 남고, 새 예약어가 필요하며, Rust에서는 무한 루프다. 권하지 않는다.
-- 거르는 절은 어느 쪽이든 `if`로 둔다(Python · Julia와 같다). `where`는 낱말을 하나 더 들인다.
+- `from`은 반복 대상이 먼저 오는 순서와 맞게 읽힌다("xs에서 꺼낸 x * 2"). destructure import(`use { cos, pi } from 'math'`)로
+  이미 들어올 낱말이고 뜻도 같다(출처에서 꺼낸다). SQL · LINQ의 `select ... from ...` 계보다.
+- `json.from` 함수와 `regex.cy`의 지역 변수 `from`이 있어 예약어가 아니라 문맥 키워드여야 한다. 원소 식 바로 뒤에 식별자가 오는
+  자리는 지금 문법에 없어 모호하지 않을 것으로 보지만, 파서로 확인하지는 않았다.
+- 거르는 절은 `if`로 둔다(Python · Julia와 같다). `where`는 낱말을 하나 더 들인다.
+- 고르지 않은 후보: `for`(위의 이유), `each`(매뉴얼의 용어 "for each" · "each variable"과 맞지만 새 낱말이고 영어로는 "for each"의
+  반쪽), `loop`(`for`와 같은 문장 낱말이라 어색함이 남고, 새 예약어가 필요하며, Rust에서는 무한 루프다).
+- 낮춘 결과는 그대로 `for` 문이다. `from`은 식 안에서만 쓰는 표기이고 반복의 뜻은 `for`와 같다(`Iterable` · `next`).
 
 `xs = xs.append(x)` 꼴의 제자리 재사용(`project_last_use.md`)이 이미 있어 낮춘 루프의 비용은 손으로 쓴 것과 같다.
 장점: Python에서 오는 사용자와 모델이 가장 먼저 찾는 표현이다. 클로저 캡처 규칙을 넓히지 않고 얻는다.
@@ -900,7 +895,7 @@ Julia의 shell 모드(`;`)는 가져오지 않는다. A가 들어가면 `os.cmd`
 1. A(`os.cmd`)를 0.5에 넣을지. 넣는다면 실패한 종료를 기본 오류로 할지, 파이프의 어느 쪽 실패를 올릴지.
 2. B의 1(`int op float` 대칭)을 넣을지. 지금의 비대칭이 의도한 규칙인지부터 확인한다. B의 2는 결정 문서로.
 3. C는 LSP Warning으로 먼저 넣고 세어 볼지.
-4. D와 `map` · `filter` 메서드 중 무엇을 먼저 할지, 또는 둘 다 하지 않을지. D를 한다면 절을 여는 낱말(`for` · `from` · `each`).
+4. D와 `map` · `filter` 메서드 중 무엇을 먼저 할지, 또는 둘 다 하지 않을지. D의 꼴은 `[]int{x * 2 from xs |x| if x > limit}`로 정했다(2026-11-24).
 5. E의 세 명령 중 무엇을 넣을지. `.which`는 C와 함께 하는 것이 싸다.
 6. F는 컴파일 타임 평가기를 넓히는 일이 정해질 때까지 미루는 데 동의하는지.
 

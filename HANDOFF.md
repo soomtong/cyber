@@ -188,6 +188,11 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - 테스트는 `modules/cy.cy` 끝. `.doc`은 CLI에서 손으로 확인했다(자동 테스트 없음: REPL을 stdin으로 모는 테스트가 없다).
   - 확인: 수 피연산자 · `os.cmd` · REPL 명령 각각의 커밋 뒤 14단계 검증 rc=0(wasm 단계는 Python `wasmtime` 대역).
 
+- [x] PR soomtong/cyber#12 리뷰(2026-11-24, 사용자: "PR 검토하고 리뷰하고 수정할 부분 처리 후 병합"). `/code-review high` 10건을 모두
+  고쳤고(`unreleased.md` "PR #12 리뷰에서 나온 수정"), 첫 CI의 macOS 실패(`SIGPIPE`를 무시하는 러너에서 `yes | head -1`)를 고쳤다.
+  - 구현 함정: 무시된 신호(`SIG_IGN`)와 신호 mask는 exec를 넘어 자식에게 간다. 핸들러는 기본 동작으로 돌아간다. Linux에서
+    macOS 러너의 조건은 `sh -c 'trap "" PIPE; exec zig-out/bin/cyber x.cy'`로 만든다.
+
 ## 시도했으나 실패한 접근
 
 - `+=` 경로에서 받는 쪽을 `semaExpr`로 읽으면 복사본에 append한다(이중 해제). 메서드 호출처럼 `semaExprSkipSym`을 써야 한다.

@@ -392,9 +392,31 @@ fn cmdFeedInput(file: std.Io.File, bytes: []const u8) void {
     file.close(io);
 }
 
+fn cmdDoNothingSignalHandler(_: std.posix.SIG) callconv(.c) void {}
+
+/// A program keeps an ignored `SIGPIPE` when it is started, and a handler is set back to the default action.
+/// When this process ignores the signal, a stage in front of one that closes its input (`yes` before `head`)
+/// is not stopped by the signal: its write fails and it ends with an error status, so the pipeline would fail.
+/// A handler that does nothing is the same to this process (a write to a closed pipe returns an error) and
+/// gives the stages the default action. `std.Io.Threaded.init` does the same for the processes it starts.
+/// The default action and a handler of the host are left alone.
+fn cmdLetStagesGetSigpipe() void {
+    if (builtin.os.tag == .windows) return;
+    var old: std.posix.Sigaction = undefined;
+    std.posix.sigaction(.PIPE, null, &old);
+    if (old.handler.handler != std.posix.SIG.IGN) return;
+    const act: std.posix.Sigaction = .{
+        .handler = .{ .handler = cmdDoNothingSignalHandler },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+    std.posix.sigaction(.PIPE, &act, null);
+}
+
 fn cmdRunPipeline(alloc: std.mem.Allocator, arena: std.mem.Allocator, stages: []const CmdStage, input: ?[]const u8, mode: CmdMode, out: *CmdOutput) !void {
     const io = stdx.io();
     const n = stages.len;
+    if (n > 1) cmdLetStagesGetSigpipe();
 
     var base_env: ?std.process.Environ.Map = if (inherits_current_env) null else try currentEnvMap(arena);
 

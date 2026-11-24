@@ -97,6 +97,8 @@ REPL에서 문서, 호출이 고르는 함수, 바이트코드를 본다. 결정
   `var f float = symbol.a`가 통과했다. 이제 'Expected `float`, found `symbol`.' 타입 오류다.
 - `os.cmd`: 입력 글이 있는 명령이 출력 한도를 넘는 등 시작 뒤에 실패하면 멈추던 것을 고쳤다. Windows에서는 환경 map을 만들지
   않아 `os.exec`의 Windows 경로가 0.4.19와 같다. `a.pipe(b)`가 `b`의 입력 글을 쓰지 않는다고 문서에 적었다.
+- `os.cmd`: 이 프로세스가 `SIGPIPE`를 무시하면 자식도 물려받아 `yes | head -1` 꼴의 파이프라인이 `error.ExitStatus`였다(PR의 첫
+  macOS CI에서 드러남). 파이프라인을 시작하기 전에 무시를 아무 일도 하지 않는 핸들러로 바꿔 단계들이 신호를 받게 했다.
 - `.which`: 선언 위치를 uri가 아니라 청크로 찾는다. 세션의 뒤 eval에서 선언한 함수의 줄 번호가 맞다.
 - 문서: 컴파일 타임의 `==` · `!=`는 정수와 float를 섞지 못한다고 고쳤다. `semaRightOperand`의 문서 주석 자리.
 - 테스트: `core/number_signed_raw_compare_error.cy` · `symbol_op_float_error.cy` · `float_op_symbol_error.cy` ·

@@ -189,3 +189,14 @@ CLI의 REPL에서 `use os`가 'Failed to load module: os'였다(F-200). 세션�
   새로 만든다.
 - 결정 `docs/decisions/project_memory_limit.md` "eval마다 남는 메모리", 테스트 lib `A chunk whose code is done keeps no room it
   does not use.`
+
+## 선언 해석 중의 `type.info` (2026-11-24, F-205)
+
+- 선언이 이름으로 부르는 템플릿 안의 `type.info`가 호스트를 끝내던 것을 고쳤다(전부터 있던 결함). 예: 필드 타입이
+  `x StructOf[P]`이고 `StructOf`가 `type.info(T).!struct`를 읽으면 panic 'No such field `name`.'이었다. 선언을 해석하는 동안에는
+  `meta` 모듈의 정보 타입(`StructField` · `EnumCase` 등)이 아직 해석되지 않았는데, 그 타입으로 값을 만들었다. 이제 정보 타입을
+  찾을 때 해석한다.
+- `cyber src/builtins/cy.cy`(내장 모듈 소스를 main으로 실행)도 같은 panic이었다. 이제 'Host func `_parser_comments` failed to
+  load.' 컴파일 오류다(내장 모듈의 호스트 함수는 그 모듈로 올릴 때만 묶인다).
+- 테스트: behavior `meta/type_info_in_decl.cy`(struct · enum · choice).
+

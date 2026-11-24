@@ -985,6 +985,7 @@ fn test_control_flow(run: *Runner) void {
     run.case("types/func_template_specialize_trace_error.cy");
     run.case("types/type_template_specialize_trace_error.cy");
     run.case("meta/type_info_trait.cy");
+    run.case("meta/type_info_in_decl.cy");
     run.case("meta/ct_switch_top_level_error.cy");
     run.case("control_flow/for_iter_borrow_mutate_error.cy");
     run.case("control_flow/for_range.cy");

@@ -392,7 +392,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 ## 다음 에이전트에게
 
 1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환, `os.cmd`, REPL 조회 명령, 세션의 메서드 선언,
-   REPL이 CLI의 모듈을 가져온다, 가변 인자 extern 함수의 `int` · `float` 인자, eval마다 남는 메모리).
+   REPL이 CLI의 모듈을 가져온다, 가변 인자 extern 함수의 `int` · `float` 인자, eval마다 남는 메모리, 선언 해석 중의 `type.info`).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 
@@ -401,8 +401,8 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - 0.4.19에서 남긴 것: 시그니처에 직접 쓴 `fn(T) -> [%N + 1]T`는 infer 파라미터로 찾지 않는다(이항식 안을 보지 않는다).
   템플릿 오버로드끼리 infer 위치만 다르면(`fn(T) -> ?%U`와 `fn(T) -> []%U`) 선언이 'already been declared with the same
   function signature'로 거부된다. `%T type` 명시 인자의 평가 오류와 컴파일 타임 호출(`matchGenericFuncCt`)은 오버로드에서 바로 오류다.
-  실패한 오버로드 후보에서 끝까지 검사된 타입 선언형 람다는 죽은 코드로 남는다. `cyber src/builtins/cy.cy`(내장 모듈 소스를
-  main으로 실행)는 panic 'No such field `name`.'이다. wasm 빌드의 테스트는 `CYBER_TEST_FILTER`를 읽지 않는다.
+  실패한 오버로드 후보에서 끝까지 검사된 타입 선언형 람다는 죽은 코드로 남는다. `cyber src/builtins/cy.cy`의 panic은
+  F-205로 고쳤다(이제 호스트 함수 로드 실패 컴파일 오류). wasm 빌드의 테스트는 `CYBER_TEST_FILTER`를 읽지 않는다.
   '변수를 캡처하는 블록 람다를 오버로드 인자로 주면 Missing return statement.'라는 보고는 재현되지 않았다(leak만 고쳤다).
 - 이동: 조건부로 평가되는 식의 부분(`and` · `or`의 오른쪽, `?else` · `!else`의 기본값 · 블록)은 바깥 변수를 옮기지 못한다.
   `try` 문 · `scope` 블록 안의 `!`마다 빈 IR `block` 문장이 하나 붙는다(bytecode는 없다).
@@ -432,7 +432,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-204까지, 열린 것은 F-204).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-205까지, 열린 것 없음).
 
 ## 작업 방식
 

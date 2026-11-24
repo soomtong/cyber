@@ -164,10 +164,12 @@
 sha=$(git rev-parse <태그>); n=$(git rev-list --count 0.3..$sha)
 zig build cli -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false -Dbuild=$n -Dcommit=${sha:0:7}
 zig-out/bin/cyber version            # Cyber 0.4.4 build-N-xxxxxxx
-tar -C zig-out/bin -czvf cyber-macos-arm64.tar.gz cyber
+zig build lsp -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false -Dbuild=$n -Dcommit=${sha:0:7}
+tar -C zig-out/bin -czvf cyber-macos-arm64.tar.gz cyber cyber-lsp   # 번들은 두 실행 파일(0.4.15부터)
 zig build lib -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-none -Dcpu=baseline -Ddev=false -Dbuild=$n -Dcommit=${sha:0:7}
 cp zig-out/lib/libcyber.a libcyber-macos-arm64.a
 gh release upload <태그> cyber-macos-arm64.tar.gz libcyber-macos-arm64.a -R soomtong/cyber --clobber
+# Release job이 skipped여서 릴리스가 없으면: gh run download <run> -p 'bin-*'로 나머지 13개를 받아 gh release create로 함께 올린다(0.4.20).
 zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Ddev 기본 true)
 ```
 
@@ -215,6 +217,14 @@ zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Dd
   concurrency로 취소됐다(태그 run만 본다). 태그 run `45217802270`은 arm64 macOS job(`macos-26`)이 러너를 받지 못해 15분 뒤
   취소되기를 되풀이했고, 실패한 job만 재실행(`gh run rerun --failed`)하기를 다섯 번 한 뒤 통과했다. 나머지 job은 첫 실행에서
   모두 통과했다. 설치 확인은 `install.sh 0.4.19`(arm64 macOS): 버전 문자열, `cyber-lsp` `initialize`, 추론 람다 예제.
+- 0.4.20(2026-11-25): 태그 `0.4.20` → `b407c7b9`, `build-1165-b407c7b`, 에셋 15개. master run `45413008378`과 태그 run
+  `45418409134` 모두 arm64 macOS job만 러너를 받지 못했다(나머지 job은 첫 실행에서 통과). 태그 run은 `gh run rerun --failed`를
+  열두 번 해도 배정되지 않아 run을 취소하고 대체 절차로 냈다: run의 자산 13개를 `gh run download -p 'bin-*'`로 받고, arm64
+  `cyber-macos-arm64.tar.gz`(`cyber` · `cyber-lsp`) · `libcyber-macos-arm64.a`를 태그 커밋의 worktree에서 아래 명령으로 빌드해
+  `gh release create 0.4.20 --verify-tag --title 0.4.20 --notes-file docs/releases/0.4.20.md --latest <15개>`로 올렸다. 로컬
+  빌드의 버전 문자열이 CI 자산(`cyber-macos-x64`의 문자열)과 같은 것을 확인했다. 설치 확인은 `install.sh 0.4.20`(arm64 macOS):
+  버전 문자열, `cyber-lsp` `initialize`, `examples/hello.cy`, `i * f`, `const k = 1 << 70`, `os.cmd`. master run이 실패해 `latest`
+  사전 릴리스는 v0.4.19-DEV에 머문다(다음 master push의 run이 갱신한다).
 
 ## CI 시간 줄이기 (2026-11-18)
 

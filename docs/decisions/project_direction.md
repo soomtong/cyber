@@ -13,8 +13,9 @@
 
 ## 백엔드
 
-- 기본 백엔드는 바이트코드 VM이다. 네이티브가 필요하면 TCC/C AOT(`-Dtest-backend=tcc|cc`)로 충분하다.
-  2026-11-23 덧붙임: 위 문장은 확인 없이 적은 것이다. C 백엔드(`-tcc`, `-cc`, `CL_TCC`, `CL_CC`)는 지금 어떤 스크립트도
+- 바이트코드 VM이 유일한 백엔드다. C 백엔드는 2026-11-23에 지웠고(아래 기록), 네이티브가 다시 필요하면 LLVM으로 새로 만든다.
+  처음(2026-10-31)에는 "네이티브가 필요하면 TCC/C AOT(`-Dtest-backend=tcc|cc`)로 충분하다"고 적었다.
+  2026-11-23 덧붙임: 그 문장은 확인 없이 적은 것이다. C 백엔드(`-tcc`, `-cc`, `CL_TCC`, `CL_CC`)는 지금 어떤 스크립트도
   컴파일하지 못한다. `print(1.5)`가 `core:17`(`#[bind] fn abort`)에서 'CompileError: Expected function implementation.'으로
   끝난다. upstream에서 물려받은 상태이고 CI는 이 백엔드를 돌린 적이 없다. 원인은 세 겹이다.
   1. `src/sema_resolve.zig`의 `#[bind]` 함수 해소가 백엔드가 VM이 아니면 VM에 묶인 함수마다 `.cy` 본문을 요구한다

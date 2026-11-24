@@ -27,7 +27,7 @@ tags:
 | --- | --- |
 | 파일 | `src/ir.zig` |
 | 만드는 곳 | sema 패스(`src/sema.zig`)가 AST를 훑으면서 동시에 만든다 |
-| 쓰는 곳 | 백엔드 `bc_gen`(바이트코드), `cgen`(C AOT). LLVM 백엔드는 `compiler.zig`에서 `error.TODO`이고 `llvm_gen.zig`는 `bc169c5`에서 삭제됐다 |
+| 쓰는 곳 | 백엔드 `bc_gen`(바이트코드). `cgen`(C AOT)은 2026-11-23에 C 백엔드를 지웠다(`project_direction.md`). LLVM 백엔드는 `compiler.zig`에서 `error.TODO`이고 `llvm_gen.zig`는 `bc169c5`에서 삭제됐다 |
 | 수명 | 코드젠이 소비한 직후 버려진다 |
 
 `ir.zig` 머리 주석이 설계 의도를 직접 밝힌다. AST는 sema 결과를 담기에 맞지 않으므로, 타입 검사 · 수명 · ARC · 소멸자 같은
@@ -102,14 +102,14 @@ const cstr = sema.Cstr.initRequire(int_t);   // target_t = int, reqTypeCstr = tr
 | `sema` | semantic analysis | `sema.zig`, `sema_func.zig`, `sema_type.zig` | 이름 해석 · 타입 검사 · 소유권 삽입 · IR 생성 |
 | `sym` | symbol | `sym.zig` | 이름 있는 모든 것의 공통 머리 |
 | `bc_gen` / `bcgen` | bytecode generation | `bc_gen.zig` | IR → 바이트코드 |
-| `cgen` | C (code) generation | `cgen.zig` | IR → C 소스 (AOT) |
+| `cgen` | C (code) generation | `cgen.zig` | IR → C 소스 (AOT). 2026-11-23부터 FFI의 `extern` 접착 코드 생성만 남음 |
 | `dce` | Dead Code Elimination | (삭제됨) | `dce.zig`는 `enable_dce = false` 뒤의 죽은 코드라 `bc169c5`에서 지웠다. 약어는 결정 문서에 남아 있다 |
 | `cte` | compile-time evaluation | `cte.zig` | 1절 |
 | `ct_inline` | compile-time inline | `ct_inline.zig` | 1절 |
 | `capi` | C API | `capi.zig` | `cyber.h`의 Zig 쪽 미러. 소스에서는 보통 `const C = @import("capi.zig")` |
 | `lib` | library | `lib.zig` | `libcyber` 임베딩 진입점. lib 테스트는 `lib_test/` |
 | `vm` | Virtual Machine | `vm.zig`, `vm.c`, `vm.h` | 인터프리터 루프는 C(`vm.c`) |
-| `aot` | Ahead-Of-Time | `aot.c`, `aot.h` | C 백엔드 런타임 지원 |
+| `aot` | Ahead-Of-Time | `aot.c`, `aot.h`(2026-11-23 삭제) | C 백엔드 런타임 지원 |
 | `jit` | Just-In-Time | `src/jit/` | 동작하지 않는 복사-패치 JIT. 컴파일 오류로 거절된다 |
 | `ffi` | Foreign Function Interface | `os_ffi.zig`, 빌드 옵션 `-Dffi` | `zig build lib`는 FFI를 끈다 |
 | `tcc` | Tiny C Compiler | `tcc_stub.zig`, `src/builtins/c.zig` | FFI의 `extern` 바인딩 C 코드를 메모리에서 컴파일 |
@@ -217,8 +217,8 @@ const cstr = sema.Cstr.initRequire(int_t);   // target_t = int, reqTypeCstr = tr
 | --- | --- |
 | `sema.Cstr` vs `bc_gen.Cstr` | 타입 제약 vs 레지스터 배치 제약 |
 | `cte` vs `vm` | AST 인터프리터(컴파일 중) vs 바이트코드 인터프리터(실행 중) |
-| `cgen` vs `bc_gen` | C 소스 생성 vs 바이트코드 생성. 둘 다 같은 IR을 입력으로 받는다 |
-| `aot` vs `jit` | 미리 C로 컴파일(동작) vs 실행 중 기계어 생성(동작 안 함) |
+| `cgen` vs `bc_gen` | C 소스 생성 vs 바이트코드 생성. 둘 다 같은 IR을 입력으로 받았다. 2026-11-23부터 IR을 읽는 것은 `bc_gen`뿐이다 |
+| `aot` vs `jit` | 미리 C로 컴파일 vs 실행 중 기계어 생성. 둘 다 동작하지 않았고 코드는 지웠다(JIT 2026-11-06, C 2026-11-23) |
 | `inst` vs `instance` | VM instruction(약어) vs 템플릿 instance(풀어 씀) |
 | `cont` | Future continuation vs 루프 continue |
 | `fiber` | 0.3의 `fiber.zig`는 `bc169c5`에서 삭제됐다. 현재 코루틴은 generator(`RET_GEN` 계열)이고 `Fiber`는 문서에만 있다 |

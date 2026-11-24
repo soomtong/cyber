@@ -42,6 +42,9 @@
 - 2026-11-23 ~ 24(사용자: `/code-review high from 0.4.18 to head` 뒤 "fix step by step. use sub-agents max 20", 이어서
   "fix and clean up them all. then release next patch version 0.4.19 no ask to me"): 리뷰 8건, 남은 한계, 고치며 찾은 결함을
   고치고 0.4.19를 릴리스했다. 서브 에이전트가 worktree에서 고치고 master에 cherry-pick했다. 내용은 `docs/releases/0.4.19.md`.
+- 2026-11-24(사용자: "C 백엔드를 제거하고 ... 문서에 보면 아직 옛 흔적이 남아 있어 ... 몇 가지는 구현하지 않아도 된다고 보는 게
+  있어", 질문에 항목별로 답함): 매뉴얼의 C 백엔드 흔적과 Planned 항목을 정리하고 `os.open_lib`을 지웠다. 결정
+  `docs/decisions/project_planned_features.md`, `unreleased.md` 같은 절. 작업 브랜치 `claude/clever-hypatia-eqz5vt`.
 
 ## 현재 브랜치
 

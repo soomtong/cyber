@@ -33,7 +33,6 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"stdout",         zErrFunc(stdout)},
     .{"_exec",          zErrFunc(exec)},
     .{"_args",          zErrFunc(_args)},
-    .{"open_lib",        zErrFunc(openLib)},
 };
 
 const types = [_]struct{[]const u8, C.BindType}{
@@ -121,16 +120,6 @@ fn _args(t: *C.Thread) !C.Ret {
     try args.resize(alloc, argv_start);
     ret.* = slice;
     return C.RetOk;
-}
-
-pub fn openLib(t: *C.Thread) anyerror!C.Ret {
-    // if (!cy.hasFFI) return t.ret_panic("Unsupported.");
-
-    // const ret = C.thread_ret(t, ffi.DynLib);
-
-    // const config: ffi.BindLibConfig = .{};
-    // return @call(.never_inline, ffi.ffiBindLib, .{t, config, ret});
-    return C.thread_ret_panic(t, "TODO");
 }
 
 fn cacheUrl(t: *C.Thread) anyerror!C.Ret {

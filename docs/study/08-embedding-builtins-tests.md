@@ -304,7 +304,7 @@ CLI 는 다르다. CLI loader 는 같은 `bind` 를 불러 호스트 표만 등�
 
 `#[bind]` 가 붙은 함수에 Cyber 본문이 같이 있는 경우도 많다(core.cy:3734 `fn (&str) len() -> int:` 와 `return self.header && ~(1 << 63)`).
 VM 백엔드에서는 호스트 함수가 쓰이고, sema.zig:2868-2871 은 "백엔드가 VM 이 아닌데 본문이 없으면 `Expected function implementation.`" 오류를 낸다. 이 두 사실에서 본문은
-C 백엔드(`-cc`/`-tcc`)가 호스트 함수 대신 컴파일하라고 둔 것이라고 읽을 수 있다(추정. 해당 백엔드의 내부를 읽어 확인하지는 않았다).
+C 백엔드(`-cc`/`-tcc`)가 호스트 함수 대신 컴파일하라고 둔 것이라고 읽을 수 있다(추정. 해당 백엔드의 내부를 읽어 확인하지는 않았다). 2026-11-23 C 백엔드를 지우며 이 검사도 함께 없앴다(`project_direction.md`).
 
 대표 사례를 다섯 개 따라가 보자(5.4절에서 직접 추적한다).
 
@@ -502,8 +502,8 @@ behavior-test 는 이 장의 핵심이다. 파일을 "발견"하지 않는다. �
 | `single_run` | main 블록 지역 변수의 해제 코드를 생략하고 `VM.deinit` 이 힙을 쓸어 담는다. 재사용할 VM 에는 쓰지 않는다 | vm.zig:204-209, main.zig:161 |
 | `persist_main` | main 의 함수/타입/use 와 지역 변수를 다음 eval 로 이월(REPL). 2.3절 | compiler.zig:352-390, vm.zig:473-476 |
 | `gen_all_debug_syms` | 실패 가능한 명령에만이 아니라 모든 명령에 debug sym 을 만든다 | chunk.zig:682 |
-| `backend` | `CL_VM`(기본). `CL_JIT` 는 컴파일 에러 "The JIT backend is not supported."(compiler.zig:287-290, src/lib_test/compile.zig 의 "JIT backend is rejected with a clear compile error." 테스트), `CL_TCC`/`CL_CC` 는 C 로 내보내 외부 실행(vm.zig:481-511), `CL_LLVM` 은 `error.TODO` | fork 방침상 VM 만 지원 |
-| `spawn_exe` | AOT 백엔드 산출물을 spawn 으로 실행할지 | vm.zig:487 |
+| `backend` | `CL_VM`(기본). `CL_JIT` 는 컴파일 에러 "The JIT backend is not supported."(compiler.zig:287-290, src/lib_test/compile.zig 의 "JIT backend is rejected with a clear compile error." 테스트), `CL_TCC`/`CL_CC` 는 C 로 내보내 외부 실행(vm.zig:481-511, 2026-11-23 삭제), `CL_LLVM` 은 `error.TODO` | fork 방침상 VM 만 지원 |
+| `spawn_exe` | AOT 백엔드 산출물을 spawn 으로 실행할지(2026-11-23 삭제) | vm.zig:487 |
 | `skip_codegen` (Compile 전용) | 바이트코드 생성을 건너뜀. `cl_vm_validate` 가 이것으로 구문/의미 검사만 했으나 2026-11-08(F-05)부터는 코드 생성까지 한다(검증이 처음 로드한 모듈을 다음 eval 이 그대로 쓰기 위해) | `VM.validate` |
 | `emit_source_map` (Compile 전용) | C 백엔드 소스맵 | cgen.zig:298 |
 

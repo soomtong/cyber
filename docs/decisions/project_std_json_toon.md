@@ -27,7 +27,7 @@ https://github.com/toon-format/spec)를 따른다.
   `number_string` 같은 무손실 경로는 두지 않았다.
 - 객체는 `json.Object{entries []Entry}`로 삽입 순서를 지킨다(TOON은 키 순서 보존이 MUST). 조회는 선형 탐색이다. 파싱 중 중복
   키 찾기만 16개를 넘으면 임시 `Map[str, int]`를 쓴다. 중복 키는 serde처럼 마지막 값이 이기고 위치는 첫 번째다(TOON 비엄격과 같다).
-- 오류: 언어에 오류 payload가 없어(`docs.md` "error payload") Zig `Diagnostics`처럼 호출자가 넘기는 `json.Diag`에
+- 오류: 언어에 오류 payload가 없어(`docs.md` "Errors" 절. 2026-11-24 계획에서도 뺐다, `project_planned_features.md`) Zig `Diagnostics`처럼 호출자가 넘기는 `json.Diag`에
   `msg` · `line` · `col` · `pos`를 쓴다. 오류 값은 `error.Syntax`와 `error.Unicode`(UTF-8 아님) 둘뿐이다. 문구는 에이전트가 고칠 수
   있게 무엇을 기대했고 무엇을 찾았는지 말한다.
 - 중첩 한도 256(serde 128보다 넉넉하다). 파서가 재귀라 VM 스택을 지킨다.

@@ -47,7 +47,7 @@ Cyber 0.4 에서는 이 일이 특히 무겁다. 정적 타입, 템플릿, 소�
 - 정적 타입과 심볼이 있으면 일부 문장과 식은 의미가 없어진다(예: `const` 선언은 IR 이 필요 없다).
 - 파라미터 복사와 변수 캡처는 나중에 알게 되므로 되돌아가 채워 넣는(backpatching) 자리가 필요하다.
 - 관리되는 임시값을 지역 변수로 빼내기, 값 복사, retain/release, 정적 변수 초기화, 0 값 같은 IR 을 추가할 수 있다.
-- 바이트코드 백엔드와 C 백엔드를 더 단순하게 만들고, 새 백엔드를 추가하기도 쉽게 한다.
+- 바이트코드 백엔드와 C 백엔드를 더 단순하게 만들고, 새 백엔드를 추가하기도 쉽게 한다(C 백엔드는 2026-11-23 삭제, 지금 IR의 소비자는 `bc_gen`뿐이다).
 
 대안과 비교하면 다음과 같다. 일반 지식으로, TypeScript 컴파일러의 binder + checker 는 AST 에 심볼과 타입을 덧붙이는 방식이라 AST 는 그대로 남고 이후 emit 단계가 AST 를 다시 읽는다. Cyber 는 sema 가 아예 새 트리(IR)를 만들어 내고 AST 는 에러 위치(각 IR 노드가 들고 있는 `node` 포인터)에만 쓴다. 장점은 코드젠이 얇아진다는 것이고, 단점은 sema 가 "검사 + 변환 + 수명 삽입"을 한 패스에서 다 하느라 `sema.zig` 가 10.6K 줄로 커졌다는 것이다. 이 단점은 7절에서 구체적인 증상으로 다시 만난다(예: 오버로드를 시도하다 실패하면 이미 만든 IR 을 되돌려야 하는데 그 일이 미완이다).
 
@@ -633,7 +633,7 @@ funcBlock(find)
 - IR arena 는 `Chunk.init` 에서 만들어진다(`chunk.zig:266`). 해제는 `Chunk.deinit`(`:313`)이고, 이는 `Compiler.deinit`(`compiler.zig:187`) 곧 VM 정리 때다. `bcgen.genAll` 직후에 해제하지 않는다. 즉 "버려진다"는 의미상의 서술이고 메모리는 컴파일러가 살아 있는 동안 유지된다.
 - 루트는 청크마다 `ir.func_blocks`(`mainBlock`/`funcBlock` 스텁의 목록)이고, bc_gen 이 `genChunkInner`(`bc_gen.zig:438-446`)에서 이 목록을 순회한다. main 블록은 `Compiler.program_ir` 에도 저장된다(`compiler.zig:96`, `:435`).
 - 스텁을 먼저 만들고 나중에 덮어쓰는 패턴이 곳곳에 있다. `funcBlock`(`pushFuncProc`, `sema.zig:4548`에서 `undefined` 로 생성 → `popFuncBlock`, `:9173`에서 `bodyHead`/`params` 채움), `declare_local.init`(2.4절 가), `mainBlock`. 주석의 "backpatching" 이 이것이다.
-- 소비자는 여럿이다. `bc_gen.zig`(`genStmt` `:379`, `genExpr` `:480`이 `code` 별 1:1 switch), `cgen.zig`(C 백엔드, 3,187줄), `jit/gen.zig`, 그리고 꺼져 있는 `dce.zig`. 다만 C 백엔드는 현재 쓸 수 없다. `cyber -cc x.cy` 를 실행하면 sema 단계에서 core.cy 의 `#[bind]` 함수에 본문이 없다는 이유로 "Expected function implementation." 에러가 난다(`sema.zig:2870`, 5.7). IR 이 여러 백엔드를 위한 중립 표현이라는 의도는 코드 구조(백엔드가 모두 같은 IR 을 읽는다)에서 확인되지만, 바이트코드 VM 외에는 실행해 보지 못했다.
+- 소비자는 여럿이다. `bc_gen.zig`(`genStmt` `:379`, `genExpr` `:480`이 `code` 별 1:1 switch), `cgen.zig`(C 백엔드, 3,187줄), `jit/gen.zig`, 그리고 꺼져 있는 `dce.zig`. 다만 C 백엔드는 현재 쓸 수 없다. `cyber -cc x.cy` 를 실행하면 sema 단계에서 core.cy 의 `#[bind]` 함수에 본문이 없다는 이유로 "Expected function implementation." 에러가 난다(`sema.zig:2870`, 5.7). IR 이 여러 백엔드를 위한 중립 표현이라는 의도는 코드 구조(백엔드가 모두 같은 IR 을 읽는다)에서 확인되지만, 바이트코드 VM 외에는 실행해 보지 못했다. 2026-11-23 C 백엔드를 지워 지금은 `bc_gen` 하나다(`project_direction.md`).
 
 #### "코드젠은 번역만 한다"를 코드로 확인하기
 
@@ -1030,7 +1030,7 @@ fork 를 유지보수하는 입장에서 시사점은 다음과 같다.
 3. `try ... else err:` 는 파싱되지만 sema 가 항상 "Unsupported statement: tryStmt" 로 거부한다(`sema.zig:673-678`). 같은 구문의 IR 노드(`tryStmt`), `bc_gen.gen_try_stmt` 가 남아 있다. 2026-11-09 F-32 로 구현됐고 죽은 IR · 코드젠은 지웠다(`docs/decisions/project_try_block.md`).
 4. 오버로드 시도 롤백이 미완이다(`matchRtOverload` 의 TODO). 5.4 에서 다룬 대로 실제 오동작은 찾지 못했다(미확인). 선언 순서가 결과를 바꾸던 F-21 은 2026-11-08 `cf4aa84a` 로 고쳤다(`docs/decisions/project_overload_exact_match.md`).
 5. 클로저는 참조형(`^T`, `&T`) 지역만 캡처하고 바로 위 `Proc` 한 단계만 본다(`sema.zig:5066`, `:5115`). 값 타입 캡처는 `TODO: Capture non-reference stack variables too.`(`:5063`).
-6. `cyber -cc`/`-tcc` 는 sema 단계에서 실패한다(`sema.zig:2870`). C 백엔드(`cgen.zig`)는 이 IR 을 읽도록 작성되어 있으나 현재 core.cy 와는 맞지 않는다.
+6. `cyber -cc`/`-tcc` 는 sema 단계에서 실패한다(`sema.zig:2870`). C 백엔드(`cgen.zig`)는 이 IR 을 읽도록 작성되어 있으나 현재 core.cy 와는 맞지 않는다. 2026-11-23 백엔드를 지웠다(F-195).
 
 ### 7.2 문서와 코드의 차이
 

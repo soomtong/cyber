@@ -66,7 +66,7 @@ Semantics:
 
 - Typing is static. A type error appears as a CompileError before a single line runs. A variable cannot change its type.
 - There is no truthiness. The `x` in `if x:` must be a bool. Write `if xs.len() > 0:`. Bitwise operators are `&&`, `||` and `~`. Logic is `and`, `or` and `not`.
-- Integers and floats are separate. `int + float` is an error, and the right operand is fitted to the type of the left one. Convert explicitly: `float(i) + f`. A float always prints with a fraction: `5.0`, not `5`. Convert with `int(f)` to print `5`.
+- Integers and floats are separate types. An arithmetic operator or a comparison with an int and a float converts the int, on either side, and gives a float: `i * f` is `f * i`. Two ints stay ints: `i / 2` is integer division, write `i / 2.0`. A float does not convert back: `i += f` and `var n int = i * f` are errors, write `int(i * f)`. A float always prints with a fraction: `5.0`, not `5`. Convert with `int(f)` to print `5`.
 - A function cannot read a local variable of the outer scope. Pass it as a parameter, or declare a global with `global g int = 0`.
 - Using a call that returns a value as a statement is an error. To discard the value, write `_ = f()`.
 - A function that returns a value must return on every path. Otherwise: 'Missing return statement.'
@@ -157,6 +157,7 @@ list comprehensions, the `lambda` keyword (a lambda is written `|a, b| a + b` an
 - `math`, `test`, `io`
 - `os`: files, directories, environment, processes, `os.args()`. `cli` reads lines and runs the REPL.
   Text files: `os.read_file(p)!` returns `str`, `os.write_file(p, s)!`. Bytes: `os.read_file_bytes`, `os.write_file_bytes`.
+  Programs: `os.cmd({'git', 'status'}).read()!` returns the stdout as `str`, `.run()!` lets the output through, and `.run_status()!` returns `out`, `err` and `code` without an error for a failed exit. Chain `.pipe(os.cmd({...}))`, `.dir(path)`, `.env(name, value)` and `.stdin(text)` before it. There is no shell: pass every argument as its own string, and use `pipe` instead of `|`. A failed exit is `error.ExitStatus`, a missing program `error.NotFound`.
 - `json`, `toon`: parse and stringify, with a value tree.
 - `regex`: a regular expression engine without backtracking (linear time). `peg`: parsing expression grammars.
 - `time`: clocks, durations, dates and IANA time zones.
@@ -371,7 +372,8 @@ Most compile errors say how to fix the code, for example 'Did you mean starts_wi
 - 'Expected closing parenthesis.' in a call: a keyword argument `f(a=1)`. Pass it by position.
 - 'Expected a target type or at least one element.': an empty `{}`. Write `[]int{}` or `Map[str, int]{}`.
 - 'Expected type `bool`, got `int`.': a truthy condition. Use a comparison.
-- 'Expected `int`, found `float`.': int and float mixed. Match them with `float(i)`.
+- 'Expected type `int`, got `float`.': a float is stored in an int (`i += f`, `var n int = i * 0.5`). An int and a float in one expression give a float. Convert the result with `int(...)`.
+- 'Expected `int`, found `float`.': a float in a bitwise operator (`i && f`, `i << f`). Convert it with `int(f)`.
 - 'Variable `x` is already declared in the block.': repeated `:=`. Write `x = ...`.
 - 'Undeclared variable `x`.' inside a function: an outer local variable. Pass it as a parameter, or use `global`.
 - 'Undeclared variable `abs`.' (also `sum`, `sorted`, `enumerate`, `zip`): a Python builtin. See "Missing features" and write a loop.

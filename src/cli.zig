@@ -19,6 +19,7 @@ pub const Src = @embedFile("std/cli.cy");
 
 const funcs = [_]struct { []const u8, C.BindFunc }{
     .{ "repl_read_line", zErrFunc(replReadLine) },
+    .{ "repl_doc", zErrFunc(replDoc) },
 };
 
 pub fn bind(_: ?*C.VM, mod: ?*C.Sym) callconv(.c) C.Bytes {
@@ -459,6 +460,29 @@ fn loadUrl(vm: *C.VM, alloc: std.mem.Allocator, url: []const u8) ![]const u8 {
 
 pub const use_ln = builtin.target.os.tag != .windows and builtin.target.os.tag != .wasi;
 const ln = @import("linenoise");
+
+/// Prints the manual for the arguments of `cyber doc`. Set by the CLI `main`, which embeds the manual:
+/// the library does not have it.
+pub var doc_hook: ?*const fn (alloc: std.mem.Allocator, args: []const []const u8) anyerror!void = null;
+
+/// The command `.doc` of the REPL. `query` is what `cyber doc` takes after `doc`, split at spaces.
+pub fn replDoc(t: *C.Thread) anyerror!C.Ret {
+    _ = C.thread_ret(t, void);
+    const alloc = C.thread_allocator(t);
+    var query = C.thread_param(t, C.str);
+    defer C.str_deinit(t, &query);
+
+    const hook = doc_hook orelse {
+        std.debug.print("The manual is not available here.\n", .{});
+        return C.RetOk;
+    };
+    var args: std.ArrayList([]const u8) = .empty;
+    defer args.deinit(alloc);
+    var iter = std.mem.tokenizeAny(u8, C.str_bytes(query), " \t");
+    while (iter.next()) |arg| try args.append(alloc, arg);
+    try hook(alloc, args.items);
+    return C.RetOk;
+}
 
 pub fn replReadLine(t: *C.Thread) anyerror!C.Ret {
     const ret = C.thread_ret(t, C.str);

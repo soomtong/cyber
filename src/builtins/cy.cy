@@ -1223,6 +1223,15 @@ fn repl(read_line ReadLineFn) -> void:
     while ctx.read(read_line) |code|:
         ctx.eval_print(code)
 
+--| Starts an isolated REPL session like `repl(read_line)`, with `doc` behind the command `.doc`.
+--| `doc(query)` gets the text after `.doc` and prints what the host has to say about it.
+fn repl(read_line ReadLineFn, doc DocFn) -> void:
+    ctx := REPL.new()
+    ctx.doc_fn = doc
+    ctx.print_intro()
+    while ctx.read(read_line) |code|:
+        ctx.eval_print(code)
+
 type Backend enum:
     case vm
     case jit
@@ -1316,12 +1325,28 @@ fn (&VM) value_desc(val_t int, value Value) -> str:
 fn (&VM) main_thread() -> Thread:
     panic('Unsupported')
 
+--| Compiles `code` against the session without running it and describes the function that its outermost call
+--| picks: the header of the declaration, the instance of a template, where it is declared and its doc comment.
+--| Without a call it describes the name at the end of `code`. A compile error is returned as its summary.
+#[bind]
+fn (&VM) which(code str) -> str:
+    panic('Unsupported')
+
+--| Returns the bytecode of the compiled functions that `name` names: a function name, or a name with its
+--| type or module as the dump prints it (`Vec2.len2`). Empty if no compiled function matches.
+#[bind]
+fn (&VM) bytecode(name str) -> str:
+    panic('Unsupported')
+
 type REPL:
     vm     VM
     indent int
 
     -- Build multi-line input.
     input_buffer str
+
+    -- Prints the manual for the command `.doc`. None in a host that has no manual.
+    doc_fn ?DocFn = none
 
 fn REPL :: new() -> REPL:
     ctx := REPL{
@@ -1343,9 +1368,49 @@ fn REPL :: new() -> REPL:
 
 fn (&REPL) print_intro():
     print("%{meta.full_version()} REPL")
-    print("Commands: .exit")
+    print("Commands: .exit, .help")
 
 type ReadLineFn = fn(prefix str) -> Future[str]
+
+type DocFn = fn(query str) -> void
+
+--| Runs `line` if it is a command of the REPL. Returns false if it is not one.
+--| A command is a line that starts with `.` and a command name. It is not Cyber code and is not evaluated.
+fn (&REPL) command(line str) -> bool:
+    if line == '.help':
+        print('Commands:')
+        print('  .exit            Leave the REPL.')
+        print('  .help            Print this list.')
+        print('  .doc [topic]     Print a section of the manual. Without a topic: the topics.')
+        print('                   `.doc --api os` prints the functions of a module.')
+        print('  .which <expr>    Show the function that a call picks, or what a name is. Nothing runs.')
+        print('  .bc <function>   Print the bytecode of a function.')
+        return true
+    if line == '.doc' or line.starts_with('.doc '):
+        if self.doc_fn |doc|:
+            doc(line[4..].trim())
+        else:
+            print('The manual is not available here.')
+        return true
+    if line == '.which' or line.starts_with('.which '):
+        code := line[6..].trim()
+        if code.len() == 0:
+            print('Usage: .which <expression>, for example `.which print(1)` or `.which math.sqrt`.')
+        else:
+            print(self.vm.which(code))
+        return true
+    if line == '.bc' or line.starts_with('.bc '):
+        name := line[3..].trim()
+        if name.len() == 0:
+            print('Usage: .bc <function>, for example `.bc fib` or `.bc Vec2.len2`.')
+            return true
+        dump := self.vm.bytecode(name)
+        if dump.len() == 0:
+            print('No compiled function is named `%{name}`. A function is compiled when an input declares it, a template when a call uses it.')
+        else:
+            print(dump)
+        return true
+    return false
 
 --| Reads lines until a complete input is ready.
 --| A line ending with `:` opens a block; an empty line closes one.
@@ -1358,6 +1423,10 @@ fn (&&REPL) read(read_line ReadLineFn) -> ?str:
 
         if input == '.exit':
             return none
+
+        -- A command is read where an input starts, not inside a block.
+        if self.indent == 0 and self.input_buffer.len() == 0 and self.command(input):
+            continue
 
         if input.starts_with('#['):
             self.append_line(input)

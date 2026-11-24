@@ -10,6 +10,7 @@
 | --- | --- | --- | --- |
 | 1 | Nim 3.0 (Nimony) | 2026-11-15 | 0.5를 앞두고 Araq의 설계 원칙 글 검토 |
 | 2 | Nim 2 · Lean 4 · Koka: 마지막 사용 분석 | 2026-11-15 | 개발 과정에서 사이버가 맡을 단계 논의 |
+| 3 | Julia 1.13 | 2026-11-24 | Julia에서 가져올 만한 것이 있는지 질문 |
 
 ## 1. Nim 3.0 (Nimony)
 
@@ -568,3 +569,343 @@ Nim의 cursor 추론(바뀌지 않는 원본에서 읽은 값을 복사하지 �
 
 결정(2026-11-20, 사용자, 권고대로): 1은 `project_direction.md`에 적는다. 2는 0.5 뒤 첫 설계 과제로 두고
 `project_last_use.md`부터 쓴다. 3은 C(빌림 NLL)다. 4 · 5는 그 문서에서 따로 정한다.
+
+## 3. Julia 1.13
+
+### 3.1 출처와 범위
+
+- Julia 공식 매뉴얼의 다섯 장을 2026-11-24에 읽었다: Running External Programs, Conversion and Promotion, Methods(앞부분),
+  Functions, Strings. 주소는 `https://docs.julialang.org/en/v1/manual/` 아래다. 페이지 바닥글은 "Using Julia version 1.13.4"이고,
+  내려받기 페이지는 안정판 1.13.4(2026-11-13), LTS 1.10.14라고 적는다. 아래의 인용은 이 장들에서 왔다.
+- 매뉴얼에서 확인하지 못해 일반 지식으로 적은 것: `ignorestatus`의 뜻, `r"..."`가 `@r_str` 매크로 호출로 바뀐다는 것,
+  specificity의 정확한 계산 규칙, 3.5 · 3.6의 역사와 평가. 해당 자리에 "(일반 지식)"이라고 적었다.
+- 사이버 쪽 근거는 `docs/docs.md`, `src/sema_expr.zig`(`semaBinExpr`), `src/builtins/core.cy`, `src/std/os.cy` · `os.zig`,
+  `src/std/regex.cy`, `docs/decisions/*`다. 이번에는 코드를 실행하지 못했다. 컨테이너에 Zig가 없었고 릴리스 바이너리 실행은
+  세션 권한에서 막혔다. 사이버의 동작은 매뉴얼과 소스를 읽어 적었고, 채택 결정 전에 로컬 CLI로 다시 확인해야 한다.
+  제안의 예제 코드는 모두 가상이다.
+
+### 3.2 개요
+
+Julia(2012 공개, 2018 1.0)는 "두 언어 문제"를 풀려고 만든 언어다. 탐색은 Python · MATLAB으로, 속도가 필요한 부분은 C · Fortran으로
+쓰던 과학 계산을 한 언어로 하겠다는 것이다(일반 지식). 설계는 한 문장으로 줄일 수 있다. 동적 타입 언어의 모든 함수를 다중
+디스패치의 제네릭 함수로 만들고, 호출된 인자 타입 조합마다 JIT(LLVM)으로 특수화한다.
+
+사이버와는 출발점이 반대다. Julia는 동적 타입 + JIT + tracing GC이고, 사이버는 정적 타입 + 바이트코드 VM + 소유권 · ARC다.
+그래서 Julia의 핵심(동적 다중 디스패치, 매크로, JIT 특수화)은 거의 옮길 수 없다. 가져올 만한 것은 핵심의 바깥, Julia가 "스크립트
+언어로도 쓰기 좋게" 다듬은 자리에 몰려 있다. 사이버의 용도(Python · Perl · Shell 대용, `project_direction.md`)와 겹치는 자리다.
+
+| 영역 | Julia의 선택 | 동기 |
+| --- | --- | --- |
+| 디스패치 | 모든 인자의 런타임 타입으로 가장 구체적인 메서드를 고름. 모호하면 오류 | 수치 코드의 이항 연산은 왼쪽 인자의 소유가 아니다 |
+| 수치 승격 | 인자를 자동 변환하지 않음. `promote`를 부르는 포괄 메서드와 `promote_rule` | 승격 규칙을 라이브러리가 정의하고 확장한다 |
+| 원소별 연산 | `f.(xs)` 점 문법. 겹친 점 호출은 한 루프로 합쳐짐(문법 차원의 보장) | 벡터화 코드의 임시 배열 제거를 최적화기에 맡기지 않는다 |
+| 외부 명령 | 백틱은 `Cmd` 값을 만듦. shell을 거치지 않음. `pipeline`으로 조립 | shell 문자열 조립의 인용 · 주입 문제 제거 |
+| 문자열 리터럴 | 접두 식별자가 붙은 비표준 리터럴(`r"..."`) | 정규식 같은 작은 언어를 리터럴로 |
+| 도구 | REPL의 도움말 · shell 모드, `@which` · `@code_lowered` 계열(일반 지식) | 컴파일 단계를 언어 안에서 들여다본다 |
+
+### 3.3 핵심 디자인과 사이버의 현재 위치
+
+각 항목은 "Julia / 사이버 지금 / 판정" 순서다.
+
+#### 3.3.1 다중 디스패치와 모호성
+
+- Julia: "the most specific method applicable to those arguments is applied." 가장 구체적인 메서드가 하나로 정해지지 않으면
+  "Julia raises a `MethodError` rather than arbitrarily picking a method."다. 매뉴얼의 예는 `g(x::Float64, y)`와
+  `g(x, y::Float64)`를 두고 `g(2.0, 3.0)`을 부르는 것이고, 오류는 `g(::Float64, ::Float64)`를 정의하라고 알려 준다.
+- 사이버 지금: 오버로드는 컴파일 시점에 정해진다. 1단계는 암시적 변환 없는 정확한 일치(선언 순서 무관), 2단계는 선언 순서대로
+  암시적 변환을 허용한 첫 후보다(`project_overload_exact_match.md`). 매뉴얼도 그대로 적는다. "When more than one overload can take
+  the argument, the first declared one is used". `tag(x ?str)`와 `tag(x ?int)`가 있을 때 `tag(none)`은 먼저 선언한 `?str`로 간다.
+  런타임 디스패치는 trait 객체(`^Dyn[T]`)의 수신자 하나뿐이다.
+- 판정: 동적 다중 디스패치는 가져오지 않는다. 런타임 타입 격자와 메서드 표, 그리고 그것을 빠르게 만들 JIT가 필요한데 사이버는
+  JIT를 지웠다. 정적 타입 언어에서 오버로드 + 템플릿 특수화는 이미 컴파일 시점의 다중 디스패치다.
+  가져올 것은 규칙 하나다. "임의로 고르지 않고 오류를 낸다"(3.4 C).
+
+#### 3.3.2 수치 승격과 이항 연산자
+
+- Julia: "the arguments of functions are never automatically converted." 섞인 타입의 산술은 포괄 메서드가 받는다.
+
+~~~julia
++(x::Number, y::Number) = +(promote(x,y)...)
+
+promote_rule(::Type{Float64}, ::Type{Float32}) = Float64
+~~~
+
+  규칙은 한 방향만 적는다. "one does not need to define both `promote_rule(::Type{A}, ::Type{B})` and
+  `promote_rule(::Type{B}, ::Type{A})`"이고 대칭은 승격 과정이 보장한다. `1 + 2.5`와 `2.5 + 1`은 같은 길을 간다.
+- 사이버 지금: 이항 산술은 왼쪽 피연산자가 정한다. `semaBinExpr`은 왼쪽이 `float`이면 오른쪽을 `float`에 맞추고, 왼쪽이 `int`이고
+  오른쪽이 `float`이면 'Expected `int`, found `float`.' 오류를 낸다. 폭이 다른 정수끼리는 큰 쪽으로 넓힌다(여기는 대칭이다).
+  왼쪽이 숫자 리터럴이면 오른쪽에서 타입을 가져온다. 사용자 타입의 연산자는 왼쪽 타입의 메서드에서만 찾는다(소스 주석
+  "Look for sym under left type's module").
+
+~~~cy
+i := 7
+f := 2.5
+print(f * i)    -- 17.5
+print(i * f)    -- CompileError: Expected `int`, found `float`.
+
+v := math.Vec2[float]{x=1, y=2}
+print(v * 2.0)  -- `fn (Vec2[]) *(scale T)`가 받는다
+print(2.0 * v)  -- 왼쪽이 `float`라 오른쪽을 `float`에 맞추려다 오류(소스 읽기 기준)
+~~~
+
+- 판정: 가져올 가치가 크고 작다. 암시적 변환 표는 이미 `Int[X]` → `Float[W]`를 허용한다. 빠진 것은 대칭뿐이다. 곱셈의 교환
+  법칙이 타입 검사에서 깨지는 것은 Python 대용 언어에서 첫날 만나는 걸림돌이다(3.4 B).
+
+#### 3.3.3 원소별 연산과 루프 융합
+
+- Julia: "any Julia function `f` can be applied elementwise to any array (or other collection) with the syntax `f.(A)`."
+  겹친 점 호출은 "_fused_ into a single `broadcast` loop"이고 이것은 "a _syntactic guarantee_"다. 결과 배열 하나만 할당한다.
+  융합은 점이 없는 호출을 만나면 멈춘다. 함수 연결은 `1:10 |> sum |> sqrt`, 마지막 인자의 익명 함수는 `do` 블록으로 쓴다.
+- 사이버 지금: `Slice`에는 `map` · `filter` · `reduce`가 없다(`core.cy`의 `Slice` 메서드 목록). 매뉴얼은 `filter`를 손으로 쓴 예를
+  싣는다. 고차 함수를 더해도 걸림돌이 남는다. 클로저는 `^T` · `&T` 변수만 캡처한다. "A local variable that is not a reference can
+  not be captured yet: borrow it first." 그래서 지역 변수 `limit`와 비교하는 `|x| x > limit`는 먼저 `l := &limit`를 적어야 한다.
+  `do` 블록에 해당하는 것은 이미 있다(`queue_task(.high_priority, |_|):` 뒤의 블록).
+- 판정: 점 문법 자체는 가져오지 않는다. 다차원 배열과 broadcast 규칙이 있어야 값을 하고, 사이버에는 그 타입이 없다.
+  가져올 것은 원칙이다. 융합을 최적화기의 약속이 아니라 문법이 정하는 사실로 만든다. 사이버에서는 "식이 루프로 낮춰진다"는
+  형태가 되고, 클로저 캡처 제약을 피해 가는 길이기도 하다(3.4 D).
+
+#### 3.3.4 외부 명령: `Cmd`
+
+- Julia: "Instead of immediately running the command, backticks create a `Cmd` object to represent the command." 그리고
+  "The command is never run with a shell." 보간은 문자열 붙이기가 아니라 인자 단위다. 공백이 든 경로를 보간하면
+  "Julia knows that `file` is meant to be interpolated as a single argument"이고, 배열을 보간하면 원소마다 인자 하나가 된다.
+
+~~~julia
+files = ["/etc/passwd", "/Volumes/External HD/data.csv"]
+run(`grep foo $files`)                         # 인자 3개. 공백이 든 경로도 인자 하나
+
+run(pipeline(`echo hello`, `sort`))            # '|' 대신 pipeline
+run(pipeline(`do_work`, stdout=pipeline(`sort`, "out.txt"), stderr="errs.txt"))
+run(Cmd(`pwd`, dir="/"))
+out = readchomp(`echo hello`)                  # "hello"
+~~~
+
+  실패는 값이 아니라 예외다. "If the external command fails to run successfully, the run method throws an
+  `ProcessFailedException`." 종료 코드를 직접 보려면 `ignorestatus`를 쓴다(일반 지식).
+- 사이버 지금: `os.exec(args) -> ExecResult{out, err, code}` 하나다(`src/std/os.cy`, `os.zig`). 인자 목록을 받아
+  `std.process.run`으로 바로 실행하므로 shell을 거치지 않는다. 가장 중요한 원칙은 이미 지킨다. 없는 것은 나머지 전부다.
+  stdin 입력, 파이프 연결, 작업 디렉터리 · 환경 변수, 파일 리다이렉션이 없다. 출력은 10 MiB까지 모아서 한 번에 돌려준다.
+  0이 아닌 종료 코드는 오류가 아니라 `code` 필드라서 확인을 빼먹으면 조용히 지나간다. 신호로 죽으면 `code`는 -1이다.
+  문서 주석은 "Runs a shell command"라고 적는데 사실과 다르다. 파이프가 필요하면 shell에 문자열을 넘기는 수밖에 없다.
+  0.3 문법으로 남아 있는 `src/test/cli_test.cy`의 `runPipeInput`이 그렇게 쓴다(`'/bin/bash', '-c', '$(cmd) | $(cyber) temp.cy'`).
+  Julia가 없애려던 바로 그 모양이다.
+- 판정: 이 절에서 가장 먼저 가져올 항목이다. Shell 대용이 용도인 언어에서 프로세스 조립은 표준 라이브러리의 중심이고,
+  에이전트가 쓴 스크립트가 외부 입력을 shell 문자열에 넣는 것은 주입 문제다(3.4 A).
+
+#### 3.3.5 비표준 문자열 리터럴
+
+- Julia: "A non-standard string literal looks like a regular double-quoted string literal, but is immediately prefixed by an
+  identifier". 정규식은 `r"..."`이고 보간과 이스케이프 해석 없이 만들어진다. `xyz"..."`는 `@xyz_str` 매크로 호출이라 리터럴은
+  코드가 읽히는 시점에 한 번 처리되고, 사용자가 새 접두를 정의할 수 있다(일반 지식. Strings 장은 이 부분을 적지 않는다).
+- 사이버 지금: 백틱이 이스케이프 없는 raw 문자열이라 `r"..."`의 절반(이스케이프)은 이미 있다. 나머지 절반이 없다.
+  `regex.compile(pat)`은 런타임에 `!Regex`를 돌려주므로, 상수 패턴의 오타도 실행해야 드러나고 호출마다 `!`가 붙는다.
+  `peg`와 `time`의 형식 문자열도 같다. 컴파일 타임 평가기는 "can not emulate the entire language"이고 `float` 덧셈 같은 연산을
+  아직 평가하지 못한다. `regex.cy`의 패턴 컴파일러를 컴파일 타임에 돌릴 수 있는지는 확인하지 않았다.
+- 판정: 방향은 좋지만 지금은 이르다(3.4 F).
+
+#### 3.3.6 REPL과 들여다보기
+
+- Julia: REPL에서 `?`는 도움말 모드, `;`는 shell 모드다. `@which f(1, 2.0)`은 그 호출이 고르는 메서드를, `@code_lowered` ·
+  `@code_typed` · `@code_native`는 컴파일 단계별 결과를 보여 준다(일반 지식).
+- 사이버 지금: REPL 명령은 `.exit` 하나다. 재료는 CLI에 흩어져 있다. `cyber doc <절>`은 매뉴얼을, `cyber doc --api <모듈>`은
+  시그니처와 문서 주석 첫 줄을, `cyber compile`은 바이트코드를 낸다(core까지 6천 줄).
+- 판정: 작고 이득이 분명하다. 2단계 오버로드와 템플릿 특수화가 있는 언어에서 "이 호출은 어디로 가는가"는 사람도 에이전트도
+  묻는 질문이다(3.4 E).
+
+#### 3.3.7 이미 같은 자리에 있는 것
+
+- 반복 프로토콜: Julia의 `iterate(iter, state)`는 상태를 컬렉션 밖에 둔다(일반 지식). 사이버의 `iterator() -> S`와
+  `next(state &S) -> ?T`가 같은 모양이다(`Slice.iterator() -> int`, `Slice.next(idx &int) -> ?T`).
+- `do` 블록과 줄 끝 람다 블록(3.3.3). 자원 정리는 Julia가 `open(f) do io ... end`로, 사이버가 `@deinit`으로 한다.
+- 구체 타입은 상속하지 않고 추상 쪽으로만 묶는다. Julia는 추상 타입, 사이버는 trait다.
+- 구조적 동시성: Julia의 `@sync` 블록과 사이버의 `scope` 블록.
+
+### 3.4 가져올 만한 것
+
+우선순위는 용도(스크립트 CLI, 에이전트 루프)에 닿는 순서다. A · B · E는 0.5의 일(fiber 동시성 완성)을 밀어내지 않는 크기다.
+
+#### A. 명령을 값으로 (Julia `Cmd` · `pipeline`) — 작음~중간, 언어 변경 없음
+
+원칙 넷을 가져온다. 문법(백틱)은 가져오지 않는다. 사이버의 백틱은 raw 문자열이다.
+
+1. 명령은 문자열이 아니라 값이다. 만드는 것과 실행하는 것이 나뉜다.
+2. shell을 거치지 않는다. 인자는 다시 쪼개지지 않는다(지금도 지킨다).
+3. 파이프와 리다이렉션은 값의 조립이다. shell 문자열로 돌아갈 이유를 없앤다.
+4. 실패한 종료는 기본이 오류다. 사이버에서는 예외가 아니라 `!T`이므로 호출 지점마다 `!`로 보인다. Julia보다 낫다.
+
+~~~cy
+-- 제안 모양(가상, 아직 없는 API).
+use os
+
+-- 실행하고 stdout을 받는다. 0이 아닌 종료는 error.ExitStatus.
+branch := os.cmd({'git', 'rev-parse', '--abbrev-ref', 'HEAD'}).read()!.trim()
+
+-- 파이프: shell 없이 프로세스 둘을 잇는다.
+top := os.cmd({'du', '-sk', dir}).pipe(os.cmd({'sort', '-rn'})).read()!
+
+-- 디렉터리 · 환경 · stdin · 종료 코드 직접 확인.
+res := os.cmd({'make', 'test'}).dir('build').env('CI', '1').run_status()
+if res.code != 0:
+    eprint(res.err)
+
+-- 인자 목록 조립은 슬라이스 연산 그대로다. 경로에 공백이 있어도 인자 하나다.
+args := []str{'grep', '-n', pattern} + files
+hits := os.cmd(args).read() !else ''
+~~~
+
+할 일: `Cmd` 타입(인자 · 디렉터리 · 환경 · stdin · 다음 단계), `run() -> !void` · `read() -> !str` · `run_status() -> ExecResult`,
+`os.exec`는 `run_status`의 별칭으로 남기고 문서 주석의 "shell command"를 고친다. 줄 단위로 읽는 스트리밍과 실행 중 중단
+(`project_vm_interrupt.md`가 남긴 "호스트 함수 안에서는 끊지 못한다")은 다음 단계로 둔다.
+
+장점: 용도의 한가운데다. 언어 규칙을 건드리지 않는다. `deny_raw_ptrs`처럼 호스트가 막을 표면도 `os` 모듈 하나로 유지된다.
+단점: 플랫폼마다 구현이 갈린다(Windows의 파이프 · 인자 인용). `Cmd`가 `NoCopy`인지, 파이프 양쪽의 실패 중 무엇을 오류로 올릴지
+(bash `pipefail`의 문제) 정해야 한다.
+
+#### B. 대칭 수치 승격과 양쪽 연산자 조회 (Julia `promote`) — 1은 작음, 2는 중간
+
+1. 수치: `int op float`를 `float op int`와 같게 한다. 왼쪽이 `int` · `raw`이고 오른쪽이 `float`이면 왼쪽을 오른쪽 타입에 맞춘다.
+   새 변환을 만드는 것이 아니라 표에 이미 있는 `Int[X]` → `Float[W]`를 양쪽에 적용하는 것이다. 지금 오류인 코드만 통과하게
+   되므로 기존 스크립트는 깨지지 않는다. `promote_rule` 같은 사용자 확장 장치는 가져오지 않는다. 내장 수치 타입이 닫혀 있다.
+2. 사용자 타입: 왼쪽 타입에서 연산자 메서드를 찾지 못하면 오른쪽 타입의 모듈에서 찾는다. `2.0 * v`를 `Vec2` 쪽이 정의할 수
+   있게 된다. 정의하는 꼴은 결정 문서에서 정한다. 후보는 Python의 `__rmul__`처럼 반사 메서드를 두는 것과, Julia · C++처럼 두
+   피연산자 타입을 다 적는 자유 함수 `` fn `*`(s float, v Vec2) ``를 두는 것이다. 사이버는 자유 함수 오버로드가 이미 있어 뒤쪽이
+   새 개념을 덜 만든다.
+
+지켜야 할 경계는 Julia의 교훈에서 온다. 연산자 정의는 두 피연산자 타입 중 하나를 선언한 모듈에만 둔다(Rust의 orphan rule과
+같은 뜻). Julia는 이 제한이 없어 남의 타입에 남의 함수를 정의하는 "type piracy"가 관례로만 금지된다(일반 지식).
+
+장점: 수학 표기와 맞는다. 1은 몇 줄이다. 단점: 2는 연산자 조회가 한 곳에서 두 곳으로 늘어 오류 문구("어느 쪽에서 찾았고 왜
+없는가")를 다시 써야 한다. 1을 넣으면 `int`로 계산할 생각이던 식이 조용히 `float`가 되는 경우가 생기지만, 반대 순서에서는 이미
+그렇다.
+
+#### C. 오버로드 모호성은 오류 (Julia `MethodError: ... is ambiguous`) — 중간, 호환성 주의
+
+2단계에서 둘 이상의 후보가 암시적 변환으로 맞고 어느 쪽도 더 구체적이지 않으면, 먼저 선언한 것을 고르는 대신 오류를 내고
+Julia처럼 고칠 길을 알려 준다. `project_overload_exact_match.md`가 "하지 않은 것"으로 남긴 항목이다.
+
+~~~cy
+fn tag(x ?str) -> str: return 'str'
+fn tag(x ?int) -> str: return 'option int'
+
+print(tag(none))
+--> 지금: 'str'(먼저 선언한 쪽)
+--> 제안: error: `tag(none)` is ambiguous between `fn tag(?str)` and `fn tag(?int)`. Write `tag(?str(none))`.
+~~~
+
+선언 순서가 뜻을 정하지 않는다는 원칙은 F-21에서 1단계로 반쯤 세웠다. 이 항목은 나머지 반이다. 기존 스크립트가 깨질 수 있으므로
+먼저 LSP의 Warning 진단으로 넣고, core · std의 오버로드가 몇 곳 걸리는지 센 뒤에 오류로 올린다. "더 구체적"의 정의는 좁게
+잡는다(`T`가 `?T` · `!T`보다, `int`가 `float`보다 구체적). Julia의 specificity 규칙은 타입 격자 전체를 다뤄 복잡하고, 생태계가
+커지면 패키지 조합에서 모호성이 터지는 문제로 이어졌다(일반 지식). 사이버는 오버로드 집합이 모듈 안에 닫혀 있어 그 문제는 작다.
+
+#### D. 루프로 낮추는 컬렉션 식 (Julia의 문법 차원 융합) — 중간, 문법 추가
+
+컬렉션을 만드는 식을 클로저 호출이 아니라 `for` 루프와 `append`로 낮춘다. 본문은 바깥 블록의 문장이 되므로 지역 변수를 그대로
+읽는다. 캡처도, 중간 슬라이스도 없다는 것이 문법으로 정해진다.
+
+~~~cy
+-- 제안 모양(가상). 문법은 결정 문서에서 정한다.
+limit := 3
+big := []int{x * 2 from xs |x| if x > limit}
+
+-- 낮춘 결과
+big := []int{}
+for xs |x|:
+    if x > limit:
+        big += x * 2
+~~~
+
+원소가 먼저 온다(Python · Julia의 순서, 2026-11-24 사용자 결정). 처음 초안은 문장이 먼저인 `{for xs |x| if x > limit: x * 2}`였다.
+그 꼴은 중괄호 안이 블록으로 읽혀 안쪽에 빈칸을 두고 싶어지고, 블록을 여는 `:`가 한 줄 식 안에 들어온다. 원소가 먼저면
+`{x * 2`가 보통 리터럴 `[]int{a * 2, b}`와 같은 모양으로 시작해 "중괄호 안쪽은 붙여 쓴다"는 포매터 규칙
+(`project_fmt_brace_style.md`)이 그대로 맞는다. 대가는 `x`가 선언(`|x|`)보다 먼저 나온다는 것이다.
+
+절을 여는 낱말은 `from`이다(2026-11-24 사용자 결정). 문장의 `for`를 그대로 쓰지 않는 이유는 둘이다. `for`는 사이버에서 늘 줄
+맨 앞에서 블록을 여는 문장 키워드이고, `for xs |x|`는 반복 대상이 먼저라 Python의 `for x in xs`처럼 영어 문장으로 읽히지 않는다.
+
+- `from`은 반복 대상이 먼저 오는 순서와 맞게 읽힌다("xs에서 꺼낸 x * 2"). destructure import(`use { cos, pi } from 'math'`)로
+  이미 들어올 낱말이고 뜻도 같다(출처에서 꺼낸다). SQL · LINQ의 `select ... from ...` 계보다.
+- `json.from` 함수와 `regex.cy`의 지역 변수 `from`이 있어 예약어가 아니라 문맥 키워드여야 한다. 원소 식 바로 뒤에 식별자가 오는
+  자리는 지금 문법에 없어 모호하지 않을 것으로 보지만, 파서로 확인하지는 않았다.
+- 거르는 절은 `if`로 둔다(Python · Julia와 같다). `where`는 낱말을 하나 더 들인다.
+- 고르지 않은 후보: `for`(위의 이유), `each`(매뉴얼의 용어 "for each" · "each variable"과 맞지만 새 낱말이고 영어로는 "for each"의
+  반쪽), `loop`(`for`와 같은 문장 낱말이라 어색함이 남고, 새 예약어가 필요하며, Rust에서는 무한 루프다).
+- 낮춘 결과는 그대로 `for` 문이다. `from`은 식 안에서만 쓰는 표기이고 반복의 뜻은 `for`와 같다(`Iterable` · `next`).
+
+`xs = xs.append(x)` 꼴의 제자리 재사용(`project_last_use.md`)이 이미 있어 낮춘 루프의 비용은 손으로 쓴 것과 같다.
+장점: Python에서 오는 사용자와 모델이 가장 먼저 찾는 표현이다. 클로저 캡처 규칙을 넓히지 않고 얻는다.
+단점: 문법이 늘고 포매터 · tree-sitter · LSP가 따라가야 한다. `map` · `filter` 메서드를 먼저 더하고 캡처 규칙을 푸는 쪽이
+일반적인 답일 수 있다. 둘은 배타가 아니지만 순서는 정해야 한다. `|>` 연산자는 가져오지 않는다. 메서드 연결이 같은 일을 하고
+`|`는 캡처 절이 쓴다.
+
+#### E. REPL 조회 명령 (Julia `?` · `@which`) — 작음
+
+- `?name` 또는 `.doc name`: `cyber doc`의 절이나 `--api`의 시그니처 · 문서 주석을 REPL 안에서 보여 준다. 재료는 실행 파일에 있다.
+- `.which f(1, 2.5)`: 식을 실행하지 않고 sema만 돌려, 고른 오버로드의 시그니처와 선언 위치, 템플릿이면 특수화 인자를 찍는다.
+  `matchFuncSym`의 결과를 내보이는 것이다. C의 모호성 진단과 재료가 같다.
+- `.bc f`: 함수 하나의 바이트코드만 덤프한다(`cyber compile` 출력에서 한 구간).
+
+임베딩에서는 같은 것을 `libcyber` 함수로 주면 에이전트가 "이 이름이 있는가, 어떤 인자를 받는가"를 실행 전에 물을 수 있다.
+Julia의 shell 모드(`;`)는 가져오지 않는다. A가 들어가면 `os.cmd`로 충분하다.
+
+#### F. 컴파일 타임에 검증되는 리터럴 (Julia 비표준 문자열 리터럴) — 큼, 나중
+
+상수 패턴을 컴파일 시점에 검사해 오류를 `CompileError`로 올리고 `!`를 없앤다. 문법보다 능력이 먼저다. 컴파일 타임 평가기가
+`regex.cy`의 파서를 돌릴 수 있어야 하는데 지금은 "Unsupported inline eval"이 남아 있다. 평가기를 넓히는 일이 따로 정해지면 그때
+첫 사용처로 본다. 그 전의 싼 대안은 LSP가 `regex.compile`의 문자열 리터럴 인자를 미리 컴파일해 진단으로 보여 주는 것이다.
+
+### 3.5 Pros vs Cons: Julia 접근 자체
+
+장점
+
+- 다중 디스패치가 표현 문제(expression problem)를 실용적으로 푼다. 새 타입과 새 연산을 서로 다른 패키지가 더해도 조합된다.
+  수치 생태계의 조합성이 여기서 나왔다(일반 지식).
+- 승격 규칙이 언어 핵심이 아니라 라이브러리 코드다. `Int`, `Float64`조차 같은 장치로 정의된다. 사이버의 `int`가 `core.cy`의
+  `Int[64]`인 것과 같은 태도다.
+- 문법이 성능을 약속한다(점 융합). 사용자가 최적화기의 기분을 추측하지 않는다.
+- 외부 명령 설계는 범용 언어 가운데 가장 잘 다듬어진 축에 든다. shell 없이 shell의 편의를 낸다.
+
+단점
+
+- 지연. 호출된 타입 조합마다 JIT로 특수화하므로 첫 호출이 느리고("time to first plot"), 새 메서드 정의가 이미 컴파일된 코드를
+  무효화한다. 1.9의 네이티브 코드 캐시로 크게 줄었지만 구조의 비용이다(일반 지식). 사이버의 첫 eval은 2.8 ms다
+  (`project_embedding_agent_loop.md`). 지켜야 할 자산이다.
+- 인터페이스가 비공식이다. `AbstractArray`나 반복 프로토콜의 계약이 문서와 관례에 있어, 제네릭 코드가 가정한 것(예: 인덱스가
+  1에서 시작)을 새 타입이 어기면 오류 없이 틀린 답이 나온다. 조합성의 그늘로 여러 번 지적됐다(일반 지식).
+  사이버는 trait가 계약을 적고, 1.4 C가 본문 검사를 정의 시점으로 당기려 한다. 방향이 반대이고 사이버 쪽이 맞다.
+- 모호성과 type piracy는 규모가 커질수록 는다. 둘 다 "누구나 어떤 함수에든 메서드를 더한다"의 대가다.
+- REPL과 파일의 전역 스코프 규칙이 달라 1.0에서 혼란이 컸고 1.5에서 REPL 쪽을 고쳤다(일반 지식). 사이버 REPL도 재선언과
+  `move`에서 스크립트와 다르다. 이런 차이의 목록은 짧게 유지한다.
+- 1부터 시작하는 인덱스, 열 우선 배열은 수치 계산의 관습이다. 사이버의 용도와 무관하다.
+
+### 3.6 영향과 현재 상황
+
+- 다중 디스패치의 계보는 Common Lisp의 CLOS, Dylan이다. Julia는 그것을 타입 추론 · JIT와 묶어 성능의 수단으로 만들었다.
+  정적 쪽의 대응물은 Haskell의 타입 클래스, Rust의 `impl Mul<Vec2> for f64`(이항 연산자를 두 타입의 쌍으로 구현),
+  Swift의 연산자 오버로드다(일반 지식). 3.4 B의 2는 이 계보의 가장 좁은 형태다.
+- 외부 명령을 값으로 다루는 설계는 Julia 초기(2012~2013)의 글에서 shell 호출의 문제를 정리하며 나왔다(일반 지식).
+  Python의 `subprocess.run(list)`, Rust의 `std::process::Command`, Zig의 `std.process`가 같은 원칙(인자 목록, shell 없음)을
+  따르지만 파이프 조립까지 값으로 만든 것은 Julia와 그 뒤의 shell 대용 라이브러리들이다. 사이버의 `os.exec`는 지금 Python의
+  `subprocess.run` 자리에 있다.
+- 점 융합(2017, Julia 0.6)은 "벡터화는 빠르다"는 MATLAB · NumPy의 통념을 뒤집고, 벡터화를 표기의 문제로 되돌렸다(일반 지식).
+- 현재 상황: 안정판 1.13.4(2026-11-13), LTS 1.10.14. 매뉴얼의 해당 장들은 위 인용 그대로다. 채택 결정을 할 때 A는 `Cmd`의
+  API 문서(`ignorestatus` · `detach`와 스트리밍용 `open(cmd)`)를, C는 Methods 장의 뒷부분을 한 번 더 읽는 것이 좋다.
+
+### 3.7 결정할 것
+
+1. A(`os.cmd`)를 0.5에 넣을지. 넣는다면 실패한 종료를 기본 오류로 할지, 파이프의 어느 쪽 실패를 올릴지.
+2. B의 1(`int op float` 대칭)을 넣을지. 지금의 비대칭이 의도한 규칙인지부터 확인한다. B의 2는 결정 문서로.
+3. C는 LSP Warning으로 먼저 넣고 세어 볼지.
+4. D와 `map` · `filter` 메서드 중 무엇을 먼저 할지, 또는 둘 다 하지 않을지. D의 꼴은 `[]int{x * 2 from xs |x| if x > limit}`로 정했다(2026-11-24).
+5. E의 세 명령 중 무엇을 넣을지. `.which`는 C와 함께 하는 것이 싸다.
+6. F는 컴파일 타임 평가기를 넓히는 일이 정해질 때까지 미루는 데 동의하는지.
+
+결정(2026-11-24, 사용자): 2는 B의 1을 넣는다. 같은 날 넣었다(`docs/decisions/project_number_operands.md`). 산술과 비교 모두이고
+`f32` · `float`와 컴파일 타임 평가도 같은 규칙이다. 넣는 길에 3.3.2의 예와 같은 자리에서 조용히 틀린 값을 내던 결함 둘(F-196 · F-197)을
+고쳤다. B의 2(사용자 타입의 양쪽 연산자 조회)는 남았다. 1은 A도 같은 날 넣었다(`docs/decisions/project_os_cmd.md`). 실패한 종료는 `error.ExitStatus`,
+파이프라인은 어느 단계든 실패하면 실패이고 `SIGPIPE`로 끝난 앞 단계는 성공으로 본다. 3.4 A의 예와 달리 `run_status`는 `!ExecResult`를
+돌려주고(시작하지 못한 프로그램이 오류 값이라서) `os.exec`는 별칭으로 바꾸지 않고 그대로 두었다. 5는 E의 세 명령을 모두 같은 날 넣었다(`docs/decisions/project_repl_commands.md`). `?name` 표기는 넣지 않고 `.doc`만 두었다.
+D의 꼴은 위 3.4 D대로 정했고 넣을지는 미정이다. 나머지(B의 2, C, F)는 미정이다.
+
+가져오지 않기로 권하는 것: 동적 다중 디스패치와 JIT 특수화(시작 시간과 단일 백엔드), 매크로와 `@` 표기(`@`는 hook 13개의
+자리이고 메타프로그래밍은 컴파일 타임 실행이 맡는다, `project_sigils.md`), 점 broadcast 문법(대상 타입이 없다), `|>`, REPL
+shell 모드, 스레드 사이 채널(`project_planned_features.md`에서 이미 뺐다), 1 기반 인덱스.

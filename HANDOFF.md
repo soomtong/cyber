@@ -45,6 +45,13 @@
 - 2026-11-24(사용자: "C 백엔드를 제거하고 ... 문서에 보면 아직 옛 흔적이 남아 있어 ... 몇 가지는 구현하지 않아도 된다고 보는 게
   있어", 질문에 항목별로 답함): 매뉴얼의 C 백엔드 흔적과 Planned 항목을 정리하고 `os.open_lib`을 지웠다. 결정
   `docs/decisions/project_planned_features.md`, `unreleased.md` 같은 절. 작업 브랜치 `claude/clever-hypatia-eqz5vt`.
+- 2026-11-24(사용자: "우리 Cyber lang 디자인에 Julia 언어에서 차용할만한 좋은 점이 있을까?", 이어서 컬렉션 식의 꼴과
+  import 중괄호를 정하고 "B의 int op float 대칭부터 넣자"): Julia 검토(`docs/study/11-design-principles-review.md` 3절)를 쓰고
+  3.4 B의 1(수 피연산자의 대칭 변환)을 넣었다. 결정 `docs/decisions/project_number_operands.md`, `unreleased.md` 같은 이름의 절.
+  이어서 "A의 os.cmd도 넣자": 3.4 A(`os.cmd`)를 넣었다. 결정 `docs/decisions/project_os_cmd.md`.
+  이어서 "E의 REPL 조회 명령도 넣자": 3.4 E(`.doc` · `.which` · `.bc` · `.help`)를 넣었다. 결정
+  `docs/decisions/project_repl_commands.md`.
+  작업 브랜치 `claude/sharp-faraday-c5yjxa`.
 
 ## 현재 브랜치
 
@@ -158,6 +165,35 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - 기본값 식은 `sema_init.semaFieldDefault`가 struct의 해석 문맥에서 검사하고, 리터럴을 쓴 쪽의 지역은 감춘다
     (`Chunk.hide_locals_below`, `sema_local.lookupIdent2`). `cte`의 컴파일 타임 리터럴도 같은 문맥.
   - 동작이 바뀜: 같은 이름의 지역이 기본값을 가리던 것(전에는 지역 값). 확인: 14단계 검증 rc=0.
+
+- [x] 수 피연산자의 대칭 변환(2026-11-24). 결정 `project_number_operands.md`, `unreleased.md` 같은 이름의 절, F-196 · F-197.
+  - `i * f` = `f * i`, `i < f` = `f > i`, `f32 op float` = `float`. 산술(`+ - * / % **`)과 비교 모두. 결과는 정수로 되돌아가지
+    않는다(`i += f` 오류). 정수 나눗셈과 비트 연산자는 그대로다.
+  - `sema_expr.semaBinExpr`의 세 갈래(정수 왼쪽 산술, float 왼쪽 산술, 비교의 `semaComparedOperand`)와 `cte.evalFitNumbers`.
+  - 함께 고친 조용한 오답: 왼쪽이 float인 산술이 오른쪽 타입을 검사하지 않던 것(`f + 'abc'`가 `2.5`, `f32 * float`가 `0.0`),
+    컴파일 타임의 `2.5 * k`가 비정규 수이던 것.
+  - 같은 날 정한 문법 꼴(구현은 안 함): 컬렉션 식은 `[]int{x * 2 from xs |x| if x > limit}`(검토 3.4 D), destructure import의
+    중괄호는 안쪽을 띄운다(`project_fmt_brace_style.md`의 예외).
+
+- [x] `os.cmd`(2026-11-24). 결정 `project_os_cmd.md`, `unreleased.md` 같은 이름의 절, F-198.
+  - `os.cy`의 `Cmd` · `CmdStage`와 메서드 여덟, `os.zig`의 `cmdRun` · `cmdRunPipeline` · `cmdFeedInput` · `currentEnvMap`.
+  - 검토의 권고대로 정한 것(사용자가 따로 고르지 않음): 실패한 종료는 `error.ExitStatus`, pipefail, `SIGPIPE`로 끝난 앞 단계는 성공,
+    `Cmd`는 복사되는 값, `os.exec`는 그대로. 결정 문서 "정한 것"에 이유가 있다.
+  - 함께 고친 것: 자식이 `os.set_env` 변수를 받지 못하던 것(`os.exec` 포함).
+  - macOS · Windows에서는 실행해 보지 못했다(교차 컴파일만). 테스트 `modules/os_cmd.cy`는 Windows에서 본문을 건너뛴다.
+
+- [x] REPL 조회 명령(2026-11-24). 결정 `project_repl_commands.md`, `unreleased.md` 같은 이름의 절.
+  - `cy.cy`의 `REPL.command` · `VM.which` · `VM.bytecode` · `repl(read_line, doc)`, `refs.zig`의 `which`, `debug.zig`의
+    `allocFuncBytecode`, `cli.zig`의 `doc_hook` · `replDoc`, `main.zig`의 `replDoc`.
+  - 테스트는 `modules/cy.cy` 끝. `.doc`은 CLI에서 손으로 확인했다(자동 테스트 없음: REPL을 stdin으로 모는 테스트가 없다).
+  - 확인: 수 피연산자 · `os.cmd` · REPL 명령 각각의 커밋 뒤 14단계 검증 rc=0(wasm 단계는 Python `wasmtime` 대역).
+
+- [x] PR soomtong/cyber#12 리뷰(2026-11-24, 사용자: "PR 검토하고 리뷰하고 수정할 부분 처리 후 병합"). `/code-review high` 10건을 모두
+  고쳤고(`unreleased.md` "PR #12 리뷰에서 나온 수정"), 첫 CI의 macOS 실패(`SIGPIPE`를 무시하는 러너에서 `yes | head -1`)를 고쳤다.
+  - 구현 함정: 무시된 신호(`SIG_IGN`)와 신호 mask는 exec를 넘어 자식에게 간다. 핸들러는 기본 동작으로 돌아간다.
+    Darwin의 `sigprocmask`는 프로세스의 모든 스레드에 적용된다(Zig `std.posix.sigprocmask`의 주석은 "thread signal mask"지만
+    Darwin에서는 libc `sigprocmask`를 부른다). 스레드 하나만 막으려면 `pthread_sigmask`, 파이프 하나만이면 `F_SETNOSIGPIPE`.
+    무시된 `SIGPIPE`는 Linux에서 `sh -c 'trap "" PIPE; exec zig-out/bin/cyber x.cy'`로 만든다.
 
 ## 시도했으나 실패한 접근
 
@@ -302,9 +338,22 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - `docs/releases/0.4.17.md`, `docs/releases/unreleased.md`.
 - `docs/decisions/project_fork_release_ci.md`(러너 미배정 · 재태깅 · 로컬 arm64 빌드 절차).
 
+- [ ] F-199(치명, 미수정): `persist_main` 세션에서 앞 입력이 선언한 타입에 뒤 입력이 메서드 · 타입 함수를 선언하면
+  `module.reserveFunc`의 `parent.getMod().?`가 null이라 호스트가 abort한다. REPL에 `type V:` 블록 뒤 `fn (&V) twice() -> float:`.
+  REPL에서는 메서드를 선언할 길이 없다. tars-agent 세션도 같은 길이다.
+- [ ] F-200(미수정): CLI의 REPL에서 `use os`가 실패한다(REPL의 격리 VM에 CLI의 resolver · loader가 없다, `UserVM_init`).
+  `cy.eval`의 VM이 호스트 설정을 받지 않는다는 계약과 닿아 있어 사용자 결정이 필요하다.
+- `os.cmd`의 다음 단계(`project_os_cmd.md` "가져오지 않은 것"): 줄 단위 스트리밍, 실행 중 중단 · 시간 제한, 파일 리다이렉션.
+  Windows에서의 실행 확인도 남았다.
+- Julia 검토(설계 원칙 3.7)의 남은 결정: B의 2(사용자
+  타입 연산자의 양쪽 조회, `2.0 * v`), C(오버로드 모호성을 LSP Warning으로 먼저), D(컬렉션 식. 꼴은 정했고 넣을지와 `map` ·
+  `filter`와의 순서는 미정), F(컴파일 타임 검증 리터럴, 평가기 확장 뒤). 사용자가 고를 때만 한다.
+- 컴파일 타임 평가기는 float 연산이 `*`뿐이고 정수 폭을 넓히지 않는다(`const z = k * a`에서 `a`가 `i8`이면 오류). 런타임과의
+  차이로 남아 있다(`project_number_operands.md` "하지 않은 것").
+
 ## 다음 에이전트에게
 
-1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(지금은 머리말뿐).
+1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환, `os.cmd`, REPL 조회 명령).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 
@@ -368,6 +417,11 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 ## 테스트 요령
 
+- 클라우드 세션 컨테이너에는 Zig와 wasmtime이 없다. `pip install ziglang==0.17.1 wasmtime` 뒤 `ziglang` 패키지 안의 `zig`를
+  PATH에 건다. Zig의 `git+https` 패키지 받기는 프록시에서 실패한다(`unable to discover remote git server capabilities`).
+  `build.zig.zon`의 두 패키지(translate-c, 그 안의 arocc)를 codeberg의 `/archive/<커밋>.tar.gz`로 받아
+  `zig-pkg/<zon의 hash 이름>/`에 풀면 빌드된다. `wasmtime run --dir=.::/ x.wasm`은 Python `wasmtime` 패키지(`WasiConfig` ·
+  `preopen_dir`)로 같은 일을 하는 스크립트를 PATH에 두면 `verify.sh`의 9~12단계가 돈다(2026-11-24 세션).
 - behavior 테스트는 `src/behavior_test.zig`에 `run.case`로 등록해야 돈다. 파일 끝에 `--cytest: pass` 꼬리가 있어야 한다.
   새 파일을 만들기 전에 같은 이름이 있는지 본다(덮어쓴 적 있음).
 - 오류 테스트(`--cytest: error`): 기대 출력은 Debug CLI 출력에서 경로를 `@MainPath()`로 바꿔 만들고, 마지막 `--` 줄 뒤 줄바꿈

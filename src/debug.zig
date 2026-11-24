@@ -876,6 +876,65 @@ pub fn dumpBytecode(vm: *cy.VM, opts: DumpBytecodeOptions) !void {
     vm.log(lw.written());
 }
 
+/// For the REPL command `.bc`. The bytecode of every compiled function that `query` names: the name of the
+/// function alone (`len2`) or the name as the full dump prints it (`Vec2.len2`). The overloads of a name and the
+/// instances of a template are all listed. Empty if none matches. The caller frees the result with `vm.alloc`.
+pub fn allocFuncBytecode(vm: *cy.VM, query: []const u8) ![]const u8 {
+    var lw = std.Io.Writer.Allocating.init(vm.alloc);
+    defer lw.deinit();
+    const w = &lw.writer;
+
+    var offsets: std.ArrayList(u32) = .empty;
+    defer offsets.deinit(vm.alloc);
+
+    var count: usize = 0;
+    for (vm.compiler.chunks.items, 0..) |c, chunk_id| {
+        const ops = c.buf.ops.items;
+
+        // A function ends where the next one begins, or where the main block does.
+        offsets.clearRetainingCapacity();
+        var iter = c.buf.markers.iterator();
+        while (iter.next()) |e| try offsets.append(vm.alloc, e.key_ptr.*);
+        if (c == vm.compiler.main_chunk) try offsets.append(vm.alloc, c.buf.main_pc);
+        std.mem.sort(u32, offsets.items, {}, std.sort.asc(u32));
+
+        for (offsets.items, 0..) |start, i| {
+            const func = c.buf.markers.get(start) orelse continue;
+            const name = try c.sema.newFuncName(c.alloc, func, .{});
+            defer c.alloc.free(name);
+            const base = func.name();
+            const matches = std.mem.eql(u8, name, query) or std.mem.eql(u8, base, query) or
+                (std.mem.endsWith(u8, name, query) and name.len > query.len and name[name.len - query.len - 1] == '.');
+            if (!matches) continue;
+
+            var end: usize = ops.len;
+            for (offsets.items[i + 1 ..]) |next| {
+                if (next > start) {
+                    end = next;
+                    break;
+                }
+            }
+
+            if (count > 0) try w.writeByte('\n');
+            try w.print("fn {s}", .{name});
+            try c.sema.writeFuncSigStr(w, func.sig, null);
+            try w.print("  ({s})\n", .{c.srcUri});
+            var pc_off: usize = start;
+            while (pc_off < end) {
+                const pc = ops.ptr + pc_off;
+                try bytecode.write_inst(vm, w, pc[0].opcode(), chunk_id, pc_off, pc, .{});
+                try w.writeByte('\n');
+                pc_off += bytecode.getInstLenAt(pc);
+            }
+            count += 1;
+        }
+    }
+    if (count == 0) return vm.alloc.dupe(u8, "");
+    // Without the last new line: the REPL prints one.
+    const out = lw.written();
+    return vm.alloc.dupe(u8, std.mem.trimEnd(u8, out, "\n"));
+}
+
 pub fn alloc_value_desc(vm: *cy.VM, val_t: cy.TypeId, val: *cy.Value) ![]const u8 {
     var buf = std.Io.Writer.Allocating.init(vm.alloc);
     defer buf.deinit();

@@ -349,6 +349,18 @@ Some types such as `math.Vec` and `math.Mat` also overload these operators.
 -(10)     --> -10 (Negative)
 ```
 
+An integer and a float can be mixed. The integer converts to the type of the float, whichever side it is on, and the result is a float. An `f32` with a `float` gives a `float` the same way:
+```cy
+i := 7
+f := 2.5
+print(i * f)      --> 17.5
+print(f * i)      --> 17.5
+print(i + 0.5)    --> 7.5
+print(i / 2)      --> 3    (Both are integers: integer division.)
+print(i / 2.0)    --> 3.5
+```
+The result does not convert back to an integer. `i += f` and `var n int = i * f` report 'Expected type `int`, got `float`.' Write `int(i * f)`. The bitwise operators take integers only, so `i && f` is an error. An operand that is not a number is an error on either side: `f + 'abc'` reports 'Expected `float`, found `str`.'
+
 ### Comparison operators.
 The following comparison operators are supported and evaluate to a [Boolean](#booleans) value.
 
@@ -383,6 +395,14 @@ a > b           --> `true` if a is greater than b
 a >= b          --> `true` if a is greater than or equal to b
 a < b           --> `true` if a is less than b
 a <= b          --> `true` if a is less than or equal to b
+```
+
+A comparison converts its operands like an [arithmetic operator](#arithmetic-operators) does. An integer converts to the type of a float on the other side, and an integer of a narrower type converts to the wider one. A signed integer on the left does not convert to a raw integer on the right, since that would read a negative value as a large one: `i8 < r64` is a type error. `symbol` and `error` values are not numbers and do not convert:
+```cy
+i := 7
+print(i < 7.5)    --> true
+print(i == 7.0)   --> true
+print(7.0 == i)   --> true
 ```
 
 ### Logic operators.
@@ -1269,6 +1289,7 @@ f = i
 
 Implicit casts avoid lossy conversions (with the exception of int to float)
 and they never produce runtime errors.
+The two operands of an [arithmetic operator](#arithmetic-operators) or a comparison use the casts between the number types in either direction: the right operand converts to the type of the left one, and when it can not, the left one converts to the type of the right one.
 The following implicit casts are supported:
 
 | Source | Target | Behavior |
@@ -4590,7 +4611,7 @@ An expression needs to be wrapped with `#{}` to perform inline evaluation if it'
 res := #{fib(30)}
 ```
 
-Inside a compile-time body, locals (`t := 0`), compound assignment (`t += 1`), `for` ranges, `if`, `switch` and fixed-size vectors (`v := [3]int(0)`, `v[i]`, `v[i] += 1`) evaluate the same as at runtime. A vector index out of range is a compile error. Operations the evaluator does not support yet (for example `float` addition) are reported as `Unsupported inline eval`.
+Inside a compile-time body, locals (`t := 0`), compound assignment (`t += 1`), `for` ranges, `if`, `switch` and fixed-size vectors (`v := [3]int(0)`, `v[i]`, `v[i] += 1`) evaluate the same as at runtime. A vector index out of range is a compile error. Operations the evaluator does not support yet (for example `float` addition) are reported as `Unsupported inline eval`. In an arithmetic operator an integer and a float mix as they do at runtime: `const r = k * 2.5` and `const r = 2.5 * k` are the same float for an integer constant `k`. `==` and `!=` of an integer and a float are a type error at compile time.
 
 ### Inline type creation.
 Types can be created from inline evaluation. Currently, only structs can be created with `meta.new_struct`:
@@ -4904,6 +4925,41 @@ fn main() -> !void:
 
 ## Builtin modules.
 Builtin and std modules come with Cyber. See the [API docs](api.html).
+
+### Running programs.
+`os.cmd` makes a command: a program and its arguments. A `Cmd` is a value. Its methods return a new command, and nothing starts until `run`, `read` or `run_status` is called:
+```cy
+use os
+
+-- The stdout of a program.
+branch := os.cmd({'git', 'rev-parse', '--abbrev-ref', 'HEAD'}).read()!.trim()
+
+-- A pipe joins the stdout of one program to the stdin of the next.
+top := os.cmd({'du', '-sk', dir}).pipe(os.cmd({'sort', '-rn'})).read()!
+
+-- A working directory and an environment variable. The output goes to the terminal.
+os.cmd({'make', 'test'}).dir('build').env('CI', '1').run()!
+
+-- Text for stdin. `run_status` returns the exit code instead of an error.
+res := os.cmd({'grep', '-c', 'TODO'}).stdin(text).run_status()!
+if res.code != 0:
+    eprint(res.err)
+```
+There is no shell. An argument reaches the program as it is, with its spaces, quotes and `$`, so a file name or other text from outside can not turn into more arguments or another command. The list of arguments is built like any list: `os.cmd([]str{'grep', '-n', pattern} + files)`.
+
+| Method | Starts the command and |
+|---|---|
+| `run() -> !void` | waits for it. stdin, stdout and stderr are those of this process. |
+| `read() -> !str` | returns the stdout of the last program. stderr is that of this process. |
+| `run_status() -> !ExecResult` | returns the stdout of the last program, the stderr of all programs and the exit code (`out`, `err`, `code`). |
+
+`run` and `read` return `error.ExitStatus` when a program ends with an exit code other than 0 or is stopped by a signal. With `run_status` that is not an error: `code` is 0 when every program succeeded, otherwise the code of the last program that failed (128 plus the signal number for a signal). A pipeline fails when any of its programs fails. A program that is stopped because the next one closed its input, like `yes` in front of `head -1`, succeeded.
+
+A program that can not be started is an [OS error](#os-errors) from all three: `error.NotFound` for a missing program or working directory, `error.PermissionDenied`, and `error.InvalidArgument` for an empty list of arguments. Captured output is limited to 10 MiB for stdout and for stderr: more is `error.TooBig` and the programs are stopped. A pipeline has at most 16 programs.
+
+`dir(path)` and `env(name, value)` apply to the programs that the command has when they are called, so `a.dir('x').pipe(b)` runs only `a` in `x`. In `a.pipe(b)` the input is that of `a`: text that `stdin` gave to `b` is not used. A program gets the environment of this process as it is when the command runs, with the variables of `env` on top. `stdin(text)` gives the first program its input. Without it, `read` and `run_status` give an empty input.
+
+The older `os.exec(args)` runs one program and returns its `ExecResult`. It panics when the program can not be started.
 
 ### JSON and TOON.
 The `json` module parses and writes JSON (RFC 8259). The `toon` module encodes and decodes [TOON](https://github.com/toon-format/spec) (spec v4.4), a line-based form of the same data that takes fewer tokens in an LLM prompt. Both use `json.Value`:
@@ -6238,6 +6294,51 @@ Records, slices, maps and optionals are shown with their contents. Nesting stops
 > ?int(none)
 `?int` none
 ```
+
+### REPL commands.
+A line that starts with `.` and a command name is a command of the REPL. It is not Cyber code and is not evaluated. A command is read where an input starts, not inside a block:
+
+| Command | |
+|---|---|
+| `.exit` | Leaves the REPL. |
+| `.help` | Prints this list. |
+| `.doc [topic]` | Prints a section of the manual, like [`cyber doc`](#documentation). `.doc` alone prints the topics, `.doc --api os` the functions of a module. |
+| `.which <expr>` | Shows the function that a call picks, or what a name is. |
+| `.bc <function>` | Prints the bytecode of a function. |
+
+`.which` compiles the expression against the session and does not run it. It shows the function that the outermost call picks out of the overloads: the first line of its declaration, the instance when it comes from a template, the number of overloads when there are several, where it is declared, and its doc comment. Without a call it describes the name at the end of the expression. A compile error is printed as the answer:
+```bash
+> fn largest(a %T, b T) -> T:
+    | return if (a > b) a else b
+    |
+> .which largest(1.5, 2.5)
+fn largest(a %T, b T) -> T
+  as fn largest[float](float, float) -> float
+  at eval:1:1
+> xs := []int{3, 1, 2}
+> .which xs.sort()
+fn (&Slice[]) sort()
+  one of 2 overloads
+  at core:1636:1
+  Sorts in ascending order with `<`. The element type needs a `<` operator.
+> .which xs
+xs []int
+```
+
+`.bc` prints every compiled function of a name: the overloads, and the instances of a template that calls have made. The name is the function name alone (`len2`) or with its type (`Vec2.len2`):
+```bash
+> fn sq(x int) -> int:
+    | return x * x
+    |
+> .bc sq
+fn sq(int) -> int  (eval)
+3:25 .chk_stk: ret=1, frame=6
+3:28 .imul: %0 = %5 * %5
+3:32 .ret: 
+3:33 .trap: 
+```
+
+A script can ask the same of a `cy.VM`: `vm.which(code)` and `vm.bytecode(name)` return the text.
 
 ## Format source.
 `cyber fmt` rewrites source files in one fixed style and prints the paths that changed. There are no options for the style.

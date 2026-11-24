@@ -631,6 +631,7 @@ fn test_modules(run: *Runner) void {
         }
         if (test_config.ffi and builtin.target.abi != .msvc) {
             run.case("modules/os.cy");
+            run.case("modules/os_cmd.cy");
             // Reads the fixtures with `os.read_file`.
             run.case("modules/regex_spec.cy");
             run.case("modules/time_zone.cy");
@@ -724,6 +725,17 @@ fn test_core(run: *Runner) void {
     run.case("core/error_values.cy");
     run.case("core/escape_sequences.cy");
     run.case("core/floats.cy");
+    run.case("core/float_op_assign_wider_error.cy");
+    run.case("core/float_op_bool_error.cy");
+    run.case("core/float_op_str_error.cy");
+    run.case("core/float_op_symbol_error.cy");
+    run.case("core/symbol_op_float_error.cy");
+    run.case("core/error_eq_float_error.cy");
+    run.case("core/number_signed_raw_compare_error.cy");
+    run.case("core/number_mixed_bitwise_error.cy");
+    run.case("core/number_mixed_compare_str_error.cy");
+    run.case("core/number_mixed_op_assign_error.cy");
+    run.case("core/number_mixed_ops.cy");
     run.case("core/float_to_str.cy");
     run.case("core/ints.cy");
     run.case("core/int_unsupported_notation_error.cy");

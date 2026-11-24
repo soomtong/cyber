@@ -58,7 +58,7 @@ const has_libc_environ = builtin.link_libc and switch (builtin.os.tag) {
 
 /// The environment the process was started with, as `std.start` would hand to `main`.
 /// Read through libc since Cyber also runs embedded, where `main` is not Zig's.
-fn processEnvironBlock() std.process.Environ.Block {
+pub fn processEnvironBlock() std.process.Environ.Block {
     if (builtin.os.tag == .windows) return .global;
     if (has_libc_environ) {
         const c_environ = std.c.environ;

@@ -2802,7 +2802,7 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: sema.Cstr, left_n: *ast.Node, op: cy.Bina
                 .int,
                 .raw,
                 .float => {
-                    const right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = true, .fit_target = true });
+                    const right = try semaComparedOperand(c, &left, left_n, right_n);
                     return sema_bin_expr3(c, left, left_n, right, right_n, op, node);
                 },
                 else => {},
@@ -2839,6 +2839,13 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: sema.Cstr, left_n: *ast.Node, op: cy.Bina
             try checkRefOperand(c, left.type, op, left_n, node);
             if (left.type.kind() == .int or left.type.kind() == .raw) {
                 var right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = false, .fit_target = true });
+                if (right.type.kind() == .float and isArithmeticOp(op) and isNumberType(left.type)) {
+                    // `int op float` is `float op int`: the integer converts, whichever side it is on.
+                    left = (try sema_lit.semaFitTarget(c, left, right.type, left_n)) orelse {
+                        return reportOperandType(c, left.type, right.type, right_n);
+                    };
+                    return sema_bin_expr2(c, left, left_n, right, right_n, op, node);
+                }
                 if (left.type.id() != right.type.id()) {
                     // Target biggest int width.
                     var left_bits: u32 = undefined;
@@ -2853,11 +2860,7 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: sema.Cstr, left_n: *ast.Node, op: cy.Bina
                     } else if (right.type.kind() == .raw) {
                         right_bits = right.type.cast(.raw).bits;
                     } else {
-                        const exp_name = try c.sema.allocTypeName(left.type);
-                        defer c.alloc.free(exp_name);
-                        const act_name = try c.sema.allocTypeName(right.type);
-                        defer c.alloc.free(act_name);
-                        return c.reportErrorFmt("Expected `{}`, found `{}`.", &.{v(exp_name), v(act_name)}, right_n);
+                        return reportOperandType(c, left.type, right.type, right_n);
                     }
                     if (left_bits < right_bits) {
                         left = (try sema_lit.semaFitTarget(c, left, right.type, left_n)) orelse {
@@ -2872,6 +2875,12 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: sema.Cstr, left_n: *ast.Node, op: cy.Bina
                 return fold_const_int(c, try sema_bin_expr2(c, left, left_n, right, right_n, op, node));
             } else if (left.type.kind() == .float) {
                 const right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = false, .fit_target = true });
+                if (left.type.id() != right.type.id() and right.type.id() != bt.Never) {
+                    // The right operand did not convert to the type of the left one. `f32 op float` widens the left
+                    // operand. Any other type is an error: the float instructions would read its bits as a float.
+                    const wider = if (right.type.kind() == .float) try sema_lit.semaFitTarget(c, left, right.type, left_n) else null;
+                    left = wider orelse return reportOperandType(c, left.type, right.type, right_n);
+                }
                 return fold_const_int(c, try sema_bin_expr2(c, left, left_n, right, right_n, op, node));
             }
 
@@ -2883,7 +2892,7 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: sema.Cstr, left_n: *ast.Node, op: cy.Bina
         .bang_equal => {
             var left = try c.semaExpr(left_n, .{});
             try checkNoneCompare(c, left.type, left_n, right_n);
-            const right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = true, .fit_target = true });
+            const right = try semaComparedOperand(c, &left, left_n, right_n);
             const res = try semaCompare(c, left_n, left, right_n, right, node);
             const not = try c.ir.newExpr(.unary_op, c.sema.bool_t, node, .{
                 .childT = c.sema.bool_t, .op = .lnot, .expr = res.ir,
@@ -2893,7 +2902,7 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: sema.Cstr, left_n: *ast.Node, op: cy.Bina
         .equal_equal => {
             var left = try c.semaExpr(left_n, .{});
             try checkNoneCompare(c, left.type, left_n, right_n);
-            const right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = true, .fit_target = true });
+            const right = try semaComparedOperand(c, &left, left_n, right_n);
             return semaCompare(c, left_n, left, right_n, right, node);
         },
         else => return c.reportErrorFmt("Unsupported binary op: {}", &.{v(op)}, node),
@@ -2928,6 +2937,53 @@ fn noneFits(type_: *cy.Type) bool {
         .func_ptr => type_.cast(.func_ptr).sig.extern_,
         else => false,
     };
+}
+
+fn isArithmeticOp(op: cy.BinaryExprOp) bool {
+    return switch (op) {
+        .plus, .minus, .star, .slash, .percent, .pow => true,
+        else => false,
+    };
+}
+
+/// An integer, a raw integer or a float. `symbol` and `error` are raw types too, but they are names, not numbers:
+/// they do not convert to the type of the other operand.
+fn isNumberType(type_: *cy.Type) bool {
+    return switch (type_.kind()) {
+        .int, .float => true,
+        .raw => !type_.cast(.raw).distinct,
+        else => false,
+    };
+}
+
+fn reportOperandType(c: *cy.Chunk, exp_t: *cy.Type, act_t: *cy.Type, node: *ast.Node) anyerror {
+    const exp_name = try c.sema.allocTypeName(exp_t);
+    defer c.alloc.free(exp_name);
+    const act_name = try c.sema.allocTypeName(act_t);
+    defer c.alloc.free(act_name);
+    return c.reportErrorFmt("Expected `{}`, found `{}`.", &.{v(exp_name), v(act_name)}, node);
+}
+
+/// The right operand of a comparison. It is analyzed with the type of `left` as its target, so it converts to
+/// that type when an implicit cast allows it. When both operands are numbers and the right one does not convert,
+/// `left` converts to the type of the right one instead: `i < f`, `i == f` and `f32 < float` compare the same
+/// values as `f > i`, `f == i` and `float > f32`. Any other mismatch is the type error of the right operand.
+fn semaComparedOperand(c: *cy.Chunk, left: *sema.ExprResult, left_n: *ast.Node, right_n: *ast.Node) !sema.ExprResult {
+    const numeric = isNumberType(left.type);
+    const right = try semaRightOperand(c, left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = !numeric, .fit_target = true });
+    if (!numeric or left.type.id() == right.type.id() or right.type.id() == bt.Never) {
+        return right;
+    }
+    // A signed integer does not convert to a raw one here: the cast is a zero extension, which turns a negative
+    // value into a large one, and `-1 < r` would be false.
+    const signed_to_raw = left.type.kind() == .int and right.type.kind() == .raw;
+    if (isNumberType(right.type) and !signed_to_raw) {
+        if (try sema_lit.semaFitTarget(c, left.*, right.type, left_n)) |new| {
+            left.* = new;
+            return right;
+        }
+    }
+    return sema_lit.reportExpectedType(c, left.type, right.type, right_n);
 }
 
 /// Analyzes the right operand of a binary expression. `left` is evaluated before a statement that the right

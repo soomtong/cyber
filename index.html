@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.19-dev 1152-40fddcf</div>
+    <div class="sub-title">v0.4.19-dev 1155-f3feb92</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -5053,6 +5053,17 @@ fn main() -> int:
 print(res)
 --> 3
 </code></pre>
+<p>Isolated means that the new VM prints where this VM prints and has none of its other settings. It imports the modules of the library (<code>core</code>, <code>meta</code>, <code>math</code>, <code>cy</code>, <code>c</code>, <code>io</code>, <code>test</code>, <code>time</code>, <code>json</code>, <code>peg</code>, <code>regex</code>, <code>toon</code>, <code>path</code>) and nothing that the host's loader adds: not <code>os</code>, not a file. <code>cy.VM()</code> creates such a VM for more than one eval, and <code>cy.repl(read_line)</code> runs a REPL session in one.</p>
+<p>Who makes a VM decides what it can import. The CLI has <code>cli.new_vm()</code>, a VM that imports what a script run by <code>cyber</code> imports. <code>cy.REPL.new(vm)</code> runs a REPL session in a VM that the caller made:</p>
+<pre><code class="language-cy">use cli
+use cy
+
+vm := cli.new_vm()
+res := vm.eval('eval', "use os\nos.cwd()!", {persist_main=true})
+print(vm.value_desc(res.val_t, res.value))
+--> `str` '/home/user/project'
+</code></pre>
+<p>A host that embeds the library gives its own modules to a session the same way: a function that it binds sets the resolver and the loader of the new VM (<code>VM.inner</code> is the <code>CLVM*</code>) before the VM goes to <code>cy.REPL.new(vm)</code>.</p>
 <a href="#metaprogramming">^topic</a>
 <h2 id="meta-module"><code>meta</code> module. <a href="#meta-module">#</a></h2>
 <p>The <code>meta</code> module contains metaprogramming utilities. See the <a href="api.html#meta" title=""><code>meta</code> docs</a>.</p>
@@ -6123,7 +6134,7 @@ int main() {
     return cl_default_resolver(vm, params, res_uri_len);
 }
 </code></pre>
-<p>Before returning false, the resolver can give its own message with <code>clReportApiError</code>. The compiler's own lookups of the builtin modules it needs (<code>c</code> for a module with <code>#[extern]</code> functions such as <code>math</code>, <code>meta</code>) do not call the resolver, so it sees only the <code>use</code> declarations of the sources. Modules to keep from an untrusted script include <code>c</code> (raw memory and foreign calls), <code>os</code> (files and processes, when the host's loader provides it), <code>cy</code> (<code>cy.eval</code> runs code in a new VM that has none of the host's settings) and <code>meta</code> (<code>meta.load</code> reads a file at compile time).</p>
+<p>Before returning false, the resolver can give its own message with <code>clReportApiError</code>. The compiler's own lookups of the builtin modules it needs (<code>c</code> for a module with <code>#[extern]</code> functions such as <code>math</code>, <code>meta</code>) do not call the resolver, so it sees only the <code>use</code> declarations of the sources. Modules to keep from an untrusted script include <code>c</code> (raw memory and foreign calls), <code>os</code> (files and processes, when the host's loader provides it), <code>cy</code> (<code>cy.eval</code>, <code>cy.VM()</code> and <code>cy.repl</code> run code in a new VM that has none of the host's settings) and <code>meta</code> (<code>meta.load</code> reads a file at compile time).</p>
 <a href="#libcyber">^topic</a>
 <h3 id="denying-raw-pointers">Denying raw pointers. <a href="#denying-raw-pointers">#</a></h3>
 <p>A host that runs untrusted scripts can set <code>deny_raw_ptrs</code> in <code>CLEvalConfig</code> or <code>CLCompileConfig</code>. Every chunk that is not a standard module (<code>core</code>, <code>meta</code>, <code>math</code>, <code>cy</code>, <code>c</code>, <code>io</code>, <code>test</code>) then gets a compile error for any expression of a raw pointer type: <code>Ptr[T]</code>, <code>PtrSpan[T]</code> or an option of them. That covers <code>as[Ptr[int]] 8</code>, <code>Ptr[int](8)</code>, <code>as[Ptr[int]] &x</code>, <code>alloc(int)</code> and <code>PtrSpan[int]{length=4}</code>, so a script can not read or write an arbitrary address. Slices, spans, maps, strings and borrows keep working; the core library uses raw pointers for them internally. The default is false. The CLI does not set it.</p>
@@ -6327,6 +6338,13 @@ hello!
 > math.random()
 `float` 0.3650744641604983
 </code></pre>
+<p>The session imports what a script run by <code>cyber</code> imports: the standard modules, files and urls. The path of a file is relative to the working directory, since the session is not a file:</p>
+<pre><code class="language-bash">> use os
+> os.cwd()!
+`str` '/home/user/project'
+> use util 'lib/util.cy'
+</code></pre>
+<p>The session runs in a VM of its own, made by <code>cli.new_vm()</code>. Its variables, globals and types are not those of the script that started the REPL, and a panic resets the session only.</p>
 <pre><code class="language-bash">> type Foo:
     | a int
     |

@@ -223,7 +223,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
     같은 시그니처의 메서드를 교체하지 않고 오류로 한 것(결정 문서 규칙 3)과 이 넷의 거절(규칙 5)은 사용자 확인 전이다.
 
 - [x] REPL이 CLI의 모듈을 가져온다(2026-11-24, F-200 · F-203). 결정 `project_repl_modules.md`, `unreleased.md` 같은 이름의 절.
-  - `cy.VM()`은 격리된 채 두고 CLI가 준다: `cli.cy`의 `new_vm` · `use_cli_modules`(private bind), `cli.zig`의 `useCliModules` ·
+  - `cy.VM()`은 격리된 채 두고 CLI가 준다: `cli.cy`의 `new_vm`(공개, 사용자 결정 2026-11-24) · `use_cli_modules`(private bind), `cli.zig`의 `useCliModules` ·
     `child_resolver`, `cy.cy`의 `REPL.new(vm)` · `REPL.run`. 자식 VM은 부모의 `cli.App`을 가리키기만 한다(해제하지 않음).
   - `cli.zig` `loader`는 파일 · URL 소스를 `C.vm_allocator(vm)`으로 읽는다(자식 VM의 allocator가 CLI의 것과 다르다).
   - F-203(세션의 extern 함수): `builtins/c.zig`의 `newTccState` · `isBound` · `hasUnbound`, `VM.tcc_states`,
@@ -378,7 +378,6 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - [x] F-200(2026-11-24 수정): CLI의 REPL에서 `use os`가 실패하던 것. "완료된 작업"의 "REPL이 CLI의 모듈을 가져온다".
 - [ ] F-204(치명, 미수정): 가변 인자 extern 함수에 `int`를 넘기면 `'Int_0' undeclared` 뒤 호스트가 abort한다
   (`libc.printf(s, 7)`, 파일로 돌려도 같다). `i32(7)`은 된다. `@initBindLib`의 C 생성이 `int`의 C 이름을 선언하지 않는다.
-- `cli.new_vm()`을 공개로 둘지는 사용자가 뒤집을 수 있다(`project_repl_modules.md` "`cli.new_vm()`을 공개한 이유").
 - `os.cmd`의 다음 단계(`project_os_cmd.md` "가져오지 않은 것"): 줄 단위 스트리밍, 실행 중 중단 · 시간 제한, 파일 리다이렉션.
   Windows에서의 실행 확인도 남았다.
 - Julia 검토(설계 원칙 3.7)의 남은 결정: B의 2(사용자

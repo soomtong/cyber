@@ -83,8 +83,8 @@ REPL에서 문서, 호출이 고르는 함수, 바이트코드를 본다. 결정
 - 스크립트용: `cy.VM.which(code) -> str`, `cy.VM.bytecode(name) -> str`, `cy.repl(read_line, doc)` 오버로드, `cli.repl_doc(query)`.
 - 호환성: 줄 맨 앞의 `.help`, `.doc ...`, `.which ...`, `.bc ...`가 REPL에서 코드로 평가되지 않는다. 전에는 컴파일 오류였다.
 - 매뉴얼: REPL 장의 REPL commands 절. `docs/api.json`.
-- 작업 중 찾은 기존 결함: 세션에서 앞 입력의 타입에 메서드를 선언하면 호스트가 죽는다(F-199, 아래 절에서 고침), CLI의 REPL에서
-  `use os`가 실패한다(F-200, 고치지 않음).
+- 작업 중 찾은 기존 결함: 세션에서 앞 입력의 타입에 메서드를 선언하면 호스트가 죽는다(F-199, 아래 "세션의 뒤 입력이 앞 입력의
+  타입에 메서드를 선언한다"에서 고침), CLI의 REPL에서 `use os`가 실패한다(F-200, 아래 "REPL이 CLI의 모듈을 가져온다"에서 고침).
 - 확인: 14단계 검증 rc=0(9~12단계는 Python `wasmtime` 패키지로 만든 `wasmtime` 대역으로 실행).
 
 ## PR #12 리뷰에서 나온 수정 (2026-11-24)
@@ -133,3 +133,35 @@ REPL에서 문서, 호출이 고르는 함수, 바이트코드를 본다. 결정
 - 매뉴얼: Methods 절(모듈 규칙), REPL 장, `cl_vm_validate` 절, 가시성 절.
 - 확인: 14단계 검증 rc=0(9~12단계는 Python `wasmtime` 패키지로 만든 `wasmtime` 대역으로 실행). 그 뒤 매뉴얼의 REPL 문장 둘만
   고쳤다.
+
+## REPL이 CLI의 모듈을 가져온다 (2026-11-24)
+
+CLI의 REPL에서 `use os`가 'Failed to load module: os'였다(F-200). 세션의 VM이 `cy.VM()`의 격리된 VM이라 CLI의 loader가 없었다.
+결정과 검토한 안은 `docs/decisions/project_repl_modules.md`.
+
+- REPL 세션이 `cyber`로 돌린 스크립트가 가져오는 것을 가져온다: `os` · `cli` · `libc`, 파일(`use m 'm.cy'`, 작업 디렉터리 기준),
+  URL. 전에는 라이브러리의 모듈(`math` · `json` 등)만 됐다.
+- `cy.VM()` · `cy.eval` · `cy.repl(read_line)` · `cy.repl(read_line, doc)`은 그대로 격리다. 호스트의 resolver · loader를 받지 않는다.
+  `cy.repl`을 직접 부르는 호스트의 모듈 정책은 바뀌지 않는다.
+- 새 함수:
+  - `cli.new_vm() -> cy.VM`: CLI가 가져오는 것을 가져오는 VM. CLI 스크립트에서 `os`를 쓰는 eval은 `cli.new_vm().eval(...)`.
+  - `cy.REPL.new(vm VM)`: 부르는 쪽이 만든 VM에서 세션을 돈다. `REPL.new()`는 `REPL.new(VM())`과 같다.
+  - `cy.REPL.run(read_line)`: 소개 줄을 찍고 `.exit`까지 읽고 평가한다.
+- `cli.repl()`의 문서 주석이 'isolated REPL session'에서 바뀌었다. 세션은 여전히 자기 VM에서 돈다(값 · 전역 · 타입이 따로이고
+  panic은 세션만 리셋한다).
+- 함께 고친 것(F-203, 치명): `persist_main` 세션에서 extern 함수가 호스트를 끝내던 둘. `cy.VM()` 세션과 임베딩 호스트의 세션도
+  같은 길이었다.
+  - 앞 eval이 extern 함수를 묶은 뒤 뒤 eval이 extern 함수가 있는 모듈을 올리면 `'thread_ret' defined twice` 뒤 abort했다
+    (REPL: `use math` 뒤 `use os`). 바인딩마다 새 TCC state를 쓰고 묶인 함수는 다시 만들지 않는다.
+  - 앞 eval이 선언한 extern 함수를 뒤 eval이 부르면 세그폴트였다(REPL: `use libc` 뒤 다음 입력의 `libc.getenv(s)`). 뒤 eval의
+    호출 자리에도 주소를 채운다.
+- 함께 고친 것: CLI의 loader가 파일 · URL 모듈의 소스를 불러오는 VM의 allocator로 읽는다(전에는 CLI의 allocator. CLI의 VM에서는
+  둘이 같아 드러나지 않았다).
+- 알려진 한계:
+  - 가변 인자 extern 함수에 `int`를 넘기면 호스트가 abort한다(`libc.printf(s, 7)`, F-204, 전부터 있던 결함). `i32(7)`로 쓴다.
+  - REPL에서도 `os.cwd()`는 `os.cwd()!`로 써야 한다('Expected to handle the error case for `!str`.').
+  - F-199는 그대로다.
+- 매뉴얼: REPL 장(세션의 import), Runtime execution 절(`cy.eval`의 격리, `cli.new_vm()`, `cy.REPL.new(vm)`), libcyber 장의 resolver
+  절(`cy.VM()` · `cy.repl`도 격리임). `docs/api.json`.
+- 테스트: behavior `modules/cy.cy`(격리 계약, `REPL.new(vm)`, `REPL.run`), `modules/cli.cy`, `modules/cli_os.cy`, `ffi/session.cy`.
+  `src/tools/verify.sh`에 15단계 `15-repl-stdin`(빌드한 `cyber`의 REPL에 줄을 파이프로 넣는다)을 더했다.

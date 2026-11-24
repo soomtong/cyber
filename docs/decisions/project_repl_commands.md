@@ -83,7 +83,7 @@ fn largest[float](float, float) -> float  (eval)
 `.which`가 선언 위치와 문서 주석을 uri로 찾았다. 세션의 eval은 모두 uri가 `eval`이라 첫 eval의 소스에서 줄을 셌다.
 `refs.Info.def_chunk`를 더하고 `writePlace`가 청크를 받게 했다. 테스트는 `modules/cy.cy`의 `second_later`.
 
-## 작업 중 찾은 기존 결함 (고치지 않음)
+## 작업 중 찾은 기존 결함 (이 작업에서는 고치지 않음)
 
 둘 다 이 변경 전의 빌드에서도 같다. 이 작업의 범위 밖이라 고치지 않고 기록한다.
 1번(F-199)은 같은 날 뒤의 작업이 고쳤다: `docs/decisions/project_session_methods.md`.
@@ -96,6 +96,8 @@ fn largest[float](float, float) -> float  (eval)
 2. F-200: CLI의 REPL에서 `use os`가 'Failed to load module: os'다. REPL의 VM은 `cy.VM()`으로 만든 격리된 VM이고
    CLI의 resolver · loader · user data를 받지 않는다(`UserVM_init`은 printer만 물려준다). `math` 같은 builtin만 된다.
    매뉴얼은 `cy.eval`의 새 VM이 호스트 설정을 받지 않는다고 적으므로, REPL만 물려받게 할지는 따로 정해야 한다.
+   2026-11-24 고쳤다. `cy.VM()`은 격리된 채 두고 CLI가 자기 VM에 모듈을 준다(`cli.new_vm()`). 결정
+   `docs/decisions/project_repl_modules.md`.
 
 ## 확인
 

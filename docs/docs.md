@@ -4730,6 +4730,20 @@ print(res)
 --> 3
 ```
 
+Isolated means that the new VM prints where this VM prints and has none of its other settings. It imports the modules of the library (`core`, `meta`, `math`, `cy`, `c`, `io`, `test`, `time`, `json`, `peg`, `regex`, `toon`, `path`) and nothing that the host's loader adds: not `os`, not a file. `cy.VM()` creates such a VM for more than one eval, and `cy.repl(read_line)` runs a REPL session in one.
+
+Who makes a VM decides what it can import. The CLI has `cli.new_vm()`, a VM that imports what a script run by `cyber` imports. `cy.REPL.new(vm)` runs a REPL session in a VM that the caller made:
+```cy
+use cli
+use cy
+
+vm := cli.new_vm()
+res := vm.eval('eval', "use os\nos.cwd()!", {persist_main=true})
+print(vm.value_desc(res.val_t, res.value))
+--> `str` '/home/user/project'
+```
+A host that embeds the library gives its own modules to a session the same way: a function that it binds sets the resolver and the loader of the new VM (`VM.inner` is the `CLVM*`) before the VM goes to `cy.REPL.new(vm)`.
+
 ## `meta` module.
 The `meta` module contains metaprogramming utilities. See the [`meta` docs](api.html#meta).
 
@@ -6038,7 +6052,7 @@ bool resolver(CLVM* vm, CLResolverParams params, size_t* res_uri_len) {
     return cl_default_resolver(vm, params, res_uri_len);
 }
 ```
-Before returning false, the resolver can give its own message with `clReportApiError`. The compiler's own lookups of the builtin modules it needs (`c` for a module with `#[extern]` functions such as `math`, `meta`) do not call the resolver, so it sees only the `use` declarations of the sources. Modules to keep from an untrusted script include `c` (raw memory and foreign calls), `os` (files and processes, when the host's loader provides it), `cy` (`cy.eval` runs code in a new VM that has none of the host's settings) and `meta` (`meta.load` reads a file at compile time).
+Before returning false, the resolver can give its own message with `clReportApiError`. The compiler's own lookups of the builtin modules it needs (`c` for a module with `#[extern]` functions such as `math`, `meta`) do not call the resolver, so it sees only the `use` declarations of the sources. Modules to keep from an untrusted script include `c` (raw memory and foreign calls), `os` (files and processes, when the host's loader provides it), `cy` (`cy.eval`, `cy.VM()` and `cy.repl` run code in a new VM that has none of the host's settings) and `meta` (`meta.load` reads a file at compile time).
 
 ### Denying raw pointers.
 A host that runs untrusted scripts can set `deny_raw_ptrs` in `CLEvalConfig` or `CLCompileConfig`. Every chunk that is not a standard module (`core`, `meta`, `math`, `cy`, `c`, `io`, `test`) then gets a compile error for any expression of a raw pointer type: `Ptr[T]`, `PtrSpan[T]` or an option of them. That covers `as[Ptr[int]] 8`, `Ptr[int](8)`, `as[Ptr[int]] &x`, `alloc(int)` and `PtrSpan[int]{length=4}`, so a script can not read or write an arbitrary address. Slices, spans, maps, strings and borrows keep working; the core library uses raw pointers for them internally. The default is false. The CLI does not set it.
@@ -6284,6 +6298,16 @@ Top level declarations such as imports, types, and functions can be referenced i
 > math.random()
 `float` 0.3650744641604983
 ```
+
+The session imports what a script run by `cyber` imports: the standard modules, files and urls. The path of a file is relative to the working directory, since the session is not a file:
+```bash
+> use os
+> os.cwd()!
+`str` '/home/user/project'
+> use util 'lib/util.cy'
+```
+
+The session runs in a VM of its own, made by `cli.new_vm()`. Its variables, globals and types are not those of the script that started the REPL, and a panic resets the session only.
 
 ```bash
 > type Foo:

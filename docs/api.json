@@ -1044,6 +1044,7 @@
       "aliases": {}},
     {"module": "cy", "name": "REPL", "syntax": "REPL", "kind": "struct",
       "methods": [
+        {"name": "run", "recv": "&&REPL", "sig": "run(read_line ReadLineFn)", "doc": "Prints the intro, then reads and evaluates inputs until `.exit`."},
         {"name": "print_intro", "recv": "&REPL", "sig": "print_intro()"},
         {"name": "command", "recv": "&REPL", "sig": "command(line str) -> bool", "doc": "Runs `line` if it is a command of the REPL. Returns false if it is not one. A command is a line that starts with `.` and a command name. It is not Cyber code and is not evaluated."},
         {"name": "read", "recv": "&&REPL", "sig": "read(read_line ReadLineFn) -> ?str", "doc": "Reads lines until a complete input is ready. A line ending with `:` opens a block; an empty line closes one. An attribute line (`#[...]`) is held until the declaration it annotates is complete."},
@@ -1052,7 +1053,8 @@
         {"name": "prefix", "recv": "&REPL", "sig": "prefix() -> str"}
       ],
       "funcs": [
-        {"name": "new", "sig": "new() -> REPL"}
+        {"name": "new", "sig": "new() -> REPL", "doc": "A REPL whose session runs in a new, isolated `VM()`."},
+        {"name": "new", "sig": "new(vm VM) -> REPL", "doc": "A REPL whose session runs in `vm`. Who makes the VM decides what the session can import: `VM()` has the modules of the library only, and a host can hand over a VM that it has set up (the CLI does, see `cli.new_vm`)."}
       ],
       "aliases": {}},
     {"module": "cy", "name": "UnaryOp", "syntax": "UnaryOp", "kind": "enum",
@@ -1712,7 +1714,7 @@
     {"module": "cy", "name": "parser_comments", "sig": "parser_comments(parser Ptr[void]) -> []Comment"},
     {"module": "cy", "name": "new_parser", "sig": "new_parser() -> ZParser"},
     {"module": "cy", "name": "destroy_parser", "sig": "destroy_parser(parser Ptr[void])"},
-    {"module": "cy", "name": "repl", "sig": "repl(read_line ReadLineFn) -> void", "doc": "Starts an isolated REPL session. The callback `read_line(prefix string) string` is responsible for obtaining the input."},
+    {"module": "cy", "name": "repl", "sig": "repl(read_line ReadLineFn) -> void", "doc": "Starts an isolated REPL session. The callback `read_line(prefix string) string` is responsible for obtaining the input. The session runs in a new `VM()`: it imports the modules of the library and nothing that the host added. A host that wants its own modules in the session makes the VM itself and uses `REPL.new(vm)`."},
     {"module": "cy", "name": "repl", "sig": "repl(read_line ReadLineFn, doc DocFn) -> void", "doc": "Starts an isolated REPL session like `repl(read_line)`, with `doc` behind the command `.doc`. `doc(query)` gets the text after `.doc` and prints what the host has to say about it."},
     {"module": "meta", "name": "access", "sig": "access(rec Code, field EvalStr) -> Any", "doc": "Access a receiver with a given field as a string."},
     {"module": "meta", "name": "build_flag", "sig": "build_flag(name str) -> bool", "doc": "Returns whether a build flag is set."},
@@ -1759,7 +1761,8 @@
     {"module": "meta", "name": "trace_retains", "sig": "trace_retains() -> int"},
     {"module": "meta", "name": "trace_releases", "sig": "trace_releases() -> int"},
     {"module": "meta", "name": "unsupported", "sig": "unsupported() -> never", "doc": "Raise compile-time error."},
-    {"module": "cli", "name": "repl", "sig": "repl() -> void", "doc": "Starts an isolated REPL session. Invokes `cy.repl(repl_read_line)`."},
+    {"module": "cli", "name": "repl", "sig": "repl() -> void", "doc": "Starts a REPL session that reads from the terminal. The session runs in its own VM, made by `new_vm()`: it imports what a script run by `cyber` imports."},
+    {"module": "cli", "name": "new_vm", "sig": "new_vm() -> cy.VM", "doc": "Creates a VM that imports what a script run by `cyber` imports: the standard modules of the CLI (`os`, `cli`, `libc`), files and urls. Its values, globals and types are its own. `cy.VM()` creates a VM that has the modules of the library only."},
     {"module": "cli", "name": "repl_doc", "sig": "repl_doc(query str) -> void", "doc": "Prints what `cyber doc <query>` prints: a section of the manual, the topics for an empty query, or the functions of a module for `--api <module>`. This is the command `.doc` of the REPL."},
     {"module": "cli", "name": "repl_read_line", "sig": "repl_read_line(prefix str) -> str"},
     {"module": "cli", "name": "repl_read_line_", "sig": "repl_read_line_(prefix str) -> Future[str]"},

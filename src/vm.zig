@@ -105,8 +105,9 @@ pub const VM = struct {
     print_err: C.PrintErrorFn,
     log_fn: C.LogFn,
 
-    /// One TCC state for `bindLib`.
-    tcc_state: if (cy.hasFFI) ?*tcc.TCCState else ?*anyopaque,
+    /// One TCC state for each `@initBindLib` that ran. A state can not compile again after it was relocated, and
+    /// its code stays in use, so a session that binds extern functions in a later eval adds a state.
+    tcc_states: if (cy.hasFFI) std.ArrayList(*tcc.TCCState) else std.ArrayList(*anyopaque),
     placeholder: Value = undefined,
 
     config: C.EvalConfig,
@@ -175,7 +176,7 @@ pub const VM = struct {
             .env_local_saves = .empty,
             .env_local_saves_map = .empty,
             .dyn_libs = .empty,
-            .tcc_state = null,
+            .tcc_states = .empty,
         };
         self.compiler = try self.alloc.create(cy.Compiler);
         self.sema = &self.compiler.sema;
@@ -236,9 +237,10 @@ pub const VM = struct {
 
         if (!reset) {
             if (cy.hasFFI) {
-                if (self.tcc_state) |state| {
+                for (self.tcc_states.items) |state| {
                     tcc.tcc_delete(state);
                 }
+                self.tcc_states.deinit(self.alloc);
                 for (self.dyn_libs.items) |lib| {
                     lib.close();
                     self.alloc.destroy(lib);

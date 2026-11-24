@@ -20,6 +20,7 @@ pub const Src = @embedFile("std/cli.cy");
 const funcs = [_]struct { []const u8, C.BindFunc }{
     .{ "repl_read_line", zErrFunc(replReadLine) },
     .{ "repl_doc", zErrFunc(replDoc) },
+    .{ "use_cli_modules", zErrFunc(useCliModules) },
 };
 
 pub fn bind(_: ?*C.VM, mod: ?*C.Sym) callconv(.c) C.Bytes {
@@ -202,9 +203,12 @@ pub fn loader(vm_: ?*C.VM, mod_: ?*C.Sym, spec_: C.Bytes, res: [*c]C.LoaderResul
     }
 
     // Load from file or http.
+    // The VM frees the source (`manage_src`), so it comes from the allocator of the VM that loads it. For a VM
+    // made by `cli.new_vm()` that is not the allocator of the `App`.
+    const src_alloc = C.vm_allocator(vm);
     var src: []const u8 = undefined;
     if (std.mem.startsWith(u8, spec, "http://") or std.mem.startsWith(u8, spec, "https://")) {
-        src = loadUrl(vm, app.alloc, spec) catch |e| {
+        src = loadUrl(vm, src_alloc, spec) catch |e| {
             if (e == error.HandledError) {
                 return false;
             } else {
@@ -215,7 +219,7 @@ pub fn loader(vm_: ?*C.VM, mod_: ?*C.Sym, spec_: C.Bytes, res: [*c]C.LoaderResul
             }
         };
     } else {
-        src = std.Io.Dir.cwd().readFileAlloc(stdx.io(), spec, app.alloc, .limited(1e9)) catch |e| {
+        src = std.Io.Dir.cwd().readFileAlloc(stdx.io(), spec, src_alloc, .limited(1e9)) catch |e| {
             const msg = app.alloc.print("Can not load `{s}`. {}", .{ spec, e }) catch return false;
             defer app.alloc.free(msg);
             C.reportApiError(@ptrCast(vm), C.to_bytes(msg));
@@ -228,6 +232,38 @@ pub fn loader(vm_: ?*C.VM, mod_: ?*C.Sym, spec_: C.Bytes, res: [*c]C.LoaderResul
         .manage_src = true,
     };
     return true;
+}
+
+/// `cli.new_vm()`: gives a VM that a script made with `cy.VM()` what `init_cli` gives the main VM, so that it
+/// imports the same modules. `cy.VM()` itself stays isolated (the manual states that for `cy.eval`), and a
+/// host that does not load the `cli` module does not have this function.
+///
+/// The child shares the `App` of the VM that calls this and does not own it: `deinit_cli` on the main VM frees
+/// it. A VM does not read its user data when it is destroyed, so the child may outlive the `App` as long as
+/// nothing is evaluated in it by then. The child only reads the `App` (`config.reload`, the http client,
+/// `mod_uris`). The printers are those that `cy.VM()` copied from the parent.
+fn useCliModules(t: *C.Thread) anyerror!C.Ret {
+    _ = C.thread_ret(t, void);
+    const child: *C.VM = @ptrCast(C.thread_param(t, ?*anyopaque) orelse return error.InvalidArgument);
+    const parent = C.thread_vm(t);
+    C.vm_set_user_data(child, C.vm_user_data(parent));
+    C.vm_set_resolver(child, child_resolver);
+    C.vm_set_dl_resolver(child, dl_resolver);
+    C.vm_set_loader(child, loader);
+    return C.RetOk;
+}
+
+/// The resolver of a VM made by `cli.new_vm()`. Its main chunk is source text that a script evaluates
+/// (`vm.eval('eval', code)`, `vm.which(code)`), not a file, so the uri of the main chunk is taken as it is:
+/// `resolver` would look for a file of that name. The `use` declarations of the chunks go to `resolver`.
+fn child_resolver(vm: ?*C.VM, params: C.ResolverParams, res_uri_len: ?*usize) callconv(.c) bool {
+    if (params.chunkId == NullId) {
+        if (params.uri.len > params.bufLen) return false;
+        @memcpy(params.buf[0..params.uri.len], C.from_bytes(params.uri));
+        res_uri_len.?.* = params.uri.len;
+        return true;
+    }
+    return resolver(vm, params, res_uri_len);
 }
 
 fn dl_resolver(vm: ?*C.VM, uri: C.Bytes, out: [*c]C.Bytes) callconv(.c) bool {

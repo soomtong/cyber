@@ -392,6 +392,8 @@ CLI 는 libcyber 위에 얹은 호스트 프로그램 하나다. 구조를 `src/
 
 REPL 은 "Cyber 로 쓴 Cyber 호스트"다. `cli.repl()`(src/std/cli.cy:13)이 `cy.repl(replReadLine_)`(src/builtins/cy.cy:1213)을 부르고, 이것이 `REPL.new()` 로 격리된 VM 하나를 만든다
 (`cy.VM`, cy.cy:1283). 한 줄을 읽을 때마다 `vm.eval('eval', code, {persist_main=true})`(cy.cy:1378-1379)로 내부 VM 에 먹인다. 즉 VM 이 둘이다.
+2026-11-24 뒤로 `cli.repl()`은 `cy.REPL.new(cli.new_vm())`로 세션 VM 을 만든다. `cli.new_vm()`은 `cy.VM()`에 CLI 의 resolver · loader ·
+user data 를 건 VM 이라 아래 그림의 "loader/resolver = 기본값"은 `cy.repl`을 직접 부른 경우만 맞다(F-200, docs/decisions/project_repl_modules.md).
 
 ```
   바깥 VM (CLI 가 만든 것, loader=CLI loader)                  안쪽 VM (cy.zig:77 UserVM_init -> C.vm_init())

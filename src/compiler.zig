@@ -1417,6 +1417,17 @@ fn emit_program_init_func(c: *cy.Chunk, start: *cy.Func) !void {
         try sema_local.sema_discard(c, call, c.ast.null_node);
     }
 
+    if (!has_extern_func) {
+        // A later eval of a session (`persist_main`) can call an extern function that an earlier eval declared.
+        // `@initBindLib` gives the addresses to the call sites of this compile too; it compiles nothing when
+        // every extern function is bound. Without it such a call jumped to a null address.
+        for (c.compiler.chunks.items[0..c.compiler.chunk_start]) |chunk| {
+            if (chunk.has_extern_func and chunk.rt_ready) {
+                has_extern_func = true;
+                break;
+            }
+        }
+    }
     if (has_extern_func) {
         const c_chunk = (try c.get_builtin_chunk("c")) orelse {
             return c.reportError("An `#[extern]` function needs the `c` module. Add `use c`.", null);

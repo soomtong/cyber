@@ -1,5 +1,5 @@
 #!/bin/sh
-# 14-step verification to run before a commit that changes src/. Sequential, about 10 minutes.
+# 15-step verification to run before a commit that changes src/. Sequential, about 10 minutes.
 # usage: verify.sh [log dir]   (default: zig-out/verify)
 # Prints "<step> rc=N" per step and exits 1 if a step failed. The log of a step is <log dir>/<step>.log.
 # - Needs wasmtime for steps 9 to 12.
@@ -42,5 +42,14 @@ api_fresh() {
   cmp -s "$L/api.json" docs/api.json || { echo "docs/api.json is out of date: run zig-out/bin/cyber docs/gen-api-json.cy"; diff docs/api.json "$L/api.json" | head -20; return 1; }
 }
 run 14-api-json          api_fresh
+# The REPL reads lines from a pipe, and its session imports the modules of the CLI (F-200). `os` after `math`
+# binds extern functions in a second eval of the session (F-203). The first line of the output has the version.
+repl_stdin() {
+  out=$(printf 'use math\nmath.sqrt(4.0)\nuse os\nos.cwd()!.len() > 0\nuse cli\nuse libc\n.exit\n' | zig-out/bin/cyber 2>&1) || return 1
+  exp=$(printf 'Commands: .exit, .help\n`float` 2.0\n`bool` true')
+  got=$(printf '%s\n' "$out" | tail -n +2)
+  [ "$got" = "$exp" ] || { echo "unexpected REPL output:"; printf '%s\n' "$out"; return 1; }
+}
+run 15-repl-stdin        repl_stdin
 if [ $fail -eq 0 ]; then echo "DONE all steps rc=0"; else echo "FAILED see $L"; fi
 exit $fail

@@ -402,11 +402,16 @@ fn getDefaultOptions() Options {
 
 const TestConfig = struct {
     ffi: bool,
+    /// The `-Dtest-filter` of the cases of behavior_test.zig "Tests." when the executable has no environment to read
+    /// it from (wasm, run by hand with wasmtime). Elsewhere it is read at run time (`CYBER_TEST_FILTER`), so that a new
+    /// filter does not build the executable again.
+    case_filter: ?[]const u8 = null,
 };
 
 fn create_test_config(b: *std.Build, config: TestConfig) !*std.Build.Module {
     const options = b.addOptions();
     options.addOption(bool, "ffi", config.ffi);
+    options.addOption(?[]const u8, "case_filter", config.case_filter);
     return options.createModule();
 }
 
@@ -551,6 +556,7 @@ fn addBehaviorTest(b: *std.Build, lib: *std.Build.Step.Compile, vmc: *std.Build.
 
     const test_config = try create_test_config(b, .{
         .ffi = ffi,
+        .case_filter = if (rtarget.result.cpu.arch.isWasm()) testFilter else null,
     });
     step.root_module.addImport("test_config", test_config);
     return step;

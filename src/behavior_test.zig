@@ -77,9 +77,12 @@ fn testShard() Shard {
 
 /// `zig build test -Dtest-filter=<text>` sets `CYBER_TEST_FILTER=<text>` (build.zig). "Tests." then runs the cases
 /// whose path contains the text. The other tests of this file are selected by their name when the executable is built.
-/// The caller owns the result.
+/// A wasm executable has the filter it was built with (`test_config.case_filter`). The caller owns the result.
 fn testCaseFilter() ?[]const u8 {
-    if (is_wasm) return null;
+    if (is_wasm) {
+        const filter = test_config.case_filter orelse return null;
+        return t.alloc.dupe(u8, filter) catch null;
+    }
     const val = stdx.getEnvVarOwned(t.alloc, "CYBER_TEST_FILTER") catch return null;
     if (val.len == 0) {
         t.alloc.free(val);

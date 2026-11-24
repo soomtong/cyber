@@ -402,7 +402,8 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   템플릿 오버로드끼리 infer 위치만 다르면(`fn(T) -> ?%U`와 `fn(T) -> []%U`) 선언이 'already been declared with the same
   function signature'로 거부된다. `%T type` 명시 인자의 평가 오류와 컴파일 타임 호출(`matchGenericFuncCt`)은 오버로드에서 바로 오류다.
   실패한 오버로드 후보에서 끝까지 검사된 타입 선언형 람다는 죽은 코드로 남는다. `cyber src/builtins/cy.cy`의 panic은
-  F-205로 고쳤다(이제 호스트 함수 로드 실패 컴파일 오류). wasm 빌드의 테스트는 `CYBER_TEST_FILTER`를 읽지 않는다.
+  F-205로 고쳤다(이제 호스트 함수 로드 실패 컴파일 오류). wasm 빌드의 behavior 테스트는 `-Dtest-filter`를 빌드 때 넣어
+  따른다(`test_config.case_filter`, 2026-11-24).
   '변수를 캡처하는 블록 람다를 오버로드 인자로 주면 Missing return statement.'라는 보고는 재현되지 않았다(leak만 고쳤다).
 - 이동: 조건부로 평가되는 식의 부분(`and` · `or`의 오른쪽, `?else` · `!else`의 기본값 · 블록)은 바깥 변수를 옮기지 못한다.
   `try` 문 · `scope` 블록 안의 `!`마다 빈 IR `block` 문장이 하나 붙는다(bytecode는 없다).

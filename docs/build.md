@@ -37,6 +37,10 @@ wasm3 zig-out/bin/cli_test.wasm
 wasm3 zig-out/bin/lib_test.wasm
 wasm3 zig-out/bin/behavior_test.wasm
 wasm3 zig-out/bin/trace_test.wasm
+
+# `-Dtest-filter` works for the WASM tests too. The behavior cases of a WASM build keep the filter they were built
+# with, since the executable does not read `CYBER_TEST_FILTER`.
+zig build build-test -Doptimize=ReleaseSafe -Dtarget=wasm32-wasi -Dtest-filter=control_flow/
 ```
 
 ## Build the CLI.

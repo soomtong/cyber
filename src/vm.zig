@@ -393,6 +393,8 @@ pub const VM = struct {
         compile_c.deny_spawn = self.config.deny_spawn;
         defer self.compiler.main_discarded = true;
         _ = try self.compiler.compile(srcUri, src, compile_c);
+        // A method that the source declares for a type of an earlier eval is not kept either (F-199).
+        self.compiler.discardLateDecls();
     }
 
     /// Compiles `src` as a whole program and resets the VM first. See `validate` to check source against the

@@ -542,6 +542,7 @@ pub fn markHotCall(c: *cy.Chunk, func: *cy.Func) void {
 ///   error where it is. With error recovery the body is not checked again and the call is the error.
 /// - From a carried body: the error is not this source's. The carried body fails and is dropped in turn.
 pub fn checkCallee(c: *cy.Chunk, func: *cy.Func, node: *ast.Node) !void {
+    try c.compiler.noteLateRef(c, func);
     if (func.info.body_failed) {
         const compiler = c.compiler;
         if (compiler.checking_carried or compiler.recover) return cy.template.failedInstance(c, node);

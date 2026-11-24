@@ -52,6 +52,11 @@
   이어서 "E의 REPL 조회 명령도 넣자": 3.4 E(`.doc` · `.which` · `.bc` · `.help`)를 넣었다. 결정
   `docs/decisions/project_repl_commands.md`.
   작업 브랜치 `claude/sharp-faraday-c5yjxa`.
+- 2026-11-24(사용자: F-199 수정 지시. "a method or type function declared in a later input of the same session works like one
+  declared in the same source, for struct types at least. If some case can not be supported, it must be a compile error with a
+  clear message, never a panic of the host."): 세션의 뒤 입력이 앞 입력의 타입에 메서드를 선언하게 했다. 결정
+  `docs/decisions/project_session_methods.md`, `unreleased.md` 같은 이름의 절. 작업 브랜치 `claude/wizardly-franklin-xippbd`
+  (`claude/sharp-faraday-c5yjxa` 위에 쌓았다: F-199의 기록과 `.which`가 그 브랜치에만 있다).
 
 ## 현재 브랜치
 
@@ -194,6 +199,22 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
     Darwin의 `sigprocmask`는 프로세스의 모든 스레드에 적용된다(Zig `std.posix.sigprocmask`의 주석은 "thread signal mask"지만
     Darwin에서는 libc `sigprocmask`를 부른다). 스레드 하나만 막으려면 `pthread_sigmask`, 파이프 하나만이면 `F_SETNOSIGPIPE`.
     무시된 `SIGPIPE`는 Linux에서 `sh -c 'trap "" PIPE; exec zig-out/bin/cyber x.cy'`로 만든다.
+
+- [x] 세션의 뒤 입력이 앞 입력의 타입에 메서드를 선언한다(2026-11-24, F-199 · F-202). 결정 `project_session_methods.md`,
+  `unreleased.md` 같은 이름의 절.
+  - 원인: 새 main 청크는 앞 eval의 심볼을 선언 없는 `use` 별칭으로 보는데 `sema_resolve.ensureDeclNamePath`가 별칭을 부모로
+    돌려주었다. 별칭 · 함수 · 전역 · 상수에는 모듈이 없어 `reserveFunc`의 `getMod().?`가 죽었다(한 소스의 `fn foo :: bar()`도).
+  - `lateDeclParent`가 별칭을 세션의 타입으로 푼다. 선언은 타입의 모듈(살아남는 청크의 것)에 들어가므로 실패한 컴파일은
+    `Compiler.dropLateDecls`(`module.dropDeclsFrom`)가, `VM.validate`는 `discardLateDecls`가 뺀다. 뒤쪽은 그 컴파일이 전개한
+    본문 중 버려지는 선언에 닿는 것도 버린다(생성된 코드가 버려진 메서드를 부른다. `late_refs`로 따라간다). 전개한 것을 통째로
+    버리면 안 된다: 타입이 가진 `dtor` · `copy_ctor` 인스턴스가 `failed`가 되어 뒤 컴파일이 깨진다.
+  - 템플릿 메서드의 뒤늦은 오버로드: `FuncSym.variant_decls`가 인스턴스가 전개한 선언 수를 세고 `module.expandLateOverloads`가
+    나머지를 전개한다. 선언한 입력은 `Compiler.expandLateVariants`로 바로 전개한다.
+  - `@deinit` · `@copy` · `@clone` · `@send`는 거절한다. 세션의 main 청크들은 uri와 상관없이 한 모듈이다
+    (`Chunk.session_main`, `module.sameModule`): validate(`main`)와 `.which`(`which`)가 앞 eval의 `-` 필드를 읽는다.
+  - 테스트: `modules/cy_session_methods.cy`, `functions/decl_parent_not_type_error.cy` ·
+    `decl_method_parent_global_error.cy`, `modules/decl_method_other_module_error.cy`, lib `session.zig`의 마지막 테스트.
+    탐침은 `cy.VM`으로 입력 목록을 한 세션에 eval하는 스크립트가 빠르다(`?`로 시작하면 `vm.which`: validate 경로).
 
 ## 시도했으나 실패한 접근
 
@@ -353,7 +374,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 ## 다음 에이전트에게
 
-1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환, `os.cmd`, REPL 조회 명령).
+1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환, `os.cmd`, REPL 조회 명령, 세션의 메서드 선언).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 

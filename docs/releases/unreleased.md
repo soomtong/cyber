@@ -83,8 +83,8 @@ REPL에서 문서, 호출이 고르는 함수, 바이트코드를 본다. 결정
 - 스크립트용: `cy.VM.which(code) -> str`, `cy.VM.bytecode(name) -> str`, `cy.repl(read_line, doc)` 오버로드, `cli.repl_doc(query)`.
 - 호환성: 줄 맨 앞의 `.help`, `.doc ...`, `.which ...`, `.bc ...`가 REPL에서 코드로 평가되지 않는다. 전에는 컴파일 오류였다.
 - 매뉴얼: REPL 장의 REPL commands 절. `docs/api.json`.
-- 작업 중 찾은 기존 결함(고치지 않음): 세션에서 앞 입력의 타입에 메서드를 선언하면 호스트가 죽는다(F-199), CLI의 REPL에서
-  `use os`가 실패한다(F-200).
+- 작업 중 찾은 기존 결함: 세션에서 앞 입력의 타입에 메서드를 선언하면 호스트가 죽는다(F-199, 아래 절에서 고침), CLI의 REPL에서
+  `use os`가 실패한다(F-200, 고치지 않음).
 - 확인: 14단계 검증 rc=0(9~12단계는 Python `wasmtime` 패키지로 만든 `wasmtime` 대역으로 실행).
 
 ## PR #12 리뷰에서 나온 수정 (2026-11-24)
@@ -105,3 +105,29 @@ REPL에서 문서, 호출이 고르는 함수, 바이트코드를 본다. 결정
 - 문서: 컴파일 타임의 `==` · `!=`는 정수와 float를 섞지 못한다고 고쳤다. `semaRightOperand`의 문서 주석 자리.
 - 테스트: `core/number_signed_raw_compare_error.cy` · `symbol_op_float_error.cy` · `float_op_symbol_error.cy` ·
   `error_eq_float_error.cy`, `modules/os_cmd.cy`(입력 중의 `TooBig`, 파이프 뒤 명령의 입력, `pwd -P`), `modules/cy.cy`(뒤 eval의 위치).
+
+## 세션의 뒤 입력이 앞 입력의 타입에 메서드를 선언한다 (2026-11-24, F-199 · F-202)
+
+`persist_main` 세션(REPL, `cy.VM`, 임베딩 호스트)에서 앞 입력이 선언한 타입에 뒤 입력이 메서드나 타입 함수를 선언하면 호스트
+프로세스가 죽었다(`module.reserveFunc`의 'attempt to use null value'). 이제 같은 소스에서 선언한 것처럼 동작한다. 결정과 구현은
+`docs/decisions/project_session_methods.md`.
+
+- 받는 선언: 메서드(`fn (&V) twice()`), 타입 함수(`fn V :: make()`), 타입의 상수 · 함수 템플릿, 템플릿 타입의 멤버
+  (`fn (&Box[]) get() -> T`). struct · enum · choice 타입.
+- 매개변수 타입이 다른 같은 이름은 오버로드로 더한다. 같은 시그니처는 한 소스에서와 같은 오류다
+  ('`twice` has already been declared with the same function signature.'). 메서드를 바꾸려면 타입을 다시 선언한다.
+- 템플릿 타입: 새 메서드와 새 오버로드가 앞 입력이 만든 인스턴스(`Box[int]`)에도 생긴다.
+- 실패한 입력과 `cl_vm_validate` · `.which`는 타입에 아무것도 남기지 않는다. 같은 선언을 다시 넣을 수 있다.
+- 새 컴파일 오류(전에는 모두 호스트 panic):
+  - 'Can not declare `@deinit` for `V` after the input that declares `V`. ...': `@deinit` · `@copy` · `@clone` · `@send`는 타입과
+    같은 입력에 선언한다. 앞서 컴파일된 코드가 그것 없이 값을 없애고 복사하고 보내기 때문이다.
+  - 'Can not declare `twice` for `V`: `V` belongs to another module. ...': 다른 모듈 타입의 `use` 별칭, 모듈 이름. 한 소스에서도 같다.
+  - 'Can not declare `bar` for `foo`: `foo` is not a type. ...': 부모가 함수 · 전역 · 상수. 한 소스에서도 같다.
+- `cl_vm_validate`와 `.which`가 eval이 받는 소스를 거절하던 것을 고쳤다(F-202): 세션의 uri가 `main`이 아니면 앞 eval 타입의 `-`
+  필드를 읽는 소스가 'Can not access the private field'였다. `persist_main` 컴파일의 main 청크들은 uri와 상관없이 한 모듈이다.
+- 호환성: 전에 컴파일되던 소스 중 달라지는 것은 없다(위의 경우는 모두 panic이었다). 세션의 eval마다 다른 uri를 주는 호스트는
+  앞 eval의 `-` 심볼이 뒤 eval에서 보이게 된다(매뉴얼이 적은 대로).
+- 한계: CLI의 REPL은 타입 블록이 한 입력이라 `@deinit` 등 네 메서드를 가진 타입은 여전히 REPL에서 선언할 수 없다(스크립트와
+  호스트는 한 소스에 함께 넣는다). 템플릿 인스턴스는 전개할 때 찾은 것을 갖고 있다(`meta.has_decl(T, 'twice')`로 갈래를 고른 인스턴스는 뒤에 생긴 `twice`를
+  보지 못한다). 템플릿 메서드의 중복 선언은 어떤 인스턴스도 그 이름을 쓰지 않았으면 다음 사용에서 드러난다.
+- 매뉴얼: Methods 절(모듈 규칙), REPL 장, `cl_vm_validate` 절, 가시성 절.

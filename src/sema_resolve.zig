@@ -1465,15 +1465,66 @@ pub fn ensureDeclNamePath(c: *cy.Chunk, mod: *cy.Sym, parent_opt: ?*ast.Node, na
     } else {
         return c.reportErrorFmt("TODO", &.{}, parent);
     }
-    const sym = mod.getMod().?.getSym(parent_name) orelse {
+    var sym = mod.getMod().?.getSym(parent_name) orelse {
         return c.reportErrorFmt("Undeclared symbol: `{}`", &.{v(parent_name)}, parent);
     };
+    if (sym.type == .use_alias) {
+        sym = try lateDeclParent(c, sym.cast(.use_alias), parent_name, name.name, parent);
+    }
     if (sym.type == .type_alias) {
         return c.reportError("Cannot declare from type alias.", name_n);
+    }
+    if (sym.getMod() == null) {
+        // A function, a global or a constant. The callers take the module of the parent (F-199).
+        return c.reportErrorFmt("Can not declare `{}` for `{}`: `{}` is not a type. A method `fn (&T) name()` or a member `fn T :: name()` is declared for a type of this module.", &.{v(name.name), v(parent_name), v(parent_name)}, parent);
     }
     return .{
         .name = name,
         .parent = sym,
         .variant = variant,
     };
+}
+
+/// The `@` methods that the resolution of a type reads (`sema_type.resolve_type_info`, `managed`) or that a
+/// template of core asks for once per instance (`@sendable`). Code that an earlier eval compiled destroys,
+/// copies and sends the values of the type without them.
+const late_decl_hooks = std.StaticStringMap(void).initComptime(.{
+    .{"@deinit"}, .{"@copy"}, .{"@clone"}, .{"@send"},
+});
+
+/// The parent of a declaration (`fn (&V) m()`, `fn V :: f()`, `const V :: K`) when the name `V` is a `use`
+/// alias of the chunk.
+///
+/// A `persist_main` eval sees what the earlier evals declared as aliases without a declaration
+/// (`Compiler.compileInner`). The evals of a session are one module (`module.is_sym_visible`), so a type of an
+/// earlier eval takes the declaration: it joins the module of the type, which a surviving chunk owns. The
+/// compiler takes it out again when this compile fails or is discarded (`Compiler.dropLateDecls`).
+///
+/// A `use` of this source names a symbol of another module, which does not take declarations.
+fn lateDeclParent(c: *cy.Chunk, alias: *cy.sym.UseAlias, parent_name: []const u8, name: []const u8, parent: *ast.Node) !*cy.Sym {
+    const other_module = "Can not declare `{}` for `{}`: `{}` belongs to another module. A method or a member of a type is declared in the module that declares the type.";
+    if (alias.decl != null or !alias.resolved) {
+        return c.reportErrorFmt(other_module, &.{v(name), v(parent_name), v(parent_name)}, parent);
+    }
+    const target = alias.sym;
+    if (target.type == .chunk) {
+        return c.reportErrorFmt(other_module, &.{v(name), v(parent_name), v(parent_name)}, parent);
+    }
+    if (target.type == .type_alias or target.getMod() == null) {
+        // The caller reports a type alias and what is not a type.
+        return target;
+    }
+    const owner = target.parent orelse {
+        return c.reportErrorFmt(other_module, &.{v(name), v(parent_name), v(parent_name)}, parent);
+    };
+    if (owner.type != .chunk or !cy.module.sameModule(owner.cast(.chunk).chunk, c)) {
+        return c.reportErrorFmt(other_module, &.{v(name), v(parent_name), v(parent_name)}, parent);
+    }
+    if (late_decl_hooks.has(name)) {
+        return c.reportErrorFmt("Can not declare `{}` for `{}` after the input that declares `{}`. The code that the session compiled since then destroys, copies and sends a `{}` without it. Declare the type again, together with `{}`.", &.{
+            v(name), v(parent_name), v(parent_name), v(parent_name), v(name),
+        }, parent);
+    }
+    try c.compiler.noteLateDeclParent(target);
+    return target;
 }

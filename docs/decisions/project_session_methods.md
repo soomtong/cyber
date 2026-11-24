@@ -153,3 +153,5 @@ B의 수요(메서드 본문을 고쳐 다시 넣기)는 타입을 다시 선언
 - behavior: `modules/cy_session_methods.cy`(세션), `functions/decl_parent_not_type_error.cy`,
   `functions/decl_method_parent_global_error.cy`, `modules/decl_method_other_module_error.cy`.
 - lib: `lib_test/session.zig` "A later eval declares a method for a type of an earlier eval."
+- 14단계 검증(`src/tools/verify.sh`) rc=0. REPL은 Debug · ReleaseSafe CLI에 stdin으로 넣어 확인했다(메서드, 타입 함수, 오버로드,
+  중복 오류, `@deinit` 거절, `.which`).

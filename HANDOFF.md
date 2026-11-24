@@ -215,6 +215,9 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - 테스트: `modules/cy_session_methods.cy`, `functions/decl_parent_not_type_error.cy` ·
     `decl_method_parent_global_error.cy`, `modules/decl_method_other_module_error.cy`, lib `session.zig`의 마지막 테스트.
     탐침은 `cy.VM`으로 입력 목록을 한 세션에 eval하는 스크립트가 빠르다(`?`로 시작하면 `vm.which`: validate 경로).
+  - 확인: 14단계 검증 rc=0. 커밋 `012e5a75`은 세션 hook 때문에 검증이 끝나기 전에 push했고, 검증 뒤 매뉴얼 문장만 고쳤다.
+  - 남은 것: CLI의 REPL은 타입 블록이 한 입력이라 `@deinit` · `@copy` · `@clone` · `@send`를 가진 타입을 선언할 수 없다.
+    같은 시그니처의 메서드를 교체하지 않고 오류로 한 것(결정 문서 규칙 3)과 이 넷의 거절(규칙 5)은 사용자 확인 전이다.
 
 ## 시도했으나 실패한 접근
 

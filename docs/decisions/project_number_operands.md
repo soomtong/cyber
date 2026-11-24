@@ -82,9 +82,7 @@ Julia는 `+(x::Number, y::Number) = +(promote(x,y)...)`로 두 순서가 같은 
 - 사용자 타입의 양쪽 연산자 조회(검토 3.4 B의 2). `v * 2.0`은 되고 `2.0 * v`는 안 되는 것은 그대로다. 정의하는 꼴(반사
   메서드인가 자유 함수인가)을 먼저 정해야 한다.
 - 사용자 확장 승격 규칙(Julia `promote_rule`). 내장 수 타입은 닫혀 있다.
-- 컴파일 타임 평가기의 float 연산 확장. float는 여전히 `*`만 된다. `const b = k + 2.5`는 변환 뒤 'Unsupported inline eval: plus'다.
-- 컴파일 타임의 정수 폭 넓히기. `const z = k * a`(`a`가 `i8`)는 전과 같은 'Expected type `int`. Found `i8`.'다.
-  런타임 산술은 넓힌다. 이 차이는 전부터 있었다.
+- 컴파일 타임 평가기의 float 연산 확장과 정수 폭 넓히기. 뒤 절 "컴파일 타임 수 연산"(2026-11-24)에서 했다.
 - 오버로드 선택. `fn show(x float)` 하나에 `int`를 넘기는 2단계 변환은 그대로다(`project_overload_exact_match.md`).
 
 ## 검증
@@ -103,3 +101,32 @@ Julia는 `+(x::Number, y::Number) = +(promote(x,y)...)`로 두 순서가 같은 
 
 위 "결정"의 마지막 두 항목이 그 수정이다. 테스트 `core/number_signed_raw_compare_error.cy` · `symbol_op_float_error.cy` ·
 `float_op_symbol_error.cy` · `error_eq_float_error.cy`.
+
+## 컴파일 타임 수 연산 (2026-11-24)
+
+HANDOFF의 알려진 한계("컴파일 타임 평가기는 float 연산이 `*`뿐이고 정수 폭을 넓히지 않는다")를 좇다 호스트 panic 넷을 찾았다
+(F-206 · F-207). 사용자 결정 없이 고쳤다: 런타임과 다른 값을 내던 것을 같게 하는 수정이고, 새 규칙은 0 나눗셈 하나다.
+
+규칙: 컴파일 타임 연산은 런타임 명령과 같은 값을 낸다(`vm.c`의 `Add` · `IMUL` · `IDIV` · `IMOD` · `LSL` · `LSR`, `Int.**`, `float_pow`).
+
+- 정수는 자기 폭에서 래핑한다. `i8` 100 + 100은 -56, `2 ** 70`은 0.
+- `/`는 0 쪽으로 자르고 `%`는 나눠지는 수의 부호를 따른다(C). 가장 작은 값 / -1은 래핑해 자기 자신, `%`는 0이다. 런타임에서
+  `int`의 이 나눗셈은 C의 정의되지 않은 동작이고, arm64는 같은 값을 낸다(x86-64는 트랩).
+- 정수의 `/` · `%` 0은 컴파일 오류 'Division by zero.'다. 런타임은 같은 문구의 panic이다. 컴파일 타임에는 값을 낼 수 없으므로
+  오류가 맞다(Zig · Rust의 상수 평가도 오류). float의 0 나눗셈은 런타임처럼 `inf` · `nan`이다.
+- 시프트는 값을 0 확장한 64비트 레지스터를 시프트하고 폭으로 자른다. 양은 아래 6비트(`1 << 70`은 64). 런타임은 C의 `<<`라
+  64 이상은 정의되지 않았지만 arm64 · x86-64 · wasm 모두 아래 6비트를 쓴다. `>>`는 부호 있는 정수에도 논리 시프트다(매뉴얼의
+  규칙, 런타임 `LSR`, `i8` -8 >> 1은 124). 산술 시프트는 `.asr()`이다.
+- `Int.**`의 음수 지수: 밑이 1이거나 -1 ** -1이면 1 · -1, 그 밖은 0(core의 정의 그대로). `Raw`에는 `**`가 없다.
+- 피연산자 맞추기(`evalFitNumbers`)는 `semaBinExpr`와 같다. 오른쪽을 왼쪽 타입으로 바꿔 보고, 안 되면 왼쪽을 오른쪽 타입으로.
+  변환은 암시적 변환 표(`evalNumberCast`): 정수 → float, `f32` → `float`, 좁은 정수 → 넓은 정수(부호 있는 것은 `Int[W]`로 부호 확장,
+  모두 `Raw[W]`로 0 확장, 같은 폭의 raw ↔ int는 비트 그대로). 비트 연산자는 float로 바꾸지 않고, 비교는 부호 있는 정수를 raw로
+  바꾸지 않는다. `==` · `!=`도 이제 같은 길이다.
+- `EvalInt`(타입 없는 컴파일 타임 정수)는 `int`와 같은 64비트 연산이고, 다른 정수 타입과 섞이지 않는다(전과 같다).
+
+구현: `cte.zig` `evalNumberOp` · `evalIntOp` · `evalIntPow` · `evalFloatOp` · `evalNumberCast` · `evalFitNumbers`(op를 받음) ·
+`evalNumberRight`. `eval_bin_expr`가 `%` · 비트 연산자 · `>>`도 받는다. `evalCompare`가 float과 distinct raw를 비교한다.
+`heap_value.copyValue3`가 distinct raw를 복사한다.
+
+남은 것: `error` 리터럴은 컴파일 타임 식이 아니다('Unsupported compile-time expression: `error_lit`'). 사용자 타입 연산자의
+컴파일 타임 호출은 전처럼 심볼 호출이다.

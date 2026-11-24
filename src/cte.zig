@@ -643,10 +643,20 @@ pub fn evalCompare(c: *cy.Chunk, type_: *cy.Type, a: Value, b: Value, node: *ast
         bt.I8 => {
             return a.byte == b.byte;
         },
+        bt.F64 => {
+            return a.asF64() == b.asF64();
+        },
+        bt.F32 => {
+            return a.asF32() == b.asF32();
+        },
         else => {
             switch (type_.kind()) {
                 .enum_t => {
                     return a.val == b.val;
+                },
+                // A distinct raw type: `symbol`, `error`.
+                .raw => {
+                    return a.as_raw_lit(type_.cast(.raw).bits) == b.as_raw_lit(type_.cast(.raw).bits);
                 },
                 else => {
                     const name = try c.sema.allocTypeName(type_);
@@ -2164,313 +2174,201 @@ fn eval_un_expr(c: *cy.Chunk, opt_target: ?*cy.Type, unary: *ast.Unary) !Expr {
 }
 
 fn eval_bin_expr2(c: *cy.Chunk, left: cy.TypeValue, left_n: *ast.Node, right: cy.TypeValue, right_n: *ast.Node, op: cy.BinaryExprOp, node: *ast.Node) !TypeValue {
-    switch (left.type.id()) {
-        bt.F64 => {
-            switch (op) {
-                .star => {
-                    const left_v = left.value.asF64();
-                    const right_v = right.value.asF64();
-                    return cy.TypeValue.init(c.sema.f64_t, Value.initFloat64(left_v * right_v));
-                },
-                else => {
-                    return c.reportErrorFmt("Unsupported inline eval: {}", &.{v(op)}, node);
-                },
-            }
-        },
-        bt.F32 => {
-            switch (op) {
-                .star => {
-                    const left_v = left.value.asF32();
-                    const right_v = right.value.asF32();
-                    return cy.TypeValue.init(c.sema.f32_t, Value.initFloat32(left_v * right_v));
-                },
-                else => {
-                    return c.reportErrorFmt("Unsupported inline eval: {}", &.{v(op)}, node);
-                },
-            }
-        },
-        bt.EvalInt => {
-            switch (op) {
-                .plus => {
-                    const left_v = left.value.as_eval_int();
-                    const right_v = right.value.as_eval_int();
-                    return cy.TypeValue.init(left.type, Value.init_eval_int(left_v + right_v));
-                },
-                .minus => {
-                    const left_v = left.value.as_eval_int();
-                    const right_v = right.value.as_eval_int();
-                    return cy.TypeValue.init(left.type, Value.init_eval_int(left_v - right_v));
-                },
-                .star => {
-                    const left_v = left.value.as_eval_int();
-                    const right_v = right.value.as_eval_int();
-                    return cy.TypeValue.init(left.type, Value.init_eval_int(left_v * right_v));
-                },
-                .slash => {
-                    const left_v = left.value.as_eval_int();
-                    const right_v = right.value.as_eval_int();
-                    return cy.TypeValue.init(left.type, Value.init_eval_int(@divTrunc(left_v, right_v)));
-                },
-                else => {
-                    return c.reportErrorFmt("Unsupported inline eval: {}", &.{v(op)}, node);
-                },
-            }
-        },
-        bt.R64 => {
-            switch (op) {
-                .plus => {
-                    const left_v = left.value.asUint();
-                    const right_v = right.value.asUint();
-                    return cy.TypeValue.init(left.type, Value.initR64(left_v +% right_v));
-                },
-                .minus => {
-                    const left_v = left.value.asUint();
-                    const right_v = right.value.asUint();
-                    return cy.TypeValue.init(left.type, Value.initR64(left_v -% right_v));
-                },
-                .star => {
-                    const left_v = left.value.asUint();
-                    const right_v = right.value.asUint();
-                    return cy.TypeValue.init(left.type, Value.initR64(left_v *% right_v));
-                },
-                .bitwiseRightShift => {
-                    const left_v = left.value.asUint();
-                    const right_v = right.value.asUint();
-                    return cy.TypeValue.init(left.type, Value.initR64(left_v >> @intCast(right_v)));
-                },
-                .bitwiseLeftShift => {
-                    const left_v = left.value.asUint();
-                    const right_v = right.value.asUint();
-                    return cy.TypeValue.init(left.type, Value.initR64(left_v << @intCast(right_v)));
-                },
-                .less_equal => {
-                    const left_v = left.value.asUint();
-                    const right_v = right.value.asUint();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v <= right_v));
-                },
-                .less => {
-                    const left_v = left.value.asUint();
-                    const right_v = right.value.asUint();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v < right_v));
-                },
-                .greater_equal => {
-                    const left_v = left.value.asUint();
-                    const right_v = right.value.asUint();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v >= right_v));
-                },
-                .greater => {
-                    const left_v = left.value.asUint();
-                    const right_v = right.value.asUint();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v > right_v));
-                },
-                else => {
-                    return c.reportErrorFmt("Unsupported inline eval: {}", &.{v(op)}, node);
-                },
-            }
-        },
-        bt.R8 => {
-            switch (op) {
-                .less_equal => {
-                    const left_v = left.value.asU8();
-                    const right_v = right.value.asU8();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v <= right_v));
-                },
-                .less => {
-                    const left_v = left.value.asU8();
-                    const right_v = right.value.asU8();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v < right_v));
-                },
-                .greater_equal => {
-                    const left_v = left.value.asU8();
-                    const right_v = right.value.asU8();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v >= right_v));
-                },
-                .greater => {
-                    const left_v = left.value.asU8();
-                    const right_v = right.value.asU8();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v > right_v));
-                },
-                else => {
-                    return c.reportErrorFmt("Unsupported inline eval: {}", &.{v(op)}, node);
-                },
-            }
-        },
-        bt.R16 => {
-            switch (op) {
-                .less_equal => {
-                    const left_v = left.value.asU16();
-                    const right_v = right.value.asU16();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v <= right_v));
-                },
-                .less => {
-                    const left_v = left.value.asU16();
-                    const right_v = right.value.asU16();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v < right_v));
-                },
-                .greater_equal => {
-                    const left_v = left.value.asU16();
-                    const right_v = right.value.asU16();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v >= right_v));
-                },
-                .greater => {
-                    const left_v = left.value.asU16();
-                    const right_v = right.value.asU16();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v > right_v));
-                },
-                else => {
-                    return c.reportErrorFmt("Unsupported inline eval: {}", &.{v(op)}, node);
-                },
-            }
-        },
-        bt.R32 => {
-            switch (op) {
-                .less_equal => {
-                    const left_v = left.value.asU32();
-                    const right_v = right.value.asU32();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v <= right_v));
-                },
-                .less => {
-                    const left_v = left.value.asU32();
-                    const right_v = right.value.asU32();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v < right_v));
-                },
-                .greater_equal => {
-                    const left_v = left.value.asU32();
-                    const right_v = right.value.asU32();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v >= right_v));
-                },
-                .greater => {
-                    const left_v = left.value.asU32();
-                    const right_v = right.value.asU32();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v > right_v));
-                },
-                else => {
-                    return c.reportErrorFmt("Unsupported inline eval: {}", &.{v(op)}, node);
-                },
-            }
-        },
-        bt.I8 => {
-            switch (op) {
-                .greater => {
-                    const left_v = left.value.asI8();
-                    const right_v = right.value.asI8();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v > right_v));
-                },
-                .less => {
-                    const left_v = left.value.asI8();
-                    const right_v = right.value.asI8();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v < right_v));
-                },
-                else => {
-                    return c.reportErrorFmt("Unsupported inline eval: {}", &.{v(op)}, node);
-                },
-            }
-        },
-        bt.I16 => {
-            switch (op) {
-                .greater => {
-                    const left_v = left.value.asI16();
-                    const right_v = right.value.asI16();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v > right_v));
-                },
-                .less => {
-                    const left_v = left.value.asI16();
-                    const right_v = right.value.asI16();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v < right_v));
-                },
-                else => {
-                    return c.reportErrorFmt("Unsupported inline eval: {}", &.{v(op)}, node);
-                },
-            }
-        },
-        bt.I32 => {
-            switch (op) {
-                .greater => {
-                    const left_v = left.value.asI32();
-                    const right_v = right.value.asI32();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v > right_v));
-                },
-                .less => {
-                    const left_v = left.value.asI32();
-                    const right_v = right.value.asI32();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v < right_v));
-                },
-                else => {
-                    return c.reportErrorFmt("Unsupported inline eval: {}", &.{v(op)}, node);
-                },
-            }
-        },
-        bt.I64 => {
-            switch (op) {
-                .plus => {
-                    const left_v = left.value.asUint();
-                    const right_v = right.value.asUint();
-                    return cy.TypeValue.init(left.type, Value.initR64(left_v +% right_v));
-                },
-                .minus => {
-                    const left_v = left.value.asUint();
-                    const right_v = right.value.asUint();
-                    return cy.TypeValue.init(left.type, Value.initR64(left_v -% right_v));
-                },
-                .star => {
-                    const left_v = left.value.asInt();
-                    const right_v = right.value.asInt();
-                    return cy.TypeValue.init(left.type, Value.initInt(left_v *% right_v));
-                },
-                .slash => {
-                    const left_v = left.value.asInt();
-                    const right_v = right.value.asInt();
-                    return cy.TypeValue.init(left.type, Value.initInt(@divTrunc(left_v, right_v)));
-                },
-                .greater => {
-                    const left_v = left.value.asInt();
-                    const right_v = right.value.asInt();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v > right_v));
-                },
-                .less => {
-                    const left_v = left.value.asInt();
-                    const right_v = right.value.asInt();
-                    return cy.TypeValue.init(c.sema.bool_t, Value.initBool(left_v < right_v));
-                },
-                .bitwiseRightShift => {
-                    const left_v = left.value.asUint();
-                    const right_v = right.value.asUint();
-                    return cy.TypeValue.init(left.type, Value.initR64(left_v >> @intCast(right_v)));
-                },
-                .bitwiseLeftShift => {
-                    const left_v = left.value.asUint();
-                    const right_v = right.value.asUint();
-                    return cy.TypeValue.init(left.type, Value.initR64(left_v << @intCast(right_v)));
-                },
-                else => {
-                    return c.reportErrorFmt("Unsupported inline eval: {}", &.{v(op)}, node);
-                }
-            }
-        },
-        else => {
-            const leftTypeSym = left.type.sym();
-            const sym = try c.getResolvedSymOrFail(@ptrCast(leftTypeSym), op.name(), node);
-            const func_sym = try sema_call.requireFuncSym(c, sym, node);
-            const args = [_]sema_func.Argument{
-                sema_func.Argument.initReceiver(left_n, sema.ExprResult.initCtValue(left)),
-                sema_func.Argument.initPreResolved(right_n, sema.ExprResult.initCtValue(right)),
-            };
-            return callFuncSym(c, func_sym, &args, &.{}, node);
-        },
+    if (left.type.id() == right.type.id()) {
+        if (try evalNumberOp(c, left, right, op, node)) |res| {
+            return res;
+        }
+        if (left.type.id() == bt.EvalInt) {
+            return c.reportErrorFmt("Unsupported inline eval: {}", &.{v(op)}, node);
+        }
     }
+    const leftTypeSym = left.type.sym();
+    const sym = try c.getResolvedSymOrFail(@ptrCast(leftTypeSym), op.name(), node);
+    const func_sym = try sema_call.requireFuncSym(c, sym, node);
+    const args = [_]sema_func.Argument{
+        sema_func.Argument.initReceiver(left_n, sema.ExprResult.initCtValue(left)),
+        sema_func.Argument.initPreResolved(right_n, sema.ExprResult.initCtValue(right)),
+    };
+    return callFuncSym(c, func_sym, &args, &.{}, node);
 }
 
-/// The compile-time form of the implicit casts that the operands of an arithmetic operator or a comparison use:
-/// an integer to a float, and `f32` to `float`. Returns null for any other pair of types.
-fn evalNumberToFloat(tval: TypeValue, target_t: *cy.Type) ?Value {
+/// The compile-time form of the operators of the built-in number types. Both operands have the same type. The value
+/// is the one the instructions give at runtime: an integer wraps at its width, `/` truncates, `>>` is a logical
+/// shift, a shift uses the low 6 bits of its amount, and `**` of integers is `Int.**`. Where the runtime panics,
+/// on `/` and `%` of integers by zero, this is a compile error. Returns null for any other type or operator.
+fn evalNumberOp(c: *cy.Chunk, left: TypeValue, right: TypeValue, op: cy.BinaryExprOp, node: *ast.Node) !?TypeValue {
+    const l = left.value;
+    const r = right.value;
+    return switch (left.type.id()) {
+        bt.F64 => evalFloatOp(f64, c, left.type, l.asF64(), r.asF64(), op),
+        bt.F32 => evalFloatOp(f32, c, left.type, l.asF32(), r.asF32(), op),
+        bt.EvalInt, bt.I64 => evalIntOp(i64, c, left.type, l.asInt(), r.asInt(), op, node),
+        bt.I32 => evalIntOp(i32, c, left.type, l.asI32(), r.asI32(), op, node),
+        bt.I16 => evalIntOp(i16, c, left.type, l.asI16(), r.asI16(), op, node),
+        bt.I8 => evalIntOp(i8, c, left.type, l.asI8(), r.asI8(), op, node),
+        bt.R64 => evalIntOp(u64, c, left.type, l.asUint(), r.asUint(), op, node),
+        bt.R32 => evalIntOp(u32, c, left.type, l.asU32(), r.asU32(), op, node),
+        bt.R16 => evalIntOp(u16, c, left.type, l.asU16(), r.asU16(), op, node),
+        bt.R8 => evalIntOp(u8, c, left.type, l.asU8(), r.asU8(), op, node),
+        else => null,
+    };
+}
+
+fn evalIntOp(comptime T: type, c: *cy.Chunk, type_: *cy.Type, l: T, r: T, op: cy.BinaryExprOp, node: *ast.Node) !?TypeValue {
+    const U = @Int(.unsigned, @bitSizeOf(T));
+    const signed = @typeInfo(T).int.signedness == .signed;
+    const res: T = switch (op) {
+        .plus => l +% r,
+        .minus => l -% r,
+        .star => l *% r,
+        .slash, .percent => b: {
+            if (r == 0) {
+                return c.reportError("Division by zero.", node);
+            }
+            // The quotient of the smallest value by -1 does not fit. It wraps like the instructions do.
+            if (signed and r == -1) {
+                break :b if (op == .slash) 0 -% l else 0;
+            }
+            break :b if (op == .slash) @divTrunc(l, r) else @rem(l, r);
+        },
+        .pow => b: {
+            // `Raw` has no `**`.
+            if (!signed) return null;
+            break :b evalIntPow(T, l, r);
+        },
+        .bitwiseAnd => l & r,
+        .bitwiseOr => l | r,
+        .bitwiseXor => l ^ r,
+        .bitwiseLeftShift, .bitwiseRightShift => b: {
+            // The instructions shift the 64-bit register that holds the zero extended value.
+            const wide: u64 = @as(U, @bitCast(l));
+            const amt: u6 = @truncate(@as(U, @bitCast(r)));
+            const shifted = if (op == .bitwiseLeftShift) wide << amt else wide >> amt;
+            break :b @bitCast(@as(U, @truncate(shifted)));
+        },
+        .less => return evalBool(c, l < r),
+        .less_equal => return evalBool(c, l <= r),
+        .greater => return evalBool(c, l > r),
+        .greater_equal => return evalBool(c, l >= r),
+        else => return null,
+    };
+    return TypeValue.init(type_, evalIntValue(type_, @as(U, @bitCast(res))));
+}
+
+/// `Int.**`: a negative exponent gives 0 except for a base of 1, and of -1 with an exponent of -1.
+fn evalIntPow(comptime T: type, base: T, exp: T) T {
+    if (exp < 0) {
+        if (base == 1 and exp == -1) return 1;
+        if (base == -1 and exp == -1) return -1;
+        return 0;
+    }
+    var b = base;
+    var e = exp;
+    var res: T = 1;
+    while (true) {
+        if (e & 1 != 0) {
+            res *%= b;
+        }
+        e >>= 1;
+        if (e == 0) break;
+        b *%= b;
+    }
+    return res;
+}
+
+fn evalFloatOp(comptime F: type, c: *cy.Chunk, type_: *cy.Type, l: F, r: F, op: cy.BinaryExprOp) ?TypeValue {
+    const res: F = switch (op) {
+        .plus => l + r,
+        .minus => l - r,
+        .star => l * r,
+        .slash => l / r,
+        // `fmod`.
+        .percent => if (r == 0 or !std.math.isFinite(l)) std.math.nan(F) else @rem(l, r),
+        .pow => std.math.pow(F, l, r),
+        .less => return TypeValue.init(c.sema.bool_t, Value.initBool(l < r)),
+        .less_equal => return TypeValue.init(c.sema.bool_t, Value.initBool(l <= r)),
+        .greater => return TypeValue.init(c.sema.bool_t, Value.initBool(l > r)),
+        .greater_equal => return TypeValue.init(c.sema.bool_t, Value.initBool(l >= r)),
+        else => return null,
+    };
+    if (F == f32) {
+        return TypeValue.init(type_, Value.initFloat32(res));
+    }
+    return TypeValue.init(type_, Value.initFloat64(res));
+}
+
+fn evalBool(c: *cy.Chunk, b: bool) ?TypeValue {
+    return TypeValue.init(c.sema.bool_t, Value.initBool(b));
+}
+
+/// A value of the built-in integer type `type_` from its bits.
+fn evalIntValue(type_: *cy.Type, bits: u64) Value {
+    return switch (type_.id()) {
+        bt.I8 => Value.initInt8(@bitCast(@as(u8, @truncate(bits)))),
+        bt.R8 => Value.initR8(@truncate(bits)),
+        bt.I16 => Value.initInt16(@bitCast(@as(u16, @truncate(bits)))),
+        bt.R16 => Value.initR16(@truncate(bits)),
+        bt.I32 => Value.initInt32(@bitCast(@as(u32, @truncate(bits)))),
+        bt.R32 => Value.initR32(@truncate(bits)),
+        bt.EvalInt => Value.init_eval_int(@bitCast(bits)),
+        else => Value.initRaw(bits),
+    };
+}
+
+/// The width and the value of a built-in integer that is a number: a sign extended value for `Int[W]` and a zero
+/// extended one for `Raw[W]`. `symbol` and `error` are not numbers.
+const EvalIntParts = struct {
+    bits: u32,
+    signed: bool,
+    val: u64,
+};
+
+fn evalIntParts(tval: TypeValue) ?EvalIntParts {
+    const val = tval.value;
+    return switch (tval.type.id()) {
+        bt.I64 => .{ .bits = 64, .signed = true, .val = val.asUint() },
+        bt.I32 => .{ .bits = 32, .signed = true, .val = @bitCast(@as(i64, val.asI32())) },
+        bt.I16 => .{ .bits = 16, .signed = true, .val = @bitCast(@as(i64, val.asI16())) },
+        bt.I8 => .{ .bits = 8, .signed = true, .val = @bitCast(@as(i64, val.asI8())) },
+        bt.R64 => .{ .bits = 64, .signed = false, .val = val.asUint() },
+        bt.R32 => .{ .bits = 32, .signed = false, .val = val.asU32() },
+        bt.R16 => .{ .bits = 16, .signed = false, .val = val.asU16() },
+        bt.R8 => .{ .bits = 8, .signed = false, .val = val.asU8() },
+        else => null,
+    };
+}
+
+/// The compile-time form of the implicit casts between numbers (`sema_lit.semaFitTarget`): an integer to a float,
+/// `f32` to `float`, and an integer to a wider one. A signed integer sign extends to `Int[W]`, and any integer zero
+/// extends to `Raw[W]`, or keeps its bits at the same width. Returns null for any other pair of types. With
+/// `to_float` false, the casts to a float are left out.
+fn evalNumberCast(tval: TypeValue, target_t: *cy.Type, to_float: bool) ?Value {
     switch (target_t.id()) {
         bt.F64 => {
+            if (!to_float) return null;
             if (tval.type.id() == bt.F32) {
                 return Value.initFloat64(tval.value.asF32());
             }
             return Value.initFloat64(evalIntToFloat(f64, tval) orelse return null);
         },
-        bt.F32 => return Value.initFloat32(evalIntToFloat(f32, tval) orelse return null),
+        bt.F32 => {
+            if (!to_float) return null;
+            return Value.initFloat32(evalIntToFloat(f32, tval) orelse return null);
+        },
+        bt.I64, bt.I32, bt.I16, bt.I8 => {
+            const src = evalIntParts(tval) orelse return null;
+            const bits = target_t.cast(.int).bits;
+            if (src.bits > bits or (src.signed and src.bits == bits)) return null;
+            return evalIntValue(target_t, src.val);
+        },
+        bt.R64, bt.R32, bt.R16, bt.R8 => {
+            const src = evalIntParts(tval) orelse return null;
+            const bits = target_t.cast(.raw).bits;
+            if (src.bits > bits or (!src.signed and src.bits == bits)) return null;
+            // The bits of the source width, zero extended.
+            const mask: u64 = if (src.bits == 64) std.math.maxInt(u64) else (@as(u64, 1) << @intCast(src.bits)) - 1;
+            return evalIntValue(target_t, src.val & mask);
+        },
         else => return null,
     }
 }
@@ -2491,19 +2389,31 @@ fn evalIntToFloat(comptime F: type, tval: TypeValue) ?F {
     };
 }
 
-/// Gives the operands of an arithmetic operator or a comparison one type, like `sema_expr.semaBinExpr` does at
-/// runtime: the right operand converts to the type of the left one, and when it can not, the left one converts
-/// to the type of the right one. `n * 2.5` is `2.5 * n`. A pair that no implicit cast joins is the type error
-/// of the right operand.
-fn evalFitNumbers(c: *cy.Chunk, left: *TypeValue, right: *TypeValue, right_n: *ast.Node) !void {
+/// Gives the operands of a number operator one type, like `sema_expr.semaBinExpr` does at runtime: the right
+/// operand converts to the type of the left one, and when it can not, the left one converts to the type of the right
+/// one. `n * 2.5` is `2.5 * n`, and `a * n` with `a i8` is `int`. A bitwise operator does not convert to a float, and
+/// a comparison does not convert a signed integer to a raw one (the zero extension turns -1 into a large number). A
+/// pair that no implicit cast joins is the type error of the right operand.
+fn evalFitNumbers(c: *cy.Chunk, left: *TypeValue, right: *TypeValue, right_n: *ast.Node, op: cy.BinaryExprOp) !void {
     if (left.type.id() == right.type.id()) return;
-    if (evalNumberToFloat(right.*, left.type)) |val| {
+    const to_float = switch (op) {
+        .bitwiseAnd, .bitwiseOr, .bitwiseXor, .bitwiseLeftShift, .bitwiseRightShift => false,
+        else => true,
+    };
+    if (evalNumberCast(right.*, left.type, to_float)) |val| {
         right.* = TypeValue.init(left.type, val);
         return;
     }
-    if (evalNumberToFloat(left.*, right.type)) |val| {
-        left.* = TypeValue.init(right.type, val);
-        return;
+    const compare = switch (op) {
+        .less, .less_equal, .greater, .greater_equal, .equal_equal, .bang_equal => true,
+        else => false,
+    };
+    const signed_to_raw = left.type.kind() == .int and right.type.kind() == .raw;
+    if (!(compare and signed_to_raw)) {
+        if (evalNumberCast(left.*, right.type, to_float)) |val| {
+            left.* = TypeValue.init(right.type, val);
+            return;
+        }
     }
     const exp_name = try c.sema.allocTypeName(left.type);
     defer c.alloc.free(exp_name);
@@ -2512,36 +2422,55 @@ fn evalFitNumbers(c: *cy.Chunk, left: *TypeValue, right: *TypeValue, right_n: *a
     return c.reportErrorFmt("Expected type `{}`. Found `{}`.", &.{v(exp_name), v(act_name)}, right_n);
 }
 
+/// An integer, a raw integer that is not a name (`symbol`, `error`), or a float.
+fn isEvalNumberType(type_: *cy.Type) bool {
+    if (type_.id() == bt.EvalInt) return true;
+    return switch (type_.kind()) {
+        .int, .float => true,
+        .raw => !type_.cast(.raw).distinct,
+        else => false,
+    };
+}
+
+/// The right operand of a number operator. Its type is a hint: `evalFitNumbers` checks the pair.
+fn evalNumberRight(c: *cy.Chunk, left_t: *cy.Type, right_n: *ast.Node) !TypeValue {
+    var right_cstr = ExprCstr.init_check(left_t);
+    right_cstr.pass_infer_placeholder = true;
+    right_cstr.check = false;
+    return exprToValue(c, try evalExpr(c, right_n, right_cstr), right_n);
+}
+
 fn eval_bin_expr(c: *cy.Chunk, left_n: *ast.Node, op: ast.BinaryExprOp, right_n: *ast.Node, node: *ast.Node) !TypeValue {
     switch (op) {
-        .bang_equal => {
-            const left = try eval(c, left_n);
-            defer c.heap.destructValue(left);
-            const right = try evalCheck(c, right_n, left.type);
-            defer c.heap.destructValue(right);
-
-            const res = try evalCompare(c, left.type, left.value, right.value, node);
-            return TypeValue.init(c.sema.bool_t, Value.initBool(!res));
-        },
+        .bang_equal,
         .equal_equal => {
-            const left = try eval(c, left_n);
+            var left = try eval(c, left_n);
             defer c.heap.destructValue(left);
-            const right = try evalCheck(c, right_n, left.type);
+            const number = isEvalNumberType(left.type);
+            var right = if (number) try evalNumberRight(c, left.type, right_n) else try evalCheck(c, right_n, left.type);
             defer c.heap.destructValue(right);
+            if (number) {
+                try evalFitNumbers(c, &left, &right, right_n, op);
+            }
 
             const res = try evalCompare(c, left.type, left.value, right.value, node);
-            return TypeValue.init(c.sema.bool_t, Value.initBool(res));
+            return TypeValue.init(c.sema.bool_t, Value.initBool(if (op == .bang_equal) !res else res));
         },
         .star,
         .slash,
+        .percent,
         .pow,
         .less,
         .less_equal,
         .greater,
         .greater_equal,
+        .bitwiseAnd,
+        .bitwiseOr,
+        .bitwiseXor,
         .bitwiseLeftShift,
+        .bitwiseRightShift,
         .plus,
-        .minus => {        
+        .minus => {
             switch (left_n.type()) {
                 .floatLit => {
                     // Infer type from right.
@@ -2549,9 +2478,7 @@ fn eval_bin_expr(c: *cy.Chunk, left_n: *ast.Node, op: ast.BinaryExprOp, right_n:
                     defer c.heap.destructValue(right);
                     var left = try evalHint(c, left_n, right.type);
                     // The literal stays a float when the right operand is not one (`2.5 * n`).
-                    if (op != .bitwiseLeftShift) {
-                        try evalFitNumbers(c, &left, &right, right_n);
-                    }
+                    try evalFitNumbers(c, &left, &right, right_n, op);
                     return eval_bin_expr2(c, left, left_n, right, right_n, op, node);
                 },
                 else => {},
@@ -2564,18 +2491,12 @@ fn eval_bin_expr(c: *cy.Chunk, left_n: *ast.Node, op: ast.BinaryExprOp, right_n:
                 return TypeValue.init(c.sema.type_t, Value.initPtr(c.sema.infer_t));
             }
             if (left.type.kind() == .int or left.type.kind() == .raw or left.type.kind() == .float or left.type.id() == bt.EvalInt) {
-                var right_cstr = ExprCstr.init_check(left.type);
-                right_cstr.pass_infer_placeholder = true;
-                // An arithmetic operator or a comparison converts either operand, so the mismatch is checked below.
-                right_cstr.check = op == .bitwiseLeftShift;
-                var right = try exprToValue(c, try evalExpr(c, right_n, right_cstr), right_n);
+                var right = try evalNumberRight(c, left.type, right_n);
                 defer c.heap.destructValue(right);
                 if (cy.template.isInferPlaceholder(right)) {
                     return TypeValue.init(c.sema.type_t, Value.initPtr(c.sema.infer_t));
                 }
-                if (op != .bitwiseLeftShift) {
-                    try evalFitNumbers(c, &left, &right, right_n);
-                }
+                try evalFitNumbers(c, &left, &right, right_n, op);
                 return eval_bin_expr2(c, left, left_n, right, right_n, op, node);
             }
 

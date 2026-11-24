@@ -745,6 +745,8 @@ fn test_core(run: *Runner) void {
     run.case("core/number_mixed_compare_str_error.cy");
     run.case("core/number_mixed_op_assign_error.cy");
     run.case("core/number_mixed_ops.cy");
+    run.case("core/number_const_ops.cy");
+    run.case("core/number_const_div_zero_error.cy");
     run.case("core/float_to_str.cy");
     run.case("core/ints.cy");
     run.case("core/int_unsupported_notation_error.cy");

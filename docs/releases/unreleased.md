@@ -31,7 +31,7 @@ C 백엔드를 지운 뒤 `docs/docs.md`에 남은 흔적과 `Planned Feature` �
 - `f32`와 `float`를 섞으면 어느 순서든 `float`다. 비교에서는 폭이 다른 정수도 왼쪽이 넓혀진다(`i8 < int`).
 - 결과는 정수로 되돌아가지 않는다. `i += f`, `var n int = i * f`는 'Expected type `int`, got `float`.' 오류다. `int(i * f)`로 쓴다.
 - 두 정수의 나눗셈은 그대로 정수 나눗셈이다(`i / 2`). 비트 연산자는 정수만 받는다(`i && f`는 전과 같은 오류).
-- 컴파일 타임 평가도 같은 규칙이다. `const r = k * 2.5`가 된다. float의 컴파일 타임 연산은 여전히 `*`뿐이다.
+- 컴파일 타임 평가도 같은 규칙이다. `const r = k * 2.5`가 된다. float의 다른 컴파일 타임 연산은 아래 "컴파일 타임 수 연산" 절에서 넣었다.
 - 호환성(전에 틀린 값을 내던 코드가 오류나 다른 값이 된다):
   - `f + 'abc'`, `f * true`처럼 왼쪽이 float이고 오른쪽이 수가 아닌 산술이 컴파일 오류가 됐다('Expected `float`, found `str`.').
     전에는 오른쪽의 비트를 float로 읽은 값이 나왔다(F-196).
@@ -40,7 +40,7 @@ C 백엔드를 지운 뒤 `docs/docs.md`에 남은 흔적과 `Planned Feature` �
   - `const r = 2.5 * k`(정수 상수 `k`)가 비정규 수 대신 맞는 값을 낸다(F-197).
 - 매뉴얼: Arithmetic operators · Comparison operators · Implicit casts · Inline evaluation 절. 에이전트 안내의 정수 · float 항목과
   오류 문구 둘.
-- 하지 않은 것: 사용자 타입 연산자의 양쪽 조회(`2.0 * v`), 컴파일 타임의 float 연산 확장.
+- 하지 않은 것: 사용자 타입 연산자의 양쪽 조회(`2.0 * v`). 컴파일 타임의 float 연산 확장은 뒤 절에서 했다.
 - 확인: 14단계 검증에서 1~8 · 13 · 14단계 rc=0. 9~12단계(wasm 실행)는 세션 컨테이너에 `wasmtime` 실행 파일이 없어 Python `wasmtime`
   패키지로 같은 wasm 파일을 돌렸고 넷 다 통과했다(behavior 820개, cli 13개, lib 181개, trace 15개).
 
@@ -217,3 +217,18 @@ CLI의 REPL에서 `use os`가 'Failed to load module: os'였다(F-200). 세션�
   `f`. ...'이다. 인자의 타입에서 `N`을 거꾸로 풀지는 않는다(0.4.19의 남은 한계는 문구만 고쳤다).
 - 매뉴얼: 템플릿 파라미터 추론 절. 테스트: behavior `meta/infer_param_func_type_expr_error.cy`, `meta/infer_param_lambda_expr_error.cy`.
 
+## 컴파일 타임 수 연산 (2026-11-24)
+
+`const`와 컴파일 타임 본문(`#` 함수, `#{}`)의 수 연산이 런타임과 같은 값을 낸다. 결정과 구현은
+`docs/decisions/project_number_operands.md` "컴파일 타임 수 연산".
+
+- 호스트 panic 넷을 고쳤다(F-206 · F-207). `const z = k / 0` · `k % 0`, 가장 작은 `int`를 `-1`로 나누기, `1 << 70`, `symbol` 타입
+  `const`를 읽는 식이 호스트를 끝냈다. 이제 정수의 `/` · `%` 0은 'Division by zero.' 컴파일 오류이고(런타임은 같은 문구의 panic),
+  나머지는 런타임과 같은 값이다.
+- 내장 수 타입(`Int[W]` · `Raw[W]` · `Float[W]`)의 `+ - * / % **`, `&& || ~ << >>`, `< <= > >=`가 모든 폭에서 된다. 전에는 타입마다
+  몇 연산만 있어 'Unsupported inline eval: plus'였다(예: `const w = 1.5 + 2.0`, `const z = a * 2`(`a i32`), `const r = k % 3`).
+  정수는 폭에서 래핑하고, `/`는 0 쪽으로 자르고, `>>`는 논리 시프트이고, 시프트 양은 아래 6비트를 쓴다. `Raw`에는 `**`가 없다.
+- 폭이 다른 정수는 좁은 쪽이 넓혀진다. `const z = k * a`(`a i8`, `k int`)가 `int`다. 전에는 'Expected type `int`. Found `i8`.'였다.
+  비교에서 부호 있는 정수는 raw 타입으로 바뀌지 않는다(`a < r`(`a i8`, `r r64`)는 런타임처럼 타입 오류).
+- float의 `==` · `!=`, 정수와 float의 `==`(`const t = k == 7.0`)가 된다. 전에는 'Unsupported float.'와 타입 오류였다.
+- 확인: behavior 테스트 `core/number_const_ops.cy`(같은 연산을 `const`와 런타임 변수로 계산해 비교), `core/number_const_div_zero_error.cy`.

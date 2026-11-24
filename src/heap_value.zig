@@ -203,6 +203,15 @@ pub fn copyValue3(self: *cy.Heap, val_t: *cy.Type, src: [*]const u8) !Value {
                 .enum_t => {
                     return valueConstCast(src)[0];
                 },
+                // A distinct raw type: `symbol`, `error`.
+                .raw => {
+                    switch (val_t.cast(.raw).bits) {
+                        8 => return Value.initRaw(src[0]),
+                        16 => return Value.initR16(@as(*const u16, @ptrCast(@alignCast(src))).*),
+                        32 => return Value.initR32(@as(*const u32, @ptrCast(@alignCast(src))).*),
+                        else => return valueConstCast(src)[0],
+                    }
+                },
                 else => {},
             }
             std.debug.panic("Unsupported: {s} {} {}", .{val_t.name(), val_t.kind(), val_t.id()});

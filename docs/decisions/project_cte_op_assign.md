@@ -35,3 +35,4 @@
 - cte는 언어의 두 번째 구현이다. sema에 문장 · 연산이 추가되면 `cte.zig`도 따라가야 하고, 회귀 테스트는 "같은 함수를 런타임과
   `const`로 모두 실행해 비교"하는 모양으로 둔다(03장 Q4).
 - `float` 산술은 `*`만 있다. `const w = 1.5 + 2.0`도 `Unsupported inline eval: plus`.
+  2026-11-24: 내장 수 타입의 산술 · 비트 · 순서 연산을 모두 넣었다(`project_number_operands.md` "컴파일 타임 수 연산").

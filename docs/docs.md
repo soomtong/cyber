@@ -4622,7 +4622,7 @@ An expression needs to be wrapped with `#{}` to perform inline evaluation if it'
 res := #{fib(30)}
 ```
 
-Inside a compile-time body, locals (`t := 0`), compound assignment (`t += 1`), `for` ranges, `if`, `switch` and fixed-size vectors (`v := [3]int(0)`, `v[i]`, `v[i] += 1`) evaluate the same as at runtime. A vector index out of range is a compile error. Operations the evaluator does not support yet (for example `float` addition) are reported as `Unsupported inline eval`. In an arithmetic operator an integer and a float mix as they do at runtime: `const r = k * 2.5` and `const r = 2.5 * k` are the same float for an integer constant `k`. `==` and `!=` of an integer and a float are a type error at compile time.
+Inside a compile-time body, locals (`t := 0`), compound assignment (`t += 1`), `for` ranges, `if`, `switch` and fixed-size vectors (`v := [3]int(0)`, `v[i]`, `v[i] += 1`) evaluate the same as at runtime. A vector index out of range is a compile error. The operators of the built-in number types give the same value as at runtime: an integer wraps at its width, `/` truncates, `>>` is a logical shift, and a narrower integer widens to the type of the other operand. An integer and a float mix as they do at runtime: `const r = k * 2.5`, `const r = 2.5 * k` and `const t = k == 7.0` work for an integer constant `k`. Integer `/` or `%` by zero is a compile error instead of the runtime panic. Operations the evaluator does not support yet are reported as `Unsupported inline eval`.
 
 ### Inline type creation.
 Types can be created from inline evaluation. Currently, only structs can be created with `meta.new_struct`:

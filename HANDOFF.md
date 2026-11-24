@@ -61,6 +61,9 @@
   if the choice is not clear"): REPL 세션이 CLI의 모듈을 가져오게 했다. 결정 `docs/decisions/project_repl_modules.md`.
   작업 브랜치 `claude/sweet-darwin-55r6jg`(`claude/sharp-faraday-c5yjxa` 위에 쌓았다). 지금은 둘 다 master에 들어왔다.
 - 2026-11-24(사용자: "continue"): 남은 치명 결함 F-204(가변 인자 extern 함수의 `int` 인자)를 고쳤다. master에 바로 커밋.
+- 2026-11-24(사용자: "@HANDOFF.md continue"): 알려진 한계 "컴파일 타임 평가기의 float 연산 · 정수 폭"을 좇다 호스트 panic
+  F-206 · F-207을 찾아 고쳤다. 컴파일 타임 수 연산이 런타임과 같은 값을 낸다. 결정 `project_number_operands.md` "컴파일 타임
+  수 연산", `unreleased.md` 같은 이름의 절. master에 바로 커밋.
 
 ## 현재 브랜치
 
@@ -386,13 +389,15 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - Julia 검토(설계 원칙 3.7)의 남은 결정: B의 2(사용자
   타입 연산자의 양쪽 조회, `2.0 * v`), C(오버로드 모호성을 LSP Warning으로 먼저), D(컬렉션 식. 꼴은 정했고 넣을지와 `map` ·
   `filter`와의 순서는 미정), F(컴파일 타임 검증 리터럴, 평가기 확장 뒤). 사용자가 고를 때만 한다.
-- 컴파일 타임 평가기는 float 연산이 `*`뿐이고 정수 폭을 넓히지 않는다(`const z = k * a`에서 `a`가 `i8`이면 오류). 런타임과의
-  차이로 남아 있다(`project_number_operands.md` "하지 않은 것").
+- [x] 컴파일 타임 수 연산(2026-11-24, F-206 · F-207): 내장 수 타입의 모든 산술 · 비트 · 순서 연산, 정수 넓히기, float `==`.
+  정수 `/` · `%` 0은 컴파일 오류. 남은 것: `error` 리터럴은 컴파일 타임 식이 아니다. `>>`는 매뉴얼대로 논리 시프트(산술은
+  `.asr()`).
 
 ## 다음 에이전트에게
 
 1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환, `os.cmd`, REPL 조회 명령, 세션의 메서드 선언,
-   REPL이 CLI의 모듈을 가져온다, 가변 인자 extern 함수의 `int` · `float` 인자, eval마다 남는 메모리, 선언 해석 중의 `type.info`).
+   REPL이 CLI의 모듈을 가져온다, 가변 인자 extern 함수의 `int` · `float` 인자, eval마다 남는 메모리, 선언 해석 중의 `type.info`,
+   컴파일 타임 수 연산).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 
@@ -435,7 +440,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-205까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-207까지, 열린 것 없음).
 
 ## 작업 방식
 

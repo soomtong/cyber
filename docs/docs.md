@@ -6264,14 +6264,14 @@ CompileError: Cannot persist local `sp` of borrow type `[&]int` across evals. De
 > sp := []int{1, 2}
 ```
 
-A top level variable of the REPL does not move without `move`, because later inputs read it. A `NoCopy` value that would move in a script is a compile error that says to write `move a` or to borrow. After `move a`, later inputs can not use `a`. A member of a top level variable can not be moved:
+A top level variable of the REPL does not move without `move`, because later inputs read it. A `NoCopy` value that would move in a script is a compile error that says to write `move a` or to borrow. After `move a`, later inputs can not use `a` until they declare it again (`a := ...`). A member of a top level variable can not be moved:
 ```bash
 > a := Array[str]{'x', 'y'}
 > b := a
 CompileError: Cannot copy `Array[str]`, a `NoCopy` type. The top level variable `a` of the REPL does not move without `move`: later inputs read it. Write `move a` to give it away (later inputs can not use `a` then), or borrow it.
 > b := move a
 > a
-CompileError: Undeclared variable `a`.
+CompileError: `a` was moved by an earlier input. Declare it again with `a := ...` to use the name.
 ```
 
 When the first input ends with `:`, the REPL will automatically indent the next line. To recede the indentation, provide an empty input. Once the indent returns to the beginning, the entire code block is submitted for evaluation:

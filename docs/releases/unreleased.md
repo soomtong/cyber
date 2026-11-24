@@ -200,3 +200,11 @@ CLI의 REPL에서 `use os`가 'Failed to load module: os'였다(F-200). 세션�
   load.' 컴파일 오류다(내장 모듈의 호스트 함수는 그 모듈로 올릴 때만 묶인다).
 - 테스트: behavior `meta/type_info_in_decl.cy`(struct · enum · choice).
 
+## REPL에서 옮긴 변수의 오류 문구 (2026-11-24)
+
+- REPL(`persist_main` 세션)에서 `b := move a` 뒤 다음 입력이 `a`를 쓰면 일반 'Undeclared variable `a`.'이었다. 이제
+  '`a` was moved by an earlier input. Declare it again with `a := ...` to use the name.'이다. 같은 입력 안에서 옮긴 뒤 쓰면
+  전처럼 '`a` was moved at L:C. ...'이다. 다시 선언하면(`a := ...`) 보통 변수로 돌아온다. panic으로 지역이 모두 버려지면
+  옮긴 이름의 기록도 버린다.
+- 매뉴얼: REPL 장. 테스트: lib `A main local that an earlier eval moved is named as moved.`(`src/lib_test/session.zig`).
+

@@ -164,6 +164,11 @@ pub const Compiler = struct {
     /// Key is either a *Sym, *Func, or *cy.types.FuncPtr (for extern func ptrs).
     genSymMap: std.AutoHashMapUnmanaged(*anyopaque, bcgen.Sym),
 
+    /// The names of the main locals of a session that an eval moved (`core.untrackMainLocal`), until a later eval
+    /// declares the name again. A later use of the name says that it was moved instead of 'Undeclared variable'.
+    /// Owns the keys.
+    moved_main_locals: std.StringHashMapUnmanaged(void) = .empty,
+
     /// Key to VM.vtables index.
     gen_vtables: std.AutoHashMapUnmanaged(bcgen.VtableKey, u32),
 
@@ -313,6 +318,26 @@ pub const Compiler = struct {
         }
     }
 
+    pub fn clearMovedMainLocals(self: *Compiler) void {
+        var iter = self.moved_main_locals.keyIterator();
+        while (iter.next()) |key| self.alloc.free(key.*);
+        self.moved_main_locals.clearRetainingCapacity();
+    }
+
+    /// Records that the main local `name` was moved (`moved_main_locals`).
+    pub fn noteMovedMainLocal(self: *Compiler, name: []const u8) !void {
+        if (self.moved_main_locals.contains(name)) return;
+        const dup = try self.alloc.dupe(u8, name);
+        errdefer self.alloc.free(dup);
+        try self.moved_main_locals.put(self.alloc, dup, {});
+    }
+
+    /// The main local `name` is declared again.
+    pub fn forgetMovedMainLocal(self: *Compiler, name: []const u8) void {
+        const removed = self.moved_main_locals.fetchRemove(name) orelse return;
+        self.alloc.free(removed.key);
+    }
+
     pub fn deinit(self: *Compiler, comptime reset: bool) void {
         // The chunks own what the lists point to.
         if (reset) {
@@ -416,6 +441,8 @@ pub const Compiler = struct {
                 self.alloc.free(entry.value_ptr.*);
             }
         }
+        self.clearMovedMainLocals();
+        if (!reset) self.moved_main_locals.deinit(self.alloc);
         if (reset) {
             self.chunks.clearRetainingCapacity();
             self.chunk_map.clearRetainingCapacity();

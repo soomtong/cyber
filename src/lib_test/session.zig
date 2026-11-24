@@ -526,13 +526,13 @@ test "persist_main: a top level local moves with `move` only, and a moved one is
         \\    test.eq(2, eat(q))
     , config, &res));
 
-    // `move` gives the value away. The local is not restored: the later evals do not know the name.
+    // `move` gives the value away. The local is not restored, and the later evals say that it was moved.
     try zt.eq(C.Success, C.vm_evalx(vm, "repl", "b := move a\ntest.eq(2, b.len())", config, &res));
     try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "test.eq(2, a.len())", config, &res));
     {
         const summary = C.vm_compile_error_summary(vm);
         defer C.vm_freeb(vm, summary);
-        try zt.expect(std.mem.indexOf(u8, summary, "Undeclared variable `a`.") != null);
+        try zt.expect(std.mem.indexOf(u8, summary, "`a` was moved by an earlier input.") != null);
     }
     try zt.eq(C.Success, C.vm_evalx(vm, "repl", "test.eq(27, b[0].len())\ntest.eq(1, bx.n)", config, &res));
     // A restored local that a branch moves is gone as well. The other branch destructs it.
@@ -1320,4 +1320,33 @@ test "A later eval declares a method for a type of an earlier eval." {
     try zt.eq(C.Success, C.vm_eval(vm2, "type V:\n    x float", &res));
     try zt.eq(C.ErrorCompile, C.vm_eval(vm2, "fn (&V) twice() -> float:\n    return self.x * 2", &res));
     try S.expectError(vm2, "Undeclared symbol: `V`");
+}
+
+test "A main local that an earlier eval moved is named as moved." {
+    // The local is not carried over after the move. The next use said 'Undeclared variable'.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "a := {1, 2}", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "b := move a", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = a", config, &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try zt.expect(std.mem.indexOf(u8, report, "`a` was moved by an earlier input. Declare it again with `a := ...` to use the name.") != null);
+    }
+    // Declared again, the name is a local like any other.
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "a := {3}\nuse test\ntest.eq(1, a.len())\ntest.eq(2, b.len())", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use test\ntest.eq(1, a.len())", config, &res));
+    // A name that was never declared keeps the usual error.
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = nope", config, &res));
+    {
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try zt.expect(std.mem.indexOf(u8, report, "Undeclared variable `nope`.") != null);
+    }
 }

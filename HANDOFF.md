@@ -408,7 +408,8 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - 이동: 조건부로 평가되는 식의 부분(`and` · `or`의 오른쪽, `?else` · `!else`의 기본값 · 블록)은 바깥 변수를 옮기지 못한다.
   `try` 문 · `scope` 블록 안의 `!`마다 빈 IR `block` 문장이 하나 붙는다(bytecode는 없다).
   `while` 조건식의 이동은 반복문 문구('the next iteration reads it')로 막힌다. `if` 언랩의 옵션 식은 옮길 수 있다. 버퍼를 재사용한 호출의 런타임
-  stack trace에는 제자리 메서드(`Slice.remove`)가 나온다. REPL에서 `move a` 뒤 다음 입력의 `a`는 일반 'Undeclared variable'이다.
+  stack trace에는 제자리 메서드(`Slice.remove`)가 나온다. REPL에서 `move a` 뒤 다음 입력의 `a`는
+  '`a` was moved by an earlier input.'이다(2026-11-24, `Compiler.moved_main_locals`).
 - 양보만 하는 fiber와 Future를 기다리는 fiber가 섞이면 `Scope.run`이 쉬지 않고 돈다(설계대로).
 - 실행으로 확인하지 못한 경로: Windows `FallbackReadLine`. 시작한 자식이 멈춘 동안 부모 스택이 옮겨지는 경우는 지금 구조에서
   생기지 않음을 확인했다(`project_coroutines.md` 끝 절).

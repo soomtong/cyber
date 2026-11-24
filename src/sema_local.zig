@@ -1157,6 +1157,10 @@ fn lookupIdent2(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdent
             }
         }
     }
+    // A main local that an earlier eval of the session moved is no longer carried over.
+    if (self.compiler.moved_main_locals.contains(name)) {
+        return self.reportErrorFmt("`{}` was moved by an earlier input. Declare it again with `{} := ...` to use the name.", &.{v(name), v(name)}, node);
+    }
     if (self.assign_left == node) {
         return self.reportErrorFmt("Undeclared variable `{}`. To declare a new variable, write `{} := ...`.", &.{v(name), v(name)}, node);
     }

@@ -509,6 +509,8 @@ pub const VM = struct {
         }
         self.env_local_saves.clearRetainingCapacity();
         self.env_local_saves_map.clearRetainingCapacity();
+        // The values are gone, the moved ones with them.
+        self.compiler.clearMovedMainLocals();
     }
 
     /// The tail of an eval whose program ran to its end: carries the main locals over and returns the result.

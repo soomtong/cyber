@@ -1720,6 +1720,7 @@ pub fn untrackMainLocal(t: *cy.Thread) !C.Ret {
     const vm = t.c.vm;
     const removed = vm.env_local_saves_map.fetchRemove(name_s.slice()) orelse return C.RetOk;
     vm.env_local_saves.orderedRemove(removed.value).deinit(t.alloc);
+    try vm.compiler.noteMovedMainLocal(name_s.slice());
     var iter = vm.env_local_saves_map.valueIterator();
     while (iter.next()) |idx| {
         if (idx.* > removed.value) idx.* -= 1;
@@ -1744,6 +1745,7 @@ pub fn trackMainLocal(t: *cy.Thread) !C.Ret {
     errdefer t.alloc.free(save.name);
     try t.c.vm.env_local_saves.ensureUnusedCapacity(t.alloc, 1);
     const res = try t.c.vm.env_local_saves_map.getOrPut(t.alloc, name);
+    t.c.vm.compiler.forgetMovedMainLocal(name);
     if (!res.found_existing) {
         res.key_ptr.* = save.name;
         res.value_ptr.* = t.c.vm.env_local_saves.items.len;

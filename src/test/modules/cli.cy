@@ -19,9 +19,11 @@ res = vm.eval('eval', 'a.g_int', {persist_main=true})
 t.eq(cy.Success, res.code)
 t.eq('`int` 123', vm.value_desc(res.val_t, res.value))
 
--- A missing file is a compile error with the message of the CLI's resolver, and the session goes on.
+-- A missing file is a compile error that names the path, and the session goes on. The resolver of the CLI reports
+-- it ('Import path does not exist'), or its loader on wasi, where the resolver does not look at the file system.
 t.eq(cy.ErrorCompile, vm.eval('eval', "use nosuch 'nosuch.cy'", {persist_main=true}).code)
-t.assert(vm.compile_error_summary().starts_with('CompileError: Import path does not exist: `nosuch.cy`'))
+t.assert(vm.compile_error_summary().starts_with('CompileError: '))
+t.assert(vm.compile_error_summary().contains('nosuch.cy`'))
 t.eq(cy.Success, vm.eval('eval', 'math.sqrt(9.0)', {persist_main=true}).code)
 
 -- `which` compiles against the session with the same imports.

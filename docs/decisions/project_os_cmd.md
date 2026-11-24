@@ -117,18 +117,24 @@ libc의 `setenv`는 `environ`을 새 배열로 옮기므로 옛 블록에는 새
   `env()`를 준 단계만 Windows에서도 map을 만든다.
 - `a.pipe(b)`가 `b`의 입력 글을 쓰지 않는다는 것을 문서 주석과 매뉴얼에 적었다.
 - 테스트의 `pwd`를 `pwd -P`로 바꿨다. `os.cwd()`는 심볼릭 링크를 푼 경로다.
-- PR의 첫 CI에서 macOS 두 job이 `modules/os_cmd.cy`로 실패했다. `os.cmd({'yes'}).pipe(os.cmd({'head', '-1'})).read()`가
-  `error.ExitStatus`였고 로그에 `yes: stdout: Broken pipe`가 찍혔다. 그 러너의 테스트 프로세스는 `SIGPIPE`를 무시하고,
-  무시 설정은 exec를 넘어 자식에게 간다. 그러면 `yes`는 신호로 끝나지 않고 쓰기 오류로 종료 코드 1을 낸다. "정한 것" 4번의
-  규칙은 신호가 자식에게 닿아야 성립한다. Linux에서도 `sh -c 'trap "" PIPE; exec cyber x.cy'`로 재현된다.
-  고침: 단계가 둘 이상인 파이프라인을 시작하기 전에, 이 프로세스의 `SIGPIPE` 처리가 무시(`SIG_IGN`)이면 아무 일도 하지 않는
-  핸들러로 바꾼다(`cmdLetStagesGetSigpipe`). 핸들러는 exec에서 기본 동작으로 돌아가므로 단계들은 신호를 받는다. 이 프로세스에는
-  차이가 없다. 닫힌 파이프에 쓰면 전처럼 신호 없이 오류가 난다. `std.Io.Threaded.init`이 자기가 띄우는 프로세스를 위해 하는
-  것과 같은 방법이다. 기본 동작이나 호스트가 건 핸들러는 건드리지 않는다. 한 번 바꾸면 되돌리지 않는다: 임베딩 호스트가
-  `SIGPIPE`의 처리를 다시 물으면 무시 대신 핸들러가 보인다.
-  남는 경우: 파이프라인을 시작하는 스레드가 `SIGPIPE`를 mask로 막고 있으면 그 mask도 자식에게 가고, 앞 단계는 신호를 받지
-  못한다. 이 경우는 다루지 않았다.
-  자동 테스트는 없다(behavior 테스트가 자기 프로세스의 신호 처리를 바꿀 길이 없다). macOS CI가 이 경우를 돈다.
+- PR의 CI에서 macOS 두 job이 `modules/os_cmd.cy`로 실패했다. `os.cmd({'yes'}).pipe(os.cmd({'head', '-1'})).read()`가
+  `error.ExitStatus`였고 로그에 `yes: stdout: Broken pipe`가 찍혔다. `yes`가 `SIGPIPE`로 끝나지 않고 쓰기 오류로 종료 코드 1을
+  낸 것이다. "정한 것" 4번의 규칙은 신호가 단계에 닿아야 성립한다. 닿지 않는 길이 둘 있었다.
+  1. 무시된 `SIGPIPE`(`SIG_IGN`)는 exec를 넘어 자식에게 간다. 처음에는 이것이 원인이라고 보고 고쳤다. Linux에서
+     `sh -c 'trap "" PIPE; exec cyber x.cy'`로 재현되는 실제 경우다. 고침: 단계가 둘 이상인 파이프라인을 시작하기 전에, 이
+     프로세스의 처리가 무시이면 아무 일도 하지 않는 핸들러로 바꾼다(`cmdLetStagesGetSigpipe`). 핸들러는 exec에서 기본 동작으로
+     돌아가므로 단계들은 신호를 받는다. 이 프로세스에는 차이가 없다(닫힌 파이프에 쓰면 전처럼 신호 없이 오류).
+     `std.Io.Threaded.init`이 하는 것과 같은 방법이다. 기본 동작이나 호스트가 건 핸들러는 건드리지 않는다. 한 번 바꾸면
+     되돌리지 않는다: 호스트가 `SIGPIPE`의 처리를 다시 물으면 무시 대신 핸들러가 보인다.
+  2. 그 수정 뒤에도 macOS는 같은 줄에서 실패했다. 신호 mask도 exec를 넘어 자식에게 간다. 입력 스레드(`cmdFeedInput`)가
+     `SIGPIPE`를 막으려고 `std.posix.sigprocmask`를 불렀는데, Darwin의 `sigprocmask`는 부른 스레드가 아니라 프로세스의 모든
+     스레드의 mask를 바꾼다(XNU의 `block_procsigmask`. 기억에 기댄 것이고 이번에 소스를 다시 읽지 않았다). 그래서 `stdin()`을
+     한 번 쓴 뒤로는 어느 스레드가 띄우는 단계든 `SIGPIPE`가 막힌 채 시작했다. Linux에서는 스레드 하나의 mask라 드러나지 않았다.
+     고침: Darwin에서는 mask를 건드리지 않고 그 파이프에만 `fcntl(F_SETNOSIGPIPE)`를 건다. 다른 POSIX에서는
+     `pthread_sigmask`(libc가 없으면 시스템 호출)로 그 스레드만 막는다. 호스트의 mask를 바꾸던 것도 함께 없어졌다.
+  남는 경우: 파이프라인을 시작하는 스레드가 스스로 `SIGPIPE`를 mask로 막고 있으면 앞 단계는 신호를 받지 못한다. 다루지 않았다.
+  자동 테스트: 1은 behavior 테스트가 자기 프로세스의 신호 처리를 바꿀 길이 없어 없다. 2는 `modules/os_cmd.cy`의 순서(`stdin()`
+  뒤의 `yes | head -1`)가 macOS CI에서 잡는다.
 
 ## 확인한 것과 못 한 것
 

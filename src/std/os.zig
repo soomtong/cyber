@@ -381,12 +381,24 @@ pub fn cmdRun(t: *C.Thread) anyerror!C.Ret {
 /// not read its input before its output is read, and a pipe holds only so much.
 fn cmdFeedInput(file: std.Io.File, bytes: []const u8) void {
     const io = stdx.io();
-    if (builtin.os.tag != .windows) {
-        // A stage that exits without reading its input makes the write fail with a signal. Blocked on this
-        // thread, the write returns an error instead and the signal goes away with the thread.
+    // A stage that exits without reading its input makes the write fail with `SIGPIPE`, which would end this
+    // process. The write must return an error instead, without a change that another thread or a stage sees:
+    // a signal mask is inherited by the programs that a thread starts.
+    if (comptime builtin.os.tag.isDarwin()) {
+        // Per descriptor. `sigprocmask` is not used here: on Darwin it sets the mask of every thread of the
+        // process, and the stages that the other threads start afterwards would have `SIGPIPE` blocked.
+        _ = std.c.fcntl(file.handle, std.c.F.SETNOSIGPIPE, @as(c_int, 1));
+    } else if (builtin.os.tag != .windows) {
+        // Blocked on this thread only, the signal goes away with the thread.
         var set = std.posix.sigemptyset();
         std.posix.sigaddset(&set, .PIPE);
-        std.posix.sigprocmask(std.posix.SIG.BLOCK, &set, null);
+        if (builtin.link_libc) {
+            var old: std.posix.sigset_t = undefined;
+            _ = std.c.pthread_sigmask(std.posix.SIG.BLOCK, &set, &old);
+        } else {
+            // Without libc this is the system call, which sets the mask of the calling thread.
+            std.posix.sigprocmask(std.posix.SIG.BLOCK, &set, null);
+        }
     }
     file.writeStreamingAll(io, bytes) catch {};
     file.close(io);

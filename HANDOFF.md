@@ -190,8 +190,10 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 - [x] PR soomtong/cyber#12 리뷰(2026-11-24, 사용자: "PR 검토하고 리뷰하고 수정할 부분 처리 후 병합"). `/code-review high` 10건을 모두
   고쳤고(`unreleased.md` "PR #12 리뷰에서 나온 수정"), 첫 CI의 macOS 실패(`SIGPIPE`를 무시하는 러너에서 `yes | head -1`)를 고쳤다.
-  - 구현 함정: 무시된 신호(`SIG_IGN`)와 신호 mask는 exec를 넘어 자식에게 간다. 핸들러는 기본 동작으로 돌아간다. Linux에서
-    macOS 러너의 조건은 `sh -c 'trap "" PIPE; exec zig-out/bin/cyber x.cy'`로 만든다.
+  - 구현 함정: 무시된 신호(`SIG_IGN`)와 신호 mask는 exec를 넘어 자식에게 간다. 핸들러는 기본 동작으로 돌아간다.
+    Darwin의 `sigprocmask`는 프로세스의 모든 스레드에 적용된다(Zig `std.posix.sigprocmask`의 주석은 "thread signal mask"지만
+    Darwin에서는 libc `sigprocmask`를 부른다). 스레드 하나만 막으려면 `pthread_sigmask`, 파이프 하나만이면 `F_SETNOSIGPIPE`.
+    무시된 `SIGPIPE`는 Linux에서 `sh -c 'trap "" PIPE; exec zig-out/bin/cyber x.cy'`로 만든다.
 
 ## 시도했으나 실패한 접근
 

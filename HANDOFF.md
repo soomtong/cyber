@@ -59,7 +59,8 @@
   (`claude/sharp-faraday-c5yjxa` 위에 쌓았다: F-199의 기록과 `.which`가 그 브랜치에만 있다).
 - 2026-11-24(사용자: F-200을 고치라는 요청, 결정 문서 · 테스트 · 매뉴얼 · 발견 표 · `unreleased.md` · `verify.sh`까지. "ask the user
   if the choice is not clear"): REPL 세션이 CLI의 모듈을 가져오게 했다. 결정 `docs/decisions/project_repl_modules.md`.
-  작업 브랜치 `claude/sweet-darwin-55r6jg`(`claude/sharp-faraday-c5yjxa` 위에 쌓았다. master에는 둘 다 아직 없다).
+  작업 브랜치 `claude/sweet-darwin-55r6jg`(`claude/sharp-faraday-c5yjxa` 위에 쌓았다). 지금은 둘 다 master에 들어왔다.
+- 2026-11-24(사용자: "continue"): 남은 치명 결함 F-204(가변 인자 extern 함수의 `int` 인자)를 고쳤다. master에 바로 커밋.
 
 ## 현재 브랜치
 
@@ -376,8 +377,8 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - [x] F-199: `persist_main` 세션에서 앞 입력이 선언한 타입에 뒤 입력이 메서드 · 타입 함수를 선언하면 호스트가 abort하던 것.
   고쳤다(위 "완료된 작업"의 "세션의 뒤 입력이 앞 입력의 타입에 메서드를 선언한다", `project_session_methods.md`).
 - [x] F-200(2026-11-24 수정): CLI의 REPL에서 `use os`가 실패하던 것. "완료된 작업"의 "REPL이 CLI의 모듈을 가져온다".
-- [ ] F-204(치명, 미수정): 가변 인자 extern 함수에 `int`를 넘기면 `'Int_0' undeclared` 뒤 호스트가 abort한다
-  (`libc.printf(s, 7)`, 파일로 돌려도 같다). `i32(7)`은 된다. `@initBindLib`의 C 생성이 `int`의 C 이름을 선언하지 않는다.
+- [x] F-204(2026-11-24 수정, 사용자: "continue"): 가변 인자 extern 함수에 `int` · `float` · `f32` · `r16`을 넘기면 호스트가
+  abort하던 것. 변형 함수의 C 래퍼(`cgen.genVmToExternFunc`)가 자기 매개변수 · 반환 타입을 선언한다. 테스트 `ffi/variadic.cy`.
 - `os.cmd`의 다음 단계(`project_os_cmd.md` "가져오지 않은 것"): 줄 단위 스트리밍, 실행 중 중단 · 시간 제한, 파일 리다이렉션.
   Windows에서의 실행 확인도 남았다.
 - Julia 검토(설계 원칙 3.7)의 남은 결정: B의 2(사용자
@@ -389,7 +390,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 ## 다음 에이전트에게
 
 1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환, `os.cmd`, REPL 조회 명령, 세션의 메서드 선언,
-   REPL이 CLI의 모듈을 가져온다).
+   REPL이 CLI의 모듈을 가져온다, 가변 인자 extern 함수의 `int` · `float` 인자).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 

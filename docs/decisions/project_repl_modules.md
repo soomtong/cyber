@@ -158,9 +158,9 @@ REPL에서 전에는 닿지 않았을 뿐이다(extern 함수가 있는 모듈�
 - `emit_program_init_func`(`src/compiler.zig`)은 앞 컴파일의 청크에 extern 함수가 있으면 `@initBindLib`을 부른다. 묶을 것이
   없으면(`hasUnbound`) TCC 없이 relocation만 한다. `performRtRelocations`는 코드가 없는 청크(실패한 컴파일)를 건너뛴다.
 
-고치지 않은 것(F-204): 가변 인자 extern 함수에 `int`를 넘기면(`libc.printf(s, 7)`) 파일로 돌려도 `'Int_0' undeclared` 뒤 abort다.
-`i32(7)`은 된다. cgen이 템플릿 별칭이 된 `int`의 C 이름을 선언하지 않는다(F-195가 적은 `mapType` 문제와 같은 뿌리). 세션과
-무관하다.
+F-204(같은 날 고침): 가변 인자 extern 함수에 `int`를 넘기면(`libc.printf(s, 7)`) 파일로 돌려도 `'Int_0' undeclared` 뒤
+abort였다. 세션과 무관하다. 처음에는 F-195의 `mapType` 문제와 같은 뿌리로 보았으나, 원인은 변형 함수의 C 래퍼가 원래 선언의
+매개변수 타입만 선언하고 변형이 받은 인자 타입은 선언하지 않은 것이었다(`cgen.genVmToExternFunc`가 이제 자기 타입을 선언).
 
 ## 다른 언어의 같은 문제
 

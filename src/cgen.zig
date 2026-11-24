@@ -773,6 +773,13 @@ pub fn genVmToExternFunc(c: *Chunk, w: anytype, func: *cy.Func, call_func: *cy.F
 
     const params = func.sig.params();
 
+    // A variant has the types of the arguments of a call (`int` for `printf(s, 7)`), which the forward declaration of
+    // the variadic function does not declare (F-204).
+    for (params) |param| {
+        try declareType(c, param.get_type(), w);
+    }
+    try declareType(c, func.sig.ret, w);
+
     const variant = func != call_func;
     if (variant) {
         // Emit extern variant wrapper function that calls extern function.

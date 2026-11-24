@@ -1151,6 +1151,7 @@ test "FFI." {
     // Binds libc functions of the host executable by name (`#c.bind_lib(none)`), like `modules/libc.cy`.
     if (builtin.target.os.tag != .windows) {
         try case("ffi/session.cy");
+        try case("ffi/variadic.cy");
     }
 }
 

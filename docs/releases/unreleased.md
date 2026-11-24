@@ -158,7 +158,7 @@ CLI의 REPL에서 `use os`가 'Failed to load module: os'였다(F-200). 세션�
 - 함께 고친 것: CLI의 loader가 파일 · URL 모듈의 소스를 불러오는 VM의 allocator로 읽는다(전에는 CLI의 allocator. CLI의 VM에서는
   둘이 같아 드러나지 않았다).
 - 알려진 한계:
-  - 가변 인자 extern 함수에 `int`를 넘기면 호스트가 abort한다(`libc.printf(s, 7)`, F-204, 전부터 있던 결함). `i32(7)`로 쓴다.
+  - 가변 인자 extern 함수에 `int`를 넘기면 호스트가 abort했다(F-204). 아래 절에서 고쳤다.
   - REPL에서도 `os.cwd()`는 `os.cwd()!`로 써야 한다('Expected to handle the error case for `!str`.').
   - F-199는 그대로다.
 - 매뉴얼: REPL 장(세션의 import), Runtime execution 절(`cy.eval`의 격리, `cli.new_vm()`, `cy.REPL.new(vm)`), libcyber 장의 resolver
@@ -168,3 +168,14 @@ CLI의 REPL에서 `use os`가 'Failed to load module: os'였다(F-200). 세션�
 - 확인: 15단계 검증에서 9단계만 실패했다(rc=1, 나머지 rc=0). wasm에서 없는 파일의 오류를 resolver가 아니라 loader가 내어
   `modules/cli.cy`의 문구 단언이 맞지 않았다. 단언을 경로만 보게 고친 뒤 9단계를 다시 돌려 rc=0(behavior 821개), 같은 파일을
   Debug · ReleaseSafe CLI로도 다시 돌렸다. 9~12단계는 세션 컨테이너에 `wasmtime` 실행 파일이 없어 Python `wasmtime` 패키지로 돌렸다.
+
+## 가변 인자 extern 함수의 `int` · `float` 인자 (2026-11-24, F-204)
+
+- 가변 인자 extern 함수에 `int`를 넘기면 호스트가 끝나던 것을 고쳤다(전부터 있던 결함). `libc.printf(s, 7)`이
+  `'Int_0' undeclared` 뒤 'Failed to compile c source.'로 abort했다. 파일로 돌려도, 세션에서도 같았다. `float` · `f32` · `r16`도
+  같은 길이였고(`'Float_0' undeclared`), C 이름이 미리 정해진 `i8` · `i16` · `i32` · `r32` · `r64` · `bool`과 포인터만 됐다.
+- 원인: 호출마다 만드는 변형 함수(`vm_extern_variant`)의 C 래퍼가 원래 선언(`args c.variadic`)의 매개변수 타입만 선언하고,
+  변형이 받은 인자의 타입은 선언하지 않았다. 이제 `cgen.genVmToExternFunc`가 자기 매개변수 · 반환 타입을 선언한다.
+- C 함수에는 C의 기본 인자 승격이 그대로 적용된다(`f32`는 `double`로, `i8`은 `int`로). `int`는 64비트이므로 형식 문자열은
+  `%lld`(또는 `%ld`)로 쓴다.
+- 테스트: behavior `ffi/variadic.cy`(`int` · `i8` · `i16` · `i32` · `float` · `f32` · `r64` · `r32` · `r16` · `bool` · 포인터).

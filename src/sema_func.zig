@@ -1430,6 +1430,10 @@ fn firstInferParam(node: *ast.Node, ctx: ?*sema_resolve.ResolveContext) ?*ast.No
             const vector_t = node.cast(.partial_vector_type);
             return firstInferParam(vector_t.child, ctx) orelse firstInferParam(vector_t.n, ctx);
         },
+        .binExpr => {
+            const bin = node.cast(.binExpr);
+            return firstInferParam(bin.left, ctx) orelse firstInferParam(bin.right, ctx);
+        },
         .fn_type => {
             const func_type = node.cast(.fn_type);
             for (func_type.params.slice()) |param| {

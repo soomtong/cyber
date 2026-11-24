@@ -398,7 +398,8 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 ## 알려진 한계
 
-- 0.4.19에서 남긴 것: 시그니처에 직접 쓴 `fn(T) -> [%N + 1]T`는 infer 파라미터로 찾지 않는다(이항식 안을 보지 않는다).
+- 0.4.19에서 남긴 것: 시그니처에 직접 쓴 `fn(T) -> [%N + 1]T`는 이제 `N`을 짚는 'Can not infer the template parameter'
+  오류다(2026-11-24, 거꾸로 풀지는 않는다).
   템플릿 오버로드끼리 infer 위치만 다르면(`fn(T) -> ?%U`와 `fn(T) -> []%U`) 선언이 'already been declared with the same
   function signature'로 거부된다. `%T type` 명시 인자의 평가 오류와 컴파일 타임 호출(`matchGenericFuncCt`)은 오버로드에서 바로 오류다.
   실패한 오버로드 후보에서 끝까지 검사된 타입 선언형 람다는 죽은 코드로 남는다. `cyber src/builtins/cy.cy`의 panic은

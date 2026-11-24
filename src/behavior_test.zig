@@ -929,6 +929,8 @@ fn test_control_flow(run: *Runner) void {
     run.case("meta/infer_param_lambda.cy");
     run.case("meta/infer_param_lambda_alias_value.cy");
     run.case("meta/infer_param_lambda_alias_value_expr_error.cy");
+    run.case("meta/infer_param_lambda_expr_error.cy");
+    run.case("meta/infer_param_func_type_expr_error.cy");
     run.case("meta/infer_param_lambda_alias_value_param_error.cy");
     run.case("meta/infer_param_lambda_arity_error.cy");
     run.case("meta/infer_param_lambda_bang.cy");

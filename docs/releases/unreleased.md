@@ -208,3 +208,12 @@ CLI의 REPL에서 `use os`가 'Failed to load module: os'였다(F-200). 세션�
   옮긴 이름의 기록도 버린다.
 - 매뉴얼: REPL 장. 테스트: lib `A main local that an earlier eval moved is named as moved.`(`src/lib_test/session.zig`).
 
+## 계산한 크기 안의 infer 파라미터 (2026-11-24)
+
+- 함수 타입 매개변수의 계산한 크기 안에 쓴 infer 파라미터(`f fn(T) -> [%N + 1]T`)를 시그니처가 infer 파라미터로 찾지 않았다.
+  이름 있는 함수를 넘기면 'Can not infer a template parameter from the argument for `f`. Declare it as its own parameter (`%T
+  type`) ...'으로 엉뚱한 이름을 말했고, 추론 람다를 넘기면 'Can not infer function type. ...'이었다. 이제 둘 다 같은 별칭
+  (`type V2[const N int, T Any] = fn(T) -> [N + 1]T`)의 경우처럼 'Can not infer the template parameter `N` from the argument for
+  `f`. ...'이다. 인자의 타입에서 `N`을 거꾸로 풀지는 않는다(0.4.19의 남은 한계는 문구만 고쳤다).
+- 매뉴얼: 템플릿 파라미터 추론 절. 테스트: behavior `meta/infer_param_func_type_expr_error.cy`, `meta/infer_param_lambda_expr_error.cy`.
+

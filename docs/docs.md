@@ -2890,7 +2890,7 @@ print(map([]int{1, 2}, |x|)):
     return x + 1
 ```
 
-When no argument binds a template parameter, the call reports 'Can not infer the template parameter `U` from the argument for `f`. Declare it as its own parameter (`%U type`) and pass the type in the call.' An explicit parameter is always an alternative to inference:
+When no argument binds a template parameter, the call reports 'Can not infer the template parameter `U` from the argument for `f`. Declare it as its own parameter (`%U type`) and pass the type in the call.' A parameter inside a computed size (`fn(T) -> [%N + 1]T`) is never bound by an argument and reports the same. An explicit parameter is always an alternative to inference:
 ```cy
 fn convert(%U type, items []%T, f fn(T) -> U) -> []U:
     out := []U{}

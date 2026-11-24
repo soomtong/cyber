@@ -1488,6 +1488,12 @@ fn findInferParams(c: *cy.Chunk, node: *ast.Node) !void {
                 try findInferParams(c, ret);
             }
         },
+        .binExpr => {
+            // `[%N + 1]T`. Declared here so that a call says which parameter it can not infer.
+            const bin = node.cast(.binExpr);
+            try findInferParams(c, bin.left);
+            try findInferParams(c, bin.right);
+        },
         else => {
         },
     }

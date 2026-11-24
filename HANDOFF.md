@@ -186,6 +186,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - `cy.cy`의 `REPL.command` · `VM.which` · `VM.bytecode` · `repl(read_line, doc)`, `refs.zig`의 `which`, `debug.zig`의
     `allocFuncBytecode`, `cli.zig`의 `doc_hook` · `replDoc`, `main.zig`의 `replDoc`.
   - 테스트는 `modules/cy.cy` 끝. `.doc`은 CLI에서 손으로 확인했다(자동 테스트 없음: REPL을 stdin으로 모는 테스트가 없다).
+  - 확인: 수 피연산자 · `os.cmd` · REPL 명령 각각의 커밋 뒤 14단계 검증 rc=0(wasm 단계는 Python `wasmtime` 대역).
 
 ## 시도했으나 실패한 접근
 

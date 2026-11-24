@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.19-dev 1136-32ddbdf</div>
+    <div class="sub-title">v0.4.19-dev 1138-7b39609</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1090,11 +1090,11 @@ strong {
 <li>Value ownership and deinitializers.</li>
 <li>Metaprogramming with templates, inline evaluation, and compiler hooks.</li>
 <li>Concurrency. Threads that run in parallel, futures and <code>await</code> to wait for them, fibers and <code>scope</code> blocks for structured concurrency, and generators.</li>
-<li>Compilation ahead-of-time to C or interpeted from its virtual machine.</li>
-<li>Sandbox mode that restricts the language to only safe constructs. <em>Planned Feature</em></li>
+<li>Interpreted by a bytecode virtual machine. A CLI runs scripts, and <code>libcyber</code> embeds the VM in a host application.</li>
+<li>Embedding controls that let a host restrict a script: raw pointers, the modules it can load, its memory, its stack and its run time.</li>
 <li>Introspection. Much of the internals such as the builtin types and runtime is written in Cyber and can be inspected from the source code or the <a href="api.html" title="">API docs</a>.</li>
 </ul>
-<p>These docs provide a reference manual for the language. It can be read in order or browsed from the navigation. Features that are marked <code>Incomplete</code> or <code>Planned</code> have not been completed at the time of writing.</p>
+<p>These docs provide a reference manual for the language. It can be read in order or browsed from the navigation. Features that are marked <code>Planned</code> have not been completed at the time of writing.</p>
 <h2 id="hello-world">Hello World. <a href="#hello-world">#</a></h2>
 <p>Here is a simple example that offers a sneak peek into the language:</p>
 <pre><code class="language-cy">use math
@@ -1246,7 +1246,7 @@ var b float = 'hello'
 </code></pre>
 <a href="#syntax">^topic</a>
 <h3 id="global-variables"><code>global</code> variables. <a href="#global-variables">#</a></h3>
-<p>Global variables live until the end of the program and can be accessed from any context (unless they have a private modifier). Globals are considered <em>unsafe</em>. A sandbox mode that forbids them is planned.</p>
+<p>Global variables live until the end of the program and can be accessed from any context (unless they have a private modifier). Globals are considered <em>unsafe</em>.</p>
 <p>Global variables are declared with <code>global</code> and require a type specifier:</p>
 <pre><code class="language-cy">global a int = 123
 
@@ -1444,8 +1444,6 @@ a << b
 <li><a href="#string-concatenation" title="">String concatenation.</a></li>
 <li><a href="#string-interpolation" title="">String interpolation.</a></li>
 <li><a href="#string-formatting" title="">String formatting.</a></li>
-<li><a href="#line-join-literal" title="">Line-join literal.</a></li>
-<li><a href="#mutable-strings" title="">Mutable strings.</a></li>
 </ul>
 </li>
 <li><a href="#symbols" title="">Symbols.</a></li>
@@ -1741,35 +1739,10 @@ dump(&m)
 <p>Alternatively, a custom placeholder can be specified:</p>
 <pre><code class="language-cy">print('if (%PH) {\n\t%PH}'.fmt('%PH', {cond, body}))
 </code></pre>
-<p><em>Named placeholders will be supported.</em></p>
 <p>Values that can be formatted into a string typically have a <code>fmt</code> method:</p>
 <pre><code class="language-cy">x := 123
 print(x.fmt(.hex))  --> 7b
 </code></pre>
-<a href="#basic-types">^topic</a>
-<h3 id="line-join-literal">Line-join literal. <a href="#line-join-literal">#</a></h3>
-<p>The line-join literal joins string literals with the new line character <code>\n</code>. <em>Planned Feature</em></p>
-<p>This has several properties:</p>
-<ul>
-<li>Ensures the use of a consistent line separator: <code>\n</code></li>
-<li>Allows lines to have a mix of raw string or string literals.</li>
-<li>Single quotes and double quotes do not need to be escaped.</li>
-<li>Allows each line to be indented along with the surrounding syntax.</li>
-<li>Allows comments in between adjacent lines.</li>
-<li>The starting whitespace for each line is made explicit.</li>
-</ul>
-<pre><code class="language-cy">paragraph := {
-    \`raw string literal
-    \hello\nworld
-    \hello %{name}
-    -- This is a comment.
-    \last line
-    \
-}
-</code></pre>
-<a href="#basic-types">^topic</a>
-<h3 id="mutable-strings">Mutable strings. <a href="#mutable-strings">#</a></h3>
-<p><code>Str</code> is a mutable string type. <em>Planned Feature</em></p>
 <a href="#basic-types">^topic</a>
 <h2 id="symbols">Symbols. <a href="#symbols">#</a></h2>
 <p>A symbol literal is written <code>symbol.</code> followed by an identifier, like an error value is written <code>error.Name</code>.
@@ -1850,10 +1823,6 @@ print(v)     --> 123
 <p>An <code>?else</code> block executes a block of statements for the <code>none</code> case:</p>
 <pre><code class="language-cy">value := opt ?else:
     return error.Missing
-</code></pre>
-<p>A value can be returned with <code>break</code>: <em>Planned Feature</em></p>
-<pre><code class="language-cy">value := opt ?else:
-    break 'empty'
 </code></pre>
 <a href="#basic-types">^topic</a>
 <h3 id="optional-chaining">Optional chaining. <a href="#optional-chaining">#</a></h3>
@@ -1964,10 +1933,6 @@ print('%{arr[0]} %{slice[0]')   --> 100 100
 slice += 4
 slice[0] = 101
 print('%{arr[0]} %{slice[0]')   --> 100 101
-</code></pre>
-<p>The <code>+..</code> invokes the slice operator with an end position that is an increment from the start: <em>Planned Feature</em></p>
-<pre><code class="language-cy">arr := []int{1, 2, 3, 4, 5}
-print(arr[2+..2])   --> {3, 4}
 </code></pre>
 <a href="#basic-types">^topic</a>
 <h3 id="slice-operations">Slice operations. <a href="#slice-operations">#</a></h3>
@@ -2893,7 +2858,6 @@ a := MyContainer[int]{1, 2, 3}
 </li>
 <li><a href="#begin-block" title=""><code>begin</code> block.</a></li>
 <li><a href="#error-branching" title="">Error branching.</a></li>
-<li><a href="#deferred-execution" title="">Deferred execution.</a></li>
 </ul>
 </td>
 </tr></table>
@@ -3104,9 +3068,6 @@ print(a)
 <h2 id="error-branching">Error branching. <a href="#error-branching">#</a></h2>
 <p>See <a href="#error-handling" title="">Error handling</a>.</p>
 <a href="#control-flow">^topic</a>
-<h2 id="deferred-execution">Deferred execution. <a href="#deferred-execution">#</a></h2>
-<blockquote><p><em>Planned Feature</em></p>
-</blockquote><a href="#control-flow">^topic</a>
 <h1 id="functions">Functions. <a href="#functions">#</a></h1>
 <table><tr>
 <td valign="top">
@@ -3128,11 +3089,7 @@ print(a)
 </ul>
 </td><td valign="top">
 <ul>
-<li><a href="#function-calls" title="">Function calls.</a><ul>
-<li><a href="#no-parameter-calls" title="">No parameter calls.</a></li>
-<li><a href="#shorthand-calls" title="">Shorthand calls.</a></li>
-</ul>
-</li>
+<li><a href="#function-calls" title="">Function calls.</a></li>
 <li><a href="#function-templates" title="">Function templates.</a><ul>
 <li><a href="#generic-functions" title="">Generic functions.</a></li>
 <li><a href="#infer-parameter" title="">Infer parameter.</a></li>
@@ -3178,14 +3135,6 @@ p := f()
 print(p.a + p.b)    --> 3
 </code></pre>
 <p>A return type that lists several types, <code>-> (int, int)</code>, and <code>return 1, 2</code> are parse errors that say so.</p>
-<p>The returned value can also be destructured: <em>Planned Feature</em></p>
-<pre><code class="language-cy">use math
-
-fn compute(rad float) -> [2]float:
-    return {math.cos(rad), math.sin(rad)}
-
-{x, y} := compute(pi)
-</code></pre>
 <a href="#functions">^topic</a>
 <h3 id="function-overloading">Function overloading. <a href="#function-overloading">#</a></h3>
 <p>Functions can be overloaded by their type signature:</p>
@@ -3390,12 +3339,6 @@ names.sort(|a, b| c[a] > c[b])    -- {'web', 'db', 'app'}
 </blockquote><pre><code class="language-cy">d := dist(x0=10, x1=20, y0=30, y1=40)
 </code></pre>
 <a href="#functions">^topic</a>
-<h3 id="no-parameter-calls">No parameter calls. <a href="#no-parameter-calls">#</a></h3>
-<blockquote><p><em>Planned Feature</em></p>
-</blockquote><a href="#functions">^topic</a>
-<h3 id="shorthand-calls">Shorthand calls. <a href="#shorthand-calls">#</a></h3>
-<blockquote><p><em>Planned Feature</em></p>
-</blockquote><a href="#functions">^topic</a>
 <h2 id="function-templates">Function templates. <a href="#function-templates">#</a></h2>
 <p>Function declarations become function templates if they have template parameters:</p>
 <pre><code class="language-cy">fn add[T Any](a T, b T) -> T:
@@ -3564,7 +3507,7 @@ print(opt(1, |x| x / 2))      --> float
 <li><a href="#arc" title="">ARC.</a></li>
 <li><a href="#retain-optimizations" title="">Retain optimizations.</a></li>
 <li><a href="#default-allocator" title="">Default allocator.</a></li>
-<li><a href="#weak-references" title="">Weak references.</a></li>
+<li><a href="#back-references" title="">Back references.</a></li>
 <li><a href="#cycle-detection" title="">Cycle detection.</a></li>
 </ul>
 </li>
@@ -3578,7 +3521,7 @@ print(opt(1, |x| x / 2))      --> float
 </tr></table>
 <p><a href="#table-of-contents" title="">^top</a></p>
 <p>Cyber provides memory safety by default by providing structured memory semantics.
-Manual memory is also supported. A safe mode that forbids it is planned. An embedding host can already reject raw pointers in scripts with the <code>deny_raw_ptrs</code> compile option.</p>
+Manual memory is also supported. An embedding host can reject raw pointers in scripts with the <code>deny_raw_ptrs</code> compile option.</p>
 <h2 id="structured-memory">Structured memory. <a href="#structured-memory">#</a></h2>
 <p>Cyber supports value ownership, borrowing, and deinitializers.
 These concepts allow a value to be cleaned up automatically during execution because their lifetimes can be determined from analyzing the program's control flow.</p>
@@ -3693,21 +3636,15 @@ x := a[0]
 <p>Some types such as <code>Array</code> disallows copying but can still be <a href="#cloning" title="">cloned</a> or <a href="#moving" title="">moved</a>.</p>
 <a href="#memory">^topic</a>
 <h3 id="cloning">Cloning. <a href="#cloning">#</a></h3>
-<p>Some value types cannot be implicitly copied but can be explicitly cloned. The builtin <code>clone</code> is not available yet. Until then, a type provides its own method, such as <code>Array.clone</code>: <code>b := a.clone()</code>. <em>Planned Feature</em></p>
+<p>Some value types cannot be implicitly copied but can be explicitly cloned. A type that can be cloned provides a <code>clone</code> method, such as <code>Array.clone</code>:</p>
 <pre><code class="language-cy">a := Array[int]{1, 2, 3}
-b := clone(a)
+b := a.clone()
 </code></pre>
-<p>Any implicitly <code>Copyable</code> type is also implicitly <code>Cloneable</code>. By default, <code>clone</code> will invoke the type's copy constructor:</p>
-<pre><code class="language-cy">a := 123
-
-b := clone(a)
--- Equivalent to a copy.
-</code></pre>
-<p>The default <code>clone</code> behavior can be overridden by declaring a <code>@clone</code> method on the type:</p>
+<p>A user type declares its own method. There is no builtin <code>clone</code> function:</p>
 <pre><code class="language-cy">type Foo:
     a int
 
-fn (&Foo) @clone() -> Self:
+fn (&Foo) clone() -> Foo:
     return {a=self.a}
 </code></pre>
 <a href="#memory">^topic</a>
@@ -4125,31 +4062,13 @@ For example, passing a reference to a function call doesn't need a retain since 
 <h3 id="default-allocator">Default allocator. <a href="#default-allocator">#</a></h3>
 <p>Currently, <code>mimalloc</code> is used as the default heap allocator for objects, but it can be swapped with libc <code>malloc</code> or a custom allocator.</p>
 <a href="#memory">^topic</a>
-<h3 id="weak-references">Weak references. <a href="#weak-references">#</a></h3>
-<blockquote><p><em>Planned Feature</em></p>
-</blockquote><p>There is no weak reference type. A back reference from a child to its parent can not be a <code>^T</code> without forming a cycle. Keep an index or a key of the parent instead, or pass the parent to the function that needs it.</p>
+<h3 id="back-references">Back references. <a href="#back-references">#</a></h3>
+<p>There is no weak reference type, and none is planned: a reference cycle is a bug, not a structure to support. A back reference from a child to its parent can not be a <code>^T</code> without forming a cycle. Keep an index or a key of the parent instead, or pass the parent to the function that needs it.</p>
 <a href="#memory">^topic</a>
 <h3 id="cycle-detection">Cycle detection. <a href="#cycle-detection">#</a></h3>
 <p>When shared references form a reference cycle, it's considered a runtime error.
 Cycle detection is dispatched at the end of a thread.
 The thread will panic if a cycle is detected which subsequently begins the runtime's <a href="#deinitializers" title="">fatal deinitialization procedure</a>.</p>
-<p>Invoking the cycle detector manually with <code>@check_cycles</code> is not available yet: <em>Planned Feature</em></p>
-<pre><code class="language-cy">fn foo():
-    -- Create a reference cycle.
-    a := ^Foo{child=none}
-    b := ^Foo{child=none}
-    a.child = b
-    b.child = a
-
-    -- Cycle still alive in the current stack so it reports no cyclic objects.
-    res := @check_cycles()
-    print(res.num_cyc_objs)   --> 0
-
-foo()
--- `a` and `b` are no longer reachable.
-res := @check_cycles()
-print(res.num_cyc_objs)       --> 2
-</code></pre>
 <a href="#memory">^topic</a>
 <h2 id="manual-memory">Manual memory. <a href="#manual-memory">#</a></h2>
 <p>Memory can be managed by hand with pointers. This memory is not tracked: the compiler and the runtime do not check its lifetime or its bounds.</p>
@@ -4172,7 +4091,6 @@ free(s.ptr)
 </code></pre>
 <p>A negative length panics, and a length of zero returns an empty span without an allocation. <code>free</code> does not run a <code>@deinit</code>, and using the memory after <code>free</code> is undefined.</p>
 <p>An embedding host can reject raw pointers in scripts with the <code>deny_raw_ptrs</code> compile option (see <a href="#denying-raw-pointers" title="">Denying raw pointers</a>).</p>
-<p>An allocator that is chosen per allocation is not available yet. <em>Planned Feature</em></p>
 <a href="#memory">^topic</a>
 <h1 id="error-handling">Error handling. <a href="#error-handling">#</a></h1>
 <table><tr>
@@ -4180,7 +4098,6 @@ free(s.ptr)
 <ul>
 <li><a href="#errors" title="">Errors.</a><ul>
 <li><a href="#error-literal" title=""><code>error</code> literal.</a></li>
-<li><a href="#error-payload" title=""><code>error</code> payload.</a></li>
 <li><a href="#error-set-type" title=""><code>error</code> set type.</a></li>
 </ul>
 </li>
@@ -4211,10 +4128,7 @@ free(s.ptr)
 <pre><code class="language-cy">if err == error.Oops:
     handle_oops()
 </code></pre>
-<a href="#error-handling">^topic</a>
-<h3 id="error-payload"><code>error</code> payload. <a href="#error-payload">#</a></h3>
-<p>An <code>error</code> value holds only its name. Attaching a payload value when creating an error is not available yet. <em>Planned Feature</em></p>
-<p>To return details with a failure, return a struct or a choice type that describes it, or keep the details in a value that the caller passes in.</p>
+<p>An <code>error</code> value holds only its name, and it does not carry a payload. To return details with a failure, return a struct or a choice type that describes it, or fill a value that the caller passes in, as the standard modules do with a <code>Diag</code> (<code>json.parse(s, &&diag)</code>).</p>
 <a href="#error-handling">^topic</a>
 <h3 id="error-set-type"><code>error</code> set type. <a href="#error-set-type">#</a></h3>
 <p>An error set type is an exhaustive type of possible error values: <em>Planned Feature</em></p>
@@ -4336,7 +4250,7 @@ print(count)
 </code></pre>
 <p>Panics can not be caught. Once <code>panic</code> is invoked, the current thread stops execution and begins to unwind its call stack. Afterwards, the thread can not be used and transitions to a panic state.
 If the main thread panics, then the program aborts without unwinding other child threads.</p>
-<p>A panic of a spawned thread reaches the thread that awaits its <code>Future</code>: <code>await</code> panics with <code>Spawned thread panicked: <message></code>. A parent thread can not query the status of a child thread in another way. <em>Planned Feature</em></p>
+<p>A panic of a spawned thread reaches the thread that awaits its <code>Future</code>: <code>await</code> panics with <code>Spawned thread panicked: <message></code>. A parent thread can not query the status of a child thread in another way.</p>
 <p>A panic reports the <a href="#stack-traces" title="">stack trace</a> automatically to the console.</p>
 <a href="#error-handling">^topic</a>
 <h2 id="stack-traces">Stack traces. <a href="#stack-traces">#</a></h2>
@@ -4955,14 +4869,14 @@ print(gen.status())    --> GeneratorStatus.done
 <p>A generator can not be reset to its entry point. Call the function again for a new generator.</p>
 <a href="#concurrency">^topic</a>
 <h2 id="planned-concurrency-features">Planned concurrency features. <a href="#planned-concurrency-features">#</a></h2>
-<p>These features are not implemented. The names are not final:</p>
+<p>More <code>Sendable</code> types are planned (see <a href="#sendable-values" title=""><code>Sendable</code> values</a>).</p>
+<p>These are not planned. Use the way that is given:</p>
 <ul>
-<li>Future chains. A <code>Future.then_spawn</code> that spawns a thread with the result of a future. Until then, a fiber that awaits the future and continues does the same on one thread.</li>
-<li>Shared memory between threads, and channels to pass messages between them. Until then, threads exchange values through the arguments and the result of <code>spawn</code>.</li>
+<li>Future chains (<code>then_spawn</code>). A fiber that awaits the future and continues does the same on one thread.</li>
+<li>Shared memory between threads, and channels. Threads exchange values through the arguments and the result of <code>spawn</code>.</li>
 <li>An <code>await</code> that waits for futures of different types. <code>Future.wait_any</code> takes futures of one type.</li>
-<li>Thread status. A parent thread can only <code>await</code> the result of a child thread.</li>
+<li>Thread status. A parent thread <code>await</code>s the result of a child thread, and a panic of the child reaches it there.</li>
 <li>SIMD vector types. The runtime uses SIMD internally (for example in <code>str.index</code>), but the language has no vector operations.</li>
-<li>More <code>Sendable</code> types (see <a href="#sendable-values" title=""><code>Sendable</code> values</a>).</li>
 </ul>
 <a href="#concurrency">^topic</a>
 <h1 id="metaprogramming">Metaprogramming. <a href="#metaprogramming">#</a></h1>
@@ -5167,12 +5081,8 @@ fn less(a Shape, b Shape):
     return a.area() < b.area()
 </code></pre>
 <p>When a function parameter contains a generic type, the function becomes generic. The function is then specialized by the call site arguments.</p>
-<p>Type templates are planned to be generic types. Until then, expand the template or use an inferred parameter (<code>c MyContainer[%T]</code>): <em>Planned Feature</em></p>
-<pre><code class="language-cy">fn size(c MyContainer) -> int:
-    return type.size(type.of(c))
-</code></pre>
-<p>Composing a generic type is planned to create another generic type: <em>Planned Feature</em></p>
-<pre><code class="language-cy">fn size(c ?MyContainer) -> int:
+<p>A type template is not a generic type: <code>fn size(c MyContainer)</code> is a compile error. Use an inferred parameter instead, which also works when the template is composed (<code>?MyContainer[%T]</code>):</p>
+<pre><code class="language-cy">fn size(c MyContainer[%T]) -> int:
     return type.size(type.of(c))
 </code></pre>
 <a href="#metaprogramming">^topic</a>
@@ -5641,7 +5551,7 @@ fn print_c():
 <h3 id="destructure-import">Destructure import. <a href="#destructure-import">#</a></h3>
 <p>Modules can also be destructured using the following syntax:</p>
 <blockquote><p><em>Planned Feature</em></p>
-</blockquote><pre><code class="language-cy">use { cos, pi } 'math'
+</blockquote><pre><code class="language-cy">use { cos, pi } from 'math'
 
 print(cos(pi))
 </code></pre>
@@ -5702,7 +5612,6 @@ use Vec2 -> eng.Vector2
 <ul>
 <li><a href="#binding-to-c" title="">Binding to C.</a><ul>
 <li><a href="#runtime-binding" title="">Runtime binding.</a></li>
-<li><a href="#open_lib-binding" title=""><code>open_lib</code> binding.</a></li>
 <li><a href="#extern-functions" title=""><code>extern</code> functions.</a></li>
 <li><a href="#extern-globals" title=""><code>extern</code> variables.</a></li>
 <li><a href="#cbindgency" title="">cbindgen.cy</a></li>
@@ -5868,10 +5777,9 @@ print(v.y)      --> 0.0
 <p>Cyber supports binding to an existing C ABI compatible library at runtime.
 This allows calling into dynamic libraries created in C or other languages.
 Static linking is not available: the bytecode VM is the only backend.</p>
-<p>There are different approaches to binding a C library:</p>
+<p>There are two approaches to binding a C library:</p>
 <ol>
 <li>Runtime binding. The C library is loaded and binded upon program start-up.</li>
-<li><code>os.open_lib</code> binding. The user is responsible for loading the C library at runtime. <em>Planned Feature</em></li>
 <li>When embedding <a href="#libcyber" title=""><code>libcyber</code></a>, compiler hooks can bind VM or C functions with the host language.</li>
 </ol>
 <a href="#ffi">^topic</a>
@@ -5884,13 +5792,8 @@ An example can be found in <a href="https://github.com/fubark/cyber/blob/master/
 </code></pre>
 <p>A path with a directory component is opened as is. A bare file name is searched by the system loader (<code>LD_LIBRARY_PATH</code>, the directory of the <code>cyber</code> executable, then the system library paths), so use an explicit path like <code>./mylib.so</code> to load a library from the current directory.</p>
 <a href="#ffi">^topic</a>
-<h3 id="open_lib-binding"><code>open_lib</code> binding. <a href="#open_lib-binding">#</a></h3>
-<blockquote><p><em>Planned Feature</em></p>
-</blockquote><p><code>os.open_lib</code> is declared but not implemented: calling it panics. Use <a href="#runtime-binding" title="">runtime binding</a> with <code>c.bind_lib</code> instead. The paragraph below describes the planned behavior.</p>
-<p>If the path argument to <code>open_lib</code> is just a filename, the search steps for the library is specific to the operating system. Provide an absolute (eg. '/foo/mylib.so') or relative (eg. './mylib.so') path to load from a direct location instead. When the path argument is <code>none</code>, it loads the currently running executable as a library.</p>
-<a href="#ffi">^topic</a>
 <h3 id="extern-functions"><code>extern</code> functions. <a href="#extern-functions">#</a></h3>
-<p>An <code>extern</code> function is configured with a C call convention and registered for static or runtime binding:</p>
+<p>An <code>extern</code> function is configured with a C call convention and registered for runtime binding:</p>
 <pre><code class="language-cy">#[extern]
 fn SDL_CreateWindow(title Ptr[c_char], w c_int, h c_int, flags WindowFlags) -> Ptr[Window]
 </code></pre>
@@ -5904,7 +5807,7 @@ fn CreateWindow(title Ptr[c_char], w c_int, h c_int, flags WindowFlags) -> Ptr[W
 <p>An <code>extern</code> function is bound by the <code>c</code> module, so the <code>c</code> module must be loaded: <code>use c</code>, or a module that imports it. Otherwise the declaration is a compile error: 'An <code>#[extern]</code> function needs the <code>c</code> module. Add <code>use c</code>.'</p>
 <a href="#ffi">^topic</a>
 <h3 id="extern-globals"><code>extern</code> globals. <a href="#extern-globals">#</a></h3>
-<p>An <code>extern</code> global is registered for static or runtime binding. It is declared with the type of the C variable, and the script reads and writes the variable of the library:</p>
+<p>An <code>extern</code> global is registered for runtime binding. It is declared with the type of the C variable, and the script reads and writes the variable of the library:</p>
 <pre><code class="language-cy">#[extern] global count i32
 #[extern] fn bump() -> i32
 

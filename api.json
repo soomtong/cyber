@@ -1,5 +1,5 @@
 {
-  "version": "v0.4.19-dev 1136-32ddbdf",
+  "version": "v0.4.19-dev 1138-7b39609",
   "types": [
     {"module": "core", "name": "void", "syntax": "void", "kind": "builtin",
       "methods": [],
@@ -1430,10 +1430,6 @@
       "methods": [],
       "funcs": [],
       "aliases": {}},
-    {"module": "os", "name": "DynLib", "syntax": "DynLib", "kind": "struct",
-      "methods": [],
-      "funcs": [],
-      "aliases": {}},
     {"module": "os", "name": "FileInfo", "syntax": "FileInfo", "kind": "struct",
       "methods": [],
       "funcs": [],
@@ -1861,7 +1857,6 @@
     {"module": "os", "name": "unset_env", "sig": "unset_env(key str) -> !void", "doc": "Removes an environment variable by key."},
     {"module": "os", "name": "write_file", "sig": "write_file(path str, contents str) -> !void", "doc": "Writes the text `contents` to a file. Write bytes with `write_file_bytes`."},
     {"module": "os", "name": "write_file_bytes", "sig": "write_file_bytes(path str, contents []byte) -> !void", "doc": "Writes the bytes `contents` to a file."},
-    {"module": "os", "name": "open_lib", "sig": "open_lib(path ?str) -> DynLib", "doc": "Creates a handle to a dynamic library."},
     {"module": "peg", "name": "compile", "sig": "compile(grammar str) -> !Peg", "doc": "Compiles a grammar. Returns `error.Syntax` for a grammar that is malformed, calls a rule that is not defined, is left recursive or repeats something that can match nothing, and `error.TooBig` for one that is over `MaxInsts`."},
     {"module": "peg", "name": "compile", "sig": "compile(grammar str, diag &&Diag) -> !Peg", "doc": "Compiles a grammar. On failure, `diag` tells where and why."},
     {"module": "regex", "name": "unicode_version", "sig": "unicode_version() -> str", "doc": "Returns the version of the Unicode Character Database that the classes come from, such as `18.0.0`."},

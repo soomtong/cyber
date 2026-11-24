@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.19-dev 1138-7b39609</div>
+    <div class="sub-title">v0.4.19-dev 1149-424f23f</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1352,6 +1352,16 @@ Some types such as <code>math.Vec</code> and <code>math.Mat</code> also overload
 12 % 5    --> 2   (Modulus remainder)
 -(10)     --> -10 (Negative)
 </code></pre>
+<p>An integer and a float can be mixed. The integer converts to the type of the float, whichever side it is on, and the result is a float. An <code>f32</code> with a <code>float</code> gives a <code>float</code> the same way:</p>
+<pre><code class="language-cy">i := 7
+f := 2.5
+print(i * f)      --> 17.5
+print(f * i)      --> 17.5
+print(i + 0.5)    --> 7.5
+print(i / 2)      --> 3    (Both are integers: integer division.)
+print(i / 2.0)    --> 3.5
+</code></pre>
+<p>The result does not convert back to an integer. <code>i += f</code> and <code>var n int = i * f</code> report 'Expected type <code>int</code>, got <code>float</code>.' Write <code>int(i * f)</code>. The bitwise operators take integers only, so <code>i && f</code> is an error. An operand that is not a number is an error on either side: <code>f + 'abc'</code> reports 'Expected <code>float</code>, found <code>str</code>.'</p>
 <a href="#syntax">^topic</a>
 <h3 id="comparison-operators">Comparison operators. <a href="#comparison-operators">#</a></h3>
 <p>The following comparison operators are supported and evaluate to a <a href="#booleans" title="">Boolean</a> value.</p>
@@ -1381,6 +1391,12 @@ la == []int{1, 2, 3} --> false
 a >= b          --> `true` if a is greater than or equal to b
 a < b           --> `true` if a is less than b
 a <= b          --> `true` if a is less than or equal to b
+</code></pre>
+<p>A comparison converts its operands like an <a href="#arithmetic-operators" title="">arithmetic operator</a> does. An integer converts to the type of a float on the other side, and an integer of a narrower type converts to the wider one. A signed integer on the left does not convert to a raw integer on the right, since that would read a negative value as a large one: <code>i8 < r64</code> is a type error. <code>symbol</code> and <code>error</code> values are not numbers and do not convert:</p>
+<pre><code class="language-cy">i := 7
+print(i < 7.5)    --> true
+print(i == 7.0)   --> true
+print(7.0 == i)   --> true
 </code></pre>
 <a href="#syntax">^topic</a>
 <h3 id="logic-operators">Logic operators. <a href="#logic-operators">#</a></h3>
@@ -2097,6 +2113,7 @@ f = i
 </code></pre>
 <p>Implicit casts avoid lossy conversions (with the exception of int to float)
 and they never produce runtime errors.
+The two operands of an <a href="#arithmetic-operators" title="">arithmetic operator</a> or a comparison use the casts between the number types in either direction: the right operand converts to the type of the left one, and when it can not, the left one converts to the type of the right one.
 The following implicit casts are supported:</p>
 <table><thead><tr><th>Source</th><th>Target</th><th>Behavior</th></tr></thead><tbody><tr><td><code>Int[W]</code></td><td><code>Raw[W]</code></td><td>reinterpret</td></tr><tr><td><code>Int[X]</code></td><td><code>Raw[W] where X < W</code></td><td>zero extension</td></tr><tr><td><code>Raw[X]</code></td><td><code>Raw[W] where X < W</code></td><td>zero extension</td></tr><tr><td><code>Raw[W]</code></td><td><code>Int[W]</code></td><td>reinterpret</td></tr><tr><td><code>Raw[X]</code></td><td><code>Int[W] where X < W</code></td><td>zero extension</td></tr><tr><td><code>Int[X]</code></td><td><code>Int[W] where X < W</code></td><td>sign extension</td></tr><tr><td><code>Int[X]</code></td><td><code>Float[W]</code></td><td>conversion</td></tr><tr><td><code>Raw[X]</code></td><td><code>Float[W]</code></td><td>conversion</td></tr><tr><td><code>f32</code></td><td><code>f64</code></td><td>conversion</td></tr><tr><td><code>T</code></td><td><code>?T</code></td><td>wrap</td></tr><tr><td><code>T</code></td><td><code>!T</code></td><td>wrap</td></tr><tr><td><code>error</code></td><td><code>!T</code></td><td>wrap</td></tr><tr><td><code>T</code></td><td><code>!?T</code></td><td>wrap</td></tr><tr><td><code>^T</code></td><td><code>&T</code></td><td>reinterpret</td></tr><tr><td><code>FuncPtr[Sig]</code></td><td><code>Func[Sig]</code></td><td>wrap</td></tr><tr><td><code>&S</code></td><td><code>&Dyn[T] where S implements T</code></td><td>wrap</td></tr><tr><td><code>^S</code></td><td><code>^Dyn[T] where S implements T</code></td><td>wrap</td></tr><tr><td><code>Ptr[T]</code></td><td><code>Ptr[void]</code></td><td>reinterpret</td></tr><tr><td><code>&T</code></td><td><code>Ptr[void]</code></td><td>reinterpret</td></tr><tr><td><code>Ptr[void]</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>&[N]T</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>&[..N]T</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>Ptr[Int[W]]</code></td><td><code>Ptr[Raw[W]]</code></td><td>reinterpret</td></tr><tr><td><code>Ptr[Raw[W]]</code></td><td><code>Ptr[Int[W]]</code></td><td>reinterpret</td></tr><tr><td><code>&T</code></td><td><code>Ptr[T]</code></td><td>reinterpret</td></tr><tr><td><code>&Int[W]</code></td><td><code>Ptr[Raw[W]]</code></td><td>reinterpret</td></tr><tr><td><code>&Raw[W]</code></td><td><code>Ptr[Int[W]]</code></td><td>reinterpret</td></tr></tbody></table><a href="#basic-types">^topic</a>
 <h2 id="type-casts">Type casts. <a href="#type-casts">#</a></h2>
@@ -4932,7 +4949,7 @@ const fib30 = fib(30)
 <pre><code class="language-cy">-- Assign pre-computed value to a local.
 res := #{fib(30)}
 </code></pre>
-<p>Inside a compile-time body, locals (<code>t := 0</code>), compound assignment (<code>t += 1</code>), <code>for</code> ranges, <code>if</code>, <code>switch</code> and fixed-size vectors (<code>v := [3]int(0)</code>, <code>v[i]</code>, <code>v[i] += 1</code>) evaluate the same as at runtime. A vector index out of range is a compile error. Operations the evaluator does not support yet (for example <code>float</code> addition) are reported as <code>Unsupported inline eval</code>.</p>
+<p>Inside a compile-time body, locals (<code>t := 0</code>), compound assignment (<code>t += 1</code>), <code>for</code> ranges, <code>if</code>, <code>switch</code> and fixed-size vectors (<code>v := [3]int(0)</code>, <code>v[i]</code>, <code>v[i] += 1</code>) evaluate the same as at runtime. A vector index out of range is a compile error. Operations the evaluator does not support yet (for example <code>float</code> addition) are reported as <code>Unsupported inline eval</code>. In an arithmetic operator an integer and a float mix as they do at runtime: <code>const r = k * 2.5</code> and <code>const r = 2.5 * k</code> are the same float for an integer constant <code>k</code>. <code>==</code> and <code>!=</code> of an integer and a float are a type error at compile time.</p>
 <a href="#metaprogramming">^topic</a>
 <h3 id="inline-type-creation">Inline type creation. <a href="#inline-type-creation">#</a></h3>
 <p>Types can be created from inline evaluation. Currently, only structs can be created with <code>meta.new_struct</code>:</p>
@@ -5200,6 +5217,30 @@ fn main() -> !void:
 <a href="#modules">^topic</a>
 <h2 id="builtin-modules">Builtin modules. <a href="#builtin-modules">#</a></h2>
 <p>Builtin and std modules come with Cyber. See the <a href="api.html" title="">API docs</a>.</p>
+<a href="#modules">^topic</a>
+<h3 id="running-programs">Running programs. <a href="#running-programs">#</a></h3>
+<p><code>os.cmd</code> makes a command: a program and its arguments. A <code>Cmd</code> is a value. Its methods return a new command, and nothing starts until <code>run</code>, <code>read</code> or <code>run_status</code> is called:</p>
+<pre><code class="language-cy">use os
+
+-- The stdout of a program.
+branch := os.cmd({'git', 'rev-parse', '--abbrev-ref', 'HEAD'}).read()!.trim()
+
+-- A pipe joins the stdout of one program to the stdin of the next.
+top := os.cmd({'du', '-sk', dir}).pipe(os.cmd({'sort', '-rn'})).read()!
+
+-- A working directory and an environment variable. The output goes to the terminal.
+os.cmd({'make', 'test'}).dir('build').env('CI', '1').run()!
+
+-- Text for stdin. `run_status` returns the exit code instead of an error.
+res := os.cmd({'grep', '-c', 'TODO'}).stdin(text).run_status()!
+if res.code != 0:
+    eprint(res.err)
+</code></pre>
+<p>There is no shell. An argument reaches the program as it is, with its spaces, quotes and <code>$</code>, so a file name or other text from outside can not turn into more arguments or another command. The list of arguments is built like any list: <code>os.cmd([]str{'grep', '-n', pattern} + files)</code>.</p>
+<table><thead><tr><th>Method</th><th>Starts the command and</th></tr></thead><tbody><tr><td><code>run() -> !void</code></td><td>waits for it. stdin, stdout and stderr are those of this process.</td></tr><tr><td><code>read() -> !str</code></td><td>returns the stdout of the last program. stderr is that of this process.</td></tr><tr><td><code>run_status() -> !ExecResult</code></td><td>returns the stdout of the last program, the stderr of all programs and the exit code (<code>out</code>, <code>err</code>, <code>code</code>).</td></tr></tbody></table><p><code>run</code> and <code>read</code> return <code>error.ExitStatus</code> when a program ends with an exit code other than 0 or is stopped by a signal. With <code>run_status</code> that is not an error: <code>code</code> is 0 when every program succeeded, otherwise the code of the last program that failed (128 plus the signal number for a signal). A pipeline fails when any of its programs fails. A program that is stopped because the next one closed its input, like <code>yes</code> in front of <code>head -1</code>, succeeded.</p>
+<p>A program that can not be started is an <a href="#os-errors" title="">OS error</a> from all three: <code>error.NotFound</code> for a missing program or working directory, <code>error.PermissionDenied</code>, and <code>error.InvalidArgument</code> for an empty list of arguments. Captured output is limited to 10 MiB for stdout and for stderr: more is <code>error.TooBig</code> and the programs are stopped. A pipeline has at most 16 programs.</p>
+<p><code>dir(path)</code> and <code>env(name, value)</code> apply to the programs that the command has when they are called, so <code>a.dir('x').pipe(b)</code> runs only <code>a</code> in <code>x</code>. In <code>a.pipe(b)</code> the input is that of <code>a</code>: text that <code>stdin</code> gave to <code>b</code> is not used. A program gets the environment of this process as it is when the command runs, with the variables of <code>env</code> on top. <code>stdin(text)</code> gives the first program its input. Without it, <code>read</code> and <code>run_status</code> give an empty input.</p>
+<p>The older <code>os.exec(args)</code> runs one program and returns its <code>ExecResult</code>. It panics when the program can not be started.</p>
 <a href="#modules">^topic</a>
 <h3 id="json-and-toon">JSON and TOON. <a href="#json-and-toon">#</a></h3>
 <p>The <code>json</code> module parses and writes JSON (RFC 8259). The <code>toon</code> module encodes and decodes <a href="https://github.com/toon-format/spec" title="">TOON</a> (spec v4.4), a line-based form of the same data that takes fewer tokens in an LLM prompt. Both use <code>json.Value</code>:</p>
@@ -6294,6 +6335,38 @@ hello!
 > ?int(none)
 `?int` none
 </code></pre>
+<a href="#cli">^topic</a>
+<h3 id="repl-commands">REPL commands. <a href="#repl-commands">#</a></h3>
+<p>A line that starts with <code>.</code> and a command name is a command of the REPL. It is not Cyber code and is not evaluated. A command is read where an input starts, not inside a block:</p>
+<table><thead><tr><th>Command</th><th></th></tr></thead><tbody><tr><td><code>.exit</code></td><td>Leaves the REPL.</td></tr><tr><td><code>.help</code></td><td>Prints this list.</td></tr><tr><td><code>.doc [topic]</code></td><td>Prints a section of the manual, like <a href="#documentation" title=""><code>cyber doc</code></a>. <code>.doc</code> alone prints the topics, <code>.doc --api os</code> the functions of a module.</td></tr><tr><td><code>.which <expr></code></td><td>Shows the function that a call picks, or what a name is.</td></tr><tr><td><code>.bc <function></code></td><td>Prints the bytecode of a function.</td></tr></tbody></table><p><code>.which</code> compiles the expression against the session and does not run it. It shows the function that the outermost call picks out of the overloads: the first line of its declaration, the instance when it comes from a template, the number of overloads when there are several, where it is declared, and its doc comment. Without a call it describes the name at the end of the expression. A compile error is printed as the answer:</p>
+<pre><code class="language-bash">> fn largest(a %T, b T) -> T:
+    | return if (a > b) a else b
+    |
+> .which largest(1.5, 2.5)
+fn largest(a %T, b T) -> T
+  as fn largest[float](float, float) -> float
+  at eval:1:1
+> xs := []int{3, 1, 2}
+> .which xs.sort()
+fn (&Slice[]) sort()
+  one of 2 overloads
+  at core:1636:1
+  Sorts in ascending order with `<`. The element type needs a `<` operator.
+> .which xs
+xs []int
+</code></pre>
+<p><code>.bc</code> prints every compiled function of a name: the overloads, and the instances of a template that calls have made. The name is the function name alone (<code>len2</code>) or with its type (<code>Vec2.len2</code>):</p>
+<pre><code class="language-bash">> fn sq(x int) -> int:
+    | return x * x
+    |
+> .bc sq
+fn sq(int) -> int  (eval)
+3:25 .chk_stk: ret=1, frame=6
+3:28 .imul: %0 = %5 * %5
+3:32 .ret: 
+3:33 .trap: 
+</code></pre>
+<p>A script can ask the same of a <code>cy.VM</code>: <code>vm.which(code)</code> and <code>vm.bytecode(name)</code> return the text.</p>
 <a href="#cli">^topic</a>
 <h2 id="format-source">Format source. <a href="#format-source">#</a></h2>
 <p><code>cyber fmt</code> rewrites source files in one fixed style and prints the paths that changed. There are no options for the style.</p>

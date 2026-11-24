@@ -616,6 +616,7 @@ fn test_modules(run: *Runner) void {
     run.case("modules/core.cy");
     run.case("modules/cy.cy");
     run.case("modules/cy_session_methods.cy");
+    run.case("modules/cli.cy");
     run.case("modules/path_basename_error.cy");
 
     run.case("modules/math.cy");
@@ -636,6 +637,7 @@ fn test_modules(run: *Runner) void {
         if (test_config.ffi and builtin.target.abi != .msvc) {
             run.case("modules/os.cy");
             run.case("modules/os_cmd.cy");
+            run.case("modules/cli_os.cy");
             // Reads the fixtures with `os.read_file`.
             run.case("modules/regex_spec.cy");
             run.case("modules/time_zone.cy");
@@ -1146,6 +1148,10 @@ test "FFI." {
     // A config could be added to make the initial FFI call detect an error and throw a panic instead.
 
     try case("ffi/ffi.cy");
+    // Binds libc functions of the host executable by name (`#c.bind_lib(none)`), like `modules/libc.cy`.
+    if (builtin.target.os.tag != .windows) {
+        try case("ffi/session.cy");
+    }
 }
 
 test "windows new lines" {

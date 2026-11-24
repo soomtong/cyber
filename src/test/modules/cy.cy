@@ -130,6 +130,31 @@ t.eq(?str(none), repl.read(repl_read))
 t.eq(false, repl.command('x := 1'))
 t.eq(false, repl.command('.red'))
 
+-- `VM()` is isolated: it has the modules of the library and none that the host's loader adds (`os`, `cli`).
+-- The host of this test is the CLI, which has `cli`.
+iso := cy.VM()
+t.eq(cy.Success, iso.eval('eval', 'use math', {persist_main=true}).code)
+t.eq(cy.ErrorCompile, iso.eval('eval', 'use cli', {persist_main=true}).code)
+t.assert(iso.compile_error_summary().starts_with('CompileError: Failed to load module: cli'))
+-- The session goes on after the refused import.
+t.eq(cy.Success, iso.eval('eval', 'math.sqrt(4.0)', {persist_main=true}).code)
+
+-- REPL.new() runs its session in such a VM, and REPL.new(vm) in the VM that the caller made.
+t.eq(cy.ErrorCompile, repl.vm.eval('eval', 'use cli', {persist_main=true}).code)
+given := cy.VM()
+t.eq(cy.Success, given.eval('eval', 'marker := 41', {persist_main=true}).code)
+repl2 := cy.REPL.new(move given)
+check2 := repl2.vm.eval('eval', 'marker + 1', {persist_main=true})
+t.eq(cy.Success, check2.code)
+t.eq('`int` 42', repl2.vm.value_desc(check2.val_t, check2.value))
+
+-- REPL.run(): reads and evaluates until `.exit`. These inputs print nothing.
+repl_lines = []str{'ran := 7', 'fn twice(n int) -> int:', 'return n * 2', '', 'ran = twice(ran)', '.exit'}
+repl_pos = 0
+repl2.run(repl_read)
+check2 = repl2.vm.eval('eval', 'ran', {persist_main=true})
+t.eq('`int` 14', repl2.vm.value_desc(check2.val_t, check2.value))
+
 -- VM.which(): the function that a call picks, without running it.
 vm := cy.VM()
 session := ```

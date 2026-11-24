@@ -57,6 +57,9 @@
   clear message, never a panic of the host."): 세션의 뒤 입력이 앞 입력의 타입에 메서드를 선언하게 했다. 결정
   `docs/decisions/project_session_methods.md`, `unreleased.md` 같은 이름의 절. 작업 브랜치 `claude/wizardly-franklin-xippbd`
   (`claude/sharp-faraday-c5yjxa` 위에 쌓았다: F-199의 기록과 `.which`가 그 브랜치에만 있다).
+- 2026-11-24(사용자: F-200을 고치라는 요청, 결정 문서 · 테스트 · 매뉴얼 · 발견 표 · `unreleased.md` · `verify.sh`까지. "ask the user
+  if the choice is not clear"): REPL 세션이 CLI의 모듈을 가져오게 했다. 결정 `docs/decisions/project_repl_modules.md`.
+  작업 브랜치 `claude/sweet-darwin-55r6jg`(`claude/sharp-faraday-c5yjxa` 위에 쌓았다. master에는 둘 다 아직 없다).
 
 ## 현재 브랜치
 
@@ -219,6 +222,14 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   - 남은 것: CLI의 REPL은 타입 블록이 한 입력이라 `@deinit` · `@copy` · `@clone` · `@send`를 가진 타입을 선언할 수 없다.
     같은 시그니처의 메서드를 교체하지 않고 오류로 한 것(결정 문서 규칙 3)과 이 넷의 거절(규칙 5)은 사용자 확인 전이다.
 
+- [x] REPL이 CLI의 모듈을 가져온다(2026-11-24, F-200 · F-203). 결정 `project_repl_modules.md`, `unreleased.md` 같은 이름의 절.
+  - `cy.VM()`은 격리된 채 두고 CLI가 준다: `cli.cy`의 `new_vm` · `use_cli_modules`(private bind), `cli.zig`의 `useCliModules` ·
+    `child_resolver`, `cy.cy`의 `REPL.new(vm)` · `REPL.run`. 자식 VM은 부모의 `cli.App`을 가리키기만 한다(해제하지 않음).
+  - `cli.zig` `loader`는 파일 · URL 소스를 `C.vm_allocator(vm)`으로 읽는다(자식 VM의 allocator가 CLI의 것과 다르다).
+  - F-203(세션의 extern 함수): `builtins/c.zig`의 `newTccState` · `isBound` · `hasUnbound`, `VM.tcc_states`,
+    `compiler.emit_program_init_func`이 앞 컴파일의 extern 청크를 본다.
+  - 테스트 `modules/cy.cy` · `modules/cli.cy` · `modules/cli_os.cy` · `ffi/session.cy`, `verify.sh` 15단계 `15-repl-stdin`.
+
 ## 시도했으나 실패한 접근
 
 - `+=` 경로에서 받는 쪽을 `semaExpr`로 읽으면 복사본에 append한다(이중 해제). 메서드 호출처럼 `semaExprSkipSym`을 써야 한다.
@@ -364,8 +375,10 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 - [x] F-199: `persist_main` 세션에서 앞 입력이 선언한 타입에 뒤 입력이 메서드 · 타입 함수를 선언하면 호스트가 abort하던 것.
   고쳤다(위 "완료된 작업"의 "세션의 뒤 입력이 앞 입력의 타입에 메서드를 선언한다", `project_session_methods.md`).
-- [ ] F-200(미수정): CLI의 REPL에서 `use os`가 실패한다(REPL의 격리 VM에 CLI의 resolver · loader가 없다, `UserVM_init`).
-  `cy.eval`의 VM이 호스트 설정을 받지 않는다는 계약과 닿아 있어 사용자 결정이 필요하다.
+- [x] F-200(2026-11-24 수정): CLI의 REPL에서 `use os`가 실패하던 것. "완료된 작업"의 "REPL이 CLI의 모듈을 가져온다".
+- [ ] F-204(치명, 미수정): 가변 인자 extern 함수에 `int`를 넘기면 `'Int_0' undeclared` 뒤 호스트가 abort한다
+  (`libc.printf(s, 7)`, 파일로 돌려도 같다). `i32(7)`은 된다. `@initBindLib`의 C 생성이 `int`의 C 이름을 선언하지 않는다.
+- `cli.new_vm()`을 공개로 둘지는 사용자가 뒤집을 수 있다(`project_repl_modules.md` "`cli.new_vm()`을 공개한 이유").
 - `os.cmd`의 다음 단계(`project_os_cmd.md` "가져오지 않은 것"): 줄 단위 스트리밍, 실행 중 중단 · 시간 제한, 파일 리다이렉션.
   Windows에서의 실행 확인도 남았다.
 - Julia 검토(설계 원칙 3.7)의 남은 결정: B의 2(사용자
@@ -376,7 +389,8 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 ## 다음 에이전트에게
 
-1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환, `os.cmd`, REPL 조회 명령, 세션의 메서드 선언).
+1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환, `os.cmd`, REPL 조회 명령, 세션의 메서드 선언,
+   REPL이 CLI의 모듈을 가져온다).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 
@@ -416,12 +430,13 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-171까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-204까지, 열린 것은 F-204).
 
 ## 작업 방식
 
-- 순서: scratchpad 재현 → 수정 → Debug CLI 확인(`zig build cli -p <scratchpad>/dbg`) → 회귀 테스트 → 문서 → 13단계 검증 → 커밋.
-- 14단계 검증(14단계는 `docs/api.json` 낡음 검사): `src/tools/verify.sh [로그 디렉터리]`(`task verify`, 약 10분, 기본 로그 `zig-out/verify/`). `run_in_background`로
+- 순서: scratchpad 재현 → 수정 → Debug CLI 확인(`zig build cli -p <scratchpad>/dbg`) → 회귀 테스트 → 문서 → 15단계 검증 → 커밋.
+- 15단계 검증(14단계는 `docs/api.json` 낡음 검사, 15단계는 빌드한 `cyber`의 REPL에 줄을 파이프로 넣는 검사. 2026-11-24 전의
+  기록은 "14단계 검증"이라고 적는다): `src/tools/verify.sh [로그 디렉터리]`(`task verify`, 약 10분, 기본 로그 `zig-out/verify/`). `run_in_background`로
   돌리고 완료 알림을 기다린 뒤 `rc=`를 확인하고 커밋한다(`tail`만 보지 않는다). 도는 동안 `src/`를 고치지 않는다(고쳤으면
   죽이고 다시). 다른 작업을 이어 가려면 git worktree에서 돌리고 끝나면 `git worktree remove`.
 - 커밋은 의미 있는 diff면 묻지 않고 한다. push · 태그 · 릴리스는 사용자 지시 때만. `gh`는 `-R soomtong/cyber`.
@@ -432,7 +447,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 1. 버전 세 곳: `build.zig` · `build.zig.zon` · `install.sh`.
 2. `unreleased.md` → `docs/releases/<v>.md`(요약 · 호환성 절을 새로 쓴다), `unreleased.md`는 머리말만 남긴다.
-3. 14단계 검증 rc=0 → master push → 그 Latest Build가 끝난 뒤 annotated 태그 push(같이 올리면 `concurrency: latest`로 한쪽이 취소된다).
+3. 15단계 검증 rc=0 → master push → 그 Latest Build가 끝난 뒤 annotated 태그 push(같이 올리면 `concurrency: latest`로 한쪽이 취소된다).
 4. 릴리스 run 확인(`gh run list`), `gh release edit <v> --notes-file docs/releases/<v>.md --latest`. Latest는 `gh release list`로 본다.
 5. `install.sh <v>`를 scratchpad에 설치해 버전 문자열 · `cyber-lsp initialize` · 예제 하나 확인.
 6. 노트에 태그 커밋 · 빌드 번호를 적어 커밋하고 `docs/decisions/project_fork_release_ci.md`에도 기록.

@@ -85,15 +85,55 @@ fn getDynLib(vm: *cy.VM, c: *cy.Chunk) !*dynlib.DynLib {
     return lib;
 }
 
-fn getTccState(vm: *cy.VM) *tcc.TCCState {
-    return vm.tcc_state orelse {
-        const state = tcc.tcc_new();
-        // Don't include libtcc1.a.
-        _ = tcc.tcc_set_options(state, "-nostdlib");
-        _ = tcc.tcc_set_output_type(state, tcc.TCC_OUTPUT_MEMORY);
-        vm.tcc_state = state;
-        return @ptrCast(state);
-    };
+/// A new TCC state for one `initBindLib`. The VM keeps it until it is destroyed: the bound functions run its code.
+fn newTccState(vm: *cy.VM) !*tcc.TCCState {
+    const state = tcc.tcc_new() orelse return error.OutOfMemory;
+    errdefer tcc.tcc_delete(state);
+    // Don't include libtcc1.a.
+    _ = tcc.tcc_set_options(state, "-nostdlib");
+    _ = tcc.tcc_set_output_type(state, tcc.TCC_OUTPUT_MEMORY);
+    try vm.tcc_states.append(vm.alloc, state);
+    return state;
+}
+
+/// Whether there is something for `initBindLib` to compile: an extern function, a variant of a variadic one or
+/// the dispatch of an extern function pointer type that no earlier call bound.
+fn hasUnbound(c: *cy.Compiler) !bool {
+    for (c.chunks.items) |chunk| {
+        if (!chunk.has_extern_func or !chunk.rt_ready) {
+            continue;
+        }
+        for (chunk.funcs.items) |func| {
+            if (func.type == .extern_ and func.data.extern_.vm_variadic) continue;
+            if (!try isBound(c, func)) return true;
+        }
+    }
+    for (c.sema.types.items) |type_| {
+        if (type_.kind() == .func_ptr) {
+            const func_ptr = type_.cast(.func_ptr);
+            if (func_ptr.extern_is_called) {
+                const id = try bc.ensureExternFuncPtrDispatch(c, func_ptr);
+                if (c.vm.funcSyms.items[id].type == .null) return true;
+            }
+        }
+    }
+    return false;
+}
+
+/// Whether an earlier `initBindLib` of this VM bound `func`. In a `persist_main` session a later eval can load a
+/// module with extern functions; the functions of the earlier evals keep the bindings they have.
+fn isBound(c: *cy.Compiler, func: *cy.Func) !bool {
+    if (func.type == .extern_) {
+        // A variadic extern function has no binding of its own. Every state declares it for the variants
+        // that call it.
+        if (func.data.extern_.vm_variadic) return false;
+        const entry = try bc.ensureExternFunc(c, func);
+        return c.vm.funcSyms.items[entry.id].type != .null;
+    } else if (func.type == .vm_extern_variant) {
+        const id = try bc.ensureFunc(c, func);
+        return c.vm.funcSyms.items[id].type != .null;
+    }
+    return true;
 }
 
 fn genFunc(c: *cy.cgen.Chunk, lib: *dynlib.DynLib, state: *tcc.TCCState, w: anytype, func: *cy.Func) !void {
@@ -230,6 +270,11 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
         performRtRelocations(t.c.vm.compiler);
         return C.RetOk;
     }
+    if (!try hasUnbound(t.c.vm.compiler)) {
+        // A later eval of a session that only calls what the earlier evals bound. Its call sites get the addresses.
+        performRtRelocations(t.c.vm.compiler);
+        return C.RetOk;
+    }
     var compiler = cy.cgen.Compiler{
         .base = t.c.vm.compiler,
         .alloc = t.alloc,
@@ -280,7 +325,9 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
 
     // Begin func binding generation.
 
-    const state = getTccState(t.c.vm);
+    // Each call compiles into its own state. One state for the VM compiled the functions of the earlier evals
+    // again ('defined twice') and ended the host.
+    const state = try newTccState(t.c.vm);
 
     for (t.c.vm.compiler.chunks.items) |c| {
         // A chunk of a failed compile has no code (`Compiler.carryFailedCompile`).
@@ -308,6 +355,7 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
         }
 
         for (c.funcs.items) |func| {
+            if (try isBound(compiler.base, func)) continue;
             try genFunc(&chunk_gen, lib, state, w, func);
         }
     }
@@ -360,6 +408,7 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
 
         // Bind VM function pointers.
         for (c.funcs.items) |func| {
+            if (try isBound(compiler.base, func)) continue;
             try bindFunc(&compiler, state, func);
         }
     }
@@ -380,6 +429,8 @@ pub fn initBindLib(t: *cy.Thread) !C.Ret {
 /// Writes the bound extern function and variable addresses into the call sites.
 fn performRtRelocations(compiler: *cy.Compiler) void {
     for (compiler.chunks.items) |c| {
+        // A chunk of a failed compile has no code (`Compiler.carryFailedCompile`).
+        if (!c.rt_ready) continue;
         for (c.rt_relocations.items) |rel| {
             const ptr: *align(2) [6]u8 = @ptrCast(&c.buf.ops.items[rel.pc]);
             switch (rel.kind) {

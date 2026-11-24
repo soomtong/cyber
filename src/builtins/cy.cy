@@ -1217,20 +1217,18 @@ fn destroy_parser(parser Ptr[void]):
 
 --| Starts an isolated REPL session.
 --| The callback `read_line(prefix string) string` is responsible for obtaining the input.
+--| The session runs in a new `VM()`: it imports the modules of the library and nothing that the host added.
+--| A host that wants its own modules in the session makes the VM itself and uses `REPL.new(vm)`.
 fn repl(read_line ReadLineFn) -> void:
     ctx := REPL.new()
-    ctx.print_intro()
-    while ctx.read(read_line) |code|:
-        ctx.eval_print(code)
+    ctx.run(read_line)
 
 --| Starts an isolated REPL session like `repl(read_line)`, with `doc` behind the command `.doc`.
 --| `doc(query)` gets the text after `.doc` and prints what the host has to say about it.
 fn repl(read_line ReadLineFn, doc DocFn) -> void:
     ctx := REPL.new()
     ctx.doc_fn = doc
-    ctx.print_intro()
-    while ctx.read(read_line) |code|:
-        ctx.eval_print(code)
+    ctx.run(read_line)
 
 type Backend enum:
     case vm
@@ -1296,7 +1294,8 @@ fn (&Thread) deinit_str(value Value)
 type VM:
     inner Ptr[void]
 
---| Create an isolated VM.
+--| Create an isolated VM. It prints where this VM prints and has none of its other settings: the resolver,
+--| the loader and the user data are the defaults of the library, so it imports the builtin modules only.
 #[bind]
 fn VM :: @init() -> VM
 
@@ -1348,9 +1347,15 @@ type REPL:
     -- Prints the manual for the command `.doc`. None in a host that has no manual.
     doc_fn ?DocFn = none
 
+--| A REPL whose session runs in a new, isolated `VM()`.
 fn REPL :: new() -> REPL:
+    return REPL.new(VM())
+
+--| A REPL whose session runs in `vm`. Who makes the VM decides what the session can import: `VM()` has the
+--| modules of the library only, and a host can hand over a VM that it has set up (the CLI does, see `cli.new_vm`).
+fn REPL :: new(vm VM) -> REPL:
     ctx := REPL{
-        vm = VM(),
+        vm = move vm,
         indent = 0,
         input_buffer = '',
     }
@@ -1365,6 +1370,12 @@ fn REPL :: new() -> REPL:
         eprint(report)
         panic('Unexpected.')
     return ctx
+
+--| Prints the intro, then reads and evaluates inputs until `.exit`.
+fn (&&REPL) run(read_line ReadLineFn):
+    self.print_intro()
+    while self.read(read_line) |code|:
+        self.eval_print(code)
 
 fn (&REPL) print_intro():
     print("%{meta.full_version()} REPL")

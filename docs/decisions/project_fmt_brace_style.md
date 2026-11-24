@@ -68,6 +68,14 @@
 - 이름 있는 인자는 `name: value`라 `=`가 없다.
 - gofmt와 달리 정렬은 하지 않는다. 손으로 맞춘 열(`base   = none`)은 한 칸으로 줄어든다.
   줄 끝 주석 앞의 간격만 쓴 그대로 둔다.
+- 예외 하나: destructure import의 중괄호는 안쪽을 한 칸씩 띄운다. `use { cos, pi } from 'math'`
+  (2026-11-24 사용자 결정. 붙여 쓴 `use {cos, pi} from 'math'`는 너무 빡빡해 보인다).
+  이 중괄호는 타입 이름에 딸린 인자 목록이 아니라 혼자 서서 가져올 이름을 늘어놓는 자리라, 위 "핵심 디자인"의 구분으로는
+  독립된 값 쪽(JavaScript의 `import { a, b } from 'm'`)에 가깝다. 예외는 `use` 문에만 둔다. 값을 만드는 중괄호
+  (`Vec2{x = 1}`, 타입 없는 `{1, 2, 3}`, `#{...}`)는 그대로 붙여 쓴다.
+  destructure import는 아직 Planned라 파서가 받지 않는다(`project_planned_features.md`). 구현할 때 `format.zig`가 `use` 문의
+  중괄호에서 `{` 뒤와 `}` 앞에 공백 하나를 넣게 하고, 매뉴얼 Format source 절의 "There is no space inside brackets"에 이
+  예외를 적는다.
 
 ## Pros vs Cons
 

@@ -67,3 +67,6 @@
 - `sema_expr.hook_names`에 `@clone`이 있지만 컴파일러가 부르는 곳은 없다. 스크립트가 `@clone`을 선언할 수 있게 하는 이름일
   뿐이라 이번에는 두었다.
 - 남긴 계획 중 destructure import는 꼴이 바뀌었으므로 구현할 때 `from`을 문맥 키워드로 둘지 예약어로 둘지 정해야 한다.
+  `json.from` 함수와 `regex.cy`의 지역 변수 `from`이 있어 예약어로 하면 둘을 고쳐야 한다.
+- destructure import의 중괄호는 안쪽을 띄운다(`use { cos, pi } from 'math'`, 2026-11-24 사용자 결정). 포매터의 "중괄호 안쪽은
+  붙인다"에 대한 유일한 예외이고, 구현할 때 `cyber fmt`가 함께 따라야 한다. `project_fmt_brace_style.md` 결정 절.

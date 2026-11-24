@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.19-dev 1155-f3feb92</div>
+    <div class="sub-title">v0.4.20-dev 1165-b407c7b</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -3447,7 +3447,7 @@ print(rmap(|x| x + 1, []int{1, 2}))
 <pre><code class="language-cy">print(map([]int{1, 2}, |x|)):
     return x + 1
 </code></pre>
-<p>When no argument binds a template parameter, the call reports 'Can not infer the template parameter <code>U</code> from the argument for <code>f</code>. Declare it as its own parameter (<code>%U type</code>) and pass the type in the call.' An explicit parameter is always an alternative to inference:</p>
+<p>When no argument binds a template parameter, the call reports 'Can not infer the template parameter <code>U</code> from the argument for <code>f</code>. Declare it as its own parameter (<code>%U type</code>) and pass the type in the call.' A parameter inside a computed size (<code>fn(T) -> [%N + 1]T</code>) is never bound by an argument and reports the same. An explicit parameter is always an alternative to inference:</p>
 <pre><code class="language-cy">fn convert(%U type, items []%T, f fn(T) -> U) -> []U:
     out := []U{}
     for items |it|:
@@ -3507,6 +3507,7 @@ print(opt(1, some))           --> option
 print(opt(1, |x| x / 2))      --> float
 </code></pre>
 <p>When no overload takes the arguments, the call reports the error of the overload that came closest, as if it were the only one: 'Expected type <code>str</code>, got <code>int</code>.' at the branch or <code>return</code> of a lambda, 'Expected template <code>Option</code>. Found <code>Float</code>.' for <code>opt(1, |x| 1.5)</code> without the second overload, or 'Expected type <code>str</code>. Found <code>bool</code>.' Any other error in an argument, like an undeclared name in the body of a lambda, is reported right away.</p>
+<p>Two overloads that infer template parameters can differ only in the form of a parameter type: <code>fn f(x ?%T)</code>, <code>fn f(x []%T)</code> and <code>fn f(x %T)</code> are three overloads, and so are <code>f fn(T) -> ?%U</code> and <code>f fn(T) -> []%U</code>. Overloads whose parameter types are written the same way, apart from the names of the infer parameters (<code>fn f(x []%T)</code> and <code>fn f(y []%U)</code>), report '<code>f</code> has already been declared with the same function signature.' A type argument (<code>make(int, 1)</code>) goes on to an overload that takes a <code>%T type</code>, and a compile-time call (<code>const a = f(3)</code>) goes on to the next overload the same way as a runtime call.</p>
 <p>An infer parameter is declared in a parameter type only. <code>fn f(x int) -> %U</code> reports '<code>%U</code> can not be declared in a return type. Declare it in a parameter (<code>%U type</code>) instead.', and <code>%T</code> in a function body or outside of a function reports '<code>%T</code> can only be declared in the signature of a function.'</p>
 <a href="#functions">^topic</a>
 <h1 id="memory">Memory. <a href="#memory">#</a></h1>
@@ -4958,7 +4959,7 @@ const fib30 = fib(30)
 <pre><code class="language-cy">-- Assign pre-computed value to a local.
 res := #{fib(30)}
 </code></pre>
-<p>Inside a compile-time body, locals (<code>t := 0</code>), compound assignment (<code>t += 1</code>), <code>for</code> ranges, <code>if</code>, <code>switch</code> and fixed-size vectors (<code>v := [3]int(0)</code>, <code>v[i]</code>, <code>v[i] += 1</code>) evaluate the same as at runtime. A vector index out of range is a compile error. Operations the evaluator does not support yet (for example <code>float</code> addition) are reported as <code>Unsupported inline eval</code>. In an arithmetic operator an integer and a float mix as they do at runtime: <code>const r = k * 2.5</code> and <code>const r = 2.5 * k</code> are the same float for an integer constant <code>k</code>. <code>==</code> and <code>!=</code> of an integer and a float are a type error at compile time.</p>
+<p>Inside a compile-time body, locals (<code>t := 0</code>), compound assignment (<code>t += 1</code>), <code>for</code> ranges, <code>if</code>, <code>switch</code> and fixed-size vectors (<code>v := [3]int(0)</code>, <code>v[i]</code>, <code>v[i] += 1</code>) evaluate the same as at runtime. A vector index out of range is a compile error. The operators of the built-in number types give the same value as at runtime: an integer wraps at its width, <code>/</code> truncates, <code>>></code> is a logical shift, and a narrower integer widens to the type of the other operand. An integer and a float mix as they do at runtime: <code>const r = k * 2.5</code>, <code>const r = 2.5 * k</code> and <code>const t = k == 7.0</code> work for an integer constant <code>k</code>. Integer <code>/</code> or <code>%</code> by zero is a compile error instead of the runtime panic. Operations the evaluator does not support yet are reported as <code>Unsupported inline eval</code>.</p>
 <a href="#metaprogramming">^topic</a>
 <h3 id="inline-type-creation">Inline type creation. <a href="#inline-type-creation">#</a></h3>
 <p>Types can be created from inline evaluation. Currently, only structs can be created with <code>meta.new_struct</code>:</p>
@@ -6311,13 +6312,13 @@ belongs to the script: <code>cyber main.cy --version</code> runs <code>main.cy</
 CompileError: Cannot persist local `sp` of borrow type `[&]int` across evals. Declare it inside a block or use an owned type.
 > sp := []int{1, 2}
 </code></pre>
-<p>A top level variable of the REPL does not move without <code>move</code>, because later inputs read it. A <code>NoCopy</code> value that would move in a script is a compile error that says to write <code>move a</code> or to borrow. After <code>move a</code>, later inputs can not use <code>a</code>. A member of a top level variable can not be moved:</p>
+<p>A top level variable of the REPL does not move without <code>move</code>, because later inputs read it. A <code>NoCopy</code> value that would move in a script is a compile error that says to write <code>move a</code> or to borrow. After <code>move a</code>, later inputs can not use <code>a</code> until they declare it again (<code>a := ...</code>). A member of a top level variable can not be moved:</p>
 <pre><code class="language-bash">> a := Array[str]{'x', 'y'}
 > b := a
 CompileError: Cannot copy `Array[str]`, a `NoCopy` type. The top level variable `a` of the REPL does not move without `move`: later inputs read it. Write `move a` to give it away (later inputs can not use `a` then), or borrow it.
 > b := move a
 > a
-CompileError: Undeclared variable `a`.
+CompileError: `a` was moved by an earlier input. Declare it again with `a := ...` to use the name.
 </code></pre>
 <p>When the first input ends with <code>:</code>, the REPL will automatically indent the next line. To recede the indentation, provide an empty input. Once the indent returns to the beginning, the entire code block is submitted for evaluation:</p>
 <pre><code class="language-bash">> if true:

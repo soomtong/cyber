@@ -251,8 +251,10 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - [x] 0.4.18 릴리스(2026-11-22): 노트 `docs/releases/0.4.18.md`, 기록 `project_fork_release_ci.md`. CI의 Linux에서 spawn 상태
   테스트의 메모리 기준이 실패해 상태 수로 검사하게 고쳤다(`3ff30939`, `80126d0e`). 태그 run의 macOS Intel cpu 시간 테스트는
   한 번 재실행.
-- [ ] 같은 VM에서 `vm_eval`을 거듭하면 VM 메모리가 eval마다 약 22 KiB(Linux는 더) 자란다. spawn과 무관하고 0.4.17에서도 같다.
-  컴파일 결과(청크, 심볼, 문자열 intern 등) 중 무엇이 남는지 조사한다. 세션 호스트(tars-agent)가 오래 돌면 쌓인다.
+- [x] 같은 VM에서 `vm_eval`을 거듭하면 VM 메모리가 eval마다 자라던 것(2026-11-24 조사, 사용자: "continue"). eval마다 main 청크
+  하나 분량이 남는다(앞 eval의 함수 · 타입을 뒤 eval이 쓸 수 있어 VM 끝까지 둔다). 그중 쓰지 않는 명령 버퍼 자리와 빈 작업 스택을
+  돌려줘 `x := 1` 기준 eval마다 15.2 → 9.6 KB. 청크 자체를 놓으려면 참조 분석이 필요해 하지 않았다.
+  `project_memory_limit.md` "eval마다 남는 메모리".
 - [x] 위 항목의 남은 것을 정리했다(2026-11-22, 사용자: "continue", F-189..F-194). `unreleased.md` 끝의 "남은 것의 정리" 절.
   spawn 인자 · 결과는 한 규칙(`@sendable`), 버린 future는 끝까지 돈다(결정), `FutureSyncState` 해제. wasm32-freestanding 빌드 복구와
   CI 단계 추가. 빌림 컨테이너 구멍 일곱(깨지는 변경: 매개변수 뒤에는 `scope` 매개변수만 저장).
@@ -390,7 +392,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 ## 다음 에이전트에게
 
 1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환, `os.cmd`, REPL 조회 명령, 세션의 메서드 선언,
-   REPL이 CLI의 모듈을 가져온다, 가변 인자 extern 함수의 `int` · `float` 인자).
+   REPL이 CLI의 모듈을 가져온다, 가변 인자 extern 함수의 `int` · `float` 인자, eval마다 남는 메모리).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 

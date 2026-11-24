@@ -2228,3 +2228,24 @@ test "deny_spawn rejects spawn in script chunks." {
         try zt.eq(C.Success, C.vm_eval(vm, src, &res));
     }
 }
+
+test "A chunk whose code is done keeps no room it does not use." {
+    // A session keeps the chunk of every eval until the VM ends. The instruction buffer was allocated with room for
+    // 2048 instructions and kept it, and the work stacks of sema and codegen kept their room.
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "fn f(n int) -> int:\n  return n * 2\nx := f(3)", config, &res));
+    const zvm: *cy.VM = @ptrCast(@alignCast(vm));
+    const chunk = zvm.compiler.main_chunk;
+    try zt.expect(chunk.buf.ops.items.len > 0);
+    try zt.eq(chunk.buf.ops.items.len, chunk.buf.ops.capacity);
+    try zt.eq(0, chunk.semaBlocks.capacity);
+    try zt.eq(0, chunk.blocks.capacity);
+    try zt.eq(0, chunk.varStack.capacity);
+
+    // The function of the earlier eval still runs from its buffer.
+    try zt.eq(C.Success, C.vm_evalx(vm, "main", "use test\ntest.eq(10, f(5))\ntest.eq(6, x)", config, &res));
+}

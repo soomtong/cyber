@@ -96,3 +96,25 @@ N번째 할당 한 번만 실패시킴, N = 1..8600)의 결과는 다음과 같�
 - C 친화 할당자 훅은 같은 날 `cl_vm_init_mem`으로 더했다(`project_c_mem_funcs.md`).
 - CLI 옵션(`cyber --memory-limit`)은 없다.
 - 컴파일 단계의 할당 실패 처리(퍼즈의 크래시 · 누수)는 같은 날 뒤이어 했다(`project_compile_alloc_failure.md`).
+
+## eval마다 남는 메모리 (2026-11-24)
+
+같은 VM에서 eval을 거듭하면 `cl_vm_memory_used`가 eval마다 자랐다(0.4.18 CI에서 20~40 KiB로 보았고, spawn과 무관했다).
+조사: lib 테스트에 임시로 둔 탐침 allocator(할당마다 frame pointer로 호출 스택 14단을 기록)로 `x := 1`을 20번 eval하고,
+뒤 10번에 할당되어 끝까지 남은 것을 호출 스택별로 묶었다(macOS Debug).
+
+- 남는 것은 eval마다 만든 main 청크 하나 분량이다. 청크는 VM이 끝날 때까지 남는다. 바이트코드는 청크의 버퍼에서 바로
+  돌고(`funcSyms`의 pc가 그 버퍼를 가리킨다), 앞 eval의 함수는 뒤 eval이 부르거나 인라인하며(IR을 쓴다), 앞 eval의 타입 ·
+  심볼 · 디버그 표도 남은 값과 stack trace가 쓴다. `persist_main`이 아니어도 eval의 결과 값이 앞 eval의 함수를 담을 수 있다.
+  그래서 청크를 놓으려면 무엇이 그 청크를 가리키는지 알아야 하고, 그 분석은 하지 않았다.
+- 그 가운데 쓰지 않는 몫을 돌려준다.
+  - 명령 버퍼: `genAll`이 청크마다 명령 2048개(4 KB) 자리를 먼저 잡고, 코드가 작아도 그대로 두었다. 이제 `genChunkInner`가
+    코드를 다 만든 뒤, 함수 pc를 포인터로 바꾸기 전에 길이만큼 줄인다(`shrinkAndFree`).
+  - 작업 스택: sema · 코드 생성의 스택(`semaBlocks` · `varStack` · `proc_stack` · `blocks` 등 17개)은 비어도 자리를 가졌다.
+    `genAll` 끝에서 새 청크의 빈 스택을 놓는다(`Chunk.freeEmptyStacks`). 템플릿 인스턴스가 앞 청크에서 다시 sema를 돌면
+    그때 다시 잡는다.
+- 결과(`x := 1`, eval 9 → 19의 `cl_vm_memory_used`): 151,512 → 95,912바이트(eval마다 약 15.2 KB → 9.6 KB). 뒤 10번에서
+  남은 할당의 합은 141,320 → 85,720바이트.
+- 남은 9.6 KB는 청크 구조체(약 3 KB), AST · IR 노드, 함수 심볼과 디버그 표, `genSymMap` · `funcSyms`의 성장이다. 소스가
+  크면 그만큼 늘어난다. 오래 도는 세션 호스트는 VM을 주기적으로 새로 만드는 것이 지금의 답이다.
+- 테스트: lib `A chunk whose code is done keeps no room it does not use.`(`src/lib_test/compile.zig`).

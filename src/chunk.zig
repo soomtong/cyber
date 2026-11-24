@@ -405,6 +405,21 @@ pub const Chunk = struct {
         }
     }
 
+    /// Frees the room of the work stacks that are empty. A chunk whose code is done keeps it until the VM ends (a
+    /// session keeps the chunk of every eval), and is not compiled again except for a template instance, which
+    /// allocates again.
+    pub fn freeEmptyStacks(self: *Chunk) void {
+        inline for (.{
+            &self.semaProcs,        &self.semaBlocks,       &self.listDataStack,  &self.typeStack,
+            &self.valueStack,       &self.expr_stack,       &self.func_param_stack, &self.active_field_stack,
+            &self.varStack,         &self.varShadowStack,   &self.resolve_stack,  &self.proc_stack,
+            &self.blocks,           &self.blockJumpStack,   &self.bc_local_map,   &self.ir.stmtBlockStack,
+            &self.buf.ptr_layout_builder,
+        }) |list| {
+            if (list.items.len == 0) list.clearAndFree(self.alloc);
+        }
+    }
+
     pub fn deinit(self: *Chunk) void {
         self.tempBufU8.deinit(self.alloc);
         self.u16_stack.deinit(self.alloc);

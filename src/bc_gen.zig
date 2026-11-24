@@ -184,6 +184,7 @@ pub fn genAll(c: *cy.Compiler) !void {
 
     for (c.newChunks()) |chunk| {
         chunk.rt_ready = true;
+        chunk.freeEmptyStacks();
     }
 }
 
@@ -488,6 +489,10 @@ fn genChunkInner(c: *Chunk) !void {
             try mainBlock(c, block.cast(.mainBlock), block.node);
         }
     }
+
+    // The code of the chunk is final. Give back the room of the first allocation (`genAll`) before the pcs are
+    // taken: a session keeps the chunk of every eval.
+    if (c.buf.ops.items.len > 0) c.buf.ops.shrinkAndFree(c.alloc, c.buf.ops.items.len);
 
     // Get stable func pcs after final buffer size.
     for (c.ir.func_blocks.items) |block| {

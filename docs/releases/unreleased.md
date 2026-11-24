@@ -179,3 +179,13 @@ CLI의 REPL에서 `use os`가 'Failed to load module: os'였다(F-200). 세션�
 - C 함수에는 C의 기본 인자 승격이 그대로 적용된다(`f32`는 `double`로, `i8`은 `int`로). `int`는 64비트이므로 형식 문자열은
   `%lld`(또는 `%ld`)로 쓴다.
 - 테스트: behavior `ffi/variadic.cy`(`int` · `i8` · `i16` · `i32` · `float` · `f32` · `r64` · `r32` · `r16` · `bool` · 포인터).
+
+## 같은 VM의 eval마다 남는 메모리를 줄였다 (2026-11-24)
+
+- 같은 VM에서 eval을 거듭하면 eval마다 메모리가 자랐다. 각 eval의 main 청크가 VM이 끝날 때까지 남고, 그 청크가 쓰지 않는
+  명령 버퍼 4 KB와 sema · 코드 생성 작업 스택의 자리를 가졌다. 이제 코드를 다 만든 청크는 그 몫을 돌려준다.
+- `x := 1`을 거듭하면 eval마다 약 15.2 KB에서 9.6 KB로 줄었다(macOS Debug). 남는 몫은 앞 eval의 함수 · 타입을 뒤 eval이 쓸 수
+  있어 남기는 것(바이트코드, AST · IR, 심볼, 디버그 표)이고 소스 크기에 비례한다. 오래 도는 세션 호스트는 VM을 주기적으로
+  새로 만든다.
+- 결정 `docs/decisions/project_memory_limit.md` "eval마다 남는 메모리", 테스트 lib `A chunk whose code is done keeps no room it
+  does not use.`

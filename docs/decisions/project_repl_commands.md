@@ -86,6 +86,7 @@ fn largest[float](float, float) -> float  (eval)
 ## 작업 중 찾은 기존 결함 (고치지 않음)
 
 둘 다 이 변경 전의 빌드에서도 같다. 이 작업의 범위 밖이라 고치지 않고 기록한다.
+1번(F-199)은 같은 날 뒤의 작업이 고쳤다: `docs/decisions/project_session_methods.md`.
 
 1. F-199: 세션에서 앞 입력이 선언한 타입에 뒤 입력이 메서드나 타입 함수를 선언하면 호스트 프로세스가 죽는다.
    REPL에 `type V:` 블록을 넣고 `fn (&V) twice() -> float:` 또는 `fn V :: make() -> V:`를 넣으면

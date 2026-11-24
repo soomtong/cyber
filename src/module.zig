@@ -130,6 +130,103 @@ fn prepareFuncSym(c: *cy.Chunk, parent: *cy.Sym, mod: *Module, name: []const u8,
     return sym;
 }
 
+/// Takes out of `mod` what the chunks from `start` on declared in it: the module belongs to a type of an
+/// earlier eval of the session, and the compile that declared a method or a member for it failed or was
+/// discarded (`Compiler.dropLateDecls`, F-199). The chunks still own the symbols and the functions.
+pub fn dropDeclsFrom(alloc: std.mem.Allocator, mod: *Module, start: u32) void {
+    // A removal invalidates the iterator, so the scan starts again after each one.
+    scan: while (true) {
+        var iter = mod.symMap.iterator();
+        while (iter.next()) |e| {
+            if (dropSymDeclsFrom(alloc, mod, e.value_ptr.*, start)) {
+                mod.symMap.removeByPtr(e.key_ptr);
+                continue :scan;
+            }
+        }
+        break;
+    }
+}
+
+/// Returns whether nothing of `sym` is left.
+fn dropSymDeclsFrom(alloc: std.mem.Allocator, mod: *Module, sym: *cy.Sym, start: u32) bool {
+    switch (sym.type) {
+        .func => {
+            const func_sym = sym.cast(.func);
+            if (func_sym.numFuncs == 0) return false;
+            var kept_first: ?*cy.Func = null;
+            var kept_last: ?*cy.Func = null;
+            var num_kept: u16 = 0;
+            var cur: ?*cy.Func = func_sym.first;
+            while (cur) |func| {
+                cur = func.next;
+                const dropped = if (func.decl) |decl| decl.src() >= start else false;
+                if (dropped) {
+                    func.next = null;
+                    removeOverload(&mod.overloadedFuncMap, func);
+                    removeOverload(&mod.overloadedParamsMap, func);
+                    continue;
+                }
+                if (kept_last) |last| {
+                    last.next = func;
+                } else {
+                    kept_first = func;
+                }
+                kept_last = func;
+                func.next = null;
+                num_kept += 1;
+            }
+            if (num_kept == func_sym.numFuncs) return false;
+            func_sym.numFuncs = num_kept;
+            const first = kept_first orelse return true;
+            if (func_sym.first != first) {
+                func_sym.firstFuncSig = if (first.info.resolved) first.sig else null;
+            }
+            func_sym.first = first;
+            func_sym.last = kept_last.?;
+            return false;
+        },
+        .variant_func => {
+            const variant = sym.cast(.variant_func);
+            // The first declaration made the symbol, so the others are not older.
+            if (declSrc(variant.decl.decl) >= start) return true;
+            const rest = variant.rest();
+            var keep: usize = 0;
+            for (rest.items) |decl| {
+                if (declSrc(decl.decl) >= start) {
+                    alloc.free(decl.with_cstrs.slice());
+                    continue;
+                }
+                rest.items[keep] = decl;
+                keep += 1;
+            }
+            rest.items.len = keep;
+            return false;
+        },
+        .variant_member => {
+            return sym.cast(.variant_member).decl.src() >= start;
+        },
+        else => {
+            const decl = sym.declNodeOrNull() orelse return false;
+            return decl.src() >= start;
+        },
+    }
+}
+
+fn declSrc(decl: *ast.FuncDecl) u32 {
+    const node: *ast.Node = @ptrCast(decl);
+    return node.src();
+}
+
+fn removeOverload(map: *std.HashMapUnmanaged(ModFuncKey, *cy.Func, cy.hash.KeyU128Context, 80), func: *cy.Func) void {
+    var iter = map.iterator();
+    while (iter.next()) |e| {
+        if (e.value_ptr.* == func) {
+            map.removeByPtr(e.key_ptr);
+            return;
+        }
+    }
+}
+
 pub fn reserveUseAlias(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: ?*ast.Node) !*cy.sym.UseAlias {
     const sym = try c.createUseAlias(parent, name, decl);
     const mod = parent.getMod().?;
@@ -298,6 +395,10 @@ pub fn reserveVariantFunc(
                 .with_cstrs = .{ .ptr = undefined, .len = 0 },
                 .resolved = false,
             });
+            if (declSrc(sym_.decl.decl) != declSrc(decl)) {
+                // An earlier eval of the session declared the method. An instance can have expanded it.
+                try c.compiler.noteLateVariant(sym_);
+            }
             return sym_;
         } else {
             try reportDupSym(c, sym, name, @ptrCast(decl));
@@ -455,6 +556,17 @@ pub fn resolveFunc(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig) !void {
             sym.firstFuncSig = sig;
         }
         if (sym.numFuncs > 1) {
+            // A function that was resolved as the only one of its name is in neither map. A later eval of a
+            // session can declare an overload of a method of an earlier eval (F-199).
+            if (sym.first != func) {
+                if (sym.firstFuncSig) |first_sig| {
+                    const first_res = try mod.overloadedFuncMap.getOrPut(c.alloc, ModFuncKey.initModFuncKey(sym, first_sig));
+                    if (!first_res.found_existing) first_res.value_ptr.* = sym.first;
+                    const first_params = try c.sema.ensureFuncSig2(first_sig.params(), c.sema.void_t, first_sig.extern_, if (first_sig.scope_param_idx == cy.NullU8) null else first_sig.scope_param_idx);
+                    const first_params_res = try mod.overloadedParamsMap.getOrPut(c.alloc, ModFuncKey.initModFuncKey(sym, first_params));
+                    if (!first_params_res.found_existing) first_params_res.value_ptr.* = sym.first;
+                }
+            }
             const key = ModFuncKey.initModFuncKey(sym, sig);
             try mod.overloadedFuncMap.putNoClobber(c.alloc, key, func);
 
@@ -527,8 +639,15 @@ pub fn access_chunk(c: *cy.Chunk, node: *ast.Node) *cy.Chunk {
     return c.compiler.chunks.items[src];
 }
 
-/// A `-` symbol is visible to the chunk that declares it. Chunks with the same `srcUri` are one module: a
-/// `persist_main` session creates a new main chunk for every eval under the same uri (F-30).
+/// Whether two chunks are one module. A `persist_main` session creates a new main chunk for every eval: they
+/// are one module (F-30), under the same uri or not (`Chunk.session_main`, F-202).
+pub fn sameModule(a: *cy.Chunk, b: *cy.Chunk) bool {
+    if (a == b) return true;
+    if (a.session_main and b.session_main) return true;
+    return std.mem.eql(u8, a.srcUri, b.srcUri);
+}
+
+/// A `-` symbol is visible to the module that declares it (`sameModule`).
 pub fn is_sym_visible(c: *cy.Chunk, sym: *cy.Sym, node: *ast.Node) bool {
     if (!sym.getMetadata().private) {
         return true;
@@ -540,7 +659,7 @@ pub fn is_sym_visible(c: *cy.Chunk, sym: *cy.Sym, node: *ast.Node) bool {
     }
     const owner = sym.getRootChunk();
     const from = access_chunk(c, node);
-    return owner == from or std.mem.eql(u8, owner.srcUri, from.srcUri);
+    return sameModule(owner, from);
 }
 
 /// Reports an access to a `-` symbol from another module. Aliases are checked as themselves, not as their target,
@@ -569,6 +688,12 @@ fn getResolvedSym2(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *ast.N
     };
     if (mod.getSym(name)) |sym| {
         try check_sym_visible(c, sym, node);
+        if (sym.type == .func and c.compiler.late_overloads) {
+            // A later eval of the session declared an overload for the template of this instance (F-199).
+            if (modSym.instance()) |variant| {
+                try expandLateOverloads(c, modSym, mod, variant, sym.cast(.func), node);
+            }
+        }
         switch (sym.type) {
             .module_alias => {
                 return sym.cast(.module_alias).sym;
@@ -598,33 +723,7 @@ fn getResolvedSym2(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *ast.N
         if (variant.getSymTemplate().getMod().getSym(name)) |sym| {
             if (sym.type == .variant_func) {
                 const func_sym = sym.cast(.variant_func);
-
-                // The functions are reserved in the module of the instance before their signatures are resolved.
-                // If one fails, the name is taken out again: the next lookup would otherwise find a function
-                // without a signature (a crash in a session that compiles again, and with error recovery in the
-                // next body that calls it). It then fails here once more, with its report.
-                var resolved = false;
-                defer if (!resolved) {
-                    _ = mod.symMap.remove(name);
-                };
-                try sema_resolve.ensure_resolved_instance_func_decl(c, &func_sym.decl);
-                if (func_sym.decl.with_cstrs.len > 0) {
-                    try sema_resolve.check_instance_func_cstr(c, variant, &func_sym.decl, node);
-                }
-                // An overload that is skipped by `#[cond]` does not hide the overloads that follow it.
-                if (try c.reserveFunc(modSym, sym.name(), func_sym.decl.decl)) |func| {
-                    try sema_resolve.ensure_resolved_func(c, func, true, node);
-                }
-
-                for (func_sym.rest().items) |*decl| {
-                    try sema_resolve.ensure_resolved_instance_func_decl(c, decl);
-                    if (decl.with_cstrs.len > 0) {
-                        try sema_resolve.check_instance_func_cstr(c, variant, decl, node);
-                    }
-                    const func = (try c.reserveFunc(modSym, sym.name(), decl.decl)) orelse continue;
-                    try sema_resolve.ensure_resolved_func(c, func, true, node);
-                }
-                resolved = true;
+                try expandVariantFuncs(c, modSym, mod, variant, func_sym, 0, node);
                 const res = mod.getSym(name) orelse return null;
                 try check_sym_visible(c, res, node);
                 return res;
@@ -648,6 +747,85 @@ fn getResolvedSym2(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *ast.N
     }
 
     return null;
+}
+
+/// Reserves and resolves the functions of the instance `modSym` from the declarations of the template method
+/// `variant_sym`, starting with declaration `from` (0 is the first one, `i` is `rest()[i - 1]`).
+fn expandVariantFuncs(
+    c: *cy.Chunk, modSym: *cy.Sym, mod: *Module, variant: *cy.Instance, variant_sym: *cy.sym.VariantFunc, from: usize, node: *ast.Node,
+) !void {
+    const name = variant_sym.head.name();
+    // The functions are reserved in the module of the instance before their signatures are resolved.
+    // If one fails, the name is taken out again: the next lookup would otherwise find a function
+    // without a signature (a crash in a session that compiles again, and with error recovery in the
+    // next body that calls it). It then fails here once more, with its report.
+    var resolved = false;
+    defer if (!resolved) {
+        _ = mod.symMap.remove(name);
+    };
+    const num_decls = 1 + variant_sym.rest().items.len;
+    var i = from;
+    while (i < num_decls) : (i += 1) {
+        const decl = if (i == 0) &variant_sym.decl else &variant_sym.rest().items[i - 1];
+        try sema_resolve.ensure_resolved_instance_func_decl(c, decl);
+        if (decl.with_cstrs.len > 0) {
+            try sema_resolve.check_instance_func_cstr(c, variant, decl, node);
+        }
+        // An overload that is skipped by `#[cond]` does not hide the overloads that follow it.
+        const func = (try c.reserveFunc(modSym, name, decl.decl)) orelse continue;
+        try sema_resolve.ensure_resolved_func(c, func, true, node);
+    }
+    resolved = true;
+    if (mod.getSym(name)) |res| {
+        if (res.type == .func) res.cast(.func).variant_decls = @intCast(num_decls);
+    }
+}
+
+/// `func_sym` is a method of the instance `modSym`. Adds the overloads that the template got since the instance
+/// expanded the method.
+fn expandLateOverloads(
+    c: *cy.Chunk, modSym: *cy.Sym, mod: *Module, variant: *cy.Instance, func_sym: *cy.sym.FuncSym, node: *ast.Node,
+) !void {
+    // Not expanded from a template method.
+    if (func_sym.variant_decls == 0) return;
+    const template_sym = variant.getSymTemplate().getMod().getSym(func_sym.head.name()) orelse return;
+    if (template_sym.type != .variant_func) return;
+    const variant_sym = template_sym.cast(.variant_func);
+    if (func_sym.variant_decls >= 1 + variant_sym.rest().items.len) return;
+    try expandVariantFuncs(c, modSym, mod, variant, variant_sym, func_sym.variant_decls, node);
+}
+
+/// Adds the overload `decl` of the template method `variant_sym`, which a later eval of the session declared,
+/// to the instances that expanded the method before (`Compiler.expandLateVariants`). A duplicate is then an
+/// error of the eval that declares it.
+pub fn expandLateOverloadsOf(c: *cy.Chunk, template: *cy.sym.Template, variant_sym: *cy.sym.VariantFunc, node: *ast.Node) !void {
+    const name = variant_sym.head.name();
+    // An expansion can add an instance.
+    var i: usize = 0;
+    while (i < template.instances.items.len) : (i += 1) {
+        const inst = template.instances.items[i];
+        if (inst.failed or inst.type != .sym) continue;
+        const inst_sym = inst.data.sym.sym;
+        const mod = inst_sym.getMod() orelse continue;
+        const sym = mod.getSym(name) orelse continue;
+        if (sym.type != .func) continue;
+        try expandLateOverloads(c, inst_sym, mod, inst, sym.cast(.func), node);
+    }
+}
+
+/// After `dropDeclsFrom` on the module of an instance: the template lost the overloads from `start` on.
+pub fn clampVariantDecls(inst_mod: *Module, template_mod: *Module) void {
+    var iter = inst_mod.symMap.iterator();
+    while (iter.next()) |e| {
+        const sym = e.value_ptr.*;
+        if (sym.type != .func) continue;
+        const func_sym = sym.cast(.func);
+        if (func_sym.variant_decls == 0) continue;
+        const template_sym = template_mod.getSym(e.key_ptr.*) orelse continue;
+        if (template_sym.type != .variant_func) continue;
+        const num_decls = 1 + template_sym.cast(.variant_func).rest().items.len;
+        if (func_sym.variant_decls > num_decls) func_sym.variant_decls = @intCast(num_decls);
+    }
 }
 
 pub fn getResolvedSymOrFail(c: *cy.Chunk, modSym: *cy.Sym, name: []const u8, node: *ast.Node) !*cy.Sym {

@@ -544,6 +544,11 @@ pub const FuncSym = extern struct {
     last: *Func,
     numFuncs: u16,
 
+    /// For a method of a template instance: how many declarations of the template method
+    /// (`VariantFunc.decl` and `rest`) the instance has expanded. A later eval of a session can declare another
+    /// overload for the template (`module.expandLateOverloads`). 0 if the symbol was not expanded from one.
+    variant_decls: u16 = 0,
+
     /// Duped to perform uniqueness check without dereferencing the first ModuleFunc.
     /// Null until the first func is resolved.
     firstFuncSig: ?*cy.FuncSig,
@@ -947,6 +952,9 @@ const FuncInfo = packed struct {
     /// The body of this function of a template instance did not compile, in a session that goes on. It has no
     /// IR and is not carried to the next compile. A call to it checks the body again (`sema_call.checkCallee`).
     body_failed: bool = false,
+
+    /// Scratch mark of `Compiler.discardLateDecls`: the body refers to a declaration that is taken out.
+    late_taint: bool = false,
 };
 
 pub const FuncConfig = struct {

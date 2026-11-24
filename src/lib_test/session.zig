@@ -1172,3 +1172,152 @@ test "A slice of a NoCopy element type is refused and does not break the next co
         }
     }
 }
+
+test "A later eval declares a method for a type of an earlier eval." {
+    // F-199. The new main chunk of a `persist_main` eval sees the types of earlier evals as `use` aliases, which
+    // have no module: `fn (&V) twice()` in a later eval was 'attempt to use null value' in `module.reserveFunc`.
+    // The method joins the module of the type, which a surviving chunk owns, so a compile that fails or that
+    // `cl_vm_validate` discards takes it out again.
+    const S = struct {
+        fn expectError(vm: *C.VM, needle: []const u8) !void {
+            const summary = C.vm_compile_error_summary(vm);
+            defer C.vm_freeb(vm, summary);
+            if (std.mem.indexOf(u8, summary, needle) == null) {
+                std.debug.print("expected `{s}` in:\n{s}\n", .{ needle, summary });
+                return error.TestUnexpectedResult;
+            }
+        }
+    };
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    var res: C.EvalResult = undefined;
+    var config = C.defaultEvalConfig();
+    config.persist_main = true;
+
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl",
+        \\type V:
+        \\    x float
+        \\    -secret int = 7
+        \\type Box[T Any]:
+        \\    val T
+        \\fn (&Box[]) show() -> float:
+        \\    return self.val.twice()
+        \\fn dbl(x %T) -> float:
+        \\    return x.twice()
+        \\v := V{x=2}
+        \\b := Box[V]{val=v}
+    , config, &res));
+
+    const decl =
+        \\fn (&V) twice() -> float:
+        \\    return self.x * 2
+        \\fn V :: make() -> V:
+        \\    return V{x=1}
+        \\use test
+        \\test.eq(4.0, v.twice())
+        \\test.eq(2.0, V.make().twice())
+        \\test.eq(8.0, dbl(v) + b.show())
+    ;
+    const use =
+        \\use test
+        \\test.eq(4.0, v.twice())
+        \\test.eq(2.0, V.make().twice())
+        \\test.eq(8.0, dbl(v) + b.show())
+    ;
+
+    // `cl_vm_validate` compiles as `main`, not under the uri of the session. It accepts what the eval accepts
+    // and keeps nothing: neither the method, nor the instances that call it (`dbl[V]`, `Box[V].show`).
+    try zt.eq(C.Success, C.vm_validate(vm, decl));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = v.twice()", config, &res));
+    try S.expectError(vm, "Can not find the symbol `twice` in `V`.");
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = V.make()", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = dbl(v)", config, &res));
+    try S.expectError(vm, "Can not find the symbol `twice` in `V`.");
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = b.show()", config, &res));
+    try S.expectError(vm, "Can not find the symbol `twice` in `V`.");
+    // Validated twice: the first validate left no declaration that the second one would repeat.
+    try zt.eq(C.Success, C.vm_validate(vm, decl));
+    try zt.eq(C.Success, C.vm_validate(vm, decl));
+
+    // A compile that fails after the declaration keeps nothing either.
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl",
+        \\fn (&V) twice() -> float:
+        \\    return self.x * 2
+        \\_ = v.twice() + dbl(v) + b.show() + nosuch
+    , config, &res));
+    try S.expectError(vm, "Undeclared variable `nosuch`.");
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "_ = v.twice()"));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = dbl(v)", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = b.show()", config, &res));
+
+    // The eval keeps it, and later evals and validates use it.
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", decl, config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", use, config, &res));
+    try zt.eq(C.Success, C.vm_validate(vm, use));
+    // Now the declaration is a duplicate, for the validate too.
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, decl));
+    try S.expectError(vm, "`twice` has already been declared with the same function signature.");
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", decl, config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", use, config, &res));
+
+    // An overload: validated, failed, kept.
+    const overload =
+        \\fn (&V) twice(n int) -> float:
+        \\    return self.x * float(n)
+        \\fn (&Box[]) show(n int) -> float:
+        \\    return self.val.twice(n)
+        \\use test
+        \\test.eq(6.0, v.twice(3))
+        \\test.eq(10.0, b.show(5))
+    ;
+    try zt.eq(C.Success, C.vm_validate(vm, overload));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = v.twice(3)", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = b.show(5)", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", use, config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl",
+        \\fn (&V) twice(n int) -> float:
+        \\    return nosuch
+        \\fn (&Box[]) show(n int) -> float:
+        \\    return self.val.twice(n)
+        \\_ = b.show(5)
+    , config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "_ = b.show(5)", config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", overload, config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use test\ntest.eq(14.0, v.twice() + b.show(5))", config, &res));
+
+    // The `@` methods that the resolution of the type read are refused, by the eval and by the validate.
+    try zt.eq(C.ErrorCompile, C.vm_validate(vm, "fn (&V) @deinit():\n    pass"));
+    try S.expectError(vm, "Can not declare `@deinit` for `V` after the input that declares `V`.");
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "fn (&V) @copy() -> V:\n    return V{x=0}", config, &res));
+    try S.expectError(vm, "Can not declare `@copy` for `V` after the input that declares `V`.");
+
+    // F-202. The main chunks of a session are one module under any uri: a validate (`main`) and an eval under
+    // another uri read a private field of an earlier eval and declare a method that reads it.
+    try zt.eq(C.Success, C.vm_validate(vm, "_ = v.secret"));
+    try zt.eq(C.Success, C.vm_evalx(vm, "turn-2",
+        \\fn (&V) reveal() -> int:
+        \\    return self.secret
+        \\use test
+        \\test.eq(7, v.reveal())
+        \\test.eq(7, v.secret)
+    , config, &res));
+    try zt.eq(C.Success, C.vm_evalx(vm, "turn-3", "use test\ntest.eq(11.0, float(v.reveal()) + v.twice())", config, &res));
+
+    // What is not a type of the session is a compile error. These were the same panic, also in one source.
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "fn dbl :: sub() -> int:\n    return 1", config, &res));
+    try S.expectError(vm, "`dbl` is not a type.");
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", "use math", config, &res));
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "repl", "fn math :: sub() -> int:\n    return 1", config, &res));
+    try S.expectError(vm, "`math` belongs to another module.");
+    try zt.eq(C.Success, C.vm_evalx(vm, "repl", use, config, &res));
+
+    // Without `persist_main` an eval does not see the types of the eval before it.
+    const vm2 = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm2);
+    try zt.eq(C.Success, C.vm_eval(vm2, "type V:\n    x float", &res));
+    try zt.eq(C.ErrorCompile, C.vm_eval(vm2, "fn (&V) twice() -> float:\n    return self.x * 2", &res));
+    try S.expectError(vm2, "Undeclared symbol: `V`");
+}

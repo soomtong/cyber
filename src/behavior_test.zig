@@ -192,6 +192,8 @@ fn test_functions(run: *Runner) void {
     run.case("functions/overload_visibility_error.cy");
     run.case("functions/call_float_param_error.cy");
     run.case("functions/call_method_missing_error.cy");
+    run.case("functions/decl_parent_not_type_error.cy");
+    run.case("functions/decl_method_parent_global_error.cy");
     run.case("functions/call_method_sig_error.cy");
     run.case("functions/call_host.cy");
     run.case("functions/call_host_param_error.cy");
@@ -609,9 +611,11 @@ fn test_modules(run: *Runner) void {
         run.case("modules/private_variant_field_error.cy");
         run.case("modules/import_all_private_error.cy");
         run.case("modules/core_private_error.cy");
+        run.case("modules/decl_method_other_module_error.cy");
     }
     run.case("modules/core.cy");
     run.case("modules/cy.cy");
+    run.case("modules/cy_session_methods.cy");
     run.case("modules/path_basename_error.cy");
 
     run.case("modules/math.cy");

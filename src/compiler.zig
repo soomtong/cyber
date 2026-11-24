@@ -227,6 +227,21 @@ pub const Compiler = struct {
     recheck_next: u32 = 0,
     carry_syms: std.ArrayListUnmanaged(*cy.Sym) = .empty,
 
+    /// The types and templates of earlier evals of the session that this compile declares a method or a member
+    /// for (`sema_resolve.lateDeclParent`, F-199). The declarations join the modules of surviving chunks, so
+    /// a compile that fails or is discarded takes them out again (`dropLateDecls`).
+    late_parents: std.ArrayListUnmanaged(*cy.Sym) = .empty,
+    /// The template methods of earlier evals that this compile declares an overload for. The instances that
+    /// expanded such a method get the overload after the symbols of the source are resolved (`expandLateVariants`).
+    late_variants: std.ArrayListUnmanaged(*cy.sym.VariantFunc) = .empty,
+    /// An eval declared an overload for a template method of an earlier eval. From then on a lookup of a method
+    /// of an instance compares what the instance expanded with the template (`module.expandLateOverloads`).
+    late_overloads: bool = false,
+    /// While this compile has `late_parents`: which body refers to which function, by a call or as a value
+    /// (`sema_call.checkCallee`). `discardLateDecls` finds with it the bodies that reach a declaration that it
+    /// takes out.
+    late_refs: std.ArrayListUnmanaged(LateRef) = .empty,
+
     c_includes: std.ArrayList([]const u8),
     c_flags: std.ArrayList([]const u8),
 
@@ -303,9 +318,16 @@ pub const Compiler = struct {
         if (reset) {
             self.carry_funcs.clearRetainingCapacity();
             self.carry_syms.clearRetainingCapacity();
+            self.late_parents.clearRetainingCapacity();
+            self.late_variants.clearRetainingCapacity();
+            self.late_refs.clearRetainingCapacity();
+            self.late_overloads = false;
         } else {
             self.carry_funcs.deinit(self.alloc);
             self.carry_syms.deinit(self.alloc);
+            self.late_parents.deinit(self.alloc);
+            self.late_variants.deinit(self.alloc);
+            self.late_refs.deinit(self.alloc);
         }
         self.await_buf.clearAndFree(self.alloc);
         self.await_any = &.{};
@@ -501,10 +523,16 @@ pub const Compiler = struct {
         self.host_error = null;
         self.chunk_start = @intCast(self.chunks.items.len);
         self.type_start = @intCast(self.sema.types.items.len);
+        // Kept by the last compile, or taken out by `dropLateDecls`.
+        self.late_parents.clearRetainingCapacity();
+        self.late_variants.clearRetainingCapacity();
+        self.late_refs.clearRetainingCapacity();
         const res = self.compileInner2(uri, src, config) catch |err_| {
             // A callback that could not return its error ended the compile with a bare `CompileError` or null.
             const err = self.host_error orelse err_;
             self.last_compile_failed = true;
+            // Before the carry: what it collects is what survives.
+            self.dropLateDecls();
             // A refused allocation can surface as any error, including a compile error reported by a comptime
             // function (`error.OutOfMemory`), so the allocator is asked rather than the error. Another error
             // that is not a compile error (an internal error of the compiler) unwinds like a compile error
@@ -549,6 +577,126 @@ pub const Compiler = struct {
             self.carry_syms.clearRetainingCapacity();
         }
         return res;
+    }
+
+    pub fn noteLateDeclParent(self: *Compiler, parent: *cy.Sym) !void {
+        for (self.late_parents.items) |it| {
+            if (it == parent) return;
+        }
+        try self.late_parents.append(self.alloc, parent);
+    }
+
+    pub fn noteLateVariant(self: *Compiler, variant: *cy.sym.VariantFunc) !void {
+        self.late_overloads = true;
+        for (self.late_variants.items) |it| {
+            if (it == variant) return;
+        }
+        try self.late_variants.append(self.alloc, variant);
+    }
+
+    /// Gives the overloads that this source declares for template methods of earlier evals to the instances
+    /// that expanded those methods. Without it an overload with the signature of an earlier one would be
+    /// accepted here and reported by every later use of the method.
+    fn expandLateVariants(self: *Compiler, main: *cy.Chunk) !void {
+        for (self.late_variants.items) |variant| {
+            const template = variant.head.parent.?.cast(.template);
+            const rest = variant.rest().items;
+            const node: *ast.Node = @ptrCast(rest[rest.len - 1].decl);
+            try cy.module.expandLateOverloadsOf(main, template, variant, node);
+        }
+    }
+
+    /// Takes the declarations that this compile made for types of earlier evals out of their modules: the
+    /// compile failed, or `VM.validate` discards it. A member of a template that an instance expanded from such
+    /// a declaration leaves the module of the instance too.
+    pub fn dropLateDecls(self: *Compiler) void {
+        for (self.late_parents.items) |parent| {
+            cy.module.dropDeclsFrom(self.alloc, parent.getMod().?, self.chunk_start);
+            if (parent.type != .template) continue;
+            for (parent.cast(.template).instances.items) |inst| {
+                // A failed expansion can end before the instance has its symbol.
+                if (inst.failed or inst.type != .sym) continue;
+                const mod = inst.data.sym.sym.getMod() orelse continue;
+                cy.module.dropDeclsFrom(self.alloc, mod, self.chunk_start);
+                cy.module.clampVariantDecls(mod, parent.getMod().?);
+            }
+        }
+        self.late_parents.clearRetainingCapacity();
+        self.late_variants.clearRetainingCapacity();
+        self.late_refs.clearRetainingCapacity();
+    }
+
+    /// The code that `c` analyzes refers to `func`. Recorded for every function on the stack of bodies: a lambda
+    /// belongs to the body that holds it.
+    pub fn noteLateRef(self: *Compiler, c: *cy.Chunk, func: *cy.Func) !void {
+        if (self.late_parents.items.len == 0) return;
+        for (c.semaProcs.items) |proc| {
+            const from = proc.func orelse continue;
+            if (from == func) continue;
+            try self.late_refs.append(self.alloc, .{ .from = from, .to = func });
+        }
+    }
+
+    /// `VM.validate` discards the compile that just succeeded. A method that it declared for a type of an
+    /// earlier eval leaves that type again (`dropLateDecls`).
+    ///
+    /// What the compile expanded from surviving templates can call such a method: `fn dbl(x %T): x.twice()` as
+    /// `dbl[V]` with a `twice` that only the discarded source declares. That code was generated, so it can not be
+    /// checked again like the bodies of a failed compile (`carry_funcs`), and it would stay in the caches with
+    /// a call to the method. The bodies that reach a declaration of the discarded source (`late_refs`) are
+    /// forgotten: the next source that asks expands them again and gets the error, or the method that it
+    /// declares itself. A destructor or a copy function of an earlier type does not reach one (`late_decl_hooks`),
+    /// so what a type keeps of them stays valid.
+    pub fn discardLateDecls(self: *Compiler) void {
+        if (self.late_parents.items.len == 0) return;
+        const start = self.chunk_start;
+        const type_start = self.type_start;
+        const refs = self.late_refs.items;
+        for (refs) |ref| {
+            ref.from.info.late_taint = false;
+            ref.to.info.late_taint = false;
+        }
+        var changed = true;
+        while (changed) {
+            changed = false;
+            for (refs) |ref| {
+                if (ref.from.info.late_taint) continue;
+                const dropped = if (ref.to.decl) |decl| decl.src() >= start else false;
+                if (dropped or ref.to.info.late_taint) {
+                    ref.from.info.late_taint = true;
+                    changed = true;
+                }
+            }
+        }
+        for (refs) |ref| {
+            const func = ref.from;
+            if (!func.info.late_taint) continue;
+            func.info.late_taint = false;
+            if (carryFunc(func, start, type_start)) forgetExpansion(func);
+        }
+        for (refs) |ref| {
+            ref.to.info.late_taint = false;
+        }
+        self.dropLateDecls();
+    }
+
+    /// `func` is a body that a discarded compile generated and that a later compile can reach.
+    fn forgetExpansion(func: *cy.Func) void {
+        if (func.instance) |inst| {
+            // An instance of a function template leaves the cache (`template.failedEarlier`).
+            inst.failed = true;
+            return;
+        }
+        // A method that an instance of a type template expanded. The next lookup expands it again
+        // (`module.getResolvedSym`).
+        if (func.parent.type != .func) return;
+        const owner = func.parent.parent orelse return;
+        if (owner.instance() == null) return;
+        const mod = owner.getMod() orelse return;
+        const name = func.parent.name();
+        if (mod.getSym(name) == func.parent) {
+            _ = mod.symMap.remove(name);
+        }
     }
 
     /// Called after a compile failed in a session that goes on (not the first compile, no refused allocation).
@@ -662,6 +810,7 @@ pub const Compiler = struct {
             mainChunk = try ensureModule(self, r_uri);
         }
         self.main_chunk = mainChunk;
+        mainChunk.session_main = config.persist_main;
         // Queries are answered for a compile that recorded. Without the recording a partial answer (the names
         // in declarations, but no locals) would look like a complete one.
         self.refs_main = if (self.record_refs) mainChunk else null;
@@ -746,6 +895,7 @@ pub const Compiler = struct {
             try loadChunk(chunk);
             try resolveChunkSyms(chunk);
         }
+        try self.expandLateVariants(mainChunk);
 
         // With recovery the declarations that failed were skipped. A body could reach one that is half resolved.
         if (self.reports.items.len > 0) {
@@ -876,6 +1026,11 @@ pub const Compiler = struct {
     pub fn getSymChunk(self: *Compiler, sym: *cy.Sym) *cy.Chunk {
         return self.chunks.items[sym.declNode().src()];
     }
+};
+
+const LateRef = struct {
+    from: *cy.Func,
+    to: *cy.Func,
 };
 
 const ReportType = enum(u8) {

@@ -305,6 +305,11 @@ pub const Chunk = struct {
     /// module again (`Compiler.carryFailedCompile`).
     evicted: bool = false,
 
+    /// The main chunk of a `persist_main` eval or validate. The main chunks of a session are one module, also
+    /// when they are compiled under different uris (`cl_vm_validate` compiles as `main`): a `-` symbol of an
+    /// earlier eval is visible, and a type of an earlier eval takes a method (`module.sameModule`).
+    session_main: bool = false,
+
     encoder: cy.ast.Encoder,
 
     indent: u32,

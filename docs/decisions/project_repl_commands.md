@@ -78,6 +78,11 @@ fn largest[float](float, float) -> float  (eval)
 - `.doc`: `src/std/cli.cy`의 `repl_doc` bind → `src/cli.zig` `replDoc`이 질의를 공백으로 나눠 `cli.doc_hook`을 부른다. hook은
   `src/main.zig`가 REPL을 띄울 때 `doc_cli.main`으로 건다(`os.process_args`와 같은 방식: 라이브러리는 CLI 모듈을 import하지 못한다).
 
+## PR 리뷰에서 고친 것 (2026-11-24, soomtong/cyber#12)
+
+`.which`가 선언 위치와 문서 주석을 uri로 찾았다. 세션의 eval은 모두 uri가 `eval`이라 첫 eval의 소스에서 줄을 셌다.
+`refs.Info.def_chunk`를 더하고 `writePlace`가 청크를 받게 했다. 테스트는 `modules/cy.cy`의 `second_later`.
+
 ## 작업 중 찾은 기존 결함 (고치지 않음)
 
 둘 다 이 변경 전의 빌드에서도 같다. 이 작업의 범위 밖이라 고치지 않고 기록한다.

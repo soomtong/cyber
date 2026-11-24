@@ -182,6 +182,12 @@ t.eq('`int` 0', vm.value_desc(check.val_t, check.value))
 t.eq(cy.Success, vm.eval('eval', 'm := sq(n) + count()', {persist_main=true}).code)
 t.eq("fn sq(x int) -> int\n  at eval:2:1", vm.which('sq(m)'))
 
+-- The place is counted in the source of the eval that declares the function. Every eval has the uri `eval`.
+later := "x2 := 1\n\nfn first_later():\n    pass\n\n--| Declared on line 7.\nfn second_later():\n    pass\n"
+t.eq(cy.Success, vm.eval('eval', later, {persist_main=true}).code)
+t.eq("fn second_later()\n  at eval:7:1\n  Declared on line 7.", vm.which('second_later()'))
+t.eq("fn second_later()\n  at eval:7:1\n  Declared on line 7.", vm.which('second_later'))
+
 -- VM.bytecode(): the compiled functions of a name.
 bc := vm.bytecode('sq')
 t.assert(bc.starts_with("fn sq(int) -> int  (eval)\n"))

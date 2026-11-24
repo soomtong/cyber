@@ -192,12 +192,12 @@ pub fn exec(t: *C.Thread) anyerror!C.Ret {
         try buf.append(alloc, C.str_bytes(arg));
     }
 
-    var env_map = try currentEnvMap(alloc);
-    defer env_map.deinit();
+    var env_map: ?std.process.Environ.Map = if (inherits_current_env) null else try currentEnvMap(alloc);
+    defer if (env_map) |*map| map.deinit();
 
     const res = try std.process.run(alloc, stdx.io(), .{
         .argv = buf.items,
-        .environ_map = &env_map,
+        .environ_map = if (env_map) |*map| map else null,
         .stdout_limit = .limited(1024 * 1024 * 10),
         .stderr_limit = .limited(1024 * 1024 * 10),
     });
@@ -221,8 +221,13 @@ pub fn exec(t: *C.Thread) anyerror!C.Ret {
     return C.RetOk;
 }
 
-/// The environment of this process as it is now. A child that inherits the environment gets the one that the
-/// `Io` instance read when it was built, without the variables that `os.set_env` has set since.
+/// Whether a child that is given no environment gets the environment of this process as it is now.
+/// On Windows it does. Where libc holds the environment it does not: the `Io` instance remembers the block that
+/// it read when it was built, and `setenv` moves `environ` to a new array, so the variables that `os.set_env`
+/// has set since are missing. There a child is given `currentEnvMap`.
+const inherits_current_env = builtin.os.tag == .windows;
+
+/// The environment of this process as it is now.
 fn currentEnvMap(alloc: std.mem.Allocator) !std.process.Environ.Map {
     const environ: std.process.Environ = .{ .block = stdx.processEnvironBlock() };
     return environ.createMap(alloc);
@@ -391,7 +396,12 @@ fn cmdRunPipeline(alloc: std.mem.Allocator, arena: std.mem.Allocator, stages: []
     const io = stdx.io();
     const n = stages.len;
 
-    const base_env = try currentEnvMap(arena);
+    var base_env: ?std.process.Environ.Map = if (inherits_current_env) null else try currentEnvMap(arena);
+
+    // Declared before the stages so that it is joined after they are stopped: on an error the thread may be
+    // writing to a stage that nobody reads from any more, and only the end of that stage lets the write return.
+    var feeder: ?std.Thread = null;
+    defer if (feeder) |thread| thread.join();
 
     var children: [cmd_max_stages]std.process.Child = undefined;
     var nspawned: usize = 0;
@@ -402,12 +412,13 @@ fn cmdRunPipeline(alloc: std.mem.Allocator, arena: std.mem.Allocator, stages: []
         // The variables of the stage go on top of the environment of this process.
         var env_map = base_env;
         if (stage.env.len > 0) {
-            env_map = try base_env.clone(arena);
+            if (base_env == null) base_env = try currentEnvMap(arena);
+            env_map = try base_env.?.clone(arena);
             var j: usize = 0;
             while (j < stage.env.len) : (j += 2) {
                 const name = C.str_bytes(stage.env[j]);
                 if (!std.process.Environ.Map.validateKeyForPut(name)) return error.InvalidName;
-                try env_map.put(name, C.str_bytes(stage.env[j + 1]));
+                try env_map.?.put(name, C.str_bytes(stage.env[j + 1]));
             }
         }
 
@@ -425,7 +436,7 @@ fn cmdRunPipeline(alloc: std.mem.Allocator, arena: std.mem.Allocator, stages: []
         children[i] = try std.process.spawn(io, .{
             .argv = stage.argv,
             .cwd = if (stage.cwd.len > 0) .{ .path = stage.cwd } else .inherit,
-            .environ_map = &env_map,
+            .environ_map = if (env_map) |*map| map else null,
             .stdin = child_in,
             .stdout = child_out,
             .stderr = child_err,
@@ -440,7 +451,6 @@ fn cmdRunPipeline(alloc: std.mem.Allocator, arena: std.mem.Allocator, stages: []
         }
     }
 
-    var feeder: ?std.Thread = null;
     if (input) |bytes| {
         const file = children[0].stdin.?;
         children[0].stdin = null;
@@ -449,7 +459,6 @@ fn cmdRunPipeline(alloc: std.mem.Allocator, arena: std.mem.Allocator, stages: []
             return err;
         };
     }
-    defer if (feeder) |thread| thread.join();
 
     // Stream 0 is the stdout of the last stage, the others are the stderr of the stages in order.
     var files: [cmd_max_stages + 1]std.Io.File = undefined;

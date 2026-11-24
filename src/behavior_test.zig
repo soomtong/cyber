@@ -728,6 +728,10 @@ fn test_core(run: *Runner) void {
     run.case("core/float_op_assign_wider_error.cy");
     run.case("core/float_op_bool_error.cy");
     run.case("core/float_op_str_error.cy");
+    run.case("core/float_op_symbol_error.cy");
+    run.case("core/symbol_op_float_error.cy");
+    run.case("core/error_eq_float_error.cy");
+    run.case("core/number_signed_raw_compare_error.cy");
     run.case("core/number_mixed_bitwise_error.cy");
     run.case("core/number_mixed_compare_str_error.cy");
     run.case("core/number_mixed_op_assign_error.cy");

@@ -86,3 +86,18 @@ REPL에서 문서, 호출이 고르는 함수, 바이트코드를 본다. 결정
 - 작업 중 찾은 기존 결함(고치지 않음): 세션에서 앞 입력의 타입에 메서드를 선언하면 호스트가 죽는다(F-199), CLI의 REPL에서
   `use os`가 실패한다(F-200).
 - 확인: 14단계 검증 rc=0(9~12단계는 Python `wasmtime` 패키지로 만든 `wasmtime` 대역으로 실행).
+
+## PR #12 리뷰에서 나온 수정 (2026-11-24)
+
+위 세 절(수 피연산자, `os.cmd`, REPL 명령)을 묶은 PR의 코드 리뷰 10건. 릴리스 전의 변경이라 사용자에게는 위 절들의 최종 동작만 보인다.
+
+- 수 피연산자: 왼쪽 변환을 수 타입으로 좁혔다. `symbol` · `error`(distinct raw)는 변환하지 않고, 비교에서 부호 있는 정수는 raw
+  타입으로 변환하지 않는다(`i8 < r64`는 타입 오류). 처음 꼴에서는 `-1 < r64(5)`가 `false`, `symbol.a * 2.5`가 `125.0`이었다.
+- 호환성: `symbol` · `error`가 float 자리에서 수로 변환되지 않는다(F-201). 0.4.19에서는 `2.5 * symbol.a`가 `125.0`,
+  `var f float = symbol.a`가 통과했다. 이제 'Expected `float`, found `symbol`.' 타입 오류다.
+- `os.cmd`: 입력 글이 있는 명령이 출력 한도를 넘는 등 시작 뒤에 실패하면 멈추던 것을 고쳤다. Windows에서는 환경 map을 만들지
+  않아 `os.exec`의 Windows 경로가 0.4.19와 같다. `a.pipe(b)`가 `b`의 입력 글을 쓰지 않는다고 문서에 적었다.
+- `.which`: 선언 위치를 uri가 아니라 청크로 찾는다. 세션의 뒤 eval에서 선언한 함수의 줄 번호가 맞다.
+- 문서: 컴파일 타임의 `==` · `!=`는 정수와 float를 섞지 못한다고 고쳤다. `semaRightOperand`의 문서 주석 자리.
+- 테스트: `core/number_signed_raw_compare_error.cy` · `symbol_op_float_error.cy` · `float_op_symbol_error.cy` ·
+  `error_eq_float_error.cy`, `modules/os_cmd.cy`(입력 중의 `TooBig`, 파이프 뒤 명령의 입력, `pwd -P`), `modules/cy.cy`(뒤 eval의 위치).

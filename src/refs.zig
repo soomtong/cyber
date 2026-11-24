@@ -108,6 +108,8 @@ pub const Info = struct {
     def_uri: []const u8 = "",
     def_pos: u32 = 0,
     def_end: u32 = 0,
+    /// The chunk of `def_uri`. A uri does not name one source: every eval of a session has the same one.
+    def_chunk: u32 = cy.NullId,
 };
 
 const Picked = struct {
@@ -464,6 +466,7 @@ pub fn find(compiler: *cy.Compiler, pos: u32) !?Info {
             try writeTypeName(compiler, w, ref.type.?);
             if (ref.data.local_decl != cy.NullId) {
                 info.def_uri = main.srcUri;
+                info.def_chunk = main.id;
                 info.def_pos = ref.data.local_decl;
                 info.def_end = info.def_pos + @as(u32, @intCast(name.len));
             }
@@ -745,6 +748,7 @@ fn setDef(compiler: *cy.Compiler, info: *Info, decl: *ast.Node) void {
     const end = decl.end();
     if (pos == cy.NullId or end == cy.NullId or pos > chunk.src.len) return;
     info.def_uri = chunk.srcUri;
+    info.def_chunk = chunk_id;
     info.def_pos = pos;
     info.def_end = @min(@max(end, pos), @as(u32, @intCast(chunk.src.len)));
 }
@@ -862,13 +866,10 @@ pub fn which(vm: *cy.VM, src: []const u8) ![]const u8 {
     if (end > 0) {
         if (try find(compiler, @intCast(end - 1))) |info| {
             try w.writeAll(info.detail);
-            if (info.def_uri.len > 0) {
-                try writePlace(compiler, w, info.def_uri, info.def_pos);
-                for (compiler.chunks.items) |chunk| {
-                    if (!std.mem.eql(u8, chunk.srcUri, info.def_uri)) continue;
-                    if (info.def_pos <= chunk.src.len) try writeDocComment(w, chunk.src, info.def_pos);
-                    break;
-                }
+            if (info.def_uri.len > 0 and info.def_chunk < compiler.chunks.items.len) {
+                const chunk = compiler.chunks.items[info.def_chunk];
+                try writePlace(w, chunk, info.def_pos);
+                try writeDocComment(w, chunk.src, info.def_pos);
             }
             return buf.toOwnedSlice();
         }
@@ -903,29 +904,28 @@ fn writeFuncDesc(compiler: *cy.Compiler, w: *std.Io.Writer, func: *cy.Func) !voi
         const chunk_id = decl.src();
         if (decl.type() != .null and decl.pos() != cy.NullId and chunk_id < compiler.chunks.items.len) {
             const chunk = compiler.chunks.items[chunk_id];
-            try writePlace(compiler, w, chunk.srcUri, decl.pos());
+            try writePlace(w, chunk, decl.pos());
             try writeDocComment(w, chunk.src, decl.pos());
         }
     }
 }
 
-/// `  at uri:line:col`, with the line and column counted from 1.
-fn writePlace(compiler: *cy.Compiler, w: *std.Io.Writer, uri: []const u8, pos: u32) !void {
-    for (compiler.chunks.items) |chunk| {
-        if (!std.mem.eql(u8, chunk.srcUri, uri)) continue;
-        if (pos > chunk.src.len) break;
-        var line: usize = 1;
-        var line_start: usize = 0;
-        for (chunk.src[0..pos], 0..) |ch, i| {
-            if (ch == '\n') {
-                line += 1;
-                line_start = i + 1;
-            }
-        }
-        try w.print("\n  at {s}:{}:{}", .{ uri, line, pos - line_start + 1 });
+/// `  at uri:line:col` for byte offset `pos` of the source of `chunk`, with the line and column counted from 1.
+/// The chunk is given, not looked up by its uri: every eval of a session has the same uri.
+fn writePlace(w: *std.Io.Writer, chunk: *cy.Chunk, pos: u32) !void {
+    if (pos > chunk.src.len) {
+        try w.print("\n  at {s}", .{chunk.srcUri});
         return;
     }
-    try w.print("\n  at {s}", .{uri});
+    var line: usize = 1;
+    var line_start: usize = 0;
+    for (chunk.src[0..pos], 0..) |ch, i| {
+        if (ch == '\n') {
+            line += 1;
+            line_start = i + 1;
+        }
+    }
+    try w.print("\n  at {s}:{}:{}", .{ chunk.srcUri, line, pos - line_start + 1 });
 }
 
 /// The `--|` lines right above the declaration at `pos`, without the markers. Attribute lines in between are skipped.

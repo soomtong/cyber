@@ -2839,7 +2839,7 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: sema.Cstr, left_n: *ast.Node, op: cy.Bina
             try checkRefOperand(c, left.type, op, left_n, node);
             if (left.type.kind() == .int or left.type.kind() == .raw) {
                 var right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = false, .fit_target = true });
-                if (right.type.kind() == .float and isArithmeticOp(op)) {
+                if (right.type.kind() == .float and isArithmeticOp(op) and isNumberType(left.type)) {
                     // `int op float` is `float op int`: the integer converts, whichever side it is on.
                     left = (try sema_lit.semaFitTarget(c, left, right.type, left_n)) orelse {
                         return reportOperandType(c, left.type, right.type, right_n);
@@ -2939,11 +2939,19 @@ fn noneFits(type_: *cy.Type) bool {
     };
 }
 
-/// Analyzes the right operand of a binary expression. `left` is evaluated before a statement that the right
-/// operand adds (`seqFlush`).
 fn isArithmeticOp(op: cy.BinaryExprOp) bool {
     return switch (op) {
         .plus, .minus, .star, .slash, .percent, .pow => true,
+        else => false,
+    };
+}
+
+/// An integer, a raw integer or a float. `symbol` and `error` are raw types too, but they are names, not numbers:
+/// they do not convert to the type of the other operand.
+fn isNumberType(type_: *cy.Type) bool {
+    return switch (type_.kind()) {
+        .int, .float => true,
+        .raw => !type_.cast(.raw).distinct,
         else => false,
     };
 }
@@ -2961,26 +2969,25 @@ fn reportOperandType(c: *cy.Chunk, exp_t: *cy.Type, act_t: *cy.Type, node: *ast.
 /// `left` converts to the type of the right one instead: `i < f`, `i == f` and `f32 < float` compare the same
 /// values as `f > i`, `f == i` and `float > f32`. Any other mismatch is the type error of the right operand.
 fn semaComparedOperand(c: *cy.Chunk, left: *sema.ExprResult, left_n: *ast.Node, right_n: *ast.Node) !sema.ExprResult {
-    const numeric = switch (left.type.kind()) {
-        .int, .raw, .float => true,
-        else => false,
-    };
+    const numeric = isNumberType(left.type);
     const right = try semaRightOperand(c, left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = !numeric, .fit_target = true });
     if (!numeric or left.type.id() == right.type.id() or right.type.id() == bt.Never) {
         return right;
     }
-    switch (right.type.kind()) {
-        .int, .raw, .float => {
-            if (try sema_lit.semaFitTarget(c, left.*, right.type, left_n)) |new| {
-                left.* = new;
-                return right;
-            }
-        },
-        else => {},
+    // A signed integer does not convert to a raw one here: the cast is a zero extension, which turns a negative
+    // value into a large one, and `-1 < r` would be false.
+    const signed_to_raw = left.type.kind() == .int and right.type.kind() == .raw;
+    if (isNumberType(right.type) and !signed_to_raw) {
+        if (try sema_lit.semaFitTarget(c, left.*, right.type, left_n)) |new| {
+            left.* = new;
+            return right;
+        }
     }
     return sema_lit.reportExpectedType(c, left.type, right.type, right_n);
 }
 
+/// Analyzes the right operand of a binary expression. `left` is evaluated before a statement that the right
+/// operand adds (`seqFlush`).
 fn semaRightOperand(c: *cy.Chunk, left: *sema.ExprResult, left_n: *ast.Node, right_n: *ast.Node, cstr: sema.Cstr) !sema.ExprResult {
     const seq_start = c.seq_pending.items.len;
     defer sema_move.seqPop(c, seq_start);

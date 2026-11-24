@@ -203,7 +203,8 @@ fn cmd(args AsSpan[str]) -> Cmd:
 
 --| Returns this command with its stdout joined to the stdin of `next`. The result runs both at once.
 --| It succeeds when both do. A stage that is stopped because the next one closed its input (as `head` does)
---| counts as a success.
+--| counts as a success. The input of the result is that of this command: text that `stdin` gave to `next` is
+--| not used, since the stdin of `next` is the pipe.
 fn (&Cmd) pipe(next Cmd) -> Cmd:
     return {stages=self.stages + next.stages, input=self.input}
 

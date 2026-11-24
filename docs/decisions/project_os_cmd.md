@@ -107,6 +107,17 @@ F-198: 자식이 `os.set_env`로 정한 변수를 받지 못했다. `os.set_env(
 libc의 `setenv`는 `environ`을 새 배열로 옮기므로 옛 블록에는 새 변수가 없다. `os.exec`와 `os.cmd` 모두 실행 시점의 환경으로
 만든 map(`currentEnvMap`)을 `environ_map`으로 넘기게 했다.
 
+## PR 리뷰에서 고친 것 (2026-11-24, soomtong/cyber#12)
+
+- 입력 글이 있는 명령이 시작 뒤에 실패하면 끝나지 않았다. `os.cmd({'cat'}).stdin('x'.repeat(12000000)).read()`가 `error.TooBig`
+  대신 멈췄다. `cmdRunPipeline`에서 입력 스레드를 기다리는 `defer`가 단계들을 끝내는 `defer`보다 먼저 돌았고, 스레드는 아무도
+  읽지 않는 단계에 쓰느라 막혀 있었다. `feeder`의 선언과 join을 단계들의 kill 앞에 두어 kill이 먼저 돌게 했다.
+- Windows에서는 환경 map을 만들지 않는다(`inherits_current_env`). 낡은 환경은 libc `setenv`가 `environ`을 옮기는 데서 오는
+  문제라 Windows에는 없고, 환경을 주지 않은 자식이 지금의 환경을 받는다. `os.exec`의 Windows 경로가 0.4.19와 같아진다.
+  `env()`를 준 단계만 Windows에서도 map을 만든다.
+- `a.pipe(b)`가 `b`의 입력 글을 쓰지 않는다는 것을 문서 주석과 매뉴얼에 적었다.
+- 테스트의 `pwd`를 `pwd -P`로 바꿨다. `os.cwd()`는 심볼릭 링크를 푼 경로다.
+
 ## 확인한 것과 못 한 것
 
 - Linux(이 세션의 컨테이너)에서 behavior 테스트 `modules/os_cmd.cy`가 Debug에서 누수 검사와 함께 통과한다. 파이프 · 디렉터리 ·

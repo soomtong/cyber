@@ -37,7 +37,12 @@ Julia는 `+(x::Number, y::Number) = +(promote(x,y)...)`로 두 순서가 같은 
 - 두 정수의 나눗셈은 그대로 정수 나눗셈이다. `var h float = i / 2`는 3.0이다. 변환은 피연산자 한 쌍마다 정해지고 목표
   타입이 식 안으로 번지지 않는다.
 - 비트 연산자(`&& || ~ << >>`)는 바뀌지 않았다. `i && f`는 전과 같은 'Expected `int`, found `float`.'다.
-- 컴파일 타임 평가(`const`, `#{}`)도 같은 규칙이다.
+- 컴파일 타임 평가(`const`, `#{}`)의 산술 · 순서 비교도 같은 규칙이다. `==` · `!=`는 아니다. 컴파일 타임 평가기가 float의 같음
+  비교를 지원하지 않아('Unsupported float.') 정수와 float의 `==`는 어느 순서든 전과 같은 타입 오류다.
+- 수가 아닌 raw 타입은 변환하지 않는다. `symbol` · `error`는 distinct raw 타입이라 종류로는 raw지만 이름이다.
+  `symbol.a * 2.5`, `symbol.a < 2.5`, `error.X == 2.5`는 타입 오류다(`sema_expr.isNumberType`).
+- 비교에서 부호 있는 정수는 raw 타입으로 변환하지 않는다. `Int[X]` → `Raw[W]`는 0 확장이라 음수가 큰 수가 된다.
+  `i8 < r64`는 전과 같은 타입 오류다. 반대 방향(`r64 < i8`)은 전부터 오른쪽을 0 확장해 통과했고 그대로 두었다.
 
 지금 오류이던 코드만 통과하게 되므로 기존 스크립트의 뜻은 바뀌지 않는다. 예외는 아래 "함께 고친 결함"의 세 가지다.
 그 코드들은 전에 틀린 값을 냈다.
@@ -53,6 +58,9 @@ Julia는 `+(x::Number, y::Number) = +(promote(x,y)...)`로 두 순서가 같은 
    `g += f`는 'Expected type `f32`, got `float`.' 오류다.
 3. F-197: 컴파일 타임 평가에서 왼쪽이 float 리터럴이고 오른쪽이 정수 상수이면(`const r = 2.5 * k`) 정수의 비트를 float로
    읽어 비정규 수가 나왔다. 반대 순서 `k * 2.5`는 'Expected type `int`. Found `float`.' 오류였다. 이제 둘 다 `7.5`다.
+
+4. F-201(전부터 있던 것): `symbol` · `error`가 float 자리에서 수로 변환됐다. `2.5 * symbol.a`가 `125.0`, `var f float = symbol.a`가
+   통과했다. `sema_lit.semaFitTarget`의 raw → float 갈래가 distinct raw 타입도 받았기 때문이다. 이제 타입 오류다.
 
 ## 구현
 
@@ -85,3 +93,13 @@ Julia는 `+(x::Number, y::Number) = +(promote(x,y)...)`로 두 순서가 같은 
   컴파일 타임), 오류 케이스 `number_mixed_bitwise_error.cy` · `number_mixed_op_assign_error.cy` ·
   `number_mixed_compare_str_error.cy` · `float_op_str_error.cy` · `float_op_bool_error.cy` · `float_op_assign_wider_error.cy`.
 - 실행 결과는 `docs/releases/unreleased.md`의 같은 이름의 절에 적는다.
+
+## PR 리뷰에서 고친 것 (2026-11-24, soomtong/cyber#12)
+
+처음 넣은 꼴은 왼쪽 변환을 `int` · `raw` · `float` 종류 전부에 열어 두었다. 리뷰가 둘을 찾았다.
+
+- `var s i8 = -1`, `var r r64 = 5`에서 `s < r`가 `false`였다. 왼쪽의 `i8`이 `r64`로 0 확장됐다. master에서는 타입 오류다.
+- `symbol.a * 2.5`가 `125.0`, `symbol.a < 2.5` · `error.X == 2.5`가 `false`로 컴파일됐다. master에서는 타입 오류다.
+
+위 "결정"의 마지막 두 항목이 그 수정이다. 테스트 `core/number_signed_raw_compare_error.cy` · `symbol_op_float_error.cy` ·
+`float_op_symbol_error.cy` · `error_eq_float_error.cy`.

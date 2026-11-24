@@ -397,7 +397,7 @@ a < b           --> `true` if a is less than b
 a <= b          --> `true` if a is less than or equal to b
 ```
 
-A comparison converts its operands like an [arithmetic operator](#arithmetic-operators) does. An integer converts to the type of a float on the other side, and an integer of a narrower type converts to the wider one:
+A comparison converts its operands like an [arithmetic operator](#arithmetic-operators) does. An integer converts to the type of a float on the other side, and an integer of a narrower type converts to the wider one. A signed integer on the left does not convert to a raw integer on the right, since that would read a negative value as a large one: `i8 < r64` is a type error. `symbol` and `error` values are not numbers and do not convert:
 ```cy
 i := 7
 print(i < 7.5)    --> true
@@ -4611,7 +4611,7 @@ An expression needs to be wrapped with `#{}` to perform inline evaluation if it'
 res := #{fib(30)}
 ```
 
-Inside a compile-time body, locals (`t := 0`), compound assignment (`t += 1`), `for` ranges, `if`, `switch` and fixed-size vectors (`v := [3]int(0)`, `v[i]`, `v[i] += 1`) evaluate the same as at runtime. A vector index out of range is a compile error. Operations the evaluator does not support yet (for example `float` addition) are reported as `Unsupported inline eval`. An integer and a float mix as they do at runtime: `const r = k * 2.5` and `const r = 2.5 * k` are the same float for an integer constant `k`.
+Inside a compile-time body, locals (`t := 0`), compound assignment (`t += 1`), `for` ranges, `if`, `switch` and fixed-size vectors (`v := [3]int(0)`, `v[i]`, `v[i] += 1`) evaluate the same as at runtime. A vector index out of range is a compile error. Operations the evaluator does not support yet (for example `float` addition) are reported as `Unsupported inline eval`. In an arithmetic operator an integer and a float mix as they do at runtime: `const r = k * 2.5` and `const r = 2.5 * k` are the same float for an integer constant `k`. `==` and `!=` of an integer and a float are a type error at compile time.
 
 ### Inline type creation.
 Types can be created from inline evaluation. Currently, only structs can be created with `meta.new_struct`:
@@ -4957,7 +4957,7 @@ There is no shell. An argument reaches the program as it is, with its spaces, qu
 
 A program that can not be started is an [OS error](#os-errors) from all three: `error.NotFound` for a missing program or working directory, `error.PermissionDenied`, and `error.InvalidArgument` for an empty list of arguments. Captured output is limited to 10 MiB for stdout and for stderr: more is `error.TooBig` and the programs are stopped. A pipeline has at most 16 programs.
 
-`dir(path)` and `env(name, value)` apply to the programs that the command has when they are called, so `a.dir('x').pipe(b)` runs only `a` in `x`. A program gets the environment of this process as it is when the command runs, with the variables of `env` on top. `stdin(text)` gives the first program its input. Without it, `read` and `run_status` give an empty input.
+`dir(path)` and `env(name, value)` apply to the programs that the command has when they are called, so `a.dir('x').pipe(b)` runs only `a` in `x`. In `a.pipe(b)` the input is that of `a`: text that `stdin` gave to `b` is not used. A program gets the environment of this process as it is when the command runs, with the variables of `env` on top. `stdin(text)` gives the first program its input. Without it, `read` and `run_status` give an empty input.
 
 The older `os.exec(args)` runs one program and returns its `ExecResult`. It panics when the program can not be started.
 

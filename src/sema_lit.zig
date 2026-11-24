@@ -519,8 +519,8 @@ pub fn semaFitTarget(c: *cy.Chunk, expr: sema.ExprResult, target_t: *cy.Type, no
                 return try semaIntToFloat(c, target_t, expr, node);
             }
 
-            // Raw[] -> Float[]
-            if (expr.type.kind() == .raw) {
+            // Raw[] -> Float[]. A distinct raw type (`symbol`, `error`) is a name, not a number.
+            if (expr.type.kind() == .raw and !expr.type.cast(.raw).distinct) {
                 return try semaIntToFloat(c, target_t, expr, node);
             }
         },

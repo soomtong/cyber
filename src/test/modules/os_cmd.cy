@@ -83,6 +83,10 @@ fn run_all() -> !void:
 
     -- Over 10 MiB of output is an error, and the program is stopped.
     t.eq(error.TooBig, os.cmd({'yes'}).read().unwrap_error())
+    -- Also while the input is still being written: the program is stopped before the writer is waited for.
+    t.eq(error.TooBig, os.cmd({'cat'}).stdin('x'.repeat(12000000)).read().unwrap_error())
+    -- The input of the command after a pipe is not used.
+    t.eq('first', os.cmd({'cat'}).stdin('first').pipe(os.cmd({'cat'}).stdin('second')).read()!)
 
     -- At most 16 stages.
     var many os.Cmd = os.cmd({'cat'}).stdin('through\n')
@@ -93,7 +97,8 @@ fn run_all() -> !void:
     t.eq(error.InvalidArgument, many.read().unwrap_error())
 
     -- A command is a value: a method returns a new one and the command can run again.
-    base := os.cmd({'pwd'})
+    -- `-P` for the path without symbolic links, which is what `os.cwd` returns.
+    base := os.cmd({'pwd', '-P'})
     moved := base.dir('/')
     t.eq('/\n', moved.read()!)
     t.eq('/\n', moved.read()!)

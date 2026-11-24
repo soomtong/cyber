@@ -106,8 +106,8 @@ fn new_vm() -> cy.VM:
 
 `cli.repl()`만 쓰는 private 함수로 둘 수도 있었다. 공개한 이유는 둘이다. 테스트가 세션의 결과를 값으로 확인하려면 VM을 손에
 쥐어야 하고(`cli.repl()`은 터미널을 읽는다), F-200과 같은 놀람이 `cy.eval`에도 있다(`cyber`로 돌린 스크립트의 `cy.eval('use os')`가
-실패한다). `cy.VM()`은 라이브러리의 VM, `cli.new_vm()`은 CLI의 VM이라는 한 쌍이 된다. 줄일 수 있는 표면이므로 사용자가 원하면
-private으로 되돌린다.
+실패한다). `cy.VM()`은 라이브러리의 VM, `cli.new_vm()`은 CLI의 VM이라는 한 쌍이 된다. 결정(사용자, 2026-11-24: "cli.new_vm() 공개"):
+공개로 둔다.
 
 ### `cli.App`의 수명 · `reload` · `mod_uris`
 

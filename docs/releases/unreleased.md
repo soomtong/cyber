@@ -165,3 +165,6 @@ CLI의 REPL에서 `use os`가 'Failed to load module: os'였다(F-200). 세션�
   절(`cy.VM()` · `cy.repl`도 격리임). `docs/api.json`.
 - 테스트: behavior `modules/cy.cy`(격리 계약, `REPL.new(vm)`, `REPL.run`), `modules/cli.cy`, `modules/cli_os.cy`, `ffi/session.cy`.
   `src/tools/verify.sh`에 15단계 `15-repl-stdin`(빌드한 `cyber`의 REPL에 줄을 파이프로 넣는다)을 더했다.
+- 확인: 15단계 검증에서 9단계만 실패했다(rc=1, 나머지 rc=0). wasm에서 없는 파일의 오류를 resolver가 아니라 loader가 내어
+  `modules/cli.cy`의 문구 단언이 맞지 않았다. 단언을 경로만 보게 고친 뒤 9단계를 다시 돌려 rc=0(behavior 821개), 같은 파일을
+  Debug · ReleaseSafe CLI로도 다시 돌렸다. 9~12단계는 세션 컨테이너에 `wasmtime` 실행 파일이 없어 Python `wasmtime` 패키지로 돌렸다.

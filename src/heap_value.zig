@@ -393,6 +393,7 @@ pub fn destructValue2(self: *cy.Heap, val_t: *cy.Type, val: Value) void {
                 .borrow,
                 .func_sym,
                 .int,
+                .raw,
                 .func_ptr,
                 .enum_t => {
                     // Nop.

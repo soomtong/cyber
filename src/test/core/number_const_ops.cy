@@ -133,11 +133,20 @@ test.eq(i + f, i_f)
 test.eq(f + i, f_i)
 test.eq(true, i_eq_f)
 
--- A constant of `symbol` is a value at compile time too.
+-- A constant of `symbol` or `error` is a value at compile time too.
 const sym = symbol.a
 const sym_eq = sym == symbol.a
 const sym_ne = sym != symbol.a
 test.eq(true, sym_eq)
 test.eq(false, sym_ne)
+const err = error.Foo
+const err_eq = err == error.Foo
+const err_ne = err != error.Bar
+test.eq(true, err_eq)
+test.eq(true, err_ne)
+test.eq(error.Foo, err)
+fn fails() -> !int:
+    return err
+test.eq(3, fails() !else 3)
 
 --cytest: pass

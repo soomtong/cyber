@@ -1637,6 +1637,13 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
                 }
             }
         },
+        .error_lit => {
+            const name = node.cast(.error_lit).name.as_name();
+            return Expr.initValue(.{
+                .type = c.sema.error_t,
+                .value = try c.sema.initSymbol(name),
+            });
+        },
         .at_lit => {
             const at_name = node.cast(.at_lit).value.slice();
             return c.reportErrorFmt("Undeclared `{}`. A symbol literal is written `symbol.{}`.", &.{v(at_name), v(at_name[1..])}, node);

@@ -128,5 +128,7 @@ HANDOFF의 알려진 한계("컴파일 타임 평가기는 float 연산이 `*`�
 `evalNumberRight`. `eval_bin_expr`가 `%` · 비트 연산자 · `>>`도 받는다. `evalCompare`가 float과 distinct raw를 비교한다.
 `heap_value.copyValue3`가 distinct raw를 복사한다.
 
-남은 것: `error` 리터럴은 컴파일 타임 식이 아니다('Unsupported compile-time expression: `error_lit`'). 사용자 타입 연산자의
-컴파일 타임 호출은 전처럼 심볼 호출이다.
+`error` 리터럴(이어서, 2026-11-24): `cte`의 `.error_lit`가 `symbol.name`처럼 심볼 id를 값으로 갖는 `error` 값을 만든다.
+`ct_inline.value`가 그 값을 상수로 펼치고, `heap_value.destructValue2`가 distinct raw를 해제하지 않는다(전에는 panic).
+
+남은 것: 사용자 타입 연산자의 컴파일 타임 호출은 전처럼 심볼 호출이다.

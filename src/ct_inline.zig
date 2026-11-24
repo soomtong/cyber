@@ -99,6 +99,10 @@ pub fn value(c: *cy.Chunk, val_: cy.TypeValue, target_opt: ?*cy.Type, node: *ast
             const id = val.value.asSymbol();
             return c.semaConst(id, c.sema.symbol_t, node);
         },
+        // `error.Name` holds the id of its symbol.
+        bt.Error => {
+            return c.semaConst(val.value.val, c.sema.error_t, node);
+        },
         else => {
             switch (val.type.kind()) {
                 .partial_vector => {

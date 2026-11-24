@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.19-dev 1149-424f23f</div>
+    <div class="sub-title">v0.4.19-dev 1152-40fddcf</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -2348,6 +2348,15 @@ fn (&Node) inc_one():
 var n = Node{value=123, next=none}
 n.inc(321)    --> 445
 </code></pre>
+<p>A method is declared in the module that declares the type. A type that a module imports does not take one, and neither does a name that is not a type:</p>
+<pre><code class="language-cy">use m 'm.cy'
+use V = m.V
+
+fn (&V) twice() -> float:
+    --> CompileError: Can not declare `twice` for `V`: `V` belongs to another module. A method or a member of a type is declared in the module that declares the type.
+    return self.x * 2
+</code></pre>
+<p>The same holds for a function, a constant and a function template of a type (<code>fn V :: make()</code>, <code>const V :: K = 1</code>). In a <code>persist_main</code> session the evals are one module, so a later eval declares a method for a type of an earlier one. See <a href="#repl" title="">REPL</a>.</p>
 <p>The receiver type can be passed by value, reference, borrow, or pointer:</p>
 <pre><code class="language-cy">-- Pass by value.
 fn (Node) inc(n int)
@@ -5622,7 +5631,7 @@ This only allows the source module to access the symbol:</p>
 -fn add(a, b int) -> int:
     return a + b
 </code></pre>
-<p>The prefix applies to functions and methods, globals, constants, types (including templates, traits and type aliases) and <a href="#field-visibility" title="">fields</a>. The module is the file that declares the symbol, so <code>m.add(1, 2)</code> from another module is a compile error: <code>Can not access the private symbol </code>add<code>in</code>m<code>. A symbol declared with </code>-<code> is only visible to the module that declares it.</code> A <code>use *</code> import skips private symbols. Overloads of one function share one visibility: declaring <code>fn f(a int)</code> and <code>-fn f(a float)</code> is a compile error. A <code>persist_main</code> session (the REPL) counts as one module, so a private symbol declared by an earlier eval stays visible to the next one.</p>
+<p>The prefix applies to functions and methods, globals, constants, types (including templates, traits and type aliases) and <a href="#field-visibility" title="">fields</a>. The module is the file that declares the symbol, so <code>m.add(1, 2)</code> from another module is a compile error: <code>Can not access the private symbol </code>add<code>in</code>m<code>. A symbol declared with </code>-<code> is only visible to the module that declares it.</code> A <code>use *</code> import skips private symbols. Overloads of one function share one visibility: declaring <code>fn f(a int)</code> and <code>-fn f(a float)</code> is a compile error. A <code>persist_main</code> session (the REPL) counts as one module, whatever uri each eval is given, so a private symbol declared by an earlier eval stays visible to the next one and to <code>cl_vm_validate</code>.</p>
 <a href="#modules">^topic</a>
 <h2 id="symbol-alias">Symbol alias. <a href="#symbol-alias">#</a></h2>
 <p><code>use</code> can create an alias to another symbol:</p>
@@ -6011,7 +6020,7 @@ for (size_t i = 0; i < count; i += 1) {
 <p>A range can end on a later line than it starts. A token or parse error reports a position: its range is the code point there, or empty at the end of a line.</p>
 <p>When the compiler knows the edit that fixes an error, <code>has_fix</code> is set: replace the bytes <code>fix_pos</code> to <code>fix_end_pos</code> (exclusive) of the source with <code>fix_text</code>. A misspelled member (<code>Did you mean ...?</code>), a function that was renamed in its module, and <code>xs = xs.append(v)</code> have one. <code>cyber-lsp</code> offers it as a quick fix. A note never has a fix.
 By default the compiler stops at its first error and the count is 0 or 1. <code>cl_vm_set_error_recovery(vm, true)</code> lets it go on. Every syntax error is reported: a statement with a syntax error is skipped together with the lines indented under it, and parsing goes on at the next line of the same block or of a block around it. A source with a syntax error is not checked further, so its other errors are reported once the syntax errors are fixed. In a source without syntax errors, the main block, each function and each method is checked again without the statement that failed, so the errors of its other statements are reported too, and the other bodies are still checked. A statement that failed to declare a local (<code>x := ...</code>) ends its block, so the uses of the local after it are not reported as undeclared. A body is checked at most ten times. Every declaration is resolved too: a signature, the fields of a type, the type of a global or of a const and a type alias that fail are reported, and the next declaration is resolved. A declaration that refers to one that failed fails without a report of its own. With an error in a declaration no body is checked, so the errors in bodies are reported once the declarations are fixed. An error in a top level compile-time statement, a <code>use</code> or a template header still ends the compile. The result is <code>CL_ERROR_COMPILE</code> either way and nothing is run. The summary and <code>cl_vm_compile_error</code> describe the first error.</p>
-<p>A compile error does not end a session. The next eval or validate compiles on top of what the evals before the failed one left: with <code>persist_main</code> their locals and declarations are still there, and nothing that the failed script declared is kept. A module that the failed compile loaded for the first time is loaded again by the next <code>use</code>. The template instances that it expanded from earlier modules (<code>[]str</code> with <code>sort</code>) are checked and generated by the next compile. If the body of such an instance does not compile (<code>Map[[]int, int]</code> behind an earlier error), the next compile drops the instance instead of reporting its error, and a later use of it reports that it could not be expanded. These instances are checked before the next compile resolves the script, so the script itself is compiled once, and the module loader, the resolvers and the compile-time host functions are not called again for it. The loader is called again for a module that the failed compile loaded first. Make it return the same source for the same module. When the first compile of a VM fails, the next eval resets the VM.</p>
+<p>A compile error does not end a session. The next eval or validate compiles on top of what the evals before the failed one left: with <code>persist_main</code> their locals and declarations are still there, and nothing that the failed script declared is kept, including a method that it declared for a type of an earlier eval. A module that the failed compile loaded for the first time is loaded again by the next <code>use</code>. The template instances that it expanded from earlier modules (<code>[]str</code> with <code>sort</code>) are checked and generated by the next compile. If the body of such an instance does not compile (<code>Map[[]int, int]</code> behind an earlier error), the next compile drops the instance instead of reporting its error, and a later use of it reports that it could not be expanded. These instances are checked before the next compile resolves the script, so the script itself is compiled once, and the module loader, the resolvers and the compile-time host functions are not called again for it. The loader is called again for a module that the failed compile loaded first. Make it return the same source for the same module. When the first compile of a VM fails, the next eval resets the VM.</p>
 <a href="#libcyber">^topic</a>
 <h3 id="asking-what-a-name-is">Asking what a name is. <a href="#asking-what-a-name-is">#</a></h3>
 <p>For editor tooling, <code>cl_vm_set_symbol_info(vm, true)</code> makes the compiler record what the names in the main source refer to. After a compile, <code>cl_vm_symbol_at</code> describes what is at a byte offset:</p>
@@ -6034,7 +6043,7 @@ A name in a declaration of the main source can be asked like a use of it. To fin
 <code>cl_vm_symbol_hints(vm, &hints)</code> lists notes on the main source for an editor, sorted by position: the type inferred for each <code>x := expr</code> (<code>CL_HINT_LOCAL_TYPE</code>), each <code>return</code>, <code>break</code> and <code>continue</code> that waits for the fibers of a <code>scope</code> block before it leaves it (<code>CL_HINT_SCOPE_EXIT</code>), the name of the parameter at each argument of a call to a function with two or more parameters, from the overload that the call picked, unless the argument is a name that ends in it (<code>CL_HINT_PARAM_NAME</code>), and, after a compile without errors, the locals and <code>use</code>s that are never used (<code>CL_HINT_UNUSED_LOCAL</code>, <code>CL_HINT_UNUSED_USE</code>). A name that starts with <code>_</code> is not called unused, nor is one that is also written where the compiler did not look (a branch of <code>#if</code> that was not taken). The language server <code>cyber-lsp</code> uses all of these.</p>
 <a href="#libcyber">^topic</a>
 <h3 id="checking-a-script-without-running-it">Checking a script without running it. <a href="#checking-a-script-without-running-it">#</a></h3>
-<p><code>cl_vm_validate</code> compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (<code>persist_main</code>) are visible to it, and nothing the script declares is kept for the next eval. The VM is not reset. A module the script loads for the first time (<code>use math</code>) is initialized by the next eval that runs. It checks with the options of the last eval (<code>persist_main</code>, <code>deny_raw_ptrs</code>, <code>deny_spawn</code>). Before the first eval they are all off, so eval a prelude with the session's config first.</p>
+<p><code>cl_vm_validate</code> compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (<code>persist_main</code>) are visible to it, and nothing the script declares is kept for the next eval, including a method that it declares for a type of an earlier eval. It compiles the script as part of the session, so it accepts what the eval of the same script accepts: a private field of an earlier eval, a method for a type of an earlier eval. The VM is not reset. A module the script loads for the first time (<code>use math</code>) is initialized by the next eval that runs. It checks with the options of the last eval (<code>persist_main</code>, <code>deny_raw_ptrs</code>, <code>deny_spawn</code>). Before the first eval they are all off, so eval a prelude with the session's config first.</p>
 <pre><code class="language-c">CLResultCode code = cl_vm_validate(vm, src);
 if (code == CL_ERROR_COMPILE) {
     CLBytes summary = cl_vm_compile_error_summary(vm);
@@ -6325,6 +6334,24 @@ hello!
 > f.a
 `int` 123
 </code></pre>
+<p>A later input declares a method, a type function, a constant or a function template for a type of an earlier input. It works like one declared in the same source:</p>
+<pre><code class="language-bash">> fn (&Foo) twice() -> int:
+    | return self.a * 2
+    |
+> fn Foo :: make() -> Foo:
+    | return Foo{a=1}
+    |
+> f.twice() + Foo.make().twice()
+`int` 248
+</code></pre>
+<ul>
+<li>A method with the same name and other parameter types is another overload. The methods of the earlier inputs stay.</li>
+<li>A method with the signature of an earlier one is a compile error, like in one source: <code>CompileError: `twice` has already been declared with the same function signature.</code> A method is not replaced, because the code that was compiled before would keep calling the old body. To start over, declare the type again and then its methods. The new type hides the old one, and the values of the old type keep its methods.</li>
+<li>A member that is declared for a template type (<code>fn (&Box[]) get() -> T:</code>) also reaches the instances that earlier inputs made.</li>
+<li><code>@deinit</code>, <code>@copy</code>, <code>@clone</code> and <code>@send</code> are declared with the type. The code of the earlier inputs destroys, copies and sends the values of the type without them: <code>CompileError: Can not declare `@deinit` for `Foo` after the input that declares `Foo`. The code that the session compiled since then destroys, copies and sends a `Foo` without it. Declare the type again, together with `@deinit`.</code> A script or a host puts the type and these methods in one source. The REPL submits a type block as one input, so a type with these methods can not be declared in the REPL.</li>
+<li>An input that fails to compile leaves nothing in the type, so the method can be declared again.</li>
+<li>An instance of a template keeps what it found when it was expanded. A template that asks <code>meta.has_decl(T, 'twice')</code> does not see a <code>twice</code> that is declared after its instance for the type was made.</li>
+</ul>
 <p>Records, slices, maps and optionals are shown with their contents. Nesting stops after a few levels and long containers are cut short:</p>
 <pre><code class="language-bash">> f
 `Foo` {a=123}

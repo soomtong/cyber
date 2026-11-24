@@ -41,3 +41,29 @@ C 백엔드를 지운 뒤 `docs/docs.md`에 남은 흔적과 `Planned Feature` �
 - 매뉴얼: Arithmetic operators · Comparison operators · Implicit casts · Inline evaluation 절. 에이전트 안내의 정수 · float 항목과
   오류 문구 둘.
 - 하지 않은 것: 사용자 타입 연산자의 양쪽 조회(`2.0 * v`), 컴파일 타임의 float 연산 확장.
+- 확인: 14단계 검증에서 1~8 · 13 · 14단계 rc=0. 9~12단계(wasm 실행)는 세션 컨테이너에 `wasmtime` 실행 파일이 없어 Python `wasmtime`
+  패키지로 같은 wasm 파일을 돌렸고 넷 다 통과했다(behavior 820개, cli 13개, lib 181개, trace 15개).
+
+## `os.cmd`: 명령을 값으로 (2026-11-24)
+
+외부 프로그램을 파이프 · 작업 디렉터리 · 환경 변수 · stdin과 함께 돌린다. shell을 거치지 않는다. 결정과 구현은
+`docs/decisions/project_os_cmd.md`, 계기는 Julia 검토(`docs/study/11-design-principles-review.md` 3.4 A).
+
+- `os.cmd(args)`가 `Cmd` 값을 만든다. `pipe(next)` · `dir(path)` · `env(name, value)` · `stdin(text)`는 새 `Cmd`를 돌려주고,
+  `run()` · `read()` · `run_status()`를 부를 때 시작한다.
+  - `run() -> !void`: 출력이 이 프로세스의 stdout · stderr로 간다.
+  - `read() -> !str`: 마지막 프로그램의 stdout.
+  - `run_status() -> !ExecResult`: stdout, 모든 프로그램의 stderr, 종료 코드. 0이 아닌 코드가 오류가 아니다.
+- 실패한 종료는 `run` · `read`에서 `error.ExitStatus`다. 파이프라인은 어느 프로그램이든 실패하면 실패이고, 다음 프로그램이 입력을
+  닫아 끝난 프로그램(`yes | head -1`의 `yes`)은 성공이다. `run_status`의 `code`는 실패한 것 가운데 마지막 프로그램의 코드, 신호는
+  128 + 신호 번호다.
+- 시작하지 못한 프로그램은 오류 값이다: `error.NotFound` · `error.PermissionDenied` · `error.InvalidArgument` 등 OS 오류의 표준 이름.
+- 잡는 출력은 stdout · stderr 각각 10 MiB까지(`error.TooBig`), 파이프라인은 16개까지다.
+- 호환성:
+  - `os.exec`와 `os.cmd`의 자식이 `os.set_env`로 정한 변수를 받는다. 전에는 받지 못했다(F-198). 변수를 정해 놓고 자식에게는
+    안 보이기를 기대한 스크립트가 있다면 달라진다.
+  - `os.exec`는 그대로다(반환 타입, 시작 실패의 panic). 문서 주석의 "Runs a shell command"만 고쳤다. shell은 전에도 거치지 않았다.
+- 매뉴얼: Builtin modules의 Running programs 절. 에이전트 안내의 `os` 항목. `docs/api.json`.
+- 확인 못 한 것: macOS · Windows에서의 실행. 세 대상 모두 교차 컴파일은 된다. 테스트는 POSIX 프로그램을 써서 Windows에서는
+  본문을 건너뛴다.
+- 하지 않은 것: 파일 리다이렉션, 줄 단위 스트리밍, 실행 중 중단 · 시간 제한.

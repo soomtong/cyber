@@ -631,6 +631,7 @@ fn test_modules(run: *Runner) void {
         }
         if (test_config.ffi and builtin.target.abi != .msvc) {
             run.case("modules/os.cy");
+            run.case("modules/os_cmd.cy");
             // Reads the fixtures with `os.read_file`.
             run.case("modules/regex_spec.cy");
             run.case("modules/time_zone.cy");

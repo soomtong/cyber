@@ -157,6 +157,7 @@ list comprehensions, the `lambda` keyword (a lambda is written `|a, b| a + b` an
 - `math`, `test`, `io`
 - `os`: files, directories, environment, processes, `os.args()`. `cli` reads lines and runs the REPL.
   Text files: `os.read_file(p)!` returns `str`, `os.write_file(p, s)!`. Bytes: `os.read_file_bytes`, `os.write_file_bytes`.
+  Programs: `os.cmd({'git', 'status'}).read()!` returns the stdout as `str`, `.run()!` lets the output through, and `.run_status()!` returns `out`, `err` and `code` without an error for a failed exit. Chain `.pipe(os.cmd({...}))`, `.dir(path)`, `.env(name, value)` and `.stdin(text)` before it. There is no shell: pass every argument as its own string, and use `pipe` instead of `|`. A failed exit is `error.ExitStatus`, a missing program `error.NotFound`.
 - `json`, `toon`: parse and stringify, with a value tree.
 - `regex`: a regular expression engine without backtracking (linear time). `peg`: parsing expression grammars.
 - `time`: clocks, durations, dates and IANA time zones.

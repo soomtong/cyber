@@ -48,6 +48,7 @@
 - 2026-11-24(사용자: "우리 Cyber lang 디자인에 Julia 언어에서 차용할만한 좋은 점이 있을까?", 이어서 컬렉션 식의 꼴과
   import 중괄호를 정하고 "B의 int op float 대칭부터 넣자"): Julia 검토(`docs/study/11-design-principles-review.md` 3절)를 쓰고
   3.4 B의 1(수 피연산자의 대칭 변환)을 넣었다. 결정 `docs/decisions/project_number_operands.md`, `unreleased.md` 같은 이름의 절.
+  이어서 "A의 os.cmd도 넣자": 3.4 A(`os.cmd`)를 넣었다. 결정 `docs/decisions/project_os_cmd.md`.
   작업 브랜치 `claude/sharp-faraday-c5yjxa`.
 
 ## 현재 브랜치
@@ -171,6 +172,13 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
     컴파일 타임의 `2.5 * k`가 비정규 수이던 것.
   - 같은 날 정한 문법 꼴(구현은 안 함): 컬렉션 식은 `[]int{x * 2 from xs |x| if x > limit}`(검토 3.4 D), destructure import의
     중괄호는 안쪽을 띄운다(`project_fmt_brace_style.md`의 예외).
+
+- [x] `os.cmd`(2026-11-24). 결정 `project_os_cmd.md`, `unreleased.md` 같은 이름의 절, F-198.
+  - `os.cy`의 `Cmd` · `CmdStage`와 메서드 여덟, `os.zig`의 `cmdRun` · `cmdRunPipeline` · `cmdFeedInput` · `currentEnvMap`.
+  - 검토의 권고대로 정한 것(사용자가 따로 고르지 않음): 실패한 종료는 `error.ExitStatus`, pipefail, `SIGPIPE`로 끝난 앞 단계는 성공,
+    `Cmd`는 복사되는 값, `os.exec`는 그대로. 결정 문서 "정한 것"에 이유가 있다.
+  - 함께 고친 것: 자식이 `os.set_env` 변수를 받지 못하던 것(`os.exec` 포함).
+  - macOS · Windows에서는 실행해 보지 못했다(교차 컴파일만). 테스트 `modules/os_cmd.cy`는 Windows에서 본문을 건너뛴다.
 
 ## 시도했으나 실패한 접근
 
@@ -315,7 +323,9 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 - `docs/releases/0.4.17.md`, `docs/releases/unreleased.md`.
 - `docs/decisions/project_fork_release_ci.md`(러너 미배정 · 재태깅 · 로컬 arm64 빌드 절차).
 
-- Julia 검토(설계 원칙 3.7)의 남은 결정: A `os.cmd`(명령을 값으로, 파이프 · 디렉터리 · 환경 · 실패한 종료는 `!T`), B의 2(사용자
+- `os.cmd`의 다음 단계(`project_os_cmd.md` "가져오지 않은 것"): 줄 단위 스트리밍, 실행 중 중단 · 시간 제한, 파일 리다이렉션.
+  Windows에서의 실행 확인도 남았다.
+- Julia 검토(설계 원칙 3.7)의 남은 결정: B의 2(사용자
   타입 연산자의 양쪽 조회, `2.0 * v`), C(오버로드 모호성을 LSP Warning으로 먼저), D(컬렉션 식. 꼴은 정했고 넣을지와 `map` ·
   `filter`와의 순서는 미정), E(REPL `?name` · `.which` · `.bc`), F(컴파일 타임 검증 리터럴, 평가기 확장 뒤). 사용자가 고를 때만 한다.
 - 컴파일 타임 평가기는 float 연산이 `*`뿐이고 정수 폭을 넓히지 않는다(`const z = k * a`에서 `a`가 `i8`이면 오류). 런타임과의
@@ -323,7 +333,7 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 ## 다음 에이전트에게
 
-1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환).
+1. 0.4.19가 마지막 릴리스다. 그 뒤 변경은 `unreleased.md`(Planned 항목 정리, 수 피연산자의 대칭 변환, `os.cmd`).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 
@@ -387,6 +397,11 @@ PR #8의 PR Build가 실패로 남은 것은 arm64 macOS job이 러너를 받지
 
 ## 테스트 요령
 
+- 클라우드 세션 컨테이너에는 Zig와 wasmtime이 없다. `pip install ziglang==0.17.1 wasmtime` 뒤 `ziglang` 패키지 안의 `zig`를
+  PATH에 건다. Zig의 `git+https` 패키지 받기는 프록시에서 실패한다(`unable to discover remote git server capabilities`).
+  `build.zig.zon`의 두 패키지(translate-c, 그 안의 arocc)를 codeberg의 `/archive/<커밋>.tar.gz`로 받아
+  `zig-pkg/<zon의 hash 이름>/`에 풀면 빌드된다. `wasmtime run --dir=.::/ x.wasm`은 Python `wasmtime` 패키지(`WasiConfig` ·
+  `preopen_dir`)로 같은 일을 하는 스크립트를 PATH에 두면 `verify.sh`의 9~12단계가 돈다(2026-11-24 세션).
 - behavior 테스트는 `src/behavior_test.zig`에 `run.case`로 등록해야 돈다. 파일 끝에 `--cytest: pass` 꼬리가 있어야 한다.
   새 파일을 만들기 전에 같은 이름이 있는지 본다(덮어쓴 적 있음).
 - 오류 테스트(`--cytest: error`): 기대 출력은 Debug CLI 출력에서 경로를 `@MainPath()`로 바꿔 만들고, 마지막 `--` 줄 뒤 줄바꿈

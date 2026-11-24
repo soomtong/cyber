@@ -4926,6 +4926,41 @@ fn main() -> !void:
 ## Builtin modules.
 Builtin and std modules come with Cyber. See the [API docs](api.html).
 
+### Running programs.
+`os.cmd` makes a command: a program and its arguments. A `Cmd` is a value. Its methods return a new command, and nothing starts until `run`, `read` or `run_status` is called:
+```cy
+use os
+
+-- The stdout of a program.
+branch := os.cmd({'git', 'rev-parse', '--abbrev-ref', 'HEAD'}).read()!.trim()
+
+-- A pipe joins the stdout of one program to the stdin of the next.
+top := os.cmd({'du', '-sk', dir}).pipe(os.cmd({'sort', '-rn'})).read()!
+
+-- A working directory and an environment variable. The output goes to the terminal.
+os.cmd({'make', 'test'}).dir('build').env('CI', '1').run()!
+
+-- Text for stdin. `run_status` returns the exit code instead of an error.
+res := os.cmd({'grep', '-c', 'TODO'}).stdin(text).run_status()!
+if res.code != 0:
+    eprint(res.err)
+```
+There is no shell. An argument reaches the program as it is, with its spaces, quotes and `$`, so a file name or other text from outside can not turn into more arguments or another command. The list of arguments is built like any list: `os.cmd([]str{'grep', '-n', pattern} + files)`.
+
+| Method | Starts the command and |
+|---|---|
+| `run() -> !void` | waits for it. stdin, stdout and stderr are those of this process. |
+| `read() -> !str` | returns the stdout of the last program. stderr is that of this process. |
+| `run_status() -> !ExecResult` | returns the stdout of the last program, the stderr of all programs and the exit code (`out`, `err`, `code`). |
+
+`run` and `read` return `error.ExitStatus` when a program ends with an exit code other than 0 or is stopped by a signal. With `run_status` that is not an error: `code` is 0 when every program succeeded, otherwise the code of the last program that failed (128 plus the signal number for a signal). A pipeline fails when any of its programs fails. A program that is stopped because the next one closed its input, like `yes` in front of `head -1`, succeeded.
+
+A program that can not be started is an [OS error](#os-errors) from all three: `error.NotFound` for a missing program or working directory, `error.PermissionDenied`, and `error.InvalidArgument` for an empty list of arguments. Captured output is limited to 10 MiB for stdout and for stderr: more is `error.TooBig` and the programs are stopped. A pipeline has at most 16 programs.
+
+`dir(path)` and `env(name, value)` apply to the programs that the command has when they are called, so `a.dir('x').pipe(b)` runs only `a` in `x`. A program gets the environment of this process as it is when the command runs, with the variables of `env` on top. `stdin(text)` gives the first program its input. Without it, `read` and `run_status` give an empty input.
+
+The older `os.exec(args)` runs one program and returns its `ExecResult`. It panics when the program can not be started.
+
 ### JSON and TOON.
 The `json` module parses and writes JSON (RFC 8259). The `toon` module encodes and decodes [TOON](https://github.com/toon-format/spec) (spec v4.4), a line-based form of the same data that takes fewer tokens in an LLM prompt. Both use `json.Value`:
 ```cy

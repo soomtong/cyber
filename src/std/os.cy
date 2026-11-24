@@ -151,17 +151,152 @@ fn chdir(path str) -> !void:
         if lc.chdir(cpath.ptr) == -1:
             return last_error()
 
---| Runs a shell command and returns the stdout/stderr.
+--| Runs the program `args[0]` with the rest of `args` as its arguments and returns its stdout, stderr and exit code.
+--| There is no shell: an argument is passed as it is. A program that can not be started is a panic.
+--| `cmd` does the same with errors as values, and with pipes, a working directory, environment variables and input.
 fn exec(args AsSpan[str]) -> ExecResult:
     return _exec(args.span())
 
 -- Takes a borrowed span so the caller keeps owning the strings.
 #[bind] fn _exec(args [&]str) -> ExecResult
 
+--| The outcome of a program or a pipeline: what it wrote to stdout and stderr, and its exit code.
+--| From `Cmd.run_status`, `code` is 0 when every stage succeeded.
 type ExecResult:
     out  str
     err  str
     code int
+
+--| A command: a program with its arguments, or several that are joined by pipes, and where and how they run.
+--| A `Cmd` is a value. Nothing starts until `run`, `read` or `run_status` is called, and it can be run again.
+--| There is no shell. An argument reaches the program as it is, with its spaces, quotes and `$`, so text from
+--| outside can not turn into more arguments or another command. A pipe, a working directory and an
+--| environment variable are set with methods instead of shell syntax.
+--| Sample usage:
+--| ```cy
+--| use os
+--|
+--| branch := os.cmd({'git', 'rev-parse', '--abbrev-ref', 'HEAD'}).read()!.trim()
+--| top := os.cmd({'du', '-sk', dir}).pipe(os.cmd({'sort', '-rn'})).read()!
+--| os.cmd({'make', 'test'}).dir('build').env('CI', '1').run()!
+--| res := os.cmd({'grep', '-c', 'TODO'}).stdin(text).run_status()!
+--| if res.code != 0:
+--|     eprint(res.err)
+--| ```
+type Cmd:
+    -stages []CmdStage
+    -input  ?str
+
+-type CmdStage:
+    args []str
+    -- Empty for the working directory of this process.
+    dir  str
+    -- Names and values in turn.
+    env  []str
+
+--| Returns a command that runs the program `args[0]` with the rest of `args` as its arguments.
+--| A program name without a `/` is looked up in `PATH`.
+fn cmd(args AsSpan[str]) -> Cmd:
+    var list []str = {}
+    list += args.span()
+    return {stages={CmdStage{args=list, dir='', env={}}}, input=none}
+
+--| Returns this command with its stdout joined to the stdin of `next`. The result runs both at once.
+--| It succeeds when both do. A stage that is stopped because the next one closed its input (as `head` does)
+--| counts as a success.
+fn (&Cmd) pipe(next Cmd) -> Cmd:
+    return {stages=self.stages + next.stages, input=self.input}
+
+--| Returns this command with `path` as the working directory of every stage it has so far.
+fn (&Cmd) dir(path str) -> Cmd:
+    var stages []CmdStage = {}
+    for self.stages |stage|:
+        stages += CmdStage{args=stage.args, dir=path, env=stage.env}
+    return {stages=stages, input=self.input}
+
+--| Returns this command with the environment variable `name` set to `value` for every stage it has so far.
+--| The other variables are those of this process when the command runs.
+fn (&Cmd) env(name str, value str) -> Cmd:
+    var stages []CmdStage = {}
+    for self.stages |stage|:
+        stages += CmdStage{args=stage.args, dir=stage.dir, env=stage.env + name + value}
+    return {stages=stages, input=self.input}
+
+--| Returns this command with `text` as the stdin of its first stage.
+fn (&Cmd) stdin(text str) -> Cmd:
+    return {stages=self.stages, input=text}
+
+--| Runs the command and waits for it. Its stdout and stderr are those of this process, and so is its stdin
+--| unless `stdin` gave it text.
+--| Returns `error.ExitStatus` when a stage ends with an exit code other than 0 or is stopped by a signal, and
+--| `error.NotFound`, `error.PermissionDenied` and the like when a program can not be started.
+fn (&Cmd) run() -> !void:
+    raw := self.start(0)
+    if raw.fail != 0:
+        return cmd_error(raw.fail)
+    if raw.code != 0:
+        return error.ExitStatus
+
+--| Runs the command, waits for it and returns what its last stage wrote to stdout. stderr is that of this process.
+--| Without `stdin`, the first stage reads an empty input.
+--| Returns the errors of `run`, and `error.TooBig` when the output is over 10 MiB.
+fn (&Cmd) read() -> !str:
+    raw := self.start(1)
+    if raw.fail != 0:
+        return cmd_error(raw.fail)
+    if raw.code != 0:
+        return error.ExitStatus
+    return raw.out
+
+--| Runs the command, waits for it and returns the stdout of its last stage, the stderr of all stages and the
+--| exit code. An exit code other than 0 is not an error here: `code` is that of the last stage that failed, and
+--| 128 plus the signal number for a stage that a signal stopped.
+--| Without `stdin`, the first stage reads an empty input.
+--| Returns an error only when a program can not be started (`error.NotFound` and the like) or when stdout or
+--| stderr is over 10 MiB (`error.TooBig`).
+fn (&Cmd) run_status() -> !ExecResult:
+    raw := self.start(2)
+    if raw.fail != 0:
+        return cmd_error(raw.fail)
+    return {out=raw.out, err=raw.err, code=raw.code}
+
+-- Hands the stages to the host as flat spans. `counts` has two numbers per stage: arguments, environment pairs.
+-fn (&Cmd) start(mode int) -> CmdRaw:
+    var args []str = {}
+    var counts []int = {}
+    var dirs []str = {}
+    var envs []str = {}
+    for self.stages |stage|:
+        args += stage.args
+        counts += stage.args.len()
+        counts += stage.env.len() / 2
+        dirs += stage.dir
+        envs += stage.env
+    var input []str = {}
+    if self.input |text|:
+        input += text
+    return _cmd_run(args.span(), counts.span(), dirs.span(), envs.span(), input.span(), mode)
+
+-type CmdRaw:
+    out  str
+    err  str
+    code int
+    fail int
+
+-- `fail` is the `CmdFail` of `os.zig`.
+-fn cmd_error(fail int) -> error:
+    switch fail:
+        case 1: return error.NotFound
+        case 2: return error.PermissionDenied
+        case 3: return error.InvalidArgument
+        case 4: return error.TooBig
+        case 5: return error.NotADirectory
+        case 6: return error.IsADirectory
+        case 7: return error.TooManyOpenFiles
+        case 8: return error.OutOfMemory
+        else: return error.Unknown
+
+#[bind] -fn _cmd_run(args [&]str, counts [&]int, dirs [&]str, envs [&]str, input [&]str, mode int) -> CmdRaw
 
 --| Exits the program with a status code.
 fn exit(status int) -> never:

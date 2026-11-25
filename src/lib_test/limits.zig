@@ -391,6 +391,11 @@ test "cl_vm_set_fuel stops runaway loops and recursion." {
         \\  return f(n + 1)
         \\_ = f(0)
     , &res));
+    // A loop without a condition and with an empty body is a jump to itself.
+    try zt.eq(C.ErrorInterrupt, C.vm_eval(vm,
+        \\while:
+        \\  pass
+    , &res));
 
     // Enough fuel for a bounded loop, and the VM is still usable.
     try zt.eq(C.Success, C.vm_eval(vm,

@@ -884,7 +884,7 @@ beginSwitch:
     }
     CASE(JUMP): {
         int16_t offset = (int16_t)pc[1];
-        if (offset < 0) {
+        if (offset <= 0) {
             CHECKPOINT();
         }
         pc += offset;

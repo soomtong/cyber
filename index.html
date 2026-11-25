@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.20-dev 1166-f6c73ee</div>
+    <div class="sub-title">v0.4.20-dev 1175-b7ee7d3</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -2459,6 +2459,14 @@ a := Vec2{x=1, y=2}
 b := a + Vec2{x=3, y=4}
 c := -a
 </code></pre>
+<p>An operator method only applies when its type is on the left. When the left operand is a number or another type, declare a module-level operator function that takes both operands. <code>a op b</code> first looks for a method <code>op</code> of the type of <code>a</code>. If there is none, it looks for a module-level function <code>op</code> in the module that declares the type of <code>a</code>, then in the module that declares the type of <code>b</code>:</p>
+<pre><code class="language-cy">fn `*`(s float, v Vec2) -> Vec2:
+    return {x=s * v.x, y=s * v.y}
+
+d := 2.0 * a
+e := 2 * a      -- The literal takes the type of the parameter.
+</code></pre>
+<p>This works for the arithmetic and bitwise operators (<code>+ - * / % ** && || ~ << >></code>). A module-level operator function takes two parameters, and one of them must be a type declared in the same module. A module can not add an operator to two types that it does not own, since <code>a op b</code> would never find it. Comparison operators (<code>< <= > >=</code>) are only methods of the left operand type.</p>
 <p>Special operators have their own name. This example overloads the <code>index</code> operator and the <code>set index</code> operator:</p>
 <pre><code class="language-cy">type MyCollection:
     arr []int
@@ -3188,7 +3196,7 @@ print(show(n))       --> int
 print(show(2.5))     --> float
 print(show(4))       --> int
 </code></pre>
-<p>An argument that takes its type from the parameter does not match an overload whose parameter it can not be made for: <code>none</code> for a parameter that is not a <code>?T</code>, an enum literal like <code>.red</code> for a type without that member, an initializer literal like <code>{1, 2}</code> for <code>int</code>, or an <a href="#inferred-lambdas" title="">inferred lambda</a> for a parameter that is not a function type or that has another number of parameters. The call goes on to the next overload. When more than one overload can take the argument, the first declared one is used:</p>
+<p>An argument that takes its type from the parameter does not match an overload whose parameter it can not be made for: <code>none</code> for a parameter that is not a <code>?T</code>, an enum literal like <code>.red</code> for a type without that member, an initializer literal like <code>{1, 2}</code> for <code>int</code>, or an <a href="#inferred-lambdas" title="">inferred lambda</a> for a parameter that is not a function type or that has another number of parameters. The call goes on to the next overload. When more than one overload can take the argument, the call is a compile error unless one of them is more specific (<code>T</code> is more specific than <code>?T</code> and <code>!T</code>):</p>
 <pre><code class="language-cy">type Color enum:
     case red
     case blue
@@ -3203,9 +3211,12 @@ fn tag(x ?int) -> str:
     return 'option int'
 
 print(tag(.red))     --> color
-print(tag(none))     --> str
+print(tag(?int(none)))   --> option int
+print(tag(none))
+--> error: The call is ambiguous: both `fn tag(?str) -> str` and `fn tag(?int) -> str` match, and neither is more specific. Write `tag(?str(none))` or `tag(?int(none))`.
 </code></pre>
-<p>When no overload takes the arguments, the call reports the error of the overload that got the furthest through the arguments, and of the first declared one among those. For a literal that is the error of that overload alone, such as 'Expected <code>?T</code> to infer <code>none</code> value, found <code>Int</code>.' A closure that is passed to overloads that only take a function pointer reports 'Expected argument <code>fn(int) -> int</code>, found <code>Func[fn(int) -> int]</code>, when calling <code>fn m(int, fn(int) -> int) -> int</code>. A closure is passed to a <code>Func[fn(...)]</code> or a <code>&OpaqueFunc[fn(...)]</code> parameter.'</p>
+<p>The declaration order does not decide what a call means. Two cases are not ambiguous: overloads that only differ in number types (<code>float(x)</code> with an <code>i32</code> takes <code>float</code>, and the value is the same as through <code>int</code>), and <code>str</code> against an integer at a string literal argument (a one-character literal is a string first, so <code>v['n']</code> takes the <code>str</code> key over the <code>int</code> index). Only arguments that are names, literals and member accesses are checked, since their type can depend on the parameter.
+When no overload takes the arguments, the call reports the error of the overload that got the furthest through the arguments, and of the first declared one among those. For a literal that is the error of that overload alone, such as 'Expected <code>?T</code> to infer <code>none</code> value, found <code>Int</code>.' A closure that is passed to overloads that only take a function pointer reports 'Expected argument <code>fn(int) -> int</code>, found <code>Func[fn(int) -> int]</code>, when calling <code>fn m(int, fn(int) -> int) -> int</code>. A closure is passed to a <code>Func[fn(...)]</code> or a <code>&OpaqueFunc[fn(...)]</code> parameter.'</p>
 <p>Overloads must differ in their parameter types. Declaring two functions with the same parameters and only a different return type is a compile error.</p>
 <a href="#functions">^topic</a>
 <h2 id="parameter-groups">Parameter groups. <a href="#parameter-groups">#</a></h2>

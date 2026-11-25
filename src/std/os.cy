@@ -170,22 +170,29 @@ type ExecResult:
 --| A command: a program with its arguments, or several that are joined by pipes, and where and how they run.
 --| A `Cmd` is a value. Nothing starts until `run`, `read` or `run_status` is called, and it can be run again.
 --| There is no shell. An argument reaches the program as it is, with its spaces, quotes and `$`, so text from
---| outside can not turn into more arguments or another command. A pipe, a working directory and an
---| environment variable are set with methods instead of shell syntax.
+--| outside can not turn into more arguments or another command. A pipe, a working directory, an
+--| environment variable, a file for a stream and a time limit are set with methods instead of shell syntax.
 --| Sample usage:
 --| ```cy
 --| use os
 --|
 --| branch := os.cmd({'git', 'rev-parse', '--abbrev-ref', 'HEAD'}).read()!.trim()
 --| top := os.cmd({'du', '-sk', dir}).pipe(os.cmd({'sort', '-rn'})).read()!
---| os.cmd({'make', 'test'}).dir('build').env('CI', '1').run()!
---| res := os.cmd({'grep', '-c', 'TODO'}).stdin(text).run_status()!
+--| os.cmd({'make', 'test'}).dir('build').env('CI', '1').stdout_file('build.log').run()!
+--| res := os.cmd({'grep', '-c', 'TODO'}).stdin(text).timeout_ms(5000).run_status()!
 --| if res.code != 0:
 --|     eprint(res.err)
 --| ```
 type Cmd:
     -stages []CmdStage
-    -input  ?str
+    -- The stdin of the first stage: a `CmdIo` and the text or the path.
+    -in_io  int = 0
+    -in     str = ''
+    -- The stdout of the last stage: a `CmdIo` and the path.
+    -out_io int = 0
+    -out    str = ''
+    -- 0 for no time limit, -1 for a limit that is not over 0.
+    -limit_ms int = 0
 
 -type CmdStage:
     args []str
@@ -193,44 +200,106 @@ type Cmd:
     dir  str
     -- Names and values in turn.
     env  []str
+    -- The stderr of the stage: a `CmdIo` and the path.
+    err_io int = 0
+    err    str = ''
+
+-- Mirrored by `CmdIo` in `os.zig`. 0: what the method that runs the command says, 1: the input text,
+-- 2: a file that is read, or created or emptied, 3: a file that is created or added to.
+-const CmdIoText = 1
+-const CmdIoFile = 2
+-const CmdIoAppend = 3
 
 --| Returns a command that runs the program `args[0]` with the rest of `args` as its arguments.
 --| A program name without a `/` is looked up in `PATH`.
 fn cmd(args AsSpan[str]) -> Cmd:
     var list []str = {}
     list += args.span()
-    return {stages={CmdStage{args=list, dir='', env={}}}, input=none}
+    return {stages={CmdStage{args=list, dir='', env={}}}}
+
+-fn (&Cmd) with_stages(stages []CmdStage) -> Cmd:
+    return {stages=stages, in_io=self.in_io, in=self.in, out_io=self.out_io, out=self.out, limit_ms=self.limit_ms}
 
 --| Returns this command with its stdout joined to the stdin of `next`. The result runs both at once.
 --| It succeeds when both do. A stage that is stopped because the next one closed its input (as `head` does)
---| counts as a success. The input of the result is that of this command: text that `stdin` gave to `next` is
---| not used, since the stdin of `next` is the pipe.
+--| counts as a success. The stdin of the result is that of this command and its stdout is that of `next`:
+--| text or a file that `stdin` or `stdin_file` gave to `next` is not used, since the stdin of `next` is the pipe,
+--| and neither is a file that `stdout_file` gave to this command. The time limit is the shorter one of the two.
 fn (&Cmd) pipe(next Cmd) -> Cmd:
-    return {stages=self.stages + next.stages, input=self.input}
+    limit := self.limit_ms
+    if next.limit_ms != 0 and (limit == 0 or next.limit_ms < limit):
+        limit = next.limit_ms
+    return {stages=self.stages + next.stages, in_io=self.in_io, in=self.in, out_io=next.out_io, out=next.out,
+        limit_ms=limit}
 
 --| Returns this command with `path` as the working directory of every stage it has so far.
 fn (&Cmd) dir(path str) -> Cmd:
     var stages []CmdStage = {}
     for self.stages |stage|:
-        stages += CmdStage{args=stage.args, dir=path, env=stage.env}
-    return {stages=stages, input=self.input}
+        stages += CmdStage{args=stage.args, dir=path, env=stage.env, err_io=stage.err_io, err=stage.err}
+    return self.with_stages(stages)
 
 --| Returns this command with the environment variable `name` set to `value` for every stage it has so far.
 --| The other variables are those of this process when the command runs.
 fn (&Cmd) env(name str, value str) -> Cmd:
     var stages []CmdStage = {}
     for self.stages |stage|:
-        stages += CmdStage{args=stage.args, dir=stage.dir, env=stage.env + name + value}
-    return {stages=stages, input=self.input}
+        stages += CmdStage{args=stage.args, dir=stage.dir, env=stage.env + name + value, err_io=stage.err_io,
+            err=stage.err}
+    return self.with_stages(stages)
 
---| Returns this command with `text` as the stdin of its first stage.
+--| Returns this command with `text` as the stdin of its first stage, in place of a file that `stdin_file` gave.
 fn (&Cmd) stdin(text str) -> Cmd:
-    return {stages=self.stages, input=text}
+    return {stages=self.stages, in_io=CmdIoText, in=text, out_io=self.out_io, out=self.out, limit_ms=self.limit_ms}
+
+--| Returns this command with the file at `path` as the stdin of its first stage, in place of text that `stdin`
+--| gave. The file is opened when the command runs. A relative path is relative to the working directory of this
+--| process, not to that of `dir`.
+fn (&Cmd) stdin_file(path str) -> Cmd:
+    return {stages=self.stages, in_io=CmdIoFile, in=path, out_io=self.out_io, out=self.out, limit_ms=self.limit_ms}
+
+--| Returns this command with the stdout of its last stage written to the file at `path`. The file is created, or
+--| emptied when it exists, when the command runs. A relative path is relative to the working directory of this
+--| process. `read` can not be used with it, and `run_status` returns an empty `out`.
+fn (&Cmd) stdout_file(path str) -> Cmd:
+    return {stages=self.stages, in_io=self.in_io, in=self.in, out_io=CmdIoFile, out=path, limit_ms=self.limit_ms}
+
+--| Like `stdout_file`, but the output is added to the end of the file.
+fn (&Cmd) stdout_append(path str) -> Cmd:
+    return {stages=self.stages, in_io=self.in_io, in=self.in, out_io=CmdIoAppend, out=path, limit_ms=self.limit_ms}
+
+--| Returns this command with the stderr of every stage it has so far written to the file at `path`. The file is
+--| created, or emptied when it exists, when the command runs. Stages that name the same file write to it
+--| together. `run_status` does not return what goes to the file in `err`.
+fn (&Cmd) stderr_file(path str) -> Cmd:
+    return self.stderr_to(CmdIoFile, path)
+
+--| Like `stderr_file`, but the output is added to the end of the file.
+fn (&Cmd) stderr_append(path str) -> Cmd:
+    return self.stderr_to(CmdIoAppend, path)
+
+-fn (&Cmd) stderr_to(io int, path str) -> Cmd:
+    var stages []CmdStage = {}
+    for self.stages |stage|:
+        stages += CmdStage{args=stage.args, dir=stage.dir, env=stage.env, err_io=io, err=path}
+    return self.with_stages(stages)
+
+--| Returns this command with a time limit of `ms` milliseconds. When the limit passes before the command ends,
+--| its stages are stopped (`SIGKILL`, `TerminateProcess`) and the method that ran it returns `error.TimedOut`.
+--| The programs that a stage started itself are not stopped. A limit that is not over 0 is
+--| `error.InvalidArgument` when the command runs.
+fn (&Cmd) timeout_ms(ms int) -> Cmd:
+    limit := ms
+    if ms <= 0:
+        limit = -1
+    return {stages=self.stages, in_io=self.in_io, in=self.in, out_io=self.out_io, out=self.out, limit_ms=limit}
 
 --| Runs the command and waits for it. Its stdout and stderr are those of this process, and so is its stdin
---| unless `stdin` gave it text.
---| Returns `error.ExitStatus` when a stage ends with an exit code other than 0 or is stopped by a signal, and
---| `error.NotFound`, `error.PermissionDenied` and the like when a program can not be started.
+--| unless `stdin` or `stdin_file` gave it one, or a method gave it a file.
+--| Returns `error.ExitStatus` when a stage ends with an exit code other than 0 or is stopped by a signal,
+--| `error.TimedOut` when the time limit passed, and `error.NotFound`, `error.PermissionDenied` and the like when a
+--| program can not be started or a file can not be opened.
+--| When the host asks the VM to stop (`cl_vm_interrupt`), the stages are stopped and so is the VM.
 fn (&Cmd) run() -> !void:
     raw := self.start(0)
     if raw.fail != 0:
@@ -239,9 +308,12 @@ fn (&Cmd) run() -> !void:
         return error.ExitStatus
 
 --| Runs the command, waits for it and returns what its last stage wrote to stdout. stderr is that of this process.
---| Without `stdin`, the first stage reads an empty input.
---| Returns the errors of `run`, and `error.TooBig` when the output is over 10 MiB.
+--| Without `stdin` or `stdin_file`, the first stage reads an empty input.
+--| Returns the errors of `run`, `error.TooBig` when the output is over 10 MiB, and `error.InvalidArgument` when
+--| `stdout_file` or `stdout_append` sent the output to a file.
 fn (&Cmd) read() -> !str:
+    if self.out_io != 0:
+        return error.InvalidArgument
     raw := self.start(1)
     if raw.fail != 0:
         return cmd_error(raw.fail)
@@ -252,31 +324,42 @@ fn (&Cmd) read() -> !str:
 --| Runs the command, waits for it and returns the stdout of its last stage, the stderr of all stages and the
 --| exit code. An exit code other than 0 is not an error here: `code` is that of the last stage that failed, and
 --| 128 plus the signal number for a stage that a signal stopped.
---| Without `stdin`, the first stage reads an empty input.
---| Returns an error only when a program can not be started (`error.NotFound` and the like) or when stdout or
---| stderr is over 10 MiB (`error.TooBig`).
+--| Without `stdin` or `stdin_file`, the first stage reads an empty input. A stream that goes to a file is not
+--| in the result.
+--| Returns an error only when a program can not be started or a file can not be opened (`error.NotFound` and
+--| the like), when the time limit passed (`error.TimedOut`), or when stdout or stderr is over 10 MiB
+--| (`error.TooBig`).
 fn (&Cmd) run_status() -> !ExecResult:
     raw := self.start(2)
     if raw.fail != 0:
         return cmd_error(raw.fail)
     return {out=raw.out, err=raw.err, code=raw.code}
 
--- Hands the stages to the host as flat spans. `counts` has two numbers per stage: arguments, environment pairs.
+-- Hands the stages to the host as flat spans. `counts` has three numbers per stage: arguments, environment pairs
+-- and the `CmdIo` of stderr.
 -fn (&Cmd) start(mode int) -> CmdRaw:
     var args []str = {}
     var counts []int = {}
     var dirs []str = {}
     var envs []str = {}
+    var errs []str = {}
     for self.stages |stage|:
         args += stage.args
         counts += stage.args.len()
         counts += stage.env.len() / 2
+        counts += stage.err_io
         dirs += stage.dir
         envs += stage.env
-    var input []str = {}
-    if self.input |text|:
-        input += text
-    return _cmd_run(args.span(), counts.span(), dirs.span(), envs.span(), input.span(), mode)
+        errs += stage.err
+    texts := []str{self.in, self.out}
+    opts := []int{self.in_io, self.out_io, self.limit_ms}
+    -- When the host asks the VM to stop, the host function stops the stages and returns `CmdFail.interrupted`
+    -- (11). The checkpoint of this loop then stops the VM: the result is never taken for that of the command.
+    while:
+        raw := _cmd_run(args.span(), counts.span(), dirs.span(), envs.span(), errs.span(), texts.span(), opts.span(),
+            mode)
+        if raw.fail != 11:
+            return raw
 
 -type CmdRaw:
     out  str
@@ -295,9 +378,11 @@ fn (&Cmd) run_status() -> !ExecResult:
         case 6: return error.IsADirectory
         case 7: return error.TooManyOpenFiles
         case 8: return error.OutOfMemory
+        case 10: return error.TimedOut
         else: return error.Unknown
 
-#[bind] -fn _cmd_run(args [&]str, counts [&]int, dirs [&]str, envs [&]str, input [&]str, mode int) -> CmdRaw
+#[bind] -fn _cmd_run(args [&]str, counts [&]int, dirs [&]str, envs [&]str, errs [&]str, texts [&]str, opts [&]int,
+    mode int) -> CmdRaw
 
 --| Exits the program with a status code.
 fn exit(status int) -> never:

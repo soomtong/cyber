@@ -78,9 +78,8 @@ if res.code != 0:
 ### 가져오지 않은 것
 
 - 백틱 문법과 보간. 사이버의 백틱은 raw 문자열이다. 인자 목록은 슬라이스 연산으로 만든다(`[]str{'grep', pat} + files`).
-- 파일 리다이렉션(`stdout="out.txt"`). `read()`의 결과를 `os.write_file`로 쓴다. 큰 출력이 필요해지면 다시 본다.
-- 줄 단위 스트리밍, 실행 중 중단, 시간 제한. 호스트 함수 안에서는 `cl_vm_interrupt`가 닿지 않는다(`project_vm_interrupt.md`).
-  검토 3.4 A가 다음 단계로 둔 것이다.
+- 파일 리다이렉션, 실행 중 중단, 시간 제한은 2026-11-25에 넣었다(아래 "시간 제한 · 중단 · 파일 리다이렉션").
+- 줄 단위 스트리밍. 살아 있는 프로세스를 값으로 들고 있어야 해서 따로 정한다(같은 절 끝).
 - 단계별 stdin 글, stderr를 stdout에 합치기(`2>&1`), detach.
 
 ## 구현
@@ -144,3 +143,82 @@ libc의 `setenv`는 `environ`을 새 배열로 옮기므로 옛 블록에는 새
 - x86_64-windows-gnu, aarch64-macos, x86_64-macos로 교차 컴파일이 된다.
 - 실행해 보지 못한 것: macOS와 Windows에서의 동작. 테스트는 POSIX 프로그램(`sh`, `sort`, `tr` 등)을 쓰므로 Windows에서는
   본문을 건너뛴다. Windows의 파이프 · 인자 인용은 Zig 표준 라이브러리에 맡겼고 직접 확인하지 않았다. macOS는 CI가 돌린다.
+
+## 시간 제한 · 중단 · 파일 리다이렉션 (2026-11-25)
+
+사용자: "os.cmd 이어서 진행". 위 "가져오지 않은 것"의 다음 단계 셋 가운데 둘(시간 제한과 중단, 파일 리다이렉션)을 넣었다.
+API 꼴은 사용자가 따로 고르지 않아 아래 비교로 정했다. 바꾸려면 여기부터 고친다.
+
+### 다른 언어
+
+| | 시간 제한 | 파일로 보내기 |
+| --- | --- | --- |
+| Python `subprocess.run` | `timeout=` 초(float). 지나면 자식을 kill하고 `TimeoutExpired`(그때까지의 출력을 실음) | `stdout=open(...)` 파일 객체 |
+| Rust `std::process::Command` | 없음(`wait-timeout` crate, tokio의 `timeout`) | `Stdio::from(File)` |
+| Nim `osproc` | `waitForExit(p, timeout: int = -1)` 밀리초 | `startProcess`의 파일 핸들 |
+| Zig `std.process` | 없음(`Child.wait`는 기다리기만) | `StdIo.file` |
+| Julia | `timedwait`와 `kill` 조합 | `pipeline(cmd, stdout="f", append=true)` |
+
+### API
+
+| 메서드 | 뜻 |
+| --- | --- |
+| `Cmd.timeout_ms(ms int) -> Cmd` | 명령 전체의 기한. 지나면 단계들을 끝내고 `error.TimedOut` |
+| `Cmd.stdin_file(path str) -> Cmd` | 첫 단계의 stdin. `stdin(text)`와 나중에 부른 쪽이 이긴다 |
+| `Cmd.stdout_file(path)` · `stdout_append(path)` | 마지막 단계의 stdout을 파일로(비우거나 덧붙임) |
+| `Cmd.stderr_file(path)` · `stderr_append(path)` | 지금까지의 모든 단계의 stderr를 파일로 |
+
+### 정한 것
+
+1. 기한은 밀리초 정수다(`timeout_ms`). `time.Duration`을 받으려면 `os`가 `time`을 가져와야 하는데, 그러면 `use os`만 하는
+   스크립트의 시작이 10.3 → 14.1 ms(+37%)가 된다(ReleaseFast, hyperfine 20회). 단위를 이름에 넣어 `timeout(5)`를 초로 읽는 실수를
+   막는다. Nim이 같은 꼴이다. 0 이하는 실행할 때 `error.InvalidArgument`(조용히 "기한 없음"으로 읽지 않는다).
+2. 기한이 지나면 단계들을 `SIGKILL`(Windows `TerminateProcess`)로 끝낸다. Python처럼 SIGTERM 뒤 기다리는 단계는 두지 않았다.
+   기다릴 시간도 기한이 되어 버린다. 단계가 스스로 띄운 프로그램(손자)은 끝내지 않는다. 프로세스 그룹으로 묶으면 끝낼 수 있지만,
+   그러면 터미널의 Ctrl-C가 `run`의 단계에 닿지 않는다. Python `subprocess.run`도 자식만 끝낸다.
+3. 결과는 `error.TimedOut`(OS 오류 표준 어휘, `project_os_error_names.md`)이다. `run_status`도 오류다: 끝까지 가지 않은 명령의
+   `code`는 뜻이 없다. 그때까지의 출력은 버린다(`error`에 payload가 없다).
+4. `a.pipe(b)`의 기한은 둘 중 짧은 것이다. 입력(앞 명령의 것)이나 stdout 파일(뒤 명령의 것)과 달리 기한은 두 쪽 다 뜻이 있다.
+5. 중단: 명령이 도는 동안 `cl_vm_interrupt`가 오면 단계들을 끝내고 VM이 멈춘다. 호스트 함수는 `CmdFail.interrupted`(11)를
+   돌려주고 `os.cy`의 `start`가 호출을 반복문 안에 두어 그 반복의 검사점이 VM을 멈추게 한다(regex · peg와 같은 길).
+   스크립트는 이 결과를 보지 못한다.
+6. stdout 파일은 명령의 속성이고 `pipe`는 뒤 명령의 것을 쓴다(마지막 단계만 뜻이 있다). stderr 파일은 `dir` · `env`처럼 그때까지의
+   단계마다 붙는다. 같은 경로 · 같은 방식을 가진 단계들은 파일을 한 번 열어 함께 쓴다(따로 열면 서로 덮어쓴다).
+7. 파일은 실행할 때, 어느 단계도 시작하기 전에 연다. 열 수 없으면 아무것도 시작하지 않고 OS 오류다. 상대 경로는 이 프로세스의
+   작업 디렉터리 기준이다(`dir`은 단계의 것). Python · Rust도 부모가 연다.
+8. 덧붙이기는 POSIX에서 `O_APPEND`로 연다: 다른 프로세스가 그사이 덧붙여도 끝에 쓴다. Zig `Dir.createFile`에 그 선택지가 없어
+   `posix.openat`을 쓴다. Windows는 끝으로 옮긴 뒤 넘긴다(`FILE_APPEND_DATA`가 아니라서 동시 쓰기에는 약하다).
+9. stdout을 파일로 보낸 명령의 `read`는 `error.InvalidArgument`다. 돌려줄 것이 없는데 빈 문자열을 주면 실수가 숨는다.
+   `run_status`는 `out`이 빈 문자열이다(종료 코드와 stderr에는 여전히 뜻이 있다).
+
+### 구현
+
+- 감시 스레드(`os.zig` `CmdWatch`): 모든 단계가 시작된 뒤 띄운다. 20ms마다(또는 기한에) 깨어 중단 요청과 기한을 보고, 걸리면 아직
+  끝나지 않은 단계를 끝낸다. 실행하는 스레드는 그동안 읽기나 대기에 막혀 있다. 명령 실행마다 스레드 하나라 `true` 한 번에 약
+  0.05~0.08ms(4~6%)가 는다(macOS ReleaseFast, 200회 반복).
+- pid 재사용 경쟁: 실행하는 스레드가 단계를 회수(`wait`)한 뒤에는 그 pid가 다른 프로세스일 수 있다. 그래서 회수하지 않고 끝을
+  기다린 다음(`waitid(WEXITED | WNOWAIT)`, Windows는 `NtWaitForSingleObject`) 잠금 아래 "끝남"으로 표시하고, 감시 스레드는 같은
+  잠금 아래 표시되지 않은 단계만 끝낸다. 감시 스레드를 join한 뒤에 회수한다. Darwin의 `waitid`는 `std.c`에 없어 선언했다.
+  Linux · Darwin · Windows 밖에서는 기다리는 동안의 끝내기가 없다(빌드 대상이 아니다).
+- 손자가 파이프를 쥐고 있으면 단계를 끝내도 읽기가 끝나지 않는다. 읽기를 50ms 기한으로 돌며 감시 스레드가 멈췄는지 본다.
+- `cl_thread_interrupted(t)`를 공개 C API로 더했다. `os.zig`는 `cyber.zig`를 가져올 수 없다(CLI 실행 파일에서 `build_config`가
+  다르다). 임베더의 오래 막히는 호스트 함수에도 같은 길이 필요해 공개로 했다.
+- 중단 반복을 처음에는 `while: pass`로 썼다가 VM이 멈추지 않는 것을 찾았다(F-208, `project_vm_interrupt.md` 끝).
+
+### 확인
+
+- behavior 테스트 `modules/os_cmd.cy`(기한: 단일 · 파이프 · 입력 글 · 손자가 쥔 파이프 · 짧은 쪽 · 잘못된 값, 파일: 비우기 ·
+  덧붙이기 · `dir`과 상대 경로 · `stdin`과의 순서 · `pipe` · 결과에서 빠짐 · `read` 거절 · 같은 파일의 stderr · 열 수 없는 파일).
+- cli 테스트 `cl_vm_interrupt stops a running os.cmd and its programs.`(`cli.zig`): `sleep 30 | cat`을 중단해 10초 안에
+  `CL_ERROR_INTERRUPT`, 다음 eval은 정상. `os`는 CLI의 모듈이라 lib 테스트에 두지 못한다(`os.zig`를 가져오면 `cli.zig`의
+  linenoise까지 분석된다. 필터를 건 lib 테스트에서는 드러나지 않았다). 컴파일 중에 온 요청은 eval 시작에서 지워지므로 테스트는
+  eval이 끝날 때까지 100ms마다 다시 요청한다.
+- 교차 컴파일: x86_64-windows-gnu, x86_64-linux-gnu, aarch64-linux-gnu, x86_64-macos. 실행은 aarch64 macOS만.
+  Windows의 `TerminateProcess` · `SetFilePointerEx` 경로는 실행해 보지 못했다.
+
+### 줄 단위 스트리밍(아직)
+
+`for line in eachline(cmd)`(Julia), `Popen.stdout`(Python)처럼 도는 동안 출력을 읽으려면 호스트 함수 호출을 넘어 살아 있는
+프로세스(`os.Process`)를 값으로 들고 있어야 한다. 그 값의 소멸(끝내고 회수), panic · 중단 경로에서 소멸자가 돌지 않을 때 남는
+좀비와 스레드, 기한이 그 수명 동안 이어지는지를 먼저 정해야 해서 이번에는 넣지 않았다.
+

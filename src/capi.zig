@@ -352,6 +352,8 @@ pub fn thread_vm(t: *Thread) *VM {
     return c.cl_thread_vm(t).?;
 }
 
+pub const thread_interrupted = c.cl_thread_interrupted;
+
 pub fn thread_allocator(t: *Thread) std.mem.Allocator {
     return fromAllocator(c.cl_thread_allocator(t));
 }

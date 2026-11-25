@@ -608,6 +608,52 @@ pub const FallbackReadLine = struct {
     }
 };
 
+test "cl_vm_interrupt stops a running os.cmd and its programs." {
+    if (is_wasm or builtin.os.tag == .windows) return;
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    try init_cli(vm, zt.alloc);
+    defer deinit_cli(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    const S = struct {
+        var done = std.atomic.Value(bool).init(false);
+        // A request that comes while the eval compiles is cleared when it starts to run, so it is made again
+        // until the eval ends.
+        fn interrupter(vm_: *C.VM) void {
+            while (!done.load(.acquire)) {
+                std.Io.sleep(stdx.io(), .fromMilliseconds(100), .awake) catch {};
+                C.vm_interrupt(vm_);
+            }
+        }
+    };
+
+    // The programs would run for 30 seconds. The interrupt stops them and the eval, which never sees an error of
+    // the command: `os.cy` loops to the checkpoint.
+    const start = std.Io.Clock.Timestamp.now(stdx.io(), .awake);
+    const thread = try std.Thread.spawn(.{}, S.interrupter, .{vm});
+    var res: C.EvalResult = undefined;
+    // The CLI loader takes the uri of the main source for a path.
+    const config = C.defaultEvalConfig();
+    const code = C.vm_evalx(vm, "./src/test/main.cy",
+        \\use os
+        \\_ = os.cmd({'sleep', '30'}).pipe(os.cmd({'cat'})).read()
+        \\panic('not stopped')
+    , config, &res);
+    S.done.store(true, .release);
+    thread.join();
+    try zt.eq(C.ErrorInterrupt, code);
+    try zt.eq(true, start.untilNow(stdx.io()).raw.toMilliseconds() < 10000);
+
+    // The next eval runs a command as usual.
+    try zt.eq(C.Success, C.vm_evalx(vm, "./src/test/main.cy",
+        \\use os
+        \\use t 'test'
+        \\t.eq('ok\n', os.cmd({'echo', 'ok'}).read()!)
+    , config, &res));
+}
+
 test "Stack traces." {
     if (!is_wasm) {
         const vm = C.vm_initx(zt.alloc);

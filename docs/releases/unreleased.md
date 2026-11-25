@@ -58,3 +58,26 @@ bad := regex.compile('xa(?=b)')
 - 임베딩은 `cl_vm_symbol_hints`의 `CL_HINT_PATTERN_LITERAL`(5)로 리터럴의 자리를 받는다. 컴파일 타임 검증(Julia 검토 3.4 F)은
   평가기를 넓힐 때까지 미룬다. LSP 설계 문서 19절.
 
+## `os.cmd`: 시간 제한, 중단, 파일 리다이렉션
+
+`Cmd`에 메서드 일곱이 늘었다. 결정 `docs/decisions/project_os_cmd.md` "시간 제한 · 중단 · 파일 리다이렉션".
+
+~~~cy
+os.cmd({'make'}).stdout_file('build.log').stderr_append('errors.log').timeout_ms(60000).run()!
+n := os.cmd({'wc', '-l'}).stdin_file('data.csv').read()!
+~~~
+
+- `timeout_ms(ms)`: 기한이 지나면 단계들을 끝내고(`SIGKILL`, `TerminateProcess`) `error.TimedOut`을 돌려준다. 단계가 스스로
+  띄운 프로그램은 끝내지 않는다. `pipe`는 둘 중 짧은 기한을 쓴다. 0 이하는 실행할 때 `error.InvalidArgument`.
+- `cl_vm_interrupt`가 실행 중인 명령에 닿는다. 전에는 명령이 끝날 때까지 VM이 멈추지 않았다. 이제 단계들을 끝내고 VM이 멈춘다.
+- `stdin_file(path)`, `stdout_file(path)` · `stdout_append(path)`, `stderr_file(path)` · `stderr_append(path)`. 파일은 실행할 때
+  어느 단계도 시작하기 전에 연다. 상대 경로는 `dir`이 아니라 이 프로세스의 작업 디렉터리 기준이다. 파일로 보낸 스트림은
+  `run_status`의 결과에 없고, stdout을 파일로 보낸 명령의 `read`는 `error.InvalidArgument`다.
+- 명령 실행마다 감시 스레드 하나가 붙는다(macOS ReleaseFast에서 `true` 한 번에 약 0.05ms).
+- 임베딩: `cl_thread_interrupted(t)`가 늘었다. 오래 막히는 호스트 함수가 중단 요청을 보고 일찍 돌아오게 한다.
+
+## 빈 본문의 조건 없는 `while:`을 멈출 수 있다 (F-208)
+
+`while:` 아래 `pass`만 있는 반복은 `cl_vm_interrupt`로도 fuel로도 멈추지 않았다. 자기 자신으로 뛰는 `jmp`(오프셋 0)가 되는데 VM은
+뒤로 뛰는 점프(오프셋 < 0)에서만 중단 요청을 봤다. 이제 오프셋 0도 검사점이다. `while true: pass`는 조건 검사로 다른 자리에
+뛰어서 전에도 멈췄다.

@@ -94,6 +94,10 @@ export fn cl_thread_vm(t: *cy.Thread) *cy.VM {
     return t.c.vm;
 }
 
+export fn cl_thread_interrupted(t: *cy.Thread) bool {
+    return @atomicLoad(u8, t.c.interrupt, .acquire) != 0;
+}
+
 export fn cl_thread_allocator(t: *cy.Thread) C.Allocator {
     return C.toAllocator(t.alloc);
 }

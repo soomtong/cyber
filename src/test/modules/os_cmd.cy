@@ -107,6 +107,57 @@ fn run_all() -> !void:
     -- Output that is not UTF-8 is kept as bytes.
     t.eq(2, os.cmd({'printf', '\\377\\376'}).read()!.len())
 
+    -- timeout_ms(): the stages are stopped when the limit passes.
+    t.eq(error.TimedOut, os.cmd({'sleep', '5'}).timeout_ms(100).run().unwrap_error())
+    t.eq(error.TimedOut, os.cmd({'sleep', '5'}).timeout_ms(100).read().unwrap_error())
+    t.eq(error.TimedOut, os.cmd({'sleep', '5'}).pipe(os.cmd({'cat'})).timeout_ms(100).run_status().unwrap_error())
+    t.eq(error.TimedOut, os.cmd({'cat'}).stdin('x'.repeat(1000000)).pipe(os.cmd({'sleep', '5'})).timeout_ms(100).read().unwrap_error())
+    -- Also when a program that a stage started keeps the pipe open.
+    t.eq(error.TimedOut, os.cmd({'sh', '-c', 'sleep 3 & echo started'}).timeout_ms(200).read().unwrap_error())
+    -- The shorter limit of a pipe.
+    t.eq(error.TimedOut, os.cmd({'sleep', '5'}).timeout_ms(60000).pipe(os.cmd({'cat'}).timeout_ms(100)).run().unwrap_error())
+    t.eq('done\n', os.cmd({'echo', 'done'}).timeout_ms(10000).read()!)
+    t.eq(error.InvalidArgument, os.cmd({'true'}).timeout_ms(0).run().unwrap_error())
+    t.eq(error.InvalidArgument, os.cmd({'true'}).timeout_ms(-5).run().unwrap_error())
+
+    -- Files for the streams. A relative path is relative to this process, not to `dir`.
+    tmp := os.cmd({'mktemp', '-d'}).read()!.trim()
+    out := tmp + '/out.txt'
+    os.cmd({'echo', 'one'}).stdout_file(out).run()!
+    os.cmd({'echo', 'two'}).stdout_append(out).run()!
+    t.eq('one\ntwo\n', os.read_file(out)!)
+    os.cmd({'echo', 'three'}).dir('/').stdout_file(out).run()!
+    t.eq('three\n', os.read_file(out)!)
+    t.eq('THREE\n', os.cmd({'tr', 'a-z', 'A-Z'}).stdin_file(out).read()!)
+    -- The later of `stdin` and `stdin_file` is used.
+    t.eq('text', os.cmd({'cat'}).stdin_file(out).stdin('text').read()!)
+    t.eq('three\n', os.cmd({'cat'}).stdin('text').stdin_file(out).read()!)
+    -- The stdout of a pipe is that of its last command.
+    os.cmd({'echo', 'piped'}).stdout_file(tmp + '/lost.txt').pipe(os.cmd({'cat'}).stdout_file(out)).run()!
+    t.eq('piped\n', os.read_file(out)!)
+    t.eq(error.NotFound, os.read_file(tmp + '/lost.txt').unwrap_error())
+    -- A stream that goes to a file is not in the result.
+    res = os.cmd({'sh', '-c', 'echo o; echo e >&2'}).stdout_file(out).run_status()!
+    t.eq('', res.out)
+    t.eq('e\n', res.err)
+    t.eq(error.InvalidArgument, os.cmd({'echo'}).stdout_file(out).read().unwrap_error())
+    -- stderr goes to a file for the stages so far, and stages that name the same file write to it together.
+    err := tmp + '/err.txt'
+    res = os.cmd({'sh', '-c', 'echo e1 >&2; echo x'}).pipe(os.cmd({'sh', '-c', 'cat; echo e2 >&2'})).stderr_file(err).run_status()!
+    t.eq('x\n', res.out)
+    t.eq('', res.err)
+    t.eq('e1\ne2\n', os.cmd({'sort'}).stdin_file(err).read()!)
+    res = os.cmd({'sh', '-c', 'echo e3 >&2'}).stderr_append(err).pipe(os.cmd({'sh', '-c', 'echo e4 >&2'})).run_status()!
+    t.eq('e4\n', res.err)
+    t.eq('e1\ne2\ne3\n', os.cmd({'sort'}).stdin_file(err).read()!)
+    -- A file that can not be opened starts nothing.
+    t.eq(error.NotFound, os.cmd({'cat'}).stdin_file(tmp + '/none.txt').read().unwrap_error())
+    t.eq(error.NotFound, os.cmd({'echo'}).stdout_file(tmp + '/no/dir.txt').run().unwrap_error())
+    t.eq(error.IsADirectory, os.cmd({'echo'}).stdout_file(tmp).run().unwrap_error())
+    t.eq(error.InvalidArgument, os.cmd({'echo'}).stdout_file('').run().unwrap_error())
+    t.eq(error.InvalidArgument, os.cmd({'echo'}).stderr_file('a\x00b').run().unwrap_error())
+    os.cmd({'rm', '-r', tmp}).run()!
+
 fn in_thread(word str) -> str:
     return os.cmd({'/bin/echo', word}).pipe(os.cmd({'tr', 'a-z', 'A-Z'})).read() !else 'failed'
 

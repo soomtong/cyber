@@ -4984,6 +4984,9 @@ os.cmd({'make', 'test'}).dir('build').env('CI', '1').run()!
 res := os.cmd({'grep', '-c', 'TODO'}).stdin(text).run_status()!
 if res.code != 0:
     eprint(res.err)
+
+-- Files for the streams, and a time limit in milliseconds.
+os.cmd({'make'}).stdout_file('build.log').stderr_append('errors.log').timeout_ms(60000).run()!
 ```
 There is no shell. An argument reaches the program as it is, with its spaces, quotes and `$`, so a file name or other text from outside can not turn into more arguments or another command. The list of arguments is built like any list: `os.cmd([]str{'grep', '-n', pattern} + files)`.
 
@@ -4998,6 +5001,16 @@ There is no shell. An argument reaches the program as it is, with its spaces, qu
 A program that can not be started is an [OS error](#os-errors) from all three: `error.NotFound` for a missing program or working directory, `error.PermissionDenied`, and `error.InvalidArgument` for an empty list of arguments. Captured output is limited to 10 MiB for stdout and for stderr: more is `error.TooBig` and the programs are stopped. A pipeline has at most 16 programs.
 
 `dir(path)` and `env(name, value)` apply to the programs that the command has when they are called, so `a.dir('x').pipe(b)` runs only `a` in `x`. In `a.pipe(b)` the input is that of `a`: text that `stdin` gave to `b` is not used. A program gets the environment of this process as it is when the command runs, with the variables of `env` on top. `stdin(text)` gives the first program its input. Without it, `read` and `run_status` give an empty input.
+
+| Method | Sends |
+|---|---|
+| `stdin_file(path)` | the file to the stdin of the first program, in place of the text of `stdin`. |
+| `stdout_file(path)`, `stdout_append(path)` | the stdout of the last program to the file, which is emptied or added to. |
+| `stderr_file(path)`, `stderr_append(path)` | the stderr of the programs that the command has so far to the file. |
+
+The files are opened when the command runs, before any program starts. A relative path is relative to the working directory of this process, not to that of `dir`. A file that can not be opened is an OS error like a program that can not be started. In `a.pipe(b)` the stdout is that of `b`. A stream that goes to a file is not in the result of `run_status`, and `read` of a command whose stdout goes to a file is `error.InvalidArgument`. Programs that send stderr to the same file write to it together.
+
+`timeout_ms(ms)` stops the programs (`SIGKILL`, `TerminateProcess`) when the command has run for `ms` milliseconds, and `run`, `read` and `run_status` return `error.TimedOut`. The programs that a program started itself are not stopped. In `a.pipe(b)` the limit is the shorter one. A limit that is not over 0 is `error.InvalidArgument`. When the host of an embedded VM asks it to stop (`cl_vm_interrupt`), a running command stops its programs too.
 
 The older `os.exec(args)` runs one program and returns its `ExecResult`. It panics when the program can not be started.
 

@@ -924,6 +924,11 @@ extern bool clSilent;
 
 CLVM* cl_thread_vm(CLThread* t);
 CLAllocator cl_thread_allocator(CLThread* t);
+// Whether the eval that runs on `t` is asked to stop: `cl_vm_interrupt` was called, or the eval is stopping.
+// A host function that blocks for long (a wait, a long computation) looks at it from time to time and returns
+// early. Its result is then thrown away when the VM stops at its next checkpoint, so the function only has to
+// return a value of its return type. It may be called from another thread while the host function runs.
+bool cl_thread_interrupted(CLThread* t);
 
 typedef struct CLStackFrame {
     // Name identifier (e.g. function name, or "main")

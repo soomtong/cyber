@@ -1781,7 +1781,7 @@ test "Hints of the compiler: unused names, scope exits, inlay hints, quick fixes
     try t.expectEqualStrings("is_nan", str(edit, &.{"newText"}));
 }
 
-test "An ambiguous overload call is a warning, and a pattern literal that does not compile is an error." {
+test "A pattern literal that does not compile is an error." {
     var s: Session = undefined;
     try s.init();
     defer s.deinit();
@@ -1791,13 +1791,6 @@ test "An ambiguous overload call is a warning, and a pattern literal that does n
         \\use regex
         \\use peg
         \\
-        \\fn tag(x ?str) -> str:
-        \\    return 'str'
-        \\
-        \\fn tag(x ?int) -> str:
-        \\    return 'option int'
-        \\
-        \\print(tag(none))
         \\ok := regex.compile('a+b')
         \\bad := regex.compile('xa(?=b)')
         \\escaped := regex.compile('\t(?=b)')
@@ -1810,19 +1803,15 @@ test "An ambiguous overload call is a warning, and a pattern literal that does n
     );
     const out = try s.flush();
     const diags = items(out[0], &.{ "params", "diagnostics" });
-    try t.expectEqual(@as(usize, 4), diags.len);
-    try t.expectEqualStrings("This call matches both `fn tag(?str) -> str` and `fn tag(?int) -> str`, and the one declared first is picked. Convert an argument so that only one matches.", str(diags[0], &.{"message"}));
-    try t.expectEqual(@as(i64, 2), int(diags[0], &.{"severity"}));
-    try t.expectEqualStrings("ambiguous-call", str(diags[0], &.{"code"}));
-    try expectRange(get(diags[0], &.{"range"}).?, 9, 6, 9, 15);
+    try t.expectEqual(@as(usize, 3), diags.len);
     // The pattern is checked like the run would: the error points at its byte in the literal.
-    try t.expectEqual(@as(i64, 1), int(diags[1], &.{"severity"}));
-    try t.expectEqualStrings("pattern-literal", str(diags[1], &.{"code"}));
-    try t.expect(std.mem.startsWith(u8, str(diags[1], &.{"message"}), "`regex.compile` will fail: Look-ahead"));
-    try expectRange(get(diags[1], &.{"range"}).?, 11, 24, 11, 25);
+    try t.expectEqual(@as(i64, 1), int(diags[0], &.{"severity"}));
+    try t.expectEqualStrings("pattern-literal", str(diags[0], &.{"code"}));
+    try t.expect(std.mem.startsWith(u8, str(diags[0], &.{"message"}), "`regex.compile` will fail: Look-ahead"));
+    try expectRange(get(diags[0], &.{"range"}).?, 4, 24, 4, 25);
     // With an escape, the offset into the value is not the offset into the text: the whole literal.
-    try expectRange(get(diags[2], &.{"range"}).?, 12, 25, 12, 34);
-    try t.expect(std.mem.startsWith(u8, str(diags[3], &.{"message"}), "`peg.compile` will fail: "));
+    try expectRange(get(diags[1], &.{"range"}).?, 5, 25, 5, 34);
+    try t.expect(std.mem.startsWith(u8, str(diags[2], &.{"message"}), "`peg.compile` will fail: "));
 }
 
 test "Inlay hints name the parameters at the arguments of a call." {

@@ -17,7 +17,6 @@ pub const Fix = struct {
 pub const code_unused_local = "unused-local";
 pub const code_unused_use = "unused-use";
 pub const code_scope_exit = "scope-exit";
-pub const code_ambiguous_call = "ambiguous-call";
 pub const code_pattern_literal = "pattern-literal";
 
 /// The fix for a diagnostic of the server with code `code` over `text[start..end]`. Null for another code.

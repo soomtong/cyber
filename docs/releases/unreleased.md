@@ -23,23 +23,26 @@ e := 2 * a      -- 리터럴은 매개변수 타입을 따른다.
   a type declared in this module, ...' 오류다(깨지는 변경이지만 core · std · 테스트에 해당하는 선언은 없었다).
 - 결정 `docs/decisions/project_operator_lookup.md`, 매뉴얼 Operator methods 절.
 
-## 모호한 오버로드 호출의 LSP 경고
+## 모호한 오버로드 호출은 컴파일 오류 (깨지는 변경)
 
-두 오버로드가 같이 맞고 먼저 선언한 쪽이 다른 쪽보다 더 구체적이지 않은 호출에 `cyber-lsp`가 Warning을 낸다(동작은 그대로,
-먼저 선언한 쪽을 부른다).
+두 오버로드가 같이 맞고 어느 쪽도 더 구체적이지 않으면 컴파일 오류다. 전에는 먼저 선언한 쪽을 조용히 불렀다. 선언 순서가
+호출의 뜻을 정하지 않는다(Julia 검토 3.4 C, F-21의 나머지 반).
 
 ~~~cy
 fn tag(x ?str) -> str: return 'str'
 fn tag(x ?int) -> str: return 'option int'
 
 print(tag(none))
--- warning: This call matches both `fn tag(?str) -> str` and `fn tag(?int) -> str`, and the one declared first is picked. ...
+-- CompileError: The call is ambiguous: both `fn tag(?str) -> str` and `fn tag(?int) -> str` match, and neither is more
+-- specific. Write `tag(?str(none))` or `tag(?int(none))`.
 ~~~
 
-- 수 타입끼리만 다른 오버로드(`float(x)`에 `i32`), 문자열 리터럴 자리에서 `str`과 정수만 다른 오버로드(`s.index('\n')`,
-  json `v['n']`)는 경고하지 않는다. 한 글자 리터럴은 문자열이 먼저다.
-- 인자가 이름 · 리터럴일 때만 본다. 임베딩은 `cl_vm_symbol_hints`의 `CL_HINT_AMBIGUOUS_CALL`로 받는다.
-- 결정 `docs/decisions/project_overload_exact_match.md` 끝 절. core · std · 테스트에서 걸리는 곳은 의도된 테스트 하나였다.
+- "더 구체적"은 `T`가 `?T` · `!T`보다 좁은 것이다. 정확히 맞는 후보가 있으면 그것들끼리, 없으면 암시적 변환으로 맞는 후보끼리 본다.
+- 모호하지 않은 것: 수 타입끼리만 다른 오버로드(`float(x)`에 `i32`), 문자열 리터럴 자리에서 `str`과 정수만 다른 오버로드
+  (`s.index('\n')`, json `v['n']`. 한 글자 리터럴은 문자열이 먼저다).
+- 인자가 이름 · 리터럴 · 멤버 접근인 호출만 본다(타입이 매개변수에 따라 달라지는 인자).
+- core · std · 테스트 · 예제에서 걸린 곳은 이 경우를 시험하던 테스트 하나였다. 컴파일 시간 차이는 재지 못할 만큼 작았다.
+- 결정 `docs/decisions/project_overload_exact_match.md` 끝 절.
 
 ## `cyber-lsp`: 컴파일되지 않을 정규식 · PEG 리터럴
 
@@ -52,6 +55,6 @@ bad := regex.compile('xa(?=b)')
 ~~~
 
 - 이스케이프가 없는 리터럴은 오류가 난 글자를, 있으면 리터럴 전체를 가리킨다. 보간이 있는 문자열은 보지 않는다.
-- 임베딩은 `cl_vm_symbol_hints`의 `CL_HINT_PATTERN_LITERAL`로 리터럴의 자리를 받는다. 컴파일 타임 검증(Julia 검토 3.4 F)은
+- 임베딩은 `cl_vm_symbol_hints`의 `CL_HINT_PATTERN_LITERAL`(5)로 리터럴의 자리를 받는다. 컴파일 타임 검증(Julia 검토 3.4 F)은
   평가기를 넓힐 때까지 미룬다. LSP 설계 문서 19절.
 

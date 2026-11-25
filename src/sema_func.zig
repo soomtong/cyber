@@ -834,8 +834,8 @@ pub fn matchFuncSym(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const A
     // if == nargs, there is not enough arguments.
     var best_match_err = FuncMatchError.init(undefined, 0, undefined);
 
-    if (!req_value and c.compiler.record_refs and cy.refs.inMainSource(c, node)) {
-        try probeAmbiguousCall(c, func_sym, pre_args, end_args, nargs, node);
+    if (!req_value) {
+        try checkAmbiguousCall(c, func_sym, pre_args, end_args, nargs, node);
     }
 
     // First pass: a candidate whose parameter types match the arguments without implicit conversions wins,
@@ -912,11 +912,11 @@ fn isProbeSafeArg(node: *ast.Node) bool {
     };
 }
 
-/// For an editor (`refs.hints`): when more than one runtime overload matches a call through implicit conversions,
-/// the call picks the one declared first. Every candidate is matched and undone here, and a call whose pick is not
-/// more specific than another match is recorded. Only calls whose arguments are names and literals are checked,
-/// since an argument such as a lambda or a block would be analyzed once per candidate.
-fn probeAmbiguousCall(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const Argument, end_args: []const *ast.Node,
+/// A call that two runtime overloads match is a compile error unless the one that the call would pick (the first
+/// declared) is more specific than the other: the declaration order must not decide what a call means. Every
+/// candidate is matched and undone here. Only calls whose arguments are names and literals are checked: their
+/// type can depend on the parameter (`none`, `'a'`, `1`), and they can be analyzed once per candidate.
+fn checkAmbiguousCall(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const Argument, end_args: []const *ast.Node,
     nargs: usize, node: *ast.Node) !void {
     for (pre_args) |arg| {
         if (arg.type == .standard and !isProbeSafeArg(arg.node)) return;
@@ -954,10 +954,47 @@ fn probeAmbiguousCall(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const
     if (num_matched < 2) return;
     for (matched[1..num_matched]) |other| {
         if (!moreSpecificSig(matched[0].sig, other.sig) and !interchangeableSigs(matched[0].sig, other.sig, pre_args, end_args)) {
-            cy.refs.recordAmbiguousCall(c, node, matched[0], other);
-            return;
+            return reportAmbiguousCall(c, matched[0], other, pre_args, end_args, node);
         }
     }
+}
+
+var ambiguous_buf: [256]u8 = undefined;
+
+fn reportAmbiguousCall(c: *cy.Chunk, picked: *cy.Func, other: *cy.Func, pre_args: []const Argument,
+    end_args: []const *ast.Node, node: *ast.Node) anyerror {
+    var names: [2][]const u8 = undefined;
+    var name_bufs: [2]std.Io.Writer.Allocating = .{ .init(c.alloc), .init(c.alloc) };
+    defer for (&name_bufs) |*b| b.deinit();
+    for ([_]*cy.Func{ picked, other }, 0..) |func, i| {
+        const w = &name_bufs[i].writer;
+        try w.writeAll("fn ");
+        try cy.sym.writeFuncName(c.sema, w, func, .{ .from = c });
+        try c.sema.writeFuncSigStr(w, func.sig, c);
+        names[i] = name_bufs[i].written();
+    }
+
+    // The first argument whose parameter differs: converting it to one of the two types picks that overload.
+    var hint: []const u8 = "";
+    const call_src = c.nodeString(node);
+    for (picked.sig.params(), other.sig.params(), 0..) |pp, op, i| {
+        if (pp.get_type().id() == op.get_type().id()) continue;
+        const arg_n = if (i < pre_args.len) pre_args[i].node else end_args[i - pre_args.len];
+        if (arg_n.src() != node.src() or arg_n.pos() < node.pos() or arg_n.end() > node.end()) break;
+        if (call_src.len > 80 or std.mem.indexOfScalar(u8, call_src, '\n') != null) break;
+        const before = call_src[0 .. arg_n.pos() - node.pos()];
+        const arg_src = c.nodeString(arg_n);
+        const after = call_src[arg_n.end() - node.pos() ..];
+        const t1 = try c.sema.allocTypeName(pp.get_type());
+        defer c.alloc.free(t1);
+        const t2 = try c.sema.allocTypeName(op.get_type());
+        defer c.alloc.free(t2);
+        hint = std.fmt.bufPrint(&ambiguous_buf, " Write `{s}{s}({s}){s}` or `{s}{s}({s}){s}`.", .{
+            before, t1, arg_src, after, before, t2, arg_src, after,
+        }) catch "";
+        break;
+    }
+    return c.reportErrorFmt("The call is ambiguous: both `{}` and `{}` match, and neither is more specific.{}", &.{ v(names[0]), v(names[1]), v(hint) }, node);
 }
 
 /// Whether each parameter of `a` is the same as that of `b` or narrower: `T` is narrower than `?T` and `!T`.

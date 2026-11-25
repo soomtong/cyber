@@ -2587,7 +2587,7 @@ print(show(n))       --> int
 print(show(2.5))     --> float
 print(show(4))       --> int
 ```
-An argument that takes its type from the parameter does not match an overload whose parameter it can not be made for: `none` for a parameter that is not a `?T`, an enum literal like `.red` for a type without that member, an initializer literal like `{1, 2}` for `int`, or an [inferred lambda](#inferred-lambdas) for a parameter that is not a function type or that has another number of parameters. The call goes on to the next overload. When more than one overload can take the argument, the first declared one is used:
+An argument that takes its type from the parameter does not match an overload whose parameter it can not be made for: `none` for a parameter that is not a `?T`, an enum literal like `.red` for a type without that member, an initializer literal like `{1, 2}` for `int`, or an [inferred lambda](#inferred-lambdas) for a parameter that is not a function type or that has another number of parameters. The call goes on to the next overload. When more than one overload can take the argument, the call is a compile error unless one of them is more specific (`T` is more specific than `?T` and `!T`):
 ```cy
 type Color enum:
     case red
@@ -2603,9 +2603,11 @@ fn tag(x ?int) -> str:
     return 'option int'
 
 print(tag(.red))     --> color
-print(tag(none))     --> str
+print(tag(?int(none)))   --> option int
+print(tag(none))
+--> error: The call is ambiguous: both `fn tag(?str) -> str` and `fn tag(?int) -> str` match, and neither is more specific. Write `tag(?str(none))` or `tag(?int(none))`.
 ```
-The language server warns at a call like `tag(none)`: two overloads match, and the one declared first is not more specific than the other (`T` is more specific than `?T` and `!T`). Convert the argument, as in `tag(?int(none))`, so that only one matches. Overloads that only differ in number types, or in `str` and an integer at a string literal argument (a one-character literal is a string first, as in `v['n']`), are not warned about.
+The declaration order does not decide what a call means. Two cases are not ambiguous: overloads that only differ in number types (`float(x)` with an `i32` takes `float`, and the value is the same as through `int`), and `str` against an integer at a string literal argument (a one-character literal is a string first, so `v['n']` takes the `str` key over the `int` index). Only arguments that are names, literals and member accesses are checked, since their type can depend on the parameter.
 When no overload takes the arguments, the call reports the error of the overload that got the furthest through the arguments, and of the first declared one among those. For a literal that is the error of that overload alone, such as 'Expected `?T` to infer `none` value, found `Int`.' A closure that is passed to overloads that only take a function pointer reports 'Expected argument `fn(int) -> int`, found `Func[fn(int) -> int]`, when calling `fn m(int, fn(int) -> int) -> int`. A closure is passed to a `Func[fn(...)]` or a `&OpaqueFunc[fn(...)]` parameter.'
 
 Overloads must differ in their parameter types. Declaring two functions with the same parameters and only a different return type is a compile error.

@@ -823,24 +823,6 @@ pub fn recordCall(c: *cy.Chunk, node: *ast.Node, func: *cy.Func) void {
     c.compiler.ref_calls.append(c.compiler.alloc, .{ .node = node, .func = func }) catch {};
 }
 
-/// A call of the main source that the overloads `picked` and `other` both match through implicit conversions.
-/// The call picks `picked`, the one declared first, but it is not more specific than `other`.
-pub const AmbiguousCall = struct {
-    node: *ast.Node,
-    picked: *cy.Func,
-    other: *cy.Func,
-};
-
-/// Whether `node` is in the main source of a compile that records symbol info.
-pub fn inMainSource(c: *cy.Chunk, node: *ast.Node) bool {
-    return rangeOf(c, node) != null;
-}
-
-pub fn recordAmbiguousCall(c: *cy.Chunk, node: *ast.Node, picked: *cy.Func, other: *cy.Func) void {
-    _ = rangeOf(c, node) orelse return;
-    c.compiler.ref_ambiguous.append(c.compiler.alloc, .{ .node = node, .picked = picked, .other = other }) catch {};
-}
-
 /// For the REPL command `.which`. Compiles `src` against the session of `vm` without running it and describes
 /// the function that the outermost call of `src` picks out of the overloads and the template instances.
 /// When `src` has no call, it describes what the name at its end is. A compile error is returned as its summary.
@@ -989,12 +971,9 @@ pub const HintKind = enum(u32) {
     /// An argument of a call to a function with two or more parameters: the name of its parameter. The range is the
     /// argument, `detail` is the name. Not listed when the argument is a name that ends in the parameter's name.
     param_name = 4,
-    /// A call that two overloads match through implicit conversions, where the one declared first is picked and it
-    /// is not more specific than the other. The range is the call, `detail` names the two functions.
-    ambiguous_call = 5,
     /// A string literal that is passed as the pattern of `regex.compile` or the grammar of `peg.compile`. The
     /// range is the literal with its quotes, `detail` is the module (`regex` or `peg`).
-    pattern_literal = 6,
+    pattern_literal = 5,
 };
 
 pub const Hint = extern struct {
@@ -1060,7 +1039,6 @@ pub fn hints(compiler: *cy.Compiler, complete: bool) ![]const Hint {
         try pending.append(alloc, .{ .pos = range[0], .end = range[1], .kind = .scope_exit, .start = @intFromPtr(src.ptr) - @intFromPtr(main.src.ptr), .len = kw_len });
     }
     try paramNames(compiler, main, text, &pending);
-    try ambiguousCalls(compiler, main, text, &pending);
     try patternLiterals(compiler, main, text, &pending);
     if (complete) {
         var index = try RefIndex.init(compiler);
@@ -1088,28 +1066,6 @@ pub fn hints(compiler: *cy.Compiler, complete: bool) ![]const Hint {
     }
     compiler.ref_hints_done = complete;
     return out.items;
-}
-
-/// The calls of the main source that two overloads match. A call in a template body or a loop is recorded more
-/// than once: the hints are sorted and the repeats dropped by `hints`.
-fn ambiguousCalls(compiler: *cy.Compiler, main: *cy.Chunk, text: *std.ArrayList(u8), pending: anytype) !void {
-    const alloc = compiler.alloc;
-    for (compiler.ref_ambiguous.items) |call| {
-        const range = rangeOf(main, call.node) orelse continue;
-        const start = text.items.len;
-        var buf = std.Io.Writer.Allocating.fromArrayList(alloc, text);
-        defer text.* = buf.toArrayList();
-        const w = &buf.writer;
-        try w.writeAll("`fn ");
-        try cy.sym.writeFuncName(&compiler.sema, w, call.picked, .{});
-        try compiler.sema.writeFuncSigStr(w, call.picked.sig, null);
-        try w.writeAll("` and `fn ");
-        try cy.sym.writeFuncName(&compiler.sema, w, call.other, .{});
-        try compiler.sema.writeFuncSigStr(w, call.other.sig, null);
-        try w.writeAll("`");
-        const len = buf.writer.end - start;
-        try pending.append(alloc, .{ .pos = range[0], .end = range[1], .kind = .ambiguous_call, .start = start, .len = len });
-    }
 }
 
 /// The string literals that the main source passes to `regex.compile` and `peg.compile`. An editor can compile

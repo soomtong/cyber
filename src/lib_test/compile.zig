@@ -1886,56 +1886,6 @@ test "cl_vm_symbol_hints lists inferred types, scope exits and unused names." {
     }
 }
 
-test "cl_vm_symbol_hints lists a call that two overloads match, where the first declared one is not more specific." {
-    const vm = C.vm_init();
-    defer C.vm_deinit(vm);
-    C.vm_set_symbol_info(vm, true);
-    var config = C.defaultCompileConfig();
-    config.skip_codegen = true;
-
-    const src =
-        \\fn tag(x ?str) -> str:
-        \\    return 'str'
-        \\
-        \\fn tag(x ?int) -> str:
-        \\    return 'option int'
-        \\
-        \\fn wrap(x int) -> str:
-        \\    return 'int'
-        \\
-        \\fn wrap(x ?int) -> str:
-        \\    return 'option int'
-        \\
-        \\fn show(x float) -> str:
-        \\    return 'float'
-        \\
-        \\fn show(x int) -> str:
-        \\    return 'int'
-        \\
-        \\n := 2
-        \\small := i32(3)
-        \\print(tag(none))
-        \\print(tag('a'))
-        \\print(wrap(n))
-        \\print(show(small))
-        \\print('abc'.index('b'))
-        \\
-    ;
-    try zt.eq(C.Success, C.vm_compile(vm, "main", src, config));
-    var hints: [*c]const C.Hint = null;
-    const len = C.vm_symbol_hints(vm, &hints);
-    var found: usize = 0;
-    for (hints[0..len]) |hint| {
-        if (hint.kind != C.HintAmbiguousCall) continue;
-        found += 1;
-        try zt.eqStr("tag(none)", src[hint.pos..hint.end_pos]);
-        try zt.eqStr("`fn tag(?str) -> str` and `fn tag(?int) -> str`", C.from_bytes(hint.detail));
-    }
-    // `tag('a')` matches one. `wrap(n)` picks the exact `int`. `show(small)` only differs in number types, and
-    // `index` in `str` and `byte`: they give the same answer.
-    try zt.eq(@as(usize, 1), found);
-}
-
 test "cl_vm_symbol_hints names the parameters of the function that a call picked." {
     const vm = C.vm_init();
     defer C.vm_deinit(vm);

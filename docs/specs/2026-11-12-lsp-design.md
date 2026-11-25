@@ -766,12 +766,11 @@ main 소스의 식이 core의 템플릿을 쓰면(`[]int{1, 2}`, `s.len()`) 컴�
   symbol of a module is used through an alias: `use read_file = os.read_file`.'(`modules/use_dotted_name_error.cy`).
 
 
-## 18. 모호한 오버로드 호출 경고 (2026-11-25)
+## 18. 모호한 오버로드 호출 경고 (2026-11-25, 지움)
 
-- 힌트 `CL_HINT_AMBIGUOUS_CALL`, 범위는 호출식, `detail`은 "`fn tag(?str) -> str` and `fn tag(?int) -> str`". 서버는 Warning
-  진단(code `ambiguous-call`)으로 보인다. quick fix는 없다(어느 쪽으로 바꿀지는 사용자가 정한다).
-- 판정과 센 결과는 `docs/decisions/project_overload_exact_match.md` "모호한 호출의 LSP 경고". 호출마다 후보를 다시 맞춰 보므로
-  기호 정보를 켠 컴파일의 main 소스에서만, 인자가 이름 · 리터럴일 때만 계산한다.
+같은 날 Warning 힌트(`CL_HINT_AMBIGUOUS_CALL`)로 넣었다가, 사용자 결정으로 컴파일 오류가 되면서 릴리스 전에 지웠다. 오류는
+보통의 컴파일 진단으로 보인다. 판정은 `docs/decisions/project_overload_exact_match.md` "모호한 호출은 컴파일 오류".
+19절의 `CL_HINT_PATTERN_LITERAL`은 그래서 5다.
 
 ## 19. 패턴 리터럴 미리 컴파일 (2026-11-25)
 

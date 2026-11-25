@@ -184,6 +184,7 @@ fn test_functions(run: *Runner) void {
     run.case("functions/call_overload_closure_error.cy");
     run.case("functions/call_overload_dot_lit_error.cy");
     run.case("functions/call_overload_literal.cy");
+    run.case("functions/call_overload_ambiguous_error.cy");
     run.case("functions/call_overload_none_error.cy");
     run.case("functions/lambda_param_count_error.cy");
     run.case("functions/lambda_param_count_less_error.cy");

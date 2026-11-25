@@ -37,22 +37,27 @@ cf4aa84a.
   단일 `float` 오버로드에 `int`를 넘기는 2단계 경로. `functions/call_overload_ret_only_error.cy`: 반환만 다른 오버로드가 컴파일 오류.
 - core.cy · std의 기존 오버로드는 전부 테스트를 통과해야 한다(1단계가 잡는 호출이 이전과 다른 후보를 고르면 여기서 드러난다).
 
-## 모호한 호출의 LSP 경고 (2026-11-25, Julia 검토 3.4 C)
+## 모호한 호출은 컴파일 오류 (2026-11-25, Julia 검토 3.4 C)
 
-결정(사용자, 2026-11-25): 오류로 올리기 전에 LSP Warning으로 넣고 걸리는 곳을 센다.
+결정(사용자, 2026-11-25): 오류로 올리기 전에 LSP Warning으로 넣고 걸리는 곳을 센다. 센 뒤(아래) 같은 날 사용자가 컴파일 오류로
+올리기로 했다("이거는 컴파일 에러로 내는 게 좋겠는데?"). 경고 단계에서 넣었던 힌트 `CL_HINT_AMBIGUOUS_CALL`과 LSP 진단은
+릴리스 전에 지웠다(컴파일 오류가 그대로 진단이 된다). 'The call is ambiguous: both `fn tag(?str) -> str` and `fn tag(?int) -> str`
+match, and neither is more specific. Write `tag(?str(none))` or `tag(?int(none))`.' 제안은 처음으로 다른 매개변수 자리의 인자를
+두 타입으로 변환한 꼴이다(호출이 한 줄 80자 이하일 때).
 
-- 힌트 `CL_HINT_AMBIGUOUS_CALL`(`refs.HintKind.ambiguous_call`), `cyber-lsp`의 Warning 진단(code `ambiguous-call`). 기호 정보를
-  켠 컴파일(`record_refs`)의 main 소스에서만 계산한다.
-- `sema_func.probeAmbiguousCall`: `matchFuncSym`의 1단계 앞에서 런타임 후보(제네릭 · `const_eval_only` 제외)를 하나씩 맞춰 보고
+- `sema_func.checkAmbiguousCall`: 런타임 호출(`req_value` 아님)마다 `matchFuncSym`의 1단계 앞에서 런타임 후보(제네릭 · `const_eval_only` 제외)를 하나씩 맞춰 보고
   매번 되돌린다(`tryRtOverload`의 `probe`, 오류가 나도 리포트까지 되돌림). 정확 일치가 하나라도 있으면 그것들만, 없으면 변환 일치를
-  모은다. 둘 이상이고 먼저 선언한 것(실제로 골라지는 것)이 다른 것보다 더 구체적이지 않으면 기록한다.
+  모은다. 둘 이상이고 먼저 선언한 것이 다른 것보다 더 구체적이지 않으면 오류다. 컴파일 시간은 Debug 빌드로 json · time · ints
+테스트를 컴파일해 판정을 켜고 끈 차이가 ±1% 안이었다.
 - "더 구체적": 매개변수마다 같거나 `T`가 `?T` · `!T`보다 좁다. 처음 안의 "`int`가 `float`보다"는 넣지 않았다.
 - 설계상 모호하지 않은 쌍은 뺀다(`interchangeableSigs`): 수 타입끼리만 다른 것(`float(x i32)`가 `float` 쪽으로 가도 값이
   같다), 문자열 리터럴 인자 자리에서 `str`과 정수만 다른 것(`?T` 안도 같다). 한 글자 리터럴은 문자열이 먼저이고 rune은 문자열이
   맞지 않을 때다(`s.index('\n')`의 `byte`, json `v['n']`의 `int` 인덱스).
-- 인자가 이름 · 리터럴 · 멤버 접근일 때만 본다. 람다 · 블록 · 호출은 후보마다 다시 분석되므로 건너뛴다.
+- 인자가 이름 · 리터럴 · 멤버 접근일 때만 본다. 타입이 매개변수에 따라 달라지는 인자가 이들이다. 람다 · 블록 · 호출은 후보마다
+  다시 분석되므로 건너뛴다. 남는 구멍: 호출 결과 `T`를 `?T` · `!T` 두 오버로드에 넘기는 것처럼 타입이 정해진 식의 변환 모호성.
 
 센 결과(2026-11-25, 계측 빌드로 `src/test` · `examples` · `src/tools`의 모든 `.cy`를 컴파일, core · std는 그 과정에서 함께
 컴파일됨): 1곳, `functions/call_overload_literal.cy`의 `first(none)`(의도된 테스트). 수 타입 · `str`/`byte` 쌍을 빼기 전에는
 12곳이었다(`float(x)` · `f32(x)`에 `i32` · `r64` 등 10곳, `s.index("\n")` 1곳). 작은따옴표 리터럴을 인자로 볼 때는 json
-`v['n']` 9곳이 더 걸렸다(`str` 키와 `int` 인덱스). 오류로 올릴지는 사용자가 정한다.
+`v['n']` 9곳이 더 걸렸다(`str` 키와 `int` 인덱스). 남은 `first(none)` 테스트는 변환한 꼴로 고치고 오류 테스트
+`functions/call_overload_ambiguous_error.cy`를 더했다.

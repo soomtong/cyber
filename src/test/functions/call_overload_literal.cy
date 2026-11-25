@@ -29,13 +29,26 @@ test.eq('color true', k(.blue))
 test.eq('shape', k(.square))
 test.eq('int', k(3))
 
--- More than one overload can take the literal: the first declared one is used.
+-- Two overloads can take `none`: converting it picks one (`first(none)` is ambiguous, see
+-- `call_overload_ambiguous_error.cy`). A literal that only one of them can take needs no conversion.
 fn first(x ?str) -> str:
     return 'str'
 fn first(x ?int) -> str:
     return 'int'
-test.eq('str', first(none))
+test.eq('str', first(?str(none)))
+test.eq('int', first(?int(none)))
 test.eq('int', first(1))
+-- A one-character literal is a string first.
+test.eq('str', first('a'))
+test.eq(1, 'abc'.index('b').?)
+
+-- Overloads that only differ in number types are not ambiguous: an `i32` converts to both.
+fn show(x float) -> str:
+    return 'float'
+fn show(x int) -> str:
+    return 'int'
+small := i32(3)
+test.eq('float', show(small))
 
 -- With other arguments.
 fn two(x int, y float) -> str:

@@ -751,14 +751,6 @@ pub const Server = struct {
                         .unnecessary = true,
                     };
                 },
-                c.HintAmbiguousCall => {
-                    diag = .{
-                        .range = undefined,
-                        .msg = try std.fmt.allocPrint(arena, "This call matches both {s}, and the one declared first is picked. Convert an argument so that only one matches.", .{detail}),
-                        .severity = 2,
-                        .code = assist.code_ambiguous_call,
-                    };
-                },
                 c.HintPatternLiteral => {
                     const lit = doc.text[start..end];
                     const err = (try self.checkPattern(detail, lit)) orelse continue;

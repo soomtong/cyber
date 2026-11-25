@@ -134,9 +134,6 @@ pub const Compiler = struct {
     ref_scope_exits: std.ArrayList([2]u32) = .empty,
     /// The calls of the main source and the functions they call (`refs.hints`).
     ref_calls: std.ArrayList(cy.refs.Call) = .empty,
-    /// The calls of the main source that more than one overload matches through implicit conversions, where the
-    /// one that the call picks is not the most specific (`refs.hints`).
-    ref_ambiguous: std.ArrayList(cy.refs.AmbiguousCall) = .empty,
     /// The hints that the last `refs.hints` returned, and the text they point into.
     ref_hints: std.ArrayList(cy.refs.Hint) = .empty,
     ref_hint_text: std.ArrayList(u8) = .empty,
@@ -368,7 +365,6 @@ pub const Compiler = struct {
             self.ref_locals.deinit(self.alloc);
             self.ref_scope_exits.deinit(self.alloc);
             self.ref_calls.deinit(self.alloc);
-            self.ref_ambiguous.deinit(self.alloc);
             self.recover_skip.deinit(self.alloc);
             self.failed_decls.deinit(self.alloc);
             self.recheck_funcs.deinit(self.alloc);
@@ -517,7 +513,6 @@ pub const Compiler = struct {
         self.ref_locals.clearRetainingCapacity();
         self.ref_scope_exits.clearRetainingCapacity();
         self.ref_calls.clearRetainingCapacity();
-        self.ref_ambiguous.clearRetainingCapacity();
         self.ref_hints.clearRetainingCapacity();
         self.ref_hint_text.clearRetainingCapacity();
         self.ref_hints_done = null;
@@ -1329,7 +1324,7 @@ fn ownerTypeFailed(c: *cy.Chunk, func: *cy.Func) bool {
 }
 
 /// The lists of the symbol info that a body adds to (`refs.zig`). Each pass of `BodyRecover` adds to them.
-pub const refListNames = [_][]const u8{ "refs", "ref_locals", "ref_scope_exits", "ref_calls", "ref_ambiguous" };
+pub const refListNames = [_][]const u8{ "refs", "ref_locals", "ref_scope_exits", "ref_calls" };
 
 /// The checks of one body with error recovery. A pass that fails at a statement of the body is followed by
 /// another without that statement, until a pass gets through the body or fails where no statement of the body

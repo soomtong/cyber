@@ -2092,7 +2092,10 @@ pub const Parser = struct {
 
     /// The `else |err|:` block after the body of `for`, at the indent of `for`. It handles the error that the
     /// `next` of the iterator returns (`!?T`). The capture is optional, as for `try:`.
-    fn parseForElse(self: *Parser) !?*ast.CatchStmt {
+    fn parseForElse(self: *Parser, ct: bool) !?*ast.CatchStmt {
+        // `#for` has none: its iterator runs at compile time. An `else` after it is not its own: in a `switch`,
+        // `#for` makes cases and the `else` case follows it at the same indent.
+        if (ct) return null;
         const save = self.next_pos;
         const indent = try self.consumeFirstIndent();
         if (indent != self.cur_indent or self.peek().tag() != .else_k) {
@@ -2896,7 +2899,7 @@ pub const Parser = struct {
         }
 
         const stmts = try self.parseSingleOrIndentedBodyStmts();
-        const else_stmt = try self.parseForElse();
+        const else_stmt = try self.parseForElse(ct);
         var res = try self.ast.newNodeErase(.for_iter_stmt, .{
             .iterable = expr,
             .each = each,

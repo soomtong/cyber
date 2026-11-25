@@ -27,6 +27,15 @@
 - `freeOpSym`: 타입 심볼의 root chunk 모듈에서 연산자 이름을 찾는다. core(`builtins_chunk`)와 수 타입은 보지 않는다.
 - `src/module.zig` `checkFreeOperatorFunc`(`resolveUserFunc`에서): 위 3 · 4의 선언 검사.
 
+## 리뷰 수정 (2026-11-25, `/code-review high` 0.4.20..HEAD)
+
+- 오른쪽 수 리터럴: 메서드가 없는 왼쪽 타입의 `c * 2`가 리터럴을 먼저 `int`로 정해 `fn `*`(c Cents, f float)`에 맞지 않았다.
+  오른쪽이 수 리터럴(앞의 `-` 포함, `isNumberLitNode`)이면 분석하지 않은 인자(`Argument.init`)로 넘겨 매개변수 타입을 따른다.
+  리터럴에는 모듈이 없으니 왼쪽 타입의 모듈만 본다.
+- 오른쪽 타입의 모듈: 왼쪽이 수가 아닌 타입이고 메서드가 없을 때 왼쪽 모듈만 보던 것(`hasFreeOp(left, null)`)을, 오른쪽을 분석해
+  두 모듈을 다 보게 했다(결정 1). `'abc' * v`가 `v` 타입 모듈의 `fn `*`(s str, v Vec2)`를 찾는다. 테스트
+  `modules/free_op_import.cy`.
+
 ## 하지 않은 것
 
 - 비교 연산자의 양쪽 조회. `2 < v` 같은 식을 쓸 일이 드물고, 비교는 `==` · 정렬 규칙과 묶여 있다.

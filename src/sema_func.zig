@@ -834,7 +834,7 @@ pub fn matchFuncSym(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const A
     // if == nargs, there is not enough arguments.
     var best_match_err = FuncMatchError.init(undefined, 0, undefined);
 
-    if (!req_value) {
+    if (!req_value and func_sym.numFuncs > 1) {
         try checkAmbiguousCall(c, func_sym, pre_args, end_args, nargs, node);
     }
 
@@ -924,6 +924,12 @@ fn checkAmbiguousCall(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const
     for (end_args) |arg| {
         if (!isProbeSafeArg(arg)) return;
     }
+    // A template overload can be the one that the call picks, in declaration order like the others. Matching it
+    // would make an instance, so a call with one is not checked: the probe could not tell what the call picks.
+    var next_generic: ?*cy.Func = func_sym.first;
+    while (next_generic) |func| : (next_generic = func.next) {
+        if (!func.info.const_eval_only and func.type == .generic) return;
+    }
     const loc = try c.ir.allocArray(*ir.Expr, nargs);
     var matched: [8]*cy.Func = undefined;
     var num_matched: usize = 0;
@@ -932,7 +938,7 @@ fn checkAmbiguousCall(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const
     for ([_]bool{ true, false }) |exact| {
         var next: ?*cy.Func = func_sym.first;
         while (next) |func| : (next = func.next) {
-            if (func.info.const_eval_only or func.type == .generic) continue;
+            if (func.info.const_eval_only) continue;
             if (num_matched == matched.len) break;
             const report_start = c.compiler.reports.items.len;
             var match_err: FuncMatchError = undefined;
@@ -959,8 +965,6 @@ fn checkAmbiguousCall(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const
     }
 }
 
-var ambiguous_buf: [256]u8 = undefined;
-
 fn reportAmbiguousCall(c: *cy.Chunk, picked: *cy.Func, other: *cy.Func, pre_args: []const Argument,
     end_args: []const *ast.Node, node: *ast.Node) anyerror {
     var names: [2][]const u8 = undefined;
@@ -976,6 +980,7 @@ fn reportAmbiguousCall(c: *cy.Chunk, picked: *cy.Func, other: *cy.Func, pre_args
 
     // The first argument whose parameter differs: converting it to one of the two types picks that overload.
     var hint: []const u8 = "";
+    defer if (hint.len > 0) c.alloc.free(hint);
     const call_src = c.nodeString(node);
     for (picked.sig.params(), other.sig.params(), 0..) |pp, op, i| {
         if (pp.get_type().id() == op.get_type().id()) continue;
@@ -989,9 +994,9 @@ fn reportAmbiguousCall(c: *cy.Chunk, picked: *cy.Func, other: *cy.Func, pre_args
         defer c.alloc.free(t1);
         const t2 = try c.sema.allocTypeName(op.get_type());
         defer c.alloc.free(t2);
-        hint = std.fmt.bufPrint(&ambiguous_buf, " Write `{s}{s}({s}){s}` or `{s}{s}({s}){s}`.", .{
+        hint = try std.fmt.allocPrint(c.alloc, " Write `{s}{s}({s}){s}` or `{s}{s}({s}){s}`.", .{
             before, t1, arg_src, after, before, t2, arg_src, after,
-        }) catch "";
+        });
         break;
     }
     return c.reportErrorFmt("The call is ambiguous: both `{}` and `{}` match, and neither is more specific.{}", &.{ v(names[0]), v(names[1]), v(hint) }, node);

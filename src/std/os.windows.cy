@@ -565,7 +565,6 @@ fn openDirWindows(path str, iterable bool) -> !os.Dir:
     -- Note: fd is void on Windows, use undef
     return os.Dir{
         fd = undef,
-        closed = false,
         path = path,
     }
 

@@ -1396,7 +1396,7 @@
       ],
       "funcs": [],
       "aliases": {"dirname": "dir"}},
-    {"module": "os", "name": "Process", "syntax": "Process", "kind": "struct", "doc": "A command that runs: what `Cmd.start` returns. Its stdout is read with `read_line` or `read_all`, and `wait` or `wait_code` waits for its end. When the value goes away before the command ended, its programs are stopped. Also when the eval ends with a panic, and when the host asks the VM to stop (`cl_vm_interrupt`).",
+    {"module": "os", "name": "Process", "syntax": "Process", "kind": "struct", "doc": "A command that runs: what `Cmd.start` returns. Its stdout is read with `read_line` or `read_all`, and `wait` or `wait_code` waits for its end. When the value goes away before the command ended, its programs are stopped. Also when the eval ends with a panic, and when the host asks the VM to stop (`cl_vm_interrupt`). A thread that does not stop then, such as a `@deinit` that runs to its end, gets `error.Interrupted` from the methods.",
       "methods": [
         {"name": "read_line", "recv": "&Process", "sig": "read_line() -> !?str", "doc": "Returns the next line that the last stage wrote to stdout, without its line break (`\\n` or `\\r\\n`), or `none` when the output ended. Waits until a whole line or the end comes. Returns `error.TimedOut` when the time limit passed, and `error.TooBig` for a line over 10 MiB."},
         {"name": "lines", "recv": "&Process", "sig": "lines() -> ProcessLines", "doc": "Returns the lines that the last stage writes to stdout, for `for`. An error of `read_line` ends the loop in the `else |err|:` block: ```cy for p.lines() |line|: print(line) else |err|: eprint('stopped: %{err}') ```"},
@@ -1429,6 +1429,7 @@
       "aliases": {"includes": "contains", "has": "contains"}},
     {"module": "os", "name": "File", "syntax": "File", "kind": "struct",
       "methods": [
+        {"name": "is_closed", "recv": "&File", "sig": "is_closed() -> bool", "doc": "Whether `close` was called."},
         {"name": "close", "recv": "&File", "sig": "close() -> void", "doc": "Closes the file handle. File ops invoked afterwards will return `error.Closed`."},
         {"name": "info", "recv": "&File", "sig": "info() -> !FileInfo", "doc": "Returns info about the file."},
         {"name": "read", "recv": "&File", "sig": "read(buf [&]byte) -> !int", "doc": "Returns number of bytes read. If 0 is returned, then the file has reached the end."},
@@ -1449,6 +1450,7 @@
       "aliases": {}},
     {"module": "os", "name": "Dir", "syntax": "Dir", "kind": "struct",
       "methods": [
+        {"name": "is_closed", "recv": "&Dir", "sig": "is_closed() -> bool", "doc": "Whether `close` was called."},
         {"name": "close", "recv": "&Dir", "sig": "close()"},
         {"name": "info", "recv": "&Dir", "sig": "info() -> !FileInfo", "doc": "Returns info about the directory."},
         {"name": "iterator", "recv": "&Dir", "sig": "iterator() -> DirIterator", "doc": "Returns a new iterator over the directory entries. If this directory was not opened with the iterable flag, `error.NotAllowed` is returned instead."},

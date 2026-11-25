@@ -61,3 +61,10 @@ match, and neither is more specific. Write `tag(?str(none))` or `tag(?int(none))
 12곳이었다(`float(x)` · `f32(x)`에 `i32` · `r64` 등 10곳, `s.index("\n")` 1곳). 작은따옴표 리터럴을 인자로 볼 때는 json
 `v['n']` 9곳이 더 걸렸다(`str` 키와 `int` 인덱스). 남은 `first(none)` 테스트는 변환한 꼴로 고치고 오류 테스트
 `functions/call_overload_ambiguous_error.cy`를 더했다.
+
+리뷰 수정(2026-11-25, `/code-review high` 0.4.20..HEAD):
+- 오버로드가 하나인 호출은 검사하지 않는다(`func_sym.numFuncs > 1`). 전에는 인자를 한 번 더 분석했다.
+- 런타임 템플릿 후보(`fn f(x %T)`)가 있는 함수는 검사하지 않는다. `matchFuncSym`은 템플릿도 선언 순서대로 고르는데 검사는 그것을
+  빼고 맞춰 봐서, 템플릿이 정확히 맞는 `f(n)`을 `?int` · `!int` 두 후보 사이의 모호함으로 잘못 보고했다. 템플릿을 맞춰 보면
+  인스턴스가 생기니 검사 쪽에서 빠진다. 테스트 `call_overload_literal.cy`의 `pick(n)`.
+- 제안 문구를 전역 버퍼가 아니라 `c.alloc`에 만든다(여러 VM이 동시에 컴파일하면 섞일 수 있었다).

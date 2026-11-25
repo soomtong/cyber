@@ -248,6 +248,11 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 | F-208 | 조건 없는 `while:`에 본문이 `pass`뿐이면 `cl_vm_interrupt`와 fuel이 반복을 멈추지 못한다. 에이전트가 쓴 스크립트에서 호스트가 영영 기다린다 | 빈 본문의 반복이 자기 자신으로 뛰는 `jmp`(오프셋 0)인데 `vm.c` `JUMP`는 오프셋 < 0에서만 검사점을 지남 | `os.cmd` 중단을 만들며 `os.cy`의 대기 반복에서 발견(2026-11-25) | 높음. 호스트 멈춤 | 2026-11-25 수정. 오프셋 0도 검사점. lib 테스트 `cl_vm_set_fuel stops runaway loops and recursion.` |
 | F-209 | Linux에서 `os.resolve_path`가 연 fd를 닫지 않는다. 부를 때마다 fd 하나가 샌다 | Linux 갈래가 `lc.open`의 fd를 `File`로 감싸지 않음(macOS 갈래는 감쌌다) | F-210을 고치며 코드 읽기(2026-11-25) | 중간. 자원 누수 | 2026-11-25 수정. `File{fd=fd}`로 감쌈 |
 | F-210 | panic · 중단으로 끝난 eval의 `os.File` · `os.Dir`가 핸들을 닫지 않는다. `persist_main` 세션 · 임베딩 호스트에서 eval마다 fd가 쌓인다 | panic 스윕(`freeHeapPages`)이 메모리만 놓고 `@deinit`을 부르지 않음 | `os.Process` 정리를 만들며(2026-11-25) | 중간. 자원 누수 | 2026-11-25 수정. `_fd_guard` · `cl_vm_add_cleanup`, cli 테스트 `A file that a panic sweeps is closed.` |
+| F-211 | 모듈 수준 연산자 함수에서 오른쪽 수 리터럴이 매개변수 타입을 따르지 않는다. `fn `*`(c Cents, f float)`에 `c * 2`가 오류, `2 * c`는 된다 | 메서드 없는 왼쪽 갈래가 오른쪽을 대상 타입 없이 먼저 분석해 `int`로 정함 | `/code-review high` 0.4.20..HEAD(2026-11-25) | 중간. 비대칭 | 2026-11-25 수정. `isNumberLitNode`면 `Argument.init`, 테스트 `functions/free_op.cy` |
+| F-212 | 왼쪽이 다른 모듈 타입이고 메서드가 없으면 오른쪽 타입 모듈의 연산자 함수를 찾지 않는다. 선언은 통과해 부를 수 없는 함수가 된다 | `hasFreeOp(left, null)`이 왼쪽 모듈만 봄 | `/code-review high` 0.4.20..HEAD(2026-11-25) | 중간. 결정 1과 다름 | 2026-11-25 수정. 오른쪽을 분석해 두 모듈을 봄, 테스트 `modules/free_op_import.cy` |
+| F-213 | 런타임 템플릿 오버로드가 고르는 호출을 모호하다고 거짓 컴파일 오류 | `checkAmbiguousCall`이 템플릿 후보를 빼고 맞춰 봄 | `/code-review high` 0.4.20..HEAD(2026-11-25) | 중간. 맞는 코드가 컴파일 안 됨 | 2026-11-25 수정. 템플릿 후보가 있으면 검사하지 않음, 테스트 `call_overload_literal.cy` `pick(n)` |
+| F-214 | VM 중단 요청에 멈추지 않는 스레드(drop의 `@deinit`)에서 `os.cmd`가 명령을 되풀이해 다시 실행할 수 있다 | 감시가 main 스레드 플래그를 보고 `interrupted`를 돌려주는데 `os.cy`의 반복은 호출 스레드의 검사점에 기댐 | `/code-review high` 0.4.20..HEAD(2026-11-25) | 낮음. 드문 경로 | 2026-11-25 수정. 실행 감시는 호출 스레드 플래그, 그 스레드가 멈추지 않으면 `error.Interrupted`(`cmdFailFor`). 경로를 만드는 테스트는 없음 |
+| F-215 | `os.File` · `os.Dir`의 공개 `closed`를 밖에서 `true`로 두면 정리 등록이 남아 panic · VM 끝에 다른 파일이 된 핸들 번호를 닫는다 | `close`만 `_fd_unguard`를 부름 | `/code-review high` 0.4.20..HEAD(2026-11-25) | 낮음 | 2026-11-25 수정(깨지는 변경). `closed` 비공개, `is_closed()` |
 
 ## 우선순위 한 장 요약
 

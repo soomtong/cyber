@@ -85,4 +85,15 @@ fn zero(f fn() -> int) -> str:
     return 'zero %{f()}'
 test.eq('zero 7', zero(|_| 7))
 
+-- A template overload declared first is what the call picks: the two runtime overloads that a conversion would
+-- match do not make it ambiguous.
+fn pick(x %T) -> str:
+    return 'template'
+fn pick(x ?int) -> str:
+    return 'option'
+fn pick(x !int) -> str:
+    return 'result'
+n := 5
+test.eq('template', pick(n))
+
 --cytest: pass

@@ -43,6 +43,14 @@ c := Cents{n=10}
 t.eq((c / 2).n, 5)
 t.eq((c - Cents{n=1}).n, 9)
 
+-- A number literal on the right takes the type of its parameter too.
+fn `*`(c Cents, f float) -> Cents:
+    return {n=int(float(c.n) * f)}
+
+t.eq((c * 2).n, 20)
+t.eq((c * -2).n, -20)
+t.eq((c * 1.5).n, 15)
+
 -- An operator function with an infer parameter.
 type Box[T Any]:
     x T

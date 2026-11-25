@@ -388,7 +388,8 @@ fn (&Cmd) start() -> !Process:
 --| A command that runs: what `Cmd.start` returns. Its stdout is read with `read_line` or `read_all`, and `wait` or
 --| `wait_code` waits for its end.
 --| When the value goes away before the command ended, its programs are stopped. Also when the eval ends with a
---| panic, and when the host asks the VM to stop (`cl_vm_interrupt`).
+--| panic, and when the host asks the VM to stop (`cl_vm_interrupt`). A thread that does not stop then, such as a
+--| `@deinit` that runs to its end, gets `error.Interrupted` from the methods.
 type Process:
     with NoCopy
     -id int
@@ -502,6 +503,8 @@ fn (&Process) kill():
         case 7: return error.TooManyOpenFiles
         case 8: return error.OutOfMemory
         case 10: return error.TimedOut
+        -- 11 never comes here: the loops of `launch` and `proc_op` stop at their checkpoint.
+        case 12: return error.Interrupted
         else: return error.Unknown
 
 #[bind] -fn _cmd_run(args [&]str, counts [&]int, dirs [&]str, envs [&]str, errs [&]str, texts [&]str, opts [&]int,
@@ -999,13 +1002,19 @@ type File:
     with io.Writer
     with NoCopy
     fd     FileHandle
-    closed bool = false
+    -- Private: `close` also forgets the cleanup of `guard`. Setting it from outside would leave the cleanup to
+    -- close a handle number that may belong to another file by then.
+    -closed bool = false
     -- The id of the cleanup that closes `fd` when the value is swept without `@deinit` (a panic, an interrupt or
     -- the end of the VM). 0 for none: the standard streams and a handle that the caller gave.
     -guard int = 0
 
 fn (&File) @deinit():
     self.close()
+
+--| Whether `close` was called.
+fn (&File) is_closed() -> bool:
+    return self.closed
 
 --| Closes the file handle. File ops invoked afterwards will return `error.Closed`.
 fn (&File) close() -> void:
@@ -1190,13 +1199,17 @@ fn (&File) write_all(as_val AsSpan[byte]) -> !void:
 type Dir:
     with NoCopy
     fd     FileHandle
-    closed bool = false
     -- As for `File`.
+    -closed bool = false
     -guard int = 0
     path str = '' -- TODO: Required by AI DirIterator implementation. Replace with NtQueryDirectoryFile.
 
 fn (&Dir) @deinit():
     self.close()
+
+--| Whether `close` was called.
+fn (&Dir) is_closed() -> bool:
+    return self.closed
 
 fn (&Dir) close():
     if self.closed:

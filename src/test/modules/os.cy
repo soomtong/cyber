@@ -93,7 +93,7 @@ t.eq('', str(file.read_all()!))
 -- File.close()
 file = os.open_file('src/test/assets/file.txt', .read)!
 file.close()
-t.eq(true, file.closed)
+t.eq(true, file.is_closed())
 
 -- File.seek()
 file = os.open_file('src/test/assets/file.txt', .read)!

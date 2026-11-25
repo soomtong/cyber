@@ -1755,6 +1755,7 @@ fn `*`(s float, v Vec2) -> Vec2:
 d := 2.0 * a
 e := 2 * a      -- The literal takes the type of the parameter.
 ```
+A number literal on either side takes the type of the parameter (`c * 2` with `fn `*`(c Cents, f float)`). A left operand of a type from another module, such as `str`, finds a function in the module of the right type.
 This works for the arithmetic and bitwise operators (`+ - * / % ** && || ~ << >>`). A module-level operator function takes two parameters, and one of them must be a type declared in the same module. A module can not add an operator to two types that it does not own, since `a op b` would never find it. Comparison operators (`< <= > >=`) are only methods of the left operand type.
 
 Special operators have their own name. This example overloads the `index` operator and the `set index` operator:
@@ -3067,7 +3068,7 @@ a := os.open_file('foo.txt')!
 -- `a.@deinit()` is called.
 -- `a.fd` file handle is closed.
 ```
-In this case, `a` deinitializes by closing the file handle that it owns.
+In this case, `a` deinitializes by closing the file handle that it owns. `a.close()` closes it earlier, and `a.is_closed()` tells whether it was closed.
 
 Owners can also go out of scope when they have been reassigned:
 ```cy
@@ -5041,7 +5042,7 @@ code := p.wait_code()!
 | `wait_code() -> !int` | waits for the end and returns the exit code, like `code` of `run_status`. |
 | `kill()` | stops the programs that still run. `wait` then returns `error.ExitStatus`. |
 
-stderr is that of this process, and without `stdin` or `stdin_file` the first program reads an empty input. The time limit counts from `start`: once it passes, `read_line` and `wait` return `error.TimedOut`. A command whose stdout goes to a file can not be started this way (`error.InvalidArgument`). A `Process` is not copied. When it goes away before the command ended, its programs are stopped, also when the eval ends with a panic or an interrupt. `lines()` gives the lines for a `for` loop, whose `else |err|:` block handles an error such as `error.TimedOut`.
+stderr is that of this process, and without `stdin` or `stdin_file` the first program reads an empty input. The time limit counts from `start`: once it passes, `read_line` and `wait` return `error.TimedOut`. A command whose stdout goes to a file can not be started this way (`error.InvalidArgument`). A `Process` is not copied. When it goes away before the command ended, its programs are stopped, also when the eval ends with a panic or an interrupt. A thread that keeps running after the host asked the VM to stop, such as a `@deinit` that runs to its end, gets `error.Interrupted` from a command whose programs were stopped. `lines()` gives the lines for a `for` loop, whose `else |err|:` block handles an error such as `error.TimedOut`.
 
 The older `os.exec(args)` runs one program and returns its `ExecResult`, like `os.cmd(args).run_status()`. It panics when the program can not be started.
 

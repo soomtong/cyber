@@ -212,7 +212,17 @@ const CmdFail = enum(i64) {
     timed_out = 10,
     /// The host asked the VM to stop and the stages were stopped. The caller loops so that its checkpoint stops the VM.
     interrupted = 11,
+    /// The stages were stopped because the VM was asked to stop, but the calling thread does not stop at its
+    /// checkpoint (a drop that runs to its end). An error, so that the caller does not loop.
+    stopped = 12,
 };
+
+/// `.interrupted` only when the checkpoint of `t` stops it: the script loops until then (`Cmd.launch`, `proc_op`).
+fn cmdFailFor(t: *C.Thread, err: anyerror) CmdFail {
+    const fail = cmdFail(err);
+    if (fail == .interrupted and !C.thread_interrupted(t)) return .stopped;
+    return fail;
+}
 
 /// Mirrored by `Cmd.run`, `Cmd.read` and `Cmd.run_status` in `os.cy`.
 const CmdMode = enum(i64) {
@@ -377,12 +387,12 @@ pub fn cmdRun(t: *C.Thread) anyerror!C.Ret {
                 out.code = @bitCast(id);
             } else |err| {
                 if (err == error.OutOfMemory) return err;
-                fail = cmdFail(err);
+                fail = cmdFailFor(t, err);
             }
         } else if (fail == .none) {
             cmdRunPipeline(alloc, arena, stages, options, mode, t, &out) catch |err| {
                 if (err == error.OutOfMemory) return err;
-                fail = cmdFail(err);
+                fail = cmdFailFor(t, err);
             };
         }
     }
@@ -654,9 +664,10 @@ const CmdProc = struct {
             .alloc = alloc,
             .n = n,
             .watch = .{
-                // The flag of the main thread is that of every thread of the VM, and the main thread lives as long as
-                // the VM, which a `Process` may outlive the thread that started it on.
-                .thread = C.vm_main_thread(C.thread_vm(t)),
+                // A run is watched with the flag that the checkpoint of its thread reads, so that the loop of
+                // `Cmd.launch` stops. A `Process` may outlive the thread that started it: the flag of the main thread
+                // is that of every thread that runs script code, and the main thread lives as long as the VM.
+                .thread = if (mode == .stream) C.vm_main_thread(C.thread_vm(t)) else t,
                 .deadline = if (opts.timeout_ms > 0)
                     .fromNow(io, .{ .raw = .fromMilliseconds(opts.timeout_ms), .clock = .awake })
                 else
@@ -1052,7 +1063,7 @@ pub fn procOp(t: *C.Thread) anyerror!C.Ret {
 
 fn procFail(t: *C.Thread, ret: *CmdRaw, err: anyerror) anyerror!C.Ret {
     if (err == error.OutOfMemory) return err;
-    ret.* = .{ .out = C.str_init(t, ""), .err = C.str_init(t, ""), .code = 0, .fail = @intFromEnum(cmdFail(err)) };
+    ret.* = .{ .out = C.str_init(t, ""), .err = C.str_init(t, ""), .code = 0, .fail = @intFromEnum(cmdFailFor(t, err)) };
     return C.RetOk;
 }
 

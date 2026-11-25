@@ -69,7 +69,7 @@
   타임 호출을 고치고 0.4.20을 릴리스했다(2026-11-25 게시). 노트 `docs/releases/0.4.20.md`.
 - 2026-11-25(사용자: "continue from HANDOFF", Julia 남은 결정 질문에 답함 — B의 2 자유 함수 꼴, C LSP Warning 먼저 · 세고 결정,
   D 둘 다 하지 않음, F 미루고 LSP 진단만): 셋을 넣었다. master에 바로 커밋(`f2b52b72` 결정 기록, `3ad0cd31` B의 2,
-  `1e62e70d` C, `9987f869` F 대안). push 안 함.
+  `1e62e70d` C, `9987f869` F 대안, `2b4dfd80` 문자열 리터럴의 `str`/정수 쌍 제외). 15단계 검증 rc=0(`2b4dfd80`). push 안 함.
 
 ## 현재 브랜치
 
@@ -396,7 +396,7 @@
   - B의 2: 모듈 수준 연산자 함수 `` fn `*`(s float, v Vec2) ``를 두 피연산자 타입의 모듈에서 찾는다. 산술 · 비트만, 비교는
     메서드만. 선언은 같은 모듈의 타입을 받아야 한다. 결정 `project_operator_lookup.md`, 매뉴얼 Operator methods. 15단계 rc=0.
   - C: `CL_HINT_AMBIGUOUS_CALL` · `cyber-lsp` Warning(`ambiguous-call`). 센 결과 core · std · 테스트에서 의도된 테스트 하나.
-    수 타입끼리 · `str`/`byte`만 다른 쌍은 뺐다(같은 답). 오류로 올릴지는 사용자가 정한다(`project_overload_exact_match.md` 끝 절).
+    수 타입끼리, 문자열 리터럴 자리의 `str`/정수만 다른 쌍은 뺐다(json `v['n']` 9곳이 여기 걸렸었다). 오류로 올릴지는 사용자가 정한다(`project_overload_exact_match.md` 끝 절).
   - D: 하지 않는다(컬렉션 식도 `map` · `filter`도).
   - F: 미룸. 대안으로 `CL_HINT_PATTERN_LITERAL` · `cyber-lsp`가 `regex.compile` · `peg.compile`의 리터럴을 별도 VM에서 컴파일해
     Error 진단. LSP 설계 문서 19절.

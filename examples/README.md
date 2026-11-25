@@ -8,3 +8,5 @@ Notable examples will be listed here:
 - [snake.cy](https://github.com/fubark/ray-cyber/blob/master/examples/snake.cys) - The classic snake game ported from RayLib's game demo site.
 - [calculator.cy](calculator.cy) - A simple calculator with trait based operators and `map`, `filter`, `fold` helpers.
 - [fmt.cy](fmt.cy) - A source formatter for Cyber written in Cyber. A token-based sibling of the built-in `cyber fmt`.
+- [commands.cy](commands.cy) - Runs other programs with `os.cmd`: pipes, input text, exit codes, files for the streams and a time limit.
+- [stream_lines.cy](stream_lines.cy) - Reads the output of a running program a line at a time with `Cmd.start`, and stops it early.

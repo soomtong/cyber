@@ -301,7 +301,7 @@ fn (&Cmd) timeout_ms(ms int) -> Cmd:
 --| program can not be started or a file can not be opened.
 --| When the host asks the VM to stop (`cl_vm_interrupt`), the stages are stopped and so is the VM.
 fn (&Cmd) run() -> !void:
-    raw := self.start(0)
+    raw := self.launch(0)
     if raw.fail != 0:
         return cmd_error(raw.fail)
     if raw.code != 0:
@@ -314,7 +314,7 @@ fn (&Cmd) run() -> !void:
 fn (&Cmd) read() -> !str:
     if self.out_io != 0:
         return error.InvalidArgument
-    raw := self.start(1)
+    raw := self.launch(1)
     if raw.fail != 0:
         return cmd_error(raw.fail)
     if raw.code != 0:
@@ -330,14 +330,14 @@ fn (&Cmd) read() -> !str:
 --| the like), when the time limit passed (`error.TimedOut`), or when stdout or stderr is over 10 MiB
 --| (`error.TooBig`).
 fn (&Cmd) run_status() -> !ExecResult:
-    raw := self.start(2)
+    raw := self.launch(2)
     if raw.fail != 0:
         return cmd_error(raw.fail)
     return {out=raw.out, err=raw.err, code=raw.code}
 
 -- Hands the stages to the host as flat spans. `counts` has three numbers per stage: arguments, environment pairs
 -- and the `CmdIo` of stderr.
--fn (&Cmd) start(mode int) -> CmdRaw:
+-fn (&Cmd) launch(mode int) -> CmdRaw:
     var args []str = {}
     var counts []int = {}
     var dirs []str = {}
@@ -360,6 +360,89 @@ fn (&Cmd) run_status() -> !ExecResult:
             mode)
         if raw.fail != 11:
             return raw
+
+--| Starts the command and returns it while it runs, to read the stdout of its last stage a line at a time.
+--| stderr is that of this process, and the first stage reads an empty input without `stdin` or `stdin_file`.
+--| The time limit of `timeout_ms` counts from here.
+--| Returns the errors of a program that can not be started or a file that can not be opened, as `run` does,
+--| and `error.InvalidArgument` when `stdout_file` or `stdout_append` sent the output to a file.
+--| Sample usage:
+--| ```cy
+--| p := os.cmd({'ping', '-c', '3', 'localhost'}).start()!
+--| while p.read_line()! |line|:
+--|     print('> ' + line)
+--| p.wait()!
+--| ```
+fn (&Cmd) start() -> !Process:
+    if self.out_io != 0:
+        return error.InvalidArgument
+    raw := self.launch(3)
+    if raw.fail != 0:
+        return cmd_error(raw.fail)
+    return {id=raw.code}
+
+--| A command that runs: what `Cmd.start` returns. Its stdout is read with `read_line` or `read_all`, and `wait` or
+--| `wait_code` waits for its end.
+--| When the value goes away before the command ended, its programs are stopped. Also when the eval ends with a
+--| panic, and when the host asks the VM to stop (`cl_vm_interrupt`).
+type Process:
+    with NoCopy
+    -id int
+
+fn (&Process) @deinit():
+    _proc_free(self.id)
+
+--| Returns the next line that the last stage wrote to stdout, without its line break (`\n` or `\r\n`), or `none`
+--| when the output ended. Waits until a whole line or the end comes.
+--| Returns `error.TimedOut` when the time limit passed, and `error.TooBig` for a line over 10 MiB.
+fn (&Process) read_line() -> !?str:
+    raw := self.op(0)
+    if raw.fail != 0:
+        return cmd_error(raw.fail)
+    if raw.code == 0:
+        return none
+    return raw.out
+
+--| Returns the rest of what the last stage writes to stdout, until its end.
+--| Returns `error.TimedOut` when the time limit passed, and `error.TooBig` when the rest is over 10 MiB.
+fn (&Process) read_all() -> !str:
+    raw := self.op(1)
+    if raw.fail != 0:
+        return cmd_error(raw.fail)
+    return raw.out
+
+--| Waits for the command to end. stdout that was not read is read and dropped, so that a program does not wait
+--| for room in a full pipe.
+--| Returns `error.ExitStatus` when a stage ends with an exit code other than 0 or is stopped by a signal (also
+--| by `kill`), and `error.TimedOut` when the time limit passed. Waiting again returns the same.
+fn (&Process) wait() -> !void:
+    code := self.wait_code()!
+    if code != 0:
+        return error.ExitStatus
+
+--| Like `wait`, but returns the exit code instead of `error.ExitStatus`: 0 when every stage succeeded, otherwise
+--| that of the last stage that failed, and 128 plus the signal number for a stage that a signal stopped.
+fn (&Process) wait_code() -> !int:
+    raw := self.op(2)
+    if raw.fail != 0:
+        return cmd_error(raw.fail)
+    return raw.code
+
+--| Stops the programs that still run (`SIGKILL`, `TerminateProcess`). Does nothing after they ended.
+--| `read_line` then returns what they wrote before, and `wait` returns `error.ExitStatus`.
+fn (&Process) kill():
+    _ = self.op(3)
+
+-- As `launch` does, the loop lets the VM stop when the host function returns `CmdFail.interrupted`.
+-fn (&Process) op(op int) -> CmdRaw:
+    while:
+        raw := _proc_op(self.id, op)
+        if raw.fail != 11:
+            return raw
+
+#[bind] -fn _proc_op(id int, op int) -> CmdRaw
+
+#[bind] -fn _proc_free(id int)
 
 -type CmdRaw:
     out  str

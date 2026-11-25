@@ -81,3 +81,27 @@ n := os.cmd({'wc', '-l'}).stdin_file('data.csv').read()!
 `while:` 아래 `pass`만 있는 반복은 `cl_vm_interrupt`로도 fuel로도 멈추지 않았다. 자기 자신으로 뛰는 `jmp`(오프셋 0)가 되는데 VM은
 뒤로 뛰는 점프(오프셋 < 0)에서만 중단 요청을 봤다. 이제 오프셋 0도 검사점이다. `while true: pass`는 조건 검사로 다른 자리에
 뛰어서 전에도 멈췄다.
+
+## `os.cmd`: 도는 동안 줄 단위로 읽기 (`Cmd.start`, `os.Process`)
+
+`Cmd.start()`가 명령을 시작하고 도는 중인 `os.Process`를 돌려준다. 마지막 단계의 stdout을 쓰이는 대로 읽는다.
+결정 `docs/decisions/project_os_cmd.md` "줄 단위 스트리밍", 예제 `examples/stream_lines.cy` · `examples/commands.cy`.
+
+~~~cy
+p := os.cmd({'tail', '-f', 'app.log'}).timeout_ms(60000).start()!
+while p.read_line()! |line|:
+    if line.contains('ready'):
+        break
+p.kill()
+code := p.wait_code()!
+~~~
+
+- `read_line() -> !?str`(줄바꿈 `\n` · `\r\n` 제외, 끝이면 `none`), `read_all() -> !str`, `wait() -> !void`(`run`과 같은 오류),
+  `wait_code() -> !int`, `kill()`.
+- `wait`는 읽지 않은 stdout을 읽어 버린다(가득 찬 파이프에 단계가 멈추지 않게).
+- 값이 명령이 끝나기 전에 사라지면 프로그램들을 끝내고 회수한다. eval이 panic · 중단으로 끝나 `@deinit` 없이 쓸려도 같다.
+- `timeout_ms`는 `start`부터 센다. stdout을 파일로 보낸 명령의 `start`는 `error.InvalidArgument`.
+- `for`는 오류를 돌려줄 수 있는 반복자를 받지 않아 `lines()`는 없다. `while p.read_line()! |line|:`로 돈다.
+- 임베딩: `cl_vm_add_cleanup(vm, fn, ctx)` · `cl_vm_remove_cleanup(vm, id)`가 늘었다. 스크립트 값이 대신하는 호스트 자원을
+  eval이 panic · 중단으로 끝날 때와 VM을 해제할 때 정리한다.
+

@@ -646,6 +646,34 @@ test "cl_vm_interrupt stops a running os.cmd and its programs." {
     try zt.eq(C.ErrorInterrupt, code);
     try zt.eq(true, start.untilNow(stdx.io()).raw.toMilliseconds() < 10000);
 
+    // A `Process` that is read from when the interrupt comes. Its program is stopped and reaped: the cleanup of the
+    // swept value does it.
+    // This test also runs in the shards of the behavior test, at the same time: the file is named by the process.
+    const pid_path = try std.fmt.allocPrint(zt.alloc, "src/test/assets/proc_pid_{}.txt", .{std.c.getpid()});
+    defer zt.alloc.free(pid_path);
+    const src2 = try std.fmt.allocPrint(zt.alloc,
+        \\use os
+        \\p := os.cmd({{'sh', '-c', 'echo $$; exec sleep 30'}}).start()!
+        \\pid := p.read_line()!.?
+        \\os.write_file('{s}', pid)!
+        \\_ = p.read_line()
+        \\panic('not stopped')
+    , .{pid_path});
+    defer zt.alloc.free(src2);
+    S.done.store(false, .release);
+    const thread2 = try std.Thread.spawn(.{}, S.interrupter, .{vm});
+    const code2 = C.vm_evalx(vm, "./src/test/main.cy", src2, config, &res);
+    S.done.store(true, .release);
+    thread2.join();
+    try zt.eq(C.ErrorInterrupt, code2);
+    {
+        const pid_text = try std.Io.Dir.cwd().readFileAlloc(stdx.io(), pid_path, zt.alloc, .limited(64));
+        defer zt.alloc.free(pid_text);
+        std.Io.Dir.cwd().deleteFile(stdx.io(), pid_path) catch {};
+        const pid = try std.fmt.parseInt(std.posix.pid_t, std.mem.trim(u8, pid_text, " \n"), 10);
+        try zt.eq(error.ProcessNotFound, std.posix.kill(pid, @enumFromInt(0)));
+    }
+
     // The next eval runs a command as usual.
     try zt.eq(C.Success, C.vm_evalx(vm, "./src/test/main.cy",
         \\use os

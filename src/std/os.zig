@@ -33,6 +33,8 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"stdout",         zErrFunc(stdout)},
     .{"_exec",          zErrFunc(exec)},
     .{"_cmd_run",       zErrFunc(cmdRun)},
+    .{"_proc_op",       zErrFunc(procOp)},
+    .{"_proc_free",     zErrFunc(procFree)},
     .{"_args",          zErrFunc(_args)},
 };
 
@@ -273,6 +275,9 @@ const CmdMode = enum(i64) {
     read = 1,
     /// The stdout of the last stage and the stderr of every stage are captured.
     status = 2,
+    /// `Cmd.start`: the stdout of the last stage is read by the `Process` while the command runs. `code` of the
+    /// result is the id of the `Process`.
+    stream = 3,
 };
 
 /// Where a stream of a stage goes to or comes from when it is not a pipe of the pipeline.
@@ -350,7 +355,9 @@ pub fn cmdRun(t: *C.Thread) anyerror!C.Ret {
     const errs_span = C.thread_param(t, StrSpan);
     const texts_span = C.thread_param(t, StrSpan);
     const opts_span = C.thread_param(t, IntSpan);
-    const mode: CmdMode = @enumFromInt(C.thread_int(t));
+    const mode_n = C.thread_int(t);
+    if (mode_n < 0 or mode_n > @intFromEnum(CmdMode.stream)) return C.thread_ret_panic(t, "Unknown mode.");
+    const mode: CmdMode = @enumFromInt(mode_n);
 
     const args = args_span.ptr[0..@intCast(args_span.len)];
     const counts = counts_span.ptr[0..@intCast(counts_span.len)];
@@ -412,7 +419,20 @@ pub fn cmdRun(t: *C.Thread) anyerror!C.Ret {
             arg_i += nargs;
             env_i += nenv * 2;
         }
-        if (fail == .none) {
+        if (mode == .stream and options.out_io != .default) fail = .invalid_argument;
+        if (fail == .none and mode == .stream) {
+            if (CmdProc.start(alloc, arena, stages, options, mode, t)) |proc| {
+                proc.startReading();
+                const id = procRegister(proc, t) catch |err| {
+                    proc.destroy();
+                    return err;
+                };
+                out.code = @bitCast(id);
+            } else |err| {
+                if (err == error.OutOfMemory) return err;
+                fail = cmdFail(err);
+            }
+        } else if (fail == .none) {
             cmdRunPipeline(alloc, arena, stages, options, mode, t, &out) catch |err| {
                 if (err == error.OutOfMemory) return err;
                 fail = cmdFail(err);
@@ -649,115 +669,293 @@ fn cmdOpenOutput(io: std.Io, path: []const u8, kind: CmdIo) !std.Io.File {
     return .{ .handle = fd, .flags = .{ .nonblocking = false } };
 }
 
-fn cmdRunPipeline(alloc: std.mem.Allocator, arena: std.mem.Allocator, stages: []const CmdStage, opts: CmdOptions, mode: CmdMode, t: *C.Thread, out: *CmdOutput) !void {
-    const io = stdx.io();
-    const n = stages.len;
-    if (n > 1) cmdLetStagesGetSigpipe();
+/// A command that runs: its stages and the threads that serve them. `_cmd_run` makes one for each run and
+/// destroys it before it returns. `Cmd.start` keeps one for its `Process` in `proc_table`.
+const CmdProc = struct {
+    alloc: std.mem.Allocator,
+    n: usize,
+    children: [cmd_max_stages]std.process.Child = undefined,
+    nspawned: usize = 0,
+    /// Writes the input text. Joined after the stages are stopped: it may be writing to a stage that nobody reads
+    /// from any more, and only the end of that stage lets the write return.
+    feeder: ?std.Thread = null,
+    /// The input text, owned when the command outlives the host call (`Cmd.start`).
+    owned_input: ?[]u8 = null,
+    watch: CmdWatch,
+    watcher: ?std.Thread = null,
+    /// The stdout of the last stage, read by a `Process`. Set up by `startReading`.
+    reading: bool = false,
+    reader_buffer: std.Io.File.MultiReader.Buffer(1) = undefined,
+    reader: std.Io.File.MultiReader = undefined,
+    reader_files: [1]std.Io.File = undefined,
+    eof: bool = false,
+    /// Set by `finish`.
+    finished: bool = false,
+    code: i64 = 0,
+    /// The cleanup that destroys a `Process` whose value was swept without its `@deinit`.
+    vm: ?*C.VM = null,
+    cleanup_id: u64 = 0,
 
-    var base_env: ?std.process.Environ.Map = if (inherits_current_env) null else try currentEnvMap(arena);
+    /// Opens the files of the redirections, starts the stages and the threads that serve them.
+    fn start(alloc: std.mem.Allocator, arena: std.mem.Allocator, stages: []const CmdStage, opts: CmdOptions, mode: CmdMode, t: *C.Thread) !*CmdProc {
+        const io = stdx.io();
+        const n = stages.len;
+        if (n > 1) cmdLetStagesGetSigpipe();
 
-    // Opened before any stage starts, so that a file that can not be opened starts nothing. Each stage that is
-    // given one has its own copy, and these are closed once all have started.
-    var files: CmdFiles = .{};
-    defer files.deinit(io);
-    const in_file: ?std.Io.File = if (opts.in_io == .file) try files.openInput(io, opts.in) else null;
-    const out_file: ?std.Io.File = if (opts.out_io != .default) try files.open(io, opts.out_path, opts.out_io) else null;
-    var err_files: [cmd_max_stages]?std.Io.File = @splat(null);
-    for (stages, 0..) |stage, i| {
-        if (stage.err_io != .default) err_files[i] = try files.open(io, stage.err_path, stage.err_io);
-    }
+        const proc = try alloc.create(CmdProc);
+        proc.* = .{
+            .alloc = alloc,
+            .n = n,
+            .watch = .{
+                // The flag of the main thread is that of every thread of the VM, and the main thread lives as long as
+                // the VM, which a `Process` may outlive the thread that started it on.
+                .thread = C.vm_main_thread(C.thread_vm(t)),
+                .deadline = if (opts.timeout_ms > 0)
+                    .fromNow(io, .{ .raw = .fromMilliseconds(opts.timeout_ms), .clock = .awake })
+                else
+                    null,
+                .children = undefined,
+            },
+        };
+        proc.watch.children = proc.children[0..n];
+        errdefer proc.destroy();
 
-    // Declared before the stages so that it is joined after they are stopped: on an error the thread may be
-    // writing to a stage that nobody reads from any more, and only the end of that stage lets the write return.
-    var feeder: ?std.Thread = null;
-    defer if (feeder) |thread| thread.join();
+        var base_env: ?std.process.Environ.Map = if (inherits_current_env) null else try currentEnvMap(arena);
 
-    var children: [cmd_max_stages]std.process.Child = undefined;
-    var nspawned: usize = 0;
-    // On an error, the stages that started are stopped. After `wait` this does nothing.
-    defer for (children[0..nspawned]) |*child| child.kill(io);
+        // Opened before any stage starts, so that a file that can not be opened starts nothing. Each stage that is
+        // given one has its own copy, and these are closed once all have started.
+        var files: CmdFiles = .{};
+        defer files.deinit(io);
+        const in_file: ?std.Io.File = if (opts.in_io == .file) try files.openInput(io, opts.in) else null;
+        const out_file: ?std.Io.File = if (opts.out_io != .default) try files.open(io, opts.out_path, opts.out_io) else null;
+        var err_files: [cmd_max_stages]?std.Io.File = @splat(null);
+        for (stages, 0..) |stage, i| {
+            if (stage.err_io != .default) err_files[i] = try files.open(io, stage.err_path, stage.err_io);
+        }
 
-    for (stages, 0..) |stage, i| {
-        // The variables of the stage go on top of the environment of this process.
-        var env_map = base_env;
-        if (stage.env.len > 0) {
-            if (base_env == null) base_env = try currentEnvMap(arena);
-            env_map = try base_env.?.clone(arena);
-            var j: usize = 0;
-            while (j < stage.env.len) : (j += 2) {
-                const name = C.str_bytes(stage.env[j]);
-                if (!std.process.Environ.Map.validateKeyForPut(name)) return error.InvalidName;
-                try env_map.?.put(name, C.str_bytes(stage.env[j + 1]));
+        const children = &proc.children;
+        for (stages, 0..) |stage, i| {
+            // The variables of the stage go on top of the environment of this process.
+            var env_map = base_env;
+            if (stage.env.len > 0) {
+                if (base_env == null) base_env = try currentEnvMap(arena);
+                env_map = try base_env.?.clone(arena);
+                var j: usize = 0;
+                while (j < stage.env.len) : (j += 2) {
+                    const name = C.str_bytes(stage.env[j]);
+                    if (!std.process.Environ.Map.validateKeyForPut(name)) return error.InvalidName;
+                    try env_map.?.put(name, C.str_bytes(stage.env[j + 1]));
+                }
+            }
+
+            const child_in: std.process.SpawnOptions.StdIo = if (i > 0)
+                .{ .file = children[i - 1].stdout.? }
+            else switch (opts.in_io) {
+                .text => .pipe,
+                .file => .{ .file = in_file.? },
+                else => if (mode == .run) .inherit else .ignore,
+            };
+            const child_out: std.process.SpawnOptions.StdIo = if (i + 1 < n)
+                .pipe
+            else if (out_file) |file|
+                .{ .file = file }
+            else if (mode != .run)
+                .pipe
+            else
+                .inherit;
+            const child_err: std.process.SpawnOptions.StdIo = if (err_files[i]) |file|
+                .{ .file = file }
+            else if (mode == .status)
+                .pipe
+            else
+                .inherit;
+
+            children[i] = try std.process.spawn(io, .{
+                .argv = stage.argv,
+                .cwd = if (stage.cwd.len > 0) .{ .path = stage.cwd } else .inherit,
+                .environ_map = if (env_map) |*map| map else null,
+                .stdin = child_in,
+                .stdout = child_out,
+                .stderr = child_err,
+                .create_no_window = true,
+            });
+            proc.nspawned += 1;
+
+            if (i > 0) {
+                // The next stage holds the read end now. Kept open here, the stage before would never see it close.
+                children[i - 1].stdout.?.close(io);
+                children[i - 1].stdout = null;
             }
         }
 
-        const child_in: std.process.SpawnOptions.StdIo = if (i > 0)
-            .{ .file = children[i - 1].stdout.? }
-        else switch (opts.in_io) {
-            .text => .pipe,
-            .file => .{ .file = in_file.? },
-            else => if (mode == .run) .inherit else .ignore,
-        };
-        const child_out: std.process.SpawnOptions.StdIo = if (i + 1 < n)
-            .pipe
-        else if (out_file) |file|
-            .{ .file = file }
-        else if (mode != .run)
-            .pipe
-        else
-            .inherit;
-        const child_err: std.process.SpawnOptions.StdIo = if (err_files[i]) |file|
-            .{ .file = file }
-        else if (mode == .status)
-            .pipe
-        else
-            .inherit;
+        if (opts.in_io == .text) {
+            const file = children[0].stdin.?;
+            children[0].stdin = null;
+            var bytes = opts.in;
+            if (mode == .stream) {
+                proc.owned_input = alloc.dupe(u8, bytes) catch |err| {
+                    file.close(io);
+                    return err;
+                };
+                bytes = proc.owned_input.?;
+            }
+            proc.feeder = std.Thread.spawn(.{}, cmdFeedInput, .{ file, bytes }) catch |err| {
+                file.close(io);
+                return err;
+            };
+        }
 
-        children[i] = try std.process.spawn(io, .{
-            .argv = stage.argv,
-            .cwd = if (stage.cwd.len > 0) .{ .path = stage.cwd } else .inherit,
-            .environ_map = if (env_map) |*map| map else null,
-            .stdin = child_in,
-            .stdout = child_out,
-            .stderr = child_err,
-            .create_no_window = true,
-        });
-        nspawned += 1;
+        proc.watcher = try std.Thread.spawn(.{}, CmdWatch.run, .{&proc.watch});
+        return proc;
+    }
 
-        if (i > 0) {
-            // The next stage holds the read end now. Kept open here, the stage before would never see it close.
-            children[i - 1].stdout.?.close(io);
-            children[i - 1].stdout = null;
+    /// Stops what still runs and frees the command. Also for one that did not finish starting.
+    fn destroy(proc: *CmdProc) void {
+        const io = stdx.io();
+        proc.stopWatch();
+        if (proc.reading) proc.reader.deinit();
+        // Reaps the stages that `finish` did not.
+        for (proc.children[0..proc.nspawned]) |*child| child.kill(io);
+        if (proc.feeder) |thread| thread.join();
+        if (proc.owned_input) |bytes| proc.alloc.free(bytes);
+        proc.alloc.destroy(proc);
+    }
+
+    fn stopWatch(proc: *CmdProc) void {
+        const thread = proc.watcher orelse return;
+        proc.watch.done.set(stdx.io());
+        thread.join();
+        proc.watcher = null;
+    }
+
+    /// Waits for every stage to end and returns the code of the command: 0 when every stage succeeded, otherwise
+    /// that of the last stage that failed. Returns the error of the watch when it stopped the stages.
+    fn finish(proc: *CmdProc) !i64 {
+        if (proc.finished) return proc.code;
+        const io = stdx.io();
+        const n = proc.n;
+        for (proc.children[0..n], 0..) |*child, i| {
+            cmdAwaitEnd(child);
+            proc.watch.markEnded(io, i);
+        }
+        proc.stopWatch();
+        try proc.watch.check();
+
+        // A stage before the last one that was stopped because the next stage closed its input did what it was
+        // asked.
+        var code: i64 = 0;
+        for (proc.children[0..n], 0..) |*child, i| {
+            const term = try child.wait(io);
+            const stage_code: i64 = switch (term) {
+                .exited => |status| status,
+                .signal => |sig| b: {
+                    if (builtin.os.tag != .windows) {
+                        if (i + 1 < n and sig == .PIPE) break :b 0;
+                        break :b 128 + @as(i64, @intCast(@intFromEnum(sig)));
+                    }
+                    break :b -1;
+                },
+                else => -1,
+            };
+            if (stage_code != 0) code = stage_code;
+        }
+        proc.finished = true;
+        proc.code = code;
+        return code;
+    }
+
+    /// Stops the stages that still run. Their end is then that of a signal (`kill`).
+    fn kill(proc: *CmdProc) void {
+        if (proc.finished) return;
+        const io = stdx.io();
+        proc.watch.mutex.lockUncancelable(io);
+        defer proc.watch.mutex.unlock(io);
+        for (proc.watch.children, 0..) |*child, i| {
+            if (!proc.watch.ended[i]) cmdTerminate(child);
         }
     }
 
-    if (opts.in_io == .text) {
-        const file = children[0].stdin.?;
-        children[0].stdin = null;
-        feeder = std.Thread.spawn(.{}, cmdFeedInput, .{ file, opts.in }) catch |err| {
-            file.close(io);
-            return err;
+    /// Reads the stdout of the last stage from here on, a part at a time (`Process`).
+    fn startReading(proc: *CmdProc) void {
+        const io = stdx.io();
+        proc.reader_files[0] = proc.children[proc.n - 1].stdout.?;
+        const streams = proc.reader_buffer.toStreams();
+        streams.len = 1;
+        proc.reader.init(proc.alloc, io, streams, &proc.reader_files);
+        proc.reading = true;
+    }
+
+    /// Reads more of the stdout. Sets `eof` at its end. Returns the error of the watch when it stopped the stages.
+    fn fill(proc: *CmdProc) !void {
+        proc.reader.fill(64, .{ .duration = .{ .raw = .fromMilliseconds(cmd_read_poll_ms), .clock = .awake } }) catch |err| switch (err) {
+            error.EndOfStream => {
+                proc.eof = true;
+                try proc.reader.checkAnyError();
+            },
+            error.Timeout => try proc.watch.check(),
+            else => |e| return e,
         };
     }
 
-    var watch: CmdWatch = .{
-        .thread = t,
-        .deadline = if (opts.timeout_ms > 0)
-            .fromNow(io, .{ .raw = .fromMilliseconds(opts.timeout_ms), .clock = .awake })
-        else
-            null,
-        .children = children[0..n],
-    };
-    // Declared after the stages so that it ends before an error stops them.
-    var watcher: ?std.Thread = try std.Thread.spawn(.{}, CmdWatch.run, .{&watch});
-    defer if (watcher) |thread| {
-        watch.done.set(io);
-        thread.join();
-    };
+    /// Returns the next line of the stdout without its line break (`\n` or `\r\n`), or null at its end. The
+    /// line is valid until the next read.
+    fn readLine(proc: *CmdProc) !?[]const u8 {
+        const r = proc.reader.reader(0);
+        while (true) {
+            const buf = r.buffered();
+            if (std.mem.indexOfScalar(u8, buf, '\n')) |i| {
+                r.toss(i + 1);
+                const end = if (i > 0 and buf[i - 1] == '\r') i - 1 else i;
+                return buf[0..end];
+            }
+            if (proc.eof) {
+                // The stages were stopped by the watch: what they wrote is not the whole output.
+                try proc.watch.check();
+                if (buf.len == 0) return null;
+                r.toss(buf.len);
+                return buf;
+            }
+            if (buf.len > cmd_output_limit) return error.StreamTooLong;
+            try proc.fill();
+        }
+    }
+
+    /// Returns the rest of the stdout. Valid until the next read.
+    fn readAll(proc: *CmdProc) ![]const u8 {
+        const r = proc.reader.reader(0);
+        while (!proc.eof) {
+            if (r.buffered().len > cmd_output_limit) return error.StreamTooLong;
+            try proc.fill();
+        }
+        try proc.watch.check();
+        const buf = r.buffered();
+        if (buf.len > cmd_output_limit) return error.StreamTooLong;
+        r.toss(buf.len);
+        return buf;
+    }
+
+    /// Reads the rest of the stdout and drops it, so that a stage is not blocked on a full pipe, nor stopped by a
+    /// closed one, while it is waited for.
+    fn drain(proc: *CmdProc) !void {
+        const r = proc.reader.reader(0);
+        while (!proc.eof) {
+            r.toss(r.buffered().len);
+            try proc.fill();
+        }
+        r.toss(r.buffered().len);
+    }
+};
+
+fn cmdRunPipeline(alloc: std.mem.Allocator, arena: std.mem.Allocator, stages: []const CmdStage, opts: CmdOptions, mode: CmdMode, t: *C.Thread, out: *CmdOutput) !void {
+    const io = stdx.io();
+    const proc = try CmdProc.start(alloc, arena, stages, opts, mode, t);
+    defer proc.destroy();
+    const children = proc.children[0..proc.n];
+    const n = proc.n;
 
     // Stream 0 is the stdout of the last stage when it is captured, the others are the captured stderr of the
     // stages in order.
-    const capture_out = mode != .run and out_file == null;
+    const capture_out = mode != .run and opts.out_io == .default;
     var streams_in: [cmd_max_stages + 1]std.Io.File = undefined;
     var nfiles: usize = 0;
     if (capture_out) {
@@ -766,7 +964,7 @@ fn cmdRunPipeline(alloc: std.mem.Allocator, arena: std.mem.Allocator, stages: []
     }
     const first_err = nfiles;
     if (mode == .status) {
-        for (children[0..n]) |child| {
+        for (children) |child| {
             if (child.stderr) |file| {
                 streams_in[nfiles] = file;
                 nfiles += 1;
@@ -787,7 +985,7 @@ fn cmdRunPipeline(alloc: std.mem.Allocator, arena: std.mem.Allocator, stages: []
             multi_reader.fill(64, .{ .duration = .{ .raw = .fromMilliseconds(cmd_read_poll_ms), .clock = .awake } }) catch |err| switch (err) {
                 error.EndOfStream => break,
                 error.Timeout => {
-                    try watch.check();
+                    try proc.watch.check();
                     continue;
                 },
                 else => |e| return e,
@@ -798,7 +996,7 @@ fn cmdRunPipeline(alloc: std.mem.Allocator, arena: std.mem.Allocator, stages: []
             if (err_len > cmd_output_limit) return error.StreamTooLong;
         }
         try multi_reader.checkAnyError();
-        try watch.check();
+        try proc.watch.check();
 
         if (capture_out) out.out = try multi_reader.toOwnedSlice(0);
         var err_buf: std.ArrayList(u8) = .empty;
@@ -809,34 +1007,117 @@ fn cmdRunPipeline(alloc: std.mem.Allocator, arena: std.mem.Allocator, stages: []
         out.err = try err_buf.toOwnedSlice(alloc);
     }
 
-    for (children[0..n], 0..) |*child, i| {
-        cmdAwaitEnd(child);
-        watch.markEnded(io, i);
-    }
-    watch.done.set(io);
-    watcher.?.join();
-    watcher = null;
-    try watch.check();
+    out.code = try proc.finish();
+}
 
-    // The code of the pipeline is that of the last stage that failed. A stage before the last one that was
-    // stopped because the next stage closed its input did what it was asked.
-    var code: i64 = 0;
-    for (children[0..n], 0..) |*child, i| {
-        const term = try child.wait(io);
-        const stage_code: i64 = switch (term) {
-            .exited => |status| status,
-            .signal => |sig| b: {
-                if (builtin.os.tag != .windows) {
-                    if (i + 1 < n and sig == .PIPE) break :b 0;
-                    break :b 128 + @as(i64, @intCast(@intFromEnum(sig)));
-                }
-                break :b -1;
-            },
-            else => -1,
-        };
-        if (stage_code != 0) code = stage_code;
+/// The `CmdProc` of each `os.Process`, by the id that the value holds. A value that its eval swept without its
+/// `@deinit` leaves its entry to the cleanup that the VM runs (`cl_vm_add_cleanup`).
+var proc_table: std.AutoHashMapUnmanaged(u64, *CmdProc) = .empty;
+var proc_table_lock: std.Io.Mutex = .init;
+var proc_next_id: u64 = 1;
+
+fn procLookup(id: i64) ?*CmdProc {
+    const io = stdx.io();
+    proc_table_lock.lockUncancelable(io);
+    defer proc_table_lock.unlock(io);
+    return proc_table.get(@bitCast(id));
+}
+
+/// Takes the entry out of the table: the caller destroys it.
+fn procTake(id: u64) ?*CmdProc {
+    const io = stdx.io();
+    proc_table_lock.lockUncancelable(io);
+    defer proc_table_lock.unlock(io);
+    const entry = proc_table.fetchRemove(id) orelse return null;
+    return entry.value;
+}
+
+/// The cleanup of a `Process` whose value went away without its `@deinit`. `ctx` is its id.
+fn procCleanup(ctx: ?*anyopaque) callconv(.c) void {
+    const proc = procTake(@intFromPtr(ctx)) orelse return;
+    proc.destroy();
+}
+
+/// Keeps a started command for a `Process` and returns its id.
+fn procRegister(proc: *CmdProc, t: *C.Thread) !u64 {
+    const io = stdx.io();
+    const id = b: {
+        proc_table_lock.lockUncancelable(io);
+        defer proc_table_lock.unlock(io);
+        const id = proc_next_id;
+        try proc_table.put(std.heap.smp_allocator, id, proc);
+        proc_next_id += 1;
+        break :b id;
+    };
+    const vm = C.thread_vm(t);
+    const cleanup_id = C.vm_add_cleanup(vm, procCleanup, @ptrFromInt(id));
+    if (cleanup_id == 0) {
+        _ = procTake(id);
+        return error.OutOfMemory;
     }
-    out.code = code;
+    proc.vm = vm;
+    proc.cleanup_id = cleanup_id;
+    return id;
+}
+
+/// Mirrored by `Process` in `os.cy`.
+const ProcOp = enum(i64) {
+    read_line = 0,
+    read_all = 1,
+    wait = 2,
+    kill = 3,
+};
+
+/// `fn _proc_op(id int, op int) -> CmdRaw`. For `read_line`, `code` is 1 with a line in `out` and 0 at the end of
+/// the output. For `wait`, `code` is that of the command.
+pub fn procOp(t: *C.Thread) anyerror!C.Ret {
+    if (is_wasm) return C.thread_ret_panic(t, "Unsupported.");
+    const ret = C.thread_ret(t, CmdRaw);
+    const id = C.thread_int(t);
+    const op: ProcOp = @enumFromInt(C.thread_int(t));
+
+    var out: []const u8 = "";
+    var code: i64 = 0;
+    var fail: CmdFail = .none;
+    if (procLookup(id)) |proc| {
+        const res: anyerror!void = switch (op) {
+            .read_line => if (proc.readLine()) |line| {
+                if (line) |s| {
+                    out = s;
+                    code = 1;
+                }
+            } else |err| err,
+            .read_all => if (proc.readAll()) |s| {
+                out = s;
+            } else |err| err,
+            .wait => if (proc.drain()) |_| {
+                if (proc.finish()) |c| code = c else |err| return procFail(t, ret, err);
+            } else |err| err,
+            .kill => proc.kill(),
+        };
+        res catch |err| return procFail(t, ret, err);
+    } else {
+        fail = .invalid_argument;
+    }
+    ret.* = .{ .out = C.str_init(t, out), .err = C.str_init(t, ""), .code = code, .fail = @intFromEnum(fail) };
+    return C.RetOk;
+}
+
+fn procFail(t: *C.Thread, ret: *CmdRaw, err: anyerror) anyerror!C.Ret {
+    if (err == error.OutOfMemory) return err;
+    ret.* = .{ .out = C.str_init(t, ""), .err = C.str_init(t, ""), .code = 0, .fail = @intFromEnum(cmdFail(err)) };
+    return C.RetOk;
+}
+
+/// `fn _proc_free(id int)`. The `@deinit` of a `Process`: stops what still runs and frees the command.
+pub fn procFree(t: *C.Thread) anyerror!C.Ret {
+    _ = C.thread_ret(t, void);
+    const id = C.thread_int(t);
+    if (is_wasm) return C.RetOk;
+    const proc = procTake(@bitCast(id)) orelse return C.RetOk;
+    if (proc.vm) |vm| C.vm_remove_cleanup(vm, proc.cleanup_id);
+    proc.destroy();
+    return C.RetOk;
 }
 
 pub fn fetchUrl(t: *C.Thread) anyerror!C.Ret {

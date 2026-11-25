@@ -158,6 +158,48 @@ fn run_all() -> !void:
     t.eq(error.InvalidArgument, os.cmd({'echo'}).stderr_file('a\x00b').run().unwrap_error())
     os.cmd({'rm', '-r', tmp}).run()!
 
+    -- start(): the stdout of the last stage a line at a time, while the command runs.
+    p := os.cmd({'printf', 'a\\nb\\r\\n\\nc'}).start()!
+    t.eq('a', p.read_line()!.?)
+    t.eq('b', p.read_line()!.?)
+    t.eq('', p.read_line()!.?)
+    t.eq('c', p.read_line()!.?)
+    t.eq(true, p.read_line()! == none)
+    t.eq(true, p.read_line()! == none)
+    p.wait()!
+    p.wait()!
+    t.eq(0, p.wait_code()!)
+    -- The lines of a pipeline with input, then the rest.
+    lines := os.cmd({'cat'}).stdin('one\ntwo\nthree\n').pipe(os.cmd({'tr', 'a-z', 'A-Z'})).start()!
+    t.eq('ONE', lines.read_line()!.?)
+    t.eq('TWO\nTHREE\n', lines.read_all()!)
+    t.eq('', lines.read_all()!)
+    lines.wait()!
+    -- A program that does not end: stopped after the first line.
+    endless := os.cmd({'yes'}).start()!
+    t.eq('y', endless.read_line()!.?)
+    endless.kill()
+    endless.kill()
+    t.eq(error.ExitStatus, endless.wait().unwrap_error())
+    t.eq(137, endless.wait_code()!)
+    -- The output that was not read is dropped while the command is waited for: more than a pipe holds.
+    t.eq(3, os.cmd({'sh', '-c', 'head -c 300000 /dev/zero; exit 3'}).start()!.wait_code()!)
+    -- The time limit counts from start().
+    slow := os.cmd({'sh', '-c', 'echo first; sleep 5'}).timeout_ms(300).start()!
+    t.eq('first', slow.read_line()!.?)
+    t.eq(error.TimedOut, slow.read_line().unwrap_error())
+    t.eq(error.TimedOut, slow.wait().unwrap_error())
+    t.eq(error.NotFound, os.cmd({'no-such-program-xyz'}).start().unwrap_error())
+    t.eq(error.InvalidArgument, os.cmd({'echo'}).stdout_file('out.txt').start().unwrap_error())
+    -- A value that goes away stops its programs.
+    started_pid := start_and_drop()!
+    t.eq('gone\n', os.cmd({'sh', '-c', 'kill -0 ' + started_pid + ' 2>/dev/null || echo gone'}).read()!)
+
+-- Returns the pid of a program that runs for 30 seconds, whose `Process` goes away here.
+fn start_and_drop() -> !str:
+    p := os.cmd({'sh', '-c', 'echo $$; exec sleep 30'}).start()!
+    return p.read_line()!.?
+
 fn in_thread(word str) -> str:
     return os.cmd({'/bin/echo', word}).pipe(os.cmd({'tr', 'a-z', 'A-Z'})).read() !else 'failed'
 

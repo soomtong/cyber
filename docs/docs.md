@@ -5012,6 +5012,26 @@ The files are opened when the command runs, before any program starts. A relativ
 
 `timeout_ms(ms)` stops the programs (`SIGKILL`, `TerminateProcess`) when the command has run for `ms` milliseconds, and `run`, `read` and `run_status` return `error.TimedOut`. The programs that a program started itself are not stopped. In `a.pipe(b)` the limit is the shorter one. A limit that is not over 0 is `error.InvalidArgument`. When the host of an embedded VM asks it to stop (`cl_vm_interrupt`), a running command stops its programs too.
 
+`start()` starts the command and returns it while it runs, as a `Process`, to read the stdout of the last program while it is written:
+```cy
+p := os.cmd({'tail', '-f', 'app.log'}).timeout_ms(60000).start()!
+while p.read_line()! |line|:
+    if line.contains('ready'):
+        break
+p.kill()
+code := p.wait_code()!
+```
+
+| Method | |
+|---|---|
+| `read_line() -> !?str` | returns the next line without its line break (`\n` or `\r\n`), or `none` at the end of the output. |
+| `read_all() -> !str` | returns the rest of the output. |
+| `wait() -> !void` | waits for the end, with the errors of `run`. Output that was not read is dropped. |
+| `wait_code() -> !int` | waits for the end and returns the exit code, like `code` of `run_status`. |
+| `kill()` | stops the programs that still run. `wait` then returns `error.ExitStatus`. |
+
+stderr is that of this process, and without `stdin` or `stdin_file` the first program reads an empty input. The time limit counts from `start`: once it passes, `read_line` and `wait` return `error.TimedOut`. A command whose stdout goes to a file can not be started this way (`error.InvalidArgument`). A `Process` is not copied. When it goes away before the command ended, its programs are stopped, also when the eval ends with a panic or an interrupt. To keep reading in a loop, use `while p.read_line()! |line|:`: a `for` loop does not take an iterator that can return an error.
+
 The older `os.exec(args)` runs one program and returns its `ExecResult`. It panics when the program can not be started.
 
 ### JSON and TOON.

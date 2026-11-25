@@ -1122,6 +1122,8 @@ test "Compile." {
     try compileCase("../examples/hello.cy");
     if (!is_wasm) {
         try compileCase("../examples/ffi.cy");
+        try compileCase("../examples/commands.cy");
+        try compileCase("../examples/stream_lines.cy");
     }
     try compileCase("../examples/account.cy");
     try compileCase("../examples/calculator.cy");

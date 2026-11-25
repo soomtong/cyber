@@ -79,7 +79,7 @@ if res.code != 0:
 
 - 백틱 문법과 보간. 사이버의 백틱은 raw 문자열이다. 인자 목록은 슬라이스 연산으로 만든다(`[]str{'grep', pat} + files`).
 - 파일 리다이렉션, 실행 중 중단, 시간 제한은 2026-11-25에 넣었다(아래 "시간 제한 · 중단 · 파일 리다이렉션").
-- 줄 단위 스트리밍. 살아 있는 프로세스를 값으로 들고 있어야 해서 따로 정한다(같은 절 끝).
+- 줄 단위 스트리밍도 같은 날 넣었다(아래 "줄 단위 스트리밍").
 - 단계별 stdin 글, stderr를 stdout에 합치기(`2>&1`), detach.
 
 ## 구현
@@ -216,9 +216,68 @@ API 꼴은 사용자가 따로 고르지 않아 아래 비교로 정했다. 바�
 - 교차 컴파일: x86_64-windows-gnu, x86_64-linux-gnu, aarch64-linux-gnu, x86_64-macos. 실행은 aarch64 macOS만.
   Windows의 `TerminateProcess` · `SetFilePointerEx` 경로는 실행해 보지 못했다.
 
-### 줄 단위 스트리밍(아직)
+## 줄 단위 스트리밍 (2026-11-25)
 
-`for line in eachline(cmd)`(Julia), `Popen.stdout`(Python)처럼 도는 동안 출력을 읽으려면 호스트 함수 호출을 넘어 살아 있는
-프로세스(`os.Process`)를 값으로 들고 있어야 한다. 그 값의 소멸(끝내고 회수), panic · 중단 경로에서 소멸자가 돌지 않을 때 남는
-좀비와 스레드, 기한이 그 수명 동안 이어지는지를 먼저 정해야 해서 이번에는 넣지 않았다.
+사용자: 계획(아래)에 "agree. explain the plan" 뒤 "LGTM go implementation and make some examples into @examples/".
 
+### 다른 언어
+
+| | 시작 | 줄 읽기 | 놓을 때 |
+| --- | --- | --- | --- |
+| Python | `Popen(stdout=PIPE)` | `for line in p.stdout` | 그대로 둔다(`ResourceWarning`) |
+| Rust | `Command::spawn` | `BufReader::new(child.stdout).lines()` | 그대로 둔다(기다리지도 않는다) |
+| Nim | `startProcess` | `outputStream.lines` | `close`가 끝낸다 |
+| Zig | `std.process.spawn` | `File.Reader` | 직접 `kill` · `wait` |
+| Julia | `open(cmd)` | `eachline(cmd)` | 블록 꼴의 `open`이 닫는다 |
+
+호스트 함수가 스크립트 함수를 다시 부를 길이 없어서 `each_line(f)` 같은 콜백 꼴은 안 된다. 살아 있는 프로세스를 값으로 든다.
+
+### API
+
+`Cmd.start() -> !Process`, `Process.read_line() -> !?str`, `read_all() -> !str`, `wait() -> !void`, `wait_code() -> !int`, `kill()`.
+
+### 정한 것
+
+1. 값이 사라지면(`@deinit`) 단계들을 끝내고 회수한다. Rust · Python과 다르다. 에이전트가 쓴 스크립트에서 잊힌 `tail -f`가 남는 쪽이
+   더 위험하다. 끝난 뒤에도 돌아야 하는 프로그램(detach)은 다루지 않는다.
+2. `wait`는 읽지 않은 stdout을 끝까지 읽어 버린다. 읽지 않으면 가득 찬 파이프에 단계가 멈추고(교착), 닫으면 단계가 `SIGPIPE`로
+   끝나 거짓 실패가 된다.
+3. `kill` 뒤의 `wait`는 `error.ExitStatus`(신호로 끝남), `wait_code`는 137. 다시 기다리면 같은 결과다.
+4. `read_line`은 `\n`에서 자르고 앞의 `\r`도 뗀다(Windows 프로그램). 끝에 줄바꿈 없는 조각도 한 줄이다. 10 MiB를 넘는 줄은
+   `error.TooBig`.
+5. 시간 제한은 `start`부터. 감시 스레드가 값과 함께 산다. 지나면 그 뒤의 `read_line` · `read_all` · `wait`가 `error.TimedOut`이다.
+   끝까지 읽은 뒤에도 감시가 단계를 멈췄으면 `none` 대신 `error.TimedOut`이다(잘린 출력을 끝으로 읽지 않게).
+6. stdin은 `stdin` · `stdin_file` 아니면 빈 입력, stderr는 이 프로세스의 것(`read`와 같음). stdout을 파일로 보낸 명령의 `start`는
+   `error.InvalidArgument`.
+7. `for p.lines()`는 넣지 않았다. `for`의 반복자 `next`가 `!?T`를 돌려주면 'Expected `Option` type.' 컴파일 오류다. 반복자가
+   오류를 삼키면 실패한 명령이 조용히 끝난 것처럼 보인다.
+
+### 구현
+
+- `os.zig` `CmdProc`: 단계들, 입력 스레드, 감시 스레드, stdout 읽기(`MultiReader` 하나)를 힙에 묶는다. `start` · `finish` ·
+  `destroy` · `kill` · `readLine` · `readAll` · `drain`. `_cmd_run`의 `run` · `read` · `run_status`도 같은 `start` · `finish` ·
+  `destroy`를 쓴다(호출 안에서 만들고 놓는다). 입력 글은 `start`에서만 복사한다(호출 뒤에도 쓰므로).
+- 감시 스레드는 시작한 스레드가 아니라 VM의 main 스레드로 중단 요청을 본다. 모든 스레드가 main의 플래그를 가리키고, main
+  스레드는 VM만큼 산다(값이 시작한 스레드보다 오래 살 수 있다).
+- 값은 포인터가 아니라 id(`-id int`)를 든다. 호스트의 표(`proc_table`, 잠금 아래)가 id로 `CmdProc`를 찾는다. 정리 함수가 먼저
+  돈 뒤에 값이 남아도 해제된 메모리를 가리키지 않는다(없는 id는 `error.InvalidArgument`).
+- `Process.op`는 `launch`처럼 호출을 반복 안에 둔다. 중단이면 호스트가 `CmdFail.interrupted`를 돌려주고 반복의 검사점이 VM을 멈춘다.
+- 정리: panic 스윕(`freeHeapPages`)은 메모리만 놓고 `@deinit`도 호스트 finalizer도 부르지 않는다(`os.File`도 panic 때 fd가 샌다).
+  공개 C API `cl_vm_add_cleanup(vm, fn, ctx) -> id` · `cl_vm_remove_cleanup(vm, id)`를 더했다. VM은 main 스레드의 panic · 중단
+  unwind가 힙을 쓸어낸 뒤(`thread.panic`)와 `VM.deinit`(스윕 전)에서 등록된 것을 새것부터 부르고 잊는다. `start`가 등록하고
+  `@deinit`이 지운다. CLI는 최상위 지역의 `@deinit`을 부르지 않지만(single_run) VM 해제의 정리가 프로그램을 끝낸다(Debug ·
+  ReleaseFast에서 확인).
+  - 목록은 `VM` 필드가 아니라 `VM.data`의 "cleanups"에 둔다. `VM`에 필드를 더하면 `vm.h`가 빌드마다 패딩으로 맞추는 `VM.c`의
+    오프셋이 바뀌어 빌드가 실패한다(`ZVM padding`).
+  - 잠금은 spin이다. 호스트 함수가 어느 스레드에서든 부를 수 있고, wasm에서도 쓴다.
+  - spawn한 스레드의 panic에서는 부르지 않는다. 그 값은 main의 다음 스윕이나 VM 해제 때 정리된다. 감시 스레드는 중단 요청에는
+    바로 단계들을 끝낸다.
+
+### 확인
+
+- behavior 테스트 `modules/os_cmd.cy`: 줄(`\r\n`, 빈 줄, 끝 조각), 두 번 기다리기, 파이프와 입력 글, `read_all`, `kill`(두 번),
+  137, 읽지 않은 300 KB 뒤 `wait_code`, 시간 제한, 시작 실패, 파일 stdout 거절, 값이 사라진 뒤 pid가 없음.
+- lib 테스트 `cl_vm_add_cleanup runs when the heap is swept without the values' destructors.`: 정상 끝에는 안 부름, panic · 중단 ·
+  VM 해제에서 한 번씩, 지운 것은 안 부름.
+- cli 테스트 `cl_vm_interrupt stops a running os.cmd and its programs.`: `read_line`에 막힌 중 중단, 그 프로그램의 pid가 없음.
+- 예제 `examples/stream_lines.cy` · `examples/commands.cy`(behavior 테스트가 컴파일한다, wasm 제외).

@@ -237,6 +237,9 @@ pub const Block = struct {
     pre_continue_block: u32 = cy.NullId,
 
     /// Whether there is a break stmt in the body of the loop.
+    /// The `else |err|:` block of `for`: the iterator failed, so `continue` can not ask it again.
+    for_else: bool = false,
+
     loop_has_break: bool,
 
     /// Whether a local of an outer block can be moved here (`canMoveAcross`).

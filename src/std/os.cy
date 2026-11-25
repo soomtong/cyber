@@ -403,6 +403,33 @@ fn (&Process) read_line() -> !?str:
         return none
     return raw.out
 
+--| Returns the lines that the last stage writes to stdout, for `for`. An error of `read_line` ends the loop in
+--| the `else |err|:` block:
+--| ```cy
+--| for p.lines() |line|:
+--|     print(line)
+--| else |err|:
+--|     eprint('stopped: %{err}')
+--| ```
+fn (&Process) lines() -> ProcessLines:
+    return {id=self.id}
+
+--| The lines of a `Process`, for `for`. It reads from the `Process` it came from while that is alive.
+type ProcessLines:
+    -id int
+
+fn (&ProcessLines) iterator() -> int:
+    return 0
+
+fn (&ProcessLines) next(count &int) -> !?str:
+    raw := proc_op(self.id, 0)
+    if raw.fail != 0:
+        return cmd_error(raw.fail)
+    if raw.code == 0:
+        return none
+    count.* += 1
+    return raw.out
+
 --| Returns the rest of what the last stage writes to stdout, until its end.
 --| Returns `error.TimedOut` when the time limit passed, and `error.TooBig` when the rest is over 10 MiB.
 fn (&Process) read_all() -> !str:
@@ -433,10 +460,13 @@ fn (&Process) wait_code() -> !int:
 fn (&Process) kill():
     _ = self.op(3)
 
--- As `launch` does, the loop lets the VM stop when the host function returns `CmdFail.interrupted`.
 -fn (&Process) op(op int) -> CmdRaw:
+    return proc_op(self.id, op)
+
+-- As `launch` does, the loop lets the VM stop when the host function returns `CmdFail.interrupted`.
+-fn proc_op(id int, op int) -> CmdRaw:
     while:
-        raw := _proc_op(self.id, op)
+        raw := _proc_op(id, op)
         if raw.fail != 11:
             return raw
 

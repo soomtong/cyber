@@ -320,7 +320,7 @@ pub const TryStmt = struct {
     pos: u32,
 };
 
-const CatchStmt = struct {
+pub const CatchStmt = struct {
     errorVar: ?*Node align(8),
     stmts: []*Node,
     src: u32,
@@ -876,6 +876,8 @@ pub const ForIterStmt = struct {
     each: ?*Node,
     count: ?*Node,
     stmts: []const *Node,
+    /// `else |err|:` after the body, for an iterator whose `next` returns `!?T`.
+    else_stmt: ?*CatchStmt = null,
     pos: u32,
 };
 
@@ -1507,6 +1509,10 @@ pub const Node = struct {
             .floatLit       => self.cast(.floatLit).end(),
             .for_iter_stmt  => {
                 const stmt = self.cast(.for_iter_stmt);
+                if (stmt.else_stmt) |else_stmt| {
+                    const else_node: *Node = @ptrCast(else_stmt);
+                    return else_node.end();
+                }
                 return stmt.stmts[stmt.stmts.len-1].end();
             },
             .for_range_stmt => {

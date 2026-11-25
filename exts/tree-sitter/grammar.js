@@ -418,13 +418,15 @@ module.exports = grammar({
       ),
 
     for_statement: ($) =>
-      seq(
+      prec.right(seq(
         'for',
         field('iterable', $._expression),
         optional(field('capture', $.capture)),
         ':',
         field('body', $._suite),
-      ),
+        // The error of an iterator whose `next` returns `!?T`.
+        optional($.catch_clause),
+      )),
 
     // `|x|`, `|i, x|`, `|{a, b}|`
     capture: ($) => seq('|', commaSep1(choice($.identifier, $.discard, $.destructure, $.borrow_expression)), '|'),

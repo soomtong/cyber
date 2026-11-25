@@ -189,6 +189,22 @@ fn run_all() -> !void:
     t.eq('first', slow.read_line()!.?)
     t.eq(error.TimedOut, slow.read_line().unwrap_error())
     t.eq(error.TimedOut, slow.wait().unwrap_error())
+    -- lines(): for `for`, with the error in the `else` block.
+    var got []str = {}
+    listed := os.cmd({'printf', 'x\\ny\\n'}).start()!
+    for listed.lines() |line|:
+        got += line
+    else |err|:
+        got += 'error'
+    t.eq(2, got.len())
+    t.eq('y', got[1])
+    var stopped ?error = none
+    limited := os.cmd({'sh', '-c', 'echo first; sleep 5'}).timeout_ms(300).start()!
+    for limited.lines() |line|:
+        got += line
+    else |err|:
+        stopped = err
+    t.eq(error.TimedOut, stopped.?)
     t.eq(error.NotFound, os.cmd({'no-such-program-xyz'}).start().unwrap_error())
     t.eq(error.InvalidArgument, os.cmd({'echo'}).stdout_file('out.txt').start().unwrap_error())
     -- A value that goes away stops its programs.

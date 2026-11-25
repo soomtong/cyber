@@ -194,6 +194,41 @@ begin:
       (pass_statement))))
 
 ============================================================
+For with an else block
+============================================================
+
+for p.lines() |line|:
+    print(line)
+else |err|:
+    print(err)
+
+------------------------------------------------------------
+
+(source_file
+  (for_statement
+    (call_expression
+      (member_expression
+        (identifier)
+        (identifier))
+      (arguments))
+    (capture
+      (identifier))
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (arguments
+            (identifier)))))
+    (catch_clause
+      (identifier)
+      (block
+        (expression_statement
+          (call_expression
+            (identifier)
+            (arguments
+              (identifier))))))))
+
+============================================================
 Compile time statements
 ============================================================
 

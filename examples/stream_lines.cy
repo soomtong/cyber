@@ -15,18 +15,13 @@ while p.read_line()! |line|:
         break
 print('exit code after kill: %{p.wait_code()!}')
 
--- With a time limit, `read_line` returns `error.TimedOut` once it passes.
+-- `for` takes the lines too. Reading can fail, so the loop needs an `else` block for the error: here the time
+-- limit passes after about two lines.
 slow := ticker.timeout_ms(500).start()!
-n := 0
-while:
-    line := slow.read_line() !else |err|:
-        print('stopped after %{n} lines: %{err}')
-        break
-    if line |text|:
-        n += 1
-        print('got: %{text}')
-    else:
-        break
+for slow.lines() |i, line|:
+    print('got: %{line} (line %{i + 1})')
+else |err|:
+    print('stopped: %{err}')
 
 -- Lines from a pipeline with input text. `wait` succeeds when every program does.
 upper := os.cmd({'cat'}).stdin('alpha\nbeta\ngamma\n').pipe(os.cmd({'tr', 'a-z', 'A-Z'})).start()!

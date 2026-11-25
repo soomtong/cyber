@@ -1632,58 +1632,8 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
         },
         .unwrap_res_or_block => {
             const unwrap = node.cast(.unwrap_res_or_block);
-
-            var res = try c.sema_expr_cstr_template(unwrap.res, c.sema.result_tmpl);
-            const owned = res.owned;
-            const owner = try sema_borrow.joinBranchOwner(c, null, res);
-            res = try sema_move.semaEnsureAddressable(c, res, unwrap.res);
-
-            const payload_t = res.type.cast(.result).child_t;
-            const dst_local = try sema_local.declareHiddenLocal(c, "_temp", payload_t, null, node);
-
-            // NOTE: Prevent else block from releasing a uninited local.
-            c.varStack.items[dst_local.id].type = .dead;
-            const cond = try c.semaIsError(res, node);
-
-            // Push error branch.
-            _ = try sema_local.pushBlock(c, node);
-            {
-                if (unwrap.capture) |capture| {
-                    var err_name: []const u8 = undefined;
-                    if (capture.type() == .ident) {
-                        err_name = capture.cast(.ident).name.slice();
-                    } else {
-                        return c.reportErrorFmt("Unsupported error variable: {}", &.{v(capture.type())}, capture);
-                    }
-
-                    var capture_init = try sema_access.semaUnwrapResultErrorNoCheck(c, res, capture);
-                    capture_init = try sema_copy(c, capture_init, capture);
-                    _ = try sema_local.declareLocalInit(c, err_name, c.sema.error_t, capture_init, capture);
-                }
-                try sema_stmt.semaStmts(c, unwrap.else_stmts);
-                if (c.block().endReachable) {
-                    return sema_stmt.reportElseBlockEnd(c, .result, node);
-                }
-            }
-            const stmts = try sema_local.popBlock2(c, false);
-            _ = try c.ir.pushStmt(.if_block, node, .{
-                .cond_expr = cond.ir,
-                .body_head = stmts.first,
-            });
-
-            // Push result branch.
-            const unwrap_res = try sema_stmt.semaMoveOrCopyResultPayload(c, res, owned, node);
-            _ = try c.ir.pushStmt(.set_local, unwrap.res, .{
-                .id = @intCast(dst_local.ir_id),
-                .right = unwrap_res.ir,
-            });
-
-            c.varStack.items[dst_local.id].type = .local;
-            const ret = (try semaLocal(c, dst_local.id, node)).ir;
-            c.varStack.items[dst_local.id].type = .dead;
-            var unwrap_ret = sema.ExprResult.initOwned(ret);
-            unwrap_ret.data.value.parent_local = owner;
-            return unwrap_ret;
+            const res = try c.sema_expr_cstr_template(unwrap.res, c.sema.result_tmpl);
+            return semaUnwrapResElse(c, res, unwrap.res, unwrap.capture, unwrap.else_stmts, .must_not_end, node);
         },
         .unwrap_or => {
             const unwrap = node.cast(.unwrap_or);
@@ -3462,3 +3412,71 @@ fn semaExprTemplate(c: *cy.Chunk, node: *ast.Node, template: *cy.sym.Template, e
     }
     return res;
 }
+
+pub const ResElseEnd = enum {
+    /// `x !else |err|: block`: the block must not reach its end.
+    must_not_end,
+    /// The `else |err|:` of `for`: the end of the block leaves the loop.
+    break_loop,
+};
+
+/// Unwraps the result `res_init`, which comes from `res_n`. On an error, the error goes to `capture` and
+/// `else_stmts` run (`x !else |err|: block`, the `else |err|:` of `for`).
+pub fn semaUnwrapResElse(c: *cy.Chunk, res_init: sema.ExprResult, res_n: *ast.Node, capture_opt: ?*ast.Node, else_stmts: []const *ast.Node, end: ResElseEnd, node: *ast.Node) !sema.ExprResult {
+    var res = res_init;
+    const owned = res.owned;
+    const owner = try sema_borrow.joinBranchOwner(c, null, res);
+    res = try sema_move.semaEnsureAddressable(c, res, res_n);
+
+    const payload_t = res.type.cast(.result).child_t;
+    const dst_local = try sema_local.declareHiddenLocal(c, "_temp", payload_t, null, node);
+
+    // NOTE: Prevent else block from releasing a uninited local.
+    c.varStack.items[dst_local.id].type = .dead;
+    const cond = try c.semaIsError(res, node);
+
+    // Push error branch.
+    _ = try sema_local.pushBlock(c, node);
+    c.block().for_else = end == .break_loop;
+    {
+        if (capture_opt) |capture| {
+            var err_name: []const u8 = undefined;
+            if (capture.type() == .ident) {
+                err_name = capture.cast(.ident).name.slice();
+            } else {
+                return c.reportErrorFmt("Unsupported error variable: {}", &.{v(capture.type())}, capture);
+            }
+
+            var capture_init = try sema_access.semaUnwrapResultErrorNoCheck(c, res, capture);
+            capture_init = try sema_copy(c, capture_init, capture);
+            _ = try sema_local.declareLocalInit(c, err_name, c.sema.error_t, capture_init, capture);
+        }
+        try sema_stmt.semaStmts(c, else_stmts);
+        if (c.block().endReachable) {
+            switch (end) {
+                .must_not_end => return sema_stmt.reportElseBlockEnd(c, .result, node),
+                .break_loop => try sema_stmt.semaBreak(c, node),
+            }
+        }
+    }
+    const stmts = try sema_local.popBlock2(c, false);
+    _ = try c.ir.pushStmt(.if_block, node, .{
+        .cond_expr = cond.ir,
+        .body_head = stmts.first,
+    });
+
+    // Push result branch.
+    const unwrap_res = try sema_stmt.semaMoveOrCopyResultPayload(c, res, owned, node);
+    _ = try c.ir.pushStmt(.set_local, res_n, .{
+        .id = @intCast(dst_local.ir_id),
+        .right = unwrap_res.ir,
+    });
+
+    c.varStack.items[dst_local.id].type = .local;
+    const ret = (try semaLocal(c, dst_local.id, node)).ir;
+    c.varStack.items[dst_local.id].type = .dead;
+    var unwrap_ret = sema.ExprResult.initOwned(ret);
+    unwrap_ret.data.value.parent_local = owner;
+    return unwrap_ret;
+}
+

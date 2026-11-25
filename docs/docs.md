@@ -2389,6 +2389,16 @@ for arr |i, &val|:
 ```
 Iteration by borrow is required when the element type can not be copied. `Array` and `Slice` support it. A type supports it by declaring `next_borrow(idx &int) -> scope ?&T` next to `next`. The iterable is borrowed during the loop, so it can not be modified in the loop body.
 
+An iterator can fail. When `next` returns `!?T`, an error ends the loop and runs the `else` block after the body, with the error in its optional `|err|` capture. The block is required: the error is handled where the loop is written. An iterator that ends without an error skips it:
+```cy
+p := os.cmd({'tail', '-n', '20', 'app.log'}).start()!
+for p.lines() |line|:
+    print(line)
+else |err|:
+    print('stopped: %{err}')
+```
+Leaving out the `else` block is a compile error that names the type of `next`, and an `else` block after a loop whose `next` returns `?T` is a compile error too. `continue` in the `else` block is a compile error: the iterator failed and is not asked again. The block may reach its end, `break`, or `return`.
+
 A borrow of an iterable is iterated like the iterable. `for a.* |x|:` is the same loop:
 ```cy
 fn total(a &[]int) -> int:
@@ -5026,11 +5036,12 @@ code := p.wait_code()!
 |---|---|
 | `read_line() -> !?str` | returns the next line without its line break (`\n` or `\r\n`), or `none` at the end of the output. |
 | `read_all() -> !str` | returns the rest of the output. |
+| `lines() -> ProcessLines` | the lines for `for p.lines() \|line\|: ... else \|err\|: ...`. |
 | `wait() -> !void` | waits for the end, with the errors of `run`. Output that was not read is dropped. |
 | `wait_code() -> !int` | waits for the end and returns the exit code, like `code` of `run_status`. |
 | `kill()` | stops the programs that still run. `wait` then returns `error.ExitStatus`. |
 
-stderr is that of this process, and without `stdin` or `stdin_file` the first program reads an empty input. The time limit counts from `start`: once it passes, `read_line` and `wait` return `error.TimedOut`. A command whose stdout goes to a file can not be started this way (`error.InvalidArgument`). A `Process` is not copied. When it goes away before the command ended, its programs are stopped, also when the eval ends with a panic or an interrupt. To keep reading in a loop, use `while p.read_line()! |line|:`: a `for` loop does not take an iterator that can return an error.
+stderr is that of this process, and without `stdin` or `stdin_file` the first program reads an empty input. The time limit counts from `start`: once it passes, `read_line` and `wait` return `error.TimedOut`. A command whose stdout goes to a file can not be started this way (`error.InvalidArgument`). A `Process` is not copied. When it goes away before the command ended, its programs are stopped, also when the eval ends with a panic or an interrupt. `lines()` gives the lines for a `for` loop, whose `else |err|:` block handles an error such as `error.TimedOut`.
 
 The older `os.exec(args)` runs one program and returns its `ExecResult`. It panics when the program can not be started.
 

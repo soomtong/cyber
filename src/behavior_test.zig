@@ -918,6 +918,10 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/for_iter_unsupported_error.cy");
     run.case("control_flow/for_iter_borrow_unsupported_error.cy");
     run.case("control_flow/for_iter_borrowed_iterable.cy");
+    run.case("control_flow/for_iter_else.cy");
+    run.case("control_flow/for_iter_else_missing_error.cy");
+    run.case("control_flow/for_iter_else_not_failing_error.cy");
+    run.case("control_flow/for_iter_else_continue_error.cy");
     run.case("control_flow/for_iter_index_borrow_error.cy");
     run.case("meta/infer_param_dependent.cy");
     run.case("meta/infer_param_dependent_ct_error.cy");

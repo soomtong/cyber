@@ -101,7 +101,25 @@ code := p.wait_code()!
 - `wait`는 읽지 않은 stdout을 읽어 버린다(가득 찬 파이프에 단계가 멈추지 않게).
 - 값이 명령이 끝나기 전에 사라지면 프로그램들을 끝내고 회수한다. eval이 panic · 중단으로 끝나 `@deinit` 없이 쓸려도 같다.
 - `timeout_ms`는 `start`부터 센다. stdout을 파일로 보낸 명령의 `start`는 `error.InvalidArgument`.
-- `for`는 오류를 돌려줄 수 있는 반복자를 받지 않아 `lines()`는 없다. `while p.read_line()! |line|:`로 돈다.
+- `lines()`: `for p.lines() |line|: ... else |err|: ...`(아래 "실패할 수 있는 반복자").
 - 임베딩: `cl_vm_add_cleanup(vm, fn, ctx)` · `cl_vm_remove_cleanup(vm, id)`가 늘었다. 스크립트 값이 대신하는 호스트 자원을
   eval이 panic · 중단으로 끝날 때와 VM을 해제할 때 정리한다.
+
+## `for`: 실패할 수 있는 반복자와 `else |err|:` 블록
+
+반복자의 `next`가 `!?T`를 돌려주면 `for`가 받는다. 오류가 나면 반복이 끝나고 본문 뒤의 `else` 블록이 돈다(`|err|`는 생략 가능).
+결정 `docs/decisions/project_for_fallible_iter.md`.
+
+~~~cy
+for p.lines() |line|:
+    print(line)
+else |err|:
+    print('stopped: %{err}')
+~~~
+
+- `else` 블록은 필수다. 빠지면 'The iterator can fail: `next` returns `!?str`. Handle its error with an `else |err|:` block after the
+  body of `for`.' 컴파일 오류다. 전에는 'Expected `Option` type.'이었다.
+- `next`가 `?T`인 반복 뒤의 `else` 블록은 'An `else` block of `for` handles the error of an iterator that can fail, ...' 오류다.
+- `else` 블록 안의 `continue`는 'continue can not go on with an iterator that failed. ...' 오류다(실패한 반복자를 다시 부르지
+  않는다). 블록은 끝에 닿아도 되고(반복 뒤로 간다), `break` · `return`도 된다.
 

@@ -249,8 +249,9 @@ API 꼴은 사용자가 따로 고르지 않아 아래 비교로 정했다. 바�
    끝까지 읽은 뒤에도 감시가 단계를 멈췄으면 `none` 대신 `error.TimedOut`이다(잘린 출력을 끝으로 읽지 않게).
 6. stdin은 `stdin` · `stdin_file` 아니면 빈 입력, stderr는 이 프로세스의 것(`read`와 같음). stdout을 파일로 보낸 명령의 `start`는
    `error.InvalidArgument`.
-7. `for p.lines()`는 넣지 않았다. `for`의 반복자 `next`가 `!?T`를 돌려주면 'Expected `Option` type.' 컴파일 오류다. 반복자가
-   오류를 삼키면 실패한 명령이 조용히 끝난 것처럼 보인다.
+7. `for p.lines()`는 처음에 넣지 않았다. `for`의 반복자 `next`가 `!?T`를 돌려주면 'Expected `Option` type.' 컴파일 오류였다.
+   같은 날 `for`의 `else |err|:` 블록을 넣고(`project_for_fallible_iter.md`) `lines()`를 더했다. `ProcessLines`는 id만 담아
+   `Process`가 사라진 뒤에는 `error.InvalidArgument`다.
 
 ### 구현
 

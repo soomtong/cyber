@@ -2090,6 +2090,43 @@ pub const Parser = struct {
         return switch_n;
     }
 
+    /// The `else |err|:` block after the body of `for`, at the indent of `for`. It handles the error that the
+    /// `next` of the iterator returns (`!?T`). The capture is optional, as for `try:`.
+    fn parseForElse(self: *Parser) !?*ast.CatchStmt {
+        const save = self.next_pos;
+        const indent = try self.consumeFirstIndent();
+        if (indent != self.cur_indent or self.peek().tag() != .else_k) {
+            self.next_pos = save;
+            return null;
+        }
+        const else_start = self.next_pos;
+        self.advance();
+        var error_var: ?*ast.Node = null;
+        if (self.peek().tag() == .vert_bar) {
+            self.advance();
+            if (self.peek().tag() != .ident) {
+                return self.reportError("Expected error variable.", &.{});
+            }
+            error_var = @ptrCast(try self.newIdentNode(self.next_pos));
+            self.advance();
+            if (self.peek().tag() != .vert_bar) {
+                return self.reportError("Expected vertical bar.", &.{});
+            }
+            self.advance();
+        }
+        if (self.peek().tag() != .colon) {
+            return self.reportError("Expected `:` after the `else` of `for`. Write `else |err|:`.", &.{});
+        }
+        self.advance();
+        const else_stmts = try self.parseSingleOrIndentedBodyStmts();
+        return try self.ast.newNode(.catchStmt, .{
+            .errorVar = error_var,
+            .stmts = else_stmts,
+            .src = self.ast.src_id,
+            .pos = self.tokenPos(else_start),
+        });
+    }
+
     fn parseTryStmt(self: *Parser) !*ast.TryStmt {
         const start = self.next_pos;
         // Assumes first tokens are `try` and `:`.
@@ -2859,13 +2896,15 @@ pub const Parser = struct {
         }
 
         const stmts = try self.parseSingleOrIndentedBodyStmts();
+        const else_stmt = try self.parseForElse();
         var res = try self.ast.newNodeErase(.for_iter_stmt, .{
             .iterable = expr,
             .each = each,
             .count = count,
             .stmts = stmts,
+            .else_stmt = else_stmt,
             .pos = self.tokenPos(start),
-        }); 
+        });
         if (ct) {
             res = try self.ast.newNodeErase(.ct_stmt, .{
                 .child = res,

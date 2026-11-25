@@ -491,7 +491,20 @@ fn semaStmt2(c: *cy.Chunk, node: *ast.Node) !void {
                         sema_func.Argument.initReceiver(iterable_n, iterable),
                         sema_func.Argument.initPreResolved(iterable_n, iterator_borrow),
                     };
-                    const next = try c.semaCallFuncSymRec2(func_sym, &args, iterable_n);
+                    var next = try c.semaCallFuncSymRec2(func_sym, &args, iterable_n);
+                    if (next.type.kind() == .result and next.type.cast(.result).child_t.kind() == .option) {
+                        // `next` returns `!?T`: an error ends the loop in the `else |err|:` block.
+                        const else_stmt = stmt.else_stmt orelse {
+                            const type_name = try c.sema.allocTypeName(next.type);
+                            defer c.alloc.free(type_name);
+                            return c.reportErrorFmt("The iterator can fail: `{}` returns `{}`. Handle its error with an `else |err|:` block after the body of `for`.", &.{v(next_name), v(type_name)}, iterable_n);
+                        };
+                        next = try sema_expr.semaUnwrapResElse(c, next, iterable_n, else_stmt.errorVar, else_stmt.stmts, .break_loop, @ptrCast(else_stmt));
+                    } else if (stmt.else_stmt) |else_stmt| {
+                        const type_name = try c.sema.allocTypeName(next.type);
+                        defer c.alloc.free(type_name);
+                        return c.reportErrorFmt("An `else` block of `for` handles the error of an iterator that can fail, and `{}` returns `{}`. Remove the `else` block.", &.{v(next_name), v(type_name)}, @ptrCast(else_stmt));
+                    }
                     if (each_n != null and stmt.each.?.type() != .borrow and next.type.kind() == .option) {
                         // `for a |r|` copies each element (`next` of `Array` does). The capture of an `if` or
                         // `while` unwrap would take a `NoCopy` payload, and the error would come from `next`.
@@ -904,7 +917,7 @@ fn semaMovedBreak(c: *cy.Chunk, idx: usize, node: *ast.Node) !bool {
     return true;
 }
 
-fn semaBreak(c: *cy.Chunk, node: *ast.Node) !void {
+pub fn semaBreak(c: *cy.Chunk, node: *ast.Node) !void {
     const start = c.proc().block_start;
     const idx = c.loopBlock(start) orelse {
         return c.reportError("Expected parent loop block.", node);
@@ -933,6 +946,11 @@ fn semaContinue(c: *cy.Chunk, node: *ast.Node) !void {
     const idx = c.loopBlock(start) orelse {
         return c.reportError("Expected parent loop block.", node);
     };
+    for (c.semaBlocks.items[idx..]) |b| {
+        if (b.for_else) {
+            return c.reportError("`continue` can not go on with an iterator that failed. The `else` block of `for` ends the loop: leave out `continue`.", node);
+        }
+    }
     try sema_assign.checkAssignMoveJump(c, idx, node);
     try checkLoopMoves(c, idx, node);
     const b = &c.semaBlocks.items[idx];

@@ -1399,10 +1399,18 @@
     {"module": "os", "name": "Process", "syntax": "Process", "kind": "struct", "doc": "A command that runs: what `Cmd.start` returns. Its stdout is read with `read_line` or `read_all`, and `wait` or `wait_code` waits for its end. When the value goes away before the command ended, its programs are stopped. Also when the eval ends with a panic, and when the host asks the VM to stop (`cl_vm_interrupt`).",
       "methods": [
         {"name": "read_line", "recv": "&Process", "sig": "read_line() -> !?str", "doc": "Returns the next line that the last stage wrote to stdout, without its line break (`\\n` or `\\r\\n`), or `none` when the output ended. Waits until a whole line or the end comes. Returns `error.TimedOut` when the time limit passed, and `error.TooBig` for a line over 10 MiB."},
+        {"name": "lines", "recv": "&Process", "sig": "lines() -> ProcessLines", "doc": "Returns the lines that the last stage writes to stdout, for `for`. An error of `read_line` ends the loop in the `else |err|:` block: ```cy for p.lines() |line|: print(line) else |err|: eprint('stopped: %{err}') ```"},
         {"name": "read_all", "recv": "&Process", "sig": "read_all() -> !str", "doc": "Returns the rest of what the last stage writes to stdout, until its end. Returns `error.TimedOut` when the time limit passed, and `error.TooBig` when the rest is over 10 MiB."},
         {"name": "wait", "recv": "&Process", "sig": "wait() -> !void", "doc": "Waits for the command to end. stdout that was not read is read and dropped, so that a program does not wait for room in a full pipe. Returns `error.ExitStatus` when a stage ends with an exit code other than 0 or is stopped by a signal (also by `kill`), and `error.TimedOut` when the time limit passed. Waiting again returns the same."},
         {"name": "wait_code", "recv": "&Process", "sig": "wait_code() -> !int", "doc": "Like `wait`, but returns the exit code instead of `error.ExitStatus`: 0 when every stage succeeded, otherwise that of the last stage that failed, and 128 plus the signal number for a stage that a signal stopped."},
         {"name": "kill", "recv": "&Process", "sig": "kill()", "doc": "Stops the programs that still run (`SIGKILL`, `TerminateProcess`). Does nothing after they ended. `read_line` then returns what they wrote before, and `wait` returns `error.ExitStatus`."}
+      ],
+      "funcs": [],
+      "aliases": {"splitlines": "lines"}},
+    {"module": "os", "name": "ProcessLines", "syntax": "ProcessLines", "kind": "struct", "doc": "The lines of a `Process`, for `for`. It reads from the `Process` it came from while that is alive.",
+      "methods": [
+        {"name": "iterator", "recv": "&ProcessLines", "sig": "iterator() -> int"},
+        {"name": "next", "recv": "&ProcessLines", "sig": "next(count &int) -> !?str"}
       ],
       "funcs": [],
       "aliases": {}},

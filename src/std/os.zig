@@ -31,10 +31,11 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"stderr",         zErrFunc(stderr)},
     .{"stdin",          zErrFunc(stdin)},
     .{"stdout",         zErrFunc(stdout)},
-    .{"_exec",          zErrFunc(exec)},
     .{"_cmd_run",       zErrFunc(cmdRun)},
     .{"_proc_op",       zErrFunc(procOp)},
     .{"_proc_free",     zErrFunc(procFree)},
+    .{"_fd_guard",      zErrFunc(fdGuard)},
+    .{"_fd_unguard",    zErrFunc(fdUnguard)},
     .{"_args",          zErrFunc(_args)},
 };
 
@@ -167,60 +168,6 @@ pub fn allocCacheUrl(vm: *C.VM, url: []const u8) ![]const u8 {
         defer entry.deinit(alloc);
         return cache.allocSpecFilePath(alloc, entry);
     }
-}
-
-const ExecResult = extern struct {
-    out: C.str,
-    err: C.str,
-    code: i64,
-};
-
-pub fn exec(t: *C.Thread) anyerror!C.Ret {
-    if (is_wasm) return C.thread_ret_panic(t, "Unsupported.");
-
-    const alloc = C.thread_allocator(t);
-
-    const ret = C.thread_ret(t, ExecResult);
-    // `[&]str` span: borrowed, so nothing is released here. A `[]str` param would be owned by
-    // this host function and leak unless it ran the slice destructor.
-    const ArgsSpan = extern struct { ptr: [*]const C.str, len: u64 };
-    const args_span = C.thread_param(t, ArgsSpan);
-    const args = args_span.ptr[0..@intCast(args_span.len)];
-    var buf: std.ArrayList([]const u8) = .empty;
-    defer {
-        buf.deinit(alloc);
-    }
-    for (args) |arg| {
-        try buf.append(alloc, C.str_bytes(arg));
-    }
-
-    var env_map: ?std.process.Environ.Map = if (inherits_current_env) null else try currentEnvMap(alloc);
-    defer if (env_map) |*map| map.deinit();
-
-    const res = try std.process.run(alloc, stdx.io(), .{
-        .argv = buf.items,
-        .environ_map = if (env_map) |*map| map else null,
-        .stdout_limit = .limited(1024 * 1024 * 10),
-        .stderr_limit = .limited(1024 * 1024 * 10),
-    });
-
-    defer alloc.free(res.stdout);
-    var out = C.str_init(t, res.stdout);
-    errdefer t.heap.destructStr(&out);
-    defer alloc.free(res.stderr);
-    var err = C.str_init(t, res.stderr);
-    errdefer t.heap.destructStr(&err);
-    var code: i64 = -1;
-    if (res.term == .exited) {
-        code = @intCast(res.term.exited);
-    }
-
-    ret.* = .{
-        .out = out,
-        .err = err,
-        .code = code,
-    };
-    return C.RetOk;
 }
 
 /// Whether a child that is given no environment gets the environment of this process as it is now.
@@ -1107,6 +1054,36 @@ fn procFail(t: *C.Thread, ret: *CmdRaw, err: anyerror) anyerror!C.Ret {
     if (err == error.OutOfMemory) return err;
     ret.* = .{ .out = C.str_init(t, ""), .err = C.str_init(t, ""), .code = 0, .fail = @intFromEnum(cmdFail(err)) };
     return C.RetOk;
+}
+
+/// `fn _fd_guard(fd int) -> int`. A `File` or a `Dir` that a panic, an interrupt or the end of the VM sweeps
+/// without its `@deinit` would keep its handle open until the process ends. The cleanup closes it.
+pub fn fdGuard(t: *C.Thread) anyerror!C.Ret {
+    const ret = C.thread_ret(t, i64);
+    const fd = C.thread_int(t);
+    ret.* = 0;
+    if (is_wasm or fd < 0) return C.RetOk;
+    // +1 so that the handle 0 is not a null context.
+    const id = C.vm_add_cleanup(C.thread_vm(t), fdCleanup, @ptrFromInt(@as(usize, @intCast(fd)) + 1));
+    ret.* = @bitCast(id);
+    return C.RetOk;
+}
+
+/// `fn _fd_unguard(id int)`. The handle is closed as usual.
+pub fn fdUnguard(t: *C.Thread) anyerror!C.Ret {
+    _ = C.thread_ret(t, void);
+    const id = C.thread_int(t);
+    C.vm_remove_cleanup(C.thread_vm(t), @bitCast(id));
+    return C.RetOk;
+}
+
+fn fdCleanup(ctx: ?*anyopaque) callconv(.c) void {
+    const handle = @intFromPtr(ctx) - 1;
+    if (builtin.os.tag == .windows) {
+        _ = std.os.windows.ntdll.NtClose(@ptrFromInt(handle));
+    } else if (!is_wasm) {
+        _ = std.posix.system.close(@intCast(handle));
+    }
 }
 
 /// `fn _proc_free(id int)`. The `@deinit` of a `Process`: stops what still runs and frees the command.

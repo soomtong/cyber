@@ -520,8 +520,11 @@ pub const VM = struct {
         const cleanups = self.getData(*Cleanups, "cleanups");
         cleanups.lock();
         defer cleanups.unlock();
-        for (cleanups.list.items, 0..) |cleanup, i| {
-            if (cleanup.id == id) {
+        // From the newest: a file is usually closed before the ones opened earlier.
+        var i = cleanups.list.items.len;
+        while (i > 0) {
+            i -= 1;
+            if (cleanups.list.items[i].id == id) {
                 _ = cleanups.list.orderedRemove(i);
                 return;
             }

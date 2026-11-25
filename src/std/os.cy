@@ -121,7 +121,9 @@ fn create_file(path str) -> !File:
 --| Creates and opens the file at `path`. If `truncate` is true, an existing file will be truncated.
 fn create_file(path str, truncate bool) -> !File:
     #if meta.system() == .windows:
-        return windows.create_file(path, truncate)
+        file := windows.create_file(path, truncate)!
+        file.guard = _fd_guard(as[int] file.fd)
+        return file
     #else:
         flags := lc.O_WRONLY || lc.O_CREAT || lc.O_CLOEXEC
         if truncate:
@@ -130,7 +132,7 @@ fn create_file(path str, truncate bool) -> !File:
         fd := lc.open(cpath.ptr, flags, lc.DefaultFileMode)
         if fd == -1:
             return last_error()
-        return {fd=fd}
+        return {fd=fd, guard=_fd_guard(as[int] fd)}
 
 --| Returns the current working directory.
 fn cwd() -> !str:
@@ -152,13 +154,15 @@ fn chdir(path str) -> !void:
             return last_error()
 
 --| Runs the program `args[0]` with the rest of `args` as its arguments and returns its stdout, stderr and exit code.
---| There is no shell: an argument is passed as it is. A program that can not be started is a panic.
---| `cmd` does the same with errors as values, and with pipes, a working directory, environment variables and input.
+--| There is no shell: an argument is passed as it is. stdin is empty, and `code` is 128 plus the signal number for
+--| a program that a signal stopped. A program that can not be started is a panic (`error.NotFound` and the like).
+--| It is `os.cmd(args).run_status()` with a panic for an error. `cmd` gives the errors as values, and pipes, a
+--| working directory, environment variables, input and a time limit.
 fn exec(args AsSpan[str]) -> ExecResult:
-    return _exec(args.span())
-
--- Takes a borrowed span so the caller keeps owning the strings.
-#[bind] fn _exec(args [&]str) -> ExecResult
+    raw := cmd(args).launch(2)
+    if raw.fail != 0:
+        panic('%{cmd_error(raw.fail)}')
+    return {out=raw.out, err=raw.err, code=raw.code}
 
 --| The outcome of a program or a pipeline: what it wrote to stdout and stderr, and its exit code.
 --| From `Cmd.run_status`, `code` is 0 when every stage succeeded.
@@ -474,6 +478,12 @@ fn (&Process) kill():
 
 #[bind] -fn _proc_free(id int)
 
+-- Registers a cleanup that closes the handle `fd` when the value that holds it is swept without `@deinit`.
+-- Returns its id, or 0 when there is none.
+#[bind] -fn _fd_guard(fd int) -> int
+
+#[bind] -fn _fd_unguard(id int)
+
 -type CmdRaw:
     out  str
     err  str
@@ -706,7 +716,7 @@ fn open_dir(path str, iterable bool) -> !Dir:
         fd := lc.open(cpath.ptr, lc.O_RDONLY || lc.O_DIRECTORY || lc.O_CLOEXEC, lc.mode_t(0))
         if fd == -1:
             return last_error()
-        return {fd=fd}
+        return {fd=fd, guard=_fd_guard(as[int] fd)}
 
 --| Returns the current time in nanoseconds since the Epoch.
 fn nano_time() -> !int:
@@ -769,7 +779,9 @@ fn open_file(path str) -> !File:
 --| Opens a file at the given `path` with an `OpenMode`.
 fn open_file(path str, mode OpenMode) -> !File:
     #if meta.system() == .windows:
-        return windows.open_file(path, mode)
+        file := windows.open_file(path, mode)!
+        file.guard = _fd_guard(as[int] file.fd)
+        return file
     #else:
         pathz := str.initz(path)
         access := switch mode:
@@ -779,7 +791,7 @@ fn open_file(path str, mode OpenMode) -> !File:
         fd := lc.open(pathz.ptr, access || lc.O_CLOEXEC, lc.mode_t(0))
         if fd == -1:
             return last_error()
-        return {fd=fd}
+        return {fd=fd, guard=_fd_guard(as[int] fd)}
 
 --| Returns a result that can be used to query args. 
 --| `opts`: The name of options to match excluding the hyphen prefix. eg. `-path`
@@ -886,7 +898,9 @@ fn resolve_path(path str) -> !str:
                 return last_error()
             return c.from_strz(*buf[0])
         #else meta.system() == .linux:
-            proc_path := str.initz('/proc/self/fd/%{fd}')
+            -- Closed when it goes away, as on macOS.
+            file := File{fd=fd}
+            proc_path := str.initz('/proc/self/fd/%{file.fd}')
             len := lc.readlink(proc_path.ptr, *buf[0], lc.PATH_MAX)
             if len < 0:
                 return last_error()
@@ -986,6 +1000,9 @@ type File:
     with NoCopy
     fd     FileHandle
     closed bool = false
+    -- The id of the cleanup that closes `fd` when the value is swept without `@deinit` (a panic, an interrupt or
+    -- the end of the VM). 0 for none: the standard streams and a handle that the caller gave.
+    -guard int = 0
 
 fn (&File) @deinit():
     self.close()
@@ -994,6 +1011,9 @@ fn (&File) @deinit():
 fn (&File) close() -> void:
     if self.closed:
         return
+    if self.guard != 0:
+        _fd_unguard(self.guard)
+        self.guard = 0
 
     #if meta.system() == .windows:
         if kernel32.CloseHandle(self.fd) == windows.FALSE:
@@ -1171,6 +1191,8 @@ type Dir:
     with NoCopy
     fd     FileHandle
     closed bool = false
+    -- As for `File`.
+    -guard int = 0
     path str = '' -- TODO: Required by AI DirIterator implementation. Replace with NtQueryDirectoryFile.
 
 fn (&Dir) @deinit():
@@ -1179,6 +1201,9 @@ fn (&Dir) @deinit():
 fn (&Dir) close():
     if self.closed:
         return
+    if self.guard != 0:
+        _fd_unguard(self.guard)
+        self.guard = 0
 
     #if meta.system() == .windows:
         -- Windows Dir doesn't use fd directly, iterator handles are closed separately

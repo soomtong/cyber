@@ -674,12 +674,59 @@ test "cl_vm_interrupt stops a running os.cmd and its programs." {
         try zt.eq(error.ProcessNotFound, std.posix.kill(pid, @enumFromInt(0)));
     }
 
+    // `os.exec` too.
+    S.done.store(false, .release);
+    const thread3 = try std.Thread.spawn(.{}, S.interrupter, .{vm});
+    const code3 = C.vm_evalx(vm, "./src/test/main.cy",
+        \\use os
+        \\_ = os.exec({'sleep', '30'})
+        \\panic('not stopped')
+    , config, &res);
+    S.done.store(true, .release);
+    thread3.join();
+    try zt.eq(C.ErrorInterrupt, code3);
+    try zt.eq(true, start.untilNow(stdx.io()).raw.toMilliseconds() < 20000);
+
     // The next eval runs a command as usual.
     try zt.eq(C.Success, C.vm_evalx(vm, "./src/test/main.cy",
         \\use os
         \\use t 'test'
         \\t.eq('ok\n', os.cmd({'echo', 'ok'}).read()!)
     , config, &res));
+}
+
+test "A file that a panic sweeps is closed." {
+    if (is_wasm or builtin.os.tag == .windows) return;
+    const vm = C.vm_initx(zt.alloc);
+    defer C.vm_deinit(vm);
+    try init_cli(vm, zt.alloc);
+    defer deinit_cli(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    // The behavior test runs this test in its shards at the same time: the file is named by the process.
+    const fd_path = try std.fmt.allocPrint(zt.alloc, "src/test/assets/file_fd_{}.txt", .{std.c.getpid()});
+    defer zt.alloc.free(fd_path);
+    const src = try std.fmt.allocPrint(zt.alloc,
+        \\use os
+        \\f := os.open_file('README.md')!
+        \\d := os.open_dir('src')!
+        \\os.write_file('{s}', '%{{f.fd}} %{{d.fd}}')!
+        \\panic('boom')
+    , .{fd_path});
+    defer zt.alloc.free(src);
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.ErrorPanic, C.vm_evalx(vm, "./src/test/main.cy", src, C.defaultEvalConfig(), &res));
+
+    const text = try std.Io.Dir.cwd().readFileAlloc(stdx.io(), fd_path, zt.alloc, .limited(64));
+    defer zt.alloc.free(text);
+    std.Io.Dir.cwd().deleteFile(stdx.io(), fd_path) catch {};
+    var it = std.mem.tokenizeScalar(u8, std.mem.trim(u8, text, " \n"), ' ');
+    while (it.next()) |word| {
+        const fd = try std.fmt.parseInt(std.c.fd_t, word, 10);
+        // `F_GETFD` fails with `EBADF` for a descriptor that is not open.
+        try zt.eq(-1, std.c.fcntl(fd, std.c.F.GETFD));
+    }
 }
 
 test "Stack traces." {

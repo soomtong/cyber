@@ -5043,7 +5043,7 @@ code := p.wait_code()!
 
 stderr is that of this process, and without `stdin` or `stdin_file` the first program reads an empty input. The time limit counts from `start`: once it passes, `read_line` and `wait` return `error.TimedOut`. A command whose stdout goes to a file can not be started this way (`error.InvalidArgument`). A `Process` is not copied. When it goes away before the command ended, its programs are stopped, also when the eval ends with a panic or an interrupt. `lines()` gives the lines for a `for` loop, whose `else |err|:` block handles an error such as `error.TimedOut`.
 
-The older `os.exec(args)` runs one program and returns its `ExecResult`. It panics when the program can not be started.
+The older `os.exec(args)` runs one program and returns its `ExecResult`, like `os.cmd(args).run_status()`. It panics when the program can not be started.
 
 ### JSON and TOON.
 The `json` module parses and writes JSON (RFC 8259). The `toon` module encodes and decodes [TOON](https://github.com/toon-format/spec) (spec v4.4), a line-based form of the same data that takes fewer tokens in an LLM prompt. Both use `json.Value`:

@@ -74,6 +74,9 @@ if res.code != 0:
 10. 잡은 출력은 UTF-8을 검증하지 않고 `str`로 돌려준다(`os.exec` · `str(bytes)`와 같다, `project_str_from_utf8.md`).
 11. `os.exec`는 그대로 둔다. 반환 타입(`ExecResult`, 결과가 아님)과 시작 실패가 panic인 것을 바꾸면 기존 스크립트가 깨진다.
     문서 주석의 "Runs a shell command"는 사실과 달라 고쳤다. 새 코드는 `os.cmd`를 쓴다.
+    2026-11-25: 반환 타입과 panic은 그대로 두고 구현을 `os.cmd(args).launch(2)`(`run_status`)로 옮겼다(사용자: "4번"). 이제
+    `cl_vm_interrupt`가 닿는다. 달라진 것 둘(깨지는 변경): 신호로 끝난 프로그램의 `code`가 -1에서 128 + 신호 번호로, 시작 실패의
+    panic 문구가 Zig 오류 이름(`FileNotFound`)에서 OS 오류 표준 이름(`error.NotFound`)으로. 호스트 함수 `_exec`를 지웠다.
 
 ### 가져오지 않은 것
 
@@ -271,6 +274,9 @@ API 꼴은 사용자가 따로 고르지 않아 아래 비교로 정했다. 바�
   - 목록은 `VM` 필드가 아니라 `VM.data`의 "cleanups"에 둔다. `VM`에 필드를 더하면 `vm.h`가 빌드마다 패딩으로 맞추는 `VM.c`의
     오프셋이 바뀌어 빌드가 실패한다(`ZVM padding`).
   - 잠금은 spin이다. 호스트 함수가 어느 스레드에서든 부를 수 있고, wasm에서도 쓴다.
+  - 같은 길을 `os.File` · `os.Dir`도 쓴다(2026-11-25, F-210): `open_file` · `create_file` · `open_dir`가 `_fd_guard`로 핸들을
+    닫는 정리를 등록하고 `close`가 지운다. 값의 `-guard` 필드에 id를 둔다. 표준 스트림은 등록하지 않는다. 지우기는 목록의 새것부터
+    찾는다(보통 나중에 연 파일을 먼저 닫는다).
   - spawn한 스레드의 panic에서는 부르지 않는다. 그 값은 main의 다음 스윕이나 VM 해제 때 정리된다. 감시 스레드는 중단 요청에는
     바로 단계들을 끝낸다.
 

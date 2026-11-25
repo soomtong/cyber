@@ -123,3 +123,20 @@ else |err|:
 - `else` 블록 안의 `continue`는 'continue can not go on with an iterator that failed. ...' 오류다(실패한 반복자를 다시 부르지
   않는다). 블록은 끝에 닿아도 되고(반복 뒤로 간다), `break` · `return`도 된다.
 
+## panic · 중단으로 쓸린 `os.File` · `os.Dir`가 핸들을 닫는다 (F-210)
+
+eval이 panic · 중단으로 끝나면 지역의 `@deinit`이 돌지 않아, 열린 파일과 디렉터리의 핸들이 프로세스가 끝날 때까지 남았다.
+`persist_main` 세션이나 임베딩 호스트에서는 eval마다 쌓였다. 이제 `open_file` · `create_file` · `open_dir`가 연 핸들은
+`cl_vm_add_cleanup`으로 그때 닫힌다(VM 해제 때도). 표준 스트림(`os.stdin()` 등)은 닫지 않는다. 열고 닫기 2만 번에서 시간 차이는
+잡음 수준(+0.4%)이었다.
+
+함께 고친 것(F-209): Linux의 `os.resolve_path`가 경로를 풀려고 연 fd를 닫지 않았다(macOS 갈래는 닫았다).
+
+## `os.exec`를 멈출 수 있다 (깨지는 변경 둘)
+
+`os.exec`가 `os.cmd(args).run_status()` 위에서 돈다. `cl_vm_interrupt`가 실행 중인 프로그램을 끝내고 VM을 멈춘다(전에는 프로그램이
+끝날 때까지 기다렸다). 반환 타입과 시작 실패의 panic은 그대로다.
+
+- 신호로 끝난 프로그램의 `code`가 -1에서 128 + 신호 번호다(`kill -9`는 137). `run_status`와 같다.
+- 시작하지 못한 프로그램의 panic 문구가 'FileNotFound'에서 'error.NotFound'다(OS 오류 표준 이름).
+

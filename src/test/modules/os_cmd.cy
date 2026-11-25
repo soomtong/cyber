@@ -26,6 +26,9 @@ fn run_all() -> !void:
     t.eq('yes\n', os.cmd({'sh', '-c', 'echo $CY_CMD_SET'}).read()!)
     t.eq('yes\n', os.cmd({'sh', '-c', 'echo $CY_CMD_SET'}).env('CY_A', '1').read()!)
     t.eq('yes\n', os.exec({'sh', '-c', 'echo $CY_CMD_SET'}).out)
+    -- exec() is `run_status` with a panic for an error: a signal is 128 plus its number, stdin is empty.
+    t.eq(137, os.exec({'sh', '-c', 'kill -9 $$'}).code)
+    t.eq('', os.exec({'cat'}).out)
     os.unset_env('CY_CMD_SET')!
 
     -- stdin()

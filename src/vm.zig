@@ -39,6 +39,31 @@ const VMC = extern struct {
     types_len: usize,
 };
 
+/// Cleanups that hosts registered with `cl_vm_add_cleanup`. They run when the main thread's heap is swept (a panic or
+/// an interrupt of the eval) and when the VM is deinited. Kept in `VM.data` ("cleanups"): a field of `VM` would move
+/// `VM.c`, whose offset `vm.h` mirrors. A host function on any thread of the VM may add or remove one.
+pub const Cleanups = struct {
+    list: std.ArrayList(Cleanup) = .empty,
+    locked: std.atomic.Value(bool) = .init(false),
+    next_id: u64 = 1,
+
+    pub const Cleanup = struct {
+        id: u64,
+        func: C.CleanupFn,
+        ctx: ?*anyopaque,
+    };
+
+    fn lock(self: *Cleanups) void {
+        while (self.locked.cmpxchgWeak(false, true, .acquire, .monotonic) != null) {
+            std.atomic.spinLoopHint();
+        }
+    }
+
+    fn unlock(self: *Cleanups) void {
+        self.locked.store(false, .release);
+    }
+};
+
 pub const VM = struct {
     c: VMC,
 
@@ -193,6 +218,9 @@ pub const VM = struct {
 
         const data = try self.alloc.create(cy.core.BuiltinsData);
         try self.data.put(self.alloc, "builtins", data);
+        const cleanups = try self.alloc.create(Cleanups);
+        cleanups.* = .{};
+        try self.data.put(self.alloc, "cleanups", cleanups);
 
         try @call(.never_inline, cy.bindings.bindCore, .{self});
     }
@@ -213,6 +241,8 @@ pub const VM = struct {
         // A future that was never awaited can leave a spawned thread running or queued. Stop it before
         // the worker threads are joined.
         self.stopSpawnedThreads();
+        // Before the sweep below frees the values that the cleanups stand in for.
+        self.runCleanups();
         // A done thread keeps its result until its future is awaited or destructed. Free the ones whose
         // future was neither, while their drop functions still exist.
         if (comptime build_config.threads) {
@@ -233,6 +263,10 @@ pub const VM = struct {
             const data = self.getData(*cy.core.BuiltinsData, "builtins");
             self.alloc.destroy(data);
             _ = self.data.remove("builtins");
+            const cleanups = self.getData(*Cleanups, "cleanups");
+            cleanups.list.deinit(self.alloc);
+            self.alloc.destroy(cleanups);
+            _ = self.data.remove("cleanups");
         }
 
         if (!reset) {
@@ -470,6 +504,40 @@ pub const VM = struct {
             self.alloc.free(msg);
         }
         self.alloc.destroy(state);
+    }
+
+    pub fn addCleanup(self: *VM, func: C.CleanupFn, ctx: ?*anyopaque) !u64 {
+        const cleanups = self.getData(*Cleanups, "cleanups");
+        cleanups.lock();
+        defer cleanups.unlock();
+        const id = cleanups.next_id;
+        try cleanups.list.append(self.alloc, .{ .id = id, .func = func, .ctx = ctx });
+        cleanups.next_id += 1;
+        return id;
+    }
+
+    pub fn removeCleanup(self: *VM, id: u64) void {
+        const cleanups = self.getData(*Cleanups, "cleanups");
+        cleanups.lock();
+        defer cleanups.unlock();
+        for (cleanups.list.items, 0..) |cleanup, i| {
+            if (cleanup.id == id) {
+                _ = cleanups.list.orderedRemove(i);
+                return;
+            }
+        }
+    }
+
+    /// Runs the registered cleanups, newest first, and forgets them. A cleanup may add or remove others.
+    pub fn runCleanups(self: *VM) void {
+        const cleanups = self.getData(*Cleanups, "cleanups");
+        while (true) {
+            cleanups.lock();
+            const cleanup = cleanups.list.pop();
+            cleanups.unlock();
+            const c = cleanup orelse break;
+            if (c.func) |func| func(c.ctx);
+        }
     }
 
     pub fn stopSpawnedThreads(self: *VM) void {

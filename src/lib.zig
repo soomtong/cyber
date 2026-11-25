@@ -98,6 +98,14 @@ export fn cl_thread_interrupted(t: *cy.Thread) bool {
     return @atomicLoad(u8, t.c.interrupt, .acquire) != 0;
 }
 
+export fn cl_vm_add_cleanup(vm: *cy.VM, func: C.CleanupFn, ctx: ?*anyopaque) u64 {
+    return vm.addCleanup(func, ctx) catch 0;
+}
+
+export fn cl_vm_remove_cleanup(vm: *cy.VM, id: u64) void {
+    vm.removeCleanup(id);
+}
+
 export fn cl_thread_allocator(t: *cy.Thread) C.Allocator {
     return C.toAllocator(t.alloc);
 }

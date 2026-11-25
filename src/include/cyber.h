@@ -930,6 +930,17 @@ CLAllocator cl_thread_allocator(CLThread* t);
 // return a value of its return type. It may be called from another thread while the host function runs.
 bool cl_thread_interrupted(CLThread* t);
 
+// A cleanup for a resource of the host that a script value stands in for, such as a running program.
+typedef void (*CLCleanupFn)(void* ctx);
+// Registers `fn(ctx)` to run when the eval's heap is swept without the values' `@deinit`: when the eval ends with a
+// panic or an interrupt (`CL_ERROR_PANIC`, `CL_ERROR_INTERRUPT`, also for the locals that `persist_main` kept),
+// and when the VM is deinited. It runs once and is then forgotten. Returns an id for `cl_vm_remove_cleanup`, or 0
+// without memory. A host function on any thread of the VM may call it. A panic on a spawned thread does not run
+// the cleanups.
+uint64_t cl_vm_add_cleanup(CLVM* vm, CLCleanupFn fn, void* ctx);
+// Forgets a cleanup, for a value that was released as usual. Does nothing for an id that ran or was removed.
+void cl_vm_remove_cleanup(CLVM* vm, uint64_t id);
+
 typedef struct CLStackFrame {
     // Name identifier (e.g. function name, or "main")
     CLBytes name;

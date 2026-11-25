@@ -353,6 +353,9 @@ pub fn thread_vm(t: *Thread) *VM {
 }
 
 pub const thread_interrupted = c.cl_thread_interrupted;
+pub const CleanupFn = c.CLCleanupFn;
+pub const vm_add_cleanup = c.cl_vm_add_cleanup;
+pub const vm_remove_cleanup = c.cl_vm_remove_cleanup;
 
 pub fn thread_allocator(t: *Thread) std.mem.Allocator {
     return fromAllocator(c.cl_thread_allocator(t));

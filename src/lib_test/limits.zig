@@ -415,6 +415,65 @@ test "cl_vm_set_fuel stops runaway loops and recursion." {
     , &res));
 }
 
+test "cl_vm_add_cleanup runs when the heap is swept without the values' destructors." {
+    const vm = C.vm_initx(zt.alloc);
+    var deinited = false;
+    defer if (!deinited) C.vm_deinit(vm);
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    const S = struct {
+        var runs: usize = 0;
+        var removed_runs: usize = 0;
+        fn cleanup(_: ?*anyopaque) callconv(.c) void {
+            runs += 1;
+        }
+        fn removed_cleanup(_: ?*anyopaque) callconv(.c) void {
+            removed_runs += 1;
+        }
+        // Registers a cleanup, and one that it removes at once.
+        fn mod_reg(t_: *C.Thread) callconv(.c) C.Ret {
+            _ = C.thread_ret(t_, void);
+            const vm_ = C.thread_vm(t_);
+            _ = C.vm_add_cleanup(vm_, cleanup, null);
+            const id = C.vm_add_cleanup(vm_, removed_cleanup, null);
+            C.vm_remove_cleanup(vm_, id);
+            C.vm_remove_cleanup(vm_, id);
+            return C.RetOk;
+        }
+        fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+            if (std.mem.eql(u8, C.from_bytes(uri), "mod")) {
+                C.mod_add_func(mod, "reg", C.BIND_FUNC(&mod_reg));
+                res[0].src = C.to_bytes("#[bind] fn reg()");
+                return true;
+            }
+            return C.default_loader(vm_, mod, uri, res);
+        }
+    };
+    C.vm_set_loader(vm, @ptrCast(&S.loader));
+    var res: C.EvalResult = undefined;
+
+    // An eval that ends as usual keeps it.
+    try zt.eq(C.Success, C.vm_eval(vm, "use mod\nmod.reg()", &res));
+    try zt.eq(0, S.runs);
+    // A panic runs it, once.
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm, "use mod\npanic('boom')", &res));
+    try zt.eq(1, S.runs);
+    try zt.eq(C.ErrorPanic, C.vm_eval(vm, "use mod\nmod.reg()\npanic('boom')", &res));
+    try zt.eq(2, S.runs);
+    // So does an interrupt.
+    C.vm_set_fuel(vm, 1000);
+    try zt.eq(C.ErrorInterrupt, C.vm_eval(vm, "use mod\nmod.reg()\nwhile true:\n  pass", &res));
+    try zt.eq(3, S.runs);
+    C.vm_set_fuel(vm, 0);
+    // And the deinit of the VM.
+    try zt.eq(C.Success, C.vm_eval(vm, "use mod\nmod.reg()", &res));
+    C.vm_deinit(vm);
+    deinited = true;
+    try zt.eq(4, S.runs);
+    try zt.eq(0, S.removed_runs);
+}
+
 test "cl_vm_interrupt stops a running eval." {
     const vm = C.vm_initx(zt.alloc);
     defer C.vm_deinit(vm);

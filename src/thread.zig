@@ -77,6 +77,10 @@ pub fn panic(t: *Thread, err: cy.Value) !void {
     t.exitFibers();
 
     _ = try freeHeapPages(t);
+    if (t == t.c.vm.main_thread) {
+        // The values that the host cleanups stand in for are gone without their `@deinit`.
+        t.c.vm.runCleanups();
+    }
     // Nothing is left on the heap. Give back the pages it grew to, so that a heap that ran into the memory
     // limit starts the next eval empty.
     t.heap.releaseFreePages();

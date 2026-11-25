@@ -772,3 +772,17 @@ main 소스의 식이 core의 템플릿을 쓰면(`[]int{1, 2}`, `s.len()`) 컴�
   진단(code `ambiguous-call`)으로 보인다. quick fix는 없다(어느 쪽으로 바꿀지는 사용자가 정한다).
 - 판정과 센 결과는 `docs/decisions/project_overload_exact_match.md` "모호한 호출의 LSP 경고". 호출마다 후보를 다시 맞춰 보므로
   기호 정보를 켠 컴파일의 main 소스에서만, 인자가 이름 · 리터럴일 때만 계산한다.
+
+## 19. 패턴 리터럴 미리 컴파일 (2026-11-25)
+
+Julia 검토 3.4 F(컴파일 타임에 검증되는 리터럴)는 컴파일 타임 평가기가 `regex.cy`의 파서를 돌릴 수 있을 때까지 미룬다(사용자 결정
+2026-11-25). 그 전의 싼 대안으로 편집기에서만 미리 컴파일한다.
+
+- 힌트 `CL_HINT_PATTERN_LITERAL`: main 소스가 `regex.compile` · `peg.compile`(두 오버로드 모두)의 첫 인자로 넘긴 문자열 리터럴.
+  보간이 있는 문자열은 상수가 아니라 넣지 않는다. 범위는 따옴표까지, `detail`은 모듈 이름.
+- 서버(`Server.checkPattern`)는 리터럴의 소스를 그대로 넣은 스크립트를 자기 VM(`pattern_vm`, 라이브러리 기본 loader)에서
+  돌려 `Diag`의 `pos` · `msg`를 받는다. VM은 패턴마다 `cl_vm_reset`한다. 결과는 모듈과 리터럴 소스로 캐시하고 256개를 넘으면
+  비운다.
+- 진단은 Error(code `pattern-literal`), "`regex.compile` will fail: <msg>". 이스케이프가 없는 리터럴은 `pos`가 가리키는 글자,
+  있으면 리터럴 전체를 가리킨다(값의 오프셋이 소스의 오프셋과 다르다).
+- 실행 시간: 정규식 · PEG 컴파일은 패턴 크기에 비례하고 한 문서의 리터럴 수는 적다. 캐시가 같은 리터럴의 재컴파일을 막는다.

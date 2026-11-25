@@ -992,6 +992,9 @@ pub const HintKind = enum(u32) {
     /// A call that two overloads match through implicit conversions, where the one declared first is picked and it
     /// is not more specific than the other. The range is the call, `detail` names the two functions.
     ambiguous_call = 5,
+    /// A string literal that is passed as the pattern of `regex.compile` or the grammar of `peg.compile`. The
+    /// range is the literal with its quotes, `detail` is the module (`regex` or `peg`).
+    pattern_literal = 6,
 };
 
 pub const Hint = extern struct {
@@ -1058,6 +1061,7 @@ pub fn hints(compiler: *cy.Compiler, complete: bool) ![]const Hint {
     }
     try paramNames(compiler, main, text, &pending);
     try ambiguousCalls(compiler, main, text, &pending);
+    try patternLiterals(compiler, main, text, &pending);
     if (complete) {
         var index = try RefIndex.init(compiler);
         defer index.deinit(alloc);
@@ -1105,6 +1109,28 @@ fn ambiguousCalls(compiler: *cy.Compiler, main: *cy.Chunk, text: *std.ArrayList(
         try w.writeAll("`");
         const len = buf.writer.end - start;
         try pending.append(alloc, .{ .pos = range[0], .end = range[1], .kind = .ambiguous_call, .start = start, .len = len });
+    }
+}
+
+/// The string literals that the main source passes to `regex.compile` and `peg.compile`. An editor can compile
+/// them ahead of the run. A literal with an interpolation is not a constant and is skipped.
+fn patternLiterals(compiler: *cy.Compiler, main: *cy.Chunk, text: *std.ArrayList(u8), pending: anytype) !void {
+    for (compiler.ref_calls.items) |call| {
+        if (call.func.parent.type != .func) continue;
+        if (!std.mem.eql(u8, call.func.name(), "compile")) continue;
+        const mod_uri = call.func.parent.getRootChunk().srcUri;
+        if (!std.mem.eql(u8, mod_uri, "regex") and !std.mem.eql(u8, mod_uri, "peg")) continue;
+        const args = call.node.cast(.callExpr).args.slice();
+        if (args.len == 0) continue;
+        const arg = args[0];
+        switch (arg.type()) {
+            .string_lit, .sq_string_lit, .raw_string_lit => {},
+            else => continue,
+        }
+        const range = rangeOf(main, arg) orelse continue;
+        const start = text.items.len;
+        try text.appendSlice(compiler.alloc, mod_uri);
+        try pending.append(compiler.alloc, .{ .pos = range[0], .end = range[1], .kind = .pattern_literal, .start = start, .len = mod_uri.len });
     }
 }
 

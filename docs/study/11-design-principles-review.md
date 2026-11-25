@@ -910,6 +910,8 @@ D의 꼴은 위 3.4 D대로 정했고 넣을지는 미정이다. 나머지(B의 
 `` fn `*`(a A, b B) ``를 찾고, 연산자 자유 함수는 피연산자 타입 중 하나를 선언한 모듈에만 둔다. 반사 메서드는 들이지 않는다.
 C는 LSP Warning으로 먼저 넣고 core · std · 테스트에서 걸리는 곳을 센 뒤 오류로 올릴지 정한다. D는 컬렉션 식도 `map` · `filter`
 메서드도 하지 않는다(`for` 루프로 쓴다). F는 미루고, 싼 대안인 LSP의 `regex.compile` 문자열 리터럴 진단만 넣는다.
+같은 날 넣었다: B의 2는 `docs/decisions/project_operator_lookup.md`, C의 경고와 센 결과(core · std · 테스트에서 의도된 테스트
+하나)는 `docs/decisions/project_overload_exact_match.md` 끝 절, F의 대안은 LSP 설계 문서 19절(`peg.compile`도 같이).
 
 가져오지 않기로 권하는 것: 동적 다중 디스패치와 JIT 특수화(시작 시간과 단일 백엔드), 매크로와 `@` 표기(`@`는 hook 13개의
 자리이고 메타프로그래밍은 컴파일 타임 실행이 맡는다, `project_sigils.md`), 점 broadcast 문법(대상 타입이 없다), `|>`, REPL

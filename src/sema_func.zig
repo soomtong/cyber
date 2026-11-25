@@ -906,7 +906,7 @@ pub fn matchFuncSym(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const A
 fn isProbeSafeArg(node: *ast.Node) bool {
     return switch (node.type()) {
         .ident, .noneLit, .decLit, .binLit, .octLit, .hexLit, .floatLit, .trueLit, .falseLit, .raw_string_lit,
-        .string_lit => true,
+        .string_lit, .sq_string_lit => true,
         .accessExpr => isProbeSafeArg(node.cast(.accessExpr).left),
         else => false,
     };

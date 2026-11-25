@@ -873,6 +873,10 @@ typedef enum {
     /// `str` and `byte`, give the same answer and are not listed. Only calls whose arguments are names and
     /// literals are checked. The range is the call, `detail` names the two functions.
     CL_HINT_AMBIGUOUS_CALL = 5,
+    /// A string literal passed as the pattern of `regex.compile` or the grammar of `peg.compile`, for an editor
+    /// to compile ahead of the run. A literal with an interpolation is not listed. The range is the literal with its
+    /// quotes, `detail` is the module (`regex` or `peg`).
+    CL_HINT_PATTERN_LITERAL = 6,
 } CLHintKind;
 
 /// A note on the main source for an editor, see `cl_vm_symbol_hints`. `kind` is a `CLHintKind`.

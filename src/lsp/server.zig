@@ -112,6 +112,11 @@ pub const Server = struct {
     /// The document that the VM compiled last, while no document changed since. Its symbol info can be asked.
     compiled: ?*Document = null,
 
+    /// Compiles the pattern literals of `regex.compile` and `peg.compile` (`checkPattern`). Made on first use.
+    pattern_vm: ?*c.VM = null,
+    /// The result of each pattern literal, by the module and the literal's source. Cleared when it grows large.
+    pattern_cache: std.StringHashMapUnmanaged(?PatternError) = .empty,
+
     /// Bodies of the messages to send, in order. Owned by the server until `takeOutput`.
     out: std.ArrayList([]u8) = .empty,
 
@@ -157,8 +162,74 @@ pub const Server = struct {
         if (self.files_arena) |*arena| arena.deinit();
         for (self.out.items) |msg| self.alloc.free(msg);
         self.out.deinit(self.alloc);
+        self.clearPatternCache();
+        self.pattern_cache.deinit(self.alloc);
+        if (self.pattern_vm) |vm| {
+            c.vm_deinit(vm);
+            captured.clearAndFree(captured_alloc);
+        }
         cli.deinit_cli(self.vm);
         c.vm_deinit(self.vm);
+    }
+
+    fn clearPatternCache(self: *Server) void {
+        var iter = self.pattern_cache.iterator();
+        while (iter.next()) |e| {
+            self.alloc.free(e.key_ptr.*);
+            if (e.value_ptr.*) |err| self.alloc.free(err.msg);
+        }
+        self.pattern_cache.clearRetainingCapacity();
+    }
+
+    /// Compiles the pattern literal `lit` (with its quotes) with `module.compile` in a VM of its own, as the run
+    /// would. Null when it compiles, or when the check itself failed.
+    fn checkPattern(self: *Server, module: []const u8, lit: []const u8) !?PatternError {
+        const key = try std.mem.concat(self.alloc, u8, &.{ module, "\x00", lit });
+        if (self.pattern_cache.get(key)) |res| {
+            self.alloc.free(key);
+            return res;
+        }
+        if (self.pattern_cache.count() >= 256) self.clearPatternCache();
+        const res = self.compilePattern(module, lit) catch null;
+        errdefer if (res) |err| self.alloc.free(err.msg);
+        self.pattern_cache.put(self.alloc, key, res) catch |err| {
+            self.alloc.free(key);
+            return err;
+        };
+        return res;
+    }
+
+    fn compilePattern(self: *Server, module: []const u8, lit: []const u8) !?PatternError {
+        const vm = self.pattern_vm orelse b: {
+            // The default loader of the library has `regex` and `peg`. The loader of the CLI would read the eval's
+            // own uri as a path.
+            const vm = c.vm_initx(self.alloc);
+            c.vm_set_printer(vm, capturePrint);
+            c.vm_set_eprinter(vm, dropPrint);
+            c.vm_set_logger(vm, dropLog);
+            self.pattern_vm = vm;
+            break :b vm;
+        };
+        // Each eval would keep its main chunk. The VM starts over for each pattern.
+        c.vm_reset(vm);
+        const src = try std.fmt.allocPrint(self.alloc,
+            \\use m '{s}'
+            \\var d m.Diag = {{}}
+            \\try:
+            \\    _ = m.compile({s}, &&d)!
+            \\else:
+            \\    print('%{{d.pos}}\n%{{d.msg}}')
+            \\
+        , .{ module, lit });
+        defer self.alloc.free(src);
+        captured.clearRetainingCapacity();
+        var res: c.EvalResult = undefined;
+        if (c.vm_eval(vm, src, &res) != c.Success) return null;
+        const out = captured.items;
+        const nl = std.mem.indexOfScalar(u8, out, '\n') orelse return null;
+        const pos = std.fmt.parseInt(u32, out[0..nl], 10) catch return null;
+        const msg = std.mem.trimEnd(u8, out[nl + 1 ..], "\n");
+        return .{ .pos = pos, .msg = try self.alloc.dupe(u8, msg) };
     }
 
     /// Whether `flush` has work to do.
@@ -686,6 +757,24 @@ pub const Server = struct {
                         .msg = try std.fmt.allocPrint(arena, "This call matches both {s}, and the one declared first is picked. Convert an argument so that only one matches.", .{detail}),
                         .severity = 2,
                         .code = assist.code_ambiguous_call,
+                    };
+                },
+                c.HintPatternLiteral => {
+                    const lit = doc.text[start..end];
+                    const err = (try self.checkPattern(detail, lit)) orelse continue;
+                    // The offset is into the value of the literal. Without escapes it is the text after the quote.
+                    const quote: usize = if (std.mem.startsWith(u8, lit, "'''") or std.mem.startsWith(u8, lit, "\"\"\"") or std.mem.startsWith(u8, lit, "```")) 3 else 1;
+                    const body = lit[@min(quote, lit.len)..lit.len -| quote];
+                    const raw = lit.len > 0 and lit[0] == '`';
+                    if ((raw or std.mem.indexOfScalar(u8, body, '\\') == null) and err.pos < body.len) {
+                        start += quote + err.pos;
+                        end = start + (std.unicode.utf8ByteSequenceLength(doc.text[start]) catch 1);
+                    }
+                    diag = .{
+                        .range = undefined,
+                        .msg = try std.fmt.allocPrint(arena, "`{s}.compile` will fail: {s}", .{ detail, err.msg }),
+                        .severity = 1,
+                        .code = assist.code_pattern_literal,
                     };
                 },
                 c.HintUnusedUse => {
@@ -2319,6 +2408,20 @@ fn getInt(obj: Value, key: []const u8) ?i64 {
 // -----------------------------------
 
 fn dropPrint(_: ?*c.Thread, _: c.Bytes) callconv(.c) void {}
+
+/// Where and why a pattern literal did not compile: `pos` is a byte offset into the pattern.
+const PatternError = struct {
+    pos: u32,
+    msg: []u8,
+};
+
+/// What the pattern VM printed (`Server.compilePattern`).
+var captured: std.ArrayList(u8) = .empty;
+var captured_alloc: std.mem.Allocator = std.heap.c_allocator;
+
+fn capturePrint(_: ?*c.Thread, s: c.Bytes) callconv(.c) void {
+    captured.appendSlice(captured_alloc, c.from_bytes(s)) catch {};
+}
 
 fn dropLog(_: ?*c.VM, _: c.Bytes) callconv(.c) void {}
 

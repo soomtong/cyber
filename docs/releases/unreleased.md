@@ -40,3 +40,17 @@ print(tag(none))
 - 인자가 이름 · 리터럴일 때만 본다. 임베딩은 `cl_vm_symbol_hints`의 `CL_HINT_AMBIGUOUS_CALL`로 받는다.
 - 결정 `docs/decisions/project_overload_exact_match.md` 끝 절. core · std · 테스트에서 걸리는 곳은 의도된 테스트 하나였다.
 
+## `cyber-lsp`: 컴파일되지 않을 정규식 · PEG 리터럴
+
+`regex.compile` · `peg.compile`에 문자열 리터럴을 넘기면 `cyber-lsp`가 실행 전에 그 패턴을 컴파일해 보고, 실패하면 Error
+진단을 낸다. 실행할 때 받을 `Diag`의 문구 그대로다.
+
+~~~cy
+bad := regex.compile('xa(?=b)')
+-- error: `regex.compile` will fail: Look-ahead (`(?=...)`, `(?!...)`) is not supported: ...
+~~~
+
+- 이스케이프가 없는 리터럴은 오류가 난 글자를, 있으면 리터럴 전체를 가리킨다. 보간이 있는 문자열은 보지 않는다.
+- 임베딩은 `cl_vm_symbol_hints`의 `CL_HINT_PATTERN_LITERAL`로 리터럴의 자리를 받는다. 컴파일 타임 검증(Julia 검토 3.4 F)은
+  평가기를 넓힐 때까지 미룬다. LSP 설계 문서 19절.
+

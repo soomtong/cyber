@@ -391,8 +391,13 @@
 - [x] F-200(2026-11-24 수정): CLI의 REPL에서 `use os`가 실패하던 것. "완료된 작업"의 "REPL이 CLI의 모듈을 가져온다".
 - [x] F-204(2026-11-24 수정, 사용자: "continue"): 가변 인자 extern 함수에 `int` · `float` · `f32` · `r16`을 넘기면 호스트가
   abort하던 것. 변형 함수의 C 래퍼(`cgen.genVmToExternFunc`)가 자기 매개변수 · 반환 타입을 선언한다. 테스트 `ffi/variadic.cy`.
-- `os.cmd`의 다음 단계(`project_os_cmd.md` "가져오지 않은 것"): 줄 단위 스트리밍, 실행 중 중단 · 시간 제한, 파일 리다이렉션.
-  Windows에서의 실행 확인도 남았다.
+- [x] `os.cmd` 시간 제한 · 중단 · 파일 리다이렉션(2026-11-25, 사용자: "os.cmd 이어서 진행", `d11d1e25`). `timeout_ms`,
+  `stdin_file` · `stdout_file` · `stdout_append` · `stderr_file` · `stderr_append`, `cl_vm_interrupt`가 명령에 닿음, C API
+  `cl_thread_interrupted`. 결정 `project_os_cmd.md` "시간 제한 · 중단 · 파일 리다이렉션". 고치다 찾은 F-208(빈 `while:`이 중단 ·
+  fuel로 멈추지 않음, `10f68eaa`). 15단계 rc=0. tars-agent TODO에 덧붙임(`c5e1e90`).
+- [ ] `os.cmd` 줄 단위 스트리밍: 사용자 결정 대기. 권고안은 `cmd.start()! -> os.Process`(NoCopy, `read_line` · `wait` · `kill`).
+  호스트→스크립트 콜백 API가 없어 `each_line(f)`는 안 된다. panic · 중단 경로에서 소멸자가 돌지 않아 남는 프로세스를 VM이
+  목록으로 치워야 한다. Windows에서의 실행 확인도 남았다.
 - [x] Julia 검토(설계 원칙 3.7)의 남은 결정(2026-11-25). 결정 기록은 3.7 끝 "결정(2026-11-25".
   - B의 2: 모듈 수준 연산자 함수 `` fn `*`(s float, v Vec2) ``를 두 피연산자 타입의 모듈에서 찾는다. 산술 · 비트만, 비교는
     메서드만. 선언은 같은 모듈의 타입을 받아야 한다. 결정 `project_operator_lookup.md`, 매뉴얼 Operator methods. 15단계 rc=0.
@@ -453,7 +458,7 @@
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-207까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-208까지, 열린 것 없음).
 
 ## 작업 방식
 

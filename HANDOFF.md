@@ -395,9 +395,11 @@
   `stdin_file` · `stdout_file` · `stdout_append` · `stderr_file` · `stderr_append`, `cl_vm_interrupt`가 명령에 닿음, C API
   `cl_thread_interrupted`. 결정 `project_os_cmd.md` "시간 제한 · 중단 · 파일 리다이렉션". 고치다 찾은 F-208(빈 `while:`이 중단 ·
   fuel로 멈추지 않음, `10f68eaa`). 15단계 rc=0. tars-agent TODO에 덧붙임(`c5e1e90`).
-- [ ] `os.cmd` 줄 단위 스트리밍: 사용자 결정 대기. 권고안은 `cmd.start()! -> os.Process`(NoCopy, `read_line` · `wait` · `kill`).
-  호스트→스크립트 콜백 API가 없어 `each_line(f)`는 안 된다. panic · 중단 경로에서 소멸자가 돌지 않아 남는 프로세스를 VM이
-  목록으로 치워야 한다. Windows에서의 실행 확인도 남았다.
+- [x] `os.cmd` 줄 단위 스트리밍(2026-11-25, 사용자: 계획에 "agree", 이어서 "LGTM go implementation and make some examples into
+  @examples/"). `Cmd.start() -> !os.Process`(`read_line` · `read_all` · `wait` · `wait_code` · `kill`, 값이 사라지면 끝냄),
+  C API `cl_vm_add_cleanup` · `cl_vm_remove_cleanup`(정리 목록은 `VM.data`의 "cleanups", VM 필드를 더하면 `ZVM padding` 빌드
+  실패). 예제 `examples/commands.cy` · `stream_lines.cy`. `for`가 `!?T` 반복자를 받지 않아 `lines()`는 없다. 결정
+  `project_os_cmd.md` "줄 단위 스트리밍". 15단계 rc=0. tars-agent TODO(`cad37cd`). 남은 것: Windows 실행 확인, detach.
 - [x] Julia 검토(설계 원칙 3.7)의 남은 결정(2026-11-25). 결정 기록은 3.7 끝 "결정(2026-11-25".
   - B의 2: 모듈 수준 연산자 함수 `` fn `*`(s float, v Vec2) ``를 두 피연산자 타입의 모듈에서 찾는다. 산술 · 비트만, 비교는
     메서드만. 선언은 같은 모듈의 타입을 받아야 한다. 결정 `project_operator_lookup.md`, 매뉴얼 Operator methods. 15단계 rc=0.

@@ -74,8 +74,8 @@
 
 ## 현재 브랜치
 
-`master`. 0.4.20 태그 `b407c7b9`(`build-1165-b407c7b`, 에셋 15개, Latest). CI의 arm64 macOS 러너가 배정되지 않아 arm64 자산
-둘은 로컬에서 빌드해 올렸다(`project_fork_release_ci.md` "0.4.20"). 릴리스 기록 커밋까지 push했다.
+`master`. 0.4.21 태그 `1cb14490`(`build-1186-1cb1449`, 에셋 15개, Latest). CI의 arm64 macOS 러너가 배정되지 않아 arm64 자산
+둘은 로컬에서 빌드해 올렸다(`project_fork_release_ci.md` "0.4.21"). 릴리스 기록 커밋까지 push한다.
 
 ## 완료된 작업
 
@@ -400,6 +400,12 @@
   C API `cl_vm_add_cleanup` · `cl_vm_remove_cleanup`(정리 목록은 `VM.data`의 "cleanups", VM 필드를 더하면 `ZVM padding` 빌드
   실패). 예제 `examples/commands.cy` · `stream_lines.cy`. `for`가 `!?T` 반복자를 받지 않아 `lines()`는 없다. 결정
   `project_os_cmd.md` "줄 단위 스트리밍". 15단계 rc=0. tars-agent TODO(`cad37cd`). 남은 것: Windows 실행 확인, detach.
+- [x] `for`의 실패할 수 있는 반복자(2026-11-25, 사용자: "2번을 먼저 진행하고 3번, 4번을 수행하자 그리고 0.4.21 릴리즈", `else |err|:`
+  갈래 필수로 답함). `d4dedbb4`. 결정 `project_for_fallible_iter.md`. `os.Process.lines()`. tree-sitter 문법도 고쳤고 cyber.nvim에
+  동기화(`867e8b5`, push 안 함).
+- [x] panic · 중단으로 쓸린 `os.File` · `os.Dir` 핸들 닫기(F-210), Linux `resolve_path` fd 누수(F-209), `os.exec`를 `run_status`
+  위로(중단 가능, 신호 코드 128 + n, panic 문구 `error.NotFound`). `33842c2f`.
+- [x] 0.4.21 릴리스(2026-11-25). 위 "현재 브랜치".
 - [x] Julia 검토(설계 원칙 3.7)의 남은 결정(2026-11-25). 결정 기록은 3.7 끝 "결정(2026-11-25".
   - B의 2: 모듈 수준 연산자 함수 `` fn `*`(s float, v Vec2) ``를 두 피연산자 타입의 모듈에서 찾는다. 산술 · 비트만, 비교는
     메서드만. 선언은 같은 모듈의 타입을 받아야 한다. 결정 `project_operator_lookup.md`, 매뉴얼 Operator methods. 15단계 rc=0.
@@ -417,8 +423,7 @@
 
 ## 다음 에이전트에게
 
-1. 0.4.20이 마지막 릴리스다(노트 `docs/releases/0.4.20.md`). `unreleased.md`에 세 절(모듈 수준 연산자 함수, 모호한 호출 오류,
-   패턴 리터럴 진단)이 있다. 2026-11-25 사용자 답: master는 push(`b7ee7d36`까지), 릴리스는 아직 하지 않는다.
+1. 0.4.21이 마지막 릴리스다(노트 `docs/releases/0.4.21.md`). `unreleased.md`는 머리말만 있다.
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 

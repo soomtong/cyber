@@ -225,6 +225,11 @@ zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Dd
   빌드의 버전 문자열이 CI 자산(`cyber-macos-x64`의 문자열)과 같은 것을 확인했다. 설치 확인은 `install.sh 0.4.20`(arm64 macOS):
   버전 문자열, `cyber-lsp` `initialize`, `examples/hello.cy`, `i * f`, `const k = 1 << 70`, `os.cmd`. master run이 실패해 `latest`
   사전 릴리스는 v0.4.19-DEV에 머문다(다음 master push의 run이 갱신한다).
+- 0.4.21(2026-11-25): 태그 `0.4.21` → `1cb14490`, `build-1186-1cb1449`, 에셋 15개. master run `45619724965`과 태그 run
+  `45623088924` 모두 arm64 macOS job만 러너를 받지 못해 취소됐다(나머지 job은 첫 실행에서 통과, Linux · Windows의 `os.cmd` ·
+  `for` `else` 테스트 포함). 재실행 없이 0.4.20과 같은 대체 절차로 냈다: 태그 run의 자산 13개 + 태그 커밋 worktree에서 빌드한
+  arm64 둘. CI `cyber-macos-x64`의 버전 문자열이 로컬 빌드와 같다. 설치 확인은 `install.sh 0.4.21`(arm64 macOS, `CYBER_HOME` ·
+  `CYBER_BIN`을 scratchpad로): 버전 문자열, `examples/hello.cy`, `examples/stream_lines.cy`, `cyber-lsp` `initialize`.
 
 ## CI 시간 줄이기 (2026-11-18)
 

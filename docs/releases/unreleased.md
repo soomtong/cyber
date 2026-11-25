@@ -20,3 +20,12 @@
 - 깨지는 변경: `os.File` · `os.Dir`의 `closed` 필드는 비공개다. 닫혔는지는 `is_closed()`로 본다. 밖에서 `closed = true`로 두면
   panic · VM 끝의 정리가 그 번호의 핸들(그사이 다른 파일일 수 있다)을 닫았다.
 - `#for` 뒤의 `else`를 `#for`의 것으로 읽지 않는다(컴파일 타임 반복은 실패하지 않는다).
+
+## `os.cmd`: `2>&1`, `detach`, `Process.pid` (2026-11-25)
+
+- `Cmd.stderr_to_stdout()`: 지금까지의 단계마다 stderr를 그 단계의 stdout이 가는 곳으로 보낸다(`2>&1`). 다음 단계로 가는 파이프,
+  `read` · `start`가 읽는 출력, `stdout_file`의 파일, 이 프로세스의 stdout. 두 스트림은 프로그램이 쓴 순서대로 섞인다.
+- `Cmd.detach() -> !int`: 기다리지 않고 시작해 마지막 단계의 pid를 돌려준다. stdin은 빈 입력, stdout · stderr는 파일로 보내지
+  않으면 버린다. eval · VM이 끝나도, `cl_vm_interrupt`에도 멈추지 않는다. POSIX에서는 따로 프로세스 그룹을 둔다. 호스트의 스레드가
+  끝을 기다려 회수한다. 시간 제한과 함께 쓰면 `error.InvalidArgument`.
+- `Process.pid() -> int`: 마지막 단계의 pid.

@@ -83,7 +83,8 @@ if res.code != 0:
 - 백틱 문법과 보간. 사이버의 백틱은 raw 문자열이다. 인자 목록은 슬라이스 연산으로 만든다(`[]str{'grep', pat} + files`).
 - 파일 리다이렉션, 실행 중 중단, 시간 제한은 2026-11-25에 넣었다(아래 "시간 제한 · 중단 · 파일 리다이렉션").
 - 줄 단위 스트리밍도 같은 날 넣었다(아래 "줄 단위 스트리밍").
-- 단계별 stdin 글, stderr를 stdout에 합치기(`2>&1`), detach.
+- 단계별 stdin 글(파이프 뒤 단계의 stdin은 파이프라 뜻이 없다).
+- stderr를 stdout에 합치기(`2>&1`)와 detach는 2026-11-25에 넣었다(아래 "`2>&1` · detach · pid").
 
 ## 구현
 
@@ -288,3 +289,31 @@ API 꼴은 사용자가 따로 고르지 않아 아래 비교로 정했다. 바�
   VM 해제에서 한 번씩, 지운 것은 안 부름.
 - cli 테스트 `cl_vm_interrupt stops a running os.cmd and its programs.`: `read_line`에 막힌 중 중단, 그 프로그램의 pid가 없음.
 - 예제 `examples/stream_lines.cy` · `examples/commands.cy`(behavior 테스트가 컴파일한다, wasm 제외).
+
+## `2>&1` · detach · pid (2026-11-25)
+
+사용자: "이어서 os.cmd 보강"(리뷰 수정 뒤). 미뤄 둔 것 중 셋을 넣었다. 단계별 stdin 글은 뜻이 없어 넣지 않았다.
+
+비교(일반 지식, 이번에 원문을 다시 확인하지 않았다): Rust `Command`는 `Stdio::from(stdout)`로 같은 파이프를 넘겨 `2>&1`을 하고,
+`spawn`한 `Child`를 버려도 프로세스는 남는다(detach가 기본). Python `subprocess`는 `stderr=STDOUT`, `Popen(...,
+start_new_session=True)`. Nim `startProcess`는 `poStdErrToStdOut` · `poDaemon`. Julia는 `run(pipeline(cmd, stderr=stdout))`,
+`run(cmd; wait=false)`. Zig 표준 라이브러리에는 둘 다 없다.
+
+### 정한 것
+
+1. `stderr_to_stdout()`은 `stderr_file`처럼 지금까지의 단계에 붙는다. 나중에 부른 stderr 메서드가 이긴다. stdout이 파이프면 파이프
+   하나를 직접 만들어 쓰기 끝을 stdout · stderr에 같이 주고, 읽기 끝을 `.pipe`가 줬을 stdout 자리에 둔다(`cmdMakePipe`, Windows는
+   `std.process.spawn`과 같은 named pipe). stdout이 파일 · 상속 · 버림이면 stderr도 같다. `run_status`의 `err`에는 들어가지 않는다.
+2. detach는 별도 메서드 `detach() -> !int`다. `start()`의 `Process`는 값이 사라지면 프로그램을 끝낸다(앞의 결정 1)는 규칙을
+   그대로 둔다. 기본 입출력은 버림(`.ignore`): 백그라운드 프로그램이 이 프로세스의 터미널에 쓰지 않게, 남길 것은 파일로 보낸다.
+   POSIX에서는 `pgid = 0`으로 프로세스 그룹을 따로 둬 터미널의 Ctrl-C가 닿지 않게 한다. 시간 제한은 `error.InvalidArgument`(멈출
+   주체가 없다). 돌려주는 값은 마지막 단계의 pid다.
+3. 회수: 끝난 자식이 좀비로 남지 않게 단계마다 기다리는 스레드를 하나 띄워 떼어 둔다(`CmdProc.reapDetached`). 그 명령은 VM이 아니라
+   `smp_allocator`로 만든다(VM보다 오래 살 수 있다). 입력 글은 복사해 그 스레드가 놓는다.
+4. `Process.pid()`는 시작할 때 기록한 마지막 단계의 pid다. 회수한 뒤에도 같은 값이다(그 번호는 다른 프로세스일 수 있다).
+
+### 확인
+
+- behavior 테스트 `modules/os_cmd.cy`: 합친 순서, `run_status`의 `err`, 파이프로 합치기, 단계 범위, 파일로 합치기, `start`로 합친
+  줄 읽기, `pid`, detach 뒤에 생기는 파일, detach의 입력 글과 파일 출력, 시간 제한 거절, 시작 실패.
+- Windows는 실행하지 못했다(파이프 · `GetProcessId`). 크로스 컴파일만 했다.

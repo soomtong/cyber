@@ -209,10 +209,12 @@ type Cmd:
     err    str = ''
 
 -- Mirrored by `CmdIo` in `os.zig`. 0: what the method that runs the command says, 1: the input text,
--- 2: a file that is read, or created or emptied, 3: a file that is created or added to.
+-- 2: a file that is read, or created or emptied, 3: a file that is created or added to, 4: (stderr) the stdout.
 -const CmdIoText = 1
 -const CmdIoFile = 2
 -const CmdIoAppend = 3
+-- stderr only: where the stdout of the stage goes.
+-const CmdIoStdout = 4
 
 --| Returns a command that runs the program `args[0]` with the rest of `args` as its arguments.
 --| A program name without a `/` is looked up in `PATH`.
@@ -281,6 +283,13 @@ fn (&Cmd) stderr_file(path str) -> Cmd:
 --| Like `stderr_file`, but the output is added to the end of the file.
 fn (&Cmd) stderr_append(path str) -> Cmd:
     return self.stderr_to(CmdIoAppend, path)
+
+--| Returns this command with the stderr of every stage it has so far going where its stdout goes, like `2>&1`:
+--| into the pipe to the next stage, into what `read` or `start` reads, into the file of `stdout_file`, or to the
+--| stdout of this process. The two streams are written in the order the program writes them. `run_status` does not
+--| return it in `err`.
+fn (&Cmd) stderr_to_stdout() -> Cmd:
+    return self.stderr_to(CmdIoStdout, '')
 
 -fn (&Cmd) stderr_to(io int, path str) -> Cmd:
     var stages []CmdStage = {}
@@ -385,6 +394,26 @@ fn (&Cmd) start() -> !Process:
         return cmd_error(raw.fail)
     return {id=raw.code}
 
+--| Starts the command and returns without waiting for it, for a program that keeps running on its own, such as a
+--| server. Returns the process id of the last stage.
+--| Its stdin is empty without `stdin` or `stdin_file`, and its stdout and stderr are dropped unless a method sends
+--| them to a file (`stdout_file`, `stderr_file`). It is not stopped when the value of this command, the eval or the
+--| VM ends, nor by `cl_vm_interrupt`, and it is in a process group of its own (POSIX), so that a Ctrl-C at the
+--| terminal does not reach it. The host reaps it when it ends.
+--| Returns the errors of a program that can not be started or a file that can not be opened, as `run` does, and
+--| `error.InvalidArgument` with a time limit: nothing would stop it.
+--| Sample usage:
+--| ```cy
+--| pid := os.cmd({'python3', '-m', 'http.server', '8000'}).stdout_file('server.log').stderr_to_stdout().detach()!
+--| ```
+fn (&Cmd) detach() -> !int:
+    if self.limit_ms != 0:
+        return error.InvalidArgument
+    raw := self.launch(4)
+    if raw.fail != 0:
+        return cmd_error(raw.fail)
+    return raw.code
+
 --| A command that runs: what `Cmd.start` returns. Its stdout is read with `read_line` or `read_all`, and `wait` or
 --| `wait_code` waits for its end.
 --| When the value goes away before the command ended, its programs are stopped. Also when the eval ends with a
@@ -459,6 +488,11 @@ fn (&Process) wait_code() -> !int:
     if raw.fail != 0:
         return cmd_error(raw.fail)
     return raw.code
+
+--| Returns the process id of the last stage. It stays the same after the program ended, when the id may name
+--| another process.
+fn (&Process) pid() -> int:
+    return self.op(4).code
 
 --| Stops the programs that still run (`SIGKILL`, `TerminateProcess`). Does nothing after they ended.
 --| `read_line` then returns what they wrote before, and `wait` returns `error.ExitStatus`.

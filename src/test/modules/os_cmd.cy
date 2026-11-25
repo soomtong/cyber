@@ -214,6 +214,45 @@ fn run_all() -> !void:
     started_pid := start_and_drop()!
     t.eq('gone\n', os.cmd({'sh', '-c', 'kill -0 ' + started_pid + ' 2>/dev/null || echo gone'}).read()!)
 
+    -- stderr_to_stdout(): `2>&1`, in the order the program writes.
+    both := os.cmd({'sh', '-c', 'echo out; echo err >&2; echo out2'}).stderr_to_stdout()
+    t.eq('out\nerr\nout2\n', both.read()!)
+    res2 := both.run_status()!
+    t.eq('out\nerr\nout2\n', res2.out)
+    t.eq('', res2.err)
+    -- Into the pipe to the next stage.
+    t.eq('2', os.cmd({'sh', '-c', 'echo a; echo b >&2'}).stderr_to_stdout().pipe(os.cmd({'wc', '-l'})).read()!.trim())
+    -- Only the stages it was given: the stderr of `sh` here is that of this process, captured by run_status.
+    res3 := os.cmd({'sh', '-c', 'echo e1 >&2'}).pipe(os.cmd({'sh', '-c', 'cat; echo e2 >&2'}).stderr_to_stdout()).run_status()!
+    t.eq('e2\n', res3.out)
+    t.eq('e1\n', res3.err)
+    -- Into the file of stdout_file.
+    dir2 := os.cmd({'mktemp', '-d'}).read()!.trim()
+    both_file := dir2 + '/both.txt'
+    os.cmd({'sh', '-c', 'echo o; echo e >&2'}).stdout_file(both_file).stderr_to_stdout().run()!
+    t.eq('o\ne\n', os.read_file(both_file)!)
+    -- Read a line at a time.
+    merged := os.cmd({'sh', '-c', 'echo x; echo y >&2'}).stderr_to_stdout().start()!
+    t.eq('x', merged.read_line()!.?)
+    t.eq('y', merged.read_line()!.?)
+    merged.wait()!
+    t.eq(true, merged.pid() > 0)
+
+    -- detach(): runs on its own. The file appears after `detach` returned.
+    flag := dir2 + '/flag.txt'
+    pid := os.cmd({'sh', '-c', 'sleep 0.2; echo done > ' + flag}).detach()!
+    t.eq(true, pid > 0)
+    os.cmd({'sh', '-c', 'while [ ! -s ' + flag + ' ]; do sleep 0.05; done'}).timeout_ms(10000).run()!
+    t.eq('done\n', os.read_file(flag)!)
+    -- Its input and output.
+    piped_out := dir2 + '/detached.txt'
+    _ = os.cmd({'tr', 'a-z', 'A-Z'}).stdin('quiet\n').stdout_file(piped_out).detach()!
+    os.cmd({'sh', '-c', 'while [ ! -s ' + piped_out + ' ]; do sleep 0.05; done'}).timeout_ms(10000).run()!
+    t.eq('QUIET\n', os.read_file(piped_out)!)
+    t.eq(error.InvalidArgument, os.cmd({'true'}).timeout_ms(100).detach().unwrap_error())
+    t.eq(error.NotFound, os.cmd({'no-such-program-xyz'}).detach().unwrap_error())
+    os.cmd({'rm', '-rf', dir2}).run()!
+
 -- Returns the pid of a program that runs for 30 seconds, whose `Process` goes away here.
 fn start_and_drop() -> !str:
     p := os.cmd({'sh', '-c', 'echo $$; exec sleep 30'}).start()!

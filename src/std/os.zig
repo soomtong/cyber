@@ -235,6 +235,9 @@ const CmdMode = enum(i64) {
     /// `Cmd.start`: the stdout of the last stage is read by the `Process` while the command runs. `code` of the
     /// result is the id of the `Process`.
     stream = 3,
+    /// `Cmd.detach`: the stages run on their own and are not waited for. `code` of the result is the process id of
+    /// the last stage.
+    detach = 4,
 };
 
 /// Where a stream of a stage goes to or comes from when it is not a pipe of the pipeline.
@@ -248,6 +251,8 @@ const CmdIo = enum(i64) {
     file = 2,
     /// An output file that is created or added to.
     append = 3,
+    /// stderr only: where the stdout of the same stage goes (`2>&1`).
+    stdout = 4,
 };
 
 const CmdStage = struct {
@@ -313,7 +318,7 @@ pub fn cmdRun(t: *C.Thread) anyerror!C.Ret {
     const texts_span = C.thread_param(t, StrSpan);
     const opts_span = C.thread_param(t, IntSpan);
     const mode_n = C.thread_int(t);
-    if (mode_n < 0 or mode_n > @intFromEnum(CmdMode.stream)) return C.thread_ret_panic(t, "Unknown mode.");
+    if (mode_n < 0 or mode_n > @intFromEnum(CmdMode.detach)) return C.thread_ret_panic(t, "Unknown mode.");
     const mode: CmdMode = @enumFromInt(mode_n);
 
     const args = args_span.ptr[0..@intCast(args_span.len)];
@@ -346,7 +351,10 @@ pub fn cmdRun(t: *C.Thread) anyerror!C.Ret {
             .out_path = C.str_bytes(texts[1]),
             .timeout_ms = opts[2],
         };
-        if (options.in_io == .append or options.out_io == .text or options.timeout_ms < 0) fail = .invalid_argument;
+        if (options.in_io == .append or options.in_io == .stdout or options.out_io == .text or options.out_io == .stdout or
+            options.timeout_ms < 0) fail = .invalid_argument;
+        // A detached command is not watched: nothing would stop it when its time is up.
+        if (mode == .detach and options.timeout_ms != 0) fail = .invalid_argument;
         if (options.in_io == .file and !cmdValidPath(options.in)) fail = .invalid_argument;
         if (options.out_io != .default and !cmdValidPath(options.out_path)) fail = .invalid_argument;
 
@@ -365,7 +373,7 @@ pub fn cmdRun(t: *C.Thread) anyerror!C.Ret {
                 if (std.mem.indexOfScalar(u8, arg, 0) != null) fail = .invalid_argument;
             }
             const err_path = C.str_bytes(errs[i]);
-            if (err_io == .text or (err_io != .default and !cmdValidPath(err_path))) fail = .invalid_argument;
+            if (err_io == .text or ((err_io == .file or err_io == .append) and !cmdValidPath(err_path))) fail = .invalid_argument;
             stage.* = .{
                 .argv = argv,
                 .cwd = C.str_bytes(dirs[i]),
@@ -385,6 +393,20 @@ pub fn cmdRun(t: *C.Thread) anyerror!C.Ret {
                     return err;
                 };
                 out.code = @bitCast(id);
+            } else |err| {
+                if (err == error.OutOfMemory) return err;
+                fail = cmdFailFor(t, err);
+            }
+        } else if (fail == .none and mode == .detach) {
+            // Not freed by the VM: the stages can outlive it, and the thread that reaps them frees the command.
+            if (CmdProc.start(std.heap.smp_allocator, arena, stages, options, mode, t)) |proc| {
+                out.code = proc.pid;
+                if (std.Thread.spawn(.{}, CmdProc.reapDetached, .{proc})) |thread| {
+                    thread.detach();
+                } else |err| {
+                    proc.destroy();
+                    fail = cmdFail(err);
+                }
             } else |err| {
                 if (err == error.OutOfMemory) return err;
                 fail = cmdFailFor(t, err);
@@ -410,7 +432,7 @@ pub fn cmdRun(t: *C.Thread) anyerror!C.Ret {
 }
 
 fn cmdIo(n: i64) ?CmdIo {
-    if (n < 0 or n > @intFromEnum(CmdIo.append)) return null;
+    if (n < 0 or n > @intFromEnum(CmdIo.stdout)) return null;
     return @enumFromInt(n);
 }
 
@@ -626,6 +648,36 @@ fn cmdOpenOutput(io: std.Io, path: []const u8, kind: CmdIo) !std.Io.File {
     return .{ .handle = fd, .flags = .{ .nonblocking = false } };
 }
 
+/// A pipe for a stage whose stderr goes where its stdout goes (`2>&1`): the read end, then the write end that the
+/// stage gets for both. Made like the pipes of `std.process.spawn`.
+fn cmdMakePipe() ![2]std.Io.File {
+    if (builtin.os.tag == .windows) {
+        const handles = try stdx.threadedPtr().windowsCreatePipe(.{
+            .server = .{ .attributes = .{ .INHERIT = false }, .mode = .{ .IO = .ASYNCHRONOUS } },
+            .client = .{ .attributes = .{ .INHERIT = true }, .mode = .{ .IO = .SYNCHRONOUS_NONALERT } },
+            .inbound = true,
+        });
+        return .{
+            .{ .handle = handles[0], .flags = .{ .nonblocking = true } },
+            .{ .handle = handles[1], .flags = .{ .nonblocking = false } },
+        };
+    }
+    const fds = try std.Io.Threaded.pipe2(.{ .CLOEXEC = true });
+    return .{
+        .{ .handle = fds[0], .flags = .{ .nonblocking = false } },
+        .{ .handle = fds[1], .flags = .{ .nonblocking = false } },
+    };
+}
+
+extern "kernel32" fn GetProcessId(process: std.os.windows.HANDLE) callconv(.winapi) u32;
+
+/// The process id of a stage that was started.
+fn cmdPid(child: *const std.process.Child) i64 {
+    const id = child.id orelse return 0;
+    if (builtin.os.tag == .windows) return GetProcessId(id);
+    return @intCast(id);
+}
+
 /// A command that runs: its stages and the threads that serve them. `_cmd_run` makes one for each run and
 /// destroys it before it returns. `Cmd.start` keeps one for its `Process` in `proc_table`.
 const CmdProc = struct {
@@ -649,6 +701,8 @@ const CmdProc = struct {
     /// Set by `finish`.
     finished: bool = false,
     code: i64 = 0,
+    /// The process id of the last stage, kept after it is reaped.
+    pid: i64 = 0,
     /// The cleanup that destroys a `Process` whose value was swept without its `@deinit`.
     vm: ?*C.VM = null,
     cleanup_id: u64 = 0,
@@ -688,7 +742,7 @@ const CmdProc = struct {
         const out_file: ?std.Io.File = if (opts.out_io != .default) try files.open(io, opts.out_path, opts.out_io) else null;
         var err_files: [cmd_max_stages]?std.Io.File = @splat(null);
         for (stages, 0..) |stage, i| {
-            if (stage.err_io != .default) err_files[i] = try files.open(io, stage.err_path, stage.err_io);
+            if (stage.err_io == .file or stage.err_io == .append) err_files[i] = try files.open(io, stage.err_path, stage.err_io);
         }
 
         const children = &proc.children;
@@ -717,27 +771,46 @@ const CmdProc = struct {
                 .pipe
             else if (out_file) |file|
                 .{ .file = file }
+            else if (mode == .detach)
+                .ignore
             else if (mode != .run)
                 .pipe
             else
                 .inherit;
-            const child_err: std.process.SpawnOptions.StdIo = if (err_files[i]) |file|
+            // `2>&1` with a pipe: both streams get the write end of one pipe, and the read end is what `.pipe`
+            // would have given as `stdout`.
+            const merged: ?[2]std.Io.File = if (stage.err_io == .stdout and child_out == .pipe) try cmdMakePipe() else null;
+            const stdout_io: std.process.SpawnOptions.StdIo = if (merged) |pipe| .{ .file = pipe[1] } else child_out;
+            const child_err: std.process.SpawnOptions.StdIo = if (stage.err_io == .stdout)
+                stdout_io
+            else if (err_files[i]) |file|
                 .{ .file = file }
             else if (mode == .status)
                 .pipe
+            else if (mode == .detach)
+                .ignore
             else
                 .inherit;
 
-            children[i] = try std.process.spawn(io, .{
+            children[i] = std.process.spawn(io, .{
                 .argv = stage.argv,
                 .cwd = if (stage.cwd.len > 0) .{ .path = stage.cwd } else .inherit,
                 .environ_map = if (env_map) |*map| map else null,
                 .stdin = child_in,
-                .stdout = child_out,
+                .stdout = stdout_io,
                 .stderr = child_err,
                 .create_no_window = true,
-            });
+                // A detached command is in a process group of its own: a Ctrl-C at the terminal does not reach it.
+                .pgid = if (mode == .detach and builtin.os.tag != .windows) 0 else null,
+            }) catch |err| {
+                if (merged) |pipe| for (pipe) |file| file.close(io);
+                return err;
+            };
             proc.nspawned += 1;
+            if (merged) |pipe| {
+                pipe[1].close(io);
+                children[i].stdout = pipe[0];
+            }
 
             if (i > 0) {
                 // The next stage holds the read end now. Kept open here, the stage before would never see it close.
@@ -750,7 +823,7 @@ const CmdProc = struct {
             const file = children[0].stdin.?;
             children[0].stdin = null;
             var bytes = opts.in;
-            if (mode == .stream) {
+            if (mode == .stream or mode == .detach) {
                 proc.owned_input = alloc.dupe(u8, bytes) catch |err| {
                     file.close(io);
                     return err;
@@ -763,7 +836,8 @@ const CmdProc = struct {
             };
         }
 
-        proc.watcher = try std.Thread.spawn(.{}, CmdWatch.run, .{&proc.watch});
+        proc.pid = cmdPid(&children[n - 1]);
+        if (mode != .detach) proc.watcher = try std.Thread.spawn(.{}, CmdWatch.run, .{&proc.watch});
         return proc;
     }
 
@@ -774,6 +848,15 @@ const CmdProc = struct {
         if (proc.reading) proc.reader.deinit();
         // Reaps the stages that `finish` did not.
         for (proc.children[0..proc.nspawned]) |*child| child.kill(io);
+        if (proc.feeder) |thread| thread.join();
+        if (proc.owned_input) |bytes| proc.alloc.free(bytes);
+        proc.alloc.destroy(proc);
+    }
+
+    /// The thread of a detached command: waits for its stages, so that none stays a zombie, and frees it.
+    fn reapDetached(proc: *CmdProc) void {
+        const io = stdx.io();
+        for (proc.children[0..proc.nspawned]) |*child| _ = child.wait(io) catch {};
         if (proc.feeder) |thread| thread.join();
         if (proc.owned_input) |bytes| proc.alloc.free(bytes);
         proc.alloc.destroy(proc);
@@ -1024,6 +1107,7 @@ const ProcOp = enum(i64) {
     read_all = 1,
     wait = 2,
     kill = 3,
+    pid = 4,
 };
 
 /// `fn _proc_op(id int, op int) -> CmdRaw`. For `read_line`, `code` is 1 with a line in `out` and 0 at the end of
@@ -1052,6 +1136,7 @@ pub fn procOp(t: *C.Thread) anyerror!C.Ret {
                 if (proc.finish()) |c| code = c else |err| return procFail(t, ret, err);
             } else |err| err,
             .kill => proc.kill(),
+            .pid => code = proc.pid,
         };
         res catch |err| return procFail(t, ret, err);
     } else {

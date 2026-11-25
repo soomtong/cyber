@@ -25,6 +25,12 @@ pub fn io() std.Io {
     return threaded.io();
 }
 
+/// The `Threaded` behind `io`, for what `std.Io` does not offer (a pipe on Windows).
+pub fn threadedPtr() *std.Io.Threaded {
+    if (threaded_state.load(.acquire) != threaded_ready) initThreadedOnce();
+    return &threaded;
+}
+
 /// Whether `io` was built. Lets a signal handler use it without building it (`initThreadedOnce` allocates).
 pub fn ioReady() bool {
     return threaded_state.load(.acquire) == threaded_ready;

@@ -5018,6 +5018,7 @@ A program that can not be started is an [OS error](#os-errors) from all three: `
 | `stdin_file(path)` | the file to the stdin of the first program, in place of the text of `stdin`. |
 | `stdout_file(path)`, `stdout_append(path)` | the stdout of the last program to the file, which is emptied or added to. |
 | `stderr_file(path)`, `stderr_append(path)` | the stderr of the programs that the command has so far to the file. |
+| `stderr_to_stdout()` | the stderr of the programs that the command has so far where their stdout goes, like `2>&1`: into the pipe to the next program, into what `read` or `start` reads, into the file of `stdout_file`, or to the stdout of this process. |
 
 The files are opened when the command runs, before any program starts. A relative path is relative to the working directory of this process, not to that of `dir`. A file that can not be opened is an OS error like a program that can not be started. In `a.pipe(b)` the stdout is that of `b`. A stream that goes to a file is not in the result of `run_status`, and `read` of a command whose stdout goes to a file is `error.InvalidArgument`. Programs that send stderr to the same file write to it together.
 
@@ -5041,8 +5042,14 @@ code := p.wait_code()!
 | `wait() -> !void` | waits for the end, with the errors of `run`. Output that was not read is dropped. |
 | `wait_code() -> !int` | waits for the end and returns the exit code, like `code` of `run_status`. |
 | `kill()` | stops the programs that still run. `wait` then returns `error.ExitStatus`. |
+| `pid() -> int` | the process id of the last program. |
 
 stderr is that of this process, and without `stdin` or `stdin_file` the first program reads an empty input. The time limit counts from `start`: once it passes, `read_line` and `wait` return `error.TimedOut`. A command whose stdout goes to a file can not be started this way (`error.InvalidArgument`). A `Process` is not copied. When it goes away before the command ended, its programs are stopped, also when the eval ends with a panic or an interrupt. A thread that keeps running after the host asked the VM to stop, such as a `@deinit` that runs to its end, gets `error.Interrupted` from a command whose programs were stopped. `lines()` gives the lines for a `for` loop, whose `else |err|:` block handles an error such as `error.TimedOut`.
+
+`detach() -> !int` starts the command and returns without waiting, for a program that keeps running on its own such as a server. It returns the process id of the last program. stdin is empty unless `stdin` or `stdin_file` gives one, and stdout and stderr are dropped unless they go to a file. The programs are not stopped when the eval or the VM ends, nor by `cl_vm_interrupt`. On POSIX they are in a process group of their own, so a Ctrl-C at the terminal does not reach them. A time limit with `detach` is `error.InvalidArgument`.
+```cy
+pid := os.cmd({'python3', '-m', 'http.server', '8000'}).stdout_file('server.log').stderr_to_stdout().detach()!
+```
 
 The older `os.exec(args)` runs one program and returns its `ExecResult`, like `os.cmd(args).run_status()`. It panics when the program can not be started.
 

@@ -70,6 +70,7 @@
 - 2026-11-25(사용자: "continue from HANDOFF", Julia 남은 결정 질문에 답함 — B의 2 자유 함수 꼴, C LSP Warning 먼저 · 세고 결정,
   D 둘 다 하지 않음, F 미루고 LSP 진단만): 셋을 넣었다. master에 바로 커밋(`f2b52b72` 결정 기록, `3ad0cd31` B의 2,
   `1e62e70d` C, `9987f869` F 대안, `2b4dfd80` 문자열 리터럴의 `str`/정수 쌍 제외). 15단계 검증 rc=0(`2b4dfd80`). push 안 함.
+  이어서 사용자: "이거는 컴파일 에러로 내는 게 좋겠는데?" → C를 컴파일 오류로 올리고 LSP 힌트를 지웠다(`eba228f1`, 15단계 rc=0).
 
 ## 현재 브랜치
 
@@ -395,12 +396,13 @@
 - [x] Julia 검토(설계 원칙 3.7)의 남은 결정(2026-11-25). 결정 기록은 3.7 끝 "결정(2026-11-25".
   - B의 2: 모듈 수준 연산자 함수 `` fn `*`(s float, v Vec2) ``를 두 피연산자 타입의 모듈에서 찾는다. 산술 · 비트만, 비교는
     메서드만. 선언은 같은 모듈의 타입을 받아야 한다. 결정 `project_operator_lookup.md`, 매뉴얼 Operator methods. 15단계 rc=0.
-  - C: `CL_HINT_AMBIGUOUS_CALL` · `cyber-lsp` Warning(`ambiguous-call`). 센 결과 core · std · 테스트에서 의도된 테스트 하나.
-    수 타입끼리, 문자열 리터럴 자리의 `str`/정수만 다른 쌍은 뺐다(json `v['n']` 9곳이 여기 걸렸었다). 오류로 올릴지는 사용자가 정한다(`project_overload_exact_match.md` 끝 절).
+  - C: 모호한 오버로드 호출은 컴파일 오류(깨지는 변경, `sema_func.checkAmbiguousCall`). 경고 단계의 힌트는 지웠고
+    `CL_HINT_PATTERN_LITERAL`이 5가 됐다. 수 타입끼리, 문자열 리터럴 자리의 `str`/정수만 다른 쌍은 모호하지 않다(json `v['n']`).
+    인자가 이름 · 리터럴 · 멤버 접근인 호출만 본다. `project_overload_exact_match.md` 끝 절, F-21 행.
   - D: 하지 않는다(컬렉션 식도 `map` · `filter`도).
   - F: 미룸. 대안으로 `CL_HINT_PATTERN_LITERAL` · `cyber-lsp`가 `regex.compile` · `peg.compile`의 리터럴을 별도 VM에서 컴파일해
     Error 진단. LSP 설계 문서 19절.
-  - tars-agent: B의 2(언어 기능)를 다음 빌드 TODO에 넣어야 한다. 2026-11-25에는 `docs/TODO.md`에 다른 세션의 미커밋 변경이 있어
+  - tars-agent: B의 2(언어 기능)와 C(깨지는 변경, 모호한 호출 오류)를 다음 빌드 TODO에 넣어야 한다. 2026-11-25에는 `docs/TODO.md`에 다른 세션의 미커밋 변경이 있어
     쓰지 않았다.
 - [x] 컴파일 타임 수 연산(2026-11-24, F-206 · F-207): 내장 수 타입의 모든 산술 · 비트 · 순서 연산, 정수 넓히기, float `==`.
   정수 `/` · `%` 0은 컴파일 오류. `error` 리터럴도 컴파일 타임 식이다. `>>`는 매뉴얼대로 논리 시프트(산술은
@@ -408,8 +410,8 @@
 
 ## 다음 에이전트에게
 
-1. 0.4.20이 마지막 릴리스다(노트 `docs/releases/0.4.20.md`). `unreleased.md`에 세 절(모듈 수준 연산자 함수, 모호한 호출 경고,
-   패턴 리터럴 진단)이 있다. 사용자에게 물을 것: C를 컴파일 오류로 올릴지(지금 걸리는 곳은 의도된 테스트 하나), 다음 릴리스.
+1. 0.4.20이 마지막 릴리스다(노트 `docs/releases/0.4.20.md`). `unreleased.md`에 세 절(모듈 수준 연산자 함수, 모호한 호출 오류,
+   패턴 리터럴 진단)이 있다. 사용자에게 물을 것: push와 다음 릴리스.
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 

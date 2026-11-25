@@ -17,6 +17,7 @@ pub const Fix = struct {
 pub const code_unused_local = "unused-local";
 pub const code_unused_use = "unused-use";
 pub const code_scope_exit = "scope-exit";
+pub const code_ambiguous_call = "ambiguous-call";
 
 /// The fix for a diagnostic of the server with code `code` over `text[start..end]`. Null for another code.
 /// The fix of a compile error is not made here: the compiler sends the edit with the error (`CLReport.fix_text`).

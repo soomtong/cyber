@@ -1326,7 +1326,7 @@ pub fn popLambdaProc(c: *cy.Chunk) !sema.ExprResult {
 pub const LambdaMark = struct {
     funcs: usize,
     func_blocks: usize,
-    ref_lens: [4]usize,
+    ref_lens: [cy.compiler.refListNames.len]usize,
 
     pub fn take(c: *cy.Chunk) LambdaMark {
         return .{

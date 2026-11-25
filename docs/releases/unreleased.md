@@ -23,3 +23,20 @@ e := 2 * a      -- 리터럴은 매개변수 타입을 따른다.
   a type declared in this module, ...' 오류다(깨지는 변경이지만 core · std · 테스트에 해당하는 선언은 없었다).
 - 결정 `docs/decisions/project_operator_lookup.md`, 매뉴얼 Operator methods 절.
 
+## 모호한 오버로드 호출의 LSP 경고
+
+두 오버로드가 같이 맞고 먼저 선언한 쪽이 다른 쪽보다 더 구체적이지 않은 호출에 `cyber-lsp`가 Warning을 낸다(동작은 그대로,
+먼저 선언한 쪽을 부른다).
+
+~~~cy
+fn tag(x ?str) -> str: return 'str'
+fn tag(x ?int) -> str: return 'option int'
+
+print(tag(none))
+-- warning: This call matches both `fn tag(?str) -> str` and `fn tag(?int) -> str`, and the one declared first is picked. ...
+~~~
+
+- 수 타입끼리만 다른 오버로드(`float(x)`에 `i32`), `str`과 `byte`만 다른 오버로드(`s.index('\n')`)는 같은 답을 내므로 경고하지 않는다.
+- 인자가 이름 · 리터럴일 때만 본다. 임베딩은 `cl_vm_symbol_hints`의 `CL_HINT_AMBIGUOUS_CALL`로 받는다.
+- 결정 `docs/decisions/project_overload_exact_match.md` 끝 절. core · std · 테스트에서 걸리는 곳은 의도된 테스트 하나였다.
+

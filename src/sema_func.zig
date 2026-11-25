@@ -834,6 +834,10 @@ pub fn matchFuncSym(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const A
     // if == nargs, there is not enough arguments.
     var best_match_err = FuncMatchError.init(undefined, 0, undefined);
 
+    if (!req_value and c.compiler.record_refs and cy.refs.inMainSource(c, node)) {
+        try probeAmbiguousCall(c, func_sym, pre_args, end_args, nargs, node);
+    }
+
     // First pass: a candidate whose parameter types match the arguments without implicit conversions wins,
     // regardless of declaration order. Otherwise fall back to the first candidate that matches with conversions (F-21).
     if (!req_value and func_sym.numFuncs > 1) {
@@ -849,6 +853,7 @@ pub fn matchFuncSym(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const A
             }
         }
     }
+
 
     var next: ?*cy.Func = func_sym.first;
     while (next) |func| {
@@ -897,9 +902,111 @@ pub fn matchFuncSym(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const A
     return reportCallFuncMismatch2(c, pre_args, end_args, best_func, best_match_err, node);
 }
 
+/// An argument whose analysis has no effect beyond the call: it can be matched against every overload and undone.
+fn isProbeSafeArg(node: *ast.Node) bool {
+    return switch (node.type()) {
+        .ident, .noneLit, .decLit, .binLit, .octLit, .hexLit, .floatLit, .trueLit, .falseLit, .raw_string_lit,
+        .string_lit => true,
+        .accessExpr => isProbeSafeArg(node.cast(.accessExpr).left),
+        else => false,
+    };
+}
+
+/// For an editor (`refs.hints`): when more than one runtime overload matches a call through implicit conversions,
+/// the call picks the one declared first. Every candidate is matched and undone here, and a call whose pick is not
+/// more specific than another match is recorded. Only calls whose arguments are names and literals are checked,
+/// since an argument such as a lambda or a block would be analyzed once per candidate.
+fn probeAmbiguousCall(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const Argument, end_args: []const *ast.Node,
+    nargs: usize, node: *ast.Node) !void {
+    for (pre_args) |arg| {
+        if (arg.type == .standard and !isProbeSafeArg(arg.node)) return;
+    }
+    for (end_args) |arg| {
+        if (!isProbeSafeArg(arg)) return;
+    }
+    const loc = try c.ir.allocArray(*ir.Expr, nargs);
+    var matched: [8]*cy.Func = undefined;
+    var num_matched: usize = 0;
+    // The first pass of `matchFuncSym` picks an exact match. Only when there is none, the second pass picks the
+    // first candidate that matches through implicit conversions.
+    for ([_]bool{ true, false }) |exact| {
+        var next: ?*cy.Func = func_sym.first;
+        while (next) |func| : (next = func.next) {
+            if (func.info.const_eval_only or func.type == .generic) continue;
+            if (num_matched == matched.len) break;
+            const report_start = c.compiler.reports.items.len;
+            var match_err: FuncMatchError = undefined;
+            const res = tryRtOverload(c, func, pre_args, end_args, loc, exact, true, &match_err, node) catch |err| {
+                if (err != error.CompileError) return err;
+                for (c.compiler.reports.items[report_start..]) |*report| {
+                    report.deinit(c.alloc);
+                }
+                c.compiler.reports.items.len = report_start;
+                continue;
+            };
+            if (res != null) {
+                matched[num_matched] = func;
+                num_matched += 1;
+            }
+        }
+        if (num_matched > 0) break;
+    }
+    if (num_matched < 2) return;
+    for (matched[1..num_matched]) |other| {
+        if (!moreSpecificSig(matched[0].sig, other.sig) and !interchangeableSigs(matched[0].sig, other.sig)) {
+            cy.refs.recordAmbiguousCall(c, node, matched[0], other);
+            return;
+        }
+    }
+}
+
+/// Whether each parameter of `a` is the same as that of `b` or narrower: `T` is narrower than `?T` and `!T`.
+fn moreSpecificSig(a: *cy.FuncSig, b: *cy.FuncSig) bool {
+    const a_params = a.params();
+    const b_params = b.params();
+    if (a_params.len != b_params.len) return false;
+    for (a_params, b_params) |ap, bp| {
+        const at = ap.get_type();
+        const bt_ = bp.get_type();
+        if (at.id() == bt_.id()) continue;
+        switch (bt_.kind()) {
+            .option => if (bt_.cast(.option).child_t.id() == at.id()) continue,
+            .result => if (bt_.cast(.result).child_t.id() == at.id()) continue,
+            else => {},
+        }
+        return false;
+    }
+    return true;
+}
+
+/// Whether the parameters of `a` and `b` only differ in pairs that give the same answer by design: two number
+/// types (`float(x)` with an `i32` takes `float` before `int`, and the value is the same), or `str` and `byte` (a
+/// one-character literal fits both, as in `s.index('\n')`).
+fn interchangeableSigs(a: *cy.FuncSig, b: *cy.FuncSig) bool {
+    const a_params = a.params();
+    const b_params = b.params();
+    if (a_params.len != b_params.len) return false;
+    for (a_params, b_params) |ap, bp| {
+        const at = ap.get_type();
+        const bt_ = bp.get_type();
+        if (at.id() == bt_.id()) continue;
+        if (isNumberOrRaw(at) and isNumberOrRaw(bt_)) continue;
+        if ((at.id() == bt.Str and bt_.id() == bt.R8) or (at.id() == bt.R8 and bt_.id() == bt.Str)) continue;
+        return false;
+    }
+    return true;
+}
+
 /// Tries one runtime overload candidate. On a mismatch the locals and statements generated while matching are discarded.
 fn matchRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end_args: []const *ast.Node,
     loc: []*ir.Expr, exact: bool, match_err: *FuncMatchError, node: *ast.Node) !?FuncSymResult {
+    return tryRtOverload(c, func, pre_args, end_args, loc, exact, false, match_err, node);
+}
+
+/// With `probe`, what the candidate generated is discarded whether it matches or not, and also on an error. The
+/// result then only tells whether it matched.
+fn tryRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end_args: []const *ast.Node,
+    loc: []*ir.Expr, exact: bool, probe: bool, match_err: *FuncMatchError, node: *ast.Node) !?FuncSymResult {
 
     // Save last statement to clear any that were added on a mismatch.
     const start_stmt = c.ir.curBlock().last;
@@ -907,8 +1014,30 @@ fn matchRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end
     const saved_take = c.global_take;
     const undo_mark = try sema_move.beginUndo(c);
     defer sema_move.endUndo(c, undo_mark);
+    const Undo = struct {
+        fn run(c_: *cy.Chunk, mark: anytype, var_start_: usize, saved_take_: anytype, start_stmt_: anytype) void {
+            // A local that an argument moved is alive again for the next candidate.
+            sema_move.undoMoves(c_, mark, var_start_);
+            // Discard any locals created during matching.
+            if (var_start_ < c_.varStack.items.len) {
+                sema_borrow.truncateBorrowLoans(c_, var_start_);
+                c_.varStack.items.len = var_start_;
+            }
+            // The hidden locals of a take (`sema_move.takeGlobal`) went with them. The next candidate takes again.
+            c_.global_take = saved_take_;
+            if (start_stmt_ != null) {
+                // TODO: Also remove the statements and expressions generated.
+                start_stmt_.?.next = null;
+                c_.ir.curBlock().last = start_stmt_.?;
+            } else {
+                c_.ir.curBlock().last = null;
+            }
+        }
+    };
+    errdefer if (probe) Undo.run(c, undo_mark, var_start, saved_take, start_stmt);
 
     if (try matchOverloadedFunc(c, func, pre_args, end_args, loc, exact, match_err, node)) |res| {
+        if (probe) Undo.run(c, undo_mark, var_start, saved_take, start_stmt);
         return .{
             .func = res.func,
             .kind = .rt,
@@ -920,24 +1049,7 @@ fn matchRtOverload(c: *cy.Chunk, func: *cy.Func, pre_args: []const Argument, end
         };
     }
 
-    // A local that an argument moved is alive again for the next candidate.
-    sema_move.undoMoves(c, undo_mark, var_start);
-
-    // Discard any locals created during matching.
-    if (var_start < c.varStack.items.len) {
-        sema_borrow.truncateBorrowLoans(c, var_start);
-        c.varStack.items.len = var_start;
-    }
-    // The hidden locals of a take (`sema_move.takeGlobal`) went with them. The next candidate takes again.
-    c.global_take = saved_take;
-
-    if (start_stmt != null) {
-        // TODO: Also remove the statements and expressions generated.
-        start_stmt.?.next = null;
-        c.ir.curBlock().last = start_stmt.?;
-    } else {
-        c.ir.curBlock().last = null;
-    }
+    Undo.run(c, undo_mark, var_start, saved_take, start_stmt);
     return null;
 }
 
@@ -2017,6 +2129,11 @@ fn binaryOpVerb(name: []const u8) ?OpVerb {
 
 fn isNumberType(t: *cy.Type) bool {
     return t.kind() == .int or t.kind() == .float;
+}
+
+/// A number type or a raw integer that is not a name (`symbol` and `error` are distinct raw types).
+fn isNumberOrRaw(t: *cy.Type) bool {
+    return isNumberType(t) or (t.kind() == .raw and !t.cast(.raw).distinct);
 }
 
 fn isShortSrc(src: []const u8) bool {

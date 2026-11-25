@@ -36,3 +36,21 @@ cf4aa84a.
 - behavior 테스트 `functions/call_overload_exact.cy`: `float` 먼저 · `int` 먼저 두 순서, 지역 변수 · 리터럴, 두 인자 혼합, 메서드,
   단일 `float` 오버로드에 `int`를 넘기는 2단계 경로. `functions/call_overload_ret_only_error.cy`: 반환만 다른 오버로드가 컴파일 오류.
 - core.cy · std의 기존 오버로드는 전부 테스트를 통과해야 한다(1단계가 잡는 호출이 이전과 다른 후보를 고르면 여기서 드러난다).
+
+## 모호한 호출의 LSP 경고 (2026-11-25, Julia 검토 3.4 C)
+
+결정(사용자, 2026-11-25): 오류로 올리기 전에 LSP Warning으로 넣고 걸리는 곳을 센다.
+
+- 힌트 `CL_HINT_AMBIGUOUS_CALL`(`refs.HintKind.ambiguous_call`), `cyber-lsp`의 Warning 진단(code `ambiguous-call`). 기호 정보를
+  켠 컴파일(`record_refs`)의 main 소스에서만 계산한다.
+- `sema_func.probeAmbiguousCall`: `matchFuncSym`의 1단계 앞에서 런타임 후보(제네릭 · `const_eval_only` 제외)를 하나씩 맞춰 보고
+  매번 되돌린다(`tryRtOverload`의 `probe`, 오류가 나도 리포트까지 되돌림). 정확 일치가 하나라도 있으면 그것들만, 없으면 변환 일치를
+  모은다. 둘 이상이고 먼저 선언한 것(실제로 골라지는 것)이 다른 것보다 더 구체적이지 않으면 기록한다.
+- "더 구체적": 매개변수마다 같거나 `T`가 `?T` · `!T`보다 좁다. 처음 안의 "`int`가 `float`보다"는 넣지 않았다.
+- 같은 답을 내도록 설계된 쌍은 뺀다(`interchangeableSigs`): 수 타입끼리만 다른 것(`float(x i32)`가 `float` 쪽으로 가도 값이
+  같다), `str`과 `byte`만 다른 것(한 글자 리터럴 `s.index('\n')`).
+- 인자가 이름 · 리터럴 · 멤버 접근일 때만 본다. 람다 · 블록 · 호출은 후보마다 다시 분석되므로 건너뛴다.
+
+센 결과(2026-11-25, 계측 빌드로 `src/test` · `examples` · `src/tools`의 모든 `.cy`를 컴파일, core · std는 그 과정에서 함께
+컴파일됨): 1곳, `functions/call_overload_literal.cy`의 `first(none)`(의도된 테스트). 수 타입 · `str`/`byte` 쌍을 빼기 전에는
+12곳이었다(`float(x)` · `f32(x)`에 `i32` · `r64` 등 10곳, `s.index("\n")` 1곳). 오류로 올릴지는 사용자가 정한다.

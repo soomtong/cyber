@@ -868,6 +868,11 @@ typedef enum {
     /// the name of its parameter in the function that the call picked out of the overloads. Not listed when the
     /// argument is a name that ends in the parameter's name (`width`, `self.width`, `old_width`).
     CL_HINT_PARAM_NAME = 4,
+    /// A call that two overloads match, where the call picks the one declared first and it is not more specific
+    /// than the other (`T` is more specific than `?T` and `!T`). Overloads that only differ in number types, or in
+    /// `str` and `byte`, give the same answer and are not listed. Only calls whose arguments are names and
+    /// literals are checked. The range is the call, `detail` names the two functions.
+    CL_HINT_AMBIGUOUS_CALL = 5,
 } CLHintKind;
 
 /// A note on the main source for an editor, see `cl_vm_symbol_hints`. `kind` is a `CLHintKind`.

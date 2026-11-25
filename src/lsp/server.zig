@@ -680,6 +680,14 @@ pub const Server = struct {
                         .unnecessary = true,
                     };
                 },
+                c.HintAmbiguousCall => {
+                    diag = .{
+                        .range = undefined,
+                        .msg = try std.fmt.allocPrint(arena, "This call matches both {s}, and the one declared first is picked. Convert an argument so that only one matches.", .{detail}),
+                        .severity = 2,
+                        .code = assist.code_ambiguous_call,
+                    };
+                },
                 c.HintUnusedUse => {
                     // The statement without the line break.
                     while (end > start and std.ascii.isWhitespace(doc.text[end - 1])) end -= 1;

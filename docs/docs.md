@@ -2605,7 +2605,7 @@ fn tag(x ?int) -> str:
 print(tag(.red))     --> color
 print(tag(none))     --> str
 ```
-The language server warns at a call like `tag(none)`: two overloads match, and the one declared first is not more specific than the other (`T` is more specific than `?T` and `!T`). Convert the argument, as in `tag(?int(none))`, so that only one matches. Overloads that only differ in number types, or in `str` and `byte`, give the same answer and are not warned about.
+The language server warns at a call like `tag(none)`: two overloads match, and the one declared first is not more specific than the other (`T` is more specific than `?T` and `!T`). Convert the argument, as in `tag(?int(none))`, so that only one matches. Overloads that only differ in number types, or in `str` and an integer at a string literal argument (a one-character literal is a string first, as in `v['n']`), are not warned about.
 When no overload takes the arguments, the call reports the error of the overload that got the furthest through the arguments, and of the first declared one among those. For a literal that is the error of that overload alone, such as 'Expected `?T` to infer `none` value, found `Int`.' A closure that is passed to overloads that only take a function pointer reports 'Expected argument `fn(int) -> int`, found `Func[fn(int) -> int]`, when calling `fn m(int, fn(int) -> int) -> int`. A closure is passed to a `Func[fn(...)]` or a `&OpaqueFunc[fn(...)]` parameter.'
 
 Overloads must differ in their parameter types. Declaring two functions with the same parameters and only a different return type is a compile error.

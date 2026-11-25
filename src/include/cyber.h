@@ -870,7 +870,7 @@ typedef enum {
     CL_HINT_PARAM_NAME = 4,
     /// A call that two overloads match, where the call picks the one declared first and it is not more specific
     /// than the other (`T` is more specific than `?T` and `!T`). Overloads that only differ in number types, or in
-    /// `str` and `byte`, give the same answer and are not listed. Only calls whose arguments are names and
+    /// `str` and an integer at a string literal argument, are not listed. Only calls whose arguments are names and
     /// literals are checked. The range is the call, `detail` names the two functions.
     CL_HINT_AMBIGUOUS_CALL = 5,
     /// A string literal passed as the pattern of `regex.compile` or the grammar of `peg.compile`, for an editor

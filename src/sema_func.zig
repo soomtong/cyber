@@ -953,7 +953,7 @@ fn probeAmbiguousCall(c: *cy.Chunk, func_sym: *cy.sym.FuncSym, pre_args: []const
     }
     if (num_matched < 2) return;
     for (matched[1..num_matched]) |other| {
-        if (!moreSpecificSig(matched[0].sig, other.sig) and !interchangeableSigs(matched[0].sig, other.sig)) {
+        if (!moreSpecificSig(matched[0].sig, other.sig) and !interchangeableSigs(matched[0].sig, other.sig, pre_args, end_args)) {
             cy.refs.recordAmbiguousCall(c, node, matched[0], other);
             return;
         }
@@ -979,19 +979,31 @@ fn moreSpecificSig(a: *cy.FuncSig, b: *cy.FuncSig) bool {
     return true;
 }
 
-/// Whether the parameters of `a` and `b` only differ in pairs that give the same answer by design: two number
-/// types (`float(x)` with an `i32` takes `float` before `int`, and the value is the same), or `str` and `byte` (a
-/// one-character literal fits both, as in `s.index('\n')`).
-fn interchangeableSigs(a: *cy.FuncSig, b: *cy.FuncSig) bool {
+/// Whether the parameters of `a` and `b` only differ in pairs that are not ambiguous by design: two number types
+/// (`float(x)` with an `i32` takes `float` before `int`, and the value is the same), or `str` and an integer at a
+/// string literal argument (a one-character literal is a string first and a rune only where no string fits: `s.index('\n')` with `byte`,
+/// `v['n']` with an `int` index). The same holds inside `?T`.
+fn interchangeableSigs(a: *cy.FuncSig, b: *cy.FuncSig, pre_args: []const Argument, end_args: []const *ast.Node) bool {
     const a_params = a.params();
     const b_params = b.params();
     if (a_params.len != b_params.len) return false;
-    for (a_params, b_params) |ap, bp| {
-        const at = ap.get_type();
-        const bt_ = bp.get_type();
+    if (a_params.len != pre_args.len + end_args.len) return false;
+    for (a_params, b_params, 0..) |ap, bp, i| {
+        const arg_n = if (i < pre_args.len) pre_args[i].node else end_args[i - pre_args.len];
+        var at = ap.get_type();
+        var bt_ = bp.get_type();
         if (at.id() == bt_.id()) continue;
+        if (at.kind() == .option and bt_.kind() == .option) {
+            at = at.cast(.option).child_t;
+            bt_ = bt_.cast(.option).child_t;
+        }
         if (isNumberOrRaw(at) and isNumberOrRaw(bt_)) continue;
-        if ((at.id() == bt.Str and bt_.id() == bt.R8) or (at.id() == bt.R8 and bt_.id() == bt.Str)) continue;
+        if ((at.id() == bt.Str and isNumberOrRaw(bt_)) or (isNumberOrRaw(at) and bt_.id() == bt.Str)) {
+            switch (arg_n.type()) {
+                .string_lit, .sq_string_lit, .raw_string_lit => continue,
+                else => {},
+            }
+        }
         return false;
     }
     return true;

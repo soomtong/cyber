@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-25): Julia 검토의 남은 결정(B의 2 · C · D · F) 구현
+# HANDOFF (2026-11-25): 0.4.20..HEAD 리뷰 수정과 os.cmd 보강(2>&1 · detach · pid)
 
 ## 목표
 
@@ -71,6 +71,9 @@
   D 둘 다 하지 않음, F 미루고 LSP 진단만): 셋을 넣었다. master에 바로 커밋(`f2b52b72` 결정 기록, `3ad0cd31` B의 2,
   `1e62e70d` C, `9987f869` F 대안, `2b4dfd80` 문자열 리터럴의 `str`/정수 쌍 제외). 15단계 검증 rc=0(`2b4dfd80`). push 안 함.
   이어서 사용자: "이거는 컴파일 에러로 내는 게 좋겠는데?" → C를 컴파일 오류로 올리고 LSP 힌트를 지웠다(`eba228f1`, 15단계 rc=0).
+- 2026-11-25(사용자: "@HANDOFF.md continue" → `/code-review high 0.4.20..HEAD` 9건 → "커밋 메시지 빼고 다 고쳐. 그리고 이어서
+  os.cmd 보강하고 다 마치면 push 해줘. 새 버전을 내지는 말고"): 리뷰 8건 수정(`9165b1aa`, F-211..F-215), `os.cmd`에
+  `stderr_to_stdout` · `detach` · `Process.pid`. 둘 다 15단계 rc=0 뒤 커밋, master push. 릴리스는 하지 않음(사용자가 더 모아서 낸다).
 
 ## 현재 브랜치
 
@@ -417,13 +420,21 @@
     Error 진단. LSP 설계 문서 19절.
   - tars-agent: B의 2 · C · F 대안을 `docs/TODO.md`의 cyber 변경 항목에 덧붙여 커밋했다(`df1a693`, 사용자 지시로 남아 있던
     다른 세션의 0.4.19 미커밋 변경도 함께, push 안 함).
+- [x] `/code-review high` 0.4.20..HEAD(2026-11-25) 9건 중 8건 수정(`9165b1aa`). 커밋 제목 길이 1건은 사용자 지시로 두었다.
+  자유 연산자의 오른쪽 리터럴 · 오른쪽 모듈 조회, 템플릿 후보가 있으면 모호성 검사 생략 · 단일 오버로드 생략 · 전역 버퍼 제거,
+  `os.cmd` 감시는 실행 스레드 플래그 + 멈추지 않는 스레드는 `error.Interrupted`(`cmdFailFor`, CmdFail 12), `File` · `Dir`의
+  `closed` 비공개 + `is_closed()`(깨지는 변경), `#for` 뒤 `else`는 `#for`의 것이 아님. `unreleased.md` 첫 절.
+- [x] `os.cmd` 보강(2026-11-25): `Cmd.stderr_to_stdout()`(CmdIo 4, 파이프면 `cmdMakePipe`로 쓰기 끝을 둘에), `Cmd.detach() -> !int`
+  (CmdMode 4, 기본 입출력 버림, POSIX `pgid = 0`, `smp_allocator`로 만든 명령을 떼어 둔 스레드가 회수 · 해제, 시간 제한 거절),
+  `Process.pid()`. 결정 `project_os_cmd.md` 끝 절. Windows는 크로스 컴파일만 했다. 남은 것: 단계별 stdin 글(뜻 없음),
+  실행 중 프로세스의 stdin 쓰기(파이프가 차면 막혀 중단을 못 봄, 하지 않음).
 - [x] 컴파일 타임 수 연산(2026-11-24, F-206 · F-207): 내장 수 타입의 모든 산술 · 비트 · 순서 연산, 정수 넓히기, float `==`.
   정수 `/` · `%` 0은 컴파일 오류. `error` 리터럴도 컴파일 타임 식이다. `>>`는 매뉴얼대로 논리 시프트(산술은
   `.asr()`).
 
 ## 다음 에이전트에게
 
-1. 0.4.21이 마지막 릴리스다(노트 `docs/releases/0.4.21.md`). `unreleased.md`는 머리말만 있다.
+1. 0.4.21이 마지막 릴리스다(노트 `docs/releases/0.4.21.md`). `unreleased.md`에 그 뒤 두 절(리뷰 수정, os.cmd 보강)이 있다.
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 
@@ -465,7 +476,7 @@
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - VM 생성(`cl_vm_init*`)과 값 생성 C API의 할당 실패는 아직 `fatal`(실패를 알릴 시그니처를 먼저 정해야 함).
 - 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-208까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-215까지, 열린 것 없음).
 
 ## 작업 방식
 

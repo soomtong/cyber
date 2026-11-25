@@ -1747,6 +1747,16 @@ b := a + Vec2{x=3, y=4}
 c := -a
 ```
 
+An operator method only applies when its type is on the left. When the left operand is a number or another type, declare a module-level operator function that takes both operands. `a op b` first looks for a method `op` of the type of `a`. If there is none, it looks for a module-level function `op` in the module that declares the type of `a`, then in the module that declares the type of `b`:
+```cy
+fn `*`(s float, v Vec2) -> Vec2:
+    return {x=s * v.x, y=s * v.y}
+
+d := 2.0 * a
+e := 2 * a      -- The literal takes the type of the parameter.
+```
+This works for the arithmetic and bitwise operators (`+ - * / % ** && || ~ << >>`). A module-level operator function takes two parameters, and one of them must be a type declared in the same module. A module can not add an operator to two types that it does not own, since `a op b` would never find it. Comparison operators (`< <= > >=`) are only methods of the left operand type.
+
 Special operators have their own name. This example overloads the `index` operator and the `set index` operator:
 ```cy
 type MyCollection:

@@ -534,6 +534,7 @@ pub fn appendFunc(c: *cy.Chunk, func: *cy.Func) !void {
 }
 
 pub fn resolveUserFunc(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig) !void {
+    try checkFreeOperatorFunc(c, func, sig);
     if (!func.info.const_eval_only) {
         for (sig.params()) |param| {
             if (param.get_type().info.ct) {
@@ -543,6 +544,43 @@ pub fn resolveUserFunc(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig) !void {
         }
     }
     try resolveFunc(c, func, sig);
+}
+
+const free_ops = [_][]const u8{ "+", "-", "*", "/", "%", "**", "&&", "||", "~", "<<", ">>" };
+const compare_ops = [_][]const u8{ "<", "<=", ">", ">=" };
+
+/// A module-level `` fn `*`(a A, b B) `` is found by `a * b` only through the module that declares `A` or `B`
+/// (`sema_expr.semaFreeOp`). Anywhere else it would never be called, so it is an error: one module can not add an
+/// operator to two types that it does not own. Comparison operators are only methods of the left type.
+fn checkFreeOperatorFunc(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig) !void {
+    if (func.isMethod() or func.decl == null) return;
+    const parent = func.parent.parent orelse return;
+    if (parent.type != .chunk) return;
+    const name = func.name();
+    for (compare_ops) |op| {
+        if (std.mem.eql(u8, name, op)) {
+            return c.reportErrorFmt("Declare `{}` as a method of the left operand type. A comparison operator is not looked up in the module of its operands.", &.{v(name)}, func.decl);
+        }
+    }
+    for (free_ops) |op| {
+        if (std.mem.eql(u8, name, op)) break;
+    } else return;
+    if (sig.params_len != 2) {
+        return c.reportErrorFmt("A module-level operator function takes two parameters, the left and the right operand.", &.{}, func.decl);
+    }
+    for (sig.params()) |param| {
+        var param_t = param.get_type();
+        switch (param_t.kind()) {
+            .borrow => param_t = param_t.cast(.borrow).child_t,
+            .ex_borrow => param_t = param_t.cast(.ex_borrow).child_t,
+            else => {},
+        }
+        // An infer parameter (`s %T`) stands for a type that is not known here.
+        if (param_t.id() == bt.Infer or param_t.id() == bt.Dependent) return;
+        if (param_t.kind() == .null) continue;
+        if (param_t.sym().head.getRootChunk() == c) return;
+    }
+    return c.reportErrorFmt("The operator function `{}` must take a type declared in this module, so that `a {} b` can find it from the type of `a` or `b`.", &.{v(name), v(name)}, func.decl);
 }
 
 pub fn resolveFunc(c: *cy.Chunk, func: *cy.Func, sig: *cy.FuncSig) !void {

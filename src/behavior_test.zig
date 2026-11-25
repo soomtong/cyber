@@ -201,6 +201,10 @@ fn test_functions(run: *Runner) void {
     run.case("functions/call_host.cy");
     run.case("functions/call_host_param_error.cy");
     run.case("functions/call_op.cy");
+    run.case("functions/free_op.cy");
+    run.case("functions/free_op_compare_error.cy");
+    run.case("functions/free_op_not_owned_error.cy");
+    run.case("functions/free_op_params_error.cy");
     run.case("functions/call_recursive.cy");
     run.case("functions/call_static_lambda_incompat_arg_error.cy");
     run.case("functions/call_struct_param.cy");
@@ -579,6 +583,7 @@ fn test_modules(run: *Runner) void {
         run.case("modules/import_not_found_error.cy");
         run.case("modules/import_missing_sym_error.cy");
         run.case("modules/import_rel_path.cy");
+        run.case("modules/free_op_import.cy");
         run.case("modules/import_template_take.cy");
         run.case("modules/import_implied_rel_path.cy");
         run.case("modules/import_stmt_error.cy");

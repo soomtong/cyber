@@ -2835,6 +2835,11 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: sema.Cstr, left_n: *ast.Node, op: cy.Bina
                 .decLit => {
                     // Infer type from right.
                     const right = try c.semaExprHint(right_n, expr.target_t);
+                    if (!isNumberType(right.type) and right.type.id() != bt.Never) {
+                        // `2 * v`: the operator comes from the type of `v`, and the literal takes the type of its
+                        // parameter like any call argument.
+                        if (try semaFreeOp(c, op, left_n, null, right_n, right, node)) |res| return res;
+                    }
                     const left = try c.semaExprCstr(left_n, right.type);
                     return fold_const_int(c, try sema_bin_expr2(c, left, left_n, right, right_n, op, node));
                 },
@@ -2844,6 +2849,9 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: sema.Cstr, left_n: *ast.Node, op: cy.Bina
             try checkRefOperand(c, left.type, op, left_n, node);
             if (left.type.kind() == .int or left.type.kind() == .raw) {
                 var right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = false, .fit_target = true });
+                if (!isNumberType(right.type) and right.type.id() != bt.Never) {
+                    if (try semaFreeOp(c, op, left_n, left, right_n, right, node)) |res| return res;
+                }
                 if (right.type.kind() == .float and isArithmeticOp(op) and isNumberType(left.type)) {
                     // `int op float` is `float op int`: the integer converts, whichever side it is on.
                     left = (try sema_lit.semaFitTarget(c, left, right.type, left_n)) orelse {
@@ -2880,6 +2888,9 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: sema.Cstr, left_n: *ast.Node, op: cy.Bina
                 return fold_const_int(c, try sema_bin_expr2(c, left, left_n, right, right_n, op, node));
             } else if (left.type.kind() == .float) {
                 const right = try semaRightOperand(c, &left, left_n, right_n, .{ .target_t = left.type, .reqTypeCstr = false, .fit_target = true });
+                if (!isNumberType(right.type) and right.type.id() != bt.Never) {
+                    if (try semaFreeOp(c, op, left_n, left, right_n, right, node)) |res| return res;
+                }
                 if (left.type.id() != right.type.id() and right.type.id() != bt.Never) {
                     // The right operand did not convert to the type of the left one. `f32 op float` widens the left
                     // operand. Any other type is an error: the float instructions would read its bits as a float.
@@ -2889,10 +2900,17 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: sema.Cstr, left_n: *ast.Node, op: cy.Bina
                 return fold_const_int(c, try sema_bin_expr2(c, left, left_n, right, right_n, op, node));
             }
 
-            // Look for sym under left type's module.
-            const sym = try c.accessResolvedSymOrFail(left.type, op.name(), node);
-            const func_sym = try sema_call.requireFuncSym(c, sym, node);
-            return c.semaCallFuncSymRec(func_sym, left_n, left, &.{ right_n }, false, node);
+            // Look for a method of the left type, then for a free operator function of either operand type.
+            if (try c.accessResolvedSym(left.type, op.name(), node)) |sym| {
+                const func_sym = try sema_call.requireFuncSym(c, sym, node);
+                return c.semaCallFuncSymRec(func_sym, left_n, left, &.{ right_n }, false, node);
+            }
+            if (hasFreeOp(c, op, left.type, null)) {
+                const right = try semaRightOperand(c, &left, left_n, right_n, .{ .reqTypeCstr = false });
+                if (try semaFreeOp(c, op, left_n, left, right_n, right, node)) |res| return res;
+            }
+            _ = try c.accessResolvedSymOrFail(left.type, op.name(), node);
+            unreachable;
         },
         .bang_equal => {
             var left = try c.semaExpr(left_n, .{});
@@ -2912,6 +2930,68 @@ pub fn semaBinExpr(c: *cy.Chunk, expr: sema.Cstr, left_n: *ast.Node, op: cy.Bina
         },
         else => return c.reportErrorFmt("Unsupported binary op: {}", &.{v(op)}, node),
     }
+}
+
+/// The type whose declaring module can hold a free operator function for `type_`: borrows look at their child.
+/// Number types have no such module: their operators are built in.
+fn freeOpOwnerType(type_: *cy.Type) ?*cy.Type {
+    const t = switch (type_.kind()) {
+        .borrow => type_.cast(.borrow).child_t,
+        .ex_borrow => type_.cast(.ex_borrow).child_t,
+        else => type_,
+    };
+    if (isNumberType(t) or t.id() == bt.Never) return null;
+    return t;
+}
+
+/// The free operator function `op` declared in the module that declares `type_`.
+fn freeOpSym(c: *cy.Chunk, op: cy.BinaryExprOp, type_: *cy.Type) ?*cy.sym.FuncSym {
+    const owner_t = freeOpOwnerType(type_) orelse return null;
+    const mod_chunk = owner_t.sym().head.getRootChunk();
+    if (mod_chunk == c.compiler.builtins_chunk) return null;
+    const sym = mod_chunk.sym.getMod().getSym(op.name()) orelse return null;
+    if (sym.type != .func) return null;
+    return sym.cast(.func);
+}
+
+/// Whether the module of `left_t` or of `right_t` declares the free operator function `op`.
+fn hasFreeOp(c: *cy.Chunk, op: cy.BinaryExprOp, left_t: *cy.Type, right_t: ?*cy.Type) bool {
+    if (freeOpSym(c, op, left_t) != null) return true;
+    if (right_t) |t| return freeOpSym(c, op, t) != null;
+    return false;
+}
+
+/// Whether one of the overloads of `sym` takes a second parameter of the type of `right_t` (or a borrow of it).
+fn takesRight(sym: *cy.sym.FuncSym, right_t: *cy.Type) bool {
+    if (!sym.isResolved()) return false;
+    const want = freeOpOwnerType(right_t) orelse right_t;
+    var func: ?*cy.Func = sym.first;
+    while (func) |f| : (func = f.next) {
+        const params = f.sig.params();
+        if (params.len != 2) continue;
+        const param_t = freeOpOwnerType(params[1].get_type()) orelse params[1].get_type();
+        if (param_t.id() == want.id()) return true;
+    }
+    return false;
+}
+
+/// `a op b` with a free operator function `` fn `op`(a A, b B) `` from the module that declares the type of `a` or
+/// of `b`. Null when neither module declares `op`. The module of the left type comes first, unless only the
+/// module of the right type has an overload for the right type.
+/// A null `left` is a number literal, analyzed as an argument of the chosen function.
+fn semaFreeOp(c: *cy.Chunk, op: cy.BinaryExprOp, left_n: *ast.Node, left: ?sema.ExprResult, right_n: *ast.Node,
+    right: sema.ExprResult, node: *ast.Node) !?sema.ExprResult {
+    const left_sym = if (left) |l| freeOpSym(c, op, l.type) else null;
+    var right_sym = freeOpSym(c, op, right.type);
+    if (right_sym == left_sym) right_sym = null;
+    const func_sym = blk: {
+        if (left_sym) |sym| {
+            if (right_sym == null or takesRight(sym, right.type)) break :blk sym;
+        }
+        break :blk right_sym orelse return null;
+    };
+    const left_arg = if (left) |l| Argument.initReceiver(left_n, l) else Argument.init(left_n);
+    return try sema_call.semaCallFuncSymRec2(c, func_sym, &.{ left_arg, Argument.initReceiver(right_n, right) }, node);
 }
 
 /// `x == none` where `x` can not hold `none`. `semaNone` would only say that it expected `?T`.

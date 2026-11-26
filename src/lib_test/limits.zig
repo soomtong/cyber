@@ -1055,8 +1055,7 @@ test "A thread that awaits a spawned thread sleeps instead of spinning." {
 
     // The short nap lets a worker take the task, so `await` has to wait for another thread.
     // A waiting thread used to spin: the process used about as much cpu time as the wait took.
-    const start = S.cpuMicros();
-    try zt.eq(C.Success, C.vm_eval(vm,
+    const src =
         \\use mod
         \\use test
         \\fn work(n int) -> int:
@@ -1068,7 +1067,12 @@ test "A thread that awaits a spawned thread sleeps instead of spinning." {
         \\fs := {spawn work(2)}
         \\mod.nap(30)
         \\test.eq(0, Future.wait_any(fs.span()))
-    , &res));
+    ;
+    // The first eval compiles the modules, which takes most of 200ms of cpu time in a Debug build on a slow machine.
+    // Only the second one is measured: it compiles the main source alone.
+    try zt.eq(C.Success, C.vm_eval(vm, src, &res));
+    const start = S.cpuMicros();
+    try zt.eq(C.Success, C.vm_eval(vm, src, &res));
     const used = S.cpuMicros() - start;
     try zt.expect(used < 200000);
 }

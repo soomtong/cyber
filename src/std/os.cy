@@ -17,6 +17,9 @@ use windows 'os.windows.cy'
 #[cond=meta.system() == .windows]
 use kernel32 'windows/kernel32.cy'
 
+#[cond=meta.system() == .windows]
+use win32 'windows/windows.cy'
+
 --| Contains system level functions.
 --|
 --| ## Architecture:
@@ -60,11 +63,11 @@ fn stdout() -> File:
 
 -fn std_file(n int) -> File:
     #if meta.system() == .windows:
-        var id windows.DWORD = windows.STD_INPUT_HANDLE
+        var id win32.DWORD = win32.STD_INPUT_HANDLE
         if n == 1:
-            id = windows.STD_OUTPUT_HANDLE
+            id = win32.STD_OUTPUT_HANDLE
         else n == 2:
-            id = windows.STD_ERROR_HANDLE
+            id = win32.STD_ERROR_HANDLE
         return {fd=kernel32.GetStdHandle(id), std=n + 1}
     #else:
         return {fd=lc.fd_t(n), std=n + 1}

@@ -2241,15 +2241,16 @@ fn expect_deny_ffi_error(vm: *C.VM, config: C.EvalConfig, src: []const u8, msg: 
 }
 
 test "deny_ffi rejects C FFI in script chunks." {
-    // Without the option a script that may only `use math` declares `#[extern] fn getpid() -> i32` and calls a
-    // symbol of the host process: `math` loads `c`, so no `use c` is needed. A `none` of an extern function type
+    // Without the option a script that may only `use math` declares `#[extern] fn abs(x i32) -> i32` and calls a
+    // symbol of the host process (the C runtime has `abs` on every platform, `getpid` is POSIX only): `math` loads
+    // `c`, so no `use c` is needed. A `none` of an extern function type
     // is a call to the null address (SIGSEGV in the host).
     if (is_wasm) return;
     C.setSilent(true);
     defer C.setSilent(false);
 
     const extern_msg = "`#[extern]` is not allowed. The host disabled C FFI for this script (`deny_ffi`).";
-    const extern_src = "use math\n#[extern]\nfn getpid() -> i32\nprint(getpid())\n";
+    const extern_src = "use math\n#[extern]\nfn abs(x i32) -> i32\nprint(abs(-3))\n";
     {
         const vm = C.vm_init();
         defer C.vm_deinit(vm);

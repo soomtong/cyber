@@ -974,6 +974,9 @@ beginSwitch:
         t->c.fp_end = stack + base + 4;
         HostFn fn = (HostFn)READ_U48(2);
         Ret res = fn(t);
+        if (t->c.host_alloc_failed) {
+            res = zHostCallResult(t, res);
+        }
         if (res != 0) {
             if (res == RET_AWAIT) {
                 // A builtin suspended the eval (`@await_any`). A resume runs this call again: its arguments

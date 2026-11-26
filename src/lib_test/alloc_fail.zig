@@ -185,3 +185,115 @@ test "A type declaration that fails part way frees what it reserved." {
         try zt.eq(C.Success, C.vm_eval(vm, "a := 1", &res));
     }
 }
+
+test "A VM that can not be created returns null and leaves nothing allocated." {
+    // `zt.alloc` reports what a failed `cl_vm_initx` did not give back. Every allocation of the init fails
+    // once, and with `sticky` every allocation after it too, as a host arena that ran out would.
+    for ([_]bool{ false, true }) |sticky| {
+        const n = try initWithFailingAlloc(sticky);
+        try zt.expect(n > 10);
+    }
+}
+
+fn initWithFailingAlloc(sticky: bool) !usize {
+    var n: usize = 1;
+    while (true) : (n += 1) {
+        var fa = FailingAlloc{ .child = zt.alloc, .fail_at = n, .sticky = sticky, .armed = true };
+        const vm = C.c.cl_vm_initx(C.toAllocator(fa.allocator())) orelse {
+            try zt.expect(fa.fired);
+            continue;
+        };
+        fa.armed = false;
+        defer C.vm_deinit(vm);
+        // A failure can be absorbed (a block that could not grow in place is allocated anew). The VM works.
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_eval(vm, "a := 1", &res));
+        // Past the last allocation of the init.
+        if (!fa.fired) return n;
+    }
+}
+
+/// The allocator of the VM in the host functions below, which fail the next allocation they ask for.
+var host_fa: ?*FailingAlloc = null;
+
+fn failNextAlloc() void {
+    const fa = host_fa.?;
+    fa.n = 0;
+    fa.fail_at = 1;
+    fa.sticky = false;
+    fa.fired = false;
+    fa.armed = true;
+}
+
+// Longer than the small inline form, so the heap is asked for a buffer.
+const long_host_str = "a string that the host function builds on the heap, long enough for its own buffer.";
+
+const HostOom = struct {
+    fn make_str(t: *C.Thread) callconv(.c) C.Ret {
+        const ret: *C.str = C.thread_ret(t, C.str);
+        failNextAlloc();
+        ret.* = C.str_init(t, long_host_str);
+        host_fa.?.armed = false;
+        // The host returns as usual. The VM sees the failure.
+        return C.RetOk;
+    }
+    fn make_slice(t: *C.Thread) callconv(.c) C.Ret {
+        const ret: *C.Slice = C.thread_ret(t, C.Slice);
+        failNextAlloc();
+        ret.* = C.slice_init(t, 64, 8);
+        host_fa.?.armed = false;
+        return C.RetOk;
+    }
+    fn make_own_panic(t: *C.Thread) callconv(.c) C.Ret {
+        const ret: *C.str = C.thread_ret(t, C.str);
+        failNextAlloc();
+        ret.* = C.str_init(t, long_host_str);
+        host_fa.?.armed = false;
+        // A host that checks gives its own panic, which is kept.
+        return C.thread_ret_panic(t, "The host is out of memory.");
+    }
+    fn loader(vm_: *C.VM, mod: *C.Sym, uri: C.Bytes, res: [*c]C.LoaderResult) callconv(.c) bool {
+        if (std.mem.eql(u8, C.from_bytes(uri), "mod")) {
+            C.mod_add_func(mod, "make_str", C.BIND_FUNC(&make_str));
+            C.mod_add_func(mod, "make_slice", C.BIND_FUNC(&make_slice));
+            C.mod_add_func(mod, "make_own_panic", C.BIND_FUNC(&make_own_panic));
+            res[0].src = C.to_bytes(
+                \\#[bind] fn make_str() -> str
+                \\#[bind] fn make_slice() -> []int
+                \\#[bind] fn make_own_panic() -> str
+            );
+            return true;
+        }
+        return C.default_loader(vm_, mod, uri, res);
+    }
+};
+
+test "A value that a host function can not create ends the call with an OutOfMemory panic." {
+    // `cl_str_init` and the other value-creating functions used to abort the process.
+    C.setSilent(true);
+    defer C.setSilent(false);
+    var fa = FailingAlloc{ .child = zt.alloc };
+    host_fa = &fa;
+    defer host_fa = null;
+    const vm = C.vm_initx(fa.allocator());
+    defer C.vm_deinit(vm);
+    C.vm_set_loader(vm, @ptrCast(&HostOom.loader));
+
+    const cases = [_]struct { src: []const u8, summary: []const u8 }{
+        .{ .src = "use mod\ns := mod.make_str()\nprint(s)", .summary = "panic: OutOfMemory\n" },
+        .{ .src = "use mod\nxs := mod.make_slice()\nprint(xs.len())", .summary = "panic: OutOfMemory\n" },
+        // Called from a function value: the call goes through `Thread.callFunc`.
+        .{ .src = "use mod\nf := mod.make_str\ns := f()\nprint(s)", .summary = "panic: OutOfMemory\n" },
+        .{ .src = "use mod\ns := mod.make_own_panic()", .summary = "panic: The host is out of memory.\n" },
+    };
+    for (cases) |case| {
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.ErrorPanic, C.vm_eval(vm, case.src, &res));
+        try zt.expect(fa.fired);
+        const report = C.vm_error_summary(vm);
+        defer C.vm_freeb(vm, report);
+        try zt.expect(std.mem.startsWith(u8, report, case.summary));
+        // The flag does not carry over to the next eval.
+        try zt.eq(C.Success, C.vm_eval(vm, "a := 'still alive' + ' here'", &res));
+    }
+}

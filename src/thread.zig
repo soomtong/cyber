@@ -402,6 +402,7 @@ pub const ThreadC = extern struct {
 
     panic_payload: u64,
     panic_type: u8,
+    host_alloc_failed: u8,
 
     trace: *vmc.TraceInfo,
     trace_pc: [*]cy.Inst,
@@ -443,6 +444,7 @@ pub const Thread = struct {
     /// The queues of the thread's `Scope` values.
     scope_queues: ?*cy.fiber_wait.ScopeQueue = null,
 
+    /// Leaves nothing allocated when it fails.
     pub fn init(self: *Thread, id: usize, alloc: std.mem.Allocator, vm: *cy.VM) !void {
         self.* = .{
             .heap = try cy.Heap.init(self.c.vm, self, alloc, vm.sema),
@@ -459,6 +461,7 @@ pub const Thread = struct {
                 .stack_limit = default_stack_limit,
                 .panic_payload = undefined,
                 .panic_type = vmc.PANIC_NONE,
+                .host_alloc_failed = 0,
                 .trace = undefined,
                 .trace_pc = undefined,
                 .trace_fp = undefined,
@@ -477,11 +480,14 @@ pub const Thread = struct {
             .stack_trace = .{},
         };
 
+        errdefer self.heap.deinit(false);
+
         // Spawned threads share the main thread's flag (`new_thread`).
         self.c.interrupt = &self.c.interrupt_flag;
 
         // 4KB default stack size. 
         try self.stackEnsureTotalCapacityPrecise(InitStackLen);
+        errdefer self.alloc.free(self.c.stack());
         self.c.fp = self.c.stack_ptr;
 
         if (cy.Trace) {
@@ -748,7 +754,7 @@ pub const Thread = struct {
         if (host_func) {
             self.enterHostFrame(ret_ + ret_size, cur_pc, ret_ + ret_size);
             const ptr: vmc.HostFn = @ptrFromInt(@as(usize, @truncate(func_ptr.val & ~(@as(u64, 1) << 63))));
-            const res = ptr.?(@ptrCast(self));
+            const res = self.hostCallResult(ptr.?(@ptrCast(self)));
             if (res != 0) {
                 return error.Panic;
             }
@@ -1111,7 +1117,7 @@ pub const Thread = struct {
             self.c.pc = @ptrCast(pc);
             self.enterHostFrame(base_ptr, pc, fp);
             const host_fn: vmc.HostFn = @ptrCast(@alignCast(ptr));
-            const res: c.Ret = host_fn.?(@ptrCast(self));
+            const res: c.Ret = self.hostCallResult(host_fn.?(@ptrCast(self)));
             if (res != 0) {
                 return error.Panic;
             }
@@ -1142,7 +1148,7 @@ pub const Thread = struct {
             self.enterHostFrame(fp + base, pc, fp);
 
             const ptr: vmc.HostFn = @ptrCast(@alignCast(func_ptr));
-            const res: c.Ret = @bitCast(ptr.?(@ptrCast(self)));
+            const res: c.Ret = self.hostCallResult(@bitCast(ptr.?(@ptrCast(self))));
             if (res != 0) {
                 return error.Panic;
             }
@@ -1195,7 +1201,7 @@ pub const Thread = struct {
             .host => {
                 self.c.pc = @ptrCast(pc);
                 self.enterHostFrame(fp + base, pc, fp);
-                const res: c.Ret = @bitCast(func.data.host.ptr.?(@ptrCast(self)));
+                const res: c.Ret = self.hostCallResult(@bitCast(func.data.host.ptr.?(@ptrCast(self))));
                 if (res != 0) {
                     return error.Panic;
                 }
@@ -1232,6 +1238,21 @@ pub const Thread = struct {
 
     /// There is no memory for the message of a panic. The panic goes on with a static message, which masks the
     /// original one.
+    /// The result of a host function, checked after it returns: when a value-creating C API function failed to
+    /// allocate during the call (`host_alloc_failed`), the call ends with `panic: OutOfMemory`, unless the host
+    /// already returned a panic of its own (`cl_thread_ret_panic`).
+    pub fn hostCallResult(self: *cy.Thread, res: c.Ret) c.Ret {
+        if (self.c.host_alloc_failed == 0) return res;
+        self.c.host_alloc_failed = 0;
+        if (res == c.RetInterrupt) return res;
+        return self.ret_panic_no_msg();
+    }
+
+    /// Records that a value-creating C API function could not allocate. See `hostCallResult`.
+    pub fn hostAllocFailed(self: *cy.Thread) void {
+        self.c.host_alloc_failed = 1;
+    }
+
     fn ret_panic_no_msg(self: *cy.Thread) c.Ret {
         const msg: []const u8 = "OutOfMemory";
         self.c.panic_payload = (@as(u64, @intCast(@intFromPtr(msg.ptr))) & 0xffffffffffff) | (@as(u64, msg.len) << 48);

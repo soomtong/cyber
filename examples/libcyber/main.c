@@ -18,6 +18,7 @@ void printer(CLThread* t, CLBytes str) {
 
 int main() {
     CLVM* vm = cl_vm_init();
+    if (vm == NULL) return 1;
     cl_vm_set_printer(vm, printer);
 
     const char* src =

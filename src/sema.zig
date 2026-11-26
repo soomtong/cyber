@@ -1191,9 +1191,11 @@ pub const Sema = struct {
     pub fn ensureSymbol(self: *Sema, name: []const u8) !u64 {
         const res = try self.symbols_map.getOrPut(self.alloc, name);
         if (!res.found_existing) {
+            errdefer self.symbols_map.removeByPtr(res.key_ptr);
             const id: u64 = @intCast(self.symbols.items.len);
+            try self.symbols.ensureUnusedCapacity(self.alloc, 1);
             const dupe = try self.alloc.dupe(u8, name);
-            try self.symbols.append(self.alloc, dupe);
+            self.symbols.appendAssumeCapacity(dupe);
             res.value_ptr.* = id;
             res.key_ptr.* = dupe;
             return id;

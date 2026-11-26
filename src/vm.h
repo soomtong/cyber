@@ -875,6 +875,9 @@ typedef struct Thread {
 
     u64 panic_payload;
     u8 panic_type;
+    // Set by a value-creating C API function (`cl_str_init`, `cl_array_empty`, ...) whose allocation failed.
+    // The host call that was running then ends with `panic: OutOfMemory` (`zHostCallResult`).
+    u8 host_alloc_failed;
 
     // ZList compact_trace;
     // ZList stack_trace;    
@@ -1004,6 +1007,7 @@ HeapObjectResult zAllocPoolObject(ZThread* t, TypeId id);
 HeapObjectResult zAllocBigObject(ZThread* t, TypeId id, size_t size);
 ValueResult zAllocClosure(ZThread* t, Value* fp, Inst* func_pc, TypeId ptr_t, Inst* captures, u16 ncaptures, bool stack_func);
 ValueResult zAllocFuncUnion(ZThread* t, TypeId id, Value func_ptr);
+uint8_t zHostCallResult(ZThread* t, uint8_t res);
 void z_log(ZThread* t, const char* msg, size_t len);
 bool zCheckDoubleFree(ZThread* t, HeapObject* obj);
 bool zCheckRetainDanglingPointer(ZThread* t, HeapObject* obj);

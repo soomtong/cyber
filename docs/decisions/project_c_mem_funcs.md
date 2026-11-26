@@ -38,6 +38,7 @@ VM의 메모리를 자기 아레나 · 풀 · 계수기로 돌릴 방법이 없�
    갱신(같은 날): eval 중의 `NULL`은 이제 컴파일 단계에서도 그 eval의 오류다(`project_compile_alloc_failure.md`). 컴파일이
    메모리 부족으로 끝나면 세션이 reset되므로 상한의 수단은 여전히 `cl_vm_set_memory_limit`이다.
 7. VM을 만들 때의 할당 실패는 `cl_vm_init` · `cl_vm_initx`와 같이 `fatal`이다.
+   갱신(2026-11-26): 세 함수 모두 `NULL`을 돌려주고 받은 블록을 모두 돌려준다(`project_capi_alloc_failure.md`).
 
 ## 구현 메모
 

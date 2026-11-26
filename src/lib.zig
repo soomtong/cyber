@@ -21,18 +21,22 @@ fn default_logger(s: C.Bytes) callconv(.c) void {
     _ = s;
 }
 
-export fn cl_vm_init() *cy.VM {
-    const alloc = std.heap.c_allocator;
-    const vm = alloc.create(cy.VM) catch fatal();
-    vm.init(alloc) catch fatal();
-    return @ptrCast(vm);
+/// Creates a VM on `alloc`, or returns null when an allocation fails. Nothing is left allocated then.
+fn createVM(alloc: std.mem.Allocator) ?*cy.VM {
+    const vm = alloc.create(cy.VM) catch return null;
+    vm.init(alloc) catch {
+        alloc.destroy(vm);
+        return null;
+    };
+    return vm;
 }
 
-export fn cl_vm_initx(allocator: C.Allocator) *cy.VM {
-    const alloc = C.fromAllocator(allocator);
-    const vm = alloc.create(cy.VM) catch fatal();
-    vm.init(alloc) catch fatal();
-    return @ptrCast(vm);
+export fn cl_vm_init() ?*cy.VM {
+    return createVM(std.heap.c_allocator);
+}
+
+export fn cl_vm_initx(allocator: C.Allocator) ?*cy.VM {
+    return createVM(C.fromAllocator(allocator));
 }
 
 /// The allocator of a VM created with `cl_vm_init_mem`: the two C functions of the host as a `std.mem.Allocator`.
@@ -68,15 +72,15 @@ const HostMem = struct {
     };
 };
 
-export fn cl_vm_init_mem(funcs: C.MemFuncs) *cy.VM {
+export fn cl_vm_init_mem(funcs: C.MemFuncs) ?*cy.VM {
     // The `HostMem` lives in the host's memory too, so that the host sees nothing left after `cl_vm_deinit`.
-    const mem_ptr = funcs.alloc.?(funcs.ctx, @sizeOf(HostMem), @alignOf(HostMem)) orelse fatal();
+    const mem_ptr = funcs.alloc.?(funcs.ctx, @sizeOf(HostMem), @alignOf(HostMem)) orelse return null;
     const mem: *HostMem = @ptrCast(@alignCast(mem_ptr));
     mem.* = .{ .funcs = funcs };
-    const alloc = mem.allocator();
-    const vm = alloc.create(cy.VM) catch fatal();
-    vm.init(alloc) catch fatal();
-    return @ptrCast(vm);
+    return createVM(mem.allocator()) orelse {
+        funcs.free.?(funcs.ctx, mem, @sizeOf(HostMem), @alignOf(HostMem));
+        return null;
+    };
 }
 
 export fn cl_vm_deinit(vm: *cy.VM) void {
@@ -212,8 +216,17 @@ export fn cl_thread_ptr(t: *cy.Thread) *anyopaque {
     return t.param(*anyopaque);
 }
 
+/// What a value-creating function returns when it can not allocate: an empty or null value that the host
+/// function does not use further. The host call then ends with `panic: OutOfMemory` (`Thread.hostCallResult`).
+var empty_slice_elems: u64 = 0;
+const empty_slice: cy.heap.Slice = .{ .buf = null, .ptr = &empty_slice_elems, .len = 0, .header = 0 };
+const empty_str: cy.heap.Str = .{ .buf = null, .ptr = "", .len_ = 1 << 63 };
+
 export fn cl_slice_init(t: *cy.Thread, num_elems: usize, elem_size: usize) cy.heap.Slice {
-    return t.heap.init_slice_undef(t.c.vm.sema.raw_buffer_byte_t.id(), num_elems, elem_size) catch fatal();
+    return t.heap.init_slice_undef(t.c.vm.sema.raw_buffer_byte_t.id(), num_elems, elem_size) catch {
+        t.hostAllocFailed();
+        return empty_slice;
+    };
 }
 
 /// Releases a slice that a host function owns, e.g. a `[]T` param from `cl_thread_slice`.
@@ -236,8 +249,8 @@ export fn cl_slice_deinit(t: *cy.Thread, elem_t: ?*cy.Type, s: *cy.heap.Slice) v
     t.heap.releaseObject(buf);
 }
 
-export fn cl_vm_alloc(vm: *cy.VM, size: usize) *anyopaque {
-    const slice = vm.alloc.alignedAlloc(u8, .@"8", size) catch fatal();
+export fn cl_vm_alloc(vm: *cy.VM, size: usize) ?*anyopaque {
+    const slice = vm.alloc.alignedAlloc(u8, .@"8", size) catch return null;
     return slice.ptr;
 }
 
@@ -246,7 +259,7 @@ export fn cl_vm_free(vm: *cy.VM, ptr: *anyopaque, size: usize) void {
 }
 
 export fn cl_vm_allocb(vm: *cy.VM, size: usize) C.Bytes {
-    const slice = vm.alloc.alloc(u8, size) catch fatal();
+    const slice = vm.alloc.alloc(u8, size) catch return .{ .ptr = null, .len = 0 };
     return C.to_bytes(slice);
 }
 
@@ -805,8 +818,8 @@ export fn cl_vm_set_resolver(vm: *cy.VM, resolver: C.ResolverFn) void {
 
 export fn cl_vm_resolve(vm: *cy.VM, uri: C.Bytes) C.Bytes {
     var buf: [4096]u8 = undefined;
-    const r_uri_temp = cy.compiler.resolveModuleUri(vm.compiler, &buf, C.from_bytes(uri)) catch fatal();
-    const r_uri = vm.alloc.dupe(u8, r_uri_temp) catch fatal();
+    const r_uri_temp = cy.compiler.resolveModuleUri(vm.compiler, &buf, C.from_bytes(uri)) catch return .{ .ptr = null, .len = 0 };
+    const r_uri = vm.alloc.dupe(u8, r_uri_temp) catch return .{ .ptr = null, .len = 0 };
     return C.to_bytes(r_uri);
 }
 
@@ -927,15 +940,27 @@ export fn cl_vm_set_user_data(vm: *cy.VM, userData: ?*anyopaque) void {
 }
 
 export fn cl_str_init(t: *cy.Thread, cstr: C.Bytes) C.str {
-    return stdx.reinterpret(C.str, t.heap.init_str(C.from_bytes(cstr)) catch fatal());
+    const s = t.heap.init_str(C.from_bytes(cstr)) catch blk: {
+        t.hostAllocFailed();
+        break :blk empty_str;
+    };
+    return stdx.reinterpret(C.str, s);
 }
 
 export fn cl_astr_init(t: *cy.Thread, cstr: C.Bytes) C.str {
-    return stdx.reinterpret(C.str, t.heap.init_astr(C.from_bytes(cstr)) catch fatal());
+    const s = t.heap.init_astr(C.from_bytes(cstr)) catch blk: {
+        t.hostAllocFailed();
+        break :blk empty_str;
+    };
+    return stdx.reinterpret(C.str, s);
 }
 
 export fn cl_ustr_init(t: *cy.Thread, cstr: C.Bytes) C.str {
-    return stdx.reinterpret(C.str, t.heap.init_ustr(C.from_bytes(cstr)) catch fatal());
+    const s = t.heap.init_ustr(C.from_bytes(cstr)) catch blk: {
+        t.hostAllocFailed();
+        break :blk empty_str;
+    };
+    return stdx.reinterpret(C.str, s);
 }
 
 export fn cl_str_deinit(t: *cy.Thread, s: *cy.heap.Str) void {
@@ -947,19 +972,31 @@ export fn cl_str_bytes(s: cy.heap.Str) C.Bytes {
 }
 
 export fn cl_array_empty(t: *cy.Thread, array_t: *cy.Type) u64 {
-    return (t.heap.newEmptyArray(array_t.id()) catch fatal()).val;
+    const val = t.heap.newEmptyArray(array_t.id()) catch {
+        t.hostAllocFailed();
+        return 0;
+    };
+    return val.val;
 }
 
 export fn cl_map_empty(t: *cy.Thread, map_t: *cy.Type) u64 {
-    return (t.heap.allocMapZero(map_t.id()) catch fatal()).val;
+    const val = t.heap.allocMapZero(map_t.id()) catch {
+        t.hostAllocFailed();
+        return 0;
+    };
+    return val.val;
 }
 
 export fn cl_new_func_union(t: *cy.Thread, union_t: *cy.Type, func: C.HostFn) u64 {
-    return (t.heap.allocHostFuncUnion(union_t.id(), @ptrCast(func)) catch fatal()).val;
+    const val = t.heap.allocHostFuncUnion(union_t.id(), @ptrCast(func)) catch {
+        t.hostAllocFailed();
+        return 0;
+    };
+    return val.val;
 }
 
-export fn cl_vm_ensure_func_sig(vm: *cy.VM, params: [*]const *cy.Type, nparams: usize, ret_t: *cy.Type) *cy.FuncSig {
-    return vm.sema.ensureFuncSig(@ptrCast(@alignCast(params[0..nparams])), ret_t) catch fatal();
+export fn cl_vm_ensure_func_sig(vm: *cy.VM, params: [*]const *cy.Type, nparams: usize, ret_t: *cy.Type) ?*cy.FuncSig {
+    return vm.sema.ensureFuncSig(@ptrCast(@alignCast(params[0..nparams])), ret_t) catch null;
 }
 
 // test "clNewFunc()" {
@@ -983,23 +1020,26 @@ export fn cl_mod_get_data(mod_: *C.Sym) ?*anyopaque {
 }
 
 export fn cl_lift(t: *cy.Thread, type_: *cy.Type, value: *anyopaque) u64 {
-    const res = t.heap.new_object_undef(type_.id(), type_.size()) catch @panic("error");
+    const res = t.heap.new_object_undef(type_.id(), type_.size()) catch {
+        t.hostAllocFailed();
+        return 0;
+    };
     const dst: [*]u8 = @ptrCast(res);
     const src: [*]u8 = @ptrCast(value);
     @memcpy(dst[0..type_.size()], src[0..type_.size()]);
     return Value.initPtr(res).val;
 }
 
-export fn cl_error(vm: *cy.VM, name: C.Bytes) u64 {
-    return vm.sema.ensureSymbol(C.from_bytes(name)) catch @panic("error");
+export fn cl_error(vm: *cy.VM, name: C.Bytes) i64 {
+    return @intCast(vm.sema.ensureSymbol(C.from_bytes(name)) catch return -1);
 }
 
-export fn cl_symbol(vm: *cy.VM, name: C.Bytes) u64 {
-    return vm.sema.ensureSymbol(C.from_bytes(name)) catch @panic("error");
+export fn cl_symbol(vm: *cy.VM, name: C.Bytes) i64 {
+    return @intCast(vm.sema.ensureSymbol(C.from_bytes(name)) catch return -1);
 }
 
 export fn cl_object_string(t: *cy.Thread, val: u64) C.Bytes {
-    const str = t.heap.get_or_buf_print_object(&cy.tempBuf, .{ .val = val }) catch cy.fatal();
+    const str = t.heap.get_or_buf_print_object(&cy.tempBuf, .{ .val = val }) catch return .{ .ptr = null, .len = 0 };
     return C.to_bytes(str);
 }
 
@@ -1035,7 +1075,7 @@ export fn cl_thread_signal_host_panic(t: *cy.Thread) void {
 }
 
 export fn cl_value_desc(vm: *cy.VM, val_t: cy.TypeId, val: *Value) C.Bytes {
-    const res = cy.debug.alloc_value_desc(vm, val_t, val) catch @panic("error");
+    const res = cy.debug.alloc_value_desc(vm, val_t, val) catch return .{ .ptr = null, .len = 0 };
     return C.to_bytes(res);
 }
 

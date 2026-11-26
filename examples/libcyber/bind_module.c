@@ -90,6 +90,7 @@ void printer(CLThread* t, CLBytes str) {
 int main() {
     // clVerbose = true;
     CLVM* vm = cl_vm_init();
+    if (vm == NULL) return 1;
     cl_vm_set_loader(vm, loader);
     cl_vm_set_printer(vm, printer);
 

@@ -130,6 +130,6 @@ struct 필드, enum case, choice case, cunion case의 이름이 한 타입 안�
 
 ## 남은 것
 
-- VM 생성 구간과 값 생성 API의 `fatal`(결정 10).
+- VM 생성 구간과 값 생성 API의 `fatal`(결정 10). 2026-11-26에 고쳤다: `project_capi_alloc_failure.md`.
 - 요약의 `WriteFailed`를 `OutOfMemory`로 모으기.
 - 컴파일 OOM 뒤에도 세션을 지키는 되감기. 필요해지면 컴파일을 세션의 사본 위에서 하는 쪽을 먼저 본다.

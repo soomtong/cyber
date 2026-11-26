@@ -79,7 +79,7 @@ const UserVM = struct {
 
 pub fn UserVM_init(t: *cy.Thread) anyerror!C.Ret {
     // Create an isolated VM.
-    const new = C.vm_init();
+    const new = C.c.cl_vm_init() orelse return error.OutOfMemory;
 
     // Use the same printers as the parent VM.
     C.vm_set_printer(new, C.vm_printer(@ptrCast(t.c.vm)));

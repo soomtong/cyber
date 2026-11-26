@@ -5889,12 +5889,13 @@ The examples shown below can be found in the repository under [libcyber](https:/
 Types and constants from the C-API begin with `CL` and functions begin with `cl`.
 
 ## Create VM.
-A VM instance is required to compile and interpret Cyber code. To create a new VM instance, call `cl_vm_init`:
+A VM instance is required to compile and interpret Cyber code. To create a new VM instance, call `cl_vm_init`. It returns NULL when there is no memory for the VM:
 ```c
 #include "cyber.h"
 
 int main() {
     CLVM* vm = cl_vm_init();
+    if (vm == NULL) return 1;
     // ...
     cl_vm_deinit(vm);
     return 0;
@@ -6148,7 +6149,17 @@ A host can give the VM its own allocator (`cl_vm_init_mem`, `cl_vm_initx`). When
 | In the script | `CL_ERROR_PANIC` with `panic: OutOfMemory`. Without memory for the message or the stack trace of another panic, its message is replaced by `OutOfMemory` and its trace is empty. |
 | After the run (the result value, the persisted locals) | `CL_ERROR_UNKNOWN`, with no summary. |
 
-A summary function returns the null string if there is no memory for the text. Creating a VM (`cl_vm_init`, `cl_vm_initx`, `cl_vm_init_mem`) still aborts the process if the allocator fails, and so do the functions a host calls to create values (`cl_str_init`, `cl_array_empty`, ...).
+A summary function returns the null string if there is no memory for the text. Creating a VM (`cl_vm_init`, `cl_vm_initx`, `cl_vm_init_mem`) returns NULL if the allocator fails, after giving back every block it took. `cl_vm_alloc` returns NULL and `cl_vm_allocb` the null string, `cl_vm_ensure_func_sig` NULL and `cl_symbol` · `cl_error` -1.
+
+The functions a host function calls to create values (`cl_str_init`, `cl_astr_init`, `cl_ustr_init`, `cl_slice_init`, `cl_new_func_union`, `cl_lift`, `cl_array_empty`, `cl_map_empty`) return an empty string, an empty slice or the value 0 when they can not allocate, and the host function ends with `panic: OutOfMemory` when it returns, whatever it returns. A panic it returns itself with `cl_thread_ret_panic` is kept. The host does not use that value or put it in another value, and returns as soon as it can:
+```c
+CLRet make(CLThread* t) {
+    CLstr* ret = cl_thread_ret(t, sizeof(CLstr));
+    *ret = cl_str_init(t, CL_BYTES("hello"));
+    // On an allocation failure `*ret` is empty and the call ends with `panic: OutOfMemory`.
+    return CL_RET_OK;
+}
+```
 
 To bound the memory of a script use `cl_vm_set_memory_limit` and not an allocator that fails: a limit ends in `panic: OutOfMemory` only where the script grows its heap or a stack, and it never stops the compiler part way.
 

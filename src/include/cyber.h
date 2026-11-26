@@ -371,6 +371,8 @@ CLBytes clResultName(CLResultCode code);
 // [ VM ]
 // -----------------------------------
 
+// The functions that create a VM return NULL when an allocation fails. Nothing is left allocated then.
+
 // Create a new VM with `malloc` as the allocator.
 CLVM* cl_vm_init(void);
 
@@ -381,7 +383,8 @@ CLVM* cl_vm_initx(CLAllocator allocator);
 // `cl_vm_deinit` returns every block.
 // To bound the memory of a script use `cl_vm_set_memory_limit` and not an `alloc` that returns NULL: a limit
 // ends the script alone, in an `OutOfMemory` panic. An `alloc` that returns NULL during an eval fails that eval
-// (see `cl_vm_eval`), and while the VM is created (`cl_vm_init_mem` itself) it aborts the process.
+// (see `cl_vm_eval`), and while the VM is created it makes `cl_vm_init_mem` return NULL, after every block
+// was returned.
 CLVM* cl_vm_init_mem(CLMemFuncs funcs);
 
 // Deinitializes the VM and frees all memory associated with it. Any operation on `vm` afterwards is undefined.
@@ -395,6 +398,7 @@ CLThread* cl_vm_main_thread(CLVM* vm);
 
 CLResolverFn cl_vm_resolver(CLVM* vm);
 void cl_vm_set_resolver(CLVM* vm, CLResolverFn resolver);
+// The null string when the uri does not resolve or there is no memory. Must be freed with `cl_vm_freeb`.
 CLBytes cl_vm_resolve(CLVM* vm, CLBytes uri);
 
 // This is only relevant for binding dynamic libs.
@@ -894,6 +898,7 @@ size_t cl_vm_symbol_hints(CLVM* vm, const CLHint** out);
 // that is handed over to Cyber so it knows how to free it.
 // This is also used to manage accessible buffers when embedding WASM.
 // Only pointer is returned so wasm callsite can just receive the return value.
+// `cl_vm_alloc` returns NULL and `cl_vm_allocb` the null string when the allocation fails.
 void* cl_vm_alloc(CLVM* vm, size_t size);
 CLBytes cl_vm_allocb(CLVM* vm, size_t size);
 
@@ -1079,12 +1084,20 @@ CLType* cl_find_type(CLVM* vm, CLBytes spec);
 
 // Returns a short description about a value given their type id.
 // Specializes for common types. Other types will only output the type id and the address.
-// This is very basic compared to the core API's `to_print_string` and `dump`.
+// This is very basic compared to the core API's `to_print_string` and `dump`. The null string when there is no
+// memory.
 CLBytes cl_value_desc(CLVM* vm, CLTypeId val_t, CLValue* val);
 
-// Symbol value.
+// Symbol value, or -1 when there is no memory for a new symbol.
 int64_t cl_symbol(CLVM* vm, CLBytes str);
 int64_t cl_error(CLVM* vm, CLBytes str);
+
+// The functions below that create a value in a host function (`cl_str_init`, `cl_astr_init`, `cl_ustr_init`,
+// `cl_slice_init`, `cl_new_func_union`, `cl_lift`, `cl_array_empty`, `cl_map_empty`) do not abort when they
+// can not allocate. They return an empty string, an empty slice or the value 0, and the host function that is
+// running ends with `panic: OutOfMemory` when it returns, whatever it returns (a panic from
+// `cl_thread_ret_panic` is kept). The host must not use that value or store it in another value: it returns
+// (and frees what it holds) as soon as it can.
 
 // `cl_str` is the recommended way to initialize a new string.
 // `cl_astr` or `cl_ustr` asserts an ASCII or UTF-8 string respectively.
@@ -1093,7 +1106,7 @@ CLstr cl_astr_init(CLThread* t, CLBytes str);
 CLstr cl_ustr_init(CLThread* t, CLBytes str);
 void cl_str_deinit(CLThread* t, CLstr* str);
 CLBytes cl_str_bytes(CLstr str);
-CLBytes cl_object_string(CLThread* t, CLValue val);  // Conversion from value to a basic string description.
+CLBytes cl_object_string(CLThread* t, CLValue val);  // Conversion from value to a basic string description. The null string when there is no memory.
 
 // Initializes a new slice with undefined elements.
 CLSlice cl_slice_init(CLThread* t, size_t num_elems, size_t elem_size);
@@ -1102,7 +1115,7 @@ CLSlice cl_slice_init(CLThread* t, size_t num_elems, size_t elem_size);
 // The elements are destructed only when this slice holds the last reference to the buffer.
 void cl_slice_deinit(CLThread* t, CLType* elem_t, CLSlice* s);
 
-// Functions.
+// Functions. `cl_vm_ensure_func_sig` returns NULL when there is no memory.
 CLFuncSig* cl_vm_ensure_func_sig(CLVM* vm, const CLType* params, size_t nparams, CLType* ret_t);
 CLValue cl_new_func_union(CLThread* t, CLType* union_t, CLHostFn func);
 

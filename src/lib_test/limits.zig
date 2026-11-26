@@ -283,6 +283,8 @@ const CMem = struct {
     blocks: std.atomic.Value(usize) = .init(0),
     allocs: std.atomic.Value(usize) = .init(0),
     max_align: std.atomic.Value(usize) = .init(0),
+    // Returns null from this allocation on (counted from 1). 0: never.
+    fail_from: usize = 0,
 
     fn funcs(self: *CMem) C.MemFuncs {
         return .{ .ctx = self, .alloc = alloc, .free = free };
@@ -291,6 +293,7 @@ const CMem = struct {
     fn alloc(ctx: ?*anyopaque, size: usize, alignment: usize) callconv(.c) ?*anyopaque {
         const self: *CMem = @ptrCast(@alignCast(ctx));
         if (size == 0 or !std.math.isPowerOfTwo(alignment)) return null;
+        if (self.fail_from != 0 and self.allocs.load(.monotonic) + 1 >= self.fail_from) return null;
         const ptr = self.child.rawAlloc(size, .fromByteUnits(alignment), @returnAddress()) orelse return null;
         _ = self.held.fetchAdd(size, .monotonic);
         _ = self.blocks.fetchAdd(1, .monotonic);
@@ -364,6 +367,23 @@ test "cl_vm_init_mem runs a VM on the C memory functions of a host." {
     // `cl_vm_deinit` returned everything, the `VM` object and the functions included.
     try zt.eq(@as(usize, 0), host.blocks.load(.monotonic));
     try zt.eq(@as(usize, 0), host.held.load(.monotonic));
+}
+
+test "cl_vm_init_mem returns null when the host runs out of memory, and the host gets every block back." {
+    // The memory functions return null from an allocation on: the first one is the VM's own record of them.
+    var n: usize = 1;
+    while (true) : (n += 1) {
+        var host = CMem{ .child = zt.alloc, .fail_from = n };
+        const vm = C.c.cl_vm_init_mem(host.funcs()) orelse {
+            try zt.eq(@as(usize, 0), host.blocks.load(.monotonic));
+            continue;
+        };
+        C.vm_deinit(vm);
+        try zt.eq(@as(usize, 0), host.blocks.load(.monotonic));
+        // An init that never reached the failing allocation.
+        if (host.allocs.load(.monotonic) < n) break;
+    }
+    try zt.expect(n > 10);
 }
 
 test "cl_vm_set_fuel stops runaway loops and recursion." {

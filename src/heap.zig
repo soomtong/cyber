@@ -92,6 +92,7 @@ pub const Heap = struct {
         };
 
         // Initialize heap.
+        errdefer new.heapPages.deinit(alloc);
         const list = try new.growHeapPages(1);
         new.heapFreeHead = list.head;
         if (cy.Trace) {

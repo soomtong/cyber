@@ -117,6 +117,7 @@ CLResultCode run(CLVM* vm, char* src, int cancel_at) {
 
 int main() {
     CLVM* vm = cl_vm_init();
+    if (vm == NULL) return 1;
     cl_vm_set_loader(vm, loader);
     cl_vm_set_printer(vm, printer);
 

@@ -103,6 +103,7 @@ CLResultCode run(CLVM* vm, const char* label, char* src) {
 int main() {
     HostMem mem = {0};
     CLVM* vm = cl_vm_init_mem((CLMemFuncs){ .ctx = &mem, .alloc = host_alloc, .free = host_free });
+    if (vm == NULL) return 1;
     cl_vm_set_loader(vm, loader);
     cl_vm_set_printer(vm, printer);
 

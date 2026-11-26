@@ -259,13 +259,18 @@ pub const Compiler = struct {
     /// Counts the compiles of this compiler. `Instance.site` is valid only in the compile that set it.
     compile_seq: u32 = 0,
 
+    /// Leaves nothing allocated when it fails.
     pub fn init(self: *Compiler, vm: *cy.VM) !void {
+        var heap = try cy.Heap.init(vm, null, vm.alloc, undefined);
+        errdefer heap.deinit(false);
+        var sema_ = try sema.Sema.init(vm.alloc, self);
+        errdefer sema_.deinit(vm.alloc, false);
         self.* = .{
             .alloc = vm.alloc,
             .vm = vm,
-            .heap = try cy.Heap.init(vm, null, vm.alloc, undefined),
+            .heap = heap,
             .reports = .empty,
-            .sema = try sema.Sema.init(vm.alloc, self),
+            .sema = sema_,
             .loader = default_loader,
             .resolver = default_resolver,
             .dl_resolver = default_dl_resolver,
@@ -1840,10 +1845,17 @@ pub fn loadChunk(c: *cy.Chunk) !void {
 
 fn createModuleUnmanaged(self: *Compiler, r_uri: []const u8, src: []const u8) !*cy.Chunk {
     const src_dupe = try self.alloc.dupe(u8, src);
+    errdefer self.alloc.free(src_dupe);
     const r_uri_dupe = try self.alloc.dupe(u8, r_uri);
+    // The chunk owns the uri once it is initialized.
+    var uri_owned = false;
+    errdefer if (!uri_owned) self.alloc.free(r_uri_dupe);
 
     const chunk = try self.alloc.create(cy.Chunk);
+    errdefer self.alloc.destroy(chunk);
     try chunk.init(self, cy.NullId, r_uri_dupe, src_dupe);
+    uri_owned = true;
+    errdefer chunk.deinit();
     chunk.sym = try chunk.createChunkSym(r_uri_dupe);
     return chunk;
 }

@@ -153,9 +153,13 @@ pub const VM = struct {
 
     /// `child` is the host's allocator. Everything the VM allocates goes through a `MemAccount` on top of it,
     /// which `deinit` frees again and replaces with `child` (the host frees the VM itself with it).
+    /// Leaves nothing allocated when it fails: the host frees `self` with `child`.
     pub fn init(self: *VM, child: std.mem.Allocator) !void {
+        // Once the main thread and the data exist, `deinit` frees whatever else the init built.
+        var whole = false;
+        errdefer if (whole) self.deinit(false);
         const acct = try child.create(cy.MemAccount);
-        errdefer child.destroy(acct);
+        errdefer if (!whole) child.destroy(acct);
         acct.* = .{ .child = child };
         const alloc = acct.allocator();
 
@@ -203,25 +207,33 @@ pub const VM = struct {
             .dyn_libs = .empty,
             .tcc_states = .empty,
         };
+        errdefer if (!whole) self.worker_pool.deinit(self.alloc);
         self.compiler = try self.alloc.create(cy.Compiler);
+        errdefer if (!whole) self.alloc.destroy(self.compiler);
         self.sema = &self.compiler.sema;
         try self.compiler.init(self);
+        errdefer if (!whole) self.compiler.deinit(false);
 
         self.main_thread = try self.alloc.create(cy.Thread);
+        errdefer if (!whole) self.alloc.destroy(self.main_thread);
         try self.main_thread.init(0, alloc, self);
+        errdefer if (!whole) self.main_thread.deinit(false);
         if (cy.Trace) {
             self.main_thread.heap.c.trace_panic_at_event = trace_panic_at_event;
             self.main_thread.heap.c.trace_track_object_event = trace_track_object_event;
         }
 
-        try self.funcSyms.ensureTotalCapacityPrecise(self.alloc, 255);
-
+        try self.data.ensureTotalCapacity(self.alloc, 2);
+        errdefer if (!whole) self.data.deinit(self.alloc);
         const data = try self.alloc.create(cy.core.BuiltinsData);
-        try self.data.put(self.alloc, "builtins", data);
+        errdefer if (!whole) self.alloc.destroy(data);
         const cleanups = try self.alloc.create(Cleanups);
         cleanups.* = .{};
-        try self.data.put(self.alloc, "cleanups", cleanups);
+        self.data.putAssumeCapacity("builtins", data);
+        self.data.putAssumeCapacity("cleanups", cleanups);
+        whole = true;
 
+        try self.funcSyms.ensureTotalCapacityPrecise(self.alloc, 255);
         try @call(.never_inline, cy.bindings.bindCore, .{self});
     }
 
@@ -1127,6 +1139,10 @@ fn allocFailed(t: *cy.Thread, err: anyerror) vmc.ResultCode {
 
 // `Value` crosses the C ABI as `uint64_t` (vm.h). The Zig union would be passed
 // indirectly on wasm32, so these entry points take the raw bits.
+fn zHostCallResult(t: *cy.Thread, res: C.Ret) callconv(.c) C.Ret {
+    return t.hostCallResult(res);
+}
+
 fn zAllocFuncUnion(t: *cy.Thread, type_id: cy.TypeId, func_ptr_bits: u64) callconv(.c) vmc.ValueResult {
     const func_ptr: Value = .{ .val = func_ptr_bits };
     const func_union = t.heap.allocFunc(type_id, func_ptr) catch |err| {
@@ -1430,6 +1446,7 @@ comptime {
     @export(&z_ret_generator, .{ .name = "z_ret_generator", .linkage = .strong });
     @export(&zAllocClosure, .{ .name = "zAllocClosure", .linkage = .strong });
     @export(&zAllocFuncUnion, .{ .name = "zAllocFuncUnion", .linkage = .strong });
+    @export(&zHostCallResult, .{ .name = "zHostCallResult", .linkage = .strong });
     @export(&zAlloc, .{ .name = "zAlloc", .linkage = .strong });
     @export(&zCallPtr, .{ .name = "zCallPtr", .linkage = .strong });
     @export(&zCallUnion, .{ .name = "zCallUnion", .linkage = .strong });

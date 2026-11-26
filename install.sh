@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# FIND: v0.4.21
-TAG=0.4.21
+# FIND: v0.4.22
+TAG=0.4.22
 if [[ "$@" != "" ]]
 then
   TAG="$@"

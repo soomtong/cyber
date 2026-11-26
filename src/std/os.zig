@@ -28,9 +28,8 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"cache_url",       zErrFunc(cacheUrl)},
     .{"fetch_url",       zErrFunc(fetchUrl)},
     
-    .{"stderr",         zErrFunc(stderr)},
-    .{"stdin",          zErrFunc(stdin)},
-    .{"stdout",         zErrFunc(stdout)},
+    .{"_stdin_op",      zErrFunc(stdinOp)},
+    .{"_is_terminal",   zErrFunc(isTerminal)},
     .{"_cmd_run",       zErrFunc(cmdRun)},
     .{"_proc_op",       zErrFunc(procOp)},
     .{"_proc_free",     zErrFunc(procFree)},
@@ -58,38 +57,6 @@ pub fn bind(_: ?*C.VM, mod: ?*C.Sym) callconv(.c) C.Bytes {
 
 var simd_bit_size: i64 = if (std.simd.suggestVectorLength(u8)) |VecSize|
     VecSize * 8 else 0;
-
-const File = extern struct {
-    fd: std.c.fd_t,
-    closed: bool = false,
-};
-
-fn stderr(t: *C.Thread) !C.Ret {
-    // if (!cy.hasStdFiles) return t.ret_panic("Unsupported.");
-
-    const ret = C.thread_ret(t, File);
-    const handle = std.Io.File.stderr().handle;
-    ret.* = .{ .fd = handle };
-    return C.RetOk;
-}
-
-fn stdin(t: *C.Thread) !C.Ret {
-    // if (!cy.hasStdFiles) return t.ret_panic("Unsupported.");
-
-    const ret = C.thread_ret(t, File);
-    const handle = std.Io.File.stdin().handle;
-    ret.* = .{ .fd = handle };
-    return C.RetOk;
-}
-
-fn stdout(t: *C.Thread) !C.Ret {
-    // if (!cy.hasStdFiles) return t.ret_panic("Unsupported.");
-
-    const ret = C.thread_ret(t, File);
-    const handle = std.Io.File.stdout().handle;
-    ret.* = .{ .fd = handle };
-    return C.RetOk;
-}
 
 fn _args(t: *C.Thread) !C.Ret {
     // if (is_wasm) return t.ret_panic("Unsupported.");
@@ -1235,4 +1202,213 @@ pub fn dlopen(path: []const u8) !dynlib.DynLib {
     } else {
         return dynlib.DynLib.open(path);
     }
+}
+
+// Standard input.
+
+/// The bytes of stdin that were read and not yet given to the script. Stdin is one per process, so every VM and
+/// thread reads through this buffer: a line that one call read past stays for the next (`os.read_line`, then
+/// `os.stdin().read`). A call that is interrupted keeps what it read.
+const StdinBuf = struct {
+    mutex: std.Io.Mutex = .init,
+    pending: std.ArrayList(u8) = .empty,
+    /// How far `pending` has been searched for a line break.
+    scanned: usize = 0,
+};
+var stdin_buf: StdinBuf = .{};
+/// The buffer and the texts it gives outlive any VM.
+const stdin_alloc = if (is_wasm) std.heap.wasm_allocator else std.heap.smp_allocator;
+
+/// Mirrored by `stdin_op` in `os.cy`.
+const StdinOp = enum(i64) {
+    read_line = 0,
+    read_all = 1,
+    read_password = 2,
+    /// At most `n` bytes, for `File.read` of stdin: what was read already, else what one read gives. Empty at the end
+    /// of the input.
+    read = 3,
+};
+
+const ReadSome = enum { data, eof, interrupted };
+
+/// Reads what stdin has into `stdin_buf.pending`. A POSIX stdin is polled so that the host can stop the VM while the
+/// script waits (`cl_vm_interrupt`). Windows and wasm block in the read.
+fn stdinReadSome(t: *C.Thread) !ReadSome {
+    const file = std.Io.File.stdin();
+    if (comptime !is_wasm and builtin.os.tag != .windows) {
+        while (true) {
+            if (C.thread_interrupted(t)) return .interrupted;
+            var fds = [_]std.posix.pollfd{.{ .fd = file.handle, .events = std.posix.POLL.IN, .revents = 0 }};
+            // If the wait itself fails, the read decides.
+            const n = std.posix.poll(&fds, 100) catch 1;
+            if (n > 0) break;
+        }
+    }
+    var chunk: [4096]u8 = undefined;
+    const n = file.readStreaming(stdx.io(), &.{&chunk}) catch |err| switch (err) {
+        error.EndOfStream => return .eof,
+        else => return err,
+    };
+    if (n == 0) return .eof;
+    try stdin_buf.pending.appendSlice(stdin_alloc, chunk[0..n]);
+    return .data;
+}
+
+/// Removes the first `n` bytes of `pending`.
+fn stdinDrop(n: usize) void {
+    const b = &stdin_buf;
+    const rest = b.pending.items.len - n;
+    std.mem.copyForwards(u8, b.pending.items[0..rest], b.pending.items[n..]);
+    b.pending.items.len = rest;
+    b.scanned = 0;
+}
+
+const StdinResult = struct {
+    /// A line or the text, owned by the caller (`smp_allocator`). Null at the end of the input.
+    text: ?[]u8 = null,
+    fail: CmdFail = .none,
+};
+
+/// The next line without its line break (`\n` or `\r\n`). The last line can be without one.
+fn stdinLine(t: *C.Thread) StdinResult {
+    const b = &stdin_buf;
+    while (true) {
+        if (std.mem.indexOfScalarPos(u8, b.pending.items, b.scanned, '\n')) |idx| {
+            var end = idx;
+            if (end > 0 and b.pending.items[end - 1] == '\r') end -= 1;
+            const line = stdin_alloc.dupe(u8, b.pending.items[0..end]) catch return .{ .fail = .out_of_memory };
+            stdinDrop(idx + 1);
+            return .{ .text = line };
+        }
+        b.scanned = b.pending.items.len;
+        const got = stdinReadSome(t) catch |err| return .{ .fail = cmdFailFor(t, err) };
+        switch (got) {
+            .data => {},
+            .interrupted => return .{ .fail = cmdFailFor(t, error.CmdInterrupted) },
+            .eof => {
+                if (b.pending.items.len == 0) return .{};
+                const line = stdin_alloc.dupe(u8, b.pending.items) catch return .{ .fail = .out_of_memory };
+                stdinDrop(b.pending.items.len);
+                return .{ .text = line };
+            },
+        }
+    }
+}
+
+/// The rest of the input.
+fn stdinAll(t: *C.Thread) StdinResult {
+    const b = &stdin_buf;
+    while (true) {
+        const got = stdinReadSome(t) catch |err| return .{ .fail = cmdFailFor(t, err) };
+        switch (got) {
+            .data => {},
+            .interrupted => return .{ .fail = cmdFailFor(t, error.CmdInterrupted) },
+            .eof => {
+                const text = stdin_alloc.dupe(u8, b.pending.items) catch return .{ .fail = .out_of_memory };
+                stdinDrop(b.pending.items.len);
+                return .{ .text = text };
+            },
+        }
+    }
+}
+
+const has_termios = !is_wasm and builtin.os.tag != .windows;
+
+/// The terminal settings to put back when a Ctrl-C ends the process while `read_password` has echo off.
+var password_saved: if (has_termios) std.posix.termios else void = undefined;
+
+fn passwordSigint(sig: std.posix.SIG) callconv(.c) void {
+    if (comptime has_termios) {
+        std.posix.tcsetattr(std.posix.STDIN_FILENO, .NOW, password_saved) catch {};
+        var dfl: std.posix.Sigaction = .{ .handler = .{ .handler = std.posix.SIG.DFL }, .mask = std.posix.sigemptyset(), .flags = 0 };
+        std.posix.sigaction(sig, &dfl, null);
+        _ = std.c.raise(sig);
+    }
+}
+
+const win = struct {
+    const ENABLE_ECHO_INPUT: u32 = 0x0004;
+    extern "kernel32" fn GetConsoleMode(h: std.os.windows.HANDLE, mode: *u32) callconv(.winapi) std.os.windows.BOOL;
+    extern "kernel32" fn SetConsoleMode(h: std.os.windows.HANDLE, mode: u32) callconv(.winapi) std.os.windows.BOOL;
+};
+
+/// A line with the echo of a terminal turned off. Without a terminal, a line as `stdinLine` reads it.
+fn stdinPassword(t: *C.Thread) StdinResult {
+    const handle = std.Io.File.stdin().handle;
+    if (comptime has_termios) {
+        const old = std.posix.tcgetattr(handle) catch return stdinLine(t);
+        var quiet = old;
+        quiet.lflag.ECHO = false;
+        quiet.lflag.ECHONL = true;
+        password_saved = old;
+        var act: std.posix.Sigaction = .{ .handler = .{ .handler = passwordSigint }, .mask = std.posix.sigemptyset(), .flags = 0 };
+        var prev_int: std.posix.Sigaction = undefined;
+        std.posix.sigaction(.INT, &act, &prev_int);
+        defer std.posix.sigaction(.INT, &prev_int, null);
+        std.posix.tcsetattr(handle, .FLUSH, quiet) catch return stdinLine(t);
+        defer std.posix.tcsetattr(handle, .FLUSH, old) catch {};
+        return stdinLine(t);
+    } else if (comptime builtin.os.tag == .windows) {
+        var mode: u32 = 0;
+        if (!win.GetConsoleMode(handle, &mode).toBool()) return stdinLine(t);
+        _ = win.SetConsoleMode(handle, mode & ~win.ENABLE_ECHO_INPUT);
+        defer _ = win.SetConsoleMode(handle, mode);
+        const res = stdinLine(t);
+        // The console does not echo the Enter either.
+        std.Io.File.stdout().writeStreamingAll(stdx.io(), "\r\n") catch {};
+        return res;
+    } else {
+        return stdinLine(t);
+    }
+}
+
+/// `fn _stdin_op(op int, n int) -> CmdRaw`. `code` is 1 with a text in `out`, 0 at the end of the input.
+/// `fail` is a `CmdFail`: `interrupted` (11) when the checkpoint of `t` stops it, so the script calls again.
+pub fn stdinOp(t: *C.Thread) anyerror!C.Ret {
+    const ret = C.thread_ret(t, CmdRaw);
+    const op_n = C.thread_int(t);
+    const n = C.thread_int(t);
+    if (op_n < 0 or op_n > @intFromEnum(StdinOp.read)) return C.thread_ret_panic(t, "Unknown op.");
+    const op: StdinOp = @enumFromInt(op_n);
+
+    stdin_buf.mutex.lockUncancelable(stdx.io());
+    const res: StdinResult = switch (op) {
+        .read_line => stdinLine(t),
+        .read_all => stdinAll(t),
+        .read_password => stdinPassword(t),
+        .read => b: {
+            const b = &stdin_buf;
+            if (b.pending.items.len == 0) {
+                const got = stdinReadSome(t) catch |err| break :b .{ .fail = cmdFailFor(t, err) };
+                if (got == .interrupted) break :b .{ .fail = cmdFailFor(t, error.CmdInterrupted) };
+            }
+            const len = @min(@as(usize, @intCast(@max(n, 0))), b.pending.items.len);
+            const text = stdin_alloc.dupe(u8, b.pending.items[0..len]) catch break :b .{ .fail = .out_of_memory };
+            stdinDrop(len);
+            break :b .{ .text = text };
+        },
+    };
+    stdin_buf.mutex.unlock(stdx.io());
+
+    defer if (res.text) |text| stdin_alloc.free(text);
+    ret.* = .{
+        .out = C.str_init(t, res.text orelse ""),
+        .err = C.str_init(t, ""),
+        .code = if (res.text != null) 1 else 0,
+        .fail = @intFromEnum(res.fail),
+    };
+    return C.RetOk;
+}
+
+/// `fn _is_terminal(handle int) -> bool`: whether the handle is a terminal (a console on Windows).
+pub fn isTerminal(t: *C.Thread) anyerror!C.Ret {
+    const ret = C.thread_ret(t, bool);
+    const handle = C.thread_int(t);
+    if (comptime is_wasm) {
+        ret.* = false;
+        return C.RetOk;
+    }
+    const file: std.Io.File = .{ .handle = if (builtin.os.tag == .windows) @ptrFromInt(@as(usize, @bitCast(handle))) else @intCast(handle), .flags = .{ .nonblocking = false } };
+    ret.* = file.isTty(stdx.io()) catch false;
+    return C.RetOk;
 }

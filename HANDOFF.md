@@ -85,6 +85,10 @@
 - 2026-11-26(사용자: "@HANDOFF.md continue"): "다음 에이전트에게"의 남은 것을 쉬운 것부터 했다. `cy.eval` 주석 예와 `parse_format`의
   주 날짜(`d60074c0`, 15단계 rc=0), `cl_vm_reset` · `clReportApiError`의 `fatal`(`6bc2fb89`), `&&h` 인자의 자리 대상과 그 탐침에서
   찾은 빌림 구멍 F-216. `deny_ffi`의 남은 것은 호스트 계약 · tars-agent 쪽이라 손대지 않았다.
+- 2026-11-26(사용자: "우리 클라이언트 애플리케이션에서 인풋을 받을 수 있나? 스탠다드 인풋", 이어서 "터미널에서 입출력하는 프로그램을
+  만들기 위해 키보드 입력 같은 게 필요해. 그리고 파이프라인에서 입력받을 수 있는 것도 필요하고 검증해서 추가하도록 하자", 범위 질문에
+  "기본 + 숨김 입력", "이전 작업 마치고 진행해도 된다"): 빌림 작업(`394458a6`)을 마치고 표준 입력을 넣었다. 결정
+  `docs/decisions/project_std_stdin.md`, F-217(`os.stdin()` 등이 0.4.21부터 깨짐) · F-218(`io.Scanner`). `verify.sh`는 16단계.
 
 ## 현재 브랜치
 
@@ -452,7 +456,9 @@
 
 1. 0.4.22가 마지막 릴리스다(노트 `docs/releases/0.4.22.md`). `unreleased.md`에 2026-11-26의 절들이 있다(예제, C API 할당 실패,
    `deny_ffi`, `time` · `regex` · `peg`(주 날짜 파싱 포함), 빌림 자리 대상, `&&h` 인자와 F-216). push하지 않았다.
+   표준 입력 절도 있다(`os.input` 등, F-217 · F-218). tars-agent `docs/TODO.md` 59행에 오늘 저녁 변경을 덧붙였다(`398acfc`, push 안 함).
    남은 것: `deny_ffi` 결정 문서 "남은 것"(호스트 계약, tars-agent의 `cfg.deny_ffi`), 런타임 안쪽의 `catch fatal()`,
+   키 단위 raw 입력(사용자가 이번에 빼기로 함, 넣는다면 `project_std_stdin.md` 결정 11), wasm의 `File.write`(FFI),
    제너릭 함수 · 지역에 담은 `&&h`는 여전히 아무 지역을 가리킨다고 본다(`project_borrow_model.md` 끝 절).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
@@ -502,8 +508,8 @@
 ## 작업 방식
 
 - 순서: scratchpad 재현 → 수정 → Debug CLI 확인(`zig build cli -p <scratchpad>/dbg`) → 회귀 테스트 → 문서 → 15단계 검증 → 커밋.
-- 15단계 검증(14단계는 `docs/api.json` 낡음 검사, 15단계는 빌드한 `cyber`의 REPL에 줄을 파이프로 넣는 검사. 2026-11-24 전의
-  기록은 "14단계 검증"이라고 적는다): `src/tools/verify.sh [로그 디렉터리]`(`task verify`, 약 10분, 기본 로그 `zig-out/verify/`). `run_in_background`로
+- 16단계 검증(14단계는 `docs/api.json` 낡음 검사, 15단계는 빌드한 `cyber`의 REPL에 줄을 파이프로 넣는 검사, 16단계는 스크립트에
+  stdin을 파이프로 넣는 검사(2026-11-26). 그 전의 기록은 "14단계" · "15단계 검증"이라고 적는다): `src/tools/verify.sh [로그 디렉터리]`(`task verify`, 약 10분, 기본 로그 `zig-out/verify/`). `run_in_background`로
   돌리고 완료 알림을 기다린 뒤 `rc=`를 확인하고 커밋한다(`tail`만 보지 않는다). 도는 동안 `src/`를 고치지 않는다(고쳤으면
   죽이고 다시). 다른 작업을 이어 가려면 git worktree에서 돌리고 끝나면 `git worktree remove`.
 - 커밋은 의미 있는 diff면 묻지 않고 한다. push · 태그 · 릴리스는 사용자 지시 때만. `gh`는 `-R soomtong/cyber`.

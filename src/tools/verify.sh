@@ -1,5 +1,5 @@
 #!/bin/sh
-# 15-step verification to run before a commit that changes src/. Sequential, about 10 minutes.
+# 16-step verification to run before a commit that changes src/. Sequential, about 10 minutes.
 # usage: verify.sh [log dir]   (default: zig-out/verify)
 # Prints "<step> rc=N" per step and exits 1 if a step failed. The log of a step is <log dir>/<step>.log.
 # - Needs wasmtime for steps 9 to 12.
@@ -51,5 +51,11 @@ repl_stdin() {
   [ "$got" = "$exp" ] || { echo "unexpected REPL output:"; printf '%s\n' "$out"; return 1; }
 }
 run 15-repl-stdin        repl_stdin
+# A script reads a pipe through `os.input`, `os.read_line`, `os.stdin_lines` and `os.stdin()` (src/test/stdin/stdin.cy).
+script_stdin() {
+  out=$({ printf 'Ann\nx\r\nabcdef\nl1\nl2\nlast'; head -c 9000 /dev/zero | tr '\0' 'y'; } | zig-out/bin/cyber src/test/stdin/stdin.cy 2>&1) || { printf '%s\n' "$out"; return 1; }
+  [ "$out" = "$(printf 'Name: \ndone')" ] || { echo "unexpected output:"; printf '%s\n' "$out"; return 1; }
+}
+run 16-script-stdin      script_stdin
 if [ $fail -eq 0 ]; then echo "DONE all steps rc=0"; else echo "FAILED see $L"; fi
 exit $fail

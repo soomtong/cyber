@@ -82,3 +82,17 @@
 - 구멍 수정(F-216): 처음에 빌림이 없던 컨테이너(`g := G{p=none}`)가 나중에 `g.p = &w`, `g.set(&w)`로 다른 컨테이너를 가리키면, 그
   컨테이너가 마지막 사용 뒤 자기 빌림을 놓아 `w.q = &a[0]` 뒤 `a << 3`이 통과했다. 이제 'Expected exclusive access. There is another
   active borrow to `a`.'다. 결정 `docs/decisions/project_borrow_model.md` "`&&h` 인자의 자리 대상과 늦게 받은 자리".
+
+## 표준 입력: `os.input` · `os.read_line` · 파이프 · 숨김 입력 (2026-11-26)
+
+- 새 함수: `os.read_line() -> !?str`(줄바꿈을 뺀 줄, 끝이면 `none`), `os.input(prompt) -> !?str`(프롬프트를 찍고 한 줄),
+  `os.stdin_lines()`(`for`용, `else |err|:`), `os.read_stdin() -> !str`(나머지 전부), `os.read_password(prompt) -> !?str`(터미널이면
+  echo를 끄고 읽음, Ctrl-C로 끝나도 터미널을 되돌림), `File.is_terminal()`. 매뉴얼 "Reading input.", 결정
+  `docs/decisions/project_std_stdin.md`.
+- 결함 수정(F-217): `os.stdin()` · `os.stdout()` · `os.stderr()`가 0.4.21부터 쓰레기 핸들을 돌려줘 `read` · `write`가
+  `error.InvalidArgument`였고, 값이 사라질 때 그 번호를 닫다 'panic: Unexpected. error.InvalidArgument'였다. 이제 fd 0 · 1 · 2(Windows
+  `GetStdHandle`)이고, `close()`는 스트림을 닫지 않는다. `os.stdin()`의 읽기는 `read_line`과 같은 버퍼를 지나 섞어 써도 된다.
+- 깨지는 변경: `File.read_line()`이 `!str`(언제나 `error.TODO`)에서 `!?str`이 됐다. stdin이 아닌 파일은 한 바이트씩 읽는다.
+- 결함 수정(F-218): `io.Scanner.next_line()`이 입력 끝에서 끝나지 않았고(읽기가 0을 돌려줄 때), 버퍼 경계에 걸친 줄을 둘로
+  잘랐다. `ScannerNextFn`이 `none`을 돌려주면 이제 "더 읽어라"다(전에는 끝).
+- `src/tools/verify.sh`가 16단계가 됐다(`16-script-stdin`: `src/test/stdin/stdin.cy`에 파이프로 입력).

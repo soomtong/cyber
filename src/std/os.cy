@@ -45,17 +45,102 @@ type FileHandle = switch meta.system():
 --| Default SIMD vector bit size.
 #[bind] global vecBitSize int
 
---| Returns the standard error handle.
-#[bind]
-fn stderr() -> File
+--| Returns the standard error handle. Closing it is a no-op.
+fn stderr() -> File:
+    return std_file(2)
 
---| Returns the standard input handle.
-#[bind]
-fn stdin() -> File
+--| Returns the standard input handle. Its reads go through the same buffer as `read_line`, `input` and
+--| `read_stdin`, so they can be mixed. Closing it is a no-op.
+fn stdin() -> File:
+    return std_file(0)
 
---| Returns the standard output handle.
-#[bind]
-fn stdout() -> File
+--| Returns the standard output handle. Closing it is a no-op.
+fn stdout() -> File:
+    return std_file(1)
+
+-fn std_file(n int) -> File:
+    #if meta.system() == .windows:
+        var id windows.DWORD = windows.STD_INPUT_HANDLE
+        if n == 1:
+            id = windows.STD_OUTPUT_HANDLE
+        else n == 2:
+            id = windows.STD_ERROR_HANDLE
+        return {fd=kernel32.GetStdHandle(id), std=n + 1}
+    #else:
+        return {fd=lc.fd_t(n), std=n + 1}
+
+--| Reads the next line of stdin and returns it without its line break (`\n` or `\r\n`). The last line can be
+--| without one. Returns `none` at the end of the input: when a pipe or a file runs out, or after Ctrl-D (Ctrl-Z
+--| and Enter on Windows) at a terminal. The host can stop the VM while it waits (`cl_vm_interrupt`).
+fn read_line() -> !?str:
+    raw := stdin_op(0, 0)
+    if raw.fail != 0:
+        return cmd_error(raw.fail)
+    if raw.code == 0:
+        return none
+    return raw.out
+
+--| Prints `prompt` without a line break and reads a line of stdin, as `read_line` does.
+--| ```cy
+--| name := os.input('Name: ')! ?else 'stranger'
+--| ```
+fn input(prompt str) -> !?str:
+    prints(prompt)
+    return read_line()
+
+--| Prints `prompt` and reads a line of stdin without showing what is typed, for a password. When stdin is not a
+--| terminal (a pipe), the line is read as `read_line` reads it.
+fn read_password(prompt str) -> !?str:
+    prints(prompt)
+    raw := stdin_op(2, 0)
+    if raw.fail != 0:
+        return cmd_error(raw.fail)
+    if raw.code == 0:
+        return none
+    return raw.out
+
+--| Returns the rest of stdin, until its end.
+fn read_stdin() -> !str:
+    raw := stdin_op(1, 0)
+    if raw.fail != 0:
+        return cmd_error(raw.fail)
+    return raw.out
+
+--| Returns the lines of stdin, for `for`. An error ends the loop in the `else |err|:` block:
+--| ```cy
+--| for os.stdin_lines() |line|:
+--|     print(line.to_upper())
+--| else |err|:
+--|     eprint(err)
+--| ```
+fn stdin_lines() -> StdinLines:
+    return {}
+
+--| The lines of stdin, for `for`. See `stdin_lines`.
+type StdinLines:
+    -unused int = 0
+
+fn (&StdinLines) iterator() -> int:
+    return 0
+
+fn (&StdinLines) next(count &int) -> !?str:
+    line := read_line()!
+    if line == none:
+        return none
+    count.* += 1
+    return line
+
+-- `op` is a `StdinOp` of `os.zig`. Like `Cmd.launch`, it calls again when the host function returns
+-- `CmdFail.interrupted` (11), so that the checkpoint of the loop stops the VM.
+-fn stdin_op(op int, n int) -> CmdRaw:
+    while:
+        raw := _stdin_op(op, n)
+        if raw.fail != 11:
+            return raw
+
+#[bind] -fn _stdin_op(op int, n int) -> CmdRaw
+
+#[bind] -fn _is_terminal(handle int) -> bool
 
 const AccessExists  = c_int(0)  -- F_OK
 const AccessRead    = c_int(4)  -- R_OK
@@ -1042,6 +1127,9 @@ type File:
     -- The id of the cleanup that closes `fd` when the value is swept without `@deinit` (a panic, an interrupt or
     -- the end of the VM). 0 for none: the standard streams and a handle that the caller gave.
     -guard int = 0
+    -- 1, 2 or 3 for stdin, stdout and stderr (`os.stdin()`): `close` leaves them open, and the reads of stdin go
+    -- through the buffer of `read_line`.
+    -std int = 0
 
 fn (&File) @deinit():
     self.close()
@@ -1053,6 +1141,9 @@ fn (&File) is_closed() -> bool:
 --| Closes the file handle. File ops invoked afterwards will return `error.Closed`.
 fn (&File) close() -> void:
     if self.closed:
+        return
+    if self.std != 0:
+        self.closed = true
         return
     if self.guard != 0:
         _fd_unguard(self.guard)
@@ -1092,6 +1183,16 @@ fn (&File) info() -> !FileInfo:
 
 --| Returns number of bytes read. If 0 is returned, then the file has reached the end.
 fn (&File) read(buf [&]byte) -> !int:
+    if self.std == 1:
+        -- Through the buffer of `read_line`, which has what it read past its line.
+        if buf.length == 0:
+            return 0
+        raw := stdin_op(3, buf.length)
+        if raw.fail != 0:
+            return cmd_error(raw.fail)
+        for 0..raw.out.len() |i|:
+            buf[i] = raw.out[i]
+        return raw.out.len()
     #if meta.system() == .windows:
         var bytes_read windows.DWORD = 0
         result := kernel32.ReadFile(self.fd, as buf.base, windows.DWORD(buf.length), &bytes_read, none)
@@ -1133,14 +1234,33 @@ fn (&File) read_fill(as_buf AsSpan[byte]) -> !int:
         i += read
     return i
 
---| Reads until a new line as a `str`.
---| For bulk line reading, consider using `Scanner.nextLine`.
-fn (&File) read_line() -> !str:
-    return error.TODO
-    -- const input = try std.io.getStdIn().reader().readUntilDelimiterAlloc(vm.alloc, '\n', 10e8);
-    -- defer vm.alloc.free(input);
-    -- // TODO: Use allocOwnedString
-    -- return vm.heap.newStr(input);
+--| Reads the next line and returns it without its line break (`\n` or `\r\n`), or `none` at the end of the file.
+--| A file other than stdin is read one byte at a time, so that nothing past the line is consumed: use
+--| `io.Scanner` to read many lines.
+fn (&File) read_line() -> !?str:
+    if self.std == 1:
+        return read_line()
+    var line []byte = {}
+    buf := [1]byte(0)
+    while:
+        n := self.read(buf[..])!
+        if n == 0:
+            if line.len() == 0:
+                return none
+            break
+        if buf[0] == '\n':
+            break
+        line += buf[0]
+    if line.len() > 0 and line[line.len() - 1] == '\r':
+        line.size_down(line.len() - 1)
+    return str(line)
+
+--| Whether the file is a terminal (a console on Windows), and not a pipe or a file.
+fn (&File) is_terminal() -> bool:
+    #if meta.system() == .windows:
+        return _is_terminal(as[int] self.fd)
+    #else:
+        return _is_terminal(int(self.fd))
 
 --| Seeks the read/write position by `pos` bytes from the current position.
 fn (&File) seek(n int) -> !void:

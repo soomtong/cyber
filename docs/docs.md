@@ -4979,6 +4979,31 @@ fn main() -> !void:
 ## Builtin modules.
 Builtin and std modules come with Cyber. See the [API docs](api.html).
 
+### Reading input.
+The `os` module reads stdin, whether it is a terminal where someone types or a pipe (`cat data.txt | cyber app.cy`). `os.input(prompt)` prints the prompt without a line break and reads a line. `os.read_line()` reads a line without a prompt. Both return the line without its line break (`\n` or `\r\n`), and `none` at the end of the input: when a pipe or a file runs out, or after Ctrl-D (Ctrl-Z and Enter on Windows) at a terminal:
+```cy
+use os
+
+name := os.input('Name: ')! ?else 'stranger'
+print('Hello, %{name}.')
+
+while os.input('> ')! |cmd|:
+    if cmd == 'quit':
+        break
+    print('you typed `%{cmd}`')
+```
+`os.stdin_lines()` gives the lines for a `for` loop, whose `else |err|:` block handles an error. `os.read_stdin()` returns the rest of the input as one string:
+```cy
+-- cat names.txt | cyber upper.cy
+for os.stdin_lines() |line|:
+    print(line.upper())
+else |err|:
+    eprint(err)
+```
+`os.read_password(prompt)` reads a line without showing what is typed when stdin is a terminal. The terminal is set back when the line is read, and also when Ctrl-C ends the program. From a pipe it reads a line as `read_line` does. `os.stdin().is_terminal()` tells a terminal from a pipe or a file, and `os.stdout().is_terminal()` whether the output is shown or goes on to another program.
+
+Stdin is one stream for the whole process. Every read of it goes through one buffer, so `read_line`, `input`, `stdin_lines`, `read_stdin` and the `File` methods of `os.stdin()` (`read`, `read_line`, `read_all`) can be used one after another without losing input. `close()` of `os.stdin()`, `os.stdout()` or `os.stderr()` leaves the stream open. While a script waits for input on Linux or macOS, the host can stop it (`cl_vm_interrupt`). A line can be as long as memory allows. For a file other than stdin, `File.read_line()` reads one byte at a time so that it consumes nothing past the line. To read many lines of a file, use `io.Scanner(&file).next_line()`.
+
 ### Running programs.
 `os.cmd` makes a command: a program and its arguments. A `Cmd` is a value. Its methods return a new command, and nothing starts until `run`, `read` or `run_status` is called:
 ```cy

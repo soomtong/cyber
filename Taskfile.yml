@@ -368,7 +368,7 @@ tasks:
       - task: build:release
 
   verify:
-    desc: 'Run the 15-step verification before a commit (all optimize modes, lib tests, wasm32-wasi with wasmtime, ReleaseSafe CLI, api.json, piped REPL). Usage: task verify -- <log dir>'
+    desc: 'Run the 16-step verification before a commit (all optimize modes, lib tests, wasm32-wasi with wasmtime, ReleaseSafe CLI, api.json, piped REPL, piped script). Usage: task verify -- <log dir>'
     cmds:
       - src/tools/verify.sh {{.CLI_ARGS}}
 

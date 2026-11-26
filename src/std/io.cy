@@ -14,6 +14,8 @@ type Scanner[T Reader]:
     buf []byte
     cur int = 0
     end int = 0
+    -- The reader returned 0 bytes: the input ended.
+    eof bool = false
 
 const Scanner :: DefaultBufferSize = 8192
 
@@ -24,17 +26,20 @@ fn Scanner :: @init(scope reader &%T, buf_size int) -> scope Scanner[T]:
     return {
         reader = reader,
         buf = []byte(buf_size, 0),
-        cur = buf_size,
-        end = buf_size,
+        cur = 0,
+        end = 0,
     }
 
-fn (&Scanner[]) read_full() -> !void:
-    -- Read until buffer is filled or end of file.
-    while self.end < self.buf.len():
-        self.end += self.reader.read(self.buf.span()[self.end..]) !else |err|:
-            if err == error.EndOfFile:
-                break
-            return err
+-- Reads into the free part of the buffer once. A reader returns 0 at the end of its input.
+-fn (&Scanner[]) read_more() -> !void:
+    n := self.reader.read(self.buf.span()[self.end..]) !else |err|:
+        if err == error.EndOfFile:
+            self.eof = true
+            return
+        return err
+    if n == 0:
+        self.eof = true
+    self.end += n
 
 type ScannerNextFn = fn([&]byte) -> !?NextRange
 
@@ -43,61 +48,49 @@ type NextRange:
     end   int
     advance_end int
 
+--| Returns the next piece that `next_fn` finds in the buffered input, reading more while it finds none. `next_fn`
+--| returns `none` to ask for more. At the end of the input, the rest is the last piece, and `none` follows.
 fn (&Scanner[]) next(next_fn ScannerNextFn) -> !?[]byte:
-    if self.cur == self.end and self.end < self.buf.len():
-        -- EOF
-        return none
-
-    if self.cur == self.end:
+    var res []byte = {}
+    while:
+        if self.cur < self.end:
+            if next_fn(self.buf.span()[self.cur..self.end])! |range|:
+                slice := self.buf[self.cur+range.start..self.cur+range.end]
+                self.cur += range.advance_end
+                if res.len() > 0:
+                    return res + slice
+                return slice
+            -- Keep the partial piece and read more.
+            res += self.buf[self.cur..self.end]
+            self.cur = self.end
+        if self.eof:
+            if res.len() > 0:
+                return res
+            return none
         self.cur = 0
         self.end = 0
-        self.read_full()!
+        self.read_more()!
 
-    if next_fn(self.buf.span()[self.cur..self.end])! |range|:
-        slice := self.buf[self.cur+range.start..self.cur+range.end]
-        self.cur += range.advance_end
-        return slice
-
-    -- Start building the result.
-    res := self.buf[self.cur..self.end]
-    self.cur = self.end
-
-    while true:
-        if self.cur == self.end and self.end < self.buf.len():
-            -- EOF
-            return none
-
-        if self.cur == self.end:
-            self.cur = 0
-            self.end = 0
-            self.read_full()!
-
-        if next_fn(self.buf.span()[self.cur..self.end])! |range|:
-            slice := self.buf[self.cur+range.start..self.cur+range.end]
-            self.cur += range.advance_end
-            return res + slice
-
-        -- Save partial.
-        res += self.buf[self.cur..self.end]
-        self.cur = self.end
-    return none
-
---| Returns the next line that ends with `\n`, `\r`, `\r\n`, or until the EOF.
---| The line returned does not include the new line character(s).
+--| Returns the next line without its line break (`\n`, `\r\n` or `\r`). The last line can be without one.
+--| Returns `none` at the end of the input.
 fn (&Scanner[]) next_line() -> !?[]byte:
     next := fn(span [&]byte) -> !?NextRange:
         idx := index_newline(span) ?else:
-            if span.length == 0:
+            return none
+        advance_end := idx + 1
+        if span[idx] == '\r':
+            if idx + 1 == span.length:
+                -- A `\n` can follow in the next read.
                 return none
-            else:
-                return NextRange{start=0, end=span.length, advance_end=span.length}
-        advance_end := idx
-        if span[advance_end] == '\r':
-            advance_end += 1
-        if span[advance_end] == '\n':
-            advance_end += 1
+            if span[idx + 1] == '\n':
+                advance_end += 1
         return NextRange{start=0, end=idx, advance_end=advance_end}
-    return self.next(next)
+    line := self.next(next)! ?else:
+        return none
+    -- The input ended right after a `\r`.
+    if line.len() > 0 and line[line.len() - 1] == '\r':
+        return line[0..line.len() - 1]
+    return line
 
 type Writer trait:
     fn write(bytes [&]byte) -> !int

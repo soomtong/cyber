@@ -14,3 +14,4 @@ Notable examples will be listed here:
 - [background_job.cy](background_job.cy) - Starts a server that keeps running with `Cmd.detach`, talks to it and stops it by its process id.
 - [parallel_jobs.cy](parallel_jobs.cy) - Runs several commands at once with `Cmd.start`, keeps them in an `Array[os.Process]` and reports each exit code.
 - [pi_digits.cy](pi_digits.cy) - Prints PI to the Nth decimal place with an integer spigot. The number comes from an argument, a prompt or a pipe (`os.input`).
+- [e_digits.cy](e_digits.cy) - Prints e to the Nth decimal place with Sale's spigot, the sibling of `pi_digits.cy`.

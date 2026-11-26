@@ -1148,6 +1148,7 @@ test "Compile." {
     try compileCase("../examples/calculator.cy");
     try compileCase("../examples/fibonacci.cy");
     try compileCase("../examples/pi_digits.cy");
+    try compileCase("../examples/e_digits.cy");
 
     // tools.
     try compileCase("tools/bench.cy");

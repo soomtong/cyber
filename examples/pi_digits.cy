@@ -8,19 +8,19 @@ use os
 const MaxPlaces = 1000
 
 -- The first `n` decimal digits of PI, 3 first, by the spigot of Rabinowitz and Wagon. PI is held as a number in a
--- mixed radix (1/3, 2/5, 3/7, ...) whose places all start at 2. Each pass multiplies it by 10 and carries one
+-- mixed radix (1/3, 2/5, 3/7, ...) whose terms all start at 2. Each pass multiplies it by 10 and carries one
 -- decimal digit out of the front.
 fn pi_digits(n int) -> []int:
     len := 10 * n / 3 + 1
-    places := []int(len, 2)
+    terms := []int(len, 2)
     var digits []int = {}
     for 0..n:
         carry := 0
         for len..>0 |i|:
-            x := 10 * places[i - 1] + carry * i
-            places[i - 1] = x % (2 * i - 1)
+            x := 10 * terms[i - 1] + carry * i
+            terms[i - 1] = x % (2 * i - 1)
             carry = x / (2 * i - 1)
-        places[0] = carry % 10
+        terms[0] = carry % 10
         digits += carry / 10
     -- A pass can carry out 10: it adds one to the digits before it.
     for digits.len() - 1..>0 |i|:

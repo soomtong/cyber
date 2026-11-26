@@ -80,18 +80,22 @@ fn read_line() -> !?str:
         return none
     return raw.out
 
---| Prints `prompt` without a line break and reads a line of stdin, as `read_line` does.
+--| Prints `prompt` without a line break and reads a line of stdin, as `read_line` does. The prompt is printed only
+--| when stdin is a terminal, like `read -p` of a shell: input from a pipe or a file is not asked for, and the output
+--| stays clean for the next program.
 --| ```cy
 --| name := os.input('Name: ')! ?else 'stranger'
 --| ```
 fn input(prompt str) -> !?str:
-    prints(prompt)
+    if stdin().is_terminal():
+        prints(prompt)
     return read_line()
 
 --| Prints `prompt` and reads a line of stdin without showing what is typed, for a password. When stdin is not a
---| terminal (a pipe), the line is read as `read_line` reads it.
+--| terminal (a pipe), the line is read as `input` reads it, without the prompt.
 fn read_password(prompt str) -> !?str:
-    prints(prompt)
+    if stdin().is_terminal():
+        prints(prompt)
     raw := stdin_op(2, 0)
     if raw.fail != 0:
         return cmd_error(raw.fail)

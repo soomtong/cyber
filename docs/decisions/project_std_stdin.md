@@ -35,6 +35,9 @@ raw 입력은 넣지 않음).
 1. `os.read_line() -> !?str`: 줄바꿈(`\n`, `\r\n`)을 뺀 줄, 끝이면 `none`. 마지막 줄은 줄바꿈이 없어도 된다. Cyber는 끝을
    옵션으로 나타내는 꼴이 이미 있다(`Process.read_line`, `Scanner.next_line`). Python · Nim처럼 오류로 하면 `while` 꼴이 안 된다.
 2. `os.input(prompt) -> !?str`: 프롬프트를 줄바꿈 없이 찍고(`prints`, 호스트의 printer) 읽는다. Python의 이름이다.
+   프롬프트는 stdin이 터미널일 때만 찍는다(bash `read -p`와 같다, 같은 날 예제 `pi_digits.cy`를 쓰며 바꿈). Python `input`은
+   언제나 찍어서 `echo 50 | prog`의 출력이 `Prompt: 3.14...`로 붙는다. 파이프로 받는 프로그램의 출력은 다음 프로그램의 입력이라
+   묻는 말이 섞이면 안 된다. `read_password`도 같다.
 3. `os.stdin_lines()`: `for`용 반복자(`else |err|:` 필수, `Process.lines`와 같은 꼴). `os.read_stdin() -> !str`: 나머지 전부.
 4. `os.read_password(prompt) -> !?str`: 터미널이면 echo를 끄고(`ECHONL`은 켜서 Enter의 줄바꿈은 보인다) 한 줄 읽고 되돌린다.
    읽는 동안 SIGINT 핸들러를 두어 Ctrl-C면 설정을 되돌린 뒤 기본 동작으로 다시 신호를 낸다(CLI에 SIGINT 처리가 없어, 그대로면

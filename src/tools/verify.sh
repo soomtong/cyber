@@ -54,7 +54,7 @@ run 15-repl-stdin        repl_stdin
 # A script reads a pipe through `os.input`, `os.read_line`, `os.stdin_lines` and `os.stdin()` (src/test/stdin/stdin.cy).
 script_stdin() {
   out=$({ printf 'Ann\nx\r\nabcdef\nl1\nl2\nlast'; head -c 9000 /dev/zero | tr '\0' 'y'; } | zig-out/bin/cyber src/test/stdin/stdin.cy 2>&1) || { printf '%s\n' "$out"; return 1; }
-  [ "$out" = "$(printf 'Name: \ndone')" ] || { echo "unexpected output:"; printf '%s\n' "$out"; return 1; }
+  [ "$out" = "done" ] || { echo "unexpected output:"; printf '%s\n' "$out"; return 1; }
 }
 run 16-script-stdin      script_stdin
 if [ $fail -eq 0 ]; then echo "DONE all steps rc=0"; else echo "FAILED see $L"; fi

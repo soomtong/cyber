@@ -750,6 +750,14 @@ const ArgBorrows = struct {
     }
 };
 
+/// The text of a single-quoted string literal without escapes or interpolation (`'0'`), else null.
+fn plainStrLitText(src: []const u8) ?[]const u8 {
+    if (src.len < 2 or src[0] != '\'' or src[src.len - 1] != '\'') return null;
+    const text = src[1 .. src.len - 1];
+    if (std.mem.indexOfAny(u8, text, "'\\%\n") != null) return null;
+    return text;
+}
+
 /// The next other owner that an argument notes in `Chunk.borrow_pending`, from `k` up to `end`.
 fn nextArgOwner(c: *cy.Chunk, end: u32, k: *u32) ?sema.LocalId {
     while (k.* < end) {
@@ -2143,7 +2151,12 @@ fn reportCallFuncMismatch3(c: *cy.Chunk, pre_args: []const Argument, end_args: [
             const right_src = c.nodeString(err_node);
             if (left_t.id() == bt.Str and isNumberType(match_err.arg_t) and isShortSrc(left_src) and isShortSrc(right_src)) {
                 if (std.mem.eql(u8, func_name, "+")) {
-                    hint = std.fmt.bufPrint(&op_hint_buf, " To join them, write `'%{{{s}}}%{{{s}}}'`.", .{left_src, right_src}) catch hint;
+                    if (plainStrLitText(left_src)) |text| {
+                        // `'0' + d`: the literal becomes the text of the template.
+                        hint = std.fmt.bufPrint(&op_hint_buf, " To join them, write `'{s}%{{{s}}}'`.", .{text, right_src}) catch hint;
+                    } else {
+                        hint = std.fmt.bufPrint(&op_hint_buf, " To join them, write `'%{{{s}}}%{{{s}}}'`.", .{left_src, right_src}) catch hint;
+                    }
                 } else {
                     hint = std.fmt.bufPrint(&op_hint_buf, " Convert one side: `{s}({s})` or `'%{{{s}}}'`.", .{argt_name, left_src, right_src}) catch hint;
                 }

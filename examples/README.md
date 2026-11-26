@@ -13,3 +13,4 @@ Notable examples will be listed here:
 - [build_log.cy](build_log.cy) - Keeps stdout and stderr together in their order with `Cmd.stderr_to_stdout`: lines, a log file and a pipe.
 - [background_job.cy](background_job.cy) - Starts a server that keeps running with `Cmd.detach`, talks to it and stops it by its process id.
 - [parallel_jobs.cy](parallel_jobs.cy) - Runs several commands at once with `Cmd.start`, keeps them in an `Array[os.Process]` and reports each exit code.
+- [pi_digits.cy](pi_digits.cy) - Prints PI to the Nth decimal place with an integer spigot. The number comes from an argument, a prompt or a pipe (`os.input`).

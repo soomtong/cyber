@@ -95,4 +95,8 @@
 - 깨지는 변경: `File.read_line()`이 `!str`(언제나 `error.TODO`)에서 `!?str`이 됐다. stdin이 아닌 파일은 한 바이트씩 읽는다.
 - 결함 수정(F-218): `io.Scanner.next_line()`이 입력 끝에서 끝나지 않았고(읽기가 0을 돌려줄 때), 버퍼 경계에 걸친 줄을 둘로
   잘랐다. `ScannerNextFn`이 `none`을 돌려주면 이제 "더 읽어라"다(전에는 끝).
+- `os.input` · `os.read_password`는 stdin이 터미널일 때만 프롬프트를 찍는다(bash `read -p`처럼). 파이프의 출력에 묻는 말이 섞이지 않는다.
+- 예제 `examples/pi_digits.cy`: PI를 N째 소수 자리까지(정수 spigot, 최대 1000자리). 인자 · 프롬프트 · 파이프로 받는다.
+- 오류 힌트: `'0' + d`처럼 왼쪽이 이스케이프 · 보간 없는 문자열 리터럴이면 'To join them, write `'0%{d}'`.'(전에는
+  `'%{'0'}%{d}'`).
 - `src/tools/verify.sh`가 16단계가 됐다(`16-script-stdin`: `src/test/stdin/stdin.cy`에 파이프로 입력).

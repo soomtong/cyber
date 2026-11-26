@@ -7,9 +7,8 @@ use test
 
 test.eq(false, os.stdin().is_terminal())
 
--- `input` prints its prompt without a line break.
+-- `input` prints its prompt only at a terminal: a pipe is not asked.
 test.eq('Ann', os.input('Name: ')!.?)
-print('')
 -- `\r\n` is a line break too.
 test.eq('x', os.read_line()!.?)
 

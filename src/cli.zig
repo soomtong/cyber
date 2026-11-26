@@ -627,6 +627,18 @@ test "cl_vm_interrupt stops a running os.cmd and its programs." {
                 C.vm_interrupt(vm_);
             }
         }
+        // Waits until the script wrote the pid to `path`: an interrupt before that would stop `os.write_file`
+        // part way, when a loaded machine runs the eval slowly.
+        fn interrupterAfterFile(vm_: *C.VM, path: []const u8) void {
+            while (!done.load(.acquire)) {
+                std.Io.sleep(stdx.io(), .fromMilliseconds(50), .awake) catch {};
+                const text = std.Io.Dir.cwd().readFileAlloc(stdx.io(), path, zt.alloc, .limited(64)) catch continue;
+                defer zt.alloc.free(text);
+                if (text.len == 0) continue;
+                break;
+            }
+            interrupter(vm_);
+        }
     };
 
     // The programs would run for 30 seconds. The interrupt stops them and the eval, which never sees an error of
@@ -661,7 +673,7 @@ test "cl_vm_interrupt stops a running os.cmd and its programs." {
     , .{pid_path});
     defer zt.alloc.free(src2);
     S.done.store(false, .release);
-    const thread2 = try std.Thread.spawn(.{}, S.interrupter, .{vm});
+    const thread2 = try std.Thread.spawn(.{}, S.interrupterAfterFile, .{ vm, pid_path });
     const code2 = C.vm_evalx(vm, "./src/test/main.cy", src2, config, &res);
     S.done.store(true, .release);
     thread2.join();

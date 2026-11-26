@@ -78,6 +78,10 @@
   "3가지 모두 다 진행해 봅시다. 쉬운 거부터"): 취소 불변식 panic은 보호 장치로 재분류(코드 변경 없음), `@destruct_span` 삭제
   (`55179645`), `Scope.run`의 준비 큐(`d731ad19`, `src/fiber_wait.zig`).
 - 2026-11-26(사용자: "release 0.4.22"): 0.4.22 릴리스. 태그 `6767c2d8`, `build-1194-6767c2d`, 에셋 15개(CI, 대체 절차 없음).
+- 2026-11-26(사용자: "새로 추가된 os.cmd 예제를 만들자", "1에서 4까지 진행해", "완성되면 5번 작업", "결정은 위임합니다"): `os.cmd` 예제
+  셋(`424a1ee1`), 1 tars-agent를 0.4.22로(tars-agent `f72c68e`, `e2755fb`), 2 C API 할당 실패(`7e095a84`), 3 `deny_ffi`(`0eb8b84d`),
+  4 빌림 검사 오탐 둘(`84f77217`), 5 `time` · `regex` · `peg` 보강(`95b01289`). 3 · 4 · 5는 서브 에이전트가 worktree에서 하고
+  cherry-pick했다. `os.cmd` 중단 테스트의 경합도 고쳤다(`03266847`). 합친 master 15단계 rc=0. push 안 함.
 
 ## 현재 브랜치
 
@@ -443,7 +447,10 @@
 
 ## 다음 에이전트에게
 
-1. 0.4.22가 마지막 릴리스다(노트 `docs/releases/0.4.22.md`). `unreleased.md`는 머리말만 있다.
+1. 0.4.22가 마지막 릴리스다(노트 `docs/releases/0.4.22.md`). `unreleased.md`에 2026-11-26의 다섯 절이 있다(예제, C API 할당 실패,
+   `deny_ffi`, `time` · `regex` · `peg`, 빌림 자리 대상). master는 origin보다 앞서 있고 push하지 않았다.
+   남은 것: `cl_vm_reset` · `clReportApiError`의 `fatal`, `deny_ffi` 결정 문서 "남은 것", `&&h`를 넘긴 컨테이너의 빌림 보수성,
+   `parse_format`의 `%U` · `%W`, 매뉴얼 · `cy.cy` 주석의 `cy.eval('return 1')` 예가 지금 컴파일 오류(고치지 않음).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 

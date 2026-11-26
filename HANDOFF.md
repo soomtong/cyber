@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-26): 기술 부채 셋 정리(Scope 준비 큐)와 0.4.22 릴리스
+# HANDOFF (2026-11-27): 표준 입력, 예제 넷, 0.4.23 릴리스, 정수 넘침 panic, 다중 대입
 
 ## 목표
 
@@ -89,10 +89,16 @@
   만들기 위해 키보드 입력 같은 게 필요해. 그리고 파이프라인에서 입력받을 수 있는 것도 필요하고 검증해서 추가하도록 하자", 범위 질문에
   "기본 + 숨김 입력", "이전 작업 마치고 진행해도 된다"): 빌림 작업(`394458a6`)을 마치고 표준 입력을 넣었다. 결정
   `docs/decisions/project_std_stdin.md`, F-217(`os.stdin()` 등이 0.4.21부터 깨짐) · F-218(`io.Scanner`). `verify.sh`는 16단계.
+- 2026-11-26 ~ 27(사용자: 예제 요청 "Find PI to the Nth Digit", "e", "Fibonacci sequence up to Nth number", 그리고 "예제 코드를 만들면서
+  우리의 cyber lang spec과 동작을 수정하는 거야", "우아한 코드를 작성해줘", "go release next patch version"): 예제 `pi_digits.cy` ·
+  `e_digits.cy` · `fibonacci_sequence.cy`. 예제가 드러낸 언어 변경: `os.input` 프롬프트는 터미널에서만, `'0' + d` 힌트, 정수 넘침 panic
+  (질문에 "넘치면 panic (권장)", `project_int_overflow.md`, F-219 · F-220), 다중 대입과 한 줄 `?else return`("둘 다 넣자",
+  `project_multi_assign.md`). 0.4.23 릴리스(태그 `090fd62f`, `build-1211-090fd62`, 대체 절차). 넘침 · Fibonacci · 다중 대입은 0.4.23 뒤.
 
 ## 현재 브랜치
 
-`master`. 0.4.22 태그 `6767c2d8`(`build-1194-6767c2d`, 에셋 15개, Latest). 릴리스 기록 커밋까지 push한다.
+`master`. 0.4.23 태그 `090fd62f`(`build-1211-090fd62`, 에셋 15개, Latest). 릴리스 기록 `c2f48050`까지 push했다. 그 뒤 셋
+(`b38209a3` 넘침, `0787ec42` Fibonacci, `4159f8b7` 다중 대입)은 push하지 않았다(각각 16단계 rc=0, 다중 대입은 넘침 위의 worktree에서).
 
 ## 완료된 작업
 
@@ -454,7 +460,10 @@
 
 ## 다음 에이전트에게
 
-1. 0.4.22가 마지막 릴리스다(노트 `docs/releases/0.4.22.md`). `unreleased.md`에 2026-11-26의 절들이 있다(예제, C API 할당 실패,
+0. 0.4.23이 마지막 릴리스다(노트 `docs/releases/0.4.23.md`). `unreleased.md`에는 넘침 · Fibonacci · 다중 대입 셋. cyber.nvim
+   `30c59ed`(문법 동기화, SOURCE는 `4159f8b7`)와 tars-agent `bfac57a`(TODO 59행)는 push하지 않았다. 예제를 만들 때는 걸리는 곳을 우회하지
+   말고 언어 쪽을 고친다(메모리 `feedback-examples-drive-language-fixes`). 다중 대입의 다음 후보: 튜플 분해(`q, r := divmod(...)`).
+1. 0.4.22 뒤의 기록(노트 `docs/releases/0.4.22.md`). `unreleased.md`에 2026-11-26의 절들이 있다(예제, C API 할당 실패,
    `deny_ffi`, `time` · `regex` · `peg`(주 날짜 파싱 포함), 빌림 자리 대상, `&&h` 인자와 F-216). push하지 않았다.
    표준 입력 절도 있다(`os.input` 등, F-217 · F-218). tars-agent `docs/TODO.md` 59행에 오늘 저녁 변경을 덧붙였다(`398acfc`, push 안 함).
    남은 것: `deny_ffi` 결정 문서 "남은 것"(호스트 계약, tars-agent의 `cfg.deny_ffi`), 런타임 안쪽의 `catch fatal()`,

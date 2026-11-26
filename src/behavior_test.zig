@@ -1155,6 +1155,7 @@ test "Compile." {
     try compileCase("../examples/fibonacci.cy");
     try compileCase("../examples/pi_digits.cy");
     try compileCase("../examples/e_digits.cy");
+    try compileCase("../examples/fibonacci_sequence.cy");
 
     // tools.
     try compileCase("tools/bench.cy");

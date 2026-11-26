@@ -13,3 +13,8 @@
   `checked_mul`(`?Self`, 넘치면 `none`). 매뉴얼 "Integer overflow.", 결정 `docs/decisions/project_int_overflow.md`.
 - 결함 수정: 컴파일 타임 `-(int.min)`의 호스트 panic(F-219), 런타임 `int.min / -1` · `% -1`의 C 정의되지 않은 동작(F-220).
 - 바이트코드: `s += 1`이 4칸에서 5칸이 됐다. 함수 본문 크기 한계('Function body too large.')에 조금 일찍 닿는다.
+
+## 예제 `fibonacci_sequence.cy` (2026-11-27)
+
+- 피보나치 수열을 N개까지(최대 93개, F(92)가 `int`에 들어가는 마지막 수). 각 수를 앞 두 수의 합으로 만들어 마지막 수 다음을 미리
+  계산하다 넘치는 일이 없다. `pi_digits.cy`와 같은 꼴로 인자 · 프롬프트 · 파이프로 받는다.

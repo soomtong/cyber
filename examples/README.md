@@ -15,3 +15,4 @@ Notable examples will be listed here:
 - [parallel_jobs.cy](parallel_jobs.cy) - Runs several commands at once with `Cmd.start`, keeps them in an `Array[os.Process]` and reports each exit code.
 - [pi_digits.cy](pi_digits.cy) - Prints PI to the Nth decimal place with an integer spigot. The number comes from an argument, a prompt or a pipe (`os.input`).
 - [e_digits.cy](e_digits.cy) - Prints e to the Nth decimal place with Sale's spigot, the sibling of `pi_digits.cy`.
+- [fibonacci_sequence.cy](fibonacci_sequence.cy) - Prints the first N Fibonacci numbers, up to the 93 that fit in an `int` (one more overflows).

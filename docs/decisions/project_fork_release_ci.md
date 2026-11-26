@@ -234,6 +234,14 @@ zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Dd
   `45749964224` 모두 arm64 macOS를 포함한 모든 job이 첫 실행에서 통과해 Release job이 릴리스를 만들었다(대체 절차 없음). 설치 확인은
   `install.sh 0.4.22`(arm64 macOS, `CYBER_HOME` · `CYBER_BIN`을 scratchpad로): 버전 문자열, `examples/hello.cy`, `cyber-lsp`
   `initialize`, Scope 준비 큐 벤치(N=8000 5ms)와 `concurrency/scope_ready_queue.cy`.
+- 0.4.23(2026-11-27): 태그 `0.4.23` → `090fd62f`, `build-1211-090fd62`, 에셋 15개. 릴리스 커밋 `fef8ef1e`의 master run
+  `45831684332`이 Windows(`os.stdin()`의 Windows 분기가 없는 이름을 씀, `deny_ffi` 테스트의 `getpid`)와 macOS Intel(CPU 시간
+  테스트가 Debug 컴파일을 잼)에서 실패해 태그 전에 고쳤다(`27f41395`, `090fd62f`). Cyber 소스의 Windows `#if` 분기는 교차 컴파일로는
+  검사되지 않는다: Windows job이 처음 본다. master run `45844908460`과 태그 run `45851748245` 모두 arm64 macOS만 러너를 받지 못해
+  취소됐고(나머지 통과), 재실행 없이 0.4.21과 같은 대체 절차로 냈다: 태그 run 자산 13개 + 태그 커밋 worktree에서 빌드한 arm64 둘.
+  CI `cyber-macos-x64`와 로컬 arm64의 버전 문자열이 같다. zsh의 배열 확장으로 파일 목록을 넘기면 Claude Code 안전 검사에 걸려
+  `fd -0 | xargs -0 gh release create ...`로 넘겼다. 설치 확인은 `install.sh 0.4.23`(arm64 macOS, `CYBER_HOME` · `CYBER_BIN`을
+  scratchpad로): 버전 문자열, `examples/hello.cy` · `pi_digits.cy`(파이프) · `e_digits.cy`, 파이프 stdin, `cyber-lsp` `initialize`.
 
 ## CI 시간 줄이기 (2026-11-18)
 

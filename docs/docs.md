@@ -5868,6 +5868,7 @@ An extern symbol name can be declared as for a function: `#[extern='lib_count'] 
   * [Limiting an eval.](#limiting-an-eval)
 * [Module loader.](#module-loader)
   * [Denying raw pointers.](#denying-raw-pointers)
+  * [Denying C FFI.](#denying-c-ffi)
   * [Allocation failure.](#allocation-failure)
 </td><td valign="top">
 
@@ -6036,7 +6037,7 @@ A name in a declaration of the main source can be asked like a use of it. To fin
 `cl_vm_symbol_hints(vm, &hints)` lists notes on the main source for an editor, sorted by position: the type inferred for each `x := expr` (`CL_HINT_LOCAL_TYPE`), each `return`, `break` and `continue` that waits for the fibers of a `scope` block before it leaves it (`CL_HINT_SCOPE_EXIT`), the name of the parameter at each argument of a call to a function with two or more parameters, from the overload that the call picked, unless the argument is a name that ends in it (`CL_HINT_PARAM_NAME`), and, after a compile without errors, the locals and `use`s that are never used (`CL_HINT_UNUSED_LOCAL`, `CL_HINT_UNUSED_USE`). A name that starts with `_` is not called unused, nor is one that is also written where the compiler did not look (a branch of `#if` that was not taken). The language server `cyber-lsp` uses all of these.
 
 ### Checking a script without running it.
-`cl_vm_validate` compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (`persist_main`) are visible to it, and nothing the script declares is kept for the next eval, including a method that it declares for a type of an earlier eval. It compiles the script as part of the session, so it accepts what the eval of the same script accepts: a private field of an earlier eval, a method for a type of an earlier eval. The VM is not reset. A module the script loads for the first time (`use math`) is initialized by the next eval that runs. It checks with the options of the last eval (`persist_main`, `deny_raw_ptrs`, `deny_spawn`). Before the first eval they are all off, so eval a prelude with the session's config first.
+`cl_vm_validate` compiles a script against the current session and reports compile errors without running it. Locals and declarations persisted by earlier evals (`persist_main`) are visible to it, and nothing the script declares is kept for the next eval, including a method that it declares for a type of an earlier eval. It compiles the script as part of the session, so it accepts what the eval of the same script accepts: a private field of an earlier eval, a method for a type of an earlier eval. The VM is not reset. A module the script loads for the first time (`use math`) is initialized by the next eval that runs. It checks with the options of the last eval (`persist_main`, `deny_raw_ptrs`, `deny_spawn`, `deny_ffi`). Before the first eval they are all off, so eval a prelude with the session's config first.
 ```c
 CLResultCode code = cl_vm_validate(vm, src);
 if (code == CL_ERROR_COMPILE) {
@@ -6135,6 +6136,20 @@ cl_vm_evalx(vm, CL_BYTES("turn"), src, cfg, &res);
 ```c
 CLEvalConfig cfg = clDefaultEvalConfig();
 cfg.deny_spawn = true;
+```
+
+### Denying C FFI.
+A module allowlist does not keep a script from C: `math` imports `c`, so a script that may only `use math` can still declare `#[extern] fn getpid() -> i32` and call any symbol of the host process. A host that runs untrusted scripts sets `deny_ffi` in `CLEvalConfig` or `CLCompileConfig`. In every chunk that is not a builtin module (`core`, `meta`, `math`, `cy`, `c`, `io`, `test`, `time`, `json`, `peg`, `regex`, `toon`, `path`) these are then compile errors:
+
+* `#[extern]` on a function, a global or a function type (`#[extern] fn() -> i32`): '`#[extern]` is not allowed. The host disabled C FFI for this script (`deny_ffi`).' A `none` of an extern function type is a call to the null address.
+* `use c`, under any alias: 'The module `c` is not allowed. The host disabled C FFI for this script (`deny_ffi`).' Its `#c.bind_lib` loads a library, and `#c.include` and `#c.flag` add to the C compile of every extern function, those of `math` too.
+
+Creating a `cy.VM` (`cy.eval`, `cy.VM()`) panics with '`cy.VM` is not allowed. The host disabled C FFI for this script (`deny_ffi`).': the new VM has the default loader and none of the host's options. The builtin modules keep their own extern functions, so `math.acos` still works. A module that the host's loader provides as Cyber source is not a builtin module and can not declare extern functions either. The default is false. The CLI does not set it. A host that runs untrusted scripts sets all three options with its resolver:
+```c
+CLEvalConfig cfg = clDefaultEvalConfig();
+cfg.deny_raw_ptrs = true;
+cfg.deny_spawn = true;
+cfg.deny_ffi = true;
 ```
 
 ### Session reset.

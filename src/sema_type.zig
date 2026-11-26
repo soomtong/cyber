@@ -4,6 +4,7 @@ const cy = @import("cyber.zig");
 const sema = cy.sema;
 const sema_local = cy.sema_local;
 const sema_resolve = cy.sema_resolve;
+const sema_expr = cy.sema_expr;
 const cte = cy.cte;
 const ast = cy.ast;
 const ct_inline = cy.ct_inline;
@@ -1239,6 +1240,12 @@ fn sameMethodParams(a: *cy.FuncSig, b: *cy.FuncSig) bool {
 }
 
 pub fn resolveFuncType(c: *cy.Chunk, func_type: *ast.FuncType) !*cy.FuncSig {
+    if (func_type.extern_) |attr| {
+        // A `none` of an extern function type is a null address that a call jumps to.
+        if (c.compiler.config.deny_ffi and !sema_expr.isBuiltinModuleNode(c, @ptrCast(func_type))) {
+            return sema_resolve.reportDenyFfi(c, @ptrCast(attr));
+        }
+    }
     const start = c.func_param_stack.items.len;
     defer c.func_param_stack.items.len = start;
 

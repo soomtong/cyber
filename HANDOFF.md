@@ -484,7 +484,8 @@
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
 - C API의 할당 실패: VM 생성은 `NULL`, 값 생성은 호스트 호출의 'panic: OutOfMemory'(2026-11-26,
   `project_capi_alloc_failure.md`). `cl_vm_reset` · `clReportApiError`와 런타임 안쪽의 `catch fatal()`은 남았다.
-- 신뢰하지 않는 스크립트의 C FFI 차단은 미결정(`deny_raw_ptrs` · `deny_spawn`은 있음).
+- 신뢰하지 않는 스크립트의 C FFI 차단: `deny_ffi`로 정했다(2026-11-26, `project_deny_ffi.md`). 남은 것은 호스트 로더가 주는 Cyber
+  소스 모듈의 `#[extern]`(builtin이 아니라 거부됨)과, 옵션 없이 돈 앞 eval이 세션에 남긴 `use c` · extern 함수.
 - 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-215까지, 열린 것 없음).
 
 ## 작업 방식

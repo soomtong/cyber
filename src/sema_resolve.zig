@@ -256,6 +256,11 @@ pub fn declareUseImport(c: *cy.Chunk, node: *ast.ImportStmt) !void {
 
     var buf: [4096]u8 = undefined;
     const uri = try cy.compiler.resolveModuleUriFrom(c, &buf, specPath, node.spec);
+    if (c.compiler.config.deny_ffi and std.mem.eql(u8, uri, "c") and !sema_expr.isBuiltinModuleNode(c, @ptrCast(node))) {
+        // `c` binds libraries (`#c.bind_lib`) and adds C source to the compile of every extern function
+        // (`#c.include`, `#c.flag`), including those of the standard modules.
+        return c.reportErrorFmt("The module `c` is not allowed. The host disabled C FFI for this script (`deny_ffi`).", &.{}, @ptrCast(node));
+    }
 
     const import_c = try cy.compiler.ensureModule(c.compiler, uri);
     try c.imports.append(c.alloc, import_c);
@@ -633,6 +638,11 @@ pub fn ensure_resolved_func(c: *cy.Chunk, func: *cy.Func, resolve_new_types: boo
                 .unsafe, .consteval, .reserve => {
                     return c.reportErrorFmt("The `#[{}]` attribute is reserved for the builtin modules.", &.{v(@tagName(attr.type))}, @ptrCast(attr));
                 },
+                .extern_ => {
+                    if (c.compiler.config.deny_ffi) {
+                        return reportDenyFfi(c, @ptrCast(attr));
+                    }
+                },
                 else => {},
             }
         }
@@ -858,6 +868,12 @@ pub fn reserveConst(c: *cy.Chunk, parent: *cy.Sym, name: []const u8, decl: *ast.
     }
 }
 
+/// `deny_ffi`: a script chunk may not declare an extern function, global or function type. Such a declaration
+/// binds a symbol of the host process or of a library (`dlsym`) and calls it without a host function in between.
+pub fn reportDenyFfi(c: *cy.Chunk, node: *ast.Node) error{CompileError, OutOfMemory, FormatError, WriteFailed} {
+    return c.reportErrorFmt("`#[extern]` is not allowed. The host disabled C FFI for this script (`deny_ffi`).", &.{}, node);
+}
+
 pub fn reserveGlobal(c: *cy.Chunk, decl: *ast.GlobalDecl) !?*Sym {
     const decl_path = try ensureDeclNamePath(c, @ptrCast(c.sym), decl.parent, decl.name);
     if (decl.right == null) {
@@ -868,6 +884,9 @@ pub fn reserveGlobal(c: *cy.Chunk, decl: *ast.GlobalDecl) !?*Sym {
             if (attr.type == .bind) {
                 has_bind = true;
             } else if (attr.type == .extern_) {
+                if (c.compiler.config.deny_ffi and !sema_expr.isBuiltinModuleNode(c, @ptrCast(decl))) {
+                    return reportDenyFfi(c, @ptrCast(attr));
+                }
                 has_extern = true;
             } else if (attr.type == .cond) {
                 const res = try cte.evalCheck(c, attr.value.?, c.sema.bool_t);

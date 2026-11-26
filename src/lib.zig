@@ -279,6 +279,7 @@ export fn clDefaultEvalConfig() C.EvalConfig {
         .persist_main = false,
         .deny_raw_ptrs = false,
         .deny_spawn = false,
+        .deny_ffi = false,
     };
 }
 
@@ -503,6 +504,7 @@ export fn clDefaultCompileConfig() C.CompileConfig {
         .persist_main = false,
         .deny_raw_ptrs = false,
         .deny_spawn = false,
+        .deny_ffi = false,
     };
 }
 

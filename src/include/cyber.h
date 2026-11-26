@@ -297,6 +297,12 @@ typedef struct CLEvalConfig {
     /// Reject `spawn` in every chunk that is not a standard module: a call is a compile error. A script then
     /// runs on the thread of the eval only, and so does every host function it calls. Default false.
     bool deny_spawn;
+
+    /// Reject C FFI in every chunk that is not a standard module: `#[extern]` on a function, a global or a
+    /// function type, and `use c` (`#c.bind_lib`, `#c.include`, `#c.flag`) are compile errors. A script then
+    /// reaches native code only through host functions. Creating a `cy.VM` panics, since a nested VM does not
+    /// get the host's loader or these options. Default false.
+    bool deny_ffi;
 } CLEvalConfig;
 
 typedef struct CLEvalResult {
@@ -326,6 +332,9 @@ typedef struct CLCompileConfig {
 
     /// See `CLEvalConfig.deny_spawn`.
     bool deny_spawn;
+
+    /// See `CLEvalConfig.deny_ffi`.
+    bool deny_ffi;
 } CLCompileConfig;
 
 typedef struct CLValidateConfig {
@@ -590,7 +599,7 @@ CLResultCode cl_vm_compile_path(CLVM* vm, CLBytes uri, CLCompileConfig config);
 // Persisted locals and declarations from earlier evals are visible to it, and nothing it declares is kept for
 // the next eval. A module the source loads first (`use math`) is initialized by the next eval that runs.
 // On `CL_ERROR_COMPILE` the report is available from `cl_vm_compile_error_summary`.
-// It checks with the options of the last eval (`persist_main`, `deny_raw_ptrs`, `deny_spawn` of its `CLEvalConfig`).
+// It checks with the options of the last eval (`persist_main`, `deny_raw_ptrs`, `deny_spawn`, `deny_ffi` of its `CLEvalConfig`).
 // Before the first eval of the VM they are all off, so eval a prelude with the session's config first: a
 // `spawn` passes the check on a new VM and is a compile error after an eval with `deny_spawn`.
 CLResultCode cl_vm_validate(CLVM* vm, CLBytes src);

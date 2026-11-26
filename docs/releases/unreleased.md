@@ -23,3 +23,18 @@
   끝냈다.
 - `cy.eval`의 새 VM을 만들지 못하면 스크립트의 `OutOfMemory` panic이다.
 - 결정은 `docs/decisions/project_capi_alloc_failure.md`. 남은 `fatal`: `cl_vm_reset`, `clReportApiError`, 런타임 안쪽.
+
+## 임베딩: C FFI 차단 `deny_ffi` (2026-11-26)
+
+- `CLEvalConfig` · `CLCompileConfig` 끝에 `bool deny_ffi`가 늘었다(기본 false). 두 구조체의 레이아웃이 바뀌었으므로 호스트는
+  `cyber.h`로 다시 컴파일해야 한다.
+- 모듈 허용 표로는 C를 막지 못했다. `math`가 `use c`를 하므로 `use math`만 허용한 스크립트도 `#[extern] fn getpid() -> i32`를
+  선언해 호스트 프로세스의 아무 심볼이나 불렀고, `#[extern] fn() -> i32` 타입의 `none`을 부르면 호스트가 SIGSEGV였다.
+- `deny_ffi`를 켜면 builtin 모듈이 아닌 chunk에서 `#[extern]` 함수 · 전역 · 함수 타입이
+  '`#[extern]` is not allowed. The host disabled C FFI for this script (`deny_ffi`).', `use c`(어떤 별칭이든)가
+  'The module `c` is not allowed. The host disabled C FFI for this script (`deny_ffi`).' 컴파일 오류다. `cy.VM` 생성
+  (`cy.eval`)은 '`cy.VM` is not allowed. The host disabled C FFI for this script (`deny_ffi`).' panic이다. 새 VM은 기본 로더와
+  기본 설정을 갖기 때문이다. builtin 모듈의 extern 함수(`math.acos`)는 그대로 돈다. CLI는 켜지 않는다.
+- `cl_vm_compile`이 `deny_raw_ptrs` · `deny_spawn` · `deny_ffi`를 VM에 남긴다. 전에는 그 뒤의 `cl_vm_validate`와 런타임
+  `spawn` 검사가 옵션을 보지 못했다.
+- 결정 `docs/decisions/project_deny_ffi.md`, 매뉴얼 `docs/docs.md` "Denying C FFI.".

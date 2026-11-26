@@ -439,6 +439,7 @@ pub const VM = struct {
         compile_c.persist_main = self.config.persist_main;
         compile_c.deny_raw_ptrs = self.config.deny_raw_ptrs;
         compile_c.deny_spawn = self.config.deny_spawn;
+        compile_c.deny_ffi = self.config.deny_ffi;
         defer self.compiler.main_discarded = true;
         _ = try self.compiler.compile(srcUri, src, compile_c);
         // A method that the source declares for a type of an earlier eval is not kept either (F-199).
@@ -455,6 +456,10 @@ pub const VM = struct {
         self.config = C.defaultEvalConfig();
         self.config.single_run = config.single_run;
         self.config.gen_all_debug_syms = true;
+        // A program compiled here may run, and `validate` compiles with these.
+        self.config.deny_raw_ptrs = config.deny_raw_ptrs;
+        self.config.deny_spawn = config.deny_spawn;
+        self.config.deny_ffi = config.deny_ffi;
 
         var tt = cy.debug.timer();
         const res = try self.compiler.compile(srcUri, src, config);
@@ -722,6 +727,7 @@ pub const VM = struct {
         compile_c.persist_main = config.persist_main;
         compile_c.deny_raw_ptrs = config.deny_raw_ptrs;
         compile_c.deny_spawn = config.deny_spawn;
+        compile_c.deny_ffi = config.deny_ffi;
         const res = try self.compiler.compile(src_uri, src, compile_c);
         tt.endPrintVerbose("compile");
 

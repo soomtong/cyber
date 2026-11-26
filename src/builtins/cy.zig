@@ -78,6 +78,11 @@ const UserVM = struct {
 };
 
 pub fn UserVM_init(t: *cy.Thread) anyerror!C.Ret {
+    if (t.c.vm.config.deny_ffi) {
+        // The new VM has the default loader and none of the host's options: its script could use `c`, declare
+        // extern functions and load modules that the host's resolver refuses.
+        return t.ret_panic("`cy.VM` is not allowed. The host disabled C FFI for this script (`deny_ffi`).");
+    }
     // Create an isolated VM.
     const new = C.c.cl_vm_init() orelse return error.OutOfMemory;
 

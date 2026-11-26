@@ -2229,6 +2229,73 @@ test "deny_spawn rejects spawn in script chunks." {
     }
 }
 
+fn expect_deny_ffi_error(vm: *C.VM, config: C.EvalConfig, src: []const u8, msg: []const u8) !void {
+    var res: C.EvalResult = undefined;
+    try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "t", src, config, &res));
+    const summary = C.vm_compile_error_summary(vm);
+    defer C.vm_freeb(vm, summary);
+    if (std.mem.indexOf(u8, summary, msg) == null) {
+        std.debug.print("expected `{s}`, got:\n{s}\n", .{ msg, summary });
+        return error.TestUnexpectedResult;
+    }
+}
+
+test "deny_ffi rejects C FFI in script chunks." {
+    // Without the option a script that may only `use math` declares `#[extern] fn getpid() -> i32` and calls a
+    // symbol of the host process: `math` loads `c`, so no `use c` is needed. A `none` of an extern function type
+    // is a call to the null address (SIGSEGV in the host).
+    if (is_wasm) return;
+    C.setSilent(true);
+    defer C.setSilent(false);
+
+    const extern_msg = "`#[extern]` is not allowed. The host disabled C FFI for this script (`deny_ffi`).";
+    const extern_src = "use math\n#[extern]\nfn getpid() -> i32\nprint(getpid())\n";
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        var config = C.defaultEvalConfig();
+        config.deny_ffi = true;
+        config.persist_main = true;
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_evalx(vm, "t", "a := 1\n", config, &res));
+        try expect_deny_ffi_error(vm, config, extern_src, extern_msg);
+        // A generic extern function, an extern global and an extern function type.
+        try expect_deny_ffi_error(vm, config, "use math\n#[extern]\nfn f(x %T) -> T\n", extern_msg);
+        try expect_deny_ffi_error(vm, config, "use math\n#[extern]\nglobal errno i32\nprint(1)\n", extern_msg);
+        try expect_deny_ffi_error(vm, config, "fn g(f #[extern] fn() -> i32) -> i32:\n    return f()\nprint(g(none))\n", extern_msg);
+        try expect_deny_ffi_error(vm, config, "type F = #[extern] fn() -> i32\n", extern_msg);
+        // `c` binds libraries and adds C source to the compile of the extern functions of `math`.
+        const use_c_msg = "The module `c` is not allowed. The host disabled C FFI for this script (`deny_ffi`).";
+        try expect_deny_ffi_error(vm, config, "use c\n#c.bind_lib('libfoo.so')\n", use_c_msg);
+        try expect_deny_ffi_error(vm, config, "use cc 'c'\n", use_c_msg);
+        try zt.eq(C.ErrorCompile, C.vm_validate(vm, extern_src));
+        // The extern functions of the standard modules stay: `math.acos` calls the C `acos`. A rejected eval does
+        // not break the session.
+        try zt.eq(C.Success, C.vm_evalx(vm, "t", "use math\nuse test\ntest.eq(math.acos(1.0), 0.0)\ntest.eq(a, 1)\n", config, &res));
+        // A nested VM would get the default loader and none of these options.
+        try zt.eq(C.ErrorPanic, C.vm_evalx(vm, "t", "use cy\nres := cy.eval('1 + 1')\n", config, &res));
+        const panic_summary = C.thread_panic_summary(C.vm_main_thread(vm));
+        defer C.vm_freeb(vm, panic_summary);
+        try zt.expect(std.mem.indexOf(u8, panic_summary, "`cy.VM` is not allowed. The host disabled C FFI for this script (`deny_ffi`).") != null);
+    }
+    // `cl_vm_compile` takes the option too.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        var config = C.defaultCompileConfig();
+        try zt.eq(C.Success, C.vm_compile(vm, "t", extern_src, config));
+        config.deny_ffi = true;
+        try zt.eq(C.ErrorCompile, C.vm_compile(vm, "t", extern_src, config));
+    }
+    // The default keeps C FFI.
+    {
+        const vm = C.vm_init();
+        defer C.vm_deinit(vm);
+        var res: C.EvalResult = undefined;
+        try zt.eq(C.Success, C.vm_eval(vm, extern_src, &res));
+    }
+}
+
 test "A chunk whose code is done keeps no room it does not use." {
     // A session keeps the chunk of every eval until the VM ends. The instruction buffer was allocated with room for
     // 2048 instructions and kept it, and the work stacks of sema and codegen kept their room.

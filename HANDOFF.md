@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-25): 0.4.20..HEAD 리뷰 수정과 os.cmd 보강(2>&1 · detach · pid)
+# HANDOFF (2026-11-26): 기술 부채 셋 정리(Scope 준비 큐)
 
 ## 목표
 
@@ -74,6 +74,9 @@
 - 2026-11-25(사용자: "@HANDOFF.md continue" → `/code-review high 0.4.20..HEAD` 9건 → "커밋 메시지 빼고 다 고쳐. 그리고 이어서
   os.cmd 보강하고 다 마치면 push 해줘. 새 버전을 내지는 말고"): 리뷰 8건 수정(`9165b1aa`, F-211..F-215), `os.cmd`에
   `stderr_to_stdout` · `detach` · `Process.pid`. 둘 다 15단계 rc=0 뒤 커밋, master push. 릴리스는 하지 않음(사용자가 더 모아서 낸다).
+- 2026-11-26(사용자: "급하지 않은 기술 부채라고 되어 있는 것 3가지를 검토해 주세요. 어느 정도 비용이 들지 파악이 먼저", 이어서
+  "3가지 모두 다 진행해 봅시다. 쉬운 거부터"): 취소 불변식 panic은 보호 장치로 재분류(코드 변경 없음), `@destruct_span` 삭제
+  (`55179645`), `Scope.run`의 준비 큐(`d731ad19`, `src/fiber_wait.zig`). push 안 함.
 
 ## 현재 브랜치
 
@@ -373,8 +376,12 @@
   docs. and check ..."): Python 슬라이스, `|_|` 반복(위치도), 버린 값의 `_ = <문장>`, 모듈의 가까운 이름 · `basename` 등.
   `agent-guide.md`의 `int(z)` 예 · `Array` 이동 · 오류 표. tars-agent에는 요청서 회신 절과 TODO 항목(다음 빌드로 올릴 때 프롬프트
   168 · 347행)을 써서 커밋했다(`8bf3e89`, push 안 함). 프롬프트 본문은 0.4.16 고정이라 지금 고치지 않았다.
-- [ ] 기술 부채(급하지 않음): `@destruct_span` 취소 keep 지점(쓰게 되면), `Scope.run`의 바퀴당 `waiting()` 질의(준비 큐 ·
-  futex식 대기 표, fiber 수 비용이 문제가 되면), 취소 불변식 panic(닿는 경로 없음). 기록은 `project_coroutines.md`.
+- [x] 기술 부채 셋(2026-11-26).
+  - 취소 불변식 panic('A fiber that was cancelled stopped where it can not be cancelled.'): 부채가 아니라 패드 없는 지점이 생겼을
+    때의 보호 장치다(닿는 스크립트 경로 없음, `project_coroutines.md` "취소 도중 다시 멈춘 `@deinit`"). 그대로 둔다.
+  - `@destruct_span`: 쓰는 곳이 없어 지웠다(`55179645`). 원소 구간 소멸 루틴을 다시 두면 `computeCancelKeep`에 더한다.
+  - `Scope.run` 준비 큐(`d731ad19`): 스레드별 Future 대기 표 + scope 준비 큐. N=8000 대기 fiber 1767ms → 6ms, 중첩 221ms → 1ms.
+    결정 `project_coroutines.md` "Scope 준비 큐", `unreleased.md` 같은 날 절. 깨어난 fiber는 완료 순서로 큐 끝에 선다.
 
 ## 핵심 파일
 
@@ -388,6 +395,7 @@
 - `src/std/os.cy` `read_file` · `read_file_bytes` · `write_file` · `write_file_bytes`.
 - `docs/releases/0.4.17.md`, `docs/releases/unreleased.md`.
 - `docs/decisions/project_fork_release_ci.md`(러너 미배정 · 재태깅 · 로컬 arm64 빌드 절차).
+- `src/fiber_wait.zig`(Future 대기 표 · `ScopeQueue` · `pollShared`), core.cy `Scope.run` · `@scope_*`, vm.c `AWAIT` · `FIBER_RESUME`의 등록 · 해제.
 
 - [x] F-199: `persist_main` 세션에서 앞 입력이 선언한 타입에 뒤 입력이 메서드 · 타입 함수를 선언하면 호스트가 abort하던 것.
   고쳤다(위 "완료된 작업"의 "세션의 뒤 입력이 앞 입력의 타입에 메서드를 선언한다", `project_session_methods.md`).
@@ -434,7 +442,8 @@
 
 ## 다음 에이전트에게
 
-1. 0.4.21이 마지막 릴리스다(노트 `docs/releases/0.4.21.md`). `unreleased.md`에 그 뒤 두 절(리뷰 수정, os.cmd 보강)이 있다.
+1. 0.4.21이 마지막 릴리스다(노트 `docs/releases/0.4.21.md`). `unreleased.md`에 그 뒤 세 절(리뷰 수정, os.cmd 보강, Scope 준비
+   큐)이 있다. master는 origin보다 앞서 있다(push 안 함).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 

@@ -162,6 +162,20 @@ Variables can be assigned afterwards using the `=` operator:
 a = 234
 ```
 
+Several variables are declared or assigned at once with commas. Every value on the right is evaluated, from left to right, before the first one is stored, so a swap needs no temporary:
+```cy
+a, b := 0, 1
+for 0..10:
+    a, b = b, a + b
+print(a)     --> 55
+
+x, y := 'left', 'right'
+x, y = y, x
+pt.x, pt.y = pt.y, pt.x
+xs[0], xs[1] = xs[1], xs[0]
+```
+Each side has the same number of items: '2 places take 2 values, found 3.' The places of `=` are variables, fields and elements, the names of `:=` are new variables. A value that can not be copied (`NoCopy`, such as `Array`) moves, as in a single assignment. A literal takes the type of its place (`i, j = 0, 1` for `i32` variables). Compound assignments (`+=`) take one variable. A function returns one value, so `q, r := divmod(7, 2)` is an error: the right side has one value.
+
 A function body, including the main block, can hold at most 256 locals. Parameters and the hidden temporaries the compiler creates count towards that limit. A function signature can have at most 255 parameters and a struct at most 255 fields. A single branch (the body of a loop, an `if` or a `switch` case) can span at most 32767 bytecode slots, roughly 8000 simple statements; a plain `if` body without `else` can span 65535. Exceeding a limit is a compile error. Move part of a long body into another function.
 
 ### `var` declaration.
@@ -599,15 +613,9 @@ When a result may not fit, ask for it with `checked_add`, `checked_sub` and `che
 ```cy
 -- The nth Fibonacci number, or `none` when it does not fit in an `int` (from `fib(93)` on).
 fn fib(n int) -> ?int:
-    if n == 0:
-        return 0
-    a := 0
-    b := 1
-    for 1..n:
-        next := a.checked_add(b) ?else:
-            return none
-        a = b
-        b = next
+    a, b := 1, 0
+    for 0..n:
+        a, b = b, a.checked_add(b) ?else return none
     return b
 
 print(int.max.wrapping_add(1) == int.min)  --> true
@@ -988,6 +996,13 @@ An `?else` block executes a block of statements for the `none` case:
 ```cy
 value := opt ?else:
     return error.Missing
+```
+
+A block of one `return`, `break` or `continue` can follow on the same line without `:`:
+```cy
+value := opt ?else return none
+for items |item|:
+    size := item.size ?else continue
 ```
 
 ### Optional chaining.
@@ -3858,6 +3873,12 @@ The error value can be captured:
 ```cy
 res := do_something() !else |err|:
     panic('Failed with %{err}')
+```
+
+Like `?else`, one `return`, `break` or `continue` can follow on the same line without `:`:
+```cy
+n := int.parse(s) !else return 0
+data := os.read_file(path) !else |err| return err
 ```
 
 An `!else` block can not reach its end. It must end with `return`, `panic`, `break` or `continue`. To continue after handling the error, use the [unwrap block](#unwrap-block).

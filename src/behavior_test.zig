@@ -936,6 +936,12 @@ fn test_control_flow(run: *Runner) void {
     run.case("control_flow/for_iter_borrow_unsupported_error.cy");
     run.case("control_flow/for_iter_borrowed_iterable.cy");
     run.case("control_flow/for_iter_else.cy");
+    run.case("control_flow/multi_assign.cy");
+    run.case("control_flow/multi_assign_count_error.cy");
+    run.case("control_flow/multi_assign_op_error.cy");
+    run.case("control_flow/multi_decl_name_error.cy");
+    run.case("control_flow/multi_assign_moved_error.cy");
+    run.case("control_flow/else_jump.cy");
     run.case("control_flow/for_iter_else_missing_error.cy");
     run.case("control_flow/for_iter_else_not_failing_error.cy");
     run.case("control_flow/for_iter_else_continue_error.cy");

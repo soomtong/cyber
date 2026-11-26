@@ -18,3 +18,12 @@
 
 - 피보나치 수열을 N개까지(최대 93개, F(92)가 `int`에 들어가는 마지막 수). 각 수를 앞 두 수의 합으로 만들어 마지막 수 다음을 미리
   계산하다 넘치는 일이 없다. `pi_digits.cy`와 같은 꼴로 인자 · 프롬프트 · 파이프로 받는다.
+||||||| parent of 1adc2bd1 (Add multiple assignment and one-line jumps after ?else and !else)
+
+## 다중 대입과 한 줄 `?else return` (2026-11-26)
+
+- `a, b = b, a + b`와 `a, b := 0, 1`. 오른쪽 값을 왼쪽부터 모두 계산한 뒤 대입하므로 맞바꾸기(`x, y = y, x`)에 임시 변수가 필요 없다.
+  자리는 변수 · 필드 · 원소, `NoCopy` 값은 옮긴다. 개수가 다르면 '2 places take 2 values, found 3. ...'.
+- `?else` · `!else`(`!else |err|` 포함) 뒤에 `return` · `break` · `continue` 하나를 `:` 없이 쓴다: `n := o ?else return none`.
+  전에는 'Expected default expression.'.
+- 매뉴얼 "Local variables.", "Unwrap or default.", 결정 `docs/decisions/project_multi_assign.md`. tree-sitter 문법도 고쳤다.

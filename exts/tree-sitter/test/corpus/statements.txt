@@ -297,3 +297,36 @@ scope |s|:
             (identifier)
             (initializer
               (number))))))))
+
+=============================================================
+Multiple assignment and declaration
+=============================================================
+
+a, b := 0, 1
+a, b = b, a + b
+p.x, xs[0] = 1, 2
+
+-------------------------------------------------------------
+
+(source_file
+  (multiple_declaration
+    (identifier)
+    (identifier)
+    (number)
+    (number))
+  (multiple_assignment
+    (identifier)
+    (identifier)
+    (identifier)
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (multiple_assignment
+    (member_expression
+      (identifier)
+      (identifier))
+    (index_expression
+      (identifier)
+      (number))
+    (number)
+    (number)))

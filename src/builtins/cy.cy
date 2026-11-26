@@ -111,6 +111,7 @@ type Node enum:
     case lambda_expr         void
     case lambda_multi        void
     case move_expr           void
+    case multi_stmt          void
     case namedArg            void
     case noneLit             void
     case octLit              void

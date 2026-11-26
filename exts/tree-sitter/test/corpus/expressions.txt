@@ -370,3 +370,39 @@ b := a[..n - 1]
         end: (binary_expression
           left: (identifier)
           right: (number))))))
+
+============================================================
+Unwrap or a jump on the same line
+============================================================
+
+n := o ?else return none
+v := f() !else |err| return err
+w := x ?else continue
+
+------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (unwrap_or_block
+      (identifier)
+      (block
+        (return_statement
+          (none)))))
+  (variable_declaration
+    (identifier)
+    (unwrap_or_block
+      (call_expression
+        (identifier)
+        (arguments))
+      (capture
+        (identifier))
+      (block
+        (return_statement
+          (identifier)))))
+  (variable_declaration
+    (identifier)
+    (unwrap_or_block
+      (identifier)
+      (block
+        (continue_statement)))))

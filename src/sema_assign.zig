@@ -311,15 +311,24 @@ fn semaAssignToGlobal(c: *cy.Chunk, left: sema.ExprResult, left_n: *ast.Node, ri
 pub const PlaceSubst = struct {
     node: *ast.Node,
     id: sema.LocalId,
+    /// The node is read once and takes the value out of the local (`semaMultiStmt`), which then has nothing to
+    /// destruct. Without it the node reads the local each time (`stabilizeOpAssignLeft`).
+    take: bool = false,
 };
 
-/// Sema of a node that `stabilizeOpAssignLeft` evaluated reads its local.
+/// Sema of a node that `stabilizeOpAssignLeft` or `semaMultiStmt` evaluated reads its local.
 pub fn semaPlaceSubst(c: *cy.Chunk, node: *ast.Node) !?sema.ExprResult {
     var i = c.place_subst.items.len;
     while (i > 0) {
         i -= 1;
         const e = c.place_subst.items[i];
-        if (e.node == node) return try sema_expr.semaLocal(c, e.id, node);
+        if (e.node != node) continue;
+        var res = try sema_expr.semaLocal(c, e.id, node);
+        if (e.take) {
+            c.varStack.items[e.id].type = .dead;
+            res.owned = true;
+        }
+        return res;
     }
     return null;
 }
@@ -375,6 +384,43 @@ fn isConstOperand(node: *ast.Node) bool {
         .group => isConstOperand(node.cast(.group).child),
         else => false,
     };
+}
+
+/// A literal: its value does not depend on the variables that a `multi_stmt` stores to.
+fn isLiteralOperand(node: *ast.Node) bool {
+    return switch (node.type()) {
+        .ident, .at_lit => false,
+        .unary_expr => isLiteralOperand(node.cast(.unary_expr).child),
+        else => isConstOperand(node),
+    };
+}
+
+/// `a, b = b, a + b` and `a, b := 0, 1`. Every right side that is not a literal is evaluated, from left to right, into
+/// a hidden local first. Then each pair is analyzed as its own assignment or declaration, whose right side reads the
+/// hidden local (`place_subst`). A literal is left in place, so that it takes the type of its target (`i32` `x, y = 0, 1`).
+pub fn semaMultiStmt(c: *cy.Chunk, node: *ast.Node) !void {
+    const multi = node.cast(.multi_stmt);
+    const subst_start = c.place_subst.items.len;
+    defer c.place_subst.items.len = subst_start;
+    for (multi.stmts) |stmt| {
+        const right = if (multi.decl) stmt.cast(.var_decl).right else stmt.cast(.assign_stmt).right;
+        if (isLiteralOperand(right)) continue;
+        const res = try c.semaExpr(right, .{});
+        if (res.type.kind() == .void or res.type.kind() == .never) {
+            return c.reportError("Expected a value.", right);
+        }
+        const owned = try sema_move.semaOwn(c, res, right);
+        const temp = try sema_local.declareHiddenLocal(c, "_multi", owned.type, owned, right);
+        try c.place_subst.append(c.alloc, .{ .node = right, .id = temp.id, .take = true });
+    }
+    for (multi.stmts) |stmt| {
+        if (multi.decl) {
+            try sema_local.localDecl(c, stmt.cast(.var_decl));
+        } else {
+            const assign = stmt.cast(.assign_stmt);
+            try semaAssignStmt(c, stmt, assign.left, assign.right, .{});
+        }
+    }
 }
 
 /// Evaluates `node` into a hidden local that lives until the statement ends, when its evaluation calls a function:

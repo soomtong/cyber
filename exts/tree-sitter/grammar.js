@@ -63,6 +63,7 @@ module.exports = grammar({
     [$.parameter, $._type_only],
     [$.if_expression, $.parenthesized_expression],
     [$.capture, $.infer_lambda],
+    [$.multiple_declaration, $._primary],
   ],
 
   rules: {
@@ -82,8 +83,10 @@ module.exports = grammar({
       choice(
         $.expression_statement,
         $.assignment,
+        $.multiple_assignment,
         $.augmented_assignment,
         $.variable_declaration,
+        $.multiple_declaration,
         $.var_declaration,
         $.const_declaration,
         $.global_declaration,
@@ -152,6 +155,16 @@ module.exports = grammar({
     assignment: ($) =>
       prec.right(1, seq(field('left', $._term), '=', field('right', $._rhs), optional($._suite_body))),
 
+    // `a, b = b, a + b`: every right side is evaluated before the first is stored.
+    multiple_assignment: ($) =>
+      prec.right(1, seq(
+        field('left', $._term),
+        repeat1(seq(',', field('left', $._term))),
+        '=',
+        field('right', $._expression),
+        repeat1(seq(',', field('right', $._expression))),
+      )),
+
     augmented_assignment: ($) =>
       prec.right(1, seq(
         field('left', $._term),
@@ -167,6 +180,16 @@ module.exports = grammar({
         ':=',
         field('value', $._rhs),
         optional($._suite_body),
+      )),
+
+    // `a, b := 0, 1`
+    multiple_declaration: ($) =>
+      prec.right(seq(
+        field('name', $.identifier),
+        repeat1(seq(',', field('name', $.identifier))),
+        ':=',
+        field('value', $._expression),
+        repeat1(seq(',', field('value', $._expression))),
       )),
 
     // `var name Type = expr`
@@ -673,7 +696,8 @@ module.exports = grammar({
         seq(field('value', $._expression), field('operator', choice('?else', '!else')), field('default', $._expression)),
       ),
 
-    // `opt ?else:` block, `res !else |err|:` block
+    // `opt ?else:` block, `res !else |err|:` block, and one `return`, `break` or `continue` without `:`
+    // (`opt ?else return none`).
     unwrap_or_block: ($) =>
       prec.right(
         PREC.default,
@@ -681,10 +705,14 @@ module.exports = grammar({
           field('value', $._expression),
           field('operator', choice('?else', '!else')),
           optional(field('capture', $.capture)),
-          ':',
-          field('body', $._expression_suite),
+          choice(
+            seq(':', field('body', $._expression_suite)),
+            field('body', alias($._jump_statement, $.block)),
+          ),
         ),
       ),
+
+    _jump_statement: ($) => choice($.return_statement, $.break_statement, $.continue_statement),
 
     if_expression: ($) =>
       prec.right(

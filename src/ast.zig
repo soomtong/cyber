@@ -74,6 +74,7 @@ pub const NodeType = enum(u8) {
     lambda_expr, 
     lambda_multi,
     move_expr,
+    multi_stmt,
     namedArg,
     noneLit,
     octLit,
@@ -438,6 +439,13 @@ pub const ScopeStmt = struct {
 pub const BeginStmt = struct {
     stmts: []const *Node,
     pos: u32,
+};
+
+/// `a, b = b, a + b` (an `assign_stmt` for each pair) or `a, b := 0, 1` (a `var_decl` for each). All the right sides
+/// are evaluated, from left to right, before the first value is stored.
+pub const MultiStmt = struct {
+    stmts: []const *Node,
+    decl: bool,
 };
 
 pub const IfStmt = struct {
@@ -943,6 +951,7 @@ pub fn NodeData(comptime node_t: NodeType) type {
         .at_lit         => Literal,
         .attribute      => Attribute,
         .begin_stmt    => BeginStmt,
+        .multi_stmt    => MultiStmt,
         .binExpr        => BinExpr,
         .binLit         => Literal,
         .borrow         => Borrow,
@@ -1145,6 +1154,7 @@ pub const Node = struct {
             .at_lit         => self.cast(.at_lit).src,
             .attribute      => self.cast(.attribute).src,
             .begin_stmt    => self.cast(.begin_stmt).stmts[0].src(),
+            .multi_stmt    => self.cast(.multi_stmt).stmts[0].src(),
             .binExpr        => self.cast(.binExpr).left.src(),
             .binLit         => self.cast(.binLit).src,
             .borrow         => self.cast(.borrow).child.src(),
@@ -1280,6 +1290,7 @@ pub const Node = struct {
             .at_lit         => self.cast(.at_lit).pos,
             .attribute      => self.cast(.attribute).pos,
             .begin_stmt    => self.cast(.begin_stmt).pos,
+            .multi_stmt    => self.cast(.multi_stmt).stmts[0].pos(),
             .binExpr        => self.cast(.binExpr).left.pos(),
             .binLit         => self.cast(.binLit).pos,
             .borrow         => self.cast(.borrow).pos,
@@ -1416,6 +1427,10 @@ pub const Node = struct {
             },
             .begin_stmt    => {
                 const stmts = self.cast(.begin_stmt).stmts;
+                return stmts[stmts.len-1].end();
+            },
+            .multi_stmt    => {
+                const stmts = self.cast(.multi_stmt).stmts;
                 return stmts[stmts.len-1].end();
             },
             .binExpr        => self.cast(.binExpr).right.end(),
@@ -1834,7 +1849,7 @@ pub const UnaryOp = enum(u8) {
 };
 
 test "ast internals." {
-    try t.eq(124, std.enums.values(NodeType).len);
+    try t.eq(125, std.enums.values(NodeType).len);
     try t.eq(1, @sizeOf(NodeHeader));
 }
 

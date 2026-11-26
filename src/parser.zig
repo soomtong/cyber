@@ -4865,10 +4865,10 @@ pub const Parser = struct {
                         }
                         self.advance();
 
-                        if (self.peek().tag() != .colon) {
+                        if (self.peek().tag() != .colon and !isJumpKeyword(self.peek().tag())) {
                             return self.reportError("Expected colon.", &.{});
                         }
-                        self.advance();
+                        if (self.peek().tag() == .colon) self.advance();
                         try self.pushBlock();
                         const stmts = try self.parseSingleOrIndentedBodyStmts();
                         _ = self.popBlock();
@@ -4877,8 +4877,9 @@ pub const Parser = struct {
                             .capture = capture,
                             .else_stmts = stmts,
                         });
-                    } else if (self.peek().tag() == .colon) {
-                        self.advance();
+                    } else if (self.peek().tag() == .colon or isJumpKeyword(self.peek().tag())) {
+                        // `!else: ...`, or one `return`, `break` or `continue` on the same line: `!else return none`.
+                        if (self.peek().tag() == .colon) self.advance();
                         try self.pushBlock();
                         const stmts = try self.parseSingleOrIndentedBodyStmts();
                         _ = self.popBlock();
@@ -4903,8 +4904,9 @@ pub const Parser = struct {
                         return self.reportError("Expected `else`.", &.{});
                     }
                     self.advance();
-                    if (self.peek().tag() == .colon) {
-                        self.advance();
+                    if (self.peek().tag() == .colon or isJumpKeyword(self.peek().tag())) {
+                        // `?else: ...`, or one `return`, `break` or `continue` on the same line: `?else return none`.
+                        if (self.peek().tag() == .colon) self.advance();
                         try self.pushBlock();
                         const stmts = try self.parseSingleOrIndentedBodyStmts();
                         _ = self.popBlock();
@@ -5028,6 +5030,72 @@ pub const Parser = struct {
             .typeSpec = var_t,
             .right = right,
             .pos = self.tokenPos(start),
+        });
+    }
+
+    /// `a, b = b, a + b` and `a, b := 0, 1`, after the first left expression. Each pair becomes an `assign_stmt` or a
+    /// `var_decl` of a `multi_stmt`.
+    fn parseMultiStmt(self: *Parser, start: u32, first: *ast.Node) !*ast.Node {
+        var lefts: std.ArrayList(*ast.Node) = .empty;
+        defer lefts.deinit(self.alloc);
+        try lefts.append(self.alloc, first);
+        while (self.peek().tag() == .comma) {
+            self.advance();
+            const left = (try self.parseExpr(.{})) orelse {
+                return self.reportError("Expected a variable after `,`.", &.{});
+            };
+            try lefts.append(self.alloc, left);
+        }
+        const decl = switch (self.peek().tag()) {
+            .colon_equal => true,
+            .equal => false,
+            else => return self.reportError("Expected `=` or `:=` after the list of variables. `+=` and the other compound assignments take one variable.", &.{}),
+        };
+        for (lefts.items) |left| {
+            if (decl) {
+                if (left.type() != .ident) {
+                    return self.reportErrorAtSrc("Expected identifier for variable declaration.", &.{}, left.pos());
+                }
+            } else switch (left.type()) {
+                .accessExpr, .deref, .index_expr, .ident => {},
+                else => return self.reportErrorAtSrc("Expected a variable, a field or an element to assign to.", &.{}, left.pos()),
+            }
+        }
+        self.advance();
+
+        var rights: std.ArrayList(*ast.Node) = .empty;
+        defer rights.deinit(self.alloc);
+        while (true) {
+            const right = (try self.parseExpr(.{})) orelse {
+                return self.reportError("Expected right expression for assignment statement.", &.{});
+            };
+            try rights.append(self.alloc, right);
+            if (self.peek().tag() != .comma) break;
+            self.advance();
+        }
+        if (rights.items.len != lefts.items.len) {
+            const what: []const u8 = if (decl) "variables" else "places";
+            return self.reportErrorAt("{} {} take {} values, found {}. Write one value for each: `a, b = x, y`.", &.{
+                v(lefts.items.len), v(what), v(lefts.items.len), v(rights.items.len),
+            }, start);
+        }
+
+        var pairs: std.ArrayList(*ast.Node) = .empty;
+        defer pairs.deinit(self.alloc);
+        for (lefts.items, rights.items) |left, right| {
+            try pairs.append(self.alloc, if (decl) try self.ast.newNodeErase(.var_decl, .{
+                .name = left,
+                .typeSpec = null,
+                .right = right,
+                .pos = left.pos(),
+            }) else try self.ast.newNodeErase(.assign_stmt, .{
+                .left = left,
+                .right = right,
+            }));
+        }
+        return self.ast.newNodeErase(.multi_stmt, .{
+            .stmts = try self.ast.dupeNodes(pairs.items),
+            .decl = decl,
         });
     }
 
@@ -5174,6 +5242,10 @@ pub const Parser = struct {
         var expr = (try self.parseExpr(.{})) orelse {
             return null;
         };
+
+        if (self.peek().tag() == .comma) {
+            return self.parseMultiStmt(start, expr);
+        }
 
         var is_assign_stmt = false;
         const tag = self.peek().tag();
@@ -5506,4 +5578,10 @@ fn defaultReportFn(p: *cy.Parser, format: []const u8, args: []const cy.fmt.FmtVa
     _ = args;
     _ = pos;
     return error.ParseError;
+}
+
+/// A statement that leaves the code after `?else` or `!else` without a value: it can follow them on the same line
+/// without `:` (`?else return none`).
+fn isJumpKeyword(tag: cy.tokenizer.TokenType) bool {
+    return tag == .return_k or tag == .break_k or tag == .continue_k;
 }

@@ -323,6 +323,10 @@ fn semaStmt2(c: *cy.Chunk, node: *ast.Node) !void {
             try sema_assign.semaAssignStmt(c, node, stmt.left, stmt.right, .{});
             return;
         },
+        .multi_stmt => {
+            try sema_assign.semaMultiStmt(c, node);
+            return;
+        },
         .trait_decl,
         .struct_decl,
         .cstruct_decl,

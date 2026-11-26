@@ -10,3 +10,6 @@ Notable examples will be listed here:
 - [fmt.cy](fmt.cy) - A source formatter for Cyber written in Cyber. A token-based sibling of the built-in `cyber fmt`.
 - [commands.cy](commands.cy) - Runs other programs with `os.cmd`: pipes, input text, exit codes, files for the streams and a time limit.
 - [stream_lines.cy](stream_lines.cy) - Reads the output of a running program a line at a time with `Cmd.start`, and stops it early.
+- [build_log.cy](build_log.cy) - Keeps stdout and stderr together in their order with `Cmd.stderr_to_stdout`: lines, a log file and a pipe.
+- [background_job.cy](background_job.cy) - Starts a server that keeps running with `Cmd.detach`, talks to it and stops it by its process id.
+- [parallel_jobs.cy](parallel_jobs.cy) - Runs several commands at once with `Cmd.start`, keeps them in an `Array[os.Process]` and reports each exit code.

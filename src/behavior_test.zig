@@ -1130,6 +1130,9 @@ test "Compile." {
         try compileCase("../examples/ffi.cy");
         try compileCase("../examples/commands.cy");
         try compileCase("../examples/stream_lines.cy");
+        try compileCase("../examples/build_log.cy");
+        try compileCase("../examples/background_job.cy");
+        try compileCase("../examples/parallel_jobs.cy");
     }
     try compileCase("../examples/account.cy");
     try compileCase("../examples/calculator.cy");

@@ -45,8 +45,13 @@
   `==`는 그대로 모든 칸을 비교하므로, 같은 순간의 `+09:00` 값과 `Z` 값은 `a <= b and a >= b`이면서 `a != b`다. 순간의 같음은
   `a.time() == b.time()`. 결정 `docs/decisions/project_std_time.md` "셋째 단계".
 - `DateTime.format` · `Date.format` · `Time.format`에 `%U`(일요일 시작 주)와 `%W`(월요일 시작 주), 00~53, C `strftime`과 같은
-  값. `parse_format`에서는 `%u` · `%w` · `%G` · `%V`처럼 출력 전용이다: 전에는 'Unknown specifier', 이제
-  '`%U` is for output only. Parse the date with `%Y`, `%m` and `%d`, or with `%j`.'
+  값.
+- `parse_format`이 주 날짜를 읽는다(같은 날 이어서): `%U` · `%W`는 `%Y`(`%y`)와, `%V`는 `%G`와, 그리고 요일(`%a` · `%A` · `%u` ·
+  `%w`)과 함께 날짜를 정한다. 전에는 `%u` · `%w` · `%G` · `%V` · `%U` · `%W`가 출력 전용 오류였다. 요일이 빠지면
+  'A week of the year needs a day of the week: add `%a`, `%A`, `%u` or `%w`.', 그 주에 없는 날은 `error.Range`
+  ('Week 0 of 2026 has no Wednesday.'), `%m` · `%d` · `%j`와 함께 쓰면 `error.Format`.
+- 동작이 바뀜: 연도와 월 · 일(또는 `%j`)이 다 있는 형식의 요일은 이제 그 날짜의 요일이어야 한다. 전에는 읽고 버렸다.
+  `Fri 2026-11-26`을 `%a %F`로 읽으면 `error.Range`, '2026-11-26 is a Thursday, not a Friday.' 연도가 없으면 그대로 버린다.
 - `regex.Regex.replace` · `replace_all`이 함수를 받는다: `repl &OpaqueFunc[fn(&Captures) -> str]`(함수 포인터 · 클로저).
   일치마다 왼쪽부터 한 번 불리고, 돌려준 문자열은 `$`를 확장하지 않고 그대로 들어간다. 결정 `project_std_regex.md` "함수로 치환".
 - `peg.Peg.replace` · `replace_all`도 같은 꼴로 함수를 받는다(`fn(&Capture) -> str`, 매치 전체의 캡처).

@@ -5374,9 +5374,16 @@ print(time.parse_format('Nov  5 10:22:01', '%b %e %T')!.format())
 | Zone | `%Z`: the abbreviation of the time zone (`KST`, `EDT`). `UTC` or the offset for a value without a zone. Output only |
 | Short forms | `%F` (`%Y-%m-%d`), `%T` (`%H:%M:%S`), `%R` (`%H:%M`), `%D` (`%m/%d/%y`) |
 | Others | `%s` (Unix seconds), `%n`, `%t`, `%%` |
-| Output only | `%u` (Monday is 1, Sunday is 7), `%w` (Sunday is 0), `%G` and `%V` (ISO 8601 year and week), `%U` and `%W` (week of the year, 00 to 53, with weeks from Sunday and from Monday as in C: the days before the first Sunday or Monday are week 00), `%Z` |
+| Week | `%u` (Monday is 1, Sunday is 7), `%w` (Sunday is 0), `%G` and `%V` (ISO 8601 year and week), `%U` and `%W` (week of the year, 00 to 53, with weeks from Sunday and from Monday as in C: the days before the first Sunday or Monday are week 00) |
+| Output only | `%Z` |
 
-Names are in English. When parsing, a number takes one or two digits (`%Y` four, `%j` up to three, every `%f` one or more), `%j` can not be used with `%m`, `%d`, `%e` or `%b`, a space in the format takes one or more, a name can be short or full in any case, and both offset specifiers take `Z`, `+0900`, `+09:00` and `+09`. A `Date` formats with the date specifiers only.
+Names are in English. When parsing, a number takes one or two digits (`%Y` four, `%j` up to three, every `%f` one or more), `%j` can not be used with `%m`, `%d`, `%e` or `%b`, a space in the format takes one or more, a name can be short or full in any case, and both offset specifiers take `Z`, `+0900`, `+09:00` and `+09`. A `Date` formats with the date and week specifiers only.
+
+A week gives the date together with a day of the week (`%a`, `%A`, `%u` or `%w`): `%U` or `%W` with `%Y` or `%y`, or `%V` with `%G`. It can not be used with `%m`, `%d`, `%e`, `%b` or `%j`, and a day that the week does not have (`2026 00 Wed` by `%Y %W %a`: the first Monday is January 5) is `error.Range`. When the format has a whole date (a year, and a month and a day or `%j`), a day of the week in the text must be the day of that date: `Fri 2026-11-26` by `%a %F` is `error.Range` with '2026-11-26 is a Thursday, not a Friday.'
+```cy
+print(time.parse_format('2026-W53-4', '%G-W%V-%u')!.format())
+--> 2026-12-31T00:00:00Z
+```
 
 The parse functions return `error.Syntax` when the text has another shape, `error.Range` when a field is out of range and `error.Format` when the format is wrong. Each takes a `time.Diag` as its last argument to see why:
 ```cy

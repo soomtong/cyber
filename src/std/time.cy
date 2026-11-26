@@ -1078,6 +1078,13 @@ fn (&Date) format(fmt str) -> !str:
     -- The day of the year of `%j`, 0 when the format has none, and whether the format has a month or a day.
     yday    int = 0
     has_md  bool = false
+    has_year bool = false
+    -- The day of the week, Monday 0, and -1 when the text has none.
+    wday    int = -1
+    -- The week of `%U`, `%W` or `%V` (`week_kind`, 0 for none), and the year of `%G` (0 for none).
+    week    int = 0
+    week_kind byte = 0
+    iso_year int = 0
 
 -type Scan:
     src     str
@@ -1197,16 +1204,17 @@ fn (&Date) format(fmt str) -> !str:
             return m
     return self.expected('the name of a month such as `Nov` or `November`')
 
--fn (&&Scan) weekday() -> !void:
+-- Reads a full or a three letter day name and returns the day, Monday 0.
+-fn (&&Scan) weekday() -> !int:
     for 0..7 |wd|:
         name := weekday_name(wd)
         if has_word(self.src, self.pos, name):
             self.pos += name.len()
-            return
+            return wd
     for 0..7 |wd|:
         if has_word(self.src, self.pos, weekday_name(wd)[0..3]):
             self.pos += 3
-            return
+            return wd
     return self.expected('the name of a day such as `Sun` or `Sunday`')
 
 -- Checks the fields and makes the value. `default_off` is the offset of a text that has none.
@@ -1330,12 +1338,14 @@ fn (&Date) format(fmt str) -> !str:
         switch f:
             case 'Y':
                 p.year = self.digits(4, 4, 'a four digit year')!
+                p.has_year = true
             case 'y':
                 y := self.digits(2, 2, 'a two digit year')!
                 if y >= 69:
                     p.year = 1900 + y
                 else:
                     p.year = 2000 + y
+                p.has_year = true
             case 'm':
                 p.month = self.digits(1, 2, 'a month')!
                 p.has_md = true
@@ -1359,7 +1369,37 @@ fn (&Date) format(fmt str) -> !str:
                 p.month = self.month()!
                 p.has_md = true
             case 'a', 'A':
-                self.weekday()!
+                p.wday = self.weekday()!
+            case 'u':
+                start := self.pos
+                u := self.digits(1, 1, 'a day of the week')!
+                if u < 1 or u > 7:
+                    self.fail(start, 'A day of the week of `%u` is 1 (Monday) to 7 (Sunday).')
+                    return error.Range
+                p.wday = u - 1
+            case 'w':
+                start := self.pos
+                w := self.digits(1, 1, 'a day of the week')!
+                if w > 6:
+                    self.fail(start, 'A day of the week of `%w` is 0 (Sunday) to 6 (Saturday).')
+                    return error.Range
+                p.wday = (w + 6) % 7
+            case 'U', 'W', 'V':
+                start := self.pos
+                wk := self.digits(1, 2, 'a week of the year')!
+                if f == 'V' and (wk < 1 or wk > 53):
+                    self.fail(start, 'An ISO week of `%V` is 1 to 53.')
+                    return error.Range
+                if wk > 53:
+                    self.fail(start, 'A week of `%' + fmt[i - 1..i] + '` is 0 to 53.')
+                    return error.Range
+                if p.week_kind != 0 and p.week_kind != f:
+                    self.fail(i - 2, 'The format has two kinds of week: use one of `%U`, `%W` and `%V`.')
+                    return error.Format
+                p.week = wk
+                p.week_kind = f
+            case 'G':
+                p.iso_year = self.digits(4, 4, 'a four digit ISO year')!
             case 'H', 'I':
                 p.hour = self.digits(1, 2, 'an hour')!
             case 'p':
@@ -1404,9 +1444,6 @@ fn (&Date) format(fmt str) -> !str:
                     self.pos += 1
             case '%':
                 self.literal('%', '`%`')!
-            case 'u', 'w', 'G', 'V', 'U', 'W':
-                self.fail(i - 2, '`%' + fmt[i - 1..i] + '` is for output only. Parse the date with `%Y`, `%m` and `%d`, or with `%j`.')
-                return error.Format
             case 'Z':
                 self.fail(i - 2, '`%Z` is for output only: an abbreviation such as `CST` names more than one zone. Parse the offset with `%z`, or read the text in a zone with `replace_zone`.')
                 return error.Format
@@ -1433,7 +1470,72 @@ fn (&Date) format(fmt str) -> !str:
         c := civil_from_days(days_from_civil(p.year, 1, 1) + p.yday - 1)
         p.month = c.m
         p.day = c.d
+    if p.week_kind != 0 or p.iso_year != 0:
+        self.week_date(&&p)!
+    else p.wday >= 0 and p.has_year and (p.has_md or p.yday > 0) and !p.has_unix:
+        -- A date with a day of the week: the two must agree.
+        if p.month >= 1 and p.month <= 12 and p.year >= 1 and p.year <= 9999 and p.day >= 1 and p.day <= days_in_month(p.year, p.month):
+            days := days_from_civil(p.year, p.month, p.day)
+            if weekday_num(days) != p.wday:
+                self.fail(0, Date{days=days}.format() + ' is a ' + weekday_name(weekday_num(days)) + ', not a ' + weekday_name(p.wday) + '.')
+                return error.Range
     return self.finish(&p, default_off)
+
+-- Turns a week of the year and a day of the week into a month and a day.
+-fn (&&Scan) week_date(p &&Parts) -> !void:
+    if p.has_md or p.yday > 0:
+        self.fail(0, 'A week of the year gives the month and the day: the format can not also have `%m`, `%d`, `%e`, `%b` or `%j`.')
+        return error.Format
+    if p.has_unix:
+        self.fail(0, '`%s` gives the date: the format can not also have a week of the year.')
+        return error.Format
+    if p.wday < 0:
+        self.fail(0, 'A week of the year needs a day of the week: add `%a`, `%A`, `%u` or `%w`.')
+        return error.Format
+    days := 0
+    if p.week_kind == 'V' or p.iso_year != 0:
+        if p.week_kind != 'V' or p.iso_year == 0:
+            self.fail(0, 'An ISO week date needs both `%G` and `%V`.')
+            return error.Format
+        if p.has_year:
+            self.fail(0, '`%G` is the year of an ISO week: the format can not also have `%Y` or `%y`.')
+            return error.Format
+        if p.iso_year < 1 or p.iso_year > 9999:
+            self.fail(0, 'A year is 1 to 9999, found ' + str(p.iso_year) + '.')
+            return error.Range
+        if p.week > weeks_in_year(p.iso_year):
+            self.fail(0, 'The ISO year ' + str(p.iso_year) + ' has no week ' + str(p.week) + '.')
+            return error.Range
+        jan4 := days_from_civil(p.iso_year, 1, 4)
+        days = jan4 - weekday_num(jan4) + (p.week - 1) * 7 + p.wday
+    else:
+        if !p.has_year:
+            self.fail(0, 'A week of the year needs the year: add `%Y` or `%y`.')
+            return error.Format
+        if p.year < 1 or p.year > 9999:
+            self.fail(0, 'A year is 1 to 9999, found ' + str(p.year) + '.')
+            return error.Range
+        jan1 := days_from_civil(p.year, 1, 1)
+        -- The days of the first week (week 1) start on the first Sunday (`%U`) or Monday (`%W`).
+        first := 0
+        nth := p.wday
+        if p.week_kind == 'U':
+            first = (7 - (weekday_num(jan1) + 1) % 7) % 7
+            nth = (p.wday + 1) % 7
+        else:
+            first = (7 - weekday_num(jan1)) % 7
+        doy := first + (p.week - 1) * 7 + nth
+        len := 365
+        if is_leap_year(p.year):
+            len = 366
+        if doy < 0 or doy >= len:
+            self.fail(0, 'Week ' + str(p.week) + ' of ' + str(p.year) + ' has no ' + weekday_name(p.wday) + '.')
+            return error.Range
+        days = jan1 + doy
+    c := civil_from_days(days)
+    p.year = c.y
+    p.month = c.m
+    p.day = c.d
 
 -fn report(s &Scan, diag &&Diag):
     diag.msg = s.msg
@@ -1473,10 +1575,12 @@ fn parse(s str, offset int, diag &&Diag) -> !DateTime:
         return err
 
 --| Parses `s` by a `strptime` format, such as `%d/%b/%Y:%H:%M:%S %z`. The specifiers are those of
---| `DateTime.format` without `%u %w %G %V %U %W`. A number takes one or two digits (`%Y` four, `%f` one to nine),
+--| `DateTime.format` without `%Z`. A number takes one or two digits (`%Y` four, `%f` one to nine),
 --| a space in the format takes one or more, `%b` and `%a` take the short or the full name in any case, and
 --| `%z` takes `Z`, `+0900`, `+09:00` or `+09`. A field that the format does not have is that of
 --| 1970-01-01T00:00:00, and without `%z` the text is read as UTC.
+--| A week of the year gives the date with a day of the week (`%a %A %u %w`): `%U` or `%W` with `%Y`, or `%V` with
+--| `%G`. A day of the week with a whole date (a year, and a month and a day or `%j`) must be the day of that date.
 --| `error.Syntax` when the text does not fit, `error.Range` for a field out of range and `error.Format`
 --| for a specifier that is not known.
 fn parse_format(s str, fmt str) -> !DateTime:

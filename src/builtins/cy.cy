@@ -7,7 +7,10 @@ use meta
 --| ```cy
 --| use cy
 --|
---| res := cy.eval('return 1')!
+--| res := cy.eval('''
+--| fn main() -> int:
+--|     return 1 + 2
+--| ''')!
 --| ```
 
 const Success      = 0
@@ -24,7 +27,7 @@ const TypeFloat = TypeF64
 const TypeStr   = 23
 
 --| Evaluates source code in an isolated VM.
---| If the last statement is an expression, a primitive or a string can be returned.
+--| The result is the value that `main` returns.
 fn eval(src str) -> !Object:
     vm := VM()  
     res := vm.eval(src)

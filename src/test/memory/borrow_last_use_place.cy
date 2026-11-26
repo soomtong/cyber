@@ -12,6 +12,9 @@ type H:
     a &int
     b &int
 
+type V:
+    x int
+
 fn get(scope p &int) -> scope &int:
     h := H{a=p, b=p}
     hr := &h
@@ -24,6 +27,40 @@ fn get2(scope p &int) -> scope &int:
     var r &int = p
     r = hr.b
     return r
+
+fn (&&H) set(scope p &int):
+    self.b = p
+
+fn (&&H) touch():
+    pass
+
+-- A container passed as `&&H` points only where the `scope` argument of the call points, and nowhere after a call
+-- without one. `h` ends after its last use while `g` lives.
+fn calls():
+    y := 5
+    w := V{x=42}
+    a := Array[int]{1, 2}
+    g := H{a=&y, b=&y}
+    g.set(&w.x)
+    h := H{a=&y, b=&a[0]}
+    test.eq(1, h.b.*)
+    a << 3
+    test.eq(42, g.b.*)
+
+    g2 := H{a=&y, b=&y}
+    g2.touch()
+    h2 := H{a=&y, b=&a[1]}
+    test.eq(2, h2.b.*)
+    a << 4
+    test.eq(5, g2.b.*)
+
+    -- `&&` of a value that holds no borrows leaves no place behind.
+    xs := Array[int]{1}
+    xs.append(2)
+    h3 := H{a=&y, b=&a[0]}
+    test.eq(1, h3.b.*)
+    a << 5
+    test.eq(2, xs.len())
 
 fn run():
     y := 5
@@ -51,5 +88,6 @@ fn run():
     test.eq(5, get2(&y).*)
 
 run()
+calls()
 
 --cytest: pass

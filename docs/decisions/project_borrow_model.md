@@ -436,6 +436,28 @@ sema의 빌림 검사는 세 조각이 서로 맞물리지 않았다.
   안전한 쪽이다.
 - 테스트: `memory/borrow_last_use_place.cy`(되는 것), `borrow_last_use_place_error` · `borrow_last_use_place_copy_error` ·
   `borrow_last_use_place_through_error` · `borrow_return_via_place_error` · `borrow_via_place_bind_error`.
-- 남은 것: `&&h`를 넘긴 컨테이너(`h.set(&w.x)`처럼 `&&self` 메서드를 부른 것)는 아직 아무 지역을 가리킨다고 본다. 부르는 쪽의
-  `lendScopeArg`가 넣을 수 있는 `scope` 인자를 알므로 그 대상만 적을 수 있지만, 함수 값 · 제너릭 인스턴스 경로를 모두 확인해야 해
-  미뤘다. 역참조 대입 문구가 빌림 지역(`r`)을 짚게 하는 것, `&self` 메서드의 관리형 필드 대입(언어 결정)도 그대로다.
+- 남은 것: (2026-11-26 아래 절에서 해결) `&&h`를 넘긴 컨테이너는 아무 지역을 가리킨다고 봤다. 역참조 대입 문구가 빌림 지역(`r`)을
+  짚게 하는 것, `&self` 메서드의 관리형 필드 대입(언어 결정)은 그대로다.
+
+### `&&h` 인자의 자리 대상과 늦게 받은 자리 (2026-11-26)
+
+위 절의 남은 것. 고치며 탐침하다 구멍(F-216)을 찾아 함께 고쳤다.
+
+- `sema_ex_borrow2`가 `&&h`를 만들 때마다 `h`에 "아무 지역" 자리 항목을 적었다. 두 경우는 적지 않는다.
+  - 빌림을 담을 수 없는 값(`type.info.borrow_only`가 거짓): `&&xs`의 `Array[int]` 등. 함수가 거기 빌림을 넣을 수 없다.
+  - `matchFuncSig`가 `&&T` 매개변수에 맞추는 인자 노드가 바로 그 `&&h`인 경우(`Chunk.ex_borrow_arg`, 수신자 `g.set(..)` 포함).
+    함수가 `h`에 넣을 수 있는 것은 `scope` 인자뿐이고(`checkFieldOwner`), 그 호출의 `ArgBorrows.lendScopeArg` →
+    `addFieldBorrowLoan`이 그 인자가 가리키는 곳을 적는다. 함수 값 호출도 `matchFuncSig`를 지나고, `scope`는 `FuncSig`의 키라
+    함수 타입이 그것을 잃지 않는다. `matchGenericFuncRt`는 매개변수 타입이 인스턴스 전에는 정해지지 않아 전처럼 보수적이다.
+    `p := &&h`처럼 지역에 담거나 `Holder{r=&&h}`에 담은 것도 전처럼 아무 지역이다(뒤에 무엇을 거쳐 넣을지 모른다).
+- 탐침에서 찾은 구멍 F-216: `g := G{p=none}`(`p ?&W`)처럼 처음에 빌림이 없는 컨테이너가 나중에 `g.p = &w`나 `g.set(&w)`로 `w`를
+  가리키면, `w`의 마지막 사용 뒤 `w`의 빌림이 끝나 `w.q = &a[0]` 뒤 `a << 3`이 통과했다(`g.p.?.q.*`가 놓인 버퍼를 읽는다). 바뀌기
+  전 CLI에서도 같았다.
+  - `isPointedInto`가 `parent_local`이 없는 지역을 통째로 건너뛰었다. 자리 항목(`borrow_places`)은 `parent_local`과 상관없이 본다.
+  - `?&W`로 감싼 `&w`는 결과의 `parent_local`이 뿌리 주인(`y`)이라 대여가 `g → y`로 적힌다. 자리 항목(`w`)은 대기 목록으로
+    적히지만, `k.p = &g`처럼 뿌리 지역(`g`)을 빌린 값은 자리가 아니라 대여(`borrow_loans`)로만 남는다. `isPointedInto`가 대여의
+    주인(과 그 `borrow_via` 사슬)도 본다.
+  - `unbindBorrowLocal`이 `parent_local`이 없는 지역에서도 `borrow_places`를 끈다(끝난 지역의 표시가 남아 오탐을 내지 않게).
+- 확인: 저장소의 `.cy` 전부를 변경 전 · 후 CLI로 돌려 첫 오류 줄 · 종료 코드를 비교했다. 테스트 `memory/borrow_last_use_place.cy`에
+  두 꼴(`scope` 인자 호출, `scope` 없는 `&&self` 호출), 오류 테스트 `borrow_last_use_place_late_error` ·
+  `borrow_last_use_place_late_call_error` · `borrow_last_use_place_late_chain_error`.

@@ -253,6 +253,7 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 | F-213 | 런타임 템플릿 오버로드가 고르는 호출을 모호하다고 거짓 컴파일 오류 | `checkAmbiguousCall`이 템플릿 후보를 빼고 맞춰 봄 | `/code-review high` 0.4.20..HEAD(2026-11-25) | 중간. 맞는 코드가 컴파일 안 됨 | 2026-11-25 수정. 템플릿 후보가 있으면 검사하지 않음, 테스트 `call_overload_literal.cy` `pick(n)` |
 | F-214 | VM 중단 요청에 멈추지 않는 스레드(drop의 `@deinit`)에서 `os.cmd`가 명령을 되풀이해 다시 실행할 수 있다 | 감시가 main 스레드 플래그를 보고 `interrupted`를 돌려주는데 `os.cy`의 반복은 호출 스레드의 검사점에 기댐 | `/code-review high` 0.4.20..HEAD(2026-11-25) | 낮음. 드문 경로 | 2026-11-25 수정. 실행 감시는 호출 스레드 플래그, 그 스레드가 멈추지 않으면 `error.Interrupted`(`cmdFailFor`). 경로를 만드는 테스트는 없음 |
 | F-215 | `os.File` · `os.Dir`의 공개 `closed`를 밖에서 `true`로 두면 정리 등록이 남아 panic · VM 끝에 다른 파일이 된 핸들 번호를 닫는다 | `close`만 `_fd_unguard`를 부름 | `/code-review high` 0.4.20..HEAD(2026-11-25) | 낮음 | 2026-11-25 수정(깨지는 변경). `closed` 비공개, `is_closed()` |
+| F-216 | 빌림 자리를 나중에 받은 컨테이너(`g := G{p=none}` 뒤 `g.p = &w` 또는 `g.set(&w)`, `k.p = &g`)가 살아 있는데 `w`의 빌림이 마지막 사용 뒤 끝나, `w.q = &a[0]` 뒤 `a << 3`이 통과하고 `g.p.?.q.*`가 놓인 버퍼를 읽는다 | `isPointedInto`가 `parent_local`이 없는 지역을 건너뛰고(그 자리 대상을 보지 않음), 필드 대입 · `scope` 인자가 남긴 대여(`borrow_loans`)를 보지 않음 | `&&h` 빌림 보수성을 줄이며 탐침(2026-11-26) | 높음. 안전한 코드에서 해제된 메모리 읽기 | 2026-11-26 수정. 두 경로를 봄, `unbindBorrowLocal`이 `borrow_places`를 끔. 테스트 `memory/borrow_last_use_place_late*_error.cy` |
 
 ## 우선순위 한 장 요약
 

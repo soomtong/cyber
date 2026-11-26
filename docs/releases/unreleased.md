@@ -72,3 +72,13 @@
 - 그대로인 것: `&&h`를 넘긴 컨테이너(`&&self` 메서드 호출 포함)는 아무 지역이나 가리킬 수 있다고 본다.
 - 확인: `memory/borrow_last_use_place.cy`와 `borrow_{last_use_place,last_use_place_copy,last_use_place_through,return_via_place,
   via_place_bind}_error.cy`. 결정 `project_borrow_model.md` "자리 대상 지역 목록".
+
+## 빌림 검사: `&&h` 인자와 늦게 받은 빌림 자리 (2026-11-26)
+
+- 받아들이는 코드가 늘었다: `&&T` 매개변수에 바로 넘긴 `&&h`(수신자 `g.set(...)` 포함)는 함수가 `scope` 인자만 넣을 수 있으므로 그
+  인자가 가리키는 곳만 가리킨다고 본다. 빌림을 담을 수 없는 값(`xs.append(1)`)의 `&&`는 아무 자리도 남기지 않는다. 전에는 둘 다
+  컨테이너가 아무 지역이나 가리킨다고 봐서, 같은 블록의 다른 빌림이 마지막 사용 뒤에 끝나지 않았다('Expected exclusive access.
+  There is another active borrow to `a`.').
+- 구멍 수정(F-216): 처음에 빌림이 없던 컨테이너(`g := G{p=none}`)가 나중에 `g.p = &w`, `g.set(&w)`로 다른 컨테이너를 가리키면, 그
+  컨테이너가 마지막 사용 뒤 자기 빌림을 놓아 `w.q = &a[0]` 뒤 `a << 3`이 통과했다. 이제 'Expected exclusive access. There is another
+  active borrow to `a`.'다. 결정 `docs/decisions/project_borrow_model.md` "`&&h` 인자의 자리 대상과 늦게 받은 자리".

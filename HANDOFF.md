@@ -82,6 +82,9 @@
   셋(`424a1ee1`), 1 tars-agent를 0.4.22로(tars-agent `f72c68e`, `e2755fb`), 2 C API 할당 실패(`7e095a84`), 3 `deny_ffi`(`0eb8b84d`),
   4 빌림 검사 오탐 둘(`84f77217`), 5 `time` · `regex` · `peg` 보강(`95b01289`). 3 · 4 · 5는 서브 에이전트가 worktree에서 하고
   cherry-pick했다. `os.cmd` 중단 테스트의 경합도 고쳤다(`03266847`). 합친 master 15단계 rc=0. push 안 함.
+- 2026-11-26(사용자: "@HANDOFF.md continue"): "다음 에이전트에게"의 남은 것을 쉬운 것부터 했다. `cy.eval` 주석 예와 `parse_format`의
+  주 날짜(`d60074c0`, 15단계 rc=0), `cl_vm_reset` · `clReportApiError`의 `fatal`(`6bc2fb89`), `&&h` 인자의 자리 대상과 그 탐침에서
+  찾은 빌림 구멍 F-216. `deny_ffi`의 남은 것은 호스트 계약 · tars-agent 쪽이라 손대지 않았다.
 
 ## 현재 브랜치
 
@@ -447,10 +450,10 @@
 
 ## 다음 에이전트에게
 
-1. 0.4.22가 마지막 릴리스다(노트 `docs/releases/0.4.22.md`). `unreleased.md`에 2026-11-26의 다섯 절이 있다(예제, C API 할당 실패,
-   `deny_ffi`, `time` · `regex` · `peg`, 빌림 자리 대상). master는 origin보다 앞서 있고 push하지 않았다.
-   남은 것: `cl_vm_reset` · `clReportApiError`의 `fatal`, `deny_ffi` 결정 문서 "남은 것", `&&h`를 넘긴 컨테이너의 빌림 보수성,
-   `parse_format`의 `%U` · `%W`, 매뉴얼 · `cy.cy` 주석의 `cy.eval('return 1')` 예가 지금 컴파일 오류(고치지 않음).
+1. 0.4.22가 마지막 릴리스다(노트 `docs/releases/0.4.22.md`). `unreleased.md`에 2026-11-26의 절들이 있다(예제, C API 할당 실패,
+   `deny_ffi`, `time` · `regex` · `peg`(주 날짜 파싱 포함), 빌림 자리 대상, `&&h` 인자와 F-216). push하지 않았다.
+   남은 것: `deny_ffi` 결정 문서 "남은 것"(호스트 계약, tars-agent의 `cfg.deny_ffi`), 런타임 안쪽의 `catch fatal()`,
+   제너릭 함수 · 지역에 담은 `&&h`는 여전히 아무 지역을 가리킨다고 본다(`project_borrow_model.md` 끝 절).
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 
@@ -480,7 +483,7 @@
 - `peg`: 시간 보장이 없다(역추적). 함수를 부르는 캡처 · 오류 표지와 복구 · cut · left recursion · 대소문자 무시 클래스 · Unicode
   속성 클래스가 없다(대소문자 무시 리터럴 `'..'i`는 2026-11-26). `find`는 위치마다 다시 맞춰 본다(첫 글자 건너뛰기 없음).
 - `time`: 윤초 · 로캘이 없다. 오프셋은 분 단위(±23:59, DB의 초 단위 LMT는 반올림). `DateTime`의 순서 연산자는 순간을
-  보지만 `==`는 오프셋 · zone까지 본다(2026-11-26). `parse_format`은 `%Z` · `%c`를 받지 않고, `%U` · `%W`는 출력 전용이고(2026-11-26) `%f`가 숫자를 끝까지 먹는다.
+  보지만 `==`는 오프셋 · zone까지 본다(2026-11-26). `parse_format`은 `%Z` · `%c`를 받지 않고 `%f`가 숫자를 끝까지 먹는다. 주(`%U` · `%W` · `%V`)는 요일과 함께만 읽고 월 · 일과 섞지 못한다(2026-11-26).
   시간대 DB를 내장하지 않아 Windows · wasm에서는 `time.zone(name)` · `time.local()`이 `error.NotFound`다(`UTC`와
   `zone_from_tzif` · `zone_from_posix`는 된다). RFC 9557은 `format_zoned` · `parse_zoned`만 다룬다(`format` · `parse`는 RFC 3339).
   `format_zoned`는 `time.zone` · `time.local`로 읽은 zone만 괄호를 붙인다(데이터로 만든 zone은 오프셋만). 같은 바이트라도 DB에서
@@ -490,11 +493,11 @@
   `t := f(move g)` 뒤 `g := move t`로 쓴다.
 - 하위 블록에서는 `move` · `meta.consume`을 못 쓴다(`else` 갈래의 consume은 뒤까지 죽은 상태로 남는다). 컴파일 타임
   `#for xs |v|`(EvalBuffer 반복)는 `#case` 바로 아래에서 `for_iter_stmt` 오류라 `#for 0..n |i|`로 돈다.
-- C API의 할당 실패: VM 생성은 `NULL`, 값 생성은 호스트 호출의 'panic: OutOfMemory'(2026-11-26,
-  `project_capi_alloc_failure.md`). `cl_vm_reset` · `clReportApiError`와 런타임 안쪽의 `catch fatal()`은 남았다.
+- C API의 할당 실패: VM 생성은 `NULL`, 값 생성은 호스트 호출의 'panic: OutOfMemory', `cl_vm_reset`은 reset 대기
+  (`cl_vm_reset_pending`), `clReportApiError`는 빈 문구(2026-11-26, `project_capi_alloc_failure.md`). 런타임 안쪽의 `catch fatal()`은 남았다.
 - 신뢰하지 않는 스크립트의 C FFI 차단: `deny_ffi`로 정했다(2026-11-26, `project_deny_ffi.md`). 남은 것은 호스트 로더가 주는 Cyber
   소스 모듈의 `#[extern]`(builtin이 아니라 거부됨)과, 옵션 없이 돈 앞 eval이 세션에 남긴 `use c` · extern 함수.
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-215까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-216까지, 열린 것 없음).
 
 ## 작업 방식
 

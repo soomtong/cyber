@@ -160,6 +160,9 @@ pub const Chunk = struct {
     borrow_loans: std.ArrayList(cy.sema.BorrowLoan) = .empty,
     /// The locals that the borrows of places held by a local point into (`Local.borrow_places`).
     borrow_place_targets: std.ArrayList(cy.sema.BorrowPlace) = .empty,
+    /// The argument node of a `&&T` parameter that `sema_func.matchFuncSig` is matching. An exclusive borrow made by
+    /// that node gives the callee nothing to store but its `scope` argument, which `ArgBorrows.lendScopeArg` records.
+    ex_borrow_arg: ?*cy.ast.Node = null,
     /// Where a local of the current procs was moved (`move x`, or an implicit move of a `NoCopy` value), for the
     /// error of a later use. Cleared when the id is given to a new local.
     moved_sites: std.AutoHashMapUnmanaged(u32, *cy.ast.Node) = .empty,

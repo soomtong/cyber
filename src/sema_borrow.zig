@@ -562,13 +562,18 @@ pub fn bindBorrowLocal(c: *cy.Chunk, var_idx: sema.LocalId, init: sema.ExprResul
 }
 
 /// Whether a live local other than `local` can point into it: a borrow of it or of a place in it (`hr := &h`,
-/// `Local.borrow_via`), or a value that holds a borrow of a place in it or in a local that points into it
-/// (`Local.borrow_places`, `Chunk.borrow_place_targets`). Used by the non-lexical end of the borrows of `local`
+/// `Local.borrow_via`), a value that holds a borrow of a place in it or in a local that points into it
+/// (`Local.borrow_places`, `Chunk.borrow_place_targets`), or a value that borrows it besides its `parent_local`
+/// (`g.p = &w`, `g.set(&w)`: `Chunk.borrow_loans`). Used by the non-lexical end of the borrows of `local`
 /// (`sema_stmt.endBorrowsAfter`).
 pub fn isPointedInto(c: *cy.Chunk, local: sema.LocalId) bool {
+    for (c.borrow_loans.items) |loan| {
+        if (loan.local != local and viaReaches(c, loan.owner, local)) return true;
+    }
     for (c.varStack.items, 0..) |other, k| {
-        if (k == local or other.parent_local == cy.NullId) continue;
-        if (viaReaches(c, other.borrow_via, local)) return true;
+        if (k == local) continue;
+        // A value without a `parent_local` (`g := G{p=none}`) can get borrows of places later (`g.p = &w`).
+        if (other.parent_local != cy.NullId and viaReaches(c, other.borrow_via, local)) return true;
         if (!other.borrow_places) continue;
         var known = false;
         for (c.borrow_place_targets.items) |p| {
@@ -597,6 +602,7 @@ pub fn unbindBorrowLocal(c: *cy.Chunk, local: *sema.Local) void {
     const id: sema.LocalId = @intCast((@intFromPtr(local) - @intFromPtr(c.varStack.items.ptr)) / @sizeOf(sema.Local));
     if (c.borrow_loans.items.len > 0) dropBorrowLoans(c, id);
     if (c.borrow_place_targets.items.len > 0) dropPlaceTargets(c, id);
+    local.borrow_places = false;
     if (local.parent_local == cy.NullId) return;
     const owner = &c.varStack.items[local.parent_local];
     if (local.ex_borrow) {
@@ -1085,8 +1091,11 @@ pub fn sema_ex_borrow2(c: *cy.Chunk, child: sema.ExprResult, ex_borrow_t: *cy.Ty
     try checkNoWriteThroughShared(c, eff_child.ir, "borrow exclusively", node);
     try checkExclusiveBorrowOfField(c, parent_local, borrowField(c, eff_child), false, node);
     // A function that gets the exclusive borrow can store in the container a borrow of a place in another container.
+    // Not in a value that holds no borrows, and not when the borrow goes straight to a `&&T` parameter of a call: the
+    // callee stores only its `scope` argument there, and the call records what that points into.
     const place = if (isBorrowLocal(c, parent_local)) c.varStack.items[parent_local].borrow_via else parent_local;
-    if (place != cy.NullId and place < c.varStack.items.len) {
+    const can_store = eff_child.type.info.borrow_only and c.ex_borrow_arg != node;
+    if (can_store and place != cy.NullId and place < c.varStack.items.len) {
         c.varStack.items[place].borrow_places = true;
         try addPlaceTarget(c, place, cy.NullId);
     }

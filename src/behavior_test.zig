@@ -427,6 +427,9 @@ fn test_memory(run: *Runner) void {
     run.case("memory/borrow_last_use_place_error.cy");
     run.case("memory/borrow_last_use_place_copy_error.cy");
     run.case("memory/borrow_last_use_place_through_error.cy");
+    run.case("memory/borrow_last_use_place_late_error.cy");
+    run.case("memory/borrow_last_use_place_late_call_error.cy");
+    run.case("memory/borrow_last_use_place_late_chain_error.cy");
     run.case("memory/borrow_return_via_place_error.cy");
     run.case("memory/borrow_via_place_bind_error.cy");
     run.case("memory/borrow_switch_expr_ex_error.cy");

@@ -608,7 +608,13 @@ pub fn matchFuncSig(c: *cy.Chunk, sig: *cy.FuncSig, pre_args: []const Argument, 
 
         var match: bool = undefined;
         const pending_start: u32 = @intCast(c.borrow_pending.items.len);
-        const arg_res = try matchArg(c, arg, param, overloaded, exact, &match);
+        const prev_ex_arg = c.ex_borrow_arg;
+        c.ex_borrow_arg = if (param.get_type().kind() == .ex_borrow) arg.node else null;
+        const arg_res = matchArg(c, arg, param, overloaded, exact, &match) catch |err| {
+            c.ex_borrow_arg = prev_ex_arg;
+            return err;
+        };
+        c.ex_borrow_arg = prev_ex_arg;
         if (!match) {
             match_err.* = FuncMatchError.init(param, arg_idx + 1, arg_res.type);
             match_err.rematch = arg_res.resType == .infer_error;

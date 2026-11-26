@@ -578,9 +578,9 @@ fn genExpr(c: *Chunk, expr: *ir.Expr, cstr: Cstr) anyerror!GenValue {
         .fiber_resume       => gen_fiber_resume(c, expr.cast(.fiber_resume), cstr, node),
         .global             => gen_global(c, expr.cast(.global), cstr, node),
         .i2f                => gen_i2f(c, expr.cast(.i2f), cstr, node),
-        .idiv               => gen_width_binop(c, expr.cast(.idiv), .idiv, true, cstr, node),
+        .idiv               => gen_idiv(c, expr.cast(.idiv), cstr, node),
         .imod               => gen_width_binop(c, expr.cast(.imod), .imod, true, cstr, node),
-        .imul               => genBinOp2(c, expr.cast(.imul), .imul, cstr, node),
+        .imul               => gen_int_ovf(c, expr.cast(.imul), .imul, .mul_ovf, cstr, node),
         .init               => gen_init(c, expr.cast(.init), cstr, node),
         .init_case          => gen_init_case(c, expr.cast(.init_case), cstr, node),
         .init_zero          => gen_init_zero(c, expr.cast(.init_zero), cstr, node),
@@ -592,13 +592,13 @@ fn genExpr(c: *Chunk, expr: *ir.Expr, cstr: Cstr) anyerror!GenValue {
         .lsr                => gen_width_binop(c, expr.cast(.lsr), .lsr, false, cstr, node),
         .mod                => gen_width_binop(c, expr.cast(.mod), .mod, false, cstr, node),
         .mul                => genBinOp2(c, expr.cast(.mul), .mul, cstr, node),
-        .neg                => genUnOp2(c, expr.cast(.neg), .neg, cstr, node),
+        .neg                => gen_neg(c, expr.cast(.neg), cstr, node),
         .not                => genUnOp2(c, expr.cast(.not), .not, cstr, node),
         .or_op              => genBinOp2(c, expr.cast(.or_op), .or_, cstr, node),
         .retain             => gen_retain(c, expr.cast(.retain), cstr, node),
         .sext               => gen_sext(c, expr.cast(.sext), cstr, node),
         .string             => gen_string(c, expr.cast(.string), cstr, node),
-        .sub                => genBinOp2(c, expr.cast(.sub), .sub, cstr, node),
+        .sub                => gen_int_ovf(c, expr.cast(.sub), .sub, .sub_ovf, cstr, node),
         .trait              => gen_trait(c, expr.cast(.trait), cstr, node),
         .truev              => gen_true(c, cstr, node),
         .trunc              => gen_trunc(c, expr.cast(.trunc), cstr, node),
@@ -1603,7 +1603,9 @@ fn genUnOp(c: *Chunk, expr: *ir.UnOp, cstr: Cstr, node: *ast.Node) !GenValue {
         },
         .minus,
         .bitwiseNot => {
-            if (expr.childT == c.sema.i64_t) {
+            if (expr.childT == c.sema.i64_t and expr.op == .minus) {
+                try c.pushFCode2(.neg_ovf, dst.isTemp(), &.{ dst.reg, childv.reg, 64 }, node);
+            } else if (expr.childT == c.sema.i64_t) {
                 try pushInlineUnExpr(c, getIntUnaryOpCode(expr.op), dst.reg, childv.reg, node);
             } else if (expr.childT == c.sema.f64_t) {
                 try pushInlineUnExpr(c, getFloatUnaryOpCode(expr.op), dst.reg, childv.reg, node);
@@ -2504,9 +2506,57 @@ fn gen_fadd(c: *Chunk, expr: *ir.BinOp2, cstr: Cstr, node: *ast.Node) !GenValue 
     return dst;
 }
 
+/// The width of a signed integer type whose `+`, `-`, `*` and unary `-` panic on overflow, else null (`Raw` types,
+/// pointers and floats wrap or do not overflow).
+fn ovfBits(t: *cy.Type) ?u16 {
+    if (t.kind() != .int) return null;
+    return @intCast(t.cast(.int).bits);
+}
+
+/// A signed op that panics on overflow (`add_ovf`, `sub_ovf`, `mul_ovf`), or `op` for a type that wraps.
+fn gen_int_ovf(c: *Chunk, expr: *ir.BinOp2, op: cy.OpCode, ovf_op: cy.OpCode, cstr: Cstr, node: *ast.Node) !GenValue {
+    const bits = ovfBits(expr.base.type) orelse return genBinOp2(c, expr, op, cstr, node);
+    const dst = try bc.selectReg(c, expr.base.type, cstr, node);
+    const leftv = try genExpr(c, expr.left, Cstr.localOrTemp());
+    const rightv = try genExpr(c, expr.right, Cstr.localOrTemp());
+    try c.pushFCode2(ovf_op, dst.isTemp(), &.{ dst.reg, leftv.reg, rightv.reg, bits }, node);
+    try pop_temp_value(c, rightv, node);
+    try pop_temp_value(c, leftv, node);
+    return dst;
+}
+
+fn gen_neg(c: *Chunk, expr: *ir.UnOp2, cstr: Cstr, node: *ast.Node) !GenValue {
+    const bits = ovfBits(expr.base.type) orelse return genUnOp2(c, expr, .neg, cstr, node);
+    const dst = try bc.selectReg(c, expr.base.type, cstr, node);
+    const childv = try genExpr(c, expr.expr, Cstr.localOrTemp());
+    try c.pushFCode2(.neg_ovf, dst.isTemp(), &.{ dst.reg, childv.reg, bits }, node);
+    try pop_temp_value(c, childv, node);
+    return dst;
+}
+
+/// Signed division: both operands sign extended like `gen_width_binop`, and the width for the quotient of the
+/// smallest value by -1, which does not fit.
+fn gen_idiv(c: *Chunk, expr: *ir.BinOp2, cstr: Cstr, node: *ast.Node) !GenValue {
+    const bits: u16 = @intCast(expr.left.type.cast(.int).bits);
+    const dst = try bc.selectReg(c, expr.base.type, cstr, node);
+    const leftv = try genExpr(c, expr.left, Cstr.localOrTemp());
+    const rightv = try genExpr(c, expr.right, Cstr.localOrTemp());
+    if (bits < 64) {
+        try push_sext(c, leftv.reg, leftv.reg, @intCast(bits), node);
+        try push_sext(c, rightv.reg, rightv.reg, @intCast(bits), node);
+    }
+    try c.pushFCode2(.idiv, dst.isTemp(), &.{ dst.reg, leftv.reg, rightv.reg, bits }, node);
+    try pop_temp_value(c, rightv, node);
+    try pop_temp_value(c, leftv, node);
+    return dst;
+}
+
 /// `a + i * k` with a small constant `k` (pointer indexing) becomes one `add_mul_i16`, `a + k` one `add_i16`.
+/// A signed add of the script (`int`, `i32`) panics on overflow: `add_ovf` and `add_i16_ovf`. An address computation
+/// (`semaMadd`, the unsigned `.mul` on the right) wraps.
 fn gen_add(c: *Chunk, expr: *ir.BinOp2, cstr: Cstr, node: *ast.Node) !GenValue {
-    if (expr.right.code == .mul or expr.right.code == .imul) {
+    const ovf_bits = ovfBits(expr.base.type);
+    if (expr.right.code == .mul or (expr.right.code == .imul and ovf_bits == null)) {
         const mul: *ir.BinOp2 = @ptrCast(@alignCast(expr.right));
         if (mul.right.code == .const64) {
             const k = mul.right.cast(.const64).val;
@@ -2526,11 +2576,16 @@ fn gen_add(c: *Chunk, expr: *ir.BinOp2, cstr: Cstr, node: *ast.Node) !GenValue {
             const dst = try bc.selectReg(c, expr.base.type, cstr, node);
             const leftv = try genExpr(c, expr.left, Cstr.localOrTemp());
             const imm: i16 = @intCast(k);
-            try c.pushCode2(.add_i16, dst.isTemp(), &.{ dst.reg, leftv.reg, @bitCast(imm) }, node);
+            if (ovf_bits) |bits| {
+                try c.pushFCode2(.add_i16_ovf, dst.isTemp(), &.{ dst.reg, leftv.reg, @bitCast(imm), bits }, node);
+            } else {
+                try c.pushCode2(.add_i16, dst.isTemp(), &.{ dst.reg, leftv.reg, @bitCast(imm) }, node);
+            }
             try pop_temp_value(c, leftv, node);
             return dst;
         }
     }
+    if (ovf_bits != null) return gen_int_ovf(c, expr, .add, .add_ovf, cstr, node);
     return genBinOp2(c, expr, .add, cstr, node);
 }
 

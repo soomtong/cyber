@@ -256,6 +256,8 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 | F-216 | 빌림 자리를 나중에 받은 컨테이너(`g := G{p=none}` 뒤 `g.p = &w` 또는 `g.set(&w)`, `k.p = &g`)가 살아 있는데 `w`의 빌림이 마지막 사용 뒤 끝나, `w.q = &a[0]` 뒤 `a << 3`이 통과하고 `g.p.?.q.*`가 놓인 버퍼를 읽는다 | `isPointedInto`가 `parent_local`이 없는 지역을 건너뛰고(그 자리 대상을 보지 않음), 필드 대입 · `scope` 인자가 남긴 대여(`borrow_loans`)를 보지 않음 | `&&h` 빌림 보수성을 줄이며 탐침(2026-11-26) | 높음. 안전한 코드에서 해제된 메모리 읽기 | 2026-11-26 수정. 두 경로를 봄, `unbindBorrowLocal`이 `borrow_places`를 끔. 테스트 `memory/borrow_last_use_place_late*_error.cy` |
 | F-217 | `os.stdin()` · `os.stdout()` · `os.stderr()`의 `File`이 쓰레기 핸들(`fd=66560` 등)이라 `read` · `write`가 `error.InvalidArgument`, 값이 사라질 때 그 번호를 닫다 panic | Zig 바인딩이 옛 꼴 `{fd, closed}`를 채움. `33842c2f`(0.4.21)에서 Cyber `File`에 `guard`가 늘었고 부르는 테스트가 없었음 | 사용자 질문(stdin 입력, 2026-11-26) | 높음. 표준 스트림을 못 씀 | 2026-11-26 수정. Cyber로 옮김(fd 0 · 1 · 2, `GetStdHandle`), `verify.sh` 16단계 |
 | F-218 | `io.Scanner.next_line()`이 입력 끝에서 끝나지 않고, 버퍼 경계에 걸친 줄을 자름 | `read_full`이 `error.EndOfFile`만 끝으로 봄(`File.read`는 0), 줄바꿈이 없으면 버퍼 조각을 줄로 줌 | 같은 조사 | 중간 | 2026-11-26 수정. `eof` 칸, `none`이면 더 읽음 |
+| F-219 | 컴파일 타임의 `-(int.min)`이 호스트 panic('integer overflow', `cte.eval_un_expr`) | Zig의 `-`를 그대로 씀 | `int` 넘침 조사(2026-11-26) | 중간. 호스트가 죽음 | 2026-11-26 수정. 'Integer overflow.' 컴파일 오류 |
+| F-220 | 런타임 `int.min / -1` · `int.min % -1`이 C의 정의되지 않은 동작(x86_64에서 SIGFPE 가능, arm64는 감긴 값) | `vm.c` `IDIV` · `IMOD`가 C의 `/` · `%`를 그대로 씀 | 같은 조사 | 높음(x86). 호스트가 죽을 수 있음 | 2026-11-26 수정. `/`는 'Integer overflow.' panic, `% -1`은 0 |
 
 ## 우선순위 한 장 요약
 

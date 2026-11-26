@@ -189,16 +189,16 @@ t.eq(0, km_int.keys().index(7).?)
 -- Narrow int keys. A wrapped key is the same key as its wrapped value.
 m_i8 := Map[i8, int]{}
 m_i8[i8(-56)] = 1
-m_i8[i8(100) + i8(100)] = 2
+m_i8[i8(100).wrapping_add(i8(100))] = 2
 t.eq(1, m_i8.size())
 t.eq(2, m_i8[i8(-56)])
-t.eq(true, m_i8.contains(i8(100) + i8(100)))
+t.eq(true, m_i8.contains(i8(100).wrapping_add(i8(100))))
 t.eq(false, m_i8.contains(i8(56)))
 m_i16 := Map[i16, int]{}
 m_i16[i16(-3)] = 3
 t.eq(3, m_i16[i16(-3)])
 m_i32 := Map[i32, int]{}
-m_i32[i32.max + i32(1)] = 4
+m_i32[i32.max.wrapping_add(i32(1))] = 4
 t.eq(4, m_i32[i32.min])
 
 -- Raw int keys.

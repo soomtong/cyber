@@ -1,7 +1,8 @@
 use test
 
 -- A `const` evaluates its operators at compile time. Each value is the one the same operator gives at runtime:
--- an integer wraps at its width, `/` truncates, `>>` is a logical shift, and a shift uses the low 6 bits of its amount.
+-- a `Raw` integer wraps at its width, `/` truncates, `>>` is a logical shift, and a shift uses the low 6 bits of its
+-- amount. A signed result that does not fit is 'Integer overflow.' at both times (`int_overflow_const_error.cy`).
 
 -- Runtime operands.
 i := 7
@@ -38,10 +39,10 @@ const i_mod = ci % 3
 const n_div = cn / 2
 const n_mod = cn % 2
 const i_pow = ci ** 3
-const pow_wrap = 2 ** 70
+const pow_big = 2 ** 62
 const pow_neg = ci ** -1
-const big_add = cbig + 1
-const min_div = (-cbig - 1) / -1
+const big_add = cbig - 1 + 1
+const min_div = (-cbig - 1) / 1
 const min_mod = (-cbig - 1) % -1
 const i_le = ci <= 7
 const i_ge = ci >= 8
@@ -54,9 +55,9 @@ test.eq(i % 3, i_mod)
 test.eq(n / 2, n_div)
 test.eq(n % 2, n_mod)
 test.eq(i ** 3, i_pow)
-test.eq(0, pow_wrap)
+test.eq(4611686018427387904, pow_big)
 test.eq(i ** -1, pow_neg)
-test.eq(big + 1, big_add)
+test.eq(big - 1 + 1, big_add)
 test.eq(-big - 1, min_div)
 test.eq(0, min_mod)
 test.eq(i <= 7, i_le)
@@ -67,10 +68,10 @@ test.eq(i ~ 2, i_xor)
 test.eq(n >> 60, i_shr)
 test.eq(64, i_shl)
 
--- Narrow integers wrap at their width.
-const s8_add = cs8 + cs8
-const s8_mul = cs8 * 3
-const s8_pow = ct8 ** 5
+-- Narrow integers. A `Raw` one wraps at its width.
+const s8_add = cs8 + ct8
+const s8_mul = ct8 * 3
+const s8_pow = ct8 ** 4
 const m8_shr = cm8 >> 1
 const m8_div = cm8 / 3
 const s8_lt = cm8 < cs8
@@ -81,9 +82,9 @@ const r8_add = cr8 + cr8
 const r8_gt = cr8 > 100
 const r32_div = cr32 / 2
 const r32_mod = cr32 % 4
-test.eq(s8 + s8, s8_add)
-test.eq(s8 * 3, s8_mul)
-test.eq(t8 ** 5, s8_pow)
+test.eq(s8 + t8, s8_add)
+test.eq(t8 * 3, s8_mul)
+test.eq(t8 ** 4, s8_pow)
 test.eq(m8 >> 1, m8_shr)
 test.eq(m8 / 3, m8_div)
 test.eq(m8 < s8, s8_lt)

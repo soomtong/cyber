@@ -645,6 +645,21 @@ pub fn write_inst(vm: *cy.VM, w: *std.Io.Writer, code: OpCode, chunk_id: ?usize,
             const right_amt: i16 = @bitCast(pc[3].val);
             try w.print("%{} = %{} + {}", .{dst, left, right_amt});
         },
+        .add_ovf, .sub_ovf, .mul_ovf => {
+            const op: []const u8 = switch (code) {
+                .add_ovf => "+",
+                .sub_ovf => "-",
+                else => "*",
+            };
+            try w.print("%{} = %{} {s} %{} i{}", .{pc[1].val, pc[2].val, op, pc[3].val, pc[4].val});
+        },
+        .add_i16_ovf => {
+            const right_amt: i16 = @bitCast(pc[3].val);
+            try w.print("%{} = %{} + {} i{}", .{pc[1].val, pc[2].val, right_amt, pc[4].val});
+        },
+        .neg_ovf => {
+            try w.print("%{} = -%{} i{}", .{pc[1].val, pc[2].val, pc[3].val});
+        },
         .and_64 => {
             const dst = pc[1].val;
             const src = pc[2].val;
@@ -955,6 +970,7 @@ pub fn getInstLenAt(pc: [*]const Inst) u8 {
         .ret_y,
         .captured,
         // .list,
+        .neg_ovf,
         .zext,
         .sext => {
             return 4;
@@ -978,7 +994,6 @@ pub fn getInstLenAt(pc: [*]const Inst) u8 {
         .sub,
         .imul,
         .mul,
-        .idiv,
         .div,
         .pow,
         .imod,
@@ -1032,6 +1047,11 @@ pub fn getInstLenAt(pc: [*]const Inst) u8 {
         .ret_gen,
         .add_mul_i16,
         .asr,
+        .idiv,
+        .add_ovf,
+        .sub_ovf,
+        .mul_ovf,
+        .add_i16_ovf,
         .cast => {
             return 5;
         },
@@ -1206,6 +1226,13 @@ pub const OpCode = enum(u8) {
     imod = vmc.CodeIMOD,
     pow = vmc.CodePow,
     neg = vmc.CodeNeg,
+    /// Signed `+`, `-` and `*` that panic with 'Integer overflow.' when the result does not fit in `bits` (the last
+    /// operand). The plain ops wrap: they are for `Raw` types and for addresses.
+    add_ovf = vmc.CodeAddOvf,
+    sub_ovf = vmc.CodeSubOvf,
+    mul_ovf = vmc.CodeMulOvf,
+    add_i16_ovf = vmc.CodeAddI16Ovf,
+    neg_ovf = vmc.CodeNegOvf,
     zext = vmc.CodeZEXT,
     sext = vmc.CodeSEXT,
     f2i = vmc.CodeF2I,
@@ -1236,7 +1263,7 @@ pub const OpCode = enum(u8) {
 };
 
 test "bytecode internals." {
-    try t.eq(138, std.enums.values(OpCode).len);
+    try t.eq(143, std.enums.values(OpCode).len);
     try t.eq(@sizeOf(Inst), 2);
     try t.eq(@sizeOf(DebugSym), 16);
 }

@@ -2459,7 +2459,8 @@ pub fn sema_bin_expr3(c: *cy.Chunk, left: sema.ExprResult, left_n: *ast.Node, ri
 }
 
 /// Folds a 64-bit integer op whose operands are all `const64` into one `const64`.
-/// Matches the VM: wrapping add/sub/mul, shift amount masked by 0xff (>= 64 is not folded).
+/// Matches the VM: `r64` add/sub/mul wrap, an `int` result that does not fit is left for the instruction to panic,
+/// shift amount masked by 0xff (>= 64 is not folded).
 fn fold_const_int(c: *cy.Chunk, res: sema.ExprResult) !sema.ExprResult {
     const expr = res.ir;
     switch (expr.type.id()) {
@@ -2477,6 +2478,20 @@ fn fold_const_int(c: *cy.Chunk, res: sema.ExprResult) !sema.ExprResult {
             if (bin.left.code != .const64 or bin.right.code != .const64) return res;
             const l = bin.left.cast(.const64).val;
             const r = bin.right.cast(.const64).val;
+            if (expr.type.id() == bt.I64) {
+                const sl: i64 = @bitCast(l);
+                const sr: i64 = @bitCast(r);
+                const checked = switch (expr.code) {
+                    .add => @addWithOverflow(sl, sr),
+                    .sub => @subWithOverflow(sl, sr),
+                    .imul => @mulWithOverflow(sl, sr),
+                    else => null,
+                };
+                if (checked) |res_ovf| {
+                    if (res_ovf[1] != 0) return res;
+                    break :b @as(u64, @bitCast(res_ovf[0]));
+                }
+            }
             break :b switch (expr.code) {
                 .add => l +% r,
                 .sub => l -% r,

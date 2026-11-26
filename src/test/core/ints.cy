@@ -187,25 +187,25 @@ t.eq(i32(-4), i32(-8) / i32(2))
 t.eq(i32(-3), i32(-7) % i32(4))
 t.eq(i32(4), i32(-8) / i32(-2))
 
--- Narrow ints, a wrapped sum divides as the wrapped value.
-t.eq(i8(-28), (i8(100) + i8(100)) / i8(2))
-t.eq(i8(-2), (i8(100) + i8(100)) % i8(3))
-t.eq(i32(-1), (i32.max + i32(1)) / i32.max)
+-- Narrow ints, a wrapped sum (`wrapping_add`, `+` panics) divides as the wrapped value.
+t.eq(i8(-28), i8(100).wrapping_add(i8(100)) / i8(2))
+t.eq(i8(-2), i8(100).wrapping_add(i8(100)) % i8(3))
+t.eq(i32(-1), i32.max.wrapping_add(i32(1)) / i32.max)
 
 -- Narrow ints, `>>` shifts in zeros from their own width.
 t.eq(i8(124), i8(-8) >> i8(1))
 t.eq(i16(32764), i16(-8) >> i16(1))
 t.eq(i32(2147483644), i32(-8) >> i32(1))
-t.eq(i8(100), (i8(100) + i8(100)) >> i8(1))
+t.eq(i8(100), i8(100).wrapping_add(i8(100)) >> i8(1))
 t.eq(i8(15), (i8(-1) << i8(4)) >> i8(4))
 
 -- Narrow ints, unsigned division.
 t.eq(i32(2147483644), i32(-8).udiv(i32(2)))
 t.eq(i32(15), i32(-1).umod(i32(16)))
-t.eq(i8(100), (i8(100) + i8(100)).udiv(i8(2)))
+t.eq(i8(100), i8(100).wrapping_add(i8(100)).udiv(i8(2)))
 
 -- Narrow ints, the operands keep their values after a division or shift.
-narrow_a := i8(100) + i8(100)
+narrow_a := i8(100).wrapping_add(i8(100))
 narrow_b := i8(2)
 t.eq(i8(-28), narrow_a / narrow_b)
 t.eq(i8(100), narrow_a >> i8(1))
@@ -214,10 +214,10 @@ t.eq(i8(2), narrow_b)
 t.eq(-56, int(narrow_a))
 
 -- Narrow ints convert to a float from their own sign bit (F-84).
-t.eq(-56.0, float(i8(100) + i8(100)))
+t.eq(-56.0, float(i8(100).wrapping_add(i8(100))))
 t.eq(-56.0, float(narrow_a))
-t.eq(-5536.0, float(i16(30000) + i16(30000)))
-t.eq(-294967296.0, float(i32(2000000000) + i32(2000000000)))
+t.eq(-5536.0, float(i16(30000).wrapping_add(i16(30000))))
+t.eq(-294967296.0, float(i32(2000000000).wrapping_add(i32(2000000000))))
 t.eq(f32(-56.0), f32(narrow_a))
 t.eq(-28.0, float(narrow_a) / 2.0)
 t.eq(i8(-56), narrow_a)
@@ -230,7 +230,7 @@ t.eq(i8(1), i8(1) ** i8(-1))
 t.eq(i8(-1), i8(-1) ** i8(-1))
 t.eq(i16(81), i16(3) ** i16(4))
 t.eq(i32(-27), i32(-3) ** i32(3))
-t.eq(i8(0), i8(2) ** i8(8))
+t.eq(i8(64), i8(2) ** i8(6))
 t.eq(1024, 2 ** 10)
 
 -- `~` with a float target applies to the int operand (F-86).

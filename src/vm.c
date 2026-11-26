@@ -270,29 +270,45 @@ static inline String static_str(ZThread* t, u8* ptr, u32 len, bool ascii) {
     };
 }
 
-// Exponentiation by squaring.
-static i64 ipow(i64 b, i64 e) {
+// Exponentiation by squaring. Returns false when the result does not fit in an `int`.
+static bool ipow(i64 b, i64 e, i64* out) {
     if (e < 0) {
         if (b == 1 && e == -1) {
-            return 1;
+            *out = 1;
+        } else if (b == -1 && e == -1) {
+            *out = -1;
+        } else {
+            *out = 0;
         }
-        if (b == -1 && e == -1) {
-            return  -1;
-        }
-        return 0;
+        return true;
     }
     i64 result = 1;
     for (;;) {
         if (e & 1) {
-            result *= b;
+            if (__builtin_mul_overflow(result, b, &result)) return false;
         }
         e >>= 1;
         if (!e) {
             break;
         }
-        b *= b;
+        // Only squared while a higher bit of `e` remains, so the square is at most the result.
+        if (__builtin_mul_overflow(b, b, &b)) return false;
     }
-    return result;
+    *out = result;
+    return true;
+}
+
+// The value of the low `bits` of a register as a signed integer. The bits above are undefined in a narrow int register.
+static inline i64 sextBits(u64 v, u16 bits) {
+    u8 ext = 64 - bits;
+    return (i64)(v << ext) >> ext;
+}
+
+// Whether `v` fits in a signed integer of `bits`.
+static inline bool fitsBits(i64 v, u16 bits) {
+    if (bits >= 64) return true;
+    i64 lim = (i64)1 << (bits - 1);
+    return v >= -lim && v < lim;
 }
 
 static void panicStaticMsg(ZThread* t, const char* msg) {
@@ -307,6 +323,25 @@ static void panicStaticMsg(ZThread* t, const char* msg) {
 static inline void panicDivisionByZero(ZThread* t) {
     panicStaticMsg(t, "Division by zero.");
 }
+
+static inline void panicIntOverflow(ZThread* t) {
+    panicStaticMsg(t, "Integer overflow.");
+}
+
+// The body of a signed op that panics on overflow: `dst bits` operands after the inputs.
+#define INT_OVF_BINOP(builtin) \
+    u16 dst = pc[1]; \
+    u16 bits = pc[4]; \
+    i64 left = sextBits(stack[pc[2]], bits); \
+    i64 right = sextBits(stack[pc[3]], bits); \
+    i64 res; \
+    if (builtin(left, right, &res) || !fitsBits(res, bits)) { \
+        panicIntOverflow(t); \
+        RETURN(RES_PANIC); \
+    } \
+    stack[dst] = BITCAST(u64, res); \
+    pc += 5; \
+    NEXT();
 
 static inline void panicOutOfBounds(ZThread* t) {
     panicStaticMsg(t, "Out of bounds.");
@@ -583,6 +618,11 @@ ResultCode execBytecode(ZThread* t) {
         JENTRY(IMOD),
         JENTRY(MOD),
         JENTRY(Neg),
+        JENTRY(AddOvf),
+        JENTRY(SubOvf),
+        JENTRY(MulOvf),
+        JENTRY(AddI16Ovf),
+        JENTRY(NegOvf),
         JENTRY(ZEXT),
         JENTRY(SEXT),
         JENTRY(F2I),
@@ -1742,13 +1782,26 @@ beginSwitch:
         UINT_BINOP(stack[dst] = left * right)
     }
     CASE(IDIV): {
-        INTEGER_BINOP(
-            if (right == 0) {
-                panicDivisionByZero(t);
+        // The operands are sign extended. The quotient of the smallest value by -1 does not fit in `bits`.
+        u16 dst = pc[1];
+        i64 left = BITCAST(i64, stack[pc[2]]);
+        i64 right = BITCAST(i64, stack[pc[3]]);
+        u16 bits = pc[4];
+        if (right == 0) {
+            panicDivisionByZero(t);
+            RETURN(RES_PANIC);
+        }
+        if (right == -1) {
+            if (left == INT64_MIN || !fitsBits(-left, bits)) {
+                panicIntOverflow(t);
                 RETURN(RES_PANIC);
             }
+            stack[dst] = BITCAST(u64, -left);
+        } else {
             stack[dst] = BITCAST(u64, left / right);
-        )
+        }
+        pc += 5;
+        NEXT();
     }
     CASE(DIV): {
         UINT_BINOP(
@@ -1760,7 +1813,14 @@ beginSwitch:
         )
     }
     CASE(Pow): {
-        INTEGER_BINOP(stack[dst] = BITCAST(u64, ipow(left, right)))
+        INTEGER_BINOP(
+            i64 res;
+            if (!ipow(left, right, &res)) {
+                panicIntOverflow(t);
+                RETURN(RES_PANIC);
+            }
+            stack[dst] = BITCAST(u64, res);
+        )
     }
     CASE(IMOD): {
         INTEGER_BINOP(
@@ -1768,7 +1828,8 @@ beginSwitch:
                 panicDivisionByZero(t);
                 RETURN(RES_PANIC);
             }
-            stack[dst] = BITCAST(u64, left % right);
+            // `INT64_MIN % -1` traps in C. The remainder by -1 is always 0.
+            stack[dst] = right == -1 ? 0 : BITCAST(u64, left % right);
         )
     }
     CASE(MOD): {
@@ -1782,6 +1843,40 @@ beginSwitch:
     }
     CASE(Neg): {
         INTEGER_UNOP(stack[dst] = BITCAST(u64, -val))
+    }
+    CASE(AddOvf): {
+        INT_OVF_BINOP(__builtin_add_overflow)
+    }
+    CASE(SubOvf): {
+        INT_OVF_BINOP(__builtin_sub_overflow)
+    }
+    CASE(MulOvf): {
+        INT_OVF_BINOP(__builtin_mul_overflow)
+    }
+    CASE(AddI16Ovf): {
+        u16 dst = pc[1];
+        u16 bits = pc[4];
+        i64 left = sextBits(stack[pc[2]], bits);
+        i64 res;
+        if (__builtin_add_overflow(left, (i64)BITCAST(i16, pc[3]), &res) || !fitsBits(res, bits)) {
+            panicIntOverflow(t);
+            RETURN(RES_PANIC);
+        }
+        stack[dst] = BITCAST(u64, res);
+        pc += 5;
+        NEXT();
+    }
+    CASE(NegOvf): {
+        u16 dst = pc[1];
+        u16 bits = pc[3];
+        i64 val = sextBits(stack[pc[2]], bits);
+        if (val == INT64_MIN || !fitsBits(-val, bits)) {
+            panicIntOverflow(t);
+            RETURN(RES_PANIC);
+        }
+        stack[dst] = BITCAST(u64, -val);
+        pc += 4;
+        NEXT();
     }
     CASE(ZEXT): {
         // TODO: Inline assembly.

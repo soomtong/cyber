@@ -746,6 +746,12 @@ fn test_core(run: *Runner) void {
     run.case("core/bool.cy");
     run.case("core/byte.cy");
     run.case("core/raw_from_float_panic.cy");
+    run.case("core/int_overflow.cy");
+    run.case("core/int_overflow_add_panic.cy");
+    run.case("core/int_overflow_mul_narrow_panic.cy");
+    run.case("core/int_overflow_neg_panic.cy");
+    run.case("core/int_overflow_div_panic.cy");
+    run.case("core/int_overflow_const_error.cy");
     run.case("core/compare_eq.cy");
     run.case("core/compare_neq.cy");
     run.case("core/error_values.cy");

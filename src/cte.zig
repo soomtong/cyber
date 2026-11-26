@@ -2098,19 +2098,27 @@ fn eval_un_expr(c: *cy.Chunk, opt_target: ?*cy.Type, unary: *ast.Unary) !Expr {
                     return Expr.initValue(res);
                 },
                 bt.I64 => {
-                    const res = cy.TypeValue.init(c.sema.i64_t, Value.initInt(-child.value.asInt()));
+                    const neg = @subWithOverflow(0, child.value.asInt());
+                    if (neg[1] != 0) return c.reportError("Integer overflow.", node);
+                    const res = cy.TypeValue.init(c.sema.i64_t, Value.initInt(neg[0]));
                     return Expr.initValue(res);
                 },
                 bt.I32 => {
-                    const res = cy.TypeValue.init(c.sema.i32_t, Value.initInt32(-child.value.asI32()));
+                    const neg = @subWithOverflow(0, child.value.asI32());
+                    if (neg[1] != 0) return c.reportError("Integer overflow.", node);
+                    const res = cy.TypeValue.init(c.sema.i32_t, Value.initInt32(neg[0]));
                     return Expr.initValue(res);
                 },
                 bt.I16 => {
-                    const res = cy.TypeValue.init(c.sema.i16_t, Value.initInt16(-child.value.asI16()));
+                    const neg = @subWithOverflow(0, child.value.asI16());
+                    if (neg[1] != 0) return c.reportError("Integer overflow.", node);
+                    const res = cy.TypeValue.init(c.sema.i16_t, Value.initInt16(neg[0]));
                     return Expr.initValue(res);
                 },
                 bt.I8 => {
-                    const res = cy.TypeValue.init(c.sema.i8_t, Value.initInt8(-child.value.asI8()));
+                    const neg = @subWithOverflow(0, child.value.asI8());
+                    if (neg[1] != 0) return c.reportError("Integer overflow.", node);
+                    const res = cy.TypeValue.init(c.sema.i8_t, Value.initInt8(neg[0]));
                     return Expr.initValue(res);
                 },
                 else => {},
@@ -2200,9 +2208,10 @@ fn eval_bin_expr2(c: *cy.Chunk, left: cy.TypeValue, left_n: *ast.Node, right: cy
 }
 
 /// The compile-time form of the operators of the built-in number types. Both operands have the same type. The value
-/// is the one the instructions give at runtime: an integer wraps at its width, `/` truncates, `>>` is a logical
+/// is the one the instructions give at runtime: a `Raw` integer wraps at its width, `/` truncates, `>>` is a logical
 /// shift, a shift uses the low 6 bits of its amount, and `**` of integers is `Int.**`. Where the runtime panics,
-/// on `/` and `%` of integers by zero, this is a compile error. Returns null for any other type or operator.
+/// on `/` and `%` of integers by zero and on a signed result that does not fit ('Integer overflow.'), this is a
+/// compile error. Returns null for any other type or operator.
 fn evalNumberOp(c: *cy.Chunk, left: TypeValue, right: TypeValue, op: cy.BinaryExprOp, node: *ast.Node) !?TypeValue {
     const l = left.value;
     const r = right.value;
@@ -2225,23 +2234,36 @@ fn evalIntOp(comptime T: type, c: *cy.Chunk, type_: *cy.Type, l: T, r: T, op: cy
     const U = @Int(.unsigned, @bitSizeOf(T));
     const signed = @typeInfo(T).int.signedness == .signed;
     const res: T = switch (op) {
-        .plus => l +% r,
-        .minus => l -% r,
-        .star => l *% r,
+        .plus, .minus, .star => b: {
+            if (!signed) break :b switch (op) {
+                .plus => l +% r,
+                .minus => l -% r,
+                else => l *% r,
+            };
+            const res = switch (op) {
+                .plus => @addWithOverflow(l, r),
+                .minus => @subWithOverflow(l, r),
+                else => @mulWithOverflow(l, r),
+            };
+            if (res[1] != 0) return c.reportError("Integer overflow.", node);
+            break :b res[0];
+        },
         .slash, .percent => b: {
             if (r == 0) {
                 return c.reportError("Division by zero.", node);
             }
-            // The quotient of the smallest value by -1 does not fit. It wraps like the instructions do.
             if (signed and r == -1) {
-                break :b if (op == .slash) 0 -% l else 0;
+                // The quotient of the smallest value by -1 does not fit. The remainder by -1 is 0.
+                if (op == .percent) break :b 0;
+                if (l == std.math.minInt(T)) return c.reportError("Integer overflow.", node);
+                break :b -l;
             }
             break :b if (op == .slash) @divTrunc(l, r) else @rem(l, r);
         },
         .pow => b: {
             // `Raw` has no `**`.
             if (!signed) return null;
-            break :b evalIntPow(T, l, r);
+            break :b evalIntPow(T, l, r) orelse return c.reportError("Integer overflow.", node);
         },
         .bitwiseAnd => l & r,
         .bitwiseOr => l | r,
@@ -2262,8 +2284,9 @@ fn evalIntOp(comptime T: type, c: *cy.Chunk, type_: *cy.Type, l: T, r: T, op: cy
     return TypeValue.init(type_, evalIntValue(type_, @as(U, @bitCast(res))));
 }
 
-/// `Int.**`: a negative exponent gives 0 except for a base of 1, and of -1 with an exponent of -1.
-fn evalIntPow(comptime T: type, base: T, exp: T) T {
+/// `Int.**`: a negative exponent gives 0 except for a base of 1, and of -1 with an exponent of -1. Null when the
+/// result does not fit.
+fn evalIntPow(comptime T: type, base: T, exp: T) ?T {
     if (exp < 0) {
         if (base == 1 and exp == -1) return 1;
         if (base == -1 and exp == -1) return -1;
@@ -2274,11 +2297,15 @@ fn evalIntPow(comptime T: type, base: T, exp: T) T {
     var res: T = 1;
     while (true) {
         if (e & 1 != 0) {
-            res *%= b;
+            const m = @mulWithOverflow(res, b);
+            if (m[1] != 0) return null;
+            res = m[0];
         }
         e >>= 1;
         if (e == 0) break;
-        b *%= b;
+        const sq = @mulWithOverflow(b, b);
+        if (sq[1] != 0) return null;
+        b = sq[0];
     }
     return res;
 }

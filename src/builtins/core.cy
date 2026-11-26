@@ -631,6 +631,48 @@ fn (Int[]) ugt(right Self) -> bool:
 fn (Int[]) uge(right Self) -> bool:
     return (as[Raw[Bits]] self) >= (as[Raw[Bits]] right)
 
+--| `self + right` that wraps at the width of the type, where `+` panics with 'Integer overflow.'. For hashes,
+--| checksums and random numbers.
+fn (Int[]) wrapping_add(right Self) -> Self:
+    return (as[Raw[Bits]] self) + (as[Raw[Bits]] right)
+
+--| `self - right` that wraps at the width of the type.
+fn (Int[]) wrapping_sub(right Self) -> Self:
+    return (as[Raw[Bits]] self) - (as[Raw[Bits]] right)
+
+--| `self * right` that wraps at the width of the type.
+fn (Int[]) wrapping_mul(right Self) -> Self:
+    return (as[Raw[Bits]] self) * (as[Raw[Bits]] right)
+
+--| `self + right`, or `none` when it does not fit in the type.
+fn (Int[]) checked_add(right Self) -> ?Self:
+    res := self.wrapping_add(right)
+    -- Both operands have the sign that the wrapped result lacks.
+    if ((self ~ res) && (right ~ res)) < 0:
+        return none
+    return res
+
+--| `self - right`, or `none` when it does not fit in the type.
+fn (Int[]) checked_sub(right Self) -> ?Self:
+    res := self.wrapping_sub(right)
+    -- The operands differ in sign and the wrapped result has the sign of `right`.
+    if ((self ~ right) && (self ~ res)) < 0:
+        return none
+    return res
+
+--| `self * right`, or `none` when it does not fit in the type.
+fn (Int[]) checked_mul(right Self) -> ?Self:
+    if self == 0:
+        return 0
+    if self == -1:
+        if right == Self.min:
+            return none
+        return -right
+    res := self.wrapping_mul(right)
+    if res / self != right:
+        return none
+    return res
+
 fn (Int[]) umul(right Self) -> Self:
     return (as[Raw[Bits]] self) * (as[Raw[Bits]] right)
 
@@ -3403,7 +3445,7 @@ fn AutoHash[K Any](key K) -> int:
         return Wyhash.hash(0, key.span())
     #else K == int:
         -- Same as `splitmix64_hash`, written out since the VM does not inline it.
-        x := as[r64] (key + 0x9e3779b97f4a7c15)
+        x := (as[r64] key) + 0x9e3779b97f4a7c15
         x ~= x >> 30
         x = x * 0xbf58476d1ce4e5b9
         x ~= x >> 27
@@ -3452,7 +3494,7 @@ fn AutoEq[K Any](a K, b K) -> bool:
 
 fn splitmix64_hash(x_ int) -> int:
     -- Unsigned multiply directly since the VM does not inline `umul`.
-    x := as[r64] (x_ + 0x9e3779b97f4a7c15)
+    x := (as[r64] x_) + 0x9e3779b97f4a7c15
     x ~= x >> 30
     x = x * 0xbf58476d1ce4e5b9
     x ~= x >> 27

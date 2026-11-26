@@ -220,7 +220,7 @@ t.eq(8.asr(200), 0)
 -- Int.asr(), narrow ints shift from their own sign bit.
 t.eq(i8(-8).asr(i8(1)), i8(-4))
 t.eq(i8(100).asr(i8(2)), i8(25))
-t.eq((i8(100) + i8(100)).asr(i8(1)), i8(-28))
+t.eq(i8(100).wrapping_add(i8(100)).asr(i8(1)), i8(-28))
 t.eq(i16(-8).asr(i16(2)), i16(-2))
 t.eq(i32(-8).asr(i32(1)), i32(-4))
 t.eq(i32.min.asr(i32(31)), i32(-1))

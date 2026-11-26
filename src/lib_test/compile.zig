@@ -167,13 +167,13 @@ test "Jumps past the one-slot offset are compile errors, not panics or runtime c
         try repeat_src(w, "s := 1\nif s == 1:\n    s = -1\nelse:\n", "    s += 1\n", "", 9000, "print(s)\n");
         try expect_limit_error(vm, lw.written(), jump_msg);
     }
-    // Inside the limits the bodies compile and run: a loop body of 7000 `add_i16` (4 slots each) and an `if` body of
-    // 15000 (60000 slots fit the u16 conditional jump).
+    // Inside the limits the bodies compile and run: a loop body of 6000 `add_i16_ovf` (5 slots each) and an `if` body
+    // of 12000 (60000 slots fit the u16 conditional jump).
     {
         const vm = C.vm_init();
         defer C.vm_deinit(vm);
         lw.clearRetainingCapacity();
-        try repeat_src(w, "use test\ns := 0\ni := 0\nwhile i < 2:\n    i += 1\n", "    s += 1\n", "", 7000, "test.eq(s, 14000)\n");
+        try repeat_src(w, "use test\ns := 0\ni := 0\nwhile i < 2:\n    i += 1\n", "    s += 1\n", "", 6000, "test.eq(s, 12000)\n");
         var res: C.EvalResult = undefined;
         try zt.eq(C.Success, C.vm_eval(vm, lw.written(), &res));
     }
@@ -181,7 +181,7 @@ test "Jumps past the one-slot offset are compile errors, not panics or runtime c
         const vm = C.vm_init();
         defer C.vm_deinit(vm);
         lw.clearRetainingCapacity();
-        try repeat_src(w, "use test\ns := 0\nif s == 0:\n", "    s += 1\n", "", 15000, "test.eq(s, 15000)\n");
+        try repeat_src(w, "use test\ns := 0\nif s == 0:\n", "    s += 1\n", "", 12000, "test.eq(s, 12000)\n");
         var res: C.EvalResult = undefined;
         try zt.eq(C.Success, C.vm_eval(vm, lw.written(), &res));
     }

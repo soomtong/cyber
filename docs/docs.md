@@ -587,6 +587,33 @@ n := int.parse('42') !else 0
 
 Integer types can perform [arithmetic](#arithmetic-operators), [bitwise](#bitwise-operators), and [comparison](#comparison-operators) operations.
 
+#### Integer overflow.
+`+`, `-`, `*`, `**`, unary `-` and `/` of a signed integer (`int`, `i32`, `i16`, `i8`) panic with 'Integer overflow.' when the result does not fit in its type. A wrong value never passes on silently. `int.min / -1` overflows too, and `x % -1` is always `0`. A constant expression that overflows is a compile error with the same message:
+```cy
+n := int.max
+print(n + 1)           --> panic: Integer overflow.
+print(i8(100) + i8(28)) --> panic: Integer overflow.
+const k = int.max + 1  -- error: Integer overflow.
+```
+When a result may not fit, ask for it with `checked_add`, `checked_sub` and `checked_mul`, which return `none` instead. Where wrapping is the intent, as in a hash, a checksum or a random number generator, write `wrapping_add`, `wrapping_sub` and `wrapping_mul`:
+```cy
+-- The nth Fibonacci number, or `none` when it does not fit in an `int` (from `fib(93)` on).
+fn fib(n int) -> ?int:
+    if n == 0:
+        return 0
+    a := 0
+    b := 1
+    for 1..n:
+        next := a.checked_add(b) ?else:
+            return none
+        a = b
+        b = next
+    return b
+
+print(int.max.wrapping_add(1) == int.min)  --> true
+```
+The raw integer types (`byte`, `r16`, `r32`, `r64`) hold bits for masks and memory: their arithmetic wraps at their width. Shifts and bitwise operators never overflow.
+
 ### Floats.
 `float` (an alias for `f64`) is the default floating point type. It's encoded as 64-bit IEEE 754.
 

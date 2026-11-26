@@ -230,6 +230,10 @@ zig build cli -Doptimize=ReleaseSafe   # 네이티브 산출물 되돌리기(-Dd
   `for` `else` 테스트 포함). 재실행 없이 0.4.20과 같은 대체 절차로 냈다: 태그 run의 자산 13개 + 태그 커밋 worktree에서 빌드한
   arm64 둘. CI `cyber-macos-x64`의 버전 문자열이 로컬 빌드와 같다. 설치 확인은 `install.sh 0.4.21`(arm64 macOS, `CYBER_HOME` ·
   `CYBER_BIN`을 scratchpad로): 버전 문자열, `examples/hello.cy`, `examples/stream_lines.cy`, `cyber-lsp` `initialize`.
+- 0.4.22(2026-11-26): 태그 `0.4.22` → `6767c2d8`, `build-1194-6767c2d`, 에셋 15개. master run `45746024150`(35분 36초)과 태그 run
+  `45749964224` 모두 arm64 macOS를 포함한 모든 job이 첫 실행에서 통과해 Release job이 릴리스를 만들었다(대체 절차 없음). 설치 확인은
+  `install.sh 0.4.22`(arm64 macOS, `CYBER_HOME` · `CYBER_BIN`을 scratchpad로): 버전 문자열, `examples/hello.cy`, `cyber-lsp`
+  `initialize`, Scope 준비 큐 벤치(N=8000 5ms)와 `concurrency/scope_ready_queue.cy`.
 
 ## CI 시간 줄이기 (2026-11-18)
 

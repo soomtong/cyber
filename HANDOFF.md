@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-26): 기술 부채 셋 정리(Scope 준비 큐)
+# HANDOFF (2026-11-26): 기술 부채 셋 정리(Scope 준비 큐)와 0.4.22 릴리스
 
 ## 목표
 
@@ -76,12 +76,12 @@
   `stderr_to_stdout` · `detach` · `Process.pid`. 둘 다 15단계 rc=0 뒤 커밋, master push. 릴리스는 하지 않음(사용자가 더 모아서 낸다).
 - 2026-11-26(사용자: "급하지 않은 기술 부채라고 되어 있는 것 3가지를 검토해 주세요. 어느 정도 비용이 들지 파악이 먼저", 이어서
   "3가지 모두 다 진행해 봅시다. 쉬운 거부터"): 취소 불변식 panic은 보호 장치로 재분류(코드 변경 없음), `@destruct_span` 삭제
-  (`55179645`), `Scope.run`의 준비 큐(`d731ad19`, `src/fiber_wait.zig`). push 안 함.
+  (`55179645`), `Scope.run`의 준비 큐(`d731ad19`, `src/fiber_wait.zig`).
+- 2026-11-26(사용자: "release 0.4.22"): 0.4.22 릴리스. 태그 `6767c2d8`, `build-1194-6767c2d`, 에셋 15개(CI, 대체 절차 없음).
 
 ## 현재 브랜치
 
-`master`. 0.4.21 태그 `1cb14490`(`build-1186-1cb1449`, 에셋 15개, Latest). CI의 arm64 macOS 러너가 배정되지 않아 arm64 자산
-둘은 로컬에서 빌드해 올렸다(`project_fork_release_ci.md` "0.4.21"). 릴리스 기록 커밋까지 push한다.
+`master`. 0.4.22 태그 `6767c2d8`(`build-1194-6767c2d`, 에셋 15개, Latest). 릴리스 기록 커밋까지 push한다.
 
 ## 완료된 작업
 
@@ -442,8 +442,7 @@
 
 ## 다음 에이전트에게
 
-1. 0.4.21이 마지막 릴리스다(노트 `docs/releases/0.4.21.md`). `unreleased.md`에 그 뒤 세 절(리뷰 수정, os.cmd 보강, Scope 준비
-   큐)이 있다. master는 origin보다 앞서 있다(push 안 함).
+1. 0.4.22가 마지막 릴리스다(노트 `docs/releases/0.4.22.md`). `unreleased.md`는 머리말만 있다.
 2. 다음 릴리스도 사용자가 지시할 때만. master를 먼저 push하고 그 run이 끝난 뒤 태그를 push한다.
 3. tars-agent 저장소에는 쓰기 전에 `git status`를 본다(다른 세션이 동시에 일한다). 회신 절 외에는 쓰지 않는다.
 

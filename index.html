@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.22-dev 1202-0b7cec1</div>
+    <div class="sub-title">v0.4.23-dev 1208-fef8ef1</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -5260,6 +5260,28 @@ fn main() -> !void:
 <h2 id="builtin-modules">Builtin modules. <a href="#builtin-modules">#</a></h2>
 <p>Builtin and std modules come with Cyber. See the <a href="api.html" title="">API docs</a>.</p>
 <a href="#modules">^topic</a>
+<h3 id="reading-input">Reading input. <a href="#reading-input">#</a></h3>
+<p>The <code>os</code> module reads stdin, whether it is a terminal where someone types or a pipe (<code>cat data.txt | cyber app.cy</code>). <code>os.input(prompt)</code> prints the prompt without a line break and reads a line. Like <code>read -p</code> of a shell, it prints the prompt only when stdin is a terminal: a pipe is not asked, and the output stays clean for the next program. <code>os.read_line()</code> reads a line without a prompt. Both return the line without its line break (<code>\n</code> or <code>\r\n</code>), and <code>none</code> at the end of the input: when a pipe or a file runs out, or after Ctrl-D (Ctrl-Z and Enter on Windows) at a terminal:</p>
+<pre><code class="language-cy">use os
+
+name := os.input('Name: ')! ?else 'stranger'
+print('Hello, %{name}.')
+
+while os.input('> ')! |cmd|:
+    if cmd == 'quit':
+        break
+    print('you typed `%{cmd}`')
+</code></pre>
+<p><code>os.stdin_lines()</code> gives the lines for a <code>for</code> loop, whose <code>else |err|:</code> block handles an error. <code>os.read_stdin()</code> returns the rest of the input as one string:</p>
+<pre><code class="language-cy">-- cat names.txt | cyber upper.cy
+for os.stdin_lines() |line|:
+    print(line.upper())
+else |err|:
+    eprint(err)
+</code></pre>
+<p><code>os.read_password(prompt)</code> reads a line without showing what is typed when stdin is a terminal. The terminal is set back when the line is read, and also when Ctrl-C ends the program. From a pipe it reads a line as <code>input</code> does, without the prompt. <code>os.stdin().is_terminal()</code> tells a terminal from a pipe or a file, and <code>os.stdout().is_terminal()</code> whether the output is shown or goes on to another program.</p>
+<p>Stdin is one stream for the whole process. Every read of it goes through one buffer, so <code>read_line</code>, <code>input</code>, <code>stdin_lines</code>, <code>read_stdin</code> and the <code>File</code> methods of <code>os.stdin()</code> (<code>read</code>, <code>read_line</code>, <code>read_all</code>) can be used one after another without losing input. <code>close()</code> of <code>os.stdin()</code>, <code>os.stdout()</code> or <code>os.stderr()</code> leaves the stream open. While a script waits for input on Linux or macOS, the host can stop it (<code>cl_vm_interrupt</code>). A line can be as long as memory allows. For a file other than stdin, <code>File.read_line()</code> reads one byte at a time so that it consumes nothing past the line. To read many lines of a file, use <code>io.Scanner(&file).next_line()</code>.</p>
+<a href="#modules">^topic</a>
 <h3 id="running-programs">Running programs. <a href="#running-programs">#</a></h3>
 <p><code>os.cmd</code> makes a command: a program and its arguments. A <code>Cmd</code> is a value. Its methods return a new command, and nothing starts until <code>run</code>, <code>read</code> or <code>run_status</code> is called:</p>
 <pre><code class="language-cy">use os
@@ -5545,7 +5567,11 @@ print(time.parse_format('Nov  5 10:22:01', '%b %e %T')!.format())
 --> 1970-11-05T10:22:01Z
 </code></pre>
 <p><code>format()</code> writes RFC 3339 (<code>Z</code> for UTC, and the fraction of the second only when it is not zero). <code>format(fmt)</code> takes a <code>strftime</code> format and returns <code>error.Format</code> for a specifier that is not in this table:</p>
-<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>Date</td><td><code>%Y</code> (four digits), <code>%y</code> (two digits: 69 to 99 are 1969 to 1999), <code>%m</code>, <code>%d</code>, <code>%e</code> (day padded with a space), <code>%j</code> (day of the year), <code>%b</code> <code>%h</code> (<code>Nov</code>), <code>%B</code> (<code>November</code>), <code>%a</code> (<code>Sun</code>), <code>%A</code> (<code>Sunday</code>)</td></tr><tr><td>Time of day</td><td><code>%H</code>, <code>%I</code> (12 hour clock), <code>%p</code> (<code>AM</code>, <code>PM</code>), <code>%M</code>, <code>%S</code>, <code>%f</code> (six digits), <code>%3f</code>, <code>%6f</code>, <code>%9f</code></td></tr><tr><td>Offset</td><td><code>%z</code> (<code>+0900</code>), <code>%:z</code> (<code>+09:00</code>)</td></tr><tr><td>Zone</td><td><code>%Z</code>: the abbreviation of the time zone (<code>KST</code>, <code>EDT</code>). <code>UTC</code> or the offset for a value without a zone. Output only</td></tr><tr><td>Short forms</td><td><code>%F</code> (<code>%Y-%m-%d</code>), <code>%T</code> (<code>%H:%M:%S</code>), <code>%R</code> (<code>%H:%M</code>), <code>%D</code> (<code>%m/%d/%y</code>)</td></tr><tr><td>Others</td><td><code>%s</code> (Unix seconds), <code>%n</code>, <code>%t</code>, <code>%%</code></td></tr><tr><td>Output only</td><td><code>%u</code> (Monday is 1, Sunday is 7), <code>%w</code> (Sunday is 0), <code>%G</code> and <code>%V</code> (ISO 8601 year and week), <code>%U</code> and <code>%W</code> (week of the year, 00 to 53, with weeks from Sunday and from Monday as in C: the days before the first Sunday or Monday are week 00), <code>%Z</code></td></tr></tbody></table><p>Names are in English. When parsing, a number takes one or two digits (<code>%Y</code> four, <code>%j</code> up to three, every <code>%f</code> one or more), <code>%j</code> can not be used with <code>%m</code>, <code>%d</code>, <code>%e</code> or <code>%b</code>, a space in the format takes one or more, a name can be short or full in any case, and both offset specifiers take <code>Z</code>, <code>+0900</code>, <code>+09:00</code> and <code>+09</code>. A <code>Date</code> formats with the date specifiers only.</p>
+<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>Date</td><td><code>%Y</code> (four digits), <code>%y</code> (two digits: 69 to 99 are 1969 to 1999), <code>%m</code>, <code>%d</code>, <code>%e</code> (day padded with a space), <code>%j</code> (day of the year), <code>%b</code> <code>%h</code> (<code>Nov</code>), <code>%B</code> (<code>November</code>), <code>%a</code> (<code>Sun</code>), <code>%A</code> (<code>Sunday</code>)</td></tr><tr><td>Time of day</td><td><code>%H</code>, <code>%I</code> (12 hour clock), <code>%p</code> (<code>AM</code>, <code>PM</code>), <code>%M</code>, <code>%S</code>, <code>%f</code> (six digits), <code>%3f</code>, <code>%6f</code>, <code>%9f</code></td></tr><tr><td>Offset</td><td><code>%z</code> (<code>+0900</code>), <code>%:z</code> (<code>+09:00</code>)</td></tr><tr><td>Zone</td><td><code>%Z</code>: the abbreviation of the time zone (<code>KST</code>, <code>EDT</code>). <code>UTC</code> or the offset for a value without a zone. Output only</td></tr><tr><td>Short forms</td><td><code>%F</code> (<code>%Y-%m-%d</code>), <code>%T</code> (<code>%H:%M:%S</code>), <code>%R</code> (<code>%H:%M</code>), <code>%D</code> (<code>%m/%d/%y</code>)</td></tr><tr><td>Others</td><td><code>%s</code> (Unix seconds), <code>%n</code>, <code>%t</code>, <code>%%</code></td></tr><tr><td>Week</td><td><code>%u</code> (Monday is 1, Sunday is 7), <code>%w</code> (Sunday is 0), <code>%G</code> and <code>%V</code> (ISO 8601 year and week), <code>%U</code> and <code>%W</code> (week of the year, 00 to 53, with weeks from Sunday and from Monday as in C: the days before the first Sunday or Monday are week 00)</td></tr><tr><td>Output only</td><td><code>%Z</code></td></tr></tbody></table><p>Names are in English. When parsing, a number takes one or two digits (<code>%Y</code> four, <code>%j</code> up to three, every <code>%f</code> one or more), <code>%j</code> can not be used with <code>%m</code>, <code>%d</code>, <code>%e</code> or <code>%b</code>, a space in the format takes one or more, a name can be short or full in any case, and both offset specifiers take <code>Z</code>, <code>+0900</code>, <code>+09:00</code> and <code>+09</code>. A <code>Date</code> formats with the date and week specifiers only.</p>
+<p>A week gives the date together with a day of the week (<code>%a</code>, <code>%A</code>, <code>%u</code> or <code>%w</code>): <code>%U</code> or <code>%W</code> with <code>%Y</code> or <code>%y</code>, or <code>%V</code> with <code>%G</code>. It can not be used with <code>%m</code>, <code>%d</code>, <code>%e</code>, <code>%b</code> or <code>%j</code>, and a day that the week does not have (<code>2026 00 Wed</code> by <code>%Y %W %a</code>: the first Monday is January 5) is <code>error.Range</code>. When the format has a whole date (a year, and a month and a day or <code>%j</code>), a day of the week in the text must be the day of that date: <code>Fri 2026-11-26</code> by <code>%a %F</code> is <code>error.Range</code> with '2026-11-26 is a Thursday, not a Friday.'</p>
+<pre><code class="language-cy">print(time.parse_format('2026-W53-4', '%G-W%V-%u')!.format())
+--> 2026-12-31T00:00:00Z
+</code></pre>
 <p>The parse functions return <code>error.Syntax</code> when the text has another shape, <code>error.Range</code> when a field is out of range and <code>error.Format</code> when the format is wrong. Each takes a <code>time.Diag</code> as its last argument to see why:</p>
 <pre><code class="language-cy">var diag time.Diag = {}
 try:

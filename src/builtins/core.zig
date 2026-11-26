@@ -247,6 +247,18 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"@fiber_unwind",  cFunc(fiber_unwind)},
     .{"@fibers_wait",   zErrFunc(fibers_wait)},
     .{"@fiber_resume",  zErrBuiltinFunc(fiber_resume, null)},
+
+    // Scope
+    .{"@scope_queue_new",  zErrFunc(scope_queue_new)},
+    .{"@scope_queue_free", cFunc(scope_queue_free)},
+    .{"@scope_add",        cFunc(scope_add)},
+    .{"@scope_pop",        cFunc(scope_pop)},
+    .{"@scope_park",       cFunc(scope_park)},
+    .{"@scope_wait",       zErrFunc(scope_wait)},
+    .{"@scope_wake_all",   cFunc(scope_wake_all)},
+    .{"@scope_count",      cFunc(scope_count)},
+    .{"@scope_first",      cFunc(scope_first)},
+    .{"@scope_next",       cFunc(scope_next)},
 };
 
 comptime {
@@ -1685,6 +1697,7 @@ pub fn notifyFutureComplete(t: *cy.Thread) anyerror!C.Ret {
     const future = t.param(*cy.heap.FutureValue);
 
     try completeFuture(t, .{ .inner = future });
+    cy.fiber_wait.wakeFuture(t, future);
     return C.RetOk;
 }
 
@@ -2203,6 +2216,7 @@ fn fiber_status(t: *cy.Thread) callconv(.c) C.Ret {
 
 /// Gives back the list that a fiber owns while it is suspended in `Future.wait_any`.
 fn fiberClearAwait(t: *cy.Thread, fiber: *vmc.Fiber) void {
+    cy.fiber_wait.unregister(t, fiber);
     const list: [*]*cy.heap.FutureValue = @ptrCast(@alignCast(fiber.await_ptr));
     for (list[0..fiber.await_len]) |future| {
         t.heap.release(Value.initPtr(future));
@@ -2314,6 +2328,7 @@ fn fiber_unwind(t: *cy.Thread) callconv(.c) C.Ret {
     const fiber = t.param(*vmc.Fiber);
     ret.* = t.unwindFiber(fiber);
     if (ret.*) {
+        cy.fiber_wait.unregister(t, fiber);
         // The wait is over. The list of a `Future.wait_any` is given back: the call does not run again.
         if (fiber.await_owned) fiberClearAwait(t, fiber);
         fiber.await_len = 0;
@@ -2348,6 +2363,130 @@ fn ownedFiberFutureReady(root: *vmc.Fiber) bool {
         if (fiber.state == vmc.FIBER_SUSPENDED and fiberFutureReady(fiber)) return true;
     }
     return false;
+}
+
+const ScopeQueue = cy.fiber_wait.ScopeQueue;
+
+fn scope_queue_new(t: *cy.Thread) anyerror!C.Ret {
+    const ret = t.ret(*ScopeQueue);
+    ret.* = try cy.fiber_wait.newQueue(t);
+    return C.RetOk;
+}
+
+fn scope_queue_free(t: *cy.Thread) callconv(.c) C.Ret {
+    _ = t.ret(void);
+    cy.fiber_wait.freeQueue(t, t.param(*ScopeQueue));
+    return C.RetOk;
+}
+
+fn scope_add(t: *cy.Thread) callconv(.c) C.Ret {
+    _ = t.ret(void);
+    const q = t.param(*ScopeQueue);
+    q.add(t.param(*vmc.Fiber));
+    return C.RetOk;
+}
+
+/// The next fiber of the scope that can run, or null.
+fn scope_pop(t: *cy.Thread) callconv(.c) C.Ret {
+    const ret = t.ret(?*vmc.Fiber);
+    const q = t.param(*ScopeQueue);
+    cy.fiber_wait.pollShared(t, false);
+    ret.* = q.pop();
+    return C.RetOk;
+}
+
+/// A fiber of the scope that `Scope.run` resumed is suspended.
+fn scope_park(t: *cy.Thread) callconv(.c) C.Ret {
+    _ = t.ret(void);
+    const q = t.param(*ScopeQueue);
+    cy.fiber_wait.park(t, q, t.param(*vmc.Fiber));
+    return C.RetOk;
+}
+
+fn scope_wake_all(t: *cy.Thread) callconv(.c) C.Ret {
+    _ = t.ret(void);
+    t.param(*ScopeQueue).wakeAll();
+    return C.RetOk;
+}
+
+fn scope_count(t: *cy.Thread) callconv(.c) C.Ret {
+    const ret = t.ret(i64);
+    ret.* = @intCast(t.param(*ScopeQueue).count);
+    return C.RetOk;
+}
+
+fn scope_first(t: *cy.Thread) callconv(.c) C.Ret {
+    const ret = t.ret(?*vmc.Fiber);
+    ret.* = t.param(*ScopeQueue).first;
+    return C.RetOk;
+}
+
+fn scope_next(t: *cy.Thread) callconv(.c) C.Ret {
+    const ret = t.ret(?*vmc.Fiber);
+    ret.* = t.param(*vmc.Fiber).scope_next;
+    return C.RetOk;
+}
+
+/// `Scope.run` has no fiber that can run, and the scope's fibers wait. Returns true when one can run, or after an
+/// interrupt (the caller loops, and the loop's checkpoint stops the eval). Returns false when nothing can wake
+/// one: no fiber of the thread awaits a future.
+/// In a fiber, the fiber gives control back. It is woken when a fiber of the scope is put in the queue
+/// (`fiber_wait.wakeFiber`), and the call returns true when it is resumed. The root context waits like
+/// `Fiber.wait_ready`: it runs queued thread tasks, sleeps until the worker pool makes progress, or suspends the
+/// eval (`CL_AWAIT`) when only the host can complete the futures.
+fn scope_wait(t: *cy.Thread) anyerror!C.Ret {
+    const ret = t.ret(bool);
+    const q = t.param(*ScopeQueue);
+    ret.* = true;
+    if (t.c.cur_fiber) |fiber| {
+        if (fiber.await_yielded) {
+            // Resumed after the wait.
+            fiber.await_yielded = false;
+            return C.RetOk;
+        }
+    }
+    const pool = &t.c.vm.worker_pool;
+    while (true) {
+        const epoch = pool.progressEpoch();
+        cy.fiber_wait.pollShared(t, true);
+        if (q.ready_head != null) return C.RetOk;
+        if (t.waits.count() == 0) {
+            ret.* = false;
+            return C.RetOk;
+        }
+        if (t.c.cur_fiber) |fiber| {
+            if (fiber.host_depth != t.c.host_depth) {
+                return t.ret_panic("Cannot await across a host call.");
+            }
+            fiber.await_fibers = true;
+            fiber.await_yielded = true;
+            fiber.waiting_in = q;
+            q.waiter = fiber;
+            return vmc.RET_FIBER_AWAIT;
+        }
+        const has_shared = t.shared_waits.items.len > 0;
+        if (has_shared and pool.run_queued_task()) {
+            continue;
+        }
+        if (!has_shared) {
+            if (!cy.vm.canSuspendEval(t)) return C.RetInterrupt;
+            const compiler = t.c.vm.compiler;
+            compiler.await_buf.clearRetainingCapacity();
+            // The same list as `Fiber.wait_ready` hands out, in the order of the thread's fibers.
+            var opt_fiber = t.c.fibers;
+            while (opt_fiber) |fiber| : (opt_fiber = fiber.list_next) {
+                if (!fiber.wait_registered) continue;
+                try compiler.await_buf.appendSlice(compiler.alloc, fiberFutures(fiber));
+            }
+            compiler.await_future = compiler.await_buf.items[0];
+            compiler.await_any = compiler.await_buf.items;
+            return vmc.RET_AWAIT;
+        }
+        if (@atomicLoad(u8, t.c.interrupt, .acquire) != 0) {
+            return C.RetOk;
+        }
+        pool.waitProgress(epoch);
+    }
 }
 
 /// Marks a fiber that was never resumed as cancelled. Returns whether it did.

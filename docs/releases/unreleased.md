@@ -29,3 +29,13 @@
   않으면 버린다. eval · VM이 끝나도, `cl_vm_interrupt`에도 멈추지 않는다. POSIX에서는 따로 프로세스 그룹을 둔다. 호스트의 스레드가
   끝을 기다려 회수한다. 시간 제한과 함께 쓰면 `error.InvalidArgument`.
 - `Process.pid() -> int`: 마지막 단계의 pid.
+
+## `scope` · `Scope`: 끝난 Future의 fiber만 다시 돈다 (2026-11-26)
+
+- `Scope.run`(`scope` 블록 · `join`)은 바퀴마다 모든 fiber에게 기다리는지 묻던 것을 그만두고 돌 수 있는 fiber만 resume한다.
+  Future를 기다리는 fiber는 그 Future가 완료될 때(`FutureResolver.complete`, 호스트의 `cl_future_complete`, spawn 스레드의 끝)
+  scope의 준비 큐에 들어간다. 결정은 `docs/decisions/project_coroutines.md` "Scope 준비 큐".
+- 성능(ReleaseFast): fiber N개가 각자 Future를 기다리고 한 fiber가 바퀴마다 하나씩 완료하는 경우 N=8000이 1767ms → 6ms(N²에서
+  N으로). 그룹 400개 × fiber 5개의 중첩 `scope`는 221ms → 1ms. `suspend`만 하는 fiber는 6~13% 빨라졌다.
+- 도는 순서: 시작한 순서로 돌고, `suspend`한 fiber는 큐 끝으로, Future로 깨어난 fiber는 완료된 순서로 큐 끝에 선다. 전에는 깨어난
+  fiber가 다음 바퀴에서 시작 순서의 제자리에 돌았다. 같은 바퀴에 여러 Future가 완료되면 도는 순서가 다를 수 있다.

@@ -87,6 +87,7 @@ pub const Pointer = heap.Pointer;
 
 pub const sync = @import("sync.zig");
 pub const thread = @import("thread.zig");
+pub const fiber_wait = @import("fiber_wait.zig");
 pub const Thread = thread.Thread;
 pub const worker = @import("worker.zig");
 

@@ -4304,7 +4304,7 @@ A fiber can not resume itself or a fiber that is waiting for it:
 Structured concurrency ties the lifetime of a group of fibers to a block of code. The fibers are started in the block, and the block is not left before all of them are done. A failure of one fiber ends the others, and the error leaves the block like any other error.
 
 ### `scope` block.
-A `scope` block runs a group of fibers and does that loop itself. The name between the bars is a `Scope` that lives for the block. `start` adds a fiber: the arguments are evaluated at once, and the fibers run when the body is done. A fiber that stops at `suspend` gives the others a turn, and when every fiber waits for a future the block waits like `Fiber.wait_ready()`:
+A `scope` block runs a group of fibers and does that loop itself. The name between the bars is a `Scope` that lives for the block. `start` adds a fiber: the arguments are evaluated at once, and the fibers run when the body is done. A fiber that stops at `suspend` gives the others a turn, a fiber that awaits a future runs again once the future is completed, and when every fiber waits for a future the block waits like `Fiber.wait_ready()`:
 ```cy
 fn fetch(name str, n int, log ^ArrayStore[str]) -> !void:
     res := spawn compute(n).await()

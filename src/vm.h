@@ -576,6 +576,26 @@ typedef struct Fiber {
     struct Fiber* owned_head;
     struct Fiber* owned_prev;
     struct Fiber* owned_next;
+
+    // Registered in the thread's wait table under each future that it awaits (`fiber_wait.zig`): completing
+    // one of them wakes the fiber. Dropped when the fiber is resumed, woken, unwound or freed.
+    bool wait_registered;
+    // The fiber of a `Scope` (`scope`, a `fiber_wait.ScopeQueue`) is suspended at an `await` or in
+    // `Fiber.wait_ready` and is not in the scope's ready queue: a completion puts it there.
+    bool parked;
+    // In the ready queue of its scope.
+    bool queued;
+    // The `ScopeQueue` of the `Scope` that started the fiber. NULL for other fibers.
+    void* scope;
+    // The fibers of the scope in the order they were started.
+    struct Fiber* scope_prev;
+    struct Fiber* scope_next;
+    // The fibers of the scope that can run, in the order they can.
+    struct Fiber* ready_prev;
+    struct Fiber* ready_next;
+    // The `ScopeQueue` whose wait the fiber is suspended in (`@scope_wait`). A fiber that is put in that queue
+    // wakes this one. NULL otherwise.
+    void* waiting_in;
 } Fiber;
 
 // Unused members are declared for debugging.
@@ -973,6 +993,8 @@ ResultCode z_ret_generator(ZThread* t, TypeId type_id, u16 ret_size, Value* fp, 
 ResultCode zAwait(ZThread* t, Value value);
 bool zFiberAwaitReady(ZThread* t, Value value);
 void zFiberSetOwner(Fiber* fiber, Fiber* owner);
+ResultCode zFiberRegisterWait(ZThread* t, Fiber* fiber);
+void zFiberUnregisterWait(ZThread* t, Fiber* fiber);
 
 // The return address of a fiber's entry frame. One `FIBER_END` inst.
 extern Inst fiber_end_code[1];

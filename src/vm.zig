@@ -1191,6 +1191,16 @@ fn zFiberSetOwner(fiber: *vmc.Fiber, owner: ?*vmc.Fiber) callconv(.c) void {
     cy.thread.setFiberOwner(fiber, owner);
 }
 
+/// A fiber is suspended at an `await` or in `Future.wait_any`: completing one of its futures wakes it.
+fn zFiberRegisterWait(t: *cy.Thread, fiber: *vmc.Fiber) callconv(.c) vmc.ResultCode {
+    cy.fiber_wait.register(t, fiber) catch |err| return allocFailed(t, err);
+    return vmc.RES_SUCCESS;
+}
+
+fn zFiberUnregisterWait(t: *cy.Thread, fiber: *vmc.Fiber) callconv(.c) void {
+    cy.fiber_wait.unregister(t, fiber);
+}
+
 fn zFiberAwaitReady(_: *cy.Thread, fut_value_bits: u64) callconv(.c) bool {
     const fut_value_ptr: Value = .{ .val = fut_value_bits };
     return futureDone(fut_value_ptr.asPtr(*cy.heap.FutureValue));
@@ -1412,6 +1422,8 @@ comptime {
     @export(&zAwait, .{ .name = "zAwait", .linkage = .strong });
     @export(&zFiberAwaitReady, .{ .name = "zFiberAwaitReady", .linkage = .strong });
     @export(&zFiberSetOwner, .{ .name = "zFiberSetOwner", .linkage = .strong });
+    @export(&zFiberRegisterWait, .{ .name = "zFiberRegisterWait", .linkage = .strong });
+    @export(&zFiberUnregisterWait, .{ .name = "zFiberUnregisterWait", .linkage = .strong });
     @export(&z_panic_unexpected_choice, .{ .name = "z_panic_unexpected_choice", .linkage = .strong });
     @export(&zAllocBigObject, .{ .name = "zAllocBigObject", .linkage = .strong });
     @export(&zAllocPoolObject, .{ .name = "zAllocPoolObject", .linkage = .strong });

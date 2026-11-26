@@ -434,6 +434,15 @@ pub const Thread = struct {
 
     stack_trace: cy.StackTrace,
 
+    /// The suspended fibers by the futures that they await (`fiber_wait.zig`).
+    waits: std.AutoHashMapUnmanaged(*cy.heap.FutureValue, cy.fiber_wait.WaitEntry) = .empty,
+    /// The futures of spawned threads in `waits`.
+    shared_waits: std.ArrayList(*cy.heap.FutureValue) = .empty,
+    /// The progress epoch of the worker pool at the last check of `shared_waits`.
+    shared_epoch: u32 = 0,
+    /// The queues of the thread's `Scope` values.
+    scope_queues: ?*cy.fiber_wait.ScopeQueue = null,
+
     pub fn init(self: *Thread, id: usize, alloc: std.mem.Allocator, vm: *cy.VM) !void {
         self.* = .{
             .heap = try cy.Heap.init(self.c.vm, self, alloc, vm.sema),
@@ -499,6 +508,7 @@ pub const Thread = struct {
 
         self.exitFibers();
         self.freeAllFibers();
+        cy.fiber_wait.deinit(self, reset);
 
         if (!reset) {
             self.alloc.free(self.c.stack());
@@ -552,6 +562,15 @@ pub const Thread = struct {
             .owned_head = null,
             .owned_prev = null,
             .owned_next = null,
+            .wait_registered = false,
+            .parked = false,
+            .queued = false,
+            .scope = null,
+            .scope_prev = null,
+            .scope_next = null,
+            .ready_prev = null,
+            .ready_next = null,
+            .waiting_in = null,
         };
         if (self.c.fibers) |head| {
             head.list_prev = fiber;
@@ -622,6 +641,7 @@ pub const Thread = struct {
 
     /// Frees a fiber that is not running.
     pub fn freeFiber(self: *Thread, fiber: *vmc.Fiber) void {
+        cy.fiber_wait.forgetFiber(self, fiber);
         // The fibers that it owned have no owner until one resumes them.
         setFiberOwner(fiber, null);
         while (fiber.owned_head) |owned| setFiberOwner(owned, null);
@@ -669,6 +689,7 @@ pub const Thread = struct {
         while (self.c.fibers) |fiber| {
             self.freeFiber(fiber);
         }
+        cy.fiber_wait.freeAllQueues(self);
     }
 
     pub fn checkGlobalRC(self: *cy.Thread) !void {

@@ -983,6 +983,12 @@ beginSwitch:
             if (res == RET_FIBER_AWAIT) {
                 // A builtin suspended the running fiber. It recorded what the fiber waits for.
                 Fiber* f = t->c.cur_fiber;
+                if (f->await_len > 0) {
+                    ResultCode code = zFiberRegisterWait(t, f);
+                    if (code != RES_SUCCESS) {
+                        RETURN(code);
+                    }
+                }
                 f->pc = pc;
                 f->fp = stack;
                 FIBER_SWITCH_OUT(f, FIBER_SUSPENDED);
@@ -1531,6 +1537,10 @@ beginSwitch:
         f->host_depth = t->c.host_depth;
         f->state = FIBER_RUNNING;
         f->started = true;
+        if (f->wait_registered) {
+            // The inst that suspended the fiber runs again and registers it again when the wait is not over.
+            zFiberUnregisterWait(t, f);
+        }
         if (!f->await_owned) {
             f->await_len = 0;
         }
@@ -1579,6 +1589,11 @@ beginSwitch:
             f->await_single = (void*)future;
             f->await_ptr = &f->await_single;
             f->await_len = 1;
+            ResultCode code = zFiberRegisterWait(t, f);
+            if (code != RES_SUCCESS) {
+                f->await_len = 0;
+                RETURN(code);
+            }
             f->pc = pc;
             f->fp = stack;
             FIBER_SWITCH_OUT(f, FIBER_SUSPENDED);

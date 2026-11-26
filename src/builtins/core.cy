@@ -5062,10 +5062,10 @@ fn @new_fiber_block(body Func[FiberBlockFn]) -> Fiber:
 --| returned. After an error the other fibers are cancelled (`Fiber.cancel`): they do not run on.
 type Scope:
     with NoCopy
-    -- The fibers that are not done, in the order they were started. `run` frees a fiber when it is done.
-    -- A fiber can start more fibers while `run` is in its loop, so the loop reads by index.
-    fibers Array[Ptr[void]]
-    state  ^ScopeState
+    -- The fibers that are not done, in the order they were started, and the ones that can run
+    -- (`fiber_wait.ScopeQueue`). `run` frees a fiber when it is done.
+    queue Ptr[void]
+    state ^ScopeState
 
 type ScopeState:
     err     ?error
@@ -5076,7 +5076,7 @@ type ScopeState:
 
 --| Returns a scope without fibers.
 fn Scope :: new() -> Scope:
-    return {fibers = Array[Ptr[void]]{}, state = ^ScopeState{err = none, taken = false, running = false}}
+    return {queue = @scope_queue_new(), state = ^ScopeState{err = none, taken = false, running = false}}
 
 fn (&&Scope) @deinit():
     if @fiber_cancelled():
@@ -5084,9 +5084,11 @@ fn (&&Scope) @deinit():
         -- error has no one to go to.
         self.state.running = false
         self.abort()
+        @scope_queue_free(self.queue)
         return
     -- An early exit of the block (`return`, an error) comes here without a `join`.
     self.run()
+    @scope_queue_free(self.queue)
     if !self.state.taken:
         if self.state.err |err|:
             -- Nothing handles the error anymore.
@@ -5098,15 +5100,11 @@ fn (&&Scope) start(func funcptr_t[%Sig], args FnTuple[Sig]):
         meta.error('A fiber of a scope must return `void` or `!void`.')
     -- The state takes one value slot, which is 8 bytes on every target. A reference is not.
     args_size := 8 + type.size(FnTuple[Sig])
-    self.fibers << @start_scope_fiber(@scope_entry[Sig], func, args_size, self.state, move args)
+    @scope_add(self.queue, @start_scope_fiber(@scope_entry[Sig], func, args_size, self.state, move args))
 
 --| The number of fibers that are not done.
 fn (&Scope) active() -> int:
-    count := 0
-    for 0..self.fibers.len() |i|:
-        if @fiber_status(self.fibers[i]) != .done:
-            count += 1
-    return count
+    return @scope_count(self.queue)
 
 --| Runs the fibers until all of them are done. A fiber that stops at `suspend` gives the others a turn.
 --| When every fiber waits for a future, the scope waits like `Fiber.wait_ready`.
@@ -5121,10 +5119,18 @@ fn (&&Scope) join() -> !void:
 --| Cancels the fibers that are not done (`Fiber.cancel`) and drops an error that a fiber returned.
 --| A fiber that can not be cancelled runs to its end first.
 fn (&&Scope) abort():
-    for 0..self.fibers.len() |i|:
-        _ = fiber_cancel(self.fibers[i])
+    self.cancel_all()
     self.run()
     self.state.taken = true
+
+-- Cancels every fiber that is not done, in the order they were started, and frees the ones that are done then.
+-fn (&&Scope) cancel_all():
+    child := @scope_first(self.queue)
+    while child != none:
+        next := @scope_next(child)
+        if fiber_cancel(child):
+            @fiber_deinit(child)
+        child = next
 
 -- `scope |s|:` is lowered to calls of these (`sema.sema_scope_stmt`).
 fn @scope_new() -> Scope:
@@ -5140,34 +5146,43 @@ fn @scope_join(s &&Scope) -> !void:
     if self.state.running:
         panic('The scope is already running its fibers.')
     self.state.running = true
+    -- Whether the fibers were cancelled after an error.
+    cancelled := false
     while:
-        progress := false
-        -- The fibers that are not done are kept, in order, at the front.
-        kept := 0
-        i := 0
-        while i < self.fibers.len():
-            child := self.fibers[i]
-            i += 1
-            done := @fiber_status(child) == .done
-            if !done:
-                -- After an error the others end where they are, also the ones that come after the failed
-                -- fiber in this round. One that can not be cancelled runs on.
-                if self.state.err != none and fiber_cancel(child):
-                    done = true
-                else !@fiber_waiting(child):
-                    done = @bitCast(FiberStatus, @fiber_resume(child)) == .done
-                    progress = true
-            if done:
-                @fiber_deinit(child)
-            else:
-                self.fibers[kept] = child
-                kept += 1
-        self.fibers.size_down(kept)
-        if kept == 0:
-            break
-        if !progress:
-            _ = Fiber.wait_ready()
+        if !cancelled and self.state.err != none:
+            -- After an error the others end where they are. One that can not be cancelled runs on.
+            cancelled = true
+            self.cancel_all()
+        -- Only the fibers that can go on are resumed: one that awaits a future is put in the queue when the
+        -- future is completed (`fiber_wait.zig`).
+        child := @scope_pop(self.queue)
+        if child == none:
+            if @scope_count(self.queue) == 0:
+                break
+            if !@scope_wait(self.queue):
+                -- Nothing would wake them. They look for themselves.
+                @scope_wake_all(self.queue)
+            continue
+        if self.state.err != none and fiber_cancel(child):
+            -- A fiber that was started after the error.
+            @fiber_deinit(child)
+            continue
+        if @bitCast(FiberStatus, @fiber_resume(child)) == .done:
+            @fiber_deinit(child)
+        else:
+            @scope_park(self.queue, child)
     self.state.running = false
+
+#[bind] fn @scope_queue_new() -> Ptr[void]
+#[bind] fn @scope_queue_free(queue Ptr[void])
+#[bind] fn @scope_add(queue Ptr[void], f Ptr[void])
+#[bind] fn @scope_pop(queue Ptr[void]) -> Ptr[void]
+#[bind] fn @scope_park(queue Ptr[void], f Ptr[void])
+#[bind] fn @scope_wait(queue Ptr[void]) -> bool
+#[bind] fn @scope_wake_all(queue Ptr[void])
+#[bind] fn @scope_count(queue Ptr[void]) -> int
+#[bind] fn @scope_first(queue Ptr[void]) -> Ptr[void]
+#[bind] fn @scope_next(f Ptr[void]) -> Ptr[void]
 
 -- The same host function as `@start_fiber`. The state is the first of the copied arguments.
 #[bind]

@@ -760,7 +760,7 @@ https://git.openjdk.org/loom/commit/ef84eca96d7ac8929b0dd5ba9d9d56f7722fd274
     상태로 표시하는 구조다(push). 워커 풀의 `progressEpoch` → 확인 → `waitProgress(seen)`은 이미 (2)의 패턴이다.
     미룬 이유: 워커 스레드와 호스트(`cl_future_complete`)의 완료가 주인 스레드의 표를 건드릴 수 없어 완료 목록과 동기화가
     필요하고, `Scope.run`이 바퀴마다 자식 전부에게 `waiting()`을 묻는 동안은 바퀴 비용의 바닥이 어차피 fiber 수다. `run`을
-    준비 큐로 바꿀 때 같이 해야 이득이 난다. fiber 수에 비례하는 바퀴 비용이 문제가 되면 이쪽으로 간다.
+    준비 큐로 바꿀 때 같이 해야 이득이 난다. fiber 수에 비례하는 바퀴 비용이 문제가 되면 이쪽으로 간다. (2026-11-26 넣음: 아래 "Scope 준비 큐".)
 - 구현. `vmc.Fiber`에 `owner` · `owned_head` · `owned_prev` · `owned_next`(끝에 더함). 소유자는 그 fiber를 마지막으로 resume했거나
   (`FIBER_RESUME`, `zFiberSetOwner`) 멈춘 fiber에 `waiting()`을 마지막으로 물은(`fiber_waiting`) fiber다. 루트 컨텍스트는 null.
   - `fiber_waiting`의 `await_fibers` 갈래는 그 fiber의 하위 트리만 본다(`ownedFiberFutureReady`, `thread.nextOwnedFiber`).
@@ -777,6 +777,35 @@ https://git.openjdk.org/loom/commit/ef84eca96d7ac8929b0dd5ba9d9d56f7722fd274
   걸리지 않는다. 매뉴얼과 `core.cy` 문서 주석에 적었다.
 - 결과: 마지막 그룹부터 완료하는 M=400이 2728ms → 227ms, 첫 그룹부터는 236ms → 224ms. 테스트 `concurrency/fiber_wait_owner.cy`
   (수정 전에는 다른 그룹의 Future에 `waiting()`이 `false`가 됐다).
+
+## Scope 준비 큐 (2026-11-26)
+
+위 절에서 미룬 futex식 대기 표를 넣었다. 사용자: "3가지 모두 다 진행해 봅시다"(기술 부채 셋 중 하나).
+
+- 문제: 소유 링크로 헛깨움은 없앴지만 `Scope.run`은 바퀴마다 모든 자식에게 `waiting()`을 물었다. fiber N개가 Future를 기다리고
+  드라이버가 바퀴마다 하나를 완료하면 N²(ReleaseFast, N=8000에서 1767ms).
+- 대기 표(`src/fiber_wait.zig`, `Thread.waits`): `await` · `Future.wait_any`에서 멈춘 fiber를 기다리는 Future를 키로 등록한다
+  (vm.c의 `AWAIT`와 `RET_FIBER_AWAIT`, `zFiberRegisterWait`). resume · 깨움 · unwind · 해제 때 뺀다. 빼기는 fiber 자신의 목록만
+  읽는다(스레드 해제 때는 Future가 먼저 풀린다). `FutureValue`의 옛 `cont_head`에 두지 않은 이유도 그것이다.
+- 깨움(push): 같은 스레드의 완료(`@notifyFutureComplete`, `cl_future_complete` · `_error`)가 표에서 기다리는 fiber를 꺼내
+  `wakeFiber`. scope의 fiber면 준비 큐에 넣고, 그 큐를 기다리는 fiber(`@scope_wait`에서 멈춘 `ScopeQueue.waiter`)로 올라가
+  같은 일을 한다. scope 밖 fiber는 `owner`가 `Fiber.wait_ready`에서 멈췄을 때만 올라간다.
+- spawn 스레드의 Future는 worker가 주인 스레드의 표를 건드릴 수 없다. 표에 따로 둔 목록(`Thread.shared_waits`)을 주인이
+  worker pool의 progress epoch가 바뀌었을 때 확인한다(`pollShared`: 큐에서 꺼낼 때마다, 기다리기 전에는 늘). 스레드가 없는
+  빌드(`single_threaded`)는 epoch가 움직이지 않아 늘 확인한다.
+- `Scope`: 자식 목록과 준비 큐를 host의 `ScopeQueue`(fiber의 `scope_*` · `ready_*` 링크)로 옮겼다. `Thread.scope_queues`에 이어
+  panic의 힙 해제가 `@deinit` 없이 Scope를 버려도 같이 푼다. `run`은 큐에서 꺼내 resume하고, 멈추면 `@scope_park`가 기다리는
+  fiber는 park, `suspend`한 fiber는 큐 끝에 둔다. 큐가 비면 `@scope_wait`: fiber에서는 `await_fibers`로 양보하고 깨움을 기다린다.
+  루트는 `Fiber.wait_ready`처럼 큐의 작업을 돌리거나 잠들거나 `CL_AWAIT`로 나간다(Future 목록은 전처럼 스레드의 fiber 순서).
+  기다릴 것이 없으면(표가 빔) false이고 `run`은 park한 fiber를 모두 깨워 스스로 확인하게 한다.
+- park의 확인: `Future.wait_any`의 다시 멈춤처럼 이미 끝난 Future가 있거나 등록되지 않은 fiber는 바로 큐에 넣는다. 사용자
+  `Fiber.wait_ready`에서 멈춘 fiber는 끝난 Future가 있어도 한 번 양보하므로 park 때 자기 하위 트리를 본다(`ownedReady`).
+- 오류: 오류를 처음 본 바퀴에 시작 순서로 모두 취소한다(park한 fiber는 큐에서 꺼내지지 않으므로). 그 뒤 꺼낸 fiber도 전처럼
+  먼저 취소를 시도한다(취소 뒤 시작된 fiber).
+- 바뀐 것: 깨어난 fiber는 완료된 순서로 큐 끝에 선다(전에는 다음 바퀴의 시작 순서 자리). `Fiber.waiting` · `Fiber.wait_ready`의
+  계약은 그대로다(scope를 쓰지 않는 스케줄러는 pull).
+- 결과(ReleaseFast): 위 경우 N=8000 1767ms → 6ms, 그룹 400개 × 5의 중첩 221ms → 1ms(마지막 그룹부터든 첫 그룹부터든).
+  `suspend`만 하는 fiber 10만 개 × 10번은 96ms → 90ms. 테스트 `concurrency/scope_ready_queue.cy` · `scope_ready_spawn.cy`.
 
 ## 0.5 범위: `spawn f(args)`는 넣고 `CL_YIELD`는 뺀다 (2026-11-20)
 

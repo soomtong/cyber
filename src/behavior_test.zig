@@ -700,6 +700,7 @@ fn test_concurrency(run: *Runner) void {
     run.case("concurrency/scope_reentry_panic.cy");
     run.case("concurrency/scope_block_exit.cy");
     run.case("concurrency/scope_nested_wait.cy");
+    run.case("concurrency/scope_ready_queue.cy");
     run.case("concurrency/fiber_wait_owner.cy");
     run.case("concurrency/fiber_method_entry_error.cy");
     run.case("concurrency/fiber_borrow_receiver_error.cy");
@@ -716,6 +717,7 @@ fn test_concurrency(run: *Runner) void {
     }
     if (!is_wasm) {
         run.case("concurrency/spawn.cy");
+        run.case("concurrency/scope_ready_spawn.cy");
         run.case("concurrency/spawn_send.cy");
         run.case("concurrency/spawn_drop.cy");
         run.case("concurrency/spawn_send_option.cy");

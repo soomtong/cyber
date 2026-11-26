@@ -843,10 +843,12 @@ pub const VM = struct {
         return self.c.types_ptr[id];
     }
 
-    pub fn setApiError(self: *const VM, str: []const u8) !void {
+    /// Without memory for the copy, the error is reported with an empty message.
+    pub fn setApiError(self: *const VM, str: []const u8) void {
         self.compiler.hasApiError = true;
+        const msg = self.alloc.dupe(u8, str) catch "";
         self.alloc.free(self.compiler.apiError);
-        self.compiler.apiError = try self.alloc.dupe(u8, str);
+        self.compiler.apiError = msg;
     }
 
     pub fn getTempString(vm: *VM) []const u8 {

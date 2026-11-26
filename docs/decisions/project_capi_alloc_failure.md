@@ -62,6 +62,21 @@ eval 안의 할당 실패는 그 eval의 오류가 됐지만(`project_compile_al
 
 ## 남은 것
 
-- `cl_vm_reset`(`resetVM`)과 `clReportApiError`(`setApiError`)의 `fatal`. 반환값이 `void`인 함수라 알릴 시그니처를 다시 정해야 한다.
+- (2026-11-26 해결, 아래 "`cl_vm_reset`과 `clReportApiError`") `cl_vm_reset` · `clReportApiError`의 `fatal`.
 - `runtime.zig` · `string.zig` 등 런타임 안쪽의 `catch fatal()`(`project_compile_alloc_failure.md` "한계"의 목록).
 - 값 생성 실패를 호스트가 바로 아는 확인 함수(필요해지면 `cl_thread_alloc_failed`).
+
+## `cl_vm_reset`과 `clReportApiError` (2026-11-26)
+
+남은 것의 첫 줄. 둘 다 반환값이 `void`라 시그니처를 바꾸지 않고 닫았다.
+
+- `cl_vm_reset`: `resetVM`에서 실패할 수 있는 것은 옛 상태를 다 놓은 뒤의 `bindCore`(sema 심볼 등록)뿐이다. 실패하면
+  `Compiler.alloc_failed`를 켜 둔다. 그러면 `cl_vm_reset_pending`이 참이고 다음 eval · validate가 다시 reset한다(eval 안의 할당
+  실패와 같은 길). `bindCore`는 다시 불러도 된다: `Sema.ensureSymbol`은 있는 키를 돌려주고, 실패한 키는 지운다. 반환 타입을
+  `bool`로 바꾸는 안은 Zig 호출자 스무 곳이 `_ =`를 써야 하고, 호스트가 할 일(다시 reset하거나 그냥 eval)은 pending 확인으로
+  충분해 하지 않았다.
+- `clReportApiError`: 전에는 옛 문구를 놓은 뒤 복사가 실패하면 `fatal`이었다(`catch`를 없애면 놓은 포인터가 남는 자리다). 이제
+  먼저 복사하고 옛 것을 놓는다. 복사가 실패하면 빈 문구로 오류를 알린다(`hasApiError`는 켜진다). 로더 · resolver 콜백이 부르는
+  함수라 오류가 났다는 사실이 문구보다 중요하다.
+- lib 테스트 `A reset that runs out of memory leaves a pending reset, and the next eval starts over.`(reset의 할당을 하나씩, 그리고
+  그 뒤 전부 실패시킴)와 `An API error without memory for its message is still reported.`

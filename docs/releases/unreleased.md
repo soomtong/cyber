@@ -22,7 +22,9 @@
   `cl_vm_ensure_func_sig`는 `NULL`, `cl_symbol` · `cl_error`는 -1을 돌려준다. `cl_vm_resolve`는 해석하지 못한 uri에도 프로세스를
   끝냈다.
 - `cy.eval`의 새 VM을 만들지 못하면 스크립트의 `OutOfMemory` panic이다.
-- 결정은 `docs/decisions/project_capi_alloc_failure.md`. 남은 `fatal`: `cl_vm_reset`, `clReportApiError`, 런타임 안쪽.
+- `cl_vm_reset`이 할당에 실패하면 프로세스를 끝내지 않고 reset을 대기로 둔다: `cl_vm_reset_pending`이 참이고 다음 eval ·
+  validate가 다시 reset한다. `clReportApiError`는 문구를 복사하지 못하면 빈 문구로 오류를 알린다(같은 날 이어서).
+- 결정은 `docs/decisions/project_capi_alloc_failure.md`. 남은 `fatal`: 런타임 안쪽.
 
 ## 임베딩: C FFI 차단 `deny_ffi` (2026-11-26)
 

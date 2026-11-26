@@ -297,3 +297,43 @@ test "A value that a host function can not create ends the call with an OutOfMem
         try zt.eq(C.Success, C.vm_eval(vm, "a := 'still alive' + ' here'", &res));
     }
 }
+
+test "A reset that runs out of memory leaves a pending reset, and the next eval starts over." {
+    // Every allocation of `cl_vm_reset` fails once, and with `sticky` every allocation after it too.
+    for ([_]bool{ false, true }) |sticky| {
+        var pending_seen = false;
+        var n: usize = 1;
+        while (true) : (n += 1) {
+            var fa = FailingAlloc{ .child = zt.alloc };
+            const vm = C.vm_initx(fa.allocator());
+            defer C.vm_deinit(vm);
+            var config = C.defaultEvalConfig();
+            config.persist_main = true;
+            var res: C.EvalResult = undefined;
+            try zt.eq(C.Success, C.vm_evalx(vm, "main", "kept := 1", config, &res));
+
+            fa = .{ .child = zt.alloc, .fail_at = n, .sticky = sticky, .armed = true };
+            C.vm_reset(vm);
+            fa.armed = false;
+            // A failure can be absorbed (a block that could not grow in place is allocated anew).
+            if (C.vm_reset_pending(vm)) pending_seen = true;
+            try zt.eq(C.Success, C.vm_evalx(vm, "main", "a := 2", config, &res));
+            try zt.expect(!C.vm_reset_pending(vm));
+            // The session of before the reset is gone either way.
+            try zt.eq(C.ErrorCompile, C.vm_evalx(vm, "main", "b := kept", config, &res));
+            if (!fa.fired) break;
+        }
+        try zt.expect(pending_seen);
+    }
+}
+
+test "An API error without memory for its message is still reported." {
+    var fa = FailingAlloc{ .child = zt.alloc };
+    const vm = C.vm_initx(fa.allocator());
+    defer C.vm_deinit(vm);
+    C.reportApiError(vm, C.to_bytes("the first message"));
+    fa = .{ .child = zt.alloc, .fail_at = 1, .armed = true };
+    C.reportApiError(vm, C.to_bytes("the second message"));
+    fa.armed = false;
+    try zt.expect(fa.fired);
+}

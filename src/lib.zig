@@ -284,7 +284,11 @@ export fn clDefaultEvalConfig() C.EvalConfig {
 }
 
 export fn cl_vm_reset(vm: *cy.VM) void {
-    vm.resetVM() catch cy.fatal();
+    vm.resetVM() catch {
+        // The old state is gone and the builtins were not all bound again. The next eval or validate resets
+        // again, and `cl_vm_reset_pending` tells the host.
+        vm.compiler.alloc_failed = true;
+    };
 }
 
 export fn cl_vm_reset_pending(vm: *cy.VM) bool {
@@ -807,7 +811,7 @@ export fn cl_thread_panic_trace(t: *cy.Thread) C.StackTrace {
 }
 
 export fn clReportApiError(vm: *const cy.VM, msg: C.Bytes) void {
-    vm.setApiError(C.from_bytes(msg)) catch fatal();
+    vm.setApiError(C.from_bytes(msg));
 }
 
 export fn cl_vm_resolver(vm: *cy.VM) C.ResolverFn {

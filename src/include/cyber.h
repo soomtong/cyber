@@ -432,7 +432,8 @@ void cl_vm_set_logger(CLVM* vm, CLLogFn log);
 CLEvalConfig clDefaultEvalConfig(void);
 CLCompileConfig clDefaultCompileConfig(void);
 
-// Resets the compiler and runtime state.
+// Resets the compiler and runtime state. When it runs out of memory, the old state is gone and the reset is not
+// finished: `cl_vm_reset_pending` is then true and the next `cl_vm_eval` or `cl_vm_validate` resets again.
 void cl_vm_reset(CLVM* vm);
 
 /// Whether the next `cl_vm_eval` or `cl_vm_validate` starts from a reset VM, like `cl_vm_reset`: persisted locals,
@@ -917,7 +918,8 @@ void cl_vm_free(CLVM* vm, void* ptr, size_t size);
 void cl_vm_freeb(CLVM* vm, CLBytes bytes);
 void cl_vm_freez(CLVM* vm, const char* str);
 
-/// Some API callbacks use this to report errors.
+/// Some API callbacks use this to report errors. The VM copies `msg`. Without memory for the copy, the error is
+/// reported with an empty message.
 void clReportApiError(CLVM* vm, CLBytes msg);
 
 // Attach a userdata pointer inside the VM.

@@ -1054,7 +1054,7 @@ strong {
 <body id="table-of-contents">
 <header>
     <h1 class="title">Cyber Docs</h1>
-    <div class="sub-title">v0.4.23-dev 1212-c2f4805</div>
+    <div class="sub-title">v0.4.23-dev 1216-d1bb6b1</div>
     <ul>
         <li><a href="https://cyberscript.dev" target="_blank" rel="noopener">Homepage</a></li>
         <li><a href="api.html">API Docs</a></li>
@@ -1210,6 +1210,18 @@ if true: print(123)
 <p>Variables can be assigned afterwards using the <code>=</code> operator:</p>
 <pre><code class="language-cy">a = 234
 </code></pre>
+<p>Several variables are declared or assigned at once with commas. Every value on the right is evaluated, from left to right, before the first one is stored, so a swap needs no temporary:</p>
+<pre><code class="language-cy">a, b := 0, 1
+for 0..10:
+    a, b = b, a + b
+print(a)     --> 55
+
+x, y := 'left', 'right'
+x, y = y, x
+pt.x, pt.y = pt.y, pt.x
+xs[0], xs[1] = xs[1], xs[0]
+</code></pre>
+<p>Each side has the same number of items: '2 places take 2 values, found 3.' The places of <code>=</code> are variables, fields and elements, the names of <code>:=</code> are new variables. A value that can not be copied (<code>NoCopy</code>, such as <code>Array</code>) moves, as in a single assignment. A literal takes the type of its place (<code>i, j = 0, 1</code> for <code>i32</code> variables). Compound assignments (<code>+=</code>) take one variable. A function returns one value, so <code>q, r := divmod(7, 2)</code> is an error: the right side has one value.</p>
 <p>A function body, including the main block, can hold at most 256 locals. Parameters and the hidden temporaries the compiler creates count towards that limit. A function signature can have at most 255 parameters and a struct at most 255 fields. A single branch (the body of a loop, an <code>if</code> or a <code>switch</code> case) can span at most 32767 bytecode slots, roughly 8000 simple statements; a plain <code>if</code> body without <code>else</code> can span 65535. Exceeding a limit is a compile error. Move part of a long body into another function.</p>
 <a href="#syntax">^topic</a>
 <h3 id="var-declaration"><code>var</code> declaration. <a href="#var-declaration">#</a></h3>
@@ -1561,6 +1573,25 @@ b := int(a)
 </code></pre>
 <p>Integer types can perform <a href="#arithmetic-operators" title="">arithmetic</a>, <a href="#bitwise-operators" title="">bitwise</a>, and <a href="#comparison-operators" title="">comparison</a> operations.</p>
 <a href="#basic-types">^topic</a>
+<h4 id="integer-overflow">Integer overflow. <a href="#integer-overflow">#</a></h4>
+<p><code>+</code>, <code>-</code>, <code>*</code>, <code>**</code>, unary <code>-</code> and <code>/</code> of a signed integer (<code>int</code>, <code>i32</code>, <code>i16</code>, <code>i8</code>) panic with 'Integer overflow.' when the result does not fit in its type. A wrong value never passes on silently. <code>int.min / -1</code> overflows too, and <code>x % -1</code> is always <code>0</code>. A constant expression that overflows is a compile error with the same message:</p>
+<pre><code class="language-cy">n := int.max
+print(n + 1)           --> panic: Integer overflow.
+print(i8(100) + i8(28)) --> panic: Integer overflow.
+const k = int.max + 1  -- error: Integer overflow.
+</code></pre>
+<p>When a result may not fit, ask for it with <code>checked_add</code>, <code>checked_sub</code> and <code>checked_mul</code>, which return <code>none</code> instead. Where wrapping is the intent, as in a hash, a checksum or a random number generator, write <code>wrapping_add</code>, <code>wrapping_sub</code> and <code>wrapping_mul</code>:</p>
+<pre><code class="language-cy">-- The nth Fibonacci number, or `none` when it does not fit in an `int` (from `fib(93)` on).
+fn fib(n int) -> ?int:
+    a, b := 1, 0
+    for 0..n:
+        a, b = b, a.checked_add(b) ?else return none
+    return b
+
+print(int.max.wrapping_add(1) == int.min)  --> true
+</code></pre>
+<p>The raw integer types (<code>byte</code>, <code>r16</code>, <code>r32</code>, <code>r64</code>) hold bits for masks and memory: their arithmetic wraps at their width. Shifts and bitwise operators never overflow.</p>
+<a href="#basic-types">^topic</a>
 <h3 id="floats">Floats. <a href="#floats">#</a></h3>
 <p><code>float</code> (an alias for <code>f64</code>) is the default floating point type. It's encoded as 64-bit IEEE 754.</p>
 <p>Floating point types include: <code>f32</code>, <code>f64</code></p>
@@ -1839,6 +1870,11 @@ print(v)     --> 123
 <p>An <code>?else</code> block executes a block of statements for the <code>none</code> case:</p>
 <pre><code class="language-cy">value := opt ?else:
     return error.Missing
+</code></pre>
+<p>A block of one <code>return</code>, <code>break</code> or <code>continue</code> can follow on the same line without <code>:</code>:</p>
+<pre><code class="language-cy">value := opt ?else return none
+for items |item|:
+    size := item.size ?else continue
 </code></pre>
 <a href="#basic-types">^topic</a>
 <h3 id="optional-chaining">Optional chaining. <a href="#optional-chaining">#</a></h3>
@@ -4248,6 +4284,10 @@ res = 'abcxyz'
 <p>The error value can be captured:</p>
 <pre><code class="language-cy">res := do_something() !else |err|:
     panic('Failed with %{err}')
+</code></pre>
+<p>Like <code>?else</code>, one <code>return</code>, <code>break</code> or <code>continue</code> can follow on the same line without <code>:</code>:</p>
+<pre><code class="language-cy">n := int.parse(s) !else return 0
+data := os.read_file(path) !else |err| return err
 </code></pre>
 <p>An <code>!else</code> block can not reach its end. It must end with <code>return</code>, <code>panic</code>, <code>break</code> or <code>continue</code>. To continue after handling the error, use the <a href="#unwrap-block" title="">unwrap block</a>.</p>
 <a href="#error-handling">^topic</a>

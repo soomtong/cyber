@@ -1,5 +1,5 @@
 {
-  "version": "v0.4.23-dev 1212-c2f4805",
+  "version": "v0.4.23-dev 1216-d1bb6b1",
   "types": [
     {"module": "core", "name": "void", "syntax": "void", "kind": "builtin",
       "methods": [],
@@ -90,6 +90,12 @@
         {"name": "ule", "recv": "Int[]", "sig": "ule(right Self) -> bool"},
         {"name": "ugt", "recv": "Int[]", "sig": "ugt(right Self) -> bool"},
         {"name": "uge", "recv": "Int[]", "sig": "uge(right Self) -> bool"},
+        {"name": "wrapping_add", "recv": "Int[]", "sig": "wrapping_add(right Self) -> Self", "doc": "`self + right` that wraps at the width of the type, where `+` panics with 'Integer overflow.'. For hashes, checksums and random numbers."},
+        {"name": "wrapping_sub", "recv": "Int[]", "sig": "wrapping_sub(right Self) -> Self", "doc": "`self - right` that wraps at the width of the type."},
+        {"name": "wrapping_mul", "recv": "Int[]", "sig": "wrapping_mul(right Self) -> Self", "doc": "`self * right` that wraps at the width of the type."},
+        {"name": "checked_add", "recv": "Int[]", "sig": "checked_add(right Self) -> ?Self", "doc": "`self + right`, or `none` when it does not fit in the type."},
+        {"name": "checked_sub", "recv": "Int[]", "sig": "checked_sub(right Self) -> ?Self", "doc": "`self - right`, or `none` when it does not fit in the type."},
+        {"name": "checked_mul", "recv": "Int[]", "sig": "checked_mul(right Self) -> ?Self", "doc": "`self * right`, or `none` when it does not fit in the type."},
         {"name": "umul", "recv": "Int[]", "sig": "umul(right Self) -> Self"},
         {"name": "udiv", "recv": "Int[]", "sig": "udiv(right Self) -> Self"},
         {"name": "umod", "recv": "Int[]", "sig": "umod(right Self) -> Self"},

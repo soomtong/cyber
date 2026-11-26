@@ -100,6 +100,16 @@ pub const BorrowOwner = struct {
     /// The part of the value can point into `owner`, a local that holds borrows itself (`&w.x` of
     /// `w := W{q=&z}`), not only into the owner at its root (`sema_borrow.valuePlaceFree`).
     place: bool = false,
+    /// With `place`, the part is a copy of a value read from or through `owner` (`h`, `h.b`). It points where the
+    /// borrows of `owner` point, not into `owner`.
+    place_copy: bool = false,
+};
+
+/// A local that the borrows of places held by `local` can point into (`Local.borrow_places`), or with `target`
+/// `cy.NullId` any local (`&&h` was taken).
+pub const BorrowPlace = struct {
+    local: LocalId,
+    target: LocalId,
 };
 
 pub const BorrowLoan = struct {
@@ -145,7 +155,8 @@ pub const Local = struct {
     borrow_via: LocalId = cy.NullId,
     /// Whether the value of this local can hold a borrow that points into a local that holds borrows itself
     /// (`h := H{b=&w.x}`, `h.b = &w.x`), or that this is unknown (`&&h` was taken). Only then a copy of a borrow
-    /// that is read out of the local (`h.b`) has to stay inside the local (`sema_borrow.copyOutOf`).
+    /// that is read out of the local (`h.b`) has to stay inside the local (`sema_borrow.copyOutOf`). The locals that
+    /// those borrows point into are `Chunk.borrow_place_targets`.
     borrow_places: bool = false,
     /// The first local of the copies of one borrow (`r2 := r`), or `cy.NullId` for a borrow that is no copy.
     borrow_alias: LocalId = cy.NullId,

@@ -274,12 +274,13 @@
 - [x] 위 항목의 남은 것을 정리했다(2026-11-22, 사용자: "continue", F-189..F-194). `unreleased.md` 끝의 "남은 것의 정리" 절.
   spawn 인자 · 결과는 한 규칙(`@sendable`), 버린 future는 끝까지 돈다(결정), `FutureSyncState` 해제. wasm32-freestanding 빌드 복구와
   CI 단계 추가. 빌림 컨테이너 구멍 일곱(깨지는 변경: 매개변수 뒤에는 `scope` 매개변수만 저장).
-  남은 것: `borrow_places`가 지역 id 목록이 아니어서 생기는 오탐 둘, 사용자 정의 `scope` `next`의 `for` 캡처는 이터러블에 묶음,
+  남은 것: (2026-11-26 해결: `borrow_places`가 지역 id 목록이 아니어서 생기는 오탐 둘, `project_borrow_model.md` "자리 대상 지역
+  목록") 사용자 정의 `scope` `next`의 `for` 캡처는 이터러블에 묶음,
   시험 분석이 끌어올린 문장은 남는다는 가정(`project_eval_order.md`), 스크립트 취소 API 없음.
 - [x] 위 항목의 미룬 후보와 새로 찾은 것을 모두 고쳤다(2026-11-22, 사용자: "continue", 서브 에이전트 일곱, F-182..F-188).
   `unreleased.md` "리뷰가 미룬 후보와 수정 중 찾은 결함" 절. spawn 결과 소유권은 결정 `project_spawn_result_ownership.md`.
   남은 것: spawn 인자 쪽 `@send`의 참조 있는 option · result(빈 본문), 큐에 있는 작업은 future를 버려도 끝까지 돈다,
-  `VM.shared_states`가 VM 수명 동안 자란다, `r = xs[0]` · `r = h.b`는 컨테이너를 주인으로 본다(보수적), 순수로 보는 연산식
+  `VM.shared_states`가 VM 수명 동안 자란다, (0.4.18에 이미 해결: `r = xs[0]` · `r = h.b`는 컨테이너를 주인으로 본다), 순수로 보는 연산식
   인덱스의 복합 대입은 사용자 연산자를 두 번 부른다, `intFmtExt`의 64바이트 버퍼(지금은 도달 불가), 4GB 넘는 문자열의 `u32`
   캐스트, `zig build lib -Dtarget=wasm32-freestanding`의 Zig std 오류(기존).
 

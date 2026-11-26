@@ -1342,7 +1342,7 @@ fn semaCaptureUnwrap(c: *cy.Chunk, opt: sema.ExprResult, opt_id: sema.LocalId, o
     }
     const unwrap_v = try sema_local.declareLocalInit(c, unwrap_name, unwrap_t, unwrap_init, capture);
     try sema_borrow.bindCaptureLocal(c, unwrap_v.id, unwrap_init);
-    sema_borrow.bindCaptureCopy(c, unwrap_v.id, opt, elem_of);
+    try sema_borrow.bindCaptureCopy(c, unwrap_v.id, opt, elem_of);
     const unwrap_local = try sema_expr.semaLocal(c, unwrap_v.id, capture);
 
     if (capture.type() == .seqDestructure) {

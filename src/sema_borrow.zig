@@ -185,7 +185,13 @@ pub fn noteBorrowOwner(c: *cy.Chunk, owner: ?sema.LocalId, ex: bool) !void {
 pub fn noteBorrowValue(c: *cy.Chunk, arg: sema.ExprResult) !void {
     try noteBorrowOwner(c, borrowOwner(c, arg), arg.type.info.ex_borrow);
     if (!valuePlaceFree(c, arg)) {
-        try c.borrow_pending.append(c.alloc, .{ .owner = arg.recParentLocal().?, .ex = false, .place = true });
+        const copy = arg.resType == .value_local or copyOutOf(c, arg) != null;
+        try c.borrow_pending.append(c.alloc, .{
+            .owner = arg.recParentLocal().?,
+            .ex = false,
+            .place = true,
+            .place_copy = copy,
+        });
     }
     if (copySource(c, arg)) |from| try noteCopyLoans(c, from);
 }
@@ -196,7 +202,7 @@ pub fn noteBorrowLocal(c: *cy.Chunk, local: sema.LocalId) !void {
     if (l.parent_local == cy.NullId) return;
     try noteBorrowOwner(c, borrowOwnerOf(c, local), l.decl_t.info.ex_borrow);
     if (!localPlaceFree(c, local)) {
-        try c.borrow_pending.append(c.alloc, .{ .owner = local, .ex = false, .place = true });
+        try c.borrow_pending.append(c.alloc, .{ .owner = local, .ex = false, .place = true, .place_copy = true });
     }
     try noteCopyLoans(c, local);
 }
@@ -277,6 +283,14 @@ fn copyOutOfContainer(c: *cy.Chunk, expr: sema.ExprResult) ?sema.LocalId {
     return from;
 }
 
+/// Whether `expr` is a shared copy of a borrow that is read out of memory through a borrow local (`hr.b` of
+/// `hr := &h`, `copyOutOf`).
+fn copyThroughBorrow(c: *cy.Chunk, expr: sema.ExprResult) bool {
+    if (expr.type.info.ex_borrow) return false;
+    const from = copyOutOf(c, expr) orelse return false;
+    return isBorrowLocal(c, from);
+}
+
 /// Whether the borrows that the local holds point only into the owners that it borrows (`Local.parent_local` and its
 /// `BorrowLoan`s), not into a local that holds borrows itself.
 fn localPlaceFree(c: *cy.Chunk, local: sema.LocalId) bool {
@@ -289,10 +303,12 @@ fn localPlaceFree(c: *cy.Chunk, local: sema.LocalId) bool {
 /// that local. The parts of a value that the statement builds are noted apart (`pendingHasPlace`).
 pub fn valuePlaceFree(c: *cy.Chunk, expr: sema.ExprResult) bool {
     const from = expr.recParentLocal() orelse return true;
-    if (expr.resType == .value_local or copyOutOf(c, expr) != null) {
-        // A copy that is read through a borrow (`hr.b`) can come from the container that the borrow points into.
-        return localPlaceFree(c, from);
+    if (copyThroughBorrow(c, expr)) {
+        // A copy that is read through a borrow (`hr.b` of `hr := &h`) points where the borrows of the container that
+        // the borrow points into point.
+        return copyOutStart(c, from, false) == null;
     }
+    if (expr.resType == .value_local or copyOutOf(c, expr) != null) return localPlaceFree(c, from);
     if (isBorrowLocal(c, from)) return localPlaceFree(c, from);
     return c.varStack.items[from].parent_local == cy.NullId;
 }
@@ -359,6 +375,12 @@ pub fn truncateBorrowLoans(c: *cy.Chunk, var_start: usize) void {
         }
         _ = c.borrow_loans.swapRemove(i);
     }
+    i = 0;
+    while (i < c.borrow_place_targets.items.len) {
+        if (c.borrow_place_targets.items[i].local >= var_start) {
+            _ = c.borrow_place_targets.swapRemove(i);
+        } else i += 1;
+    }
 }
 
 fn dropBorrowLoans(c: *cy.Chunk, local: sema.LocalId) void {
@@ -397,8 +419,72 @@ pub fn addFieldBorrowLoan(c: *cy.Chunk, left: sema.ExprResult, right: sema.ExprR
     }
     // A copy (`o.r = h`, `o.r = h.b`) keeps the other owners of the local it is read from.
     if (copySource(c, right)) |from| try copyBorrowLoans(c, target, owner, from);
-    if (!valuePlaceFree(c, right) or pendingHasPlace(c)) {
+    const value_places = !valuePlaceFree(c, right);
+    if (value_places or pendingHasPlace(c)) {
         c.varStack.items[target].borrow_places = true;
+        if (value_places) try addValuePlaceTargets(c, target, right);
+        try addPendingPlaceTargets(c, target);
+    }
+}
+
+fn addPlaceTarget(c: *cy.Chunk, local: sema.LocalId, target: sema.LocalId) !void {
+    for (c.borrow_place_targets.items) |p| {
+        if (p.local == local and (p.target == target or p.target == cy.NullId)) return;
+    }
+    try c.borrow_place_targets.append(c.alloc, .{ .local = local, .target = target });
+}
+
+/// Records for `holder` the locals that a value read from or through `from` can point into
+/// (`Chunk.borrow_place_targets`): with `self_` `from` itself (a borrow of a place in it), the locals that `from`
+/// points into (`Local.borrow_via`), and the targets of the borrows of places that each of them holds. A copy (`h`,
+/// `h.b`) points where the borrows of `from` point, not into `from`.
+fn addPlaceTargets(c: *cy.Chunk, holder: sema.LocalId, from: sema.LocalId, self_: bool) !void {
+    if (self_) try addPlaceTarget(c, holder, from);
+    var cur = from;
+    var depth: usize = 0;
+    while (cur < c.varStack.items.len) : (depth += 1) {
+        if (depth == 16) return addPlaceTarget(c, holder, cy.NullId);
+        if (cur != from) try addPlaceTarget(c, holder, cur);
+        if (c.varStack.items[cur].borrow_places) {
+            // A local that holds borrows of places without known targets can point anywhere.
+            var known = false;
+            const len = c.borrow_place_targets.items.len;
+            var i: usize = 0;
+            while (i < len) : (i += 1) {
+                const p = c.borrow_place_targets.items[i];
+                if (p.local != cur) continue;
+                known = true;
+                try addPlaceTarget(c, holder, p.target);
+            }
+            if (!known) try addPlaceTarget(c, holder, cy.NullId);
+        }
+        cur = c.varStack.items[cur].borrow_via;
+    }
+}
+
+/// `addPlaceTargets` for the value `expr`, which is not free of places (`valuePlaceFree`).
+fn addValuePlaceTargets(c: *cy.Chunk, holder: sema.LocalId, expr: sema.ExprResult) !void {
+    const from = expr.recParentLocal() orelse return;
+    const copy = expr.resType == .value_local or copyOutOf(c, expr) != null;
+    try addPlaceTargets(c, holder, from, !copy);
+}
+
+/// `addPlaceTargets` for the parts of the value that the statement builds (`pendingHasPlace`).
+fn addPendingPlaceTargets(c: *cy.Chunk, holder: sema.LocalId) !void {
+    var i: usize = c.borrow_pending_start;
+    while (i < c.borrow_pending.items.len) : (i += 1) {
+        const p = c.borrow_pending.items[i];
+        if (!p.place or p.owner >= c.varStack.items.len) continue;
+        try addPlaceTargets(c, holder, p.owner, !p.place_copy);
+    }
+}
+
+fn dropPlaceTargets(c: *cy.Chunk, local: sema.LocalId) void {
+    var i: usize = 0;
+    while (i < c.borrow_place_targets.items.len) {
+        if (c.borrow_place_targets.items[i].local == local) {
+            _ = c.borrow_place_targets.swapRemove(i);
+        } else i += 1;
     }
 }
 
@@ -427,8 +513,13 @@ pub fn bindBorrowLocal(c: *cy.Chunk, var_idx: sema.LocalId, init: sema.ExprResul
     if (!decl_t.info.borrow_only) return;
     const owner = borrowOwner(c, init) orelse return;
     if (owner == var_idx) return;
-    const places = !valuePlaceFree(c, init) or pendingHasPlace(c);
+    const value_places = !valuePlaceFree(c, init);
+    const places = value_places or pendingHasPlace(c);
     const copy_out = copyOutOfContainer(c, init);
+    const copy_through = copyThroughBorrow(c, init);
+    dropPlaceTargets(c, var_idx);
+    if (value_places) try addValuePlaceTargets(c, var_idx, init);
+    try addPendingPlaceTargets(c, var_idx);
     defer c.borrow_pending.items.len = c.borrow_pending_start;
     // The other owners of a borrow container, or of a borrow that one of several branches gives
     // (`if c: &x else &a[0]`).
@@ -457,6 +548,9 @@ pub fn bindBorrowLocal(c: *cy.Chunk, var_idx: sema.LocalId, init: sema.ExprResul
         local.borrow_via = c.varStack.items[via].borrow_via;
     } else if (copy_out != null) {
         // A copy of a borrow that is read out of a container points where the container points, not into it.
+    } else if (copy_through) {
+        // Through a borrow local (`hr.b`), the container that the borrow points into can hold borrows of places.
+        local.borrow_via = copyOutStart(c, via, false) orelse cy.NullId;
     } else if (via != owner) {
         local.borrow_via = if (isBorrowLocal(c, via)) c.varStack.items[via].borrow_via else via;
     }
@@ -468,26 +562,41 @@ pub fn bindBorrowLocal(c: *cy.Chunk, var_idx: sema.LocalId, init: sema.ExprResul
 }
 
 /// Whether a live local other than `local` can point into it: a borrow of it or of a place in it (`hr := &h`,
-/// `Local.borrow_via`), or a value that holds a borrow of a place in some local (`Local.borrow_places`, which does
-/// not tell the local). Used by the non-lexical end of the borrows of `local` (`sema_stmt.endBorrowsAfter`).
+/// `Local.borrow_via`), or a value that holds a borrow of a place in it or in a local that points into it
+/// (`Local.borrow_places`, `Chunk.borrow_place_targets`). Used by the non-lexical end of the borrows of `local`
+/// (`sema_stmt.endBorrowsAfter`).
 pub fn isPointedInto(c: *cy.Chunk, local: sema.LocalId) bool {
     for (c.varStack.items, 0..) |other, k| {
         if (k == local or other.parent_local == cy.NullId) continue;
-        if (other.borrow_places) return true;
-        var cur = other.borrow_via;
-        var depth: usize = 0;
-        while (cur < c.varStack.items.len and depth < 16) : (depth += 1) {
-            if (cur == local) return true;
-            cur = c.varStack.items[cur].borrow_via;
+        if (viaReaches(c, other.borrow_via, local)) return true;
+        if (!other.borrow_places) continue;
+        var known = false;
+        for (c.borrow_place_targets.items) |p| {
+            if (p.local != k) continue;
+            known = true;
+            if (p.target == cy.NullId or viaReaches(c, p.target, local)) return true;
         }
+        if (!known) return true;
+    }
+    return false;
+}
+
+/// Whether `local` is `start` or a local that `start` points into (`Local.borrow_via`). A chain that is too long to
+/// follow counts.
+fn viaReaches(c: *cy.Chunk, start: sema.LocalId, local: sema.LocalId) bool {
+    var cur = start;
+    var depth: usize = 0;
+    while (cur < c.varStack.items.len) : (depth += 1) {
+        if (cur == local or depth == 16) return true;
+        cur = c.varStack.items[cur].borrow_via;
     }
     return false;
 }
 
 pub fn unbindBorrowLocal(c: *cy.Chunk, local: *sema.Local) void {
-    if (c.borrow_loans.items.len > 0) {
-        dropBorrowLoans(c, @intCast((@intFromPtr(local) - @intFromPtr(c.varStack.items.ptr)) / @sizeOf(sema.Local)));
-    }
+    const id: sema.LocalId = @intCast((@intFromPtr(local) - @intFromPtr(c.varStack.items.ptr)) / @sizeOf(sema.Local));
+    if (c.borrow_loans.items.len > 0) dropBorrowLoans(c, id);
+    if (c.borrow_place_targets.items.len > 0) dropPlaceTargets(c, id);
     if (local.parent_local == cy.NullId) return;
     const owner = &c.varStack.items[local.parent_local];
     if (local.ex_borrow) {
@@ -862,7 +971,7 @@ fn copyOutStart(c: *cy.Chunk, from: sema.LocalId, spans: bool) ?sema.LocalId {
 /// of a container (`if o |q|`, `if h.o |q|`), or `elem_of` is the local that a `for` loop reads the elements of a
 /// vector or a span through (`for xs |p|`), the payload points where the option or the elements point, not into the
 /// local, and the capture can outlive the local (`placeStart`).
-pub fn bindCaptureCopy(c: *cy.Chunk, capture: sema.LocalId, opt: sema.ExprResult, elem_of: ?sema.LocalId) void {
+pub fn bindCaptureCopy(c: *cy.Chunk, capture: sema.LocalId, opt: sema.ExprResult, elem_of: ?sema.LocalId) !void {
     const l = &c.varStack.items[capture];
     if (l.parent_local == cy.NullId or l.decl_t.info.ex_borrow) return;
     var start: ?sema.LocalId = undefined;
@@ -873,6 +982,8 @@ pub fn bindCaptureCopy(c: *cy.Chunk, capture: sema.LocalId, opt: sema.ExprResult
     } else return;
     l.borrow_via = start orelse cy.NullId;
     l.borrow_places = start != null;
+    dropPlaceTargets(c, capture);
+    if (start) |s| try addPlaceTargets(c, capture, s, true);
 }
 
 /// Checks that `target` does not outlive the locals that a value read from or through `start` can point into: `start`
@@ -975,7 +1086,10 @@ pub fn sema_ex_borrow2(c: *cy.Chunk, child: sema.ExprResult, ex_borrow_t: *cy.Ty
     try checkExclusiveBorrowOfField(c, parent_local, borrowField(c, eff_child), false, node);
     // A function that gets the exclusive borrow can store in the container a borrow of a place in another container.
     const place = if (isBorrowLocal(c, parent_local)) c.varStack.items[parent_local].borrow_via else parent_local;
-    if (place != cy.NullId and place < c.varStack.items.len) c.varStack.items[place].borrow_places = true;
+    if (place != cy.NullId and place < c.varStack.items.len) {
+        c.varStack.items[place].borrow_places = true;
+        try addPlaceTarget(c, place, cy.NullId);
+    }
 
     const addr_of = try c.ir.newExpr(.address_of, ex_borrow_t, node, .{
         .expr = eff_child.ir,

@@ -54,3 +54,14 @@
   simple case folding이라 `'k'i`는 Kelvin 기호에도 맞는다. 깨지는 변경: 전에는 `'x'i`가 리터럴 뒤 규칙 `i`의 호출이었다.
   규칙을 부르려면 `'x' i`처럼 띄운다(`'x'id`처럼 이름이 이어지면 지금도 규칙). 결정 `project_std_peg.md` "대소문자 무시 리터럴과
   함수로 치환".
+
+## 빌림 검사의 자리 대상 지역 (2026-11-26)
+
+- 다른 컨테이너 안의 자리를 빌린 값을 담은 지역(`g := H{b=&w.x}`)이 살아 있는 동안 같은 블록의 다른 컨테이너도 마지막 사용 뒤에
+  끝나지 않았다. `h := H{b=&a[0]}`를 다 쓴 뒤의 `a << 3`이 'Expected exclusive access. There is another active borrow to `a`.'였다.
+  이제 자리를 담은 지역은 실제로 가리킬 수 있는 지역(`w`)만 붙잡는다.
+- `hr := &h`로 꺼낸 복사(`r := hr.b`, `r = hr.b`)를 `scope` 함수가 돌려주면(`return r`) `h`가 자리를 담지 않아도 'Expected to
+  return a borrow from the same scope as `p`.'였다. 이제 받는다. `h`가 자리를 담으면(`h := H{b=&w.x}`) 그대로 오류다.
+- 그대로인 것: `&&h`를 넘긴 컨테이너(`&&self` 메서드 호출 포함)는 아무 지역이나 가리킬 수 있다고 본다.
+- 확인: `memory/borrow_last_use_place.cy`와 `borrow_{last_use_place,last_use_place_copy,last_use_place_through,return_via_place,
+  via_place_bind}_error.cy`. 결정 `project_borrow_model.md` "자리 대상 지역 목록".

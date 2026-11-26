@@ -158,6 +158,8 @@ pub const Chunk = struct {
     /// The borrows of a local besides the one to its `parent_local`: a borrow container can borrow from more than one
     /// local (`Pair{a=&&x, b=&&y}`, `h.r = &&f`).
     borrow_loans: std.ArrayList(cy.sema.BorrowLoan) = .empty,
+    /// The locals that the borrows of places held by a local point into (`Local.borrow_places`).
+    borrow_place_targets: std.ArrayList(cy.sema.BorrowPlace) = .empty,
     /// Where a local of the current procs was moved (`move x`, or an implicit move of a `NoCopy` value), for the
     /// error of a later use. Cleared when the id is given to a new local.
     moved_sites: std.AutoHashMapUnmanaged(u32, *cy.ast.Node) = .empty,
@@ -441,6 +443,7 @@ pub const Chunk = struct {
         self.place_subst.deinit(self.alloc);
         self.borrow_pending.deinit(self.alloc);
         self.borrow_loans.deinit(self.alloc);
+        self.borrow_place_targets.deinit(self.alloc);
         self.moved_sites.deinit(self.alloc);
         self.branch_moves.deinit(self.alloc);
         self.break_moves.deinit(self.alloc);

@@ -407,3 +407,35 @@ sema의 빌림 검사는 세 조각이 서로 맞물리지 않았다.
   `borrow_return_param_place_error` · `borrow_param_store_error` · `borrow_scope_param_store_error`.
 - 남은 것: 자리 대상 지역을 지역마다 목록으로 적으면(`borrow_places`를 지역 id 목록으로) 위 오탐이 줄고, 역참조 대입 문구가 빌림
   지역(`r`)을 짚을 수 있다.
+
+### 자리 대상 지역 목록 (2026-11-26)
+
+위 절의 알고 둔 오탐 둘을 없앴다(사용자: 남은 것의 정리, 결정 위임). 둘 다 거절하던 코드를 받아들이는 쪽이다.
+
+| 꼴 | 전 | 원인 | 고친 것 |
+|---|---|---|---|
+| `g := H{b=&w.x}`가 사는 동안 같은 블록의 `h := H{b=&a[0]}` 마지막 사용 뒤 `a << 3` | 'Expected exclusive access. There is another active borrow to `a`.' | `isPointedInto`가 자리를 담은 지역이 하나라도 살아 있으면 모든 지역을 끝내지 않았다 | 자리를 담은 지역마다 가리킬 수 있는 지역을 적는다(`Chunk.borrow_place_targets`). 그 지역(과 그 지역이 `borrow_via`로 가리키는 지역)만 끝내지 않는다 |
+| `hr := &h`, `r := hr.b`(또는 `r = hr.b`) 뒤 `return r`(`h`는 자리를 담지 않음) | 'Expected to return a borrow from the same scope as `p`.' | 빌림 지역을 거쳐 꺼낸 복사를 자리를 담은 값으로 보고(`localPlaceFree(hr)`가 `borrow_via`만 보고 거짓), `r.borrow_via`를 `h`로 적었다 | 빌림 지역을 거친 복사는 `copyOutStart`가 닿는 컨테이너를 본다. 그 컨테이너가 자리를 담지 않으면 복사도 자리가 없고 `borrow_via`가 없다 |
+
+- 목록 항목은 `{local, target}`이다. `target`이 `cy.NullId`면 아무 지역이나(`&&h`를 넘긴 뒤: 함수가 무엇을 넣었는지 모른다).
+  `borrow_places`가 참인데 항목이 없으면 역시 아무 지역으로 본다(놓친 경로가 있어도 전처럼 보수적으로 남게).
+- 적는 대상: 자리의 빌림(`&w.x`, `&hr.b`)은 그 지역 자신과 그 지역의 `borrow_via` 사슬, 그리고 사슬의 각 지역이 담은 자리의
+  대상. 복사(`g2 := g`, `h.b`, `gr.p`)는 원본 자신을 빼고 같은 것을 적는다(복사는 원본이 가리키는 곳을 가리키지 원본 안을 가리키지
+  않는다). 대기 목록의 자리 항목에는 복사인지(`BorrowOwner.place_copy`)를 같이 적는다.
+- 적는 곳: `bindBorrowLocal`, `addFieldBorrowLoan`, `bindCaptureCopy`, `sema_ex_borrow2`(아무 지역). 지우는 곳:
+  `unbindBorrowLocal`(그 지역의 항목), `truncateBorrowLoans`(사라지는 지역의 항목). 항목의 대상이 사라진 뒤 같은 번호를 받은
+  지역은 오탐만 낳는다(안전한 쪽).
+- 판정: 살아 있는 다른 지역이 `local`을 가리키려면 그 지역의 `borrow_via` 사슬이나, 자리 항목 대상의 `borrow_via` 사슬에 `local`이
+  있어야 한다. 대상이 자리를 담은 다른 지역이면 그 지역이 살아 있는 동안 자기 대상을 붙잡으므로 대상의 대상까지 따라가지 않는다.
+- 빌림 지역을 거친 복사(`hr.b`)가 컨테이너보다 오래 살 수 있는 것은 전부터 같다(`borrow_place_valid.cy`). 컨테이너가 자리를
+  담았으면 복사의 `borrow_via`는 그 컨테이너이고(`copyOutStart`), 수명 검사 · 반환 검사 · 비어휘적 수명이 전처럼 컨테이너에 묶는다.
+- `r = xs[0]` · `r = h.b`가 컨테이너를 주인으로 본다는 HANDOFF의 남은 것은 0.4.18의 `copyOutOf`(컨테이너 안 빌림의 복사)로 이미
+  풀려 있었다(블록 안 `xs`, `h`, `h.inner.b`, `h.o`에서 바깥 `r`로 복사가 된다). 남은 보수성은 자리를 담은 컨테이너에서 꺼낸 복사가
+  자리 대상(`w`)이 아니라 컨테이너(`h`)에 묶이는 것이다. 수명 검사(`checkPlaces`)가 시작 지역 하나와 그 `borrow_via` 사슬을 따라가는
+  구조라 대상이 여럿이거나 아무 지역(`&&h`)이면 시작 지역을 정할 수 없어 바꾸지 않았다. 컨테이너는 대상보다 오래 살 수 없으므로
+  안전한 쪽이다.
+- 테스트: `memory/borrow_last_use_place.cy`(되는 것), `borrow_last_use_place_error` · `borrow_last_use_place_copy_error` ·
+  `borrow_last_use_place_through_error` · `borrow_return_via_place_error` · `borrow_via_place_bind_error`.
+- 남은 것: `&&h`를 넘긴 컨테이너(`h.set(&w.x)`처럼 `&&self` 메서드를 부른 것)는 아직 아무 지역을 가리킨다고 본다. 부르는 쪽의
+  `lendScopeArg`가 넣을 수 있는 `scope` 인자를 알므로 그 대상만 적을 수 있지만, 함수 값 · 제너릭 인스턴스 경로를 모두 확인해야 해
+  미뤘다. 역참조 대입 문구가 빌림 지역(`r`)을 짚게 하는 것, `&self` 메서드의 관리형 필드 대입(언어 결정)도 그대로다.

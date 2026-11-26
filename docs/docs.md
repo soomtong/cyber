@@ -3364,6 +3364,8 @@ if true:
 
 A borrow stored in a local variable is alive until the last statement of its block that names the variable. When that statement is a loop or an `if`, the borrow lives through all of it. A borrow that is only passed as an argument or used inside an expression ends with its statement. A local whose type has a destructor (a struct that holds a borrow and a managed field, a lambda that captures a borrow) keeps its borrow until the end of the block, where the destructor runs. A statement names the variable when the name is in its text, also in a nested block, a lambda, a string or a comment, but not after a `.` (`h.r` is a member).
 
+A local that another live local points into keeps its borrows while that local lives, also after its own last statement: a borrow of it (`hr := &h`), or a value that holds a borrow of a place in it (`g := H{b=&w.x}` keeps `w`). Other locals of the block still end after their last statement. After `&&h` is passed to a function, `h` can hold a borrow of a place in any local, and every local of the block stays while `h` lives.
+
 A local that holds a borrow can be borrowed again for one statement. The new borrow can not be kept in another local when it conflicts with the one the first local holds:
 ```cy
 type Foo:

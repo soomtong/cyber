@@ -5146,7 +5146,12 @@ Write patterns as raw strings (backticks) so that `\d` needs no second backslash
 
 `find` returns a `?regex.Match` with `start`, `end` (byte offsets) and `text`. `captures` returns a `?regex.Captures`: `c[0]` is the whole match, `c[1]` and `c['name']` are the text of a group, and `''` when the group did not take part in the match. `c.get(1)` and `c.get('name')` return a `?Match` and tell the two apart. Both take a second argument, the byte offset where the search starts. `find_all` and `captures_all` return every match from left to right. Matches do not overlap, and an empty match that touches the end of the match before it is left out (`a*` on `baaac` matches at 0, 1..4 and 5).
 
-In the replacement of `replace` (first match) and `replace_all`, `$1` and `${1}` stand for a group by number, `$name` and `${name}` by name, and `$$` for a dollar sign. A name takes the longest run of letters, digits and `_`, so write `${1}a`: `$1a` is the group named `1a`. A group that does not exist gives nothing. `split(s)` returns the pieces between the matches, `split(s, limit)` at most `limit` pieces. `regex.escape(s)` returns a pattern that matches `s` itself.
+In the replacement of `replace` (first match) and `replace_all`, `$1` and `${1}` stand for a group by number, `$name` and `${name}` by name, and `$$` for a dollar sign. A name takes the longest run of letters, digits and `_`, so write `${1}a`: `$1a` is the group named `1a`. A group that does not exist gives nothing. `replace` and `replace_all` also take a function of the groups in place of the replacement. It is called once for each match, from left to right, and what it returns goes in as it is: `$` has no meaning in it. A closure works too:
+```cy
+re := regex.compile(`(?P<key>\w+)=(\d+)`)!
+print(re.replace_all('a=1 b=22', |c| c['key'].upper() + ':' + c[2]))   --> A:1 B:22
+```
+`split(s)` returns the pieces between the matches, `split(s, limit)` at most `limit` pieces. `regex.escape(s)` returns a pattern that matches `s` itself.
 
 The syntax:
 
@@ -5201,6 +5206,7 @@ A grammar is a list of rules `name <- pattern`, and matching starts at the first
 | | |
 |---|---|
 | `'text'` `"text"` | The text. The escapes are `\n \r \t \\ \' \" \[ \] \- \^ \xHH \u{H..}` |
+| `'text'i` `"text"i` | The text in any case, by the simple case folding of Unicode as `(?i)` in `regex`: `'select'i` matches `SELECT` and `Select`, `'k'i` also the Kelvin sign. The `i` comes right after the quote: `'x' i` and `'x'id` call the rules `i` and `id` |
 | `[a-z_]` `[^"]` | One character of the class, or one that is not in it. A class can hold `%d` and the like: `[_%w]` |
 | `.` | Any one character |
 | `%a %c %d %g %l %p %s %u %w %x` | Letter, control, digit, printable but space, lower case, punctuation, white space, upper case, letter or digit, hex digit. ASCII only. The upper case form is the opposite: `%S` |
@@ -5222,7 +5228,7 @@ A grammar is a list of rules `name <- pattern`, and matching starts at the first
 
 A match is a `peg.Capture`: `start` and `end` (byte offsets), `text`, `name` and `kids`, the captures inside it. Captures nest as they are written in the grammar, so the result is a tree. `c[0]` is the text of the first capture directly inside `c`, and `c['name']` the text of the first capture with that name at any depth, `''` when there is none. `c.get('name')` returns a `?Capture`, `c.all('name')` every capture with that name in the order of the input, and `c.len()` the number of captures directly inside.
 
-`parse(s)` matches all of `s`. `match(s)` matches at the start of `s` and does not have to reach the end, and `match(s, start)` matches at a byte offset. `find(s)` returns the first place where the grammar matches, `find_all(s)` every match from left to right, without overlaps. `replace`, `replace_all` and `split` work as in `regex`: in the replacement, `$0` is the match, `$1` its first capture and `$name` or `${name}` the first capture with that name.
+`parse(s)` matches all of `s`. `match(s)` matches at the start of `s` and does not have to reach the end, and `match(s, start)` matches at a byte offset. `find(s)` returns the first place where the grammar matches, `find_all(s)` every match from left to right, without overlaps. `replace`, `replace_all` and `split` work as in `regex`: in the replacement, `$0` is the match, `$1` its first capture and `$name` or `${name}` the first capture with that name. A function in place of the replacement gets the `peg.Capture` of each match and returns its text: `kv.replace_all(line, |c| c['key'].upper())`.
 ```cy
 kv := peg.compile(`{:key: [_%w]+ :} '=' {:val: %d+ :}`)!
 line := 'set retries=3 timeout=250'
@@ -5257,7 +5263,7 @@ else |err|:
 ```
 `diag.line` and `diag.col` start at 1, and `diag.expected` has the expected patterns as they are written in the grammar. `peg.compile(grammar, &&diag)` fills the same `Diag` for a grammar that does not compile (`error.Syntax`). A grammar is checked when it is compiled: a rule that is not defined, a repetition of something that can match nothing (`('a'?)*`), and a rule that is left recursive, that is, calls itself before it takes any input (`expr <- expr '+' num`), are errors. Write a left recursive rule as a loop: `expr <- num ('+' num)*`.
 
-Matching is by Unicode code point: `.` and `[가-힣]` take a whole character, and offsets are in bytes. A byte of the input that is not UTF-8 is one character for `.` and for a negated class. The syntax is a subset of LPeg's `re` with the same meaning, with these differences: strings and classes have escapes, a named capture is a node of the result, `=name` matches the whole text of the capture, and what calls a Lua function (`p -> name`, `p => name`) or builds a table (`{| p |}`) is not supported. In a class, a `%` name goes on to the last letter, as in `re`: write `[_%w]`, not `[%w_]`.
+Matching is by Unicode code point: `.` and `[가-힣]` take a whole character, and offsets are in bytes. A byte of the input that is not UTF-8 is one character for `.` and for a negated class. The syntax is a subset of LPeg's `re` with the same meaning, with these differences: strings and classes have escapes, `'text'i` ignores case, a named capture is a node of the result, `=name` matches the whole text of the capture, and what calls a Lua function (`p -> name`, `p => name`) or builds a table (`{| p |}`) is not supported. In a class, a `%` name goes on to the last letter, as in `re`: write `[_%w]`, not `[%w_]`.
 
 A grammar backtracks, so there is no bound on the time of a match as there is for `regex`: a grammar can take time that grows fast with the length of the input. A match keeps a stack of open rule calls and choices. When the stack is over `peg.MaxStack` (100000) entries, for input that nests very deep, `parse` returns `error.TooDeep`, and for a match with more than `peg.MaxCaptures` (1000000) captures it returns `error.TooBig`. The functions that return an option panic in these cases. A call at the end of the last choice of a rule takes no stack: `tail <- !. / . tail` runs over any length of input. A grammar over `peg.MaxInsts` (65536) instructions is `error.TooBig` (`p^100` takes 100 times the instructions of `p`), and patterns nest at most `peg.MaxDepth` (250) deep. A compiled `Peg` does not change: compile once and use it for every match.
 
@@ -5321,12 +5327,14 @@ print((time.monotonic() - start).format())   --> 1.204s
 ```
 A `Duration` is made with `time.nanos(n)`, `micros`, `millis`, `seconds`, `minutes`, `hours` and `days` (24 hours). It adds, subtracts, negates, multiplies by an `int` and compares. A result out of the range of `Duration`, about 10000 years either way, panics with 'The duration is out of range.'. `d.secs()` and `d.millis()` return it as a whole number rounded toward zero, `d.to_float()` in seconds, and `d.format()` as text such as `1h2m3.5s`.
 
-A `Time` has no calendar fields. `t.utc()` and `t.to_offset(minutes)` return a `DateTime`, which has `year()`, `month()` (1 to 12), `day()`, `hour()`, `minute()`, `second()`, `nanosecond()`, `offset()`, `weekday()`, `day_of_year()` and `date()`. `dt.time()` returns the instant, and `time.unix(sec)`, `time.unix(sec, nsec)`, `time.unix_millis(ms)`, `t.unix()` and `t.unix_millis()` convert between a `Time` and Unix time. `dt.to_offset(m)` is the same instant at another offset, `dt.replace_offset(m)` the same date and time of day at another offset. Two `DateTime` values are `==` only when the offset is the same too, and they have no `<`. Compare the instants:
+A `Time` has no calendar fields. `t.utc()` and `t.to_offset(minutes)` return a `DateTime`, which has `year()`, `month()` (1 to 12), `day()`, `hour()`, `minute()`, `second()`, `nanosecond()`, `offset()`, `weekday()`, `day_of_year()` and `date()`. `dt.time()` returns the instant, and `time.unix(sec)`, `time.unix(sec, nsec)`, `time.unix_millis(ms)`, `t.unix()` and `t.unix_millis()` convert between a `Time` and Unix time. `dt.to_offset(m)` is the same instant at another offset, `dt.replace_offset(m)` the same date and time of day at another offset. `<`, `<=`, `>` and `>=` compare two `DateTime` values by their instants, and `a - b` is the `Duration` between them, whatever the offsets and the zones. `==` compares all the fields, as for any value, so two values of the same instant at different offsets are not `==`. Compare the instants with `time()`:
 ```cy
 a := time.parse('2026-11-15T10:22:03+09:00')!
 b := time.parse('2026-11-15T01:22:03Z')!
 print(a == b)                   --> false
 print(a.time() == b.time())     --> true
+print(a < b or a > b)           --> false
+print((a + time.seconds(5) - b).format())   --> 5s
 ```
 A `Date` is for calendar arithmetic. The difference of two dates is a number of days. `add_months` and `add_years` keep the day of the month, or take the last day when the month is shorter. `DateTime` has the same three methods, and they keep the time of day:
 ```cy
@@ -5364,7 +5372,7 @@ print(time.parse_format('Nov  5 10:22:01', '%b %e %T')!.format())
 | Zone | `%Z`: the abbreviation of the time zone (`KST`, `EDT`). `UTC` or the offset for a value without a zone. Output only |
 | Short forms | `%F` (`%Y-%m-%d`), `%T` (`%H:%M:%S`), `%R` (`%H:%M`), `%D` (`%m/%d/%y`) |
 | Others | `%s` (Unix seconds), `%n`, `%t`, `%%` |
-| Output only | `%u` (Monday is 1, Sunday is 7), `%w` (Sunday is 0), `%G` and `%V` (ISO 8601 year and week), `%Z` |
+| Output only | `%u` (Monday is 1, Sunday is 7), `%w` (Sunday is 0), `%G` and `%V` (ISO 8601 year and week), `%U` and `%W` (week of the year, 00 to 53, with weeks from Sunday and from Monday as in C: the days before the first Sunday or Monday are week 00), `%Z` |
 
 Names are in English. When parsing, a number takes one or two digits (`%Y` four, `%j` up to three, every `%f` one or more), `%j` can not be used with `%m`, `%d`, `%e` or `%b`, a space in the format takes one or more, a name can be short or full in any case, and both offset specifiers take `Z`, `+0900`, `+09:00` and `+09`. A `Date` formats with the date specifiers only.
 

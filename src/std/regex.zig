@@ -165,7 +165,7 @@ fn inTable(table: []const uni.R, cp: u32) bool {
 }
 
 /// Returns the next code point of the simple case folding orbit of `cp`, or `cp` when it folds to nothing else.
-fn foldNext(cp: u32) u32 {
+pub fn foldNext(cp: u32) u32 {
     var lo: usize = 0;
     var hi: usize = uni.fold.len;
     while (lo < hi) {

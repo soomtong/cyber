@@ -311,6 +311,16 @@ t.eq('<> <>', kv.replace_all('a=1 b=2', '<$nope$9>'))
 t.eq('none', kv.replace_all('none', 'x'))
 t.eq('none', kv.replace('none', 'x'))
 t.eq('-a-b-', peg.compile(`'x'*`)!.replace_all('axxb', '-'))
+-- A function gives the replacement for the capture of each match.
+t.eq('A=1 B=2', kv.replace_all('a=1 b=2', |c| c['key'].upper() + '=' + c['val']))
+t.eq('[a] b=2', kv.replace('a=1 b=2', |c| '[' + c['key'] + ']'))
+t.eq('$1 $1', kv.replace_all('a=1 b=2', |c| '$1'))
+t.eq('none', kv.replace_all('none', |c| 'x'))
+t.eq('none', kv.replace('none', |c| 'x'))
+t.eq('-a-b-', peg.compile(`'x'*`)!.replace_all('axxb', |c| '-'))
+fn kid_count(c &peg.Capture) -> str:
+    return str(c.len())
+t.eq('2 2', kv.replace_all('a=1 b=2', kid_count))
 sep := peg.compile(`%s* ',' %s*`)!
 parts := sep.split('a , b,c ,  d')
 t.eq(4, parts.len())
@@ -439,6 +449,34 @@ t.eq(80001, nest.parse(ok_depth)!.end)
 many := peg.compile(`{.}*`)!
 t.eq(true, parse_err(`{.}*`, str([]byte(1000001, 'a'))).starts_with('error.TooBig 0: The match has more than 1000000 captures.'))
 t.eq(400000, many.match(str([]byte(400000, 'a'))).?.len())
+
+-- A literal with `i` after the quote ignores case, by the simple case folding of Unicode as `(?i)` of `regex`.
+t.eq(6, ends(`'select'i`, 'SeLeCt'))
+t.eq(6, ends(`"select"i`, 'SELECT'))
+t.eq(-1, ends(`'select'i`, 'selec'))
+t.eq(-1, ends(`'select'`, 'SELECT'))
+-- The Kelvin sign and the long s fold to `k` and `s`, so the input can be longer in bytes than the literal.
+t.eq(5, ends(`'ks'i`, str.init_rune(0x212a) + str.init_rune(0x17f)))
+t.eq(2, ends(`'\u{212A}s'i`, 'kS'))
+t.eq(4, ends(`'가a'i`, '가A'))
+t.eq(-1, ends(`'a'i`, '\xc1'))
+t.eq(1, ends(`''i 'a'`, 'a'))
+t.eq(3, ends(`'ab'i 'c'`, 'ABc'))
+t.eq(-1, ends(`'ab'i 'c'`, 'ABC'))
+t.eq(4, ends(`{:kw: 'if'i :} !%w %s* 'x'`, 'IF x'))
+t.eq(-1, ends(`'if'i !%w`, 'iffy'))
+-- `i` that starts a longer name, or comes after a space, is a rule.
+t.eq(2, ends("""
+    s <- 'x' i
+    i <- 'y'
+""", 'xy'))
+t.eq(2, ends("""
+    s <- 'x'id
+    id <- 'Y'
+""", 'xY'))
+var ci_diag peg.Diag = {}
+t.eq(error.NoMatch, peg.compile(`'(' 'select'i`)!.parse('(selx', &&ci_diag).unwrap_error())
+t.eq('Expected `\'select\'i` at line 1, column 2, found `s`.', ci_diag.msg)
 
 -- A grammar that backtracks a lot still ends: `(a / a)* b` is linear, since a repetition gives nothing back.
 t.eq(-1, ends(`('a' / 'a')* 'b'`, str([]byte(100000, 'a'))))

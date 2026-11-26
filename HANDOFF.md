@@ -468,11 +468,11 @@
 - 보간 안의 보간은 지원하지 않는다(토크나이저 상태가 한 단계). 원인을 말하는 오류만 낸다.
 - `json` 기본 파싱은 17자리 넘는 소수를 `float`으로 근사한다(`exact`면 원문).
 - `regex`: look-around · backreference · `(?-u)` · `(?R)` · 일반 범주와 스크립트 밖의 `\p{..}` 속성(`Emoji` 등)은 받지 않는다(컴파일
-  오류). 반복자 없이 슬라이스를 돌려주고, 치환에 함수를 받지 않는다.
-- `peg`: 시간 보장이 없다(역추적). 함수를 부르는 캡처 · 오류 표지와 복구 · cut · left recursion · 대소문자 무시 리터럴 · Unicode
-  속성 클래스가 없다. `find`는 위치마다 다시 맞춰 본다(첫 글자 건너뛰기 없음).
-- `time`: 윤초 · 로캘이 없다. 오프셋은 분 단위(±23:59, DB의 초 단위 LMT는 반올림). `DateTime`에 순서 연산자가 없다
-  (`a.time() < b.time()`). `parse_format`은 `%Z` · `%U` · `%W` · `%c`를 받지 않고 `%f`가 숫자를 끝까지 먹는다.
+  오류). 반복자 없이 슬라이스를 돌려준다. 치환 함수(2026-11-26)는 `-> !str`를 받지 않는다.
+- `peg`: 시간 보장이 없다(역추적). 함수를 부르는 캡처 · 오류 표지와 복구 · cut · left recursion · 대소문자 무시 클래스 · Unicode
+  속성 클래스가 없다(대소문자 무시 리터럴 `'..'i`는 2026-11-26). `find`는 위치마다 다시 맞춰 본다(첫 글자 건너뛰기 없음).
+- `time`: 윤초 · 로캘이 없다. 오프셋은 분 단위(±23:59, DB의 초 단위 LMT는 반올림). `DateTime`의 순서 연산자는 순간을
+  보지만 `==`는 오프셋 · zone까지 본다(2026-11-26). `parse_format`은 `%Z` · `%c`를 받지 않고, `%U` · `%W`는 출력 전용이고(2026-11-26) `%f`가 숫자를 끝까지 먹는다.
   시간대 DB를 내장하지 않아 Windows · wasm에서는 `time.zone(name)` · `time.local()`이 `error.NotFound`다(`UTC`와
   `zone_from_tzif` · `zone_from_posix`는 된다). RFC 9557은 `format_zoned` · `parse_zoned`만 다룬다(`format` · `parse`는 RFC 3339).
   `format_zoned`는 `time.zone` · `time.local`로 읽은 zone만 괄호를 붙인다(데이터로 만든 zone은 오프셋만). 같은 바이트라도 DB에서

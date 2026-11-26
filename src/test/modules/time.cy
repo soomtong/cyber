@@ -95,6 +95,18 @@ t.eq(error.Range, dt.replace_offset(-1440).unwrap_error())
 t.eq(false, dt == dt.utc())
 t.eq(true, dt.time() == dt.utc().time())
 t.eq(true, dt.time() < (dt + time.nanos(1)).time())
+-- `<`, `<=`, `>`, `>=` and `-` compare the instants, whatever the offsets.
+later := dt.to_offset(-210)! + time.nanos(1)
+t.eq(true, dt < later)
+t.eq(true, dt <= later)
+t.eq(false, dt > later)
+t.eq(false, dt >= later)
+t.eq(true, later > dt)
+t.eq(true, dt <= dt.utc() and dt >= dt.utc())
+t.eq(false, dt < dt.utc() or dt > dt.utc())
+t.eq(time.nanos(1), later - dt)
+t.eq(time.nanos(-1), dt - later)
+t.eq(time.seconds(0), dt - dt.utc())
 
 -- Moving a date and time of day.
 t.eq('2026-11-16T00:00:00.123456789+05:30', (dt + time.seconds(2)).format())
@@ -260,6 +272,13 @@ t.eq('+23:59', time.format_offset(1439))
 -- Formats.
 t.eq('Wed Wednesday Jan January 31 031 3 3 2024-W05 24 01/31/24 %', d.format('%a %A %b %B %e %j %u %w %G-W%V %y %D %%')!)
 t.eq(' 5|05|Tue', time.date(2026, 5, 5)!.format('%e|%d|%a')!)
+-- `%U` and `%W`: the week that starts on Sunday and on Monday, as C `strftime` gives them.
+-- 2024-01-01 is a Monday, 2023-01-01 a Sunday, 2022-01-01 a Saturday.
+t.eq('00 01|00 01|01 01|01 02', time.date(2024, 1, 1)!.format('%U %W|')! + time.date(2024, 1, 6)!.format('%U %W|')! +
+    time.date(2024, 1, 7)!.format('%U %W|')! + time.date(2024, 1, 8)!.format('%U %W')!)
+t.eq('01 00|01 01|53 52|52 53|00 00', time.date(2023, 1, 1)!.format('%U %W|')! + time.date(2023, 1, 2)!.format('%U %W|')! +
+    time.date(2023, 12, 31)!.format('%U %W|')! + time.date(2024, 12, 31)!.format('%U %W|')! + time.date(2022, 1, 1)!.format('%U %W')!)
+t.eq('2026-11-15 46 45', time.parse('2026-11-15T10:22:03+09:00')!.format('%F %U %W')!)
 t.eq('2026-11-15 23:59:58.123456 +0530 +05:30 123 123456789 11 PM 1794767398 23:59', dt.format('%F %T.%f %z %:z %3f %9f %I %p %s %R')!)
 t.eq('12 AM|12 PM|01 PM', time.date(2026, 1, 1)!.at(0, 0, 0)!.format('%I %p|')! + time.date(2026, 1, 1)!.at(12, 0, 0)!.format('%I %p|')! + time.date(2026, 1, 1)!.at(13, 0, 0)!.format('%I %p')!)
 t.eq('-0330|+0000|-00:01', dt.to_offset(-210)!.format('%z|')! + dt.utc().format('%z|')! + dt.to_offset(-1)!.format('%:z')!)
@@ -298,6 +317,9 @@ t.eq('Unknown specifier `%Q`. See `DateTime.format` for the list.', diag.msg)
 t.eq(error.Format, time.parse_format('2026 1', '%Y %G', &&diag).unwrap_error())
 t.eq(3, diag.pos)
 t.eq('`%G` is for output only. Parse the date with `%Y`, `%m` and `%d`, or with `%j`.', diag.msg)
+t.eq(error.Format, time.parse_format('2026 03', '%Y %U', &&diag).unwrap_error())
+t.eq('`%U` is for output only. Parse the date with `%Y`, `%m` and `%d`, or with `%j`.', diag.msg)
+t.eq(error.Format, time.parse_format('2026 03', '%Y %W', &&diag).unwrap_error())
 t.eq(error.Format, time.parse_format('2026', '%Y%', &&diag).unwrap_error())
 t.eq('The format ends with a single `%`. Write `%%` for a percent sign.', diag.msg)
 t.eq(error.Format, time.parse_format('2026', '%:Y', &&diag).unwrap_error())

@@ -4,6 +4,7 @@
 const std = @import("std");
 const cy = @import("../cyber.zig");
 const C = @import("../capi.zig");
+const regex = @import("regex.zig");
 
 const Src = @embedFile("peg.cy");
 
@@ -55,6 +56,7 @@ const Op = enum(i64) {
     open = 14,
     close = 15,
     backref = 16,
+    str_fold = 17,
 };
 
 // Set words: `ascii_lo, ascii_hi, negated, nranges`, then `nranges` pairs `lo, hi`.
@@ -387,6 +389,33 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
                         failed = true;
                     }
                 },
+                .str_fold => {
+                    const off = in[1];
+                    const len = in[2];
+                    if (off < 0 or len < 0 or off + len > prog.len) return error.BadProgram;
+                    const lit = prog[@intCast(off)..][0..@intCast(len)];
+                    var end = at;
+                    var hit = true;
+                    for (lit) |w| {
+                        if (end >= hay.len or w < 0 or w > 0x10ffff) {
+                            hit = false;
+                            break;
+                        }
+                        const d = decode(hay, end);
+                        if (d.cp == NoChar or !foldEq(@intCast(w), @intCast(d.cp))) {
+                            hit = false;
+                            break;
+                        }
+                        end += d.len;
+                    }
+                    if (hit) {
+                        at = end;
+                        pc += 1;
+                    } else {
+                        if (track.on and npred == 0) track.fail(at, pc);
+                        failed = true;
+                    }
+                },
                 .set => {
                     const set = try setOf(prog, in[1]);
                     var hit = false;
@@ -550,6 +579,16 @@ fn exec(t: *cy.Thread) anyerror!C.Ret {
     return C.RetOk;
 }
 
+/// Whether `a` and `b` are the same code point under simple case folding, as `(?i)` of `regex` compares them.
+fn foldEq(a: u32, b: u32) bool {
+    if (a == b) return true;
+    var next = regex.foldNext(a);
+    while (next != a) : (next = regex.foldNext(next)) {
+        if (next == b) return true;
+    }
+    return false;
+}
+
 inline fn target(a: i64) error{BadProgram}!u32 {
     if (a < 0 or a > std.math.maxInt(u32) - 1) return error.BadProgram;
     return @intCast(a);
@@ -572,6 +611,17 @@ test "peg decode" {
     try t.expectEqual(NoChar, decode("\xff", 0).cp);
     try t.expectEqual(@as(u32, 1), decode("\xea\xb0", 0).len);
     try t.expectEqual(NoChar, decode("\xed\xa0\x80", 0).cp);
+}
+
+test "peg fold" {
+    const t = std.testing;
+    try t.expect(foldEq('a', 'A'));
+    try t.expect(foldEq('K', 0x212a));
+    try t.expect(foldEq(0x212a, 'k'));
+    try t.expect(foldEq('s', 0x17f));
+    try t.expect(!foldEq('a', 'b'));
+    try t.expect(foldEq('1', '1'));
+    try t.expect(!foldEq('1', '2'));
 }
 
 test "peg set" {

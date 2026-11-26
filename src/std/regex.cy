@@ -321,6 +321,27 @@ fn (&Regex) replace_all(s str, repl str) -> str:
     buf.append(s[last..].span())
     return str(buf)
 
+--| Returns `s` with the leftmost match replaced by what `repl` returns for its groups, see `replace_all`.
+fn (&Regex) replace(s str, repl &OpaqueFunc[fn(&Captures) -> str]) -> str:
+    if self.captures(s) |c|:
+        m := c.get(0).?
+        return s[0..m.start] + repl.*(&c) + s[m.end..]
+    return s
+
+--| Returns `s` with every match replaced by what `repl` returns for its groups.
+--| The text that `repl` returns is taken as it is: `$` has no meaning in it. `repl` is called once for each match,
+--| from left to right.
+fn (&Regex) replace_all(s str, repl &OpaqueFunc[fn(&Captures) -> str]) -> str:
+    var buf []byte = {}
+    last := 0
+    for self.captures_all(s) |c|:
+        m := c.get(0).?
+        buf.append(s[last..m.start].span())
+        buf.append(repl.*(&c).span())
+        last = m.end
+    buf.append(s[last..].span())
+    return str(buf)
+
 --| Returns the pieces of `s` between the matches. Groups are not part of the result.
 fn (&Regex) split(s str) -> []str:
     var res []str = {}

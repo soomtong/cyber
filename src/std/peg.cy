@@ -1,5 +1,6 @@
 --| Parsing expression grammars: patterns with rules that call each other, for input that a regular expression
---| can not describe, such as nested brackets. The syntax is that of the `re` module of LPeg.
+--| can not describe, such as nested brackets. The syntax is that of the `re` module of LPeg, and `'text'i` matches
+--| the text in any case.
 --| A choice `a / b` is ordered: when `a` matches, `b` is not tried. Repetitions take all they can and do not give back.
 --| Matching is by Unicode code point, offsets are in bytes.
 --| A grammar backtracks, so there is no bound on the time of a match as there is for `regex`.
@@ -71,7 +72,7 @@ type Peg:
 
 -- Program layout, shared with `peg.zig`. A program is one `[]int`:
 --   header (8 words): magic, instruction count, instruction offset, 0...
---   literals: the bytes of the literals, one byte a word
+--   literals: the bytes of the literals, one byte a word, and the code points of a case-insensitive one
 --   sets: `ascii_lo, ascii_hi, negated, nranges`, then `nranges` pairs `lo, hi`
 --   instructions: three words each, `op, a, b`
 const Magic = 0x50450001
@@ -94,6 +95,7 @@ const OpJmp = 13           -- a: target
 const OpOpen = 14          -- a: capture kind, b: name or string
 const OpClose = 15
 const OpBackref = 16       -- a: name
+const OpStrFold = 17       -- a: offset of the code points, b: count
 
 -- Capture kinds, in the program and in the capture log. 0 in the log closes a capture.
 const CapSimple = 1
@@ -121,7 +123,7 @@ const ResInterrupt = -4
 
 -- Node kinds.
 const NEmpty = 0
-const NStr = 1       -- a: offset in `lits`, b: length
+const NStr = 1       -- a: offset in `lits`, b: length, c: 1 when it ignores case (`lits` has code points)
 const NAny = 2
 const NSet = 3       -- a: offset in `sets`
 const NSeq = 4       -- a: first child in `kids`, b: count
@@ -372,6 +374,28 @@ fn (&Peg) replace_all(s str, repl str) -> str:
             buf.append(repl.span())
         else:
             buf.append(trees[i].expand(repl).span())
+        last = ranges[i * 2 + 1]
+    buf.append(s[last..].span())
+    return str(buf)
+
+--| Returns `s` with the leftmost match replaced by what `repl` returns for it, see `replace_all`.
+fn (&Peg) replace(s str, repl &OpaqueFunc[fn(&Capture) -> str]) -> str:
+    if self.find(s) |c|:
+        return s[0..c.start] + repl.*(&c) + s[c.end..]
+    return s
+
+--| Returns `s` with every match replaced by what `repl` returns for it: the capture of the whole match, with the
+--| captures inside it. The text that `repl` returns is taken as it is: `$` has no meaning in it. `repl` is called
+--| once for each match, from left to right.
+fn (&Peg) replace_all(s str, repl &OpaqueFunc[fn(&Capture) -> str]) -> str:
+    var ranges []int = {}
+    var trees []Capture = {}
+    self.scan(s, &&ranges, &&trees, true)
+    var buf []byte = {}
+    last := 0
+    for 0..ranges.len() / 2 |i|:
+        buf.append(s[last..ranges[i * 2]].span())
+        buf.append(repl.*(&trees[i]).span())
         last = ranges[i * 2 + 1]
     buf.append(s[last..].span())
     return str(buf)
@@ -1020,6 +1044,20 @@ fn (&&Builder) parse_literal() -> !Lit:
         self.pos += 1
     return Lit{a=start, b=self.lits.len() - start}
 
+-- Turns the bytes of `lit`, the last literal in `lits`, into code points, for a literal `'..'i` that ignores case.
+fn (&&Builder) fold_literal(lit Lit, from int) -> !int:
+    var buf []byte = {}
+    for 0..lit.b |i|:
+        buf.append(byte(self.lits[lit.a + i]))
+    text := str(buf)
+    self.lits = self.lits[0..lit.a]
+    i := 0
+    while i < text.len():
+        cp := int(text.rune_at(i))
+        self.lits.append(cp)
+        i += rune_len(cp)
+    return self.add(Node{kind=NStr, a=lit.a, b=self.lits.len() - lit.a, c=1, from=from, to=self.pos})
+
 -- Adds a set of code point ranges to `sets` and returns its node.
 fn (&&Builder) set_node(ranges []int, negated bool, from int) -> !int:
     off := self.sets.len()
@@ -1139,6 +1177,9 @@ fn (&&Builder) parse_primary() -> !int:
             return node
         case '\'', '"':
             lit := self.parse_literal()!
+            if self.peek() == 'i' and !is_name_char(self.peek_at(1)):
+                self.pos += 1
+                return self.fold_literal(lit, from)
             return self.add(Node{kind=NStr, a=lit.a, b=lit.b, from=from, to=self.pos})
         case '[':
             return self.parse_class()
@@ -1375,7 +1416,10 @@ fn (&&Builder) gen(n int) -> !void:
             pass
         case NStr:
             if node.b > 0:
-                pc := self.emit(OpStr, HeaderLen + node.a, node.b)!
+                op := OpStr
+                if node.c == 1:
+                    op = OpStrFold
+                pc := self.emit(op, HeaderLen + node.a, node.b)!
                 self.expects(pc, self.text_of(n))
         case NAny:
             pc := self.emit(OpAny, 0, 0)!

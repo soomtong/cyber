@@ -94,6 +94,22 @@ t.eq('$ $', re.replace_all(line, '$'))
 t.eq('${2 ${2', re.replace_all(line, '${2'))
 t.eq('- -', re.replace_all(line, '$nope-$9'))
 t.eq('no match', re.replace_all('no match', '$1'))
+-- A function gives the replacement for the groups of each match. `$` has no meaning in what it returns.
+t.eq('RETRIES:1 TIMEOUT:3', re.replace_all(line, |c| c['key'].upper() + ':' + str(c[2].len())))
+t.eq('[retries] timeout=250', re.replace(line, |c| '[' + c[1] + ']'))
+t.eq('$1 $1', re.replace_all(line, |c| '$1'))
+t.eq('no match', re.replace_all('no match', |c| 'X'))
+t.eq('no match', re.replace('no match', |c| 'X'))
+t.eq('-a-b-', regex.compile('x*')!.replace_all('axxb', |c| '-'))
+fn group_count(c &regex.Captures) -> str:
+    return str(c.len())
+t.eq('3 3', re.replace_all(line, group_count))
+calls := ^0
+numbered := fn(c &regex.Captures) -> str:
+    calls.* += 1
+    return '#' + str(calls.*)
+t.eq('#1 #2', re.replace_all(line, numbered))
+t.eq(2, calls.*)
 t.eq('no match', re.replace('no match', '$1'))
 t.eq('a-b-c', regex.compile(`\s+`)!.replace_all('a  b \t c', '-'))
 t.eq('-a-b-', regex.compile(`x*`)!.replace_all('ab', '-'))

@@ -38,3 +38,19 @@
 - `cl_vm_compile`이 `deny_raw_ptrs` · `deny_spawn` · `deny_ffi`를 VM에 남긴다. 전에는 그 뒤의 `cl_vm_validate`와 런타임
   `spawn` 검사가 옵션을 보지 못했다.
 - 결정 `docs/decisions/project_deny_ffi.md`, 매뉴얼 `docs/docs.md` "Denying C FFI.".
+
+## `time` · `regex` · `peg`: 순서 연산자, 함수로 치환, 대소문자 무시 리터럴 (2026-11-26)
+
+- `time.DateTime`에 `<` · `<=` · `>` · `>=`와 `DateTime - DateTime -> Duration`. 순간만 비교한다(오프셋 · zone은 보지 않는다).
+  `==`는 그대로 모든 칸을 비교하므로, 같은 순간의 `+09:00` 값과 `Z` 값은 `a <= b and a >= b`이면서 `a != b`다. 순간의 같음은
+  `a.time() == b.time()`. 결정 `docs/decisions/project_std_time.md` "셋째 단계".
+- `DateTime.format` · `Date.format` · `Time.format`에 `%U`(일요일 시작 주)와 `%W`(월요일 시작 주), 00~53, C `strftime`과 같은
+  값. `parse_format`에서는 `%u` · `%w` · `%G` · `%V`처럼 출력 전용이다: 전에는 'Unknown specifier', 이제
+  '`%U` is for output only. Parse the date with `%Y`, `%m` and `%d`, or with `%j`.'
+- `regex.Regex.replace` · `replace_all`이 함수를 받는다: `repl &OpaqueFunc[fn(&Captures) -> str]`(함수 포인터 · 클로저).
+  일치마다 왼쪽부터 한 번 불리고, 돌려준 문자열은 `$`를 확장하지 않고 그대로 들어간다. 결정 `project_std_regex.md` "함수로 치환".
+- `peg.Peg.replace` · `replace_all`도 같은 꼴로 함수를 받는다(`fn(&Capture) -> str`, 매치 전체의 캡처).
+- `peg`: 닫는 따옴표 바로 뒤의 `i`로 대소문자를 무시하는 리터럴(`'select'i`, `"select"i`). `regex`의 `(?i)`와 같은 Unicode
+  simple case folding이라 `'k'i`는 Kelvin 기호에도 맞는다. 깨지는 변경: 전에는 `'x'i`가 리터럴 뒤 규칙 `i`의 호출이었다.
+  규칙을 부르려면 `'x' i`처럼 띄운다(`'x'id`처럼 이름이 이어지면 지금도 규칙). 결정 `project_std_peg.md` "대소문자 무시 리터럴과
+  함수로 치환".

@@ -50,8 +50,9 @@ type Time:
     -sec  int
     -nsec int
 
---| An instant seen at a UTC offset, or in a time zone. Two values of the same instant at different offsets or
---| in different zones are not `==`: compare `a.time()` with `b.time()`.
+--| An instant seen at a UTC offset, or in a time zone. `<`, `<=`, `>`, `>=` and `-` look at the instant only.
+--| `==` looks at the offset and the zone too: two values of the same instant at different offsets or in different
+--| zones are not `==`. Compare `a.time() == b.time()` for the instant.
 type DateTime:
     -sec  int
     -nsec int
@@ -652,6 +653,23 @@ fn (&DateTime) `-`(d Duration) -> DateTime:
     return self.add(-d) !else:
         panic('The time is out of range.')
 
+--| Returns the time from `o` to this value. The offsets and the zones do not count: it is `self.time() - o.time()`.
+fn (&DateTime) `-`(o DateTime) -> Duration:
+    return self.time() - o.time()
+
+--| Whether this instant comes before that of `o`. The offsets and the zones do not count.
+fn (&DateTime) `<`(o DateTime) -> bool:
+    return self.sec < o.sec or (self.sec == o.sec and self.nsec < o.nsec)
+
+fn (&DateTime) `<=`(o DateTime) -> bool:
+    return self.sec < o.sec or (self.sec == o.sec and self.nsec <= o.nsec)
+
+fn (&DateTime) `>`(o DateTime) -> bool:
+    return self.sec > o.sec or (self.sec == o.sec and self.nsec > o.nsec)
+
+fn (&DateTime) `>=`(o DateTime) -> bool:
+    return self.sec > o.sec or (self.sec == o.sec and self.nsec >= o.nsec)
+
 -fn (&DateTime) on_day(day int) -> !DateTime:
     if self.tz.kind != 0:
         return self.tz.at_local(day * SecsPerDay + self.day_sec(), self.nsec, .compatible)
@@ -702,7 +720,9 @@ fn (&DateTime) format() -> str:
     return str(buf)
 
 --| Returns the value in a `strftime` format.
---| Date: `%Y %y %m %d %e %j %b %h %B %a %A %u %w %G %V`. Time of day: `%H %I %p %M %S %f %3f %6f %9f`.
+--| Date: `%Y %y %m %d %e %j %b %h %B %a %A %u %w %G %V %U %W`. `%U` and `%W` are the week of the year, 00 to 53,
+--| with weeks that start on Sunday and on Monday: the days before the first Sunday or Monday are in week 00.
+--| Time of day: `%H %I %p %M %S %f %3f %6f %9f`.
 --| Offset: `%z` (`+0900`), `%:z` (`+09:00`), `%Z` (the abbreviation of the zone such as `KST`, or `UTC`, or
 --| the offset when the value has no zone). Others: `%F` (`%Y-%m-%d`), `%T` (`%H:%M:%S`), `%R` (`%H:%M`),
 --| `%D` (`%m/%d/%y`), `%s` (Unix seconds), `%n`, `%t`, `%%`. Names are in English.
@@ -986,6 +1006,11 @@ fn (&Date) format(fmt str) -> !str:
                 buf = put_num(buf, iso_week_of(self.day).year, 4)
             case 'V':
                 buf = put_num(buf, iso_week_of(self.day).week, 2)
+            case 'U':
+                -- The week that starts on Sunday: Sunday is 0 here.
+                buf = put_num(buf, (year_day(self.day) + 6 - (weekday_num(self.day) + 1) % 7) / 7, 2)
+            case 'W':
+                buf = put_num(buf, (year_day(self.day) + 6 - weekday_num(self.day)) / 7, 2)
             case 'H':
                 buf = put_num(buf, self.sod / 3600, 2)
             case 'I':
@@ -1379,7 +1404,7 @@ fn (&Date) format(fmt str) -> !str:
                     self.pos += 1
             case '%':
                 self.literal('%', '`%`')!
-            case 'u', 'w', 'G', 'V':
+            case 'u', 'w', 'G', 'V', 'U', 'W':
                 self.fail(i - 2, '`%' + fmt[i - 1..i] + '` is for output only. Parse the date with `%Y`, `%m` and `%d`, or with `%j`.')
                 return error.Format
             case 'Z':
@@ -1448,7 +1473,7 @@ fn parse(s str, offset int, diag &&Diag) -> !DateTime:
         return err
 
 --| Parses `s` by a `strptime` format, such as `%d/%b/%Y:%H:%M:%S %z`. The specifiers are those of
---| `DateTime.format` without `%u %w %G %V`. A number takes one or two digits (`%Y` four, `%f` one to nine),
+--| `DateTime.format` without `%u %w %G %V %U %W`. A number takes one or two digits (`%Y` four, `%f` one to nine),
 --| a space in the format takes one or more, `%b` and `%a` take the short or the full name in any case, and
 --| `%z` takes `Z`, `+0900`, `+09:00` or `+09`. A field that the format does not have is that of
 --| 1970-01-01T00:00:00, and without `%z` the text is read as UTC.

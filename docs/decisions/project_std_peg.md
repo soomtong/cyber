@@ -306,5 +306,39 @@ ReleaseFast, Apple Silicon:
 
 ## 남은 일
 
-- 필요가 생기면: 호출 예산(`pest` `set_call_limit`), 첫 글자 집합 건너뛰기, 대소문자 무시 리터럴(`std/pegs` `i'..'`), Unicode 속성
+- 필요가 생기면: 호출 예산(`pest` `set_call_limit`), 첫 글자 집합 건너뛰기, 대소문자 무시 클래스(`[a-z]i`), Unicode 속성
   클래스(`regex`의 표 재사용), 건너뛰기 표기(Janet `to` · `thru`, `std/pegs` `@`), 오류 표지와 복구(LPegLabel), 줄 · 칸 캡처.
+
+## 대소문자 무시 리터럴과 함수로 치환 (2026-11-26)
+
+HANDOFF "알려진 한계"의 "대소문자 무시 리터럴"을 닫는다. `regex`에 함수 치환을 넣으면서 같은 꼴을 여기에도 둔다.
+
+### 비교
+
+- LPeg 1.1 `re`: 없다. `[sS][eE]..`로 쓰거나 Lua 함수로 만든다.
+- Rust: std에 PEG가 없다. pest는 `^"select"`(앞에 `^`), nom은 `tag_no_case`.
+- Zig 0.17.1: std에 PEG가 없다.
+- Nim 2.4: std `pegs`는 `i"select"`(앞에 `i`, 그리고 스타일 무시 `y"..."`), npeg도 `i"select"`.
+- Python 3.15: std에 PEG 라이브러리가 없다(pegen은 CPython 빌드 도구). pyparsing `CaselessLiteral` · `CaselessKeyword`,
+  Lark `"select"i`(뒤에 `i`). 참고로 JS peggy도 `"select"i`, 클래스에도 `[a-z]i`.
+
+### 결정
+
+1. 표기는 닫는 따옴표 바로 뒤의 `i`: `'select'i`, `"select"i`. 정규식 플래그 `/../i`와 같은 자리이고 Lark · peggy와 같다.
+   - 앞에 `i`(Nim)는 `re` 문법에서 규칙 호출 `i` 뒤 리터럴이고, 앞에 `^`(pest)는 `re`의 `p^n` 반복과 부딪힌다.
+     뒤에 `i`도 `'x'i`(리터럴 뒤 규칙 `i`)를 바꾸지만, 그 글자 바로 뒤가 이름 글자가 아닐 때만 그렇다. `'x' i`(띄움)와
+     `'x'id`는 지금처럼 규칙을 부른다. 1.0 전이라 이 드문 꼴을 바꾼다.
+2. 접기는 `regex`의 `(?i)`와 같은 Unicode simple case folding이다(`regex_unicode.zig`의 접기 궤도를 `peg.zig`가
+   `regex.foldNext`로 함께 쓴다). `'k'i`는 Kelvin 기호(U+212A)에도, `'s'i`는 `ſ`(U+017F)에도 맞는다. 그래서 일치한 입력의
+   바이트 길이가 리터럴과 다를 수 있다. full case folding(`ß`↔`ss`)은 하지 않는다(`regex`와 같다).
+3. 구현은 새 명령 `OpStrFold`(17). 리터럴을 바이트가 아니라 코드 포인트로 `lits`에 두고, 매처가 입력을 한 코드 포인트씩 읽어
+   궤도로 비교한다. 실패 위치와 `Diag.expected`는 보통 리터럴과 같이 리터럴의 시작이고, 문구에는 쓴 그대로 `'select'i`가 나온다.
+4. 클래스(`[a-z]i`)와 역참조(`=name`)의 대소문자 무시는 두지 않는다. 클래스는 `[a-zA-Z]`로 쓴다.
+5. 함수로 치환: `fn (&Peg) replace(s str, repl &OpaqueFunc[fn(&Capture) -> str]) -> str`와 `replace_all` 같은 꼴. 매치의
+   `Capture`(안쪽 캡처 포함)를 받는다. 매칭이 끝난 뒤 불리므로 결정 5의 문제(버려질 분기에서의 호출)가 없다. 결과는 그대로 넣는다.
+
+### 검증
+
+`src/test/modules/peg.cy`: `'..'i`와 `".."i`, 짧은 입력, 대소문자가 다른 보통 리터럴, Kelvin 기호 · `ſ`(바이트 길이가 다름),
+`\u{..}` 이스케이프, 한글 섞인 리터럴, UTF-8이 아닌 바이트, 빈 `''i`, 뒤따르는 보통 리터럴, 캡처 · `!%w`와 함께, 규칙 `i` · `id`가
+그대로인 것, `parse`의 오류 문구. `peg.zig`의 단위 테스트 "peg fold". 함수 치환은 같은 파일 "Replacing and splitting".

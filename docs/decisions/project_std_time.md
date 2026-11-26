@@ -368,6 +368,43 @@ d.at(h, mi, s, z)                       --> !DateTime
 ## 남은 일
 
 - 내장 tzdata(Windows · wasm에서 이름으로 찾기)와 Windows의 로컬 시간대. 크기(200~700 kB)와 갱신 주기를 보고 정한다.
-- `Date`의 주 날짜 파싱, 기간 표기(`PT1H`).
+- `Date`의 주 날짜 파싱(`%G` · `%V` · `%U` · `%W`와 요일), 기간 표기(`PT1H`).
 - 한 전이 앞뒤 하루 안에 전이가 또 있으면 `at_local`이 가까운 쪽 하나만 본다(tzdata 2026f에는 그런 zone이 차분 시험에서
   드러나지 않았다).
+
+## 셋째 단계: `DateTime`의 순서와 `%U` · `%W` (2026-11-26)
+
+HANDOFF "알려진 한계"의 두 줄을 닫는다. `DateTime`에 순서 연산자가 없어 `a.time() < b.time()`으로 썼고, `format`에 `%U` · `%W`가
+없었다.
+
+### 비교
+
+- Rust: chrono `DateTime<Tz>`의 `PartialEq` · `Ord`는 시간대가 달라도 순간으로 비교한다(같은 순간이면 `==`). `a - b`는
+  `TimeDelta`. jiff `Zoned`도 비교는 순간으로 한다. `strftime`의 `%U` · `%W`는 출력과 파싱 모두 있고, 파싱은 연도와 요일이 함께
+  있어야 날짜가 정해진다.
+- Zig 0.17.1: std에 달력 날짜 · 시간 타입이 없다(`std.time.epoch`는 Unix 초를 연 · 일로 나누는 것뿐). `strftime`도 없다.
+- Nim 2.4: `times`의 `DateTime`은 `<` · `<=` · `==`가 모두 `toTime`(순간) 비교다. `-`는 `Duration`. 형식은 `yyyy-MM-dd` 꼴의
+  자체 패턴이고 주 번호 토큰은 없다.
+- Python 3.15: aware `datetime`의 비교와 뺄셈은 UTC 순간으로 한다. 단 두 값의 `tzinfo`가 같은 객체면 벽시계 값으로 비교한다
+  (inter-zone · intra-zone 비교가 다르다). naive와 aware는 `==`가 거짓, `<`는 `TypeError`. `strftime`은 C의 것을 쓰고,
+  `strptime`은 `%U` · `%W`를 연도 · 요일과 함께일 때만 날짜 계산에 쓴다.
+- 참고로 Java `ZonedDateTime`과 JS Temporal `ZonedDateTime`은 `equals`가 zone까지 보고, 순서(`isBefore` · `compare`)는 순간이다.
+
+### 결정
+
+1. `DateTime`에 `<` · `<=` · `>` · `>=`를 둔다. 순간만 본다(오프셋 · zone은 보지 않는다). Rust · Nim · Python과 같다.
+2. `==`는 그대로 둔다. 언어의 `==`는 오버로드할 수 없고 모든 칸을 비교한다(`docs/docs.md` "Comparison operators").
+   그래서 같은 순간의 `+09:00` 값과 `Z` 값은 `a <= b and a >= b`이면서 `a != b`다. Java · Temporal과 같은 나눔이고, 순간의
+   같음은 지금처럼 `a.time() == b.time()`으로 쓴다. DB에서 읽은 zone과 `zone_from_tzif`의 zone이 `==`에서 다른 것도
+   그대로지만, 순서 비교에는 영향이 없다.
+3. 같은 이유로 `DateTime - DateTime -> Duration`도 둔다(`self.time() - o.time()`). Rust · Nim · Python 모두 있다.
+   `Time - Time`과 같은 범위라 panic이 없다(`Duration`은 약 1만 년).
+4. `format`에 `%U`(일요일 시작)와 `%W`(월요일 시작)를 C · POSIX 정의대로 둔다: 연중 일(0부터)에 7을 더하고 그 주의 시작 요일까지의
+   날 수를 빼 7로 나눈다. 첫 일요일 · 월요일 앞의 날은 00주, 범위는 00~53. macOS `date`와 아홉 날짜를 대조했다.
+5. `parse_format`에서는 `%u` · `%w` · `%G` · `%V`와 같이 출력 전용으로 둔다('`%U` is for output only. ...'). 주 번호만으로는
+   날짜가 정해지지 않고, 지금 `%a` · `%A`는 읽고 버리기만 해서 요일을 날짜 계산에 넣는 길이 없다.
+
+### 검증
+
+`src/test/modules/time.cy`: 순서 넷 · 같은 순간의 `<=`와 `>=` · `-`의 부호, `%U` · `%W` 열 날짜(연초가 일 · 월 · 토요일인 해,
+연말 53주), `parse_format`의 두 오류.

@@ -234,5 +234,38 @@ ReleaseFast, 9.8 MB 로그(10만 줄, 한글 포함), Apple Silicon:
 
 ## 남은 일
 
-- 필요가 생기면: 첫 글자 집합 건너뛰기, `find_iter` 꼴의 지연 반복(지금은 슬라이스), 함수로 치환(`replace`에 클로저),
-  `RegexSet`, 그 밖의 이진 속성(`\p{Emoji}` 등), `(?R)`.
+- 필요가 생기면: 첫 글자 집합 건너뛰기, `find_iter` 꼴의 지연 반복(지금은 슬라이스), `RegexSet`, 그 밖의 이진 속성(`\p{Emoji}` 등), `(?R)`.
+
+## 함수로 치환 (2026-11-26)
+
+HANDOFF "알려진 한계"의 "치환에 함수를 받지 않는다"를 닫는다.
+
+### 비교
+
+- Rust `regex` 1.13: `replace` · `replace_all` · `replacen`이 `Replacer` 트레이트를 받는다. `&str`(`$1` · `$name` 확장),
+  `NoExpand`(그대로), `FnMut(&Captures) -> T`(`T: AsRef<str>`)가 구현한다. 이름은 하나, 받는 것이 셋이다. 함수의 결과는 확장하지
+  않는다.
+- Zig 0.17.1: std에 정규식이 없다.
+- Nim 2.4: std `re`는 `replace`(그대로)와 `replacef`(`$1` 확장)만 있고 함수는 받지 않는다. nim-regex(nitely)는
+  `replace(s, pattern, by: proc (m: RegexMatch2, s: string): string)`으로 같은 이름에 함수 오버로드를 둔다.
+- Python 3.15: `re.sub(pattern, repl, string, count=0)`의 `repl`이 문자열이거나 `Match`를 받아 문자열을 돌려주는 함수다.
+  겹치지 않는 일치마다 왼쪽부터 한 번씩 부르고, 함수의 결과는 확장하지 않는다.
+
+### 결정
+
+1. 새 이름 없이 `replace` · `replace_all`에 오버로드를 둔다. 셋 중 둘(Rust, Python)과 nim-regex가 같은 이름이다.
+   `fn (&Regex) replace(s str, repl &OpaqueFunc[fn(&Captures) -> str]) -> str`,
+   `fn (&Regex) replace_all(s str, repl &OpaqueFunc[fn(&Captures) -> str]) -> str`.
+2. 인자는 `&OpaqueFunc[..]`: core의 `sort(less)`와 같이 함수 포인터와 클로저를 모두 받는다. `Captures`는 빌림으로 넘긴다
+   (Rust와 같다, 복사가 없다).
+3. 결과 문자열은 그대로 넣는다. `$`를 다시 확장하지 않는다(Rust · Python과 같다). 확장이 필요하면 함수 안에서 `c.expand(..)`.
+4. 일치를 먼저 다 찾고(`captures_all`), 왼쪽부터 한 번씩 부른다. 빈 일치 규칙은 문자열 치환과 같다.
+5. 오류를 돌려주는 함수(`-> !str`)는 받지 않는다. 필요하면 `captures_all`로 돈다.
+
+`peg`에도 같은 꼴을 두었다(`project_std_peg.md` 같은 날짜 절). 함수가 매칭 중에 불리지 않으므로 그 문서 결정 5의
+"버려질 분기에서의 호출" 문제는 없다.
+
+### 검증
+
+`src/test/modules/regex.cy` "Replacing": 이름 · 번호 그룹, 첫 일치만, `$`가 그대로인 것, 일치 없음, 빈 일치, 이름 있는 함수,
+캡처하는 클로저가 일치마다 한 번 불리는 것.

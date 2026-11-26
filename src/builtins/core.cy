@@ -3282,11 +3282,6 @@ fn @partial_destruct(%T type, %Layout PartialStructLayout, val Ptr[T]):
         #else:
             panic('Unsupported partial destructor for type: ' + type.name(T))
 
-fn @destruct_span(span PtrSpan[%T]):
-    #if type.managed(T):
-        for 0..span.length |i|:
-            @destruct(T, *span.ptr[i])
-
 --| Generic destructor for any type.
 fn @destruct(%T type, val Ptr[T]):
     @nop('destruct: ' + type.name(T))

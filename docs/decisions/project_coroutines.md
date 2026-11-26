@@ -604,8 +604,8 @@ move 결과를 `ExprResult.initOwned`(값, 자리 아님)로 돌려주고 그 IR
 - 리뷰 뒤 정리(2026-11-14). (1) keep 표지는 `*ir.Stmt` 맵에 넣던 전역 sentinel(`sema.cancel_keep`) 대신
   `sema.CancelPad` union(`keep` · `pad`)이다. (2) `isCancelKeepFunc`는 이름 문자열 대신 템플릿 동일성(`Sema.dtor_fn` ·
   `partial_dtor_fn` · `deinit_obj_tmpl`, `Sema.destruct_box_fn`)으로 판정하고 `Func.info.cancel_keep`에 캐시한다. builtin
-  `@deinit`만 언어가 정한 이름으로 본다. 쓰이지 않는 `@destruct_span`은 keep이 아니다(쓰게 되면 `@destruct` 안에서
-  인라인되거나 패드를 받아 나머지 원소를 놓치므로 판정에 더해야 한다). (3) `semaReleaseLocal`은 대상 타입의 소멸이
+  `@deinit`만 언어가 정한 이름으로 본다. 쓰이지 않던 `@destruct_span`은 keep
+  판정 밖이라 지웠다(2026-11-26). 원소 구간을 소멸하는 루틴을 다시 두면 이 판정에 더해야 한다(패드를 받으면 나머지 원소를 놓친다). (3) `semaReleaseLocal`은 대상 타입의 소멸이
   스크립트 코드를 부를 수 있을 때(`destructMayRunScript`)만 지점을 단다. 그 판정은 제너레이터 인스턴스를 명시적으로
   true로 본다(본문의 deinit 블록이 스크립트 코드다).
 - `move x`의 표시는 `Chunk.moved_locals`(IR 포인터 키의 사이드 테이블) 대신 `ir.Local.moved` 플래그다. 표가 seqPush에

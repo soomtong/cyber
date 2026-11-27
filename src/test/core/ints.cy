@@ -108,10 +108,24 @@ if meta.is_vm_target():
     t.eq(122.fmt(.oct), '172')
     t.eq(122.fmt(.hex), '7a')
     t.eq(122.fmt(.ch), 'z')
-    -- t.eq(2.fmt(.bin, {pad=`0`, width=8}), '00000010')
-    -- t.eq(8.fmt(.oct, {pad=`0`, width=3}), '010')
-    -- t.eq(10.fmt(.dec, {pad=`0`, width=4}), '0010')
-    -- t.eq(16.fmt(.hex, {pad=`0`, width=4}), '0010')
+    t.eq(2.fmt(.bin, {pad='0', width=8}), '00000010')
+    t.eq(8.fmt(.oct, {pad='0', width=3}), '010')
+    t.eq(10.fmt(.dec, {pad='0', width=4}), '0010')
+    t.eq(16.fmt(.hex, {pad='0', width=4}), '0010')
+    t.eq(0xdeadbeef.fmt(.hex, {sep='_'}), 'dead_beef')
+    t.eq(0b10110.fmt(.bin, {sep='_'}), '1_0110')
+
+-- fmt() with a separator: groups of 3 in decimal, the sign in front.
+t.eq(1_000_000_000_000.fmt(.dec, {sep=','}), '1,000,000,000,000')
+t.eq(123.fmt(.dec, {sep=','}), '123')
+t.eq(0.fmt(.dec, {sep=','}), '0')
+t.eq((-1234).fmt(.dec, {sep=','}), '-1,234')
+t.eq(int.min.fmt(.dec, {sep=','}), '-9,223,372,036,854,775,808')
+t.eq(i32(-5000).fmt(.dec, {sep=' '}), '-5 000')
+-- The width counts the separators. A `0` pad goes after the sign.
+t.eq(1234.fmt(.dec, {sep=',', width=7}), '  1,234')
+t.eq((-42).fmt(.dec, {pad='0', width=6}), '-00042')
+t.eq((-42).fmt(.dec, {width=6}), '   -42')
 
 -- -- Implicit widen.
 -- a_int := as[int] i32(-123)

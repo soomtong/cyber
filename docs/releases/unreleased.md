@@ -26,3 +26,14 @@
 - `?else` · `!else`(`!else |err|` 포함) 뒤에 `return` · `break` · `continue` 하나를 `:` 없이 쓴다: `n := o ?else return none`.
   전에는 'Expected default expression.'.
 - 매뉴얼 "Local variables.", "Unwrap or default.", 결정 `docs/decisions/project_multi_assign.md`. tree-sitter 문법도 고쳤다.
+
+## 예제 `prime_factors.cy`와 정수의 자릿수 구분자 (2026-11-27)
+
+- 예제: 1부터 10^12까지의 수를 소인수분해해 거듭제곱의 곱으로 쓴다(`360 = 2^3 × 3^2 × 5`). 나눗셈으로 나누는 수를 제곱근까지 시험하고,
+  조건은 `d <= rest / d`라 `d * d`가 넘치지 않는다. 인자 · 프롬프트 · 파이프로 받는 꼴은 `pi_digits.cy`와 같다.
+- 예제가 드러낸 빈틈: 한도 `1000000000000`을 읽기 쉽게 쓸 방법이 없었다. `NumberFormatConfig`에 `sep ?byte`를 더하고, 정수에도
+  `fmt(format, config)`를 열었다(전에는 `Raw`만, `int`의 꼴은 테스트에 주석으로만 있었다). `1234567.fmt(.dec, {sep=','})`는
+  `1,234,567`. 10진수는 3자리, 다른 진법은 4자리로 묶는다(Python의 `,` · `_`). width는 구분자와 부호를 센다. 128 이상의 구분자는
+  'Invalid sep: 200, expected an ASCII rune' panic.
+- `int`의 `0` 채움은 부호 뒤에 온다: `(-42).fmt(.dec, {pad='0', width=6})`는 `-00042`(Python과 같음). 다른 채움 문자는 부호 앞.
+- 매뉴얼 "String formatting."의 `fmt` 문단.

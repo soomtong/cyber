@@ -820,6 +820,7 @@ pub const Array = extern struct {
 pub const NumberFormatConfig = extern struct {
     pad: cy.value.Option(u8) = .{},
     width: cy.value.Option(i64) = .{},
+    sep: cy.value.Option(u8) = .{},
 };
 
 pub const MapValue = extern struct {

@@ -70,6 +70,7 @@ if meta.is_vm_target():
     test.eq('010', byte(8).fmt(.oct, {pad='0', width=3}))
     test.eq('0010', byte(10).fmt(.dec, {pad='0', width=4}))
     test.eq('  10', byte(16).fmt(.hex, {width=4}))
+    test.eq('1111_1111', byte(255).fmt(.bin, {sep='_'}))
     test.eq('255', byte(255).fmt(.dec, {width=2}))
     test.eq('255', byte(255).fmt(.dec, {width=0}))
 

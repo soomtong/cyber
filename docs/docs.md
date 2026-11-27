@@ -893,6 +893,13 @@ x := 123
 print(x.fmt(.hex))  --> 7b
 ```
 
+An integer also takes a `NumberFormatConfig` with a minimum `width`, the `pad` rune and a digit separator `sep`. The separator goes between groups of 3 digits in decimal and 4 in the other bases. The width counts the separators and the sign, and a `0` pad goes after the sign:
+```cy
+print(1234567.fmt(.dec, {sep=','}))         --> 1,234,567
+print(0xdeadbeef.fmt(.hex, {sep='_'}))      --> dead_beef
+print((-42).fmt(.dec, {pad='0', width=6}))  --> -00042
+```
+
 ## Symbols.
 A symbol literal is written `symbol.` followed by an identifier, like an error value is written `error.Name`.
 Each symbol has a global unique ID.

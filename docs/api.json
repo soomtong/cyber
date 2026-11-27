@@ -103,6 +103,7 @@
         {"name": "**", "recv": "Int[]", "sig": "**(e Self) -> Self"},
         {"name": "fmt", "recv": "Int[]", "sig": "fmt() -> str"},
         {"name": "fmt", "recv": "Int[]", "sig": "fmt(format NumberFormat) -> str", "doc": "Formats the integer using a NumberFormat."},
+        {"name": "fmt", "recv": "Int[]", "sig": "fmt(format NumberFormat, config NumberFormatConfig) -> str", "doc": "Formats the integer using a NumberFormat and a NumberFormatConfig: `n.fmt(.dec, {sep=','})` is `1,234,567`."},
         {"name": "ufmt", "recv": "Int[]", "sig": "ufmt() -> str"},
         {"name": "ufmt", "recv": "Int[]", "sig": "ufmt(format NumberFormat) -> str", "doc": "Formats the integer (interpreted as unsigned) using a NumberFormat."}
       ],
@@ -1736,6 +1737,7 @@
     {"module": "core", "name": "panic_unwrap_error", "sig": "panic_unwrap_error(err error) -> never"},
     {"module": "core", "name": "raw_fmt", "sig": "raw_fmt(x r64, format NumberFormat, config NumberFormatConfig) -> str"},
     {"module": "core", "name": "int_fmt", "sig": "int_fmt(x int, format NumberFormat) -> str"},
+    {"module": "core", "name": "int_fmt_config", "sig": "int_fmt_config(x int, format NumberFormat, config NumberFormatConfig) -> str"},
     {"module": "core", "name": "is_float_str", "sig": "is_float_str(x str) -> bool"},
     {"module": "core", "name": "atof", "sig": "atof(x str) -> float"},
     {"module": "core", "name": "atof32", "sig": "atof32(x str) -> f32"},

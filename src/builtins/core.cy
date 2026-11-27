@@ -393,6 +393,10 @@ type NumberFormatConfig:
     --| `width` is the minimum width. Shorter digits are padded at the start. A negative width panics.
     width ?int = none
 
+    --| `sep` provides the ASCII rune put between groups of digits: 3 in decimal, 4 in the other bases. The width
+    --| counts the separators. A byte of 128 or more panics.
+    sep   ?byte = none
+
 type byte = Raw[8]
 type r8  = Raw[8]
 type r16 = Raw[16]
@@ -715,6 +719,12 @@ fn (Int[]) fmt(format NumberFormat) -> str:
     return int_fmt(self, format)
 
 #[bind] fn int_fmt(x int, format NumberFormat) -> str
+
+--| Formats the integer using a NumberFormat and a NumberFormatConfig: `n.fmt(.dec, {sep=','})` is `1,234,567`.
+fn (Int[]) fmt(format NumberFormat, config NumberFormatConfig) -> str:
+    return int_fmt_config(self, format, config)
+
+#[bind] fn int_fmt_config(x int, format NumberFormat, config NumberFormatConfig) -> str
 
 fn (Int[]) ufmt() -> str:
     return self.ufmt(.dec)

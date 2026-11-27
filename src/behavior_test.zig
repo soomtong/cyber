@@ -830,6 +830,7 @@ fn test_core(run: *Runner) void {
     run.case("core/str_init_rune_surrogate_panic.cy");
     run.case("core/str_seek_pos_neg_panic.cy");
     run.case("core/raw_fmt_neg_width_panic.cy");
+    run.case("core/int_fmt_bad_sep_panic.cy");
     run.case("core/Slice_neg_oob_panic.cy");
     run.case("core/str_new_line_error.cy");
     run.case("core/str_interpolation.cy");
@@ -1162,6 +1163,7 @@ test "Compile." {
     try compileCase("../examples/pi_digits.cy");
     try compileCase("../examples/e_digits.cy");
     try compileCase("../examples/fibonacci_sequence.cy");
+    try compileCase("../examples/prime_factors.cy");
 
     // tools.
     try compileCase("tools/bench.cy");

@@ -16,3 +16,4 @@ Notable examples will be listed here:
 - [pi_digits.cy](pi_digits.cy) - Prints PI to the Nth decimal place with an integer spigot. The number comes from an argument, a prompt or a pipe (`os.input`).
 - [e_digits.cy](e_digits.cy) - Prints e to the Nth decimal place with Sale's spigot, the sibling of `pi_digits.cy`.
 - [fibonacci_sequence.cy](fibonacci_sequence.cy) - Prints the first N Fibonacci numbers, up to the 93 that fit in an `int` (one more overflows).
+- [prime_factors.cy](prime_factors.cy) - Factors a number up to 10^12 into primes by trial division and prints it as a product of powers.

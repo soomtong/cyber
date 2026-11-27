@@ -158,6 +158,7 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"@asr",    zErrBuiltinFunc(bindings.asr, null)},
 
     .{"int_fmt",      zErrFunc2(int_fmt, int_fmt_eval)},
+    .{"int_fmt_config", zErrFunc(int_fmt_config)},
 
 
     .{"@fabs",  zErrBuiltinFunc(bindings.fabs, null)},
@@ -2662,6 +2663,13 @@ fn raw_fmt(t: *cy.Thread) anyerror!C.Ret {
     const val = t.param(u64);
     const format = std.enums.fromInt(NumberFormat, t.param(i64)) orelse return error.InvalidEnumTag;
     const config = t.param(cy.heap.NumberFormatConfig);
+    if (checkFormatConfig(t, config)) |panic_ret| return panic_ret;
+    ret.* = try rawFmtExt(t, val, format, config);
+    return C.RetOk;
+}
+
+/// Panics for a width, pad or separator that `initPaddedDigits` would reject, so the script sees why.
+fn checkFormatConfig(t: *cy.Thread, config: cy.heap.NumberFormatConfig) ?C.Ret {
     if (config.width.from()) |width| {
         if (!validFormatWidth(width)) {
             return t.ret_panic_fmt("Invalid width: {}", &.{cy.fmt.v(width)});
@@ -2672,8 +2680,12 @@ fn raw_fmt(t: *cy.Thread) anyerror!C.Ret {
             return t.ret_panic_fmt("Invalid pad: {}, expected an ASCII rune", &.{cy.fmt.v(pad)});
         }
     }
-    ret.* = try rawFmtExt(t, val, format, config);
-    return C.RetOk;
+    if (config.sep.from()) |sep| {
+        if (!validFormatPad(sep)) {
+            return t.ret_panic_fmt("Invalid sep: {}, expected an ASCII rune", &.{cy.fmt.v(sep)});
+        }
+    }
+    return null;
 }
 
 pub fn int_fmt_eval(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
@@ -2692,6 +2704,16 @@ fn int_fmt(t: *cy.Thread) anyerror!C.Ret {
     return C.RetOk;
 }
 
+fn int_fmt_config(t: *cy.Thread) anyerror!C.Ret {
+    const ret = t.ret(cy.heap.Str);
+    const val = t.param(i64);
+    const format = std.enums.fromInt(NumberFormat, t.param(i64)) orelse return error.InvalidEnumTag;
+    const config = t.param(cy.heap.NumberFormatConfig);
+    if (checkFormatConfig(t, config)) |panic_ret| return panic_ret;
+    ret.* = try intFmtExt(&t.heap, val, format, config);
+    return C.RetOk;
+}
+
 // The width cap matches `str.repeat`.
 fn validFormatWidth(width: i64) bool {
     return width >= 0 and width <= std.math.maxInt(u32);
@@ -2701,10 +2723,11 @@ fn validFormatPad(pad: u8) bool {
     return pad < 128;
 }
 
-/// Returns `digits` padded at the start to `opts.width` with `opts.pad`. The padding goes straight to the
-/// result, so a width can be larger than the digits buffer. An invalid width or pad gives `error.InvalidArgument`;
+/// Returns `digits` with `opts.sep` between each group of `group` digits from the end, padded at the start to
+/// `opts.width` with `opts.pad`. A leading `-` stays in front of a `0` pad. The padding goes straight to the result,
+/// so a width can be larger than the digits buffer. An invalid width, pad or separator gives `error.InvalidArgument`;
 /// a script caller checks them first to panic with a message.
-fn initPaddedDigits(heap: *cy.Heap, digits: []const u8, opts: cy.heap.NumberFormatConfig) !cy.heap.Str {
+fn initPaddedDigits(heap: *cy.Heap, digits: []const u8, group: usize, opts: cy.heap.NumberFormatConfig) !cy.heap.Str {
     var width: usize = 0;
     if (opts.width.from()) |w| {
         if (!validFormatWidth(w)) return error.InvalidArgument;
@@ -2712,15 +2735,41 @@ fn initPaddedDigits(heap: *cy.Heap, digits: []const u8, opts: cy.heap.NumberForm
     }
     const pad = opts.pad.from() orelse ' ';
     if (!validFormatPad(pad)) return error.InvalidArgument;
-    if (width <= digits.len) {
-        return heap.init_astr(digits);
+    const sep = opts.sep.from();
+    if (sep) |c| {
+        if (!validFormatPad(c)) return error.InvalidArgument;
     }
-    const res = try heap.init_astr_undef(width);
+
+    const sign: []const u8 = if (digits.len > 0 and digits[0] == '-') digits[0..1] else "";
+    const body = digits[sign.len..];
+    const nseps = if (sep != null and body.len > 0) (body.len - 1) / group else 0;
+    const n = sign.len + body.len + nseps;
+    const res = try heap.init_astr_undef(@max(width, n));
     const dst = res.mutSlice();
-    const n = digits.len;
-    @memset(dst[0 .. width - n], pad);
-    @memcpy(dst[width - n ..], digits);
+    const npad = dst.len - n;
+    // A `0` pad reads as more digits, so it goes after the sign.
+    if (pad == '0') {
+        @memcpy(dst[0..sign.len], sign);
+        @memset(dst[sign.len .. sign.len + npad], pad);
+    } else {
+        @memset(dst[0..npad], pad);
+        @memcpy(dst[npad .. npad + sign.len], sign);
+    }
+    var i = npad + sign.len;
+    for (body, 0..) |d, j| {
+        if (nseps > 0 and j > 0 and (body.len - j) % group == 0) {
+            dst[i] = sep.?;
+            i += 1;
+        }
+        dst[i] = d;
+        i += 1;
+    }
     return res;
+}
+
+/// Digits between separators: 3 in decimal, 4 in the other bases (Python's `,` and `_` groups).
+fn digitGroup(base: u8) usize {
+    return if (base == 10) 3 else 4;
 }
 
 pub fn intFmtExt(heap: *cy.Heap, val: i64, format: NumberFormat, opts: cy.heap.NumberFormatConfig) !cy.heap.Str {
@@ -2747,7 +2796,7 @@ pub fn intFmtExt(heap: *cy.Heap, val: i64, format: NumberFormat, opts: cy.heap.N
             // Format as u64 to prevent emitting the `+` character.
             n = std.fmt.printInt(&buf, @as(u64, @bitCast(val)), base, .lower, .{});
         }
-        return initPaddedDigits(heap, buf[0..n], opts);
+        return initPaddedDigits(heap, buf[0..n], digitGroup(base), opts);
     }
 }
 
@@ -2769,7 +2818,7 @@ pub fn rawFmtExt(t: *cy.Thread, val: u64, format: NumberFormat, opts: cy.heap.Nu
         // 64 digits hold any `u64` in base 2.
         var buf: [64]u8 = undefined;
         const n = std.fmt.printInt(&buf, val, base, .lower, .{});
-        return initPaddedDigits(&t.heap, buf[0..n], opts);
+        return initPaddedDigits(&t.heap, buf[0..n], digitGroup(base), opts);
     }
 }
 
@@ -2801,6 +2850,19 @@ test "intFmtExt pads past the digits buffer." {
     defer heap.destructStr(&spaced);
     try std.testing.expectEqualStrings("  -5", spaced.slice());
 
+    const grouped = try intFmtExt(heap, -1234567, .dec, .{ .sep = .some(',') });
+    defer heap.destructStr(&grouped);
+    try std.testing.expectEqualStrings("-1,234,567", grouped.slice());
+
+    const zeros = try intFmtExt(heap, -42, .dec, .{ .pad = .some('0'), .width = .some(6) });
+    defer heap.destructStr(&zeros);
+    try std.testing.expectEqualStrings("-00042", zeros.slice());
+
+    const hex = try intFmtExt(heap, 0xdeadbeef, .hex, .{ .sep = .some('_'), .width = .some(12) });
+    defer heap.destructStr(&hex);
+    try std.testing.expectEqualStrings("   dead_beef", hex.slice());
+
+    try std.testing.expectError(error.InvalidArgument, intFmtExt(heap, 1, .dec, .{ .sep = .some(200) }));
     try std.testing.expectError(error.InvalidArgument, intFmtExt(heap, 1, .dec, .{ .width = .some(-1) }));
     try std.testing.expectError(error.InvalidArgument, intFmtExt(heap, 1, .dec, .{ .width = .some(1 << 40) }));
     try std.testing.expectError(error.InvalidArgument, intFmtExt(heap, 1, .dec, .{ .pad = .some(200), .width = .some(3) }));

@@ -506,6 +506,7 @@ See [Custom types -> Operator methods](#operator-methods).
 * [Slices.](#slices)
   * [Sub-slices.](#sub-slices)
   * [Slice operations.](#slice-operations)
+  * [Passing a slice to a function.](#passing-a-slice-to-a-function)
 * [Maps.](#maps)
   * [Map operations.](#map-operations)
 * [Implicit casts.](#implicit-casts)
@@ -1275,6 +1276,51 @@ xs := []int{1, 2}
 print(xs.pop().?)      --> 2
 print(xs.len())        --> 1
 ```
+
+### Passing a slice to a function.
+A function takes a slice in one of four forms. Pick the one that says what the function does with it:
+
+| Parameter | Call | The function can |
+| --- | --- | --- |
+| `xs [&]T` | `f(nums.span())` | read the elements, and write those that are not managed (`int`, `float`, a struct of them). Any run of elements is taken: a slice, a part of one (`nums[1..].span()`), an `Array`, a literal `[&]int{1, 2}`. |
+| `xs &[]T` | `f(&nums)` | the same, and use what the slice itself has, such as `len()` and its `&` methods. |
+| `xs &&[]T` | `f(&&nums)` | change the slice: grow or shrink it (`append`, `remove`), replace managed elements (`str`, `[]T`, a struct with one), call its `&&` methods. |
+| `xs []T` | `f(nums)` | keep it: store it or return it. |
+
+```cy
+-- Reads the elements, and writes them in place (`int` is not managed).
+fn scale(xs [&]int, k int):
+    for 0..xs.len() |i|:
+        xs[i] *= k
+
+-- Reads the slice itself.
+fn describe(names &[]str) -> str:
+    return '%{names.len()} names, first %{names[0]}'
+
+-- Replaces a managed element and grows the slice.
+fn add_guest(names &&[]str):
+    names[0] = names[0].upper()
+    names.append('guest')
+
+nums := []int{3, 1, 2}
+scale(nums.span(), 10)
+print(nums)                    --> {30, 10, 20}
+scale(nums[1..].span(), 2)
+print(nums)                    --> {30, 20, 40}
+
+names := []str{'ann', 'bob'}
+print(describe(&names))        --> 2 names, first ann
+add_guest(&&names)
+print(names)                   --> {'ANN', 'bob', 'guest'}
+```
+
+`[&]T` and `&[]T` are shared borrows. A managed element can not be replaced through them, and a `&&` method can not be called on one: either would free or move what another borrow can point into. The error names the form to use:
+```cy
+fn rename(names [&]str):
+    names[0] = 'z'    --> CompileError: Cannot replace a managed value through a span `[&]T`, which is a shared borrow of its elements. Take the slice as `&&[]T`.
+```
+
+A `[]T` parameter is a copy, and a copy of a slice shares the elements until one of them is resized (see [Sub-slices](#sub-slices)). Writing an element of the parameter in place (`xs[0] = 9`, `xs.sort(...)`) is seen by the caller. Growing it (`append`) gives the parameter its own elements first. A function that only reads takes `[&]T`, and one that writes in place says so with `&&[]T`.
 
 ## Maps.
 A `Map` type is a dynamic data structure that stores key value pairs in a lookup table governed by hashing functions (key hash and equality functions).
@@ -4002,6 +4048,7 @@ fn some_nested_func():
 * [Generators.](#generators)
   * [Generator rules.](#generator-rules)
   * [Resuming a generator.](#resuming-a-generator)
+  * [Taking the first values.](#taking-the-first-values)
   * [Ending a generator.](#ending-a-generator)
 * [Planned concurrency features.](#planned-concurrency-features)
 </td>
@@ -4625,6 +4672,29 @@ print(gen.status())
 ```
 
 `next` returns `none` once when the function returns: at the end of its body or at a `return` without a value. After that the generator is `.done`, and another `next` panics: `Generator is already done.`
+
+### Taking the first values.
+`take(n)` gives the next `n` values of a generator, or fewer if it ends before them. It does not run the generator: the values are made when the result is iterated, so a generator that never ends can be taken from:
+```cy
+generator fn naturals() -> int:
+    i := 0
+    while:
+        yield i
+        i += 1
+
+for naturals().take(3) |n|:
+    print(n)    --> 0, 1, 2
+```
+The result (a `GeneratorTake`) shares the generator. A generator in a variable goes on after the values that were taken, and one that is only in the result is ended when the result is destructed:
+```cy
+gen := naturals()
+for gen.take(2) |n|:
+    print(n)            --> 0, 1
+print(gen.next().?)     --> 2
+```
+After the last value, the result's `next` keeps returning `none`, also when the generator ended first. A negative `n` panics: `Expected a count of 0 or more, found -1.`
+
+Slices and other collections have no `take`, `map`, `filter` or `reduce`. Write a `for` loop, or a slice range such as `xs[0..n]`.
 
 ### Ending a generator.
 `end` ends a generator that is not done. The values of its body are destructed and the status becomes `.done`:

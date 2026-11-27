@@ -461,3 +461,19 @@ sema의 빌림 검사는 세 조각이 서로 맞물리지 않았다.
 - 확인: 저장소의 `.cy` 전부를 변경 전 · 후 CLI로 돌려 첫 오류 줄 · 종료 코드를 비교했다. 테스트 `memory/borrow_last_use_place.cy`에
   두 꼴(`scope` 인자 호출, `scope` 없는 `&&self` 호출), 오류 테스트 `borrow_last_use_place_late_error` ·
   `borrow_last_use_place_late_call_error` · `borrow_last_use_place_late_chain_error`.
+
+### span `[&]T`를 거친 쓰기 (2026-11-27, F-221)
+
+- 사용자 질문("`[&]T` 원소 쓰기가 되는지 확인해줘")의 탐침에서 찾았다. R6은 `&T` · `&[]T`를 거친 관리형 값의 대입과 `&&` 생성을
+  막지만, span을 거친 자리는 보지 않았다. `xs [&][]int`에서 `xs[0] = {7}`, `xs[0].append(1)`, `&&xs[0]`이 통과했고,
+  `lists[0].span()`을 함께 받은 함수가 놓인 버퍼를 읽었다(Debug에서 `0xaaaa...`).
+- 원인: 원소 대입은 컨테이너(`Span` 지역)를 `checkWriteAccess`에 넘기는데 `Span`은 구조체라 빌림으로 보이지 않았다. 원소 자리는
+  `Span.@index_addr`의 raw 포인터(`Ptr[T]`)라 `placeThroughShared`의 호출 갈래가 빌림 반환이 아니면 멈췄다. `&&` 수신자 메서드는
+  raw 포인터에서 `&&T`를 만드는 갈래(`*T -> &>T`, `sema_func`)를 타서 검사를 건너뛰었다.
+- 고침: `placeThroughShared`가 `Span` 타입의 자리와 span 수신자의 `@index_addr` 결과를 공유 빌림을 거친 자리로 본다. `*T -> &>T`
+  갈래가 `checkExclusiveReceiver`로 같은 검사를 한다. `sema_ex_borrow2`는 주인 지역을 찾기 전에 검사한다(전에는 span 원소의
+  `&&xs[0]`이 'Expected parent local.'이었다). span일 때 문구는 'Cannot replace a managed value through a span `[&]T`, which is a
+  shared borrow of its elements. Take the slice as `&&[]T`.'(`[&&]T`는 없다).
+- 관리형이 아닌 원소(`int`, 그런 필드만 가진 구조체)는 전처럼 span으로 제자리에 쓴다(`&T`의 필드 규칙과 같다).
+- 테스트 `memory/span_write.cy`, `span_assign_managed_error` · `span_ex_receiver_error` · `span_ex_borrow_elem_error`. 매뉴얼
+  "Passing a slice to a function." 절(네 꼴의 표와 예).

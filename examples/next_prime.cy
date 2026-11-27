@@ -54,6 +54,5 @@ fn main() -> !void:
     if args.len() <= 1:
         return ask_each()
     count := parse_count(args[1]) ?else os.exit(1)
-    gen := primes()
-    for 0..count:
-        print(gen.next().?)
+    for primes().take(count) |p|:
+        print(p)

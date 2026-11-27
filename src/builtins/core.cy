@@ -4992,6 +4992,34 @@ fn @gen_next(gen Generator[%FnPtr]) -> ?(type.fn_ret(FnPtr))
 
 #[bind] fn (&Generator[]) status() -> GeneratorStatus
 
+--| Returns the next `n` values of the generator, or fewer if it ends before them. The result shares the generator and
+--| resumes it only when it is iterated, so a generator in a variable goes on after them. Panics for a negative `n`.
+--| ```cy
+--| for primes().take(3) |p|:
+--|     print(p)    --> 2, 3, 5
+--| ```
+fn (^Generator[]) take(n int) -> GeneratorTake[FnPtr]:
+    if n < 0:
+        panic('Expected a count of 0 or more, found %{n}.')
+    return {gen=self, left=n}
+
+--| The next values of a generator, from `Generator.take`. After the last one, `next` keeps returning `none`.
+type GeneratorTake[FnPtr Any]:
+    gen  ^Generator[FnPtr]
+    left int
+
+fn (&GeneratorTake[]) next() -> ?(type.fn_ret(FnPtr)):
+    if self.left == 0 or self.gen.status() == .done:
+        return none
+    self.left -= 1
+    return self.gen.next()
+
+fn (&GeneratorTake[]) iterator() -> int:
+    return 0
+
+fn (&GeneratorTake[]) next(idx &int) -> ?(type.fn_ret(FnPtr)):
+    return self.next()
+
 type GeneratorStatus enum:
     case suspended
     case running

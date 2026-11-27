@@ -43,3 +43,21 @@
 - 소수를 하나씩 보여 주고 다음 것을 물어본다. 터미널에서는 Enter로 다음, `q`나 입력 끝으로 멈춘다. 파이프에서는 줄마다 하나씩 더
   보여 준다. 인자로 개수를 주면 묻지 않고 그만큼(최대 100,000개) 찍는다. 소수는 끝없이 도는 `generator fn primes()`가 만들고, 찾은
   홀수 소수 가운데 제곱근 아래의 것으로만 나눠 본다. 언어 변경은 없다.
+
+## 제너레이터의 `take` (2026-11-27)
+
+- `gen.take(n)`은 제너레이터의 다음 `n`개 값(먼저 끝나면 그보다 적게)을 지연 평가로 준다: `for primes().take(10) |p|`. 결과는
+  제너레이터를 공유해 변수에 담긴 제너레이터는 꺼낸 값 뒤에서 이어 간다. 마지막 값 뒤의 `next`는 계속 `none`, 음수는 'Expected a
+  count of 0 or more, found -1.' panic. `examples/next_prime.cy`의 개수 인자가 이것을 쓴다.
+- 슬라이스의 `take` · `map` · `filter` · `reduce`는 넣지 않았다(`for` · `xs[0..n]`). 매뉴얼 Generators "Taking the first values.",
+  결정 `docs/decisions/project_generator_take.md`.
+
+## span `[&]T`를 거친 쓰기의 구멍 (2026-11-27)
+
+- 깨지는 변경(결함 수정, F-221): span `[&]T`를 거쳐 관리형 원소를 바꾸는 코드가 컴파일 오류다. `xs [&][]int`의 `xs[0] = {7}`,
+  `xs[0].append(1)`, `&&xs[0]`은 'Cannot replace a managed value through a span `[&]T`, which is a shared borrow of its elements.
+  Take the slice as `&&[]T`.'(또는 'Cannot borrow exclusively ...'). 전에는 통과했고, 같은 버퍼를 빌린 다른 span이 놓인 메모리를
+  읽을 수 있었다. `&[]T`는 이미 막혀 있었다(R6). 관리형이 아닌 원소(`int`, 그런 필드만 가진 구조체)는 그대로 제자리에 쓴다.
+  고치는 법: 매개변수를 `&&[]T`로 받고 `f(&&xs)`로 부른다.
+- 매뉴얼 Slices에 "Passing a slice to a function." 절: `[&]T` · `&[]T` · `&&[]T` · `[]T` 네 꼴이 하는 일의 표와 예, `[]T` 매개변수는
+  복사이지만 크기가 바뀌기 전까지 원소를 공유해 제자리 쓰기(`xs[0] = 9`, `sort`)가 호출한 쪽에 보인다는 것.

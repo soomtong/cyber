@@ -683,7 +683,16 @@
         {"name": "next", "recv": "&Generator[]", "sig": "next() -> ?(type.fn_ret(FnPtr))"},
         {"name": "iterator", "recv": "&Generator[]", "sig": "iterator() -> int", "doc": "Returns an iterator so a generator can be used in a `for` loop. The generator keeps its own position, so the iterator state is unused."},
         {"name": "next", "recv": "&Generator[]", "sig": "next(idx &int) -> ?(type.fn_ret(FnPtr))"},
-        {"name": "status", "recv": "&Generator[]", "sig": "status() -> GeneratorStatus"}
+        {"name": "status", "recv": "&Generator[]", "sig": "status() -> GeneratorStatus"},
+        {"name": "take", "recv": "^Generator[]", "sig": "take(n int) -> GeneratorTake[FnPtr]", "doc": "Returns the next `n` values of the generator, or fewer if it ends before them. The result shares the generator and resumes it only when it is iterated, so a generator in a variable goes on after them. Panics for a negative `n`. ```cy for primes().take(3) |p|: print(p)    --> 2, 3, 5 ```"}
+      ],
+      "funcs": [],
+      "aliases": {}},
+    {"module": "core", "name": "GeneratorTake", "syntax": "GeneratorTake[FnPtr]", "kind": "struct", "tparams": "[FnPtr Any]", "doc": "The next values of a generator, from `Generator.take`. After the last one, `next` keeps returning `none`.",
+      "methods": [
+        {"name": "next", "recv": "&GeneratorTake[]", "sig": "next() -> ?(type.fn_ret(FnPtr))"},
+        {"name": "iterator", "recv": "&GeneratorTake[]", "sig": "iterator() -> int"},
+        {"name": "next", "recv": "&GeneratorTake[]", "sig": "next(idx &int) -> ?(type.fn_ret(FnPtr))"}
       ],
       "funcs": [],
       "aliases": {}},

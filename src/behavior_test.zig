@@ -462,6 +462,10 @@ fn test_memory(run: *Runner) void {
     run.case("memory/ex_borrow_container_pass_error.cy");
     run.case("memory/ex_borrow_option_error.cy");
     run.case("memory/ex_borrow_through_shared_error.cy");
+    run.case("memory/span_assign_managed_error.cy");
+    run.case("memory/span_ex_receiver_error.cy");
+    run.case("memory/span_ex_borrow_elem_error.cy");
+    run.case("memory/span_write.cy");
     run.case("memory/borrow_container_two_owners_error.cy");
     run.case("memory/borrow_container_field_store_error.cy");
     run.case("memory/borrow_in_buffer_error.cy");
@@ -684,6 +688,8 @@ fn test_concurrency(run: *Runner) void {
     run.case("concurrency/await.cy");
     run.case("concurrency/generator.cy");
     run.case("concurrency/generator_method.cy");
+    run.case("concurrency/generator_take.cy");
+    run.case("concurrency/generator_take_negative_panic.cy");
     run.case("concurrency/yield_outside_generator_error.cy");
     run.case("concurrency/generator_borrow_param_error.cy");
     run.case("concurrency/generator_borrow_option_param_error.cy");

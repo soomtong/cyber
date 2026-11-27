@@ -691,8 +691,11 @@ pub fn readThroughShared(expr: *ir.Expr) bool {
 
 /// Whether the place `expr` is reached through a shared borrow: `self.xs` of `self &Foo`, `f.*` of `f &[]int`,
 /// `self.items[i].name` (the borrow that `@index_addr` returns comes from its receiver). What is behind a pointer
-/// (`self.node.xs` of `node ^Node`) is reached through the pointer, which is not a borrow.
-pub fn placeThroughShared(expr: *ir.Expr) bool {
+/// (`self.node.xs` of `node ^Node`) is reached through the pointer, which is not a borrow. An element of a span
+/// (`xs[0]` of `xs [&]T`) is reached through the shared borrow that the span is.
+const SharedPlace = enum { none, borrow, span };
+
+fn placeThroughShared(c: *cy.Chunk, expr: *ir.Expr) SharedPlace {
     var cur = expr;
     while (true) {
         switch (cur.code) {
@@ -703,34 +706,65 @@ pub fn placeThroughShared(expr: *ir.Expr) bool {
             .call => {
                 // A borrow that a function returns points into what its first argument borrows.
                 const call = cur.cast(.call);
-                if (call.numArgs == 0 or !isBorrowType(cur.type)) return false;
+                if (call.numArgs == 0) return .none;
+                if (!isBorrowType(cur.type)) {
+                    // `Span.@index_addr` returns a raw pointer into what the span borrows.
+                    const span = std.mem.eql(u8, call.func.name(), "@index_addr") and isSpanType(c, receiverType(call.args[0]));
+                    return if (span) .span else .none;
+                }
                 cur = call.args[0];
                 continue;
             },
             else => {},
         }
+        // The elements of a span are behind the shared borrow that the span is.
+        if (isSpanType(c, cur.type)) return .span;
         switch (cur.type.kind()) {
-            .borrow => return true,
-            .pointer => return false,
+            .borrow => return .borrow,
+            .pointer => return .none,
             else => {},
         }
         switch (cur.code) {
             .deref => cur = cur.cast(.deref).expr,
             .field => cur = cur.cast(.field).rec,
-            else => return false,
+            else => return .none,
         }
     }
 }
 
 /// A shared borrow gives no access that frees or moves what is behind it: another shared borrow of the same owner
 /// can point into it (`s := &f.xs[0]` next to the `&f` that a method received).
+/// A method with a `&&T` receiver called on a raw pointer to the value: the element pointer of a span
+/// (`xs[0].append(1)` of `xs [&][]int`) is reached through the span.
+pub fn checkExclusiveReceiver(c: *cy.Chunk, rec: *ir.Expr, node: *ast.Node) !void {
+    return checkNoWriteThroughShared(c, rec, "borrow exclusively", node);
+}
+
 fn checkNoWriteThroughShared(c: *cy.Chunk, place: *ir.Expr, comptime what: []const u8, node: *ast.Node) !void {
-    if (!placeThroughShared(place)) return;
+    const shared = placeThroughShared(c, place);
+    if (shared == .none) return;
     // A destructor has the only access to the value that it ends.
     if (c.proc().func) |func| {
         if (std.mem.eql(u8, func.name(), "@deinit")) return;
     }
+    if (shared == .span) {
+        return c.reportError("Cannot " ++ what ++ " through a span `[&]T`, which is a shared borrow of its elements. Take the slice as `&&[]T`.", node);
+    }
     return c.reportError("Cannot " ++ what ++ " through a shared borrow. Declare the borrow as `&&T`.", node);
+}
+
+/// The type of the receiver `expr`, without the `&` that a method call adds.
+fn receiverType(expr: *ir.Expr) *cy.Type {
+    if (expr.code == .address_of) return expr.cast(.address_of).expr.type;
+    return switch (expr.type.kind()) {
+        .borrow => expr.type.cast(.borrow).child_t,
+        .ex_borrow => expr.type.cast(.ex_borrow).child_t,
+        else => expr.type,
+    };
+}
+
+fn isSpanType(c: *cy.Chunk, type_: *cy.Type) bool {
+    return type_.isInstanceOf(c.sema.span_tmpl);
 }
 
 fn isBorrowType(type_: *cy.Type) bool {
@@ -1075,6 +1109,8 @@ pub fn sema_ex_borrow2(c: *cy.Chunk, child: sema.ExprResult, ex_borrow_t: *cy.Ty
     try sema_access.checkPartialMoveWhole(c, child, "borrow", node);
     const eff_child = try sema_move.semaEnsureAddressable(c, child, node);
 
+    // Before the owner is looked up: an element of a span (`&&xs[0]` of `xs [&]T`) has none.
+    try checkNoWriteThroughShared(c, eff_child.ir, "borrow exclusively", node);
     const parent_local = eff_child.recParentLocal() orelse {
         if (c.global_take_rec == node and c.global_take == null and eff_child.addressable) {
             if (try sema_move.takeGlobal(c, eff_child, node)) |local_res| {
@@ -1088,7 +1124,6 @@ pub fn sema_ex_borrow2(c: *cy.Chunk, child: sema.ExprResult, ex_borrow_t: *cy.Ty
         }
     };
 
-    try checkNoWriteThroughShared(c, eff_child.ir, "borrow exclusively", node);
     try checkExclusiveBorrowOfField(c, parent_local, borrowField(c, eff_child), false, node);
     // A function that gets the exclusive borrow can store in the container a borrow of a place in another container.
     // Not in a value that holds no borrows, and not when the borrow goes straight to a `&&T` parameter of a call: the

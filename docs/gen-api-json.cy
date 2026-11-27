@@ -94,6 +94,8 @@ fn get_base_type(node ^cy.Node) -> ^cy.Node:
             return get_base_type(n.child)
         case .ex_borrow |n|:
             return get_base_type(n.child)
+        case .ref |n|:
+            return get_base_type(n.child)
         else:
             panic('unsupported %{meta.choice_tag(node.*)}')
 

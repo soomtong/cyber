@@ -1419,6 +1419,7 @@ fn resolveRtArg(c: *cy.Chunk, arg: Argument, node: *ast.Node, opt_target: ?sema.
                         if (pointer.child_t == target_child_t) {
                             if (!pointer.ref) {
                                 // *T -> &>T
+                                try sema_borrow.checkExclusiveReceiver(c, arg.data.receiver.ir, node);
                                 var new_rec = try sema_move.semaManage(c, arg.data.receiver, node);
                                 new_rec.type = target_t;
                                 return new_rec;

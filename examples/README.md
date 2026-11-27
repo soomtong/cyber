@@ -17,3 +17,4 @@ Notable examples will be listed here:
 - [e_digits.cy](e_digits.cy) - Prints e to the Nth decimal place with Sale's spigot, the sibling of `pi_digits.cy`.
 - [fibonacci_sequence.cy](fibonacci_sequence.cy) - Prints the first N Fibonacci numbers, up to the 93 that fit in an `int` (one more overflows).
 - [prime_factors.cy](prime_factors.cy) - Factors a number up to 10^12 into primes by trial division and prints it as a product of powers.
+- [next_prime.cy](next_prime.cy) - Prints primes one at a time from a `generator fn` until you stop asking, or N of them from an argument.

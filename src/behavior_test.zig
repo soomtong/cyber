@@ -1164,6 +1164,7 @@ test "Compile." {
     try compileCase("../examples/e_digits.cy");
     try compileCase("../examples/fibonacci_sequence.cy");
     try compileCase("../examples/prime_factors.cy");
+    try compileCase("../examples/next_prime.cy");
 
     // tools.
     try compileCase("tools/bench.cy");

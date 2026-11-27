@@ -101,12 +101,18 @@
   tars-agent TODO 59행에 덧붙임(`9bfacc7`). 둘 다 push 안 함.
 - 2026-11-27(사용자: "@HANDOFF.md continue"): 다음 예제 Next Prime Number(`examples/next_prime.cy`, `1d29584e`, 16단계 rc=0).
   끝없는 `generator fn primes()`, 터미널은 Enter · `q`, 파이프는 줄마다 하나, 인자는 개수(최대 100,000). 언어 변경 없음.
-  남은 마찰: `[]T`를 `[&]T` 인자로 넘기려면 `.span()`, 제너레이터에서 N개만 꺼내는 `take`가 없음(언어 결정이라 사용자에게 묻는다).
+  남은 마찰: `[]T`를 `[&]T` 인자로 넘기려면 `.span()`(암시적 변환 없음, 그대로 둠).
+- 2026-11-27(사용자: "map, filter, take, reduce is worth?" → 권고 "take만" → "ok agree let's go"): `Generator.take(n)`
+  (`GeneratorTake`, 제너레이터 공유 · 지연, 결정 `project_generator_take.md`). `next_prime.cy`가 쓴다. API 생성기가 `^T` 수신자를 받게 고침.
+  이어서 사용자 질문 "`[&]T` 원소 쓰기가 되는지 확인해줘. 적절한 예제 코드도": 관리형 원소 쓰기가 span으로 새던 F-221(UAF)을 막고
+  매뉴얼 "Passing a slice to a function." 절(네 꼴 표와 예). 커밋 `516c4091`, 16단계 rc=0. tars-agent TODO(`df1f32a`, `96a6c1d`).
+  알아 둔 것: `[]T` 복사는 크기가 바뀌기 전까지 원소를 공유해 매개변수의 제자리 쓰기(`sort`)가 호출한 쪽에 보인다(문서대로, Go 꼴).
+  값 의미로 바꿀지는 언어 결정이라 사용자에게 묻는다. `generator_take_negative_panic.cy`의 trace에 `core:5003:9`가 있다.
 
 ## 현재 브랜치
 
 `master`. 0.4.23 태그 `090fd62f`(`build-1211-090fd62`, 에셋 15개, Latest). `d1bb6b11`까지 origin에 있다. 그 뒤 `60123da4`(충돌
-표지 제거), `9a243981`(소인수분해 예제 · 자릿수 구분자), `1d29584e`(다음 소수 예제), HANDOFF 커밋은 push하지 않았다.
+표지 제거), `9a243981`(소인수분해 예제 · 자릿수 구분자), `1d29584e`(다음 소수 예제), `516c4091`(`take` · F-221), HANDOFF 커밋은 push하지 않았다.
 
 ## 완료된 작업
 
@@ -523,7 +529,7 @@
   (`cl_vm_reset_pending`), `clReportApiError`는 빈 문구(2026-11-26, `project_capi_alloc_failure.md`). 런타임 안쪽의 `catch fatal()`은 남았다.
 - 신뢰하지 않는 스크립트의 C FFI 차단: `deny_ffi`로 정했다(2026-11-26, `project_deny_ffi.md`). 남은 것은 호스트 로더가 주는 Cyber
   소스 모듈의 `#[extern]`(builtin이 아니라 거부됨)과, 옵션 없이 돈 앞 eval이 세션에 남긴 `use c` · extern 함수.
-- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-216까지, 열린 것 없음).
+- 전체 발견 이슈 표: `docs/study/10-findings-register.md`(F-221까지, 열린 것 없음).
 
 ## 작업 방식
 

@@ -95,5 +95,25 @@
   - 깨지는 변경(결함 수정): `int(x)`가 NaN이나 `int` 밖의 float를 C 캐스트로 바꿔 미정의 동작이었다(arm64는 포화, x86은 다른 값).
     이제 'The float is NaN or out of the range of `int`.' panic, 상수에서는 같은 문구의 컴파일 오류다(정수 넘침 panic과 같은 원칙).
   - `?Mode`를 돌려주는 함수의 `return .payment`가 'Can not infer symbol from `.payment`.'였다. 옵션 목표는 안쪽 타입에서 추론한다.
-- 남은 마찰: 람다가 바깥 지역(`field`)을 캡처하지 못해 묻는 함수를 둘로 썼다(2026-11-25 결정 D, 캡처 규칙은 그대로).
+- 남은 마찰: 람다가 바깥 지역(`field`)을 캡처하지 못해 묻는 함수를 둘로 썼다. 아래 "람다의 값 캡처"에서 풀었다.
 - 매뉴얼 "Integer overflow."의 변환 문단, Enums의 옵션 목표 문장.
+
+## 람다의 값 캡처 (2026-11-27)
+
+- `^T` · `&T`가 아닌 지역을 쓰는 람다는 그 값의 복사를 갖는다. 복사는 람다를 만들 때 한 번 하므로 뒤에 바깥 지역을 바꿔도 람다는
+  옛 값을 보고, 반복 안에서 만든 람다는 저마다 그 반복의 값을 갖는다. 복사만 캡처한 클로저는 `Func[F]`라 함수 밖으로 돌려줄 수
+  있고(`fn adder(n int) -> Func[fn(int) -> int]: return |x| x + n`), `sort` 같은 `&OpaqueFunc` 자리에도 넘어간다.
+  전에는 'Can only capture variables declared with the reference types `^T` or `&T`. ...' 오류였다.
+- 람다 안에서 복사한 지역이나 그 일부에 대입하면 'Cannot assign to `count` in the lambda. The lambda keeps a copy of it from
+  when it was created; declare it with `^T` to share it with the lambda.' 바꾼 값을 바깥과 나누려면 지금처럼 `^T`로 선언한다.
+- `NoCopy` 값(`Map` 등)과 빌림을 담은 값은 복사할 수 없어 'A lambda captures a copy of a local, but `m` of the type
+  `Map[str, int]` can not be copied (`NoCopy`). Declare it with `^T`, or borrow it before the lambda (`b := &m`) and use
+  `b` in the lambda.'
+- `fiber:` 본문도 같은 규칙으로 복사를 캡처한다. `spawn`에 클로저를 넘기면 'Expected template `funcptr_t`. Found `Func`.' 대신
+  'A closure can not be the entry of `spawn`: what it captures stays with this thread. Pass the values as arguments of a function
+  instead.'
+- 런타임: 클로저 객체의 `numCaptured: u64`를 `numCaptured: u32` · `owned: u32`로 나눴다(`vm.h`도). 빌림과 복사를 함께 캡처한
+  pinned closure가 복사를 소유하고 해제한다. 그런 람다가 넘겨받는 복사는 앞 32개 캡처까지다.
+- 예제 `mortgage.cy`의 `ask_field` · `ask_mode`를 `fn ask(prompt str, parse Func[fn(str) -> ?%T]) -> !?T` 하나로 합쳤다.
+- 매뉴얼 Closures 절을 새로 썼고 Function union types의 `sort` 예, `spawn` · `fiber:` 문단을 고쳤다. 결정
+  `docs/decisions/project_closure_copy_capture.md`.

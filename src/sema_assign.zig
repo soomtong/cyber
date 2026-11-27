@@ -459,8 +459,13 @@ fn checkConstPart(c: *cy.Chunk, left_n: *ast.Node) !void {
             else => break,
         }
     }
-    if (root == left_n or root.type() != .ident) return;
+    if (root.type() != .ident) return;
     const name = root.cast(.ident).name.slice();
+    if (c.semaProcs.items.len > 0 and sema_local.isCopyCapture(c, name)) {
+        const part = if (root == left_n) "" else "a part of ";
+        return c.reportErrorFmt("Cannot assign to {}`{}` in the lambda. The lambda keeps a copy of it from when it was created; declare it with `^T` to share it with the lambda.", &.{v(part), v(name)}, left_n);
+    }
+    if (root == left_n) return;
     const res = try sema_local.lookupIdent(c, name, root);
     if (res == .static and res.static.type == .const_) {
         return c.reportErrorFmt("Cannot assign to a part of the constant `{}`. It is copied at each use; declare it with `global` to change it.", &.{v(name)}, left_n);

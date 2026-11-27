@@ -790,6 +790,15 @@ pub fn destroyObject(self: *cy.Heap, obj: *cy.heap.HeapObject, comptime fatal: b
                         .pinned_closure => {
                             _ = self.pinned_closures.remove(obj);
                             const num_captured: usize = @intCast(obj.func.data.closure.numCaptured);
+                            const owned = obj.func.data.closure.owned;
+                            if (!fatal and owned != 0) {
+                                const src = obj.func.getCapturedValuesPtr()[0..num_captured];
+                                for (src, 0..) |captured, i| {
+                                    if (i < 32 and (owned >> @intCast(i)) & 1 != 0) {
+                                        release(self, captured);
+                                    }
+                                }
+                            }
                             if (num_captured <= 1) {
                                 self.freePoolObject(obj);
                             } else {

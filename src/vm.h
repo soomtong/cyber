@@ -439,7 +439,8 @@ typedef union FuncData {
     } bc;
     struct {
         Inst* pc;
-        u64 numCaptured;
+        _Alignas(8) u32 numCaptured;
+        u32 owned;
         Value firstCapturedVal;
     } closure;
 } FuncData;

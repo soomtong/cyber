@@ -1412,6 +1412,15 @@ pub fn freePinnedClosure(t: *cy.Thread) callconv(.c) C.Ret {
     }
     _ = t.heap.pinned_closures.remove(obj);
     const num_captured: usize = @intCast(obj.func.data.closure.numCaptured);
+    // The copies of locals that the closure took over (`Heap.allocClosure`).
+    const owned = obj.func.data.closure.owned;
+    if (owned != 0) {
+        for (obj.func.getCapturedValuesPtr()[0..num_captured], 0..) |captured, i| {
+            if (i < cy.heap.max_pinned_owned and (owned >> @intCast(i)) & 1 != 0) {
+                t.heap.release(captured);
+            }
+        }
+    }
     // The size that `Heap.allocClosure` allocated: a pool object for at most one capture.
     t.heap.freeObject(obj, (3 + num_captured) * @sizeOf(cy.Value));
     ret.* = true;

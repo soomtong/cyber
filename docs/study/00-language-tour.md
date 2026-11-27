@@ -568,7 +568,7 @@ print(a())
 3
 ```
 
-지역 변수를 그대로(`n := 0`) 캡처하면 문서(`docs.md:2032`의 pinned closure)와 달리 "CompileError: Can only capture variables declared with the reference types `^T` or `&T`."로 거부된다.
+지역 변수를 그대로(`n := 0`) 캡처하면 문서(`docs.md:2032`의 pinned closure)와 달리 "CompileError: Can only capture variables declared with the reference types `^T` or `&T`."로 거부된다. 2026-11-27부터는 람다가 그 값의 복사를 갖는다(만들 때의 값, 람다 안의 대입은 오류, `docs/decisions/project_closure_copy_capture.md`).
 
 ### 3.8 컬렉션: `[]T`, `Array[T]`, `Map`, `[N]T`, 튜플
 
@@ -1372,7 +1372,7 @@ print(total)
 | `Expected type `int`, got `float`.` | `var x int = 2.5`, `x = 2.5` | `int(2.5)` |
 | `TODO: infer tuple type` | `arr := {1, 2, 3}` | `[]int{1, 2, 3}` |
 | `Expected assignment to a variable or placeholder for `int`.` | 값을 돌려주는 호출을 문장으로 사용 | `_ = f()` 또는 변수에 대입 |
-| `Can only capture variables declared with the reference types `^T` or `&T`.` | 클로저가 `n := 0` 캡처 | `n := ^0` |
+| `Can only capture variables declared with the reference types `^T` or `&T`.` (2026-11-27 전) | 클로저가 `n := 0` 캡처 | 이제 값 복사로 캡처된다. 바꾸려면 `n := ^0` |
 | `Cannot copy `Array[int]`, type implements `NoCopy`.` | `b := a` | `move a` |
 | ' `a` is no longer alive in this scope.' | `move` 후 사용 | 이동 후 원본을 쓰지 않는다 |
 | `Expected `else` case since switch does not handle all cases.` | int/str `switch`에 `else` 없음 | `else:` 추가 |

@@ -965,7 +965,7 @@ pub fn semaFiberExpr(c: *cy.Chunk, node: *ast.Node) !sema.ExprResult {
 
     // Report the role and lifetime rules at the `fiber` expression instead of inside `@new_fiber`.
     // A path (`T.method`, `mod.func`) is checked too: a `&T` receiver is a borrow like any parameter.
-    if (try entrySig(c, call)) |sig| {
+    if (try entrySig(c, call, "fiber")) |sig| {
         if (sig.ret.kind() == .pointer and sig.ret.cast(.pointer).child_t.isInstanceOf(c.sema.generator_tmpl)) {
             return c.reportError("A generator cannot be a fiber entry.", node);
         }
@@ -987,9 +987,13 @@ pub fn semaFiberExpr(c: *cy.Chunk, node: *ast.Node) !sema.ExprResult {
 }
 
 /// The signature of the entry function of `fiber f(..)` or `spawn f(..)` when the callee is a name or a path.
-fn entrySig(c: *cy.Chunk, call: *ast.CallExpr) !?*cy.FuncSig {
+fn entrySig(c: *cy.Chunk, call: *ast.CallExpr, keyword: []const u8) !?*cy.FuncSig {
     if (call.callee.type() != .ident and call.callee.type() != .accessExpr) return null;
     const callee_res = try c.semaExpr(call.callee, .{});
+    if (std.mem.eql(u8, keyword, "spawn") and callee_res.type.kind() == .func) {
+        // A `Func` or an `OpaqueFunc`: a closure holds values of this thread.
+        return c.reportErrorFmt("A closure can not be the entry of `spawn`: what it captures stays with this thread. Pass the values as arguments of a function instead.", &.{}, call.callee);
+    }
     return switch (callee_res.type.kind()) {
         .func_ptr => callee_res.type.cast(.func_ptr).sig,
         .func_sym => callee_res.type.cast(.func_sym).sig,
@@ -1016,7 +1020,7 @@ fn checkEntryMethodCall(c: *cy.Chunk, call: *ast.CallExpr, keyword: []const u8, 
 pub fn semaSpawnExpr(c: *cy.Chunk, node: *ast.Node) !sema.ExprResult {
     const call = node.cast(.spawn_expr).child.cast(.callExpr);
     try checkEntryMethodCall(c, call, "spawn", "thread", node);
-    if (try entrySig(c, call)) |sig| {
+    if (try entrySig(c, call, "spawn")) |sig| {
         for (sig.params()) |param| {
             const param_t = param.get_type();
             if (param_t.info.borrow_only) {

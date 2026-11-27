@@ -110,6 +110,8 @@ fn parse_field(field Field, text str) -> ?float:
         return none
     return x
 
+const ModePrompt = 'Find the monthly payment or the payoff time? (payment/payoff) '
+
 fn parse_mode(text str) -> ?Mode:
     switch text.trim():
         case 'payment':
@@ -120,20 +122,11 @@ fn parse_mode(text str) -> ?Mode:
             eprint('Choose `payment` or `payoff`, found `%{text.trim()}`.')
             return none
 
--- Asks for `field` until the answer is good at a terminal. From a pipe, the next line decides.
-fn ask_field(field Field) -> !?float:
-    while os.input('%{field.name}: ')! |line|:
-        if parse_field(field, line) |x|:
+-- Asks with `prompt` until `parse` takes the answer at a terminal. From a pipe, the next line decides.
+fn ask(prompt str, parse Func[fn(str) -> ?%T]) -> !?T:
+    while os.input(prompt)! |line|:
+        if parse(line) |x|:
             return x
-        if !os.stdin().is_terminal():
-            return none
-    return none
-
--- Asks for the mode in the same way.
-fn ask_mode() -> !?Mode:
-    while os.input('Find the monthly payment or the payoff time? (payment/payoff) ')! |line|:
-        if parse_mode(line) |mode|:
-            return mode
         if !os.stdin().is_terminal():
             return none
     return none
@@ -148,7 +141,7 @@ fn read_numbers(fields [3]Field, texts []str) -> !?[]float:
         return none
     var numbers []float = {}
     for fields |i, field|:
-        x := (if (texts.len() > 0) parse_field(field, texts[i]) else ask_field(field)!) ?else return none
+        x := (if (texts.len() > 0) parse_field(field, texts[i]) else ask('%{field.name}: ', |line| parse_field(field, line))!) ?else return none
         numbers += x
     return numbers
 
@@ -175,7 +168,7 @@ fn print_payoff(loan Mortgage, payment int) -> bool:
 
 fn main() -> !void:
     args := os.args()
-    mode := (if (args.len() > 1) parse_mode(args[1]) else ask_mode()!) ?else os.exit(1)
+    mode := (if (args.len() > 1) parse_mode(args[1]) else ask(ModePrompt, parse_mode)!) ?else os.exit(1)
     texts := if (args.len() > 1) args[2..] else args[1..]
     numbers := read_numbers(mode.fields(), texts)! ?else os.exit(1)
     loan := Mortgage{amount=cents(numbers[0]), rate=numbers[1] / 100 / 12}

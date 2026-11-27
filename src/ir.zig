@@ -453,6 +453,9 @@ pub const Lambda = extern struct {
     // If `numCaptures` > 0, this is a closure.
     numCaptures: u8,
     captures: [*]u8,
+    /// For each capture, the `^T` copy of the local that the closure keeps (`^copy(x)`), or null when it captures the
+    /// local itself (`^T`, `&T`). The closure takes the new reference over (`Heap.owned_capture_bit`).
+    copies: [*]?*Expr,
 
     // Captures locals and must be pinned. (Initialized as an `OpaqueFunc`)
     pinned_closure: bool,

@@ -124,6 +124,13 @@
   `int(x)`의 범위 밖 · NaN이 C 미정의 동작이던 F-222(VM `floatFitsInt`, panic, `project_int_overflow.md` 끝 절), `?Enum` 목표의
   `.case` 추론(`sema_expr` `dot_lit`). 남은 마찰: 람다의 바깥 지역 캡처(묻는 함수를 둘로 씀). tars-agent TODO. 다음 예제는 Change Return
   Program. `float_to_int_range_panic`의 trace는 `core:543:17`.
+- 2026-11-27(사용자: "람다가 바깥의 지역변수를 캡처하려면 어떻게 해야해? 클로저?" 뒤 "그래 진행해. 문서화 잘 해줘."): 람다의 값 캡처.
+  `^T` · `&T`가 아닌 지역은 람다를 만들 때 `^copy(x)`로 복사해 클로저가 넘겨받는다(`sema_local.captureParentLocal`,
+  `ir.Lambda.copies`, `CLOSURE` 캡처 피연산자의 `heap.owned_capture_bit`). 람다 안의 대입은 오류(`sema_assign.checkConstPart`의
+  `isCopyCapture`), `NoCopy` · 빌림 컨테이너는 빌림을 권하는 오류. pinned closure가 복사를 소유하도록 클로저 객체를 `numCaptured: u32` ·
+  `owned: u32`로 나눴다(`vm.h`, `heap_value` · `core.freePinnedClosure`의 release). `spawn`에 클로저는 새 오류 문구. 예제 `mortgage.cy`는
+  `ask(prompt, parse Func[fn(str) -> ?%T])` 하나로. 결정 `project_closure_copy_capture.md`, 매뉴얼 Closures 절. `map` · `filter`는
+  사용자 결정으로 남김. tars-agent TODO 59행(안내 170행을 다음 빌드에서 고칠 것).
 
 ## 현재 브랜치
 
@@ -495,7 +502,7 @@
    말고 언어 쪽을 고친다(메모리 `feedback-examples-drive-language-fixes`). 다중 대입의 다음 후보: 튜플 분해(`q, r := divmod(...)`).
    예제는 Pi · e · Fibonacci · Prime Factorization · Next Prime Number · Find Cost of Tile · Mortgage Calculator 순으로 왔다(karan/Projects Numbers 목록 순, 다음은 Change Return Program). 소인수분해에서 본 남은 마찰: 사용자 타입이
    `str(x)` · `join`에서 자기 글꼴을 정할 수 없다(`Factor` 대신 텍스트 함수를 썼다, Display 류 trait은 언어 결정이라 묻는다), 슬라이스
-   `map`이 없다. `int_fmt_bad_sep_panic.cy`의 trace는 `core:739:12`를 담아 `core.cy` 앞부분이 바뀌면 줄 번호를 고친다.
+   `map`이 없다(값 캡처가 들어가 걸림돌은 풀렸다, 넣을지는 사용자 결정). `int_fmt_bad_sep_panic.cy`의 trace는 `core:739:12`를 담아 `core.cy` 앞부분이 바뀌면 줄 번호를 고친다.
 1. 0.4.22 뒤의 기록(노트 `docs/releases/0.4.22.md`). `unreleased.md`에 2026-11-26의 절들이 있다(예제, C API 할당 실패,
    `deny_ffi`, `time` · `regex` · `peg`(주 날짜 파싱 포함), 빌림 자리 대상, `&&h` 인자와 F-216). push하지 않았다.
    표준 입력 절도 있다(`os.input` 등, F-217 · F-218). tars-agent `docs/TODO.md` 59행에 오늘 저녁 변경을 덧붙였다(`398acfc`, push 안 함).

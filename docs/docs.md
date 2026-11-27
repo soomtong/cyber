@@ -2811,15 +2811,61 @@ queue_task(.high_priority, |_|):
 ```
 
 ### Closures.
-Lambdas can capture local variables with reference types from an immediate parent scope. The following example shows the lambda `f` capturing `a` from the main scope:
+A lambda can use the local variables of the function that declares it. It captures them and becomes a closure.
+
+A local of a value type is copied when the lambda is created. The lambda keeps that copy, so a change to the local after that is not seen by the lambda:
 ```cy
-a := ^1
-f := fn() -> int:
-    return a.* + 2
-print(f())     --> 3
+limit := 10
+over := fn(x int) -> bool => x > limit
+limit = 100
+print(over(50))     --> true
 ```
 
-A local that is not a reference `^T` or a borrow `&T` can not be captured. Borrow it before the lambda and capture the borrow. A closure that captures a borrow becomes a pinned closure of the type `OpaqueFunc[F]`:
+Each lambda that is created in a loop keeps the value of its own round:
+```cy
+var fs []Func[fn() -> int] = {}
+for 0..3 |i|:
+    fs += fn() -> int => i * 10
+print(fs[2]())     --> 20
+```
+
+A closure with copies can leave the function that created it:
+```cy
+fn adder(n int) -> Func[fn(int) -> int]:
+    return |x| x + n
+
+add3 := adder(3)
+print(add3(4))     --> 7
+```
+
+The copy is made like any other [copy](#copy-semantics) of the type: a `str` or a number as it is, a struct field by field, and a slice `[]T` shares the elements with the local but keeps its own length.
+
+Assigning to a copied local, or to a part of it, in the lambda is a compile error, since it would not change the local outside:
+```cy
+count := 0
+inc := fn():
+    count += 1
+--> error: Cannot assign to `count` in the lambda. The lambda keeps a copy of it from when it was created; declare it with `^T` to share it with the lambda.
+```
+
+To share a variable with the lambda, declare it with the reference type `^T`. The lambda captures the reference, and both see the changes:
+```cy
+count := ^0
+inc := fn():
+    count.* += 1
+inc()
+inc()
+print(count.*)     --> 2
+```
+
+A [`NoCopy`](#copy-semantics) value (such as a `Map`) or a value that holds borrows can not be copied. Borrow it before the lambda and capture the borrow, or declare it with `^T`:
+```cy
+counts := Map[str, int]{app=7}
+f := fn() -> int => counts['app']
+--> error: A lambda captures a copy of a local, but `counts` of the type `Map[str, int]` can not be copied (`NoCopy`). Declare it with `^T`, or borrow it before the lambda (`b := &counts`) and use `b` in the lambda.
+```
+
+A closure that captures a borrow `&T` becomes a pinned closure of the type `OpaqueFunc[F]`. It can also keep copies of other locals (up to the first 32 captures):
 ```cy
 a := 1
 b := &a
@@ -2827,6 +2873,8 @@ f := fn() -> int:
     return b.* + 2
 print(f())     --> 3
 ```
+
+Only the locals of the function right above the lambda are captured, and a function that is declared with `fn name()` captures nothing. A closure that captures copies or references `^T` has the type `Func[F]`; the [function union types](#function-union-types) take it.
 
 A pinned closure keeps its captured values without a reference, so it is a [borrow container](#scope-parameter): it can not outlive the locals it captures, it is returned only through a `scope` return type, and it can not be lifted with `^` or stored in a global:
 ```cy
@@ -2919,8 +2967,12 @@ var func Func[fn(int, int) -> int] = |a, b| a + b + c.*
 func(10, 20)       --> 35
 ```
 
-A parameter of type `&OpaqueFunc[FN]` (such as the `less` function of `sort`) takes a function, a lambda, or a closure that captures `^T` or `&T` variables. A local variable that is not a reference can not be captured yet: borrow it first.
+A parameter of type `&OpaqueFunc[FN]` (such as the `less` function of `sort`) takes a function, a lambda, or any closure. A `Map` is `NoCopy`, so a comparator borrows it first:
 ```cy
+weights := []int{30, 10, 20}
+order := []int{0, 1, 2}
+order.sort(|a, b| weights[a] < weights[b])    -- {1, 2, 0}
+
 counts := Map[str, int]{app=7, db=8, web=23}
 c := &counts
 names := counts.keys()
@@ -4138,7 +4190,7 @@ fn fib(n int) -> int:
 
 `spawn` takes the first call only, so `spawn fib(40).await()` waits for the thread, like `(spawn fib(40)).await()`. A prefix operator takes the whole term: `-spawn fib(40).await()` is `-(spawn fib(40).await())`. `fiber` is read the same way.
 
-The entry point can be a lambda in a variable. It can not capture variables, because a closure is not `Sendable`:
+The entry point can be a lambda in a variable. It can not capture variables, because a closure is not `Sendable`: a lambda that uses a local of the spawning function is the compile error 'A closure can not be the entry of `spawn`: what it captures stays with this thread. Pass the values as arguments of a function instead.'
 ```cy
 inc := fn(n int) -> int => n + 1
 print(spawn inc(3).await())    --> 4
@@ -4339,7 +4391,7 @@ while a.status() != .done or b.status() != .done:
 A fiber of a [`scope` block](#scope-block) can borrow a value instead (see [Scope borrows](#scope-borrows)).
 
 ### `fiber` blocks.
-`fiber:` takes a body instead of a call. The body is a closure, so it captures variables that are declared with a reference type:
+`fiber:` takes a body instead of a call. The body is a [closure](#closures): it keeps copies of the locals it uses from when the fiber is made, and shares the ones that are declared with a reference type:
 ```cy
 log := ^ArrayStore[str]{}
 t := fiber:

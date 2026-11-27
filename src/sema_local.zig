@@ -977,13 +977,49 @@ fn getVarPtr(self: *cy.Chunk, name: []const u8) ?*sema.Local {
     } else return null;
 }
 
-fn pushCapturedVar(c: *cy.Chunk, name: []const u8, parentVarId: sema.LocalId) !u32 {
+/// Captures the parent local `parentVarId` in the lambda that is being checked. A reference `^T` or a borrow `&T` is
+/// captured as it is. Another local is copied: the lambda keeps a `^T` of its value from when the lambda is created.
+/// `NoCopy` values and borrow containers can not be copied that way.
+fn captureParentLocal(c: *cy.Chunk, name: []const u8, parentVarId: sema.LocalId, node: *ast.Node) !u32 {
+    const decl_t = c.varStack.items[parentVarId].decl_t;
+    if (decl_t.isObjectLike() or decl_t.kind() == .borrow) {
+        return pushCapturedVar(c, name, parentVarId, decl_t, false);
+    }
+    if (decl_t.info.borrow_only or decl_t.info.no_copy) {
+        const type_name = try c.sema.allocTypeName(decl_t);
+        defer c.alloc.free(type_name);
+        const why = if (decl_t.info.borrow_only) "holds borrows" else "can not be copied (`NoCopy`)";
+        if (c.vm.config.persist_main and c.semaProcs.items.len >= 2 and c.semaProcs.items[c.semaProcs.items.len - 2].func == null) {
+            return c.reportErrorFmt("A lambda captures a copy of a local, but `{}` of the type `{}` {}. Declare it with `^T`. Inside a function, you can also borrow it before the lambda (`b := &{}`) and use `b` in the lambda.", &.{v(name), v(type_name), v(why), v(name)}, node);
+        }
+        return c.reportErrorFmt("A lambda captures a copy of a local, but `{}` of the type `{}` {}. Declare it with `^T`, or borrow it before the lambda (`b := &{}`) and use `b` in the lambda.", &.{v(name), v(type_name), v(why), v(name)}, node);
+    }
+    const box_t = try sema.getRefType(c, decl_t);
+    return pushCapturedVar(c, name, parentVarId, box_t, true);
+}
+
+/// Whether `name` in the lambda that is being checked is, or would be, the copy of a parent local (`captureParentLocal`).
+pub fn isCopyCapture(c: *cy.Chunk, name: []const u8) bool {
     const proc = c.proc();
-    const parent_v = c.varStack.items[parentVarId];
+    if (proc.var_cache_entries.get(name)) |entry| {
+        if (entry.type != .capture) return false;
+        return proc.captures.items[entry.data.capture].copy;
+    }
+    if (c.semaProcs.items.len < 2 or proc.isStaticFuncBlock) return false;
+    const prev = c.semaProcs.items[c.semaProcs.items.len - 2];
+    const entry = prev.var_cache_entries.get(name) orelse return false;
+    if (entry.type != .local) return false;
+    const decl_t = c.varStack.items[entry.data.local.varId].decl_t;
+    return !decl_t.isObjectLike() and decl_t.kind() != .borrow;
+}
+
+fn pushCapturedVar(c: *cy.Chunk, name: []const u8, parentVarId: sema.LocalId, val_t: *cy.Type, copy: bool) !u32 {
+    const proc = c.proc();
     const capturedIdx: u8 = @intCast(proc.captures.items.len);
     try proc.captures.append(c.alloc, .{
         .parent_var_idx = parentVarId,
-        .val_t = parent_v.decl_t,
+        .val_t = val_t,
+        .copy = copy,
     });
     try proc.var_cache_entries.put(c.alloc, name, .{
         .type = .capture,
@@ -1039,14 +1075,7 @@ pub fn lookupSelf(self: *cy.Chunk, node: *ast.Node) !?LookupSelfResult {
             return self.reportErrorFmt("Can not capture the local variable `self` from static function `{}`.\nOnly lambdas (anonymous functions) can capture local variables.", &.{v(funcName)}, self.curNode);
         }
 
-        // TODO: Capture non-reference stack variables too.
-        const decl_t = self.varStack.items[res.varId].decl_t;
-        if (!decl_t.isObjectLike() and decl_t.kind() != .borrow) {
-            return self.reportErrorFmt(captureHintFmt(self), &.{v("self")}, node);
-        }
-
-        // Create a local captured variable.
-        const id = try pushCapturedVar(self, "self", res.varId);
+        const id = try captureParentLocal(self, "self", res.varId, node);
         return LookupSelfResult{
             .id = id,
             .capture = true,
@@ -1132,14 +1161,7 @@ fn lookupIdent2(self: *cy.Chunk, name: []const u8, node: *ast.Node) !LookupIdent
             return self.reportErrorFmt("Can not capture the local variable `{}` from static function `{}`.\nOnly lambdas (anonymous functions) can capture local variables.", &.{v(name), v(funcName)}, self.curNode);
         }
 
-        // TODO: Capture non-reference stack variables too.
-        const decl_t = self.varStack.items[res.varId].decl_t;
-        if (!decl_t.isObjectLike() and decl_t.kind() != .borrow) {
-            return self.reportErrorFmt(captureHintFmt(self), &.{v(name)}, node);
-        }
-
-        // Create a local captured variable.
-        const id = try pushCapturedVar(self, name, res.varId);
+        const id = try captureParentLocal(self, name, res.varId, node);
         return LookupIdentResult{
             .capture = id,
         };
@@ -1205,15 +1227,6 @@ const LookupParentLocalResult = struct {
     blockIdx: u32,
 };
 
-/// The message for a lambda that captures a local that is not a reference. With `persist_main` a top level
-/// borrow can not be kept across evals, so the borrow is only suggested for a function there.
-fn captureHintFmt(c: *cy.Chunk) []const u8 {
-    if (c.vm.config.persist_main and c.semaProcs.items.len >= 2 and c.semaProcs.items[c.semaProcs.items.len - 2].func == null) {
-        return "Can only capture variables declared with the reference types `^T` or `&T`. Declare it with `^T`. Inside a function, you can also borrow it before the lambda (`b := &{}`) and use `b` in the lambda.";
-    }
-    return "Can only capture variables declared with the reference types `^T` or `&T`. Declare it with `^T`, or borrow it before the lambda (`b := &{}`) and use `b` in the lambda.";
-}
-
 fn lookupParentLocal(c: *cy.Chunk, name: []const u8, node: *ast.Node) !?LookupParentLocalResult {
     // Only check one block above.
     if (c.semaBlockDepth() > 1) {
@@ -1271,20 +1284,38 @@ pub fn popLambdaProc(c: *cy.Chunk) !sema.ExprResult {
     }
 
     var captures_data: []u8 = &.{};
+    var copies: []?*ir.Expr = &.{};
     var type_: *cy.Type = undefined;
     var captures_scope_locals = false;
     var owner: ?sema.LocalId = null;
     if (captures.len > 0) {
         captures_data = try c.ir.allocArray(u8, captures.len);
+        copies = try c.ir.allocArray(?*ir.Expr, captures.len);
         for (captures, 0..) |info, i| {
             const pId = info.parent_var_idx;
             const pvar = c.varStack.items[pId];
             captures_data[i] = pvar.inner.local.id;
+            copies[i] = null;
+            if (info.copy) {
+                // The value of the local now, in a new `^T` that only the closure holds.
+                const local = try sema_expr.semaLocal(c, pId, proc.node);
+                const copy = try sema_expr.sema_copy(c, local, proc.node);
+                copies[i] = try c.ir.newExpr(.lift, info.val_t, proc.node, .{ .child = copy.ir });
+                _ = try sema.getDeinitObjFunc(c, pvar.decl_t, proc.node);
+                continue;
+            }
             if (!info.val_t.isRefPointer()) {
                 captures_scope_locals = true;
             }
             try sema_borrow.noteBorrowLocal(c, pId);
             owner = sema_borrow.shorterOwner(c, owner, sema_borrow.borrowOwnerOf(c, pId));
+        }
+        if (captures_scope_locals and captures.len > cy.heap.max_pinned_owned) {
+            for (captures[cy.heap.max_pinned_owned..]) |info| {
+                if (info.copy) {
+                    return c.reportErrorFmt("A lambda that captures a borrow can keep copies of the first {} captured locals only.", &.{v(cy.heap.max_pinned_owned)}, proc.node);
+                }
+            }
         }
         const funcptr_t = try sema.getFuncPtrType(c, proc.func.?.sig);
         if (captures_scope_locals) {
@@ -1313,6 +1344,7 @@ pub fn popLambdaProc(c: *cy.Chunk) !sema.ExprResult {
         .func = proc.func.?,
         .numCaptures = @as(u8, @intCast(captures.len)),
         .captures = captures_data.ptr,
+        .copies = copies.ptr,
         .pinned_closure = captures_scope_locals,
     });
     var res = sema.ExprResult.initOwned(expr);

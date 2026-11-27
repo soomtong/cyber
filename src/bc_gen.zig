@@ -3633,6 +3633,16 @@ fn gen_lambda(c: *Chunk, expr: *ir.Lambda, cstr: Cstr, node: *ast.Node) !GenValu
         try gen_funcptr2(c, dst.reg, func, node);
     } else {
         const captures = expr.captures[0..expr.numCaptures];
+        // The new `^T` copies, in temps that the closure takes over.
+        const temp_start = c.cur_proc.reg_end;
+        var copy_regs: [256]Reg = undefined;
+        for (captures, 0..) |_, i| {
+            if (expr.copies[i]) |copy| {
+                const val = try genExpr(c, copy, Cstr.localOrTemp());
+                if (val.reg >= cy.heap.owned_capture_bit) return error.TooManyRegisters;
+                copy_regs[i] = val.reg;
+            }
+        }
         const start = c.buf.ops.items.len;
         const len_data: u16 = @as(u16, @intCast(captures.len)) | (@as(u16, @intFromBool(expr.pinned_closure)) << 15);
         // Allocates, so it can panic with `OutOfMemory`: the trace needs its debug sym.
@@ -3641,8 +3651,11 @@ fn gen_lambda(c: *Chunk, expr: *ir.Lambda, cstr: Cstr, node: *ast.Node) !GenValu
         }, captures.len, node);
         try c.relocations.append(c.alloc, .{.kind = .func, .pc = start + 3, .data = .{.func = func}});
         for (captures, 0..) |irVar, i| {
-            const reg = toLocalReg(c, irVar);
+            const reg = if (expr.copies[i] != null) copy_regs[i] | cy.heap.owned_capture_bit else toLocalReg(c, irVar);
             c.buf.ops.items[start + 7 + i].val = reg;
+        }
+        if (c.cur_proc.reg_end > temp_start) {
+            try pop_regs(c, temp_start, node);
         }
     }
     return dst;

@@ -337,6 +337,10 @@ pub fn semaLocal(c: *cy.Chunk, id: sema.LocalId, node: *ast.Node) !sema.ExprResu
 pub fn semaCaptured(c: *cy.Chunk, idx: usize, node: *ast.Node) !sema.ExprResult {
     const info = &c.proc().captures.items[idx];
     const loc = try c.ir.newExpr(.captured, info.val_t, node, .{ .idx = @intCast(idx) });
+    if (info.copy) {
+        // The closure's own `^T` copy of the local.
+        return semaDeref(c, sema.ExprResult.init2(loc), node);
+    }
     var res = sema.ExprResult.initCustom(loc, .capturedLocal, info.val_t, undefined);
     res.addressable = true;
     return res;

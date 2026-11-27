@@ -321,7 +321,11 @@ pub const TryCtx = struct {
 
 pub const CaptureInfo = struct {
     parent_var_idx: u32,
+    /// The type of the capture slot: the local's type, or `^T` of a copy.
     val_t: *cy.Type,
+    /// The lambda keeps a copy of a local that is not a reference: the slot holds a new `^T` of it, made when the
+    /// lambda is created (`popLambdaProc`), and a use in the lambda reads through it (`semaCaptured`).
+    copy: bool = false,
 };
 
 /// Container for main, fiber, function, and lambda blocks.

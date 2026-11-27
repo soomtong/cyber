@@ -259,7 +259,11 @@ fn test_functions(run: *Runner) void {
     run.case("functions/unary_op_borrow_receiver.cy");
     run.case("functions/unary_op_ex_borrow_error.cy");
     run.case("functions/read_capture_local_error.cy");
-    run.case("functions/capture_non_ref_error.cy");
+    run.case("functions/closure_copy.cy");
+    run.case("functions/closure_copy_nocopy_error.cy");
+    run.case("functions/closure_copy_assign_error.cy");
+    run.case("functions/closure_copy_part_assign_error.cy");
+    run.case("functions/closure_copy_borrow_container_error.cy");
     run.case("functions/static.cy");
     run.case("functions/struct_funcs.cy");
     run.case("functions/template_functions.cy");
@@ -721,7 +725,7 @@ fn test_concurrency(run: *Runner) void {
     run.case("concurrency/fiber_method_entry_error.cy");
     run.case("concurrency/fiber_borrow_receiver_error.cy");
     run.case("concurrency/fiber_no_call_error.cy");
-    run.case("concurrency/fiber_block_capture_error.cy");
+    run.case("concurrency/fiber_block_capture_copy.cy");
     run.case("concurrency/fiber_running_panic.cy");
     run.case("concurrency/fiber_in_progress_panic.cy");
     run.case("concurrency/fiber_panic.cy");
@@ -741,6 +745,7 @@ fn test_concurrency(run: *Runner) void {
     run.case("concurrency/spawn_old_form_error.cy");
     run.case("concurrency/spawn_method_entry_error.cy");
     run.case("concurrency/spawn_borrow_param_error.cy");
+    run.case("concurrency/spawn_closure_error.cy");
 }
 
 fn test_core(run: *Runner) void {

@@ -181,3 +181,9 @@ master `1bc5426e` Debug CLI로 확인했다.
   `parent_local`로 단다(`shorterOwner`). 구조체 · 튜플 리터럴도 빌림 필드로 같게 한다. 빌림 타입 전역은 `resolveUserVar`에서 거절한다.
   그 테스트를 쓰다 캡처 둘 이상인 pinned closure의 누수(F-163)도 고쳤다. 이제 안 A의 남은 일은 필요한 것 1(일반 지역의 주소를
   담는 캡처)과 문서뿐이다.
+
+## 값 캡처 (2026-11-27)
+
+일반 지역을 쓰는 람다는 이제 그 값의 복사를 갖는다(`project_closure_copy_capture.md`). `weights`가 `[]int`면
+`order.sort(|a, b| weights[a] < weights[b])`가 그대로 된다. 안 A(빌려 캡처)는 하지 않았다. `Map`은 `NoCopy`라 여전히
+`c := &counts`를 먼저 쓴다(그 오류 문구가 이것을 권한다).

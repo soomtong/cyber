@@ -1012,7 +1012,11 @@ pub const Func = extern struct {
         closure: extern struct {
             pc: [*]cy.Inst,
 
-            numCaptured: u64,
+            /// 8-byte aligned like the `u64` it was, so that the captured values stay aligned on a 32-bit target.
+            numCaptured: u32 align(8),
+            /// The captured values that a pinned closure owns and releases: bit `i` for the value `i`. A pinned
+            /// closure holds the rest without a reference. A closure that is not pinned owns all of them.
+            owned: u32,
 
             // Begins array of boxed values.
             // Each captured ptr is 8-bytes in case we need to encode info.
@@ -1393,7 +1397,12 @@ pub fn allocMapZero(self: *Heap, type_id: cy.TypeId) !Value {
     return Value.initPtr(obj);
 }
 
-/// Captured values are retained during alloc.
+/// The bit of a captured register operand of `CLOSURE` that hands the value over to the closure.
+pub const owned_capture_bit: u16 = 0x8000;
+/// A pinned closure owns at most this many captured values (`closure.owned`).
+pub const max_pinned_owned: usize = 32;
+
+/// Captured values are retained during alloc, except for the ones that are handed over (`owned_capture_bit`).
 pub fn allocClosure(
     self: *Heap, fp: [*]Value, func_pc: [*]cy.Inst, union_t: cy.TypeId, captured: [*]const cy.Inst, num_captured: u16, pinned_closure: bool,
 ) !Value {
@@ -1411,16 +1420,23 @@ pub fn allocClosure(
         .data = .{ .closure = .{
             .pc = func_pc,
             .numCaptured = @intCast(num_captured),
+            .owned = 0,
             .firstCapturedVal = undefined,
         } },
     };
     const dst = obj.func.getCapturedValuesPtr();
     for (0..num_captured) |i| {
-        const reg = captured[i];
-        if (!pinned_closure) {
-            self.retain(fp[reg.val]);
+        // The high bit marks a new value that the closure takes over (the `^T` copy of a local): it is not retained.
+        const owned = (captured[i].val & owned_capture_bit) != 0;
+        const reg = captured[i].val & ~owned_capture_bit;
+        if (owned) {
+            if (pinned_closure) {
+                obj.func.data.closure.owned |= @as(u32, 1) << @intCast(i);
+            }
+        } else if (!pinned_closure) {
+            self.retain(fp[reg]);
         }
-        dst[i] = fp[reg.val];
+        dst[i] = fp[reg];
     }
     if (pinned_closure) {
         self.pinned_closures.putAssumeCapacity(obj, {});

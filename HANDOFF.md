@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-27): 표준 입력, 예제 다섯, 0.4.23 릴리스, 정수 넘침 panic, 다중 대입, 자릿수 구분자
+# HANDOFF (2026-11-27): 표준 입력, 예제 여섯, 0.4.23 릴리스, 정수 넘침 panic, 다중 대입, 자릿수 구분자
 
 ## 목표
 
@@ -99,11 +99,14 @@
   예제가 드러낸 빈틈: 한도 `1000000000000`을 읽기 쉽게 쓸 수 없었다 → `NumberFormatConfig.sep`과 정수의 `fmt(format, config)`
   (`unreleased.md` 끝 절). 함께 `unreleased.md`에 남은 cherry-pick 충돌 표지를 지웠다(`60123da4`). 커밋 `9a243981`, 16단계 rc=0.
   tars-agent TODO 59행에 덧붙임(`9bfacc7`). 둘 다 push 안 함.
+- 2026-11-27(사용자: "@HANDOFF.md continue"): 다음 예제 Next Prime Number(`examples/next_prime.cy`, `1d29584e`, 16단계 rc=0).
+  끝없는 `generator fn primes()`, 터미널은 Enter · `q`, 파이프는 줄마다 하나, 인자는 개수(최대 100,000). 언어 변경 없음.
+  남은 마찰: `[]T`를 `[&]T` 인자로 넘기려면 `.span()`, 제너레이터에서 N개만 꺼내는 `take`가 없음(언어 결정이라 사용자에게 묻는다).
 
 ## 현재 브랜치
 
 `master`. 0.4.23 태그 `090fd62f`(`build-1211-090fd62`, 에셋 15개, Latest). `d1bb6b11`까지 origin에 있다. 그 뒤 `60123da4`(충돌
-표지 제거), `9a243981`(소인수분해 예제 · 자릿수 구분자), 이 HANDOFF 커밋은 push하지 않았다.
+표지 제거), `9a243981`(소인수분해 예제 · 자릿수 구분자), `1d29584e`(다음 소수 예제), HANDOFF 커밋은 push하지 않았다.
 
 ## 완료된 작업
 
@@ -468,7 +471,7 @@
 0. 0.4.23이 마지막 릴리스다(노트 `docs/releases/0.4.23.md`). `unreleased.md`에는 넘침 · Fibonacci · 다중 대입 셋. cyber.nvim
    `30c59ed`(문법 동기화, SOURCE는 `4159f8b7`)와 tars-agent `bfac57a`(TODO 59행)는 push하지 않았다. 예제를 만들 때는 걸리는 곳을 우회하지
    말고 언어 쪽을 고친다(메모리 `feedback-examples-drive-language-fixes`). 다중 대입의 다음 후보: 튜플 분해(`q, r := divmod(...)`).
-   예제는 Pi · e · Fibonacci · Prime Factorization 순으로 왔다(사용자가 하나씩 고른다). 소인수분해에서 본 남은 마찰: 사용자 타입이
+   예제는 Pi · e · Fibonacci · Prime Factorization · Next Prime Number 순으로 왔다(karan/Projects Numbers 목록 순, 다음은 Find Cost of Tile to Cover W x H Floor). 소인수분해에서 본 남은 마찰: 사용자 타입이
    `str(x)` · `join`에서 자기 글꼴을 정할 수 없다(`Factor` 대신 텍스트 함수를 썼다, Display 류 trait은 언어 결정이라 묻는다), 슬라이스
    `map`이 없다. `int_fmt_bad_sep_panic.cy`의 trace는 `core:725:12`를 담아 `core.cy` 앞부분이 바뀌면 줄 번호를 고친다.
 1. 0.4.22 뒤의 기록(노트 `docs/releases/0.4.22.md`). `unreleased.md`에 2026-11-26의 절들이 있다(예제, C API 할당 실패,

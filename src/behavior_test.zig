@@ -901,6 +901,10 @@ fn test_vars(run: *Runner) void {
     run.case("vars/const_init_rtval_error.cy");
     run.case("vars/const_init_ctval_error.cy");
     run.case("vars/const_write_error.cy");
+    run.case("vars/const_struct_str.cy");
+    run.case("vars/const_slice_error.cy");
+    run.case("vars/const_slice_typed_error.cy");
+    run.case("vars/const_part_write_error.cy");
     run.case("vars/local_assign_error.cy");
     run.case("vars/local_assign.cy");
     run.case("vars/local_attr_error.cy");

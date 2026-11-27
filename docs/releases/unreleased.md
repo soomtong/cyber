@@ -71,3 +71,15 @@
   `print`가 보이는 자릿수를 반올림(0.5는 0에서 먼 쪽)해 `2.675`는 `2.68`이다(Python · C는 이진 값을 반올림해 `2.67`). `sep`은
   소수점 앞만 묶는다. `places`는 0 ~ 100, 벗어나면 'Invalid places: -1, expected 0 to 100' panic. `f32`는 자기 자릿수를 쓴다.
 - 매뉴얼 "String formatting."의 float 문단, 결정 `docs/decisions/project_float_places.md`.
+
+## 문자열을 가진 const 구조체 · 고정 배열, 슬라이스 const 오류 (2026-11-27)
+
+- `const`가 `str` 필드를 가진 구조체와 그 고정 배열을 받는다: `const Fields = [3]Field{{name='Width', max=10.0}, ...}`. 전에는
+  'Expected eval eligible type, found `Field`.'였다. 상수는 쓰는 자리마다 펼쳐져 복사본은 따로 바뀐다. 타입을 적은 꼴(`const S str
+  = 'abc'`, `const W [2]str = {...}`)도 된다. 사용자가 정의한 `@copy`나 `NoCopy`를 가진 타입은 여전히 안 된다.
+- 깨지는 변경(결함 수정): 상수의 원소 · 필드에 대입하면 컴파일 오류다('Cannot assign to a part of the constant `nums`. It is
+  copied at each use; declare it with `global` to change it.'). 전에는 `const nums = [2]int{1, 2}`의 `nums[0] = 5`가 통과했고 펼친
+  임시 값만 바꿔 아무 일도 하지 않았다.
+- 슬라이스 `const`는 전용 오류다: 'A slice cannot be a constant: its copies share one buffer. Use a fixed array `[2]str`, or
+  `global` for a value that changes.' 오류에 fix가 실려 LSP가 `[]` → `[2]` quick fix를 보인다(원소 개수는 리터럴에서 센다).
+- 매뉴얼 Constants, 결정 `docs/decisions/project_const_aggregates.md`. 예제 `tile_cost.cy`가 `const Fields = [3]Field{...}`를 쓴다.

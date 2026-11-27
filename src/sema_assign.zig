@@ -448,10 +448,30 @@ const AssignOptions = struct {
 };
 
 /// Pass rightId explicitly to perform custom sema on op assign rhs.
+/// A const is expanded at each use, so an element or field of it is a temporary copy. Writing to it would change
+/// nothing, so `I[0] = 5` and `P.x = 1` on a const are errors, like `I = 5`.
+fn checkConstPart(c: *cy.Chunk, left_n: *ast.Node) !void {
+    var root = left_n;
+    while (true) {
+        switch (root.type()) {
+            .index_expr => root = root.cast(.index_expr).left,
+            .accessExpr => root = root.cast(.accessExpr).left,
+            else => break,
+        }
+    }
+    if (root == left_n or root.type() != .ident) return;
+    const name = root.cast(.ident).name.slice();
+    const res = try sema_local.lookupIdent(c, name, root);
+    if (res == .static and res.static.type == .const_) {
+        return c.reportErrorFmt("Cannot assign to a part of the constant `{}`. It is copied at each use; declare it with `global` to change it.", &.{v(name)}, left_n);
+    }
+}
+
 pub fn semaAssignStmt(c: *cy.Chunk, node: *ast.Node, left_n: *ast.Node, right: *ast.Node, opts: AssignOptions) !void {
     var var_start = c.varStack.items.len;
     const subst_start = c.place_subst.items.len;
     defer c.place_subst.items.len = subst_start;
+    try checkConstPart(c, left_n);
     if (opts.rhsOpAssignBinExpr) {
         try stabilizeOpAssignLeft(c, left_n, true);
     }

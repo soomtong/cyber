@@ -16,13 +16,17 @@ const ir = cy.ir;
 // Borrows `val_`.
 pub fn value(c: *cy.Chunk, val_: cy.TypeValue, target_opt: ?*cy.Type, node: *ast.Node) !sema.ExprResult {
     var val = val_;
+    // A value that fits the target is new and is released after it is expanded.
+    var fitted = false;
     if (target_opt) |target_t| {
         if (target_t.id() != val_.type.id()) {
             if (try cte.evalFitTarget(c, val, target_t, node)) |new| {
                 val = cy.TypeValue.init(target_t, new);
+                fitted = true;
             }
         }
     }
+    defer if (fitted) c.heap.destructValue(val);
     switch (val.type.id()) {
         bt.Void => {
             return c.semaVoid(node);
@@ -94,6 +98,11 @@ pub fn value(c: *cy.Chunk, val_: cy.TypeValue, target_opt: ?*cy.Type, node: *ast
             }
 
             return c.semaRawString(dupe, node);
+        },
+        // A `str` in a const struct or array becomes a string literal again.
+        bt.Str => {
+            const slice = val.value.asPtr(*cy.heap.Str).slice();
+            return c.semaRawString(try c.ir.alloc.dupe(u8, slice), node);
         },
         bt.Symbol => {
             const id = val.value.asSymbol();

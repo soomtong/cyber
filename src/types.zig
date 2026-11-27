@@ -165,12 +165,16 @@ pub const Type = extern struct {
             else => {},
         }
         if (self.isManaged()) {
-            return false;
+            // Expanded at each use, like an untyped const.
+            return self.isConstExpandable();
         }
         switch (self.kind()) {
             .pointer => {
                 const pointer = self.cast(.pointer);
                 return !pointer.ref;
+            },
+            .vector => {
+                return self.cast(.vector).elem_t.isConstEligible();
             },
             .struct_t => {
                 // Allow containers if they are not managed and all members are const eligible.
@@ -188,6 +192,25 @@ pub const Type = extern struct {
             else => {
                 return false;
             },
+        }
+    }
+
+    /// Whether a compile-time value of the type can be expanded into runtime IR at each use: an unmanaged value,
+    /// a `str`, or a struct or fixed array made of them. A slice is not: copies of it share one buffer.
+    pub fn isConstExpandable(self: *Type) bool {
+        if (self.id() == bt.Str) return true;
+        if (!self.isManaged()) return true;
+        switch (self.kind()) {
+            .struct_t => {
+                const struct_t = self.cast(.struct_t);
+                if (self.info.copy_user or self.info.no_copy) return false;
+                for (struct_t.fields()) |field| {
+                    if (!field.type.isConstExpandable()) return false;
+                }
+                return true;
+            },
+            .vector => return self.cast(.vector).elem_t.isConstExpandable(),
+            else => return false,
         }
     }
 

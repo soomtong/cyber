@@ -1101,6 +1101,12 @@ pub fn evalFitTarget(c: *cy.Chunk, tval: TypeValue, target_t: *cy.Type, node: *a
         }
     }
 
+    // A string literal in a `str` field or element: the expansion writes it back as a literal.
+    if (target_t.id() == bt.Str and tval.type.id() == bt.EvalStr) {
+        const str = try c.heap.init_astr(tval.value.asPtr(*cy.heap.EvalStr).slice());
+        return try c.heap.lift(bt.Str, str);
+    }
+
     if (target_t.id() == bt.I64) {
         if (tval.type.id() == bt.EvalInt) {
             return Value.initInt(tval.value.as_eval_int());
@@ -1456,6 +1462,9 @@ pub fn evalExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: ExprCstr) anyerror!E
                 .type => {
                     const type_ = sym.cast(.type).type;
 
+                    if (type_.isInstanceOf(c.sema.slice_tmpl) and init_expr.left.type() == .slice_type) {
+                        try reportSliceConst(c, init_expr);
+                    }
                     try sema_type.ensure_eval_eligible_type(c, type_, node);
 
                     if (init_expr.lit.array_like) {
@@ -2557,6 +2566,35 @@ fn eval_bin_expr(c: *cy.Chunk, left_n: *ast.Node, op: ast.BinaryExprOp, right_n:
             return c.reportErrorFmt("Inline eval: Unsupported op: `{}`\n", &.{v(op)}, node);
         },
     }
+}
+
+/// A slice literal evaluated at compile time, as in `const names = []str{'a', 'b'}`. Its value would be expanded at
+/// each use, but copies of a slice share one buffer, so writes through one would show in the others. The fix turns
+/// the slice type into a fixed array of the same length.
+fn reportSliceConst(c: *cy.Chunk, init_expr: *ast.InitExpr) !void {
+    return reportSliceConst2(c, init_expr.left.cast(.slice_type), init_expr.lit.args.len, @ptrCast(init_expr));
+}
+
+/// `const names []str = {'a', 'b'}`: the same error at the declared type.
+pub fn reportSliceConstType(c: *cy.Chunk, slice_n: *ast.SliceType, right: *ast.Node) !void {
+    if (right.type() != .init_lit) {
+        return reportSliceConst2(c, slice_n, null, @ptrCast(slice_n));
+    }
+    return reportSliceConst2(c, slice_n, right.cast(.init_lit).args.len, @ptrCast(slice_n));
+}
+
+fn reportSliceConst2(c: *cy.Chunk, slice_n: *ast.SliceType, opt_len: ?usize, node: *ast.Node) !void {
+    const elem = c.nodeString(slice_n.child);
+    const n = opt_len orelse {
+        return c.reportErrorFmt("A slice cannot be a constant: its copies share one buffer. Use a fixed array `[N]{}`, or `global` for a value that changes.", &.{v(elem)}, node);
+    };
+    const fix_text = try std.fmt.allocPrint(c.alloc, "[{}]", .{n});
+    defer c.alloc.free(fix_text);
+    return c.reportErrorFix("A slice cannot be a constant: its copies share one buffer. Use a fixed array `[{}]{}`, or `global` for a value that changes.", &.{v(n), v(elem)}, node, .{
+        .pos = slice_n.pos,
+        .end_pos = slice_n.child.pos(),
+        .text = fix_text,
+    });
 }
 
 fn evalStringLiteral(c: *cy.Chunk, str: []const u8, opt_target: ?*cy.Type, node: *ast.Node) !Expr {

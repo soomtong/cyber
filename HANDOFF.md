@@ -108,6 +108,15 @@
   매뉴얼 "Passing a slice to a function." 절(네 꼴 표와 예). 커밋 `516c4091`, 16단계 rc=0. tars-agent TODO(`df1f32a`, `96a6c1d`).
   알아 둔 것: `[]T` 복사는 크기가 바뀌기 전까지 원소를 공유해 매개변수의 제자리 쓰기(`sort`)가 호출한 쪽에 보인다(문서대로, Go 꼴).
   값 의미로 바꿀지는 언어 결정이라 사용자에게 묻는다. `generator_take_negative_panic.cy`의 trace에 `core:5003:9`가 있다.
+- 2026-11-27(사용자: "다음 예제 진행해 (Find Cost of Tile)"): 예제 `examples/tile_cost.cy`(너비 · 길이 · m²당 값 → 넓이 · 비용).
+  드러낸 빈틈: 돈을 소수 둘째 자리로 찍을 수 없었다 → `float.fmt(FloatFormatConfig)`(`places` · `sep` · `width` · `pad`, 보이는 자릿수를
+  0에서 먼 쪽으로 반올림, 결정 `project_float_places.md`, `24476958`, 16단계 rc=0). 이어서 사용자 질문 "슬라이스를 const로 선언하면 얻는
+  이점과 단점" → 권고(슬라이스 `const`는 넣지 않고 `str`을 가진 구조체 · 고정 배열 `const`를 허용, 슬라이스 `const`에 안내 오류와 fix)를
+  "권고를 준수하자 ... 린트 제공하나?", "그래 진행해"로 받음: `Type.isConstExpandable`, `EvalStr`→`str`(`cte.evalFitTarget`),
+  `ct_inline`의 `str` 전개, 슬라이스 `const` 오류와 `[]`→`[N]` fix(`cte.reportSliceConst2`, LSP 테스트), 상수의 원소 · 필드 대입
+  오류(`sema_assign.checkConstPart`, 전에는 조용히 무시되던 결함). 결정 `project_const_aggregates.md`. tars-agent TODO
+  (`5fad6d4`, `08c1087`). push 안 함. core.cy 줄이 밀리면 panic 테스트 trace 줄(`int_fmt_bad_sep_panic` 739,
+  `generator_take_negative_panic` 5030, `float_fmt_bad_places_panic` 856)을 고친다.
 
 ## 현재 브랜치
 
@@ -477,9 +486,9 @@
 0. 0.4.23이 마지막 릴리스다(노트 `docs/releases/0.4.23.md`). `unreleased.md`에는 넘침 · Fibonacci · 다중 대입 셋. cyber.nvim
    `30c59ed`(문법 동기화, SOURCE는 `4159f8b7`)와 tars-agent `bfac57a`(TODO 59행)는 push하지 않았다. 예제를 만들 때는 걸리는 곳을 우회하지
    말고 언어 쪽을 고친다(메모리 `feedback-examples-drive-language-fixes`). 다중 대입의 다음 후보: 튜플 분해(`q, r := divmod(...)`).
-   예제는 Pi · e · Fibonacci · Prime Factorization · Next Prime Number 순으로 왔다(karan/Projects Numbers 목록 순, 다음은 Find Cost of Tile to Cover W x H Floor). 소인수분해에서 본 남은 마찰: 사용자 타입이
+   예제는 Pi · e · Fibonacci · Prime Factorization · Next Prime Number · Find Cost of Tile 순으로 왔다(karan/Projects Numbers 목록 순, 다음은 Mortgage Calculator). 소인수분해에서 본 남은 마찰: 사용자 타입이
    `str(x)` · `join`에서 자기 글꼴을 정할 수 없다(`Factor` 대신 텍스트 함수를 썼다, Display 류 trait은 언어 결정이라 묻는다), 슬라이스
-   `map`이 없다. `int_fmt_bad_sep_panic.cy`의 trace는 `core:725:12`를 담아 `core.cy` 앞부분이 바뀌면 줄 번호를 고친다.
+   `map`이 없다. `int_fmt_bad_sep_panic.cy`의 trace는 `core:739:12`를 담아 `core.cy` 앞부분이 바뀌면 줄 번호를 고친다.
 1. 0.4.22 뒤의 기록(노트 `docs/releases/0.4.22.md`). `unreleased.md`에 2026-11-26의 절들이 있다(예제, C API 할당 실패,
    `deny_ffi`, `time` · `regex` · `peg`(주 날짜 파싱 포함), 빌림 자리 대상, `&&h` 인자와 F-216). push하지 않았다.
    표준 입력 절도 있다(`os.input` 등, F-217 · F-218). tars-agent `docs/TODO.md` 59행에 오늘 저녁 변경을 덧붙였다(`398acfc`, push 안 함).

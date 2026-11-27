@@ -925,14 +925,11 @@ pub fn resolveConst(c: *cy.Chunk, sym: *cy.sym.Const) !void {
         type_ = try cte.eval_type2(c, true, type_n);
         // Only allow types that can be expanded at compile-time. `ct_expand.value`
         if (!type_.isConstEligible()) {
+            if (type_.isInstanceOf(c.sema.slice_tmpl) and type_n.type() == .slice_type) {
+                try cte.reportSliceConstType(c, type_n.cast(.slice_type), node.right.?);
+            }
             const name = try c.sema.allocTypeName(type_);
             defer c.alloc.free(name);
-            if (type_.id() == bt.Str) {
-                return c.reportErrorFmt("Expected const eligible type, found `{}`. Consider using `EvalStr` which can coerce to a runtime `str`.", &.{v(name)}, type_n);
-            }
-            if (type_.kind() == .vector) {
-                return c.reportErrorFmt("TODO: const `{}`. Alternatively, use the `global` declaration.", &.{v(name)}, if (node.type != null) @ptrCast(node.type.?) else node.right.?);
-            }
             return c.reportErrorFmt("Expected const eligible type, found `{}`.", &.{v(name)}, if (node.type != null) @ptrCast(node.type.?) else node.right.?);
         }
         res = try cte.evalCheck(c, node.right.?, type_);

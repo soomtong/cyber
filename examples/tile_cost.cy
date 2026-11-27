@@ -18,6 +18,12 @@ type Field:
     name str
     max  float
 
+const Fields = [3]Field{
+    {name='Width (m)', max=MaxSide},
+    {name='Length (m)', max=MaxSide},
+    {name='Price per m²', max=MaxPrice},
+}
+
 -- The number in `text` for `field`, or `none` after saying what is wrong with it.
 fn parse_field(field Field, text str) -> ?float:
     x := float.parse(text.trim()) !else:
@@ -40,16 +46,11 @@ fn ask(field Field) -> !?float:
 
 -- The width, the length and the price, from `texts` or from the input when `texts` is empty.
 fn read_numbers(texts []str) -> !?[]float:
-    fields := []Field{
-        {name='Width (m)', max=MaxSide},
-        {name='Length (m)', max=MaxSide},
-        {name='Price per m²', max=MaxPrice},
-    }
-    if texts.len() > 0 and texts.len() != fields.len():
+    if texts.len() > 0 and texts.len() != Fields.len():
         eprint('Give the width, the length and the price, or nothing to be asked for them.')
         return none
     var numbers []float = {}
-    for fields |i, field|:
+    for Fields |i, field|:
         x := (if (texts.len() > 0) parse_field(field, texts[i]) else ask(field)!) ?else return none
         numbers += x
     return numbers

@@ -293,6 +293,28 @@ const lib = switch meta.system():
     else => meta.unsupported()
 ```
 
+A constant can be a struct or a fixed array, also one that holds strings. It is copied at each use, so a copy is a value of its own, and writing to an element or a field of the constant itself is a compile error:
+```cy
+type Field:
+    name str
+    max  float
+
+const Fields = [2]Field{
+    {name='Width', max=10.0},
+    {name='Price', max=100.0},
+}
+
+for Fields |f|:
+    print(f.name)
+Fields[0].name = 'x'  --> error: Cannot assign to a part of the constant `Fields`. ...
+```
+
+A slice cannot be a constant: its copies share one buffer until it grows, so a change through one copy would show in the others. The error suggests the fixed array of the same length, and the language server offers that edit. Use `global` for a list that changes:
+```cy
+const names = []str{'a', 'b'}
+--> error: A slice cannot be a constant: its copies share one buffer. Use a fixed array `[2]str`, ...
+```
+
 ## Reserved identifiers.
 
 ### Keywords.

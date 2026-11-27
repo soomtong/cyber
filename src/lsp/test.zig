@@ -1957,4 +1957,11 @@ test "The fix of a compile error is the edit that the compiler sends with it." {
     try t.expectEqual(@as(usize, 1), actions.len);
     edit = items(actions[0], &.{ "edit", "changes", main_uri })[0];
     try t.expectEqualStrings("len", str(edit, &.{"newText"}));
+
+    // A slice const becomes a fixed array of its length.
+    actions = try codeActionsOf(&s, 8, "const names = []str{'a', 'b'}\nprint(names[0])\n");
+    try t.expectEqual(@as(usize, 1), actions.len);
+    edit = items(actions[0], &.{ "edit", "changes", main_uri })[0];
+    try t.expectEqualStrings("[2]", str(edit, &.{"newText"}));
+    try expectRange(get(edit, &.{"range"}).?, 0, 14, 0, 16);
 }

@@ -1684,7 +1684,7 @@ pub fn ensure_eval_eligible_type(c: *cy.Chunk, type_: *cy.Type, node: *ast.Node)
     // A type const at the top level is evaluated while declarations are still being resolved, so the
     // argument type (`meta.StructConfig` for `new_struct`) may not be resolved yet.
     try ensure_resolved_type(c, type_, node);
-    if (type_.isManaged()) {
+    if (!type_.isConstExpandable()) {
         const name = try c.sema.allocTypeName(type_);
         defer c.alloc.free(name);
         return c.reportErrorFmt("Expected eval eligible type, found `{}`.", &.{v(name)}, node);

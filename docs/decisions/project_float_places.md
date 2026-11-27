@@ -34,5 +34,5 @@
 
 ## 예제에서 함께 본 것
 
-- 슬라이스 `const`(`const Fields = []Field{...}`)는 'Expected eval eligible type, found `[]Field`.'로 막힌다. 컴파일 타임 평가가
-  힙 값을 다루지 않아서다. 예제는 함수 안의 지역으로 썼다. 고칠지는 따로 본다.
+- 슬라이스 `const`(`const Fields = []Field{...}`)는 막혀 있었다. 사용자 결정(2026-11-27)으로 고정 배열 `const`에 `str`을 허용하고
+  슬라이스 `const`는 전용 오류로 했다: `project_const_aggregates.md`.

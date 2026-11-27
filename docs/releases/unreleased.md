@@ -18,7 +18,6 @@
 
 - 피보나치 수열을 N개까지(최대 93개, F(92)가 `int`에 들어가는 마지막 수). 각 수를 앞 두 수의 합으로 만들어 마지막 수 다음을 미리
   계산하다 넘치는 일이 없다. `pi_digits.cy`와 같은 꼴로 인자 · 프롬프트 · 파이프로 받는다.
-||||||| parent of 1adc2bd1 (Add multiple assignment and one-line jumps after ?else and !else)
 
 ## 다중 대입과 한 줄 `?else return` (2026-11-26)
 

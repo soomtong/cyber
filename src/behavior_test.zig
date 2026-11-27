@@ -777,6 +777,7 @@ fn test_core(run: *Runner) void {
     run.case("core/number_const_ops.cy");
     run.case("core/number_const_div_zero_error.cy");
     run.case("core/float_to_str.cy");
+    run.case("core/float_fmt_config.cy");
     run.case("core/ints.cy");
     run.case("core/int_unsupported_notation_error.cy");
     run.case("core/int_literal_overflow_error.cy");
@@ -837,6 +838,7 @@ fn test_core(run: *Runner) void {
     run.case("core/str_seek_pos_neg_panic.cy");
     run.case("core/raw_fmt_neg_width_panic.cy");
     run.case("core/int_fmt_bad_sep_panic.cy");
+    run.case("core/float_fmt_bad_places_panic.cy");
     run.case("core/Slice_neg_oob_panic.cy");
     run.case("core/str_new_line_error.cy");
     run.case("core/str_interpolation.cy");
@@ -1171,6 +1173,7 @@ test "Compile." {
     try compileCase("../examples/fibonacci_sequence.cy");
     try compileCase("../examples/prime_factors.cy");
     try compileCase("../examples/next_prime.cy");
+    try compileCase("../examples/tile_cost.cy");
 
     // tools.
     try compileCase("tools/bench.cy");

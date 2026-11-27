@@ -9,7 +9,7 @@ _ = three().take(-1)
 --panic: Expected a count of 0 or more, found -1.
 --
 --[trace]
---core:5003:9 Generator.take:
+--core:5030:9 Generator.take:
 --        panic('Expected a count of 0 or more, found %{n}.')
 --        ^
 --@MainPath():6:5 main:

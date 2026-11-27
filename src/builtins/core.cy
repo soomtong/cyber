@@ -397,6 +397,20 @@ type NumberFormatConfig:
     --| counts the separators. A byte of 128 or more panics.
     sep   ?byte = none
 
+type FloatFormatConfig:
+    --| `pad` provides the ASCII rune that is used for padding. A byte of 128 or more panics.
+    pad    ?byte = none
+
+    --| `width` is the minimum width. Shorter text is padded at the start. A negative width panics.
+    width  ?int = none
+
+    --| `sep` provides the ASCII rune put between groups of 3 digits before the point. The width counts the
+    --| separators. A byte of 128 or more panics.
+    sep    ?byte = none
+
+    --| `places` is the number of digits after the point, from 0 to 100. Without it, the digits are those of `fmt()`.
+    places ?int = none
+
 type byte = Raw[8]
 type r8  = Raw[8]
 type r16 = Raw[16]
@@ -834,6 +848,19 @@ fn (Float[]) fmt() -> str:
         return f32_fmt(self)
     #else:
         meta.unsupported()
+
+--| Formats the float using a FloatFormatConfig: `x.fmt({places=2, sep=','})` is `1,234.50` for `1234.5`. `places`
+--| rounds the digits that `fmt()` shows, half away from zero, so `2.675` gives `2.68`.
+fn (Float[]) fmt(config FloatFormatConfig) -> str:
+    #if Self == float:
+        return f64_fmt_config(self, config)
+    #else Self == f32:
+        return f32_fmt_config(self, config)
+    #else:
+        meta.unsupported()
+
+#[bind] fn f64_fmt_config(x float, config FloatFormatConfig) -> str
+#[bind] fn f32_fmt_config(x f32, config FloatFormatConfig) -> str
 
 #[bind]
 type Object:

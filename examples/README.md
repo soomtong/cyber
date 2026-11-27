@@ -18,3 +18,4 @@ Notable examples will be listed here:
 - [fibonacci_sequence.cy](fibonacci_sequence.cy) - Prints the first N Fibonacci numbers, up to the 93 that fit in an `int` (one more overflows).
 - [prime_factors.cy](prime_factors.cy) - Factors a number up to 10^12 into primes by trial division and prints it as a product of powers.
 - [next_prime.cy](next_prime.cy) - Prints primes one at a time from a `generator fn` until you stop asking, or N of them from an argument.
+- [tile_cost.cy](tile_cost.cy) - Works out what the tile for a floor costs from its width, length and price per m², with money in cents (`float.fmt({places=2})`).

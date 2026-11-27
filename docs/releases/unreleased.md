@@ -61,3 +61,13 @@
   고치는 법: 매개변수를 `&&[]T`로 받고 `f(&&xs)`로 부른다.
 - 매뉴얼 Slices에 "Passing a slice to a function." 절: `[&]T` · `&[]T` · `&&[]T` · `[]T` 네 꼴이 하는 일의 표와 예, `[]T` 매개변수는
   복사이지만 크기가 바뀌기 전까지 원소를 공유해 제자리 쓰기(`xs[0] = 9`, `sort`)가 호출한 쪽에 보인다는 것.
+
+## 예제 `tile_cost.cy`와 float의 소수 자릿수 (2026-11-27)
+
+- 예제: 바닥의 너비 · 길이(m)와 m²당 타일 값으로 넓이와 비용을 찍는다(`4.5 3.2 12.99`는 `Area: 14.40 m²`, `Cost: 187.06`). 인자
+  셋, 터미널의 프롬프트 셋, 파이프의 세 줄로 받는다. 0 이하 · 한도 초과 · NaN은 거절한다.
+- 예제가 드러낸 빈틈: 돈을 소수 둘째 자리로 찍을 방법이 없었다(`float.fmt()`는 가장 짧은 자릿수만). `FloatFormatConfig`
+  (`pad` · `width` · `sep` · `places`)와 `x.fmt(config)`를 넣었다. `1234.5.fmt({places=2, sep=','})`는 `1,234.50`. `places`는
+  `print`가 보이는 자릿수를 반올림(0.5는 0에서 먼 쪽)해 `2.675`는 `2.68`이다(Python · C는 이진 값을 반올림해 `2.67`). `sep`은
+  소수점 앞만 묶는다. `places`는 0 ~ 100, 벗어나면 'Invalid places: -1, expected 0 to 100' panic. `f32`는 자기 자릿수를 쓴다.
+- 매뉴얼 "String formatting."의 float 문단, 결정 `docs/decisions/project_float_places.md`.

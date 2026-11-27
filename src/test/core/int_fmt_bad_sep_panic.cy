@@ -4,7 +4,7 @@ _ = 5.fmt(.dec, {sep=200})
 --panic: Invalid sep: 200, expected an ASCII rune
 --
 --[trace]
---core:725:12 Int.fmt:
+--core:739:12 Int.fmt:
 --    return int_fmt_config(self, format, config)
 --           ^
 --@MainPath():1:5 main:

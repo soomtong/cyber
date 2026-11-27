@@ -823,6 +823,18 @@ pub const NumberFormatConfig = extern struct {
     sep: cy.value.Option(u8) = .{},
 };
 
+/// `NumberFormatConfig` with the digits after the point. The shared fields come first in the same order.
+pub const FloatFormatConfig = extern struct {
+    pad: cy.value.Option(u8) = .{},
+    width: cy.value.Option(i64) = .{},
+    sep: cy.value.Option(u8) = .{},
+    places: cy.value.Option(i64) = .{},
+
+    pub fn number(self: FloatFormatConfig) NumberFormatConfig {
+        return .{ .pad = self.pad, .width = self.width, .sep = self.sep };
+    }
+};
+
 pub const MapValue = extern struct {
     meta: [*]u64,
     keys: [*]u64,

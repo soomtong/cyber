@@ -901,6 +901,13 @@ print(0xdeadbeef.fmt(.hex, {sep='_'}))      --> dead_beef
 print((-42).fmt(.dec, {pad='0', width=6}))  --> -00042
 ```
 
+A float takes a `FloatFormatConfig`, which adds `places`, the number of digits after the point. It rounds the digits that `print` shows, half away from zero, so `2.675` gives `2.68` (Python and C round the binary value and give `2.67`). Without `places`, the digits are those of `fmt()`. The separator groups only the digits before the point:
+```cy
+print(1234.5.fmt({places=2, sep=','}))      --> 1,234.50
+print(2.675.fmt({places=2}))                --> 2.68
+print(4.5.fmt({places=2, width=8}))         -->     4.50
+```
+
 ## Symbols.
 A symbol literal is written `symbol.` followed by an identifier, like an error value is written `error.Name`.
 Each symbol has a global unique ID.

@@ -171,6 +171,8 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"f64_to_f32",   cFunc(f64_to_f32)},
     .{"f64_fmt",      zErrFunc(f64_fmt)},
     .{"f32_fmt",      zErrFunc(f32_fmt)},
+    .{"f64_fmt_config", zErrFunc(f64_fmt_config)},
+    .{"f32_fmt_config", zErrFunc(f32_fmt_config)},
 
     // Table
 
@@ -2611,6 +2613,37 @@ fn f64_fmt(t: *cy.Thread) anyerror!C.Ret {
     return C.RetOk;
 }
 
+fn f64_fmt_config(t: *cy.Thread) anyerror!C.Ret {
+    return floatFmtConfig(t, f64);
+}
+
+fn f32_fmt_config(t: *cy.Thread) anyerror!C.Ret {
+    return floatFmtConfig(t, f32);
+}
+
+/// The most digits after the point that `float.fmt` writes.
+const max_float_places: i64 = 100;
+
+fn floatFmtConfig(t: *cy.Thread, comptime F: type) anyerror!C.Ret {
+    const ret = t.ret(cy.heap.Str);
+    const val = t.param(F);
+    const config = t.param(cy.heap.FloatFormatConfig);
+    if (checkFormatConfig(t, config.number())) |panic_ret| return panic_ret;
+    var buf: [cy.fmt.float_buf_size + max_float_places]u8 = undefined;
+    var digits: []const u8 = undefined;
+    if (config.places.from()) |places| {
+        if (places < 0 or places > max_float_places) {
+            return t.ret_panic_fmt("Invalid places: {}, expected 0 to {}", &.{ cy.fmt.v(places), cy.fmt.v(max_float_places) });
+        }
+        // Zig rounds the shortest digits half away from zero, so `2.675` gives `2.68`, as it reads.
+        digits = std.fmt.float.render(&buf, val, .{ .mode = .decimal, .precision = @intCast(places) }) catch unreachable;
+    } else {
+        digits = cy.fmt.renderFloat(buf[0..cy.fmt.float_buf_size], val);
+    }
+    ret.* = try initPaddedDigits(&t.heap, digits, 3, config.number());
+    return C.RetOk;
+}
+
 fn atof(t: *cy.Thread) !C.Ret {
     const ret = t.ret(f64);
     const s = t.param(cy.heap.Str);
@@ -2723,7 +2756,7 @@ fn validFormatPad(pad: u8) bool {
     return pad < 128;
 }
 
-/// Returns `digits` with `opts.sep` between each group of `group` digits from the end, padded at the start to
+/// Returns `digits` with `opts.sep` between each group of `group` digits before the point, padded at the start to
 /// `opts.width` with `opts.pad`. A leading `-` stays in front of a `0` pad. The padding goes straight to the result,
 /// so a width can be larger than the digits buffer. An invalid width, pad or separator gives `error.InvalidArgument`;
 /// a script caller checks them first to panic with a message.
@@ -2742,7 +2775,9 @@ fn initPaddedDigits(heap: *cy.Heap, digits: []const u8, group: usize, opts: cy.h
 
     const sign: []const u8 = if (digits.len > 0 and digits[0] == '-') digits[0..1] else "";
     const body = digits[sign.len..];
-    const nseps = if (sep != null and body.len > 0) (body.len - 1) / group else 0;
+    // Only the whole part is grouped: `1,234.5678`.
+    const whole = std.mem.indexOfScalar(u8, body, '.') orelse body.len;
+    const nseps = if (sep != null and whole > 0) (whole - 1) / group else 0;
     const n = sign.len + body.len + nseps;
     const res = try heap.init_astr_undef(@max(width, n));
     const dst = res.mutSlice();
@@ -2757,7 +2792,7 @@ fn initPaddedDigits(heap: *cy.Heap, digits: []const u8, group: usize, opts: cy.h
     }
     var i = npad + sign.len;
     for (body, 0..) |d, j| {
-        if (nseps > 0 and j > 0 and (body.len - j) % group == 0) {
+        if (nseps > 0 and j > 0 and j < whole and (whole - j) % group == 0) {
             dst[i] = sep.?;
             i += 1;
         }

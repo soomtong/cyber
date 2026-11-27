@@ -42,6 +42,10 @@
       "methods": [],
       "funcs": [],
       "aliases": {}},
+    {"module": "core", "name": "FloatFormatConfig", "syntax": "FloatFormatConfig", "kind": "struct",
+      "methods": [],
+      "funcs": [],
+      "aliases": {}},
     {"module": "core", "name": "Raw", "syntax": "Raw[Bits]", "kind": "builtin", "tparams": "[Bits EvalInt]", "doc": "Represents a raw integer value with bits of widths 8, 16, 32, or 64.",
       "methods": [
         {"name": "~", "recv": "Raw[]", "sig": "~() -> Self"},
@@ -134,7 +138,8 @@
         {"name": "%", "recv": "Float[]", "sig": "%(right Self) -> Self"},
         {"name": "**", "recv": "Float[]", "sig": "**(right Self) -> Self"},
         {"name": "abs", "recv": "Float[]", "sig": "abs() -> Self"},
-        {"name": "fmt", "recv": "Float[]", "sig": "fmt() -> str", "doc": "Returns the text of the float, the same as `str(x)` and `print`: the shortest digits that read back as the same value, in plain decimals. A finite value without a fraction gets `.0` (`3.0`, `-0.0`). Infinity and NaN are `inf`, `-inf` and `nan`."}
+        {"name": "fmt", "recv": "Float[]", "sig": "fmt() -> str", "doc": "Returns the text of the float, the same as `str(x)` and `print`: the shortest digits that read back as the same value, in plain decimals. A finite value without a fraction gets `.0` (`3.0`, `-0.0`). Infinity and NaN are `inf`, `-inf` and `nan`."},
+        {"name": "fmt", "recv": "Float[]", "sig": "fmt(config FloatFormatConfig) -> str", "doc": "Formats the float using a FloatFormatConfig: `x.fmt({places=2, sep=','})` is `1,234.50` for `1234.5`. `places` rounds the digits that `fmt()` shows, half away from zero, so `2.675` gives `2.68`."}
       ],
       "funcs": [
         {"name": "parse", "sig": "parse(s str) -> !Self", "doc": "Reads a decimal number such as `'1.5'`, `'-2'`, `'1e3'`, `'inf'` or `'nan'`. Unlike `float(s)`, which gives 0 for a string that is not a number, returns `error.InvalidCharacter`. Spaces around the number are not allowed."}
@@ -1756,6 +1761,8 @@
     {"module": "core", "name": "f64_to_f32", "sig": "f64_to_f32(x float) -> f32"},
     {"module": "core", "name": "f64_fmt", "sig": "f64_fmt(x float) -> str"},
     {"module": "core", "name": "f32_fmt", "sig": "f32_fmt(x f32) -> str"},
+    {"module": "core", "name": "f64_fmt_config", "sig": "f64_fmt_config(x float, config FloatFormatConfig) -> str"},
+    {"module": "core", "name": "f32_fmt_config", "sig": "f32_fmt_config(x f32, config FloatFormatConfig) -> str"},
     {"module": "core", "name": "new_slice_buffer", "sig": "new_slice_buffer(T type, cap int) -> ^RawBuffer[byte]", "doc": "A `Slice` buffer holds the number of initialized elements in its first 8 bytes, then the elements. Slices that share a buffer can have different lengths, so `Slice.@deinit` destructs this count instead of its own length. Ops that resize keep it equal to the result's length. A `Slice` that owns its buffer (`owns_buffer`) is never a sub-slice, so its count is `(as[Ptr[int]] ptr)[-1]` (no call, hot path). Only managed element types read the count, so the resize ops skip it for the others."},
     {"module": "core", "name": "slice_buffer_count", "sig": "slice_buffer_count(buf Ptr[RawBuffer[byte]]) -> Ptr[int]"},
     {"module": "core", "name": "slice_buffer_elems", "sig": "slice_buffer_elems(T type, buf Ptr[RawBuffer[byte]]) -> Ptr[T]"},

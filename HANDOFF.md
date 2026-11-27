@@ -1,4 +1,4 @@
-# HANDOFF (2026-11-27): 표준 입력, 예제 넷, 0.4.23 릴리스, 정수 넘침 panic, 다중 대입
+# HANDOFF (2026-11-27): 표준 입력, 예제 다섯, 0.4.23 릴리스, 정수 넘침 panic, 다중 대입, 자릿수 구분자
 
 ## 목표
 
@@ -95,10 +95,15 @@
   (질문에 "넘치면 panic (권장)", `project_int_overflow.md`, F-219 · F-220), 다중 대입과 한 줄 `?else return`("둘 다 넣자",
   `project_multi_assign.md`). 0.4.23 릴리스(태그 `090fd62f`, `build-1211-090fd62`, 대체 절차). 넘침 · Fibonacci · 다중 대입은 0.4.23 뒤.
 
+- 2026-11-27(사용자: "Continue from the handoff", 다음 작업 질문에 "다음 예제 (Prime Factorization)"): 예제 `prime_factors.cy`.
+  예제가 드러낸 빈틈: 한도 `1000000000000`을 읽기 쉽게 쓸 수 없었다 → `NumberFormatConfig.sep`과 정수의 `fmt(format, config)`
+  (`unreleased.md` 끝 절). 함께 `unreleased.md`에 남은 cherry-pick 충돌 표지를 지웠다(`60123da4`). 커밋 `9a243981`, 16단계 rc=0.
+  tars-agent TODO 59행에 덧붙임(`9bfacc7`). 둘 다 push 안 함.
+
 ## 현재 브랜치
 
-`master`. 0.4.23 태그 `090fd62f`(`build-1211-090fd62`, 에셋 15개, Latest). 릴리스 기록 `c2f48050`까지 push했다. 그 뒤 셋
-(`b38209a3` 넘침, `0787ec42` Fibonacci, `4159f8b7` 다중 대입)은 push하지 않았다(각각 16단계 rc=0, 다중 대입은 넘침 위의 worktree에서).
+`master`. 0.4.23 태그 `090fd62f`(`build-1211-090fd62`, 에셋 15개, Latest). `d1bb6b11`까지 origin에 있다. 그 뒤 `60123da4`(충돌
+표지 제거), `9a243981`(소인수분해 예제 · 자릿수 구분자), 이 HANDOFF 커밋은 push하지 않았다.
 
 ## 완료된 작업
 
@@ -463,6 +468,9 @@
 0. 0.4.23이 마지막 릴리스다(노트 `docs/releases/0.4.23.md`). `unreleased.md`에는 넘침 · Fibonacci · 다중 대입 셋. cyber.nvim
    `30c59ed`(문법 동기화, SOURCE는 `4159f8b7`)와 tars-agent `bfac57a`(TODO 59행)는 push하지 않았다. 예제를 만들 때는 걸리는 곳을 우회하지
    말고 언어 쪽을 고친다(메모리 `feedback-examples-drive-language-fixes`). 다중 대입의 다음 후보: 튜플 분해(`q, r := divmod(...)`).
+   예제는 Pi · e · Fibonacci · Prime Factorization 순으로 왔다(사용자가 하나씩 고른다). 소인수분해에서 본 남은 마찰: 사용자 타입이
+   `str(x)` · `join`에서 자기 글꼴을 정할 수 없다(`Factor` 대신 텍스트 함수를 썼다, Display 류 trait은 언어 결정이라 묻는다), 슬라이스
+   `map`이 없다. `int_fmt_bad_sep_panic.cy`의 trace는 `core:725:12`를 담아 `core.cy` 앞부분이 바뀌면 줄 번호를 고친다.
 1. 0.4.22 뒤의 기록(노트 `docs/releases/0.4.22.md`). `unreleased.md`에 2026-11-26의 절들이 있다(예제, C API 할당 실패,
    `deny_ffi`, `time` · `regex` · `peg`(주 날짜 파싱 포함), 빌림 자리 대상, `&&h` 인자와 F-216). push하지 않았다.
    표준 입력 절도 있다(`os.input` 등, F-217 · F-218). tars-agent `docs/TODO.md` 59행에 오늘 저녁 변경을 덧붙였다(`398acfc`, push 안 함).

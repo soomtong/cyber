@@ -52,3 +52,14 @@
   곱셈, 부호 반전, `min / -1`), 컴파일 오류 테스트 하나.
 - 감김을 기대하던 테스트(`core/ints.cy`, `core/Map.cy`, `modules/core.cy`의 `i8(100) + i8(100)` 등)는 `wrapping_add`로 바꿨다.
   좁은 정수의 레지스터 위쪽 비트를 시험하려는 뜻은 그대로다.
+
+## float → int 변환 (2026-11-27, F-222)
+
+Mortgage Calculator 예제가 `const ... = float(MaxYears)`를 쓰다 컴파일 타임 변환이 없음을 드러냈고, 그것을 런타임과 맞춰 보다
+`int(1e30)`이 C 캐스트의 미정의 동작임을 찾았다.
+
+- Rust `as`는 포화(NaN은 0), Zig `@intFromFloat`은 범위 밖이 안전 모드에서 panic, Python `int(inf)`는 `OverflowError` ·
+  `int(nan)`은 `ValueError`, Nim은 C와 같다.
+- 결정: 넘침 panic 원칙(넘치면 조용히 틀린 값 대신 panic)을 따른다. 소수부는 0 쪽으로 버리고(`int(-2.9)`는 `-2`), NaN이나
+  `[-2^63, 2^63)` 밖은 'The float is NaN or out of the range of `int`.' panic(VM `F2I` · `F32_2I`의 `floatFitsInt`). 상수에서는 같은
+  문구의 컴파일 오류(`core.zig` `evalFloatToInt`). 포화가 필요하면 범위를 먼저 검사한다.

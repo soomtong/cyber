@@ -19,3 +19,4 @@ Notable examples will be listed here:
 - [prime_factors.cy](prime_factors.cy) - Factors a number up to 10^12 into primes by trial division and prints it as a product of powers.
 - [next_prime.cy](next_prime.cy) - Prints primes one at a time from a `generator fn` until you stop asking, or N of them from an argument.
 - [tile_cost.cy](tile_cost.cy) - Works out what the tile for a floor costs from its width, length and price per m², with money in cents (`float.fmt({places=2})`).
+- [mortgage.cy](mortgage.cy) - Works out the monthly payment of a mortgage, or how long a payment takes to pay it back, month by month in cents.

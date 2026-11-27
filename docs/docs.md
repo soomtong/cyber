@@ -632,6 +632,7 @@ print(n + 1)           --> panic: Integer overflow.
 print(i8(100) + i8(28)) --> panic: Integer overflow.
 const k = int.max + 1  -- error: Integer overflow.
 ```
+Converting a float to an integer with `int(x)` cuts off the fraction (`int(-2.9)` is `-2`). NaN or a float outside of the range of `int` panics with 'The float is NaN or out of the range of `int`.' instead of giving some value, and in a constant it is a compile error. `float(n)` and `int(x)` also work in a constant: `const max = float(MaxYears)`.
 When a result may not fit, ask for it with `checked_add`, `checked_sub` and `checked_mul`, which return `none` instead. Where wrapping is the intent, as in a hash, a checksum or a random number generator, write `wrapping_add`, `wrapping_sub` and `wrapping_mul`:
 ```cy
 -- The nth Fibonacci number, or `none` when it does not fit in an `int` (from `fib(93)` on).
@@ -2045,6 +2046,8 @@ fruit := Fruit.kiwi
 fruit = .orange
 print(fruit == Fruit.orange)   --> true
 ```
+
+An optional target infers from its payload type, so a function that returns `?Fruit` can `return .orange`.
 
 ### Enum `switch`.
 `switch case` can match enum cases:

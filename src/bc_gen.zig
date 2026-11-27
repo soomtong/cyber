@@ -1464,9 +1464,9 @@ fn gen_f2i(c: *Chunk, expr: *ir.UnOp2, cstr: Cstr, node: *ast.Node) !GenValue {
     const dst = try bc.selectReg(c, expr.base.type, cstr, node);
     const src = try genExpr(c, expr.expr, Cstr.localOrTemp());
     if (expr.expr.type.id() == bt.F64) {
-        try c.pushCode(.f2i, &.{ dst.reg, src.reg}, node);
+        try c.pushFCode(.f2i, &.{ dst.reg, src.reg}, node);
     } else {
-        try c.pushCode(.f32_2i, &.{ dst.reg, src.reg}, node);
+        try c.pushFCode(.f32_2i, &.{ dst.reg, src.reg}, node);
     }
     try pop_temp_value(c, src, node);
     return dst;

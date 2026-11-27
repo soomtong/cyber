@@ -259,6 +259,7 @@ LLM이 쓴 스크립트가 가장 먼저 닿을 만한 곳이다. 모두 문법�
 | F-219 | 컴파일 타임의 `-(int.min)`이 호스트 panic('integer overflow', `cte.eval_un_expr`) | Zig의 `-`를 그대로 씀 | `int` 넘침 조사(2026-11-26) | 중간. 호스트가 죽음 | 2026-11-26 수정. 'Integer overflow.' 컴파일 오류 |
 | F-220 | 런타임 `int.min / -1` · `int.min % -1`이 C의 정의되지 않은 동작(x86_64에서 SIGFPE 가능, arm64는 감긴 값) | `vm.c` `IDIV` · `IMOD`가 C의 `/` · `%`를 그대로 씀 | 같은 조사 | 높음(x86). 호스트가 죽을 수 있음 | 2026-11-26 수정. `/`는 'Integer overflow.' panic, `% -1`은 0 |
 | F-221 | span `[&]T`를 거친 관리형 원소의 대입(`xs[0] = {7}`), `&&` 메서드 호출(`xs[0].append(1)`), `&&xs[0]`이 통과해, 같은 버퍼를 빌린 다른 span이 놓인 메모리를 읽는다 | R6 검사(`placeThroughShared`)가 `Span` 지역과 `Span.@index_addr`의 raw 포인터를 공유 빌림으로 보지 않음, raw 포인터에서 `&&T`를 만드는 수신자 갈래는 검사하지 않음 | `[&]T` 원소 쓰기 확인(2026-11-27, 사용자 질문) | 높음. 안전한 코드에서 해제된 메모리 읽기 | 2026-11-27 수정. span 문구는 `&&[]T`를 안내. 테스트 `memory/span_*` |
+| F-222 | `int(x)`가 NaN이나 `int` 밖의 float(`1e30`)를 받으면 값이 플랫폼마다 다르다(arm64는 `int.max`로 포화) | VM의 `F2I` · `F32_2I`가 C `(i64)` 캐스트를 그대로 써 미정의 동작 | Mortgage Calculator 예제(2026-11-27)에서 컴파일 타임 `int(x)`를 넣다 런타임과 맞춰 봄 | 중간. 조용히 틀린 값 | 2026-11-27 수정. 'The float is NaN or out of the range of `int`.' panic, 상수는 컴파일 오류. 테스트 `core/float_to_int_range_panic.cy` |
 
 ## 우선순위 한 장 요약
 

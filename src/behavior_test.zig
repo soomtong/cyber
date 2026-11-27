@@ -544,6 +544,7 @@ fn test_types(run: *Runner) void {
     run.case("types/struct_init_field_name_error.cy");
     run.case("types/struct_init_mixed_error.cy");
     run.case("types/struct_init_mixed_const_error.cy");
+    run.case("types/dot_lit_option.cy");
     run.case("types/structs.cy");
     run.case("types/struct_default_initializer.cy");
     run.case("types/struct_default_nocopy_global_error.cy");
@@ -839,6 +840,7 @@ fn test_core(run: *Runner) void {
     run.case("core/raw_fmt_neg_width_panic.cy");
     run.case("core/int_fmt_bad_sep_panic.cy");
     run.case("core/float_fmt_bad_places_panic.cy");
+    run.case("core/float_to_int_range_panic.cy");
     run.case("core/Slice_neg_oob_panic.cy");
     run.case("core/str_new_line_error.cy");
     run.case("core/str_interpolation.cy");
@@ -905,6 +907,8 @@ fn test_vars(run: *Runner) void {
     run.case("vars/const_slice_error.cy");
     run.case("vars/const_slice_typed_error.cy");
     run.case("vars/const_part_write_error.cy");
+    run.case("vars/const_number_conv.cy");
+    run.case("vars/const_float_to_int_error.cy");
     run.case("vars/local_assign_error.cy");
     run.case("vars/local_assign.cy");
     run.case("vars/local_attr_error.cy");
@@ -1178,6 +1182,7 @@ test "Compile." {
     try compileCase("../examples/prime_factors.cy");
     try compileCase("../examples/next_prime.cy");
     try compileCase("../examples/tile_cost.cy");
+    try compileCase("../examples/mortgage.cy");
 
     // tools.
     try compileCase("tools/bench.cy");

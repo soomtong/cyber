@@ -117,6 +117,13 @@
   오류(`sema_assign.checkConstPart`, 전에는 조용히 무시되던 결함). 결정 `project_const_aggregates.md`. tars-agent TODO
   (`5fad6d4`, `08c1087`). push 안 함. core.cy 줄이 밀리면 panic 테스트 trace 줄(`int_fmt_bad_sep_panic` 739,
   `generator_take_negative_panic` 5030, `float_fmt_bad_places_panic` 856)을 고친다.
+- 2026-11-27(사용자: "agree with like go doing 이건 성능 때문이지?"): `[]T` 복사의 Go 꼴 공유 유지(성능), 결정
+  `project_slice_append_aliasing.md` 결정 4(`0e0d333c`).
+- 2026-11-27(사용자: "다음 예제 진행해 (Mortgage Calculator)"): 예제 `examples/mortgage.cy`(`payment` · `payoff`, 센트 정수 상환 일정).
+  드러낸 빈틈: 컴파일 타임 `@intToFloat` · `@floatToInt` · `int(x)`(`core.zig` `intToFloat_eval` · `floatToInt_eval` · `Int_init` 64비트),
+  `int(x)`의 범위 밖 · NaN이 C 미정의 동작이던 F-222(VM `floatFitsInt`, panic, `project_int_overflow.md` 끝 절), `?Enum` 목표의
+  `.case` 추론(`sema_expr` `dot_lit`). 남은 마찰: 람다의 바깥 지역 캡처(묻는 함수를 둘로 씀). tars-agent TODO. 다음 예제는 Change Return
+  Program. `float_to_int_range_panic`의 trace는 `core:543:17`.
 
 ## 현재 브랜치
 
@@ -486,7 +493,7 @@
 0. 0.4.23이 마지막 릴리스다(노트 `docs/releases/0.4.23.md`). `unreleased.md`에는 넘침 · Fibonacci · 다중 대입 셋. cyber.nvim
    `30c59ed`(문법 동기화, SOURCE는 `4159f8b7`)와 tars-agent `bfac57a`(TODO 59행)는 push하지 않았다. 예제를 만들 때는 걸리는 곳을 우회하지
    말고 언어 쪽을 고친다(메모리 `feedback-examples-drive-language-fixes`). 다중 대입의 다음 후보: 튜플 분해(`q, r := divmod(...)`).
-   예제는 Pi · e · Fibonacci · Prime Factorization · Next Prime Number · Find Cost of Tile 순으로 왔다(karan/Projects Numbers 목록 순, 다음은 Mortgage Calculator). 소인수분해에서 본 남은 마찰: 사용자 타입이
+   예제는 Pi · e · Fibonacci · Prime Factorization · Next Prime Number · Find Cost of Tile · Mortgage Calculator 순으로 왔다(karan/Projects Numbers 목록 순, 다음은 Change Return Program). 소인수분해에서 본 남은 마찰: 사용자 타입이
    `str(x)` · `join`에서 자기 글꼴을 정할 수 없다(`Factor` 대신 텍스트 함수를 썼다, Display 류 trait은 언어 결정이라 묻는다), 슬라이스
    `map`이 없다. `int_fmt_bad_sep_panic.cy`의 trace는 `core:739:12`를 담아 `core.cy` 앞부분이 바뀌면 줄 번호를 고친다.
 1. 0.4.22 뒤의 기록(노트 `docs/releases/0.4.22.md`). `unreleased.md`에 2026-11-26의 절들이 있다(예제, C API 할당 실패,

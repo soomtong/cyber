@@ -328,6 +328,15 @@ static inline void panicIntOverflow(ZThread* t) {
     panicStaticMsg(t, "Integer overflow.");
 }
 
+// Converting NaN or a float outside of `i64` is undefined in C. `int(x)` panics for it instead.
+static inline bool floatFitsInt(f64 val) {
+    return val >= -9223372036854775808.0 && val < 9223372036854775808.0;
+}
+
+static inline void panicFloatToInt(ZThread* t) {
+    panicStaticMsg(t, "The float is NaN or out of the range of `int`.");
+}
+
 // The body of a signed op that panics on overflow: `dst bits` operands after the inputs.
 #define INT_OVF_BINOP(builtin) \
     u16 dst = pc[1]; \
@@ -1897,6 +1906,10 @@ beginSwitch:
     CASE(F2I): {
         u16 dst = pc[1];
         f64 val = BITCAST(f64, stack[pc[2]]);
+        if (!floatFitsInt(val)) {
+            panicFloatToInt(t);
+            RETURN(RES_PANIC);
+        }
         stack[dst] = BITCAST(u64, (i64)val);
         pc += 3;
         NEXT();
@@ -1904,6 +1917,10 @@ beginSwitch:
     CASE(F32_2I): {
         u16 dst = pc[1];
         f32 val = *(f32*)&stack[pc[2]];
+        if (!floatFitsInt((f64)val)) {
+            panicFloatToInt(t);
+            RETURN(RES_PANIC);
+        }
         stack[dst] = BITCAST(u64, (i64)val);
         pc += 3;
         NEXT();

@@ -881,7 +881,9 @@ pub fn semaExprNoCheck(c: *cy.Chunk, node: *ast.Node, cstr: sema.Cstr) anyerror!
         },
         .dot_lit => {
             const name = node.cast(.dot_lit).as_dot_infer_name();
-            if (cstr.target_t) |target_t| {
+            if (cstr.target_t) |opt_target_t| {
+                // `?Mode` infers from `Mode`, and the value becomes the payload: `return .payment`.
+                const target_t = if (opt_target_t.kind() == .option) opt_target_t.cast(.option).child_t else opt_target_t;
                 if (target_t.kind() == .enum_t) {
                     const case = target_t.cast(.enum_t).getCase(name) orelse {
                         if (cstr.return_infer_error) {

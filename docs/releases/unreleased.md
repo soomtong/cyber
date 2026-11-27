@@ -83,3 +83,17 @@
 - 슬라이스 `const`는 전용 오류다: 'A slice cannot be a constant: its copies share one buffer. Use a fixed array `[2]str`, or
   `global` for a value that changes.' 오류에 fix가 실려 LSP가 `[]` → `[2]` quick fix를 보인다(원소 개수는 리터럴에서 센다).
 - 매뉴얼 Constants, 결정 `docs/decisions/project_const_aggregates.md`. 예제 `tile_cost.cy`가 `const Fields = [3]Field{...}`를 쓴다.
+
+## 예제 `mortgage.cy`, const의 수 변환, float → int 범위 panic, 옵션 목표의 `.case` (2026-11-27)
+
+- 예제: 고정 금리 대출의 월 상환액(`payment 300000 6.5 30` → `1,896.21`, 마지막 회차 · 총이자 · 총액)과, 월 상환액으로 갚는 데 걸리는
+  기간(`payoff 300000 6.5 2500` → 16년 3개월, 195회)을 낸다. 돈은 센트 정수로 다루고 매달 이자를 센트로 반올림해 상환 일정을 따라간다.
+  첫 달 이자도 못 갚는 상환액, 50년을 넘는 상환은 이유를 말하고 끝난다.
+- 예제가 드러낸 빈틈 셋:
+  - `const Years = Field{..., max=float(MaxYears)}`가 'Unsupported const eval of `@intToFloat`.'였다. 컴파일 타임 `@intToFloat` ·
+    `@floatToInt`과 `int(x)`의 float · `f32` · `bool` 갈래(전에는 'TODO')를 넣었다.
+  - 깨지는 변경(결함 수정): `int(x)`가 NaN이나 `int` 밖의 float를 C 캐스트로 바꿔 미정의 동작이었다(arm64는 포화, x86은 다른 값).
+    이제 'The float is NaN or out of the range of `int`.' panic, 상수에서는 같은 문구의 컴파일 오류다(정수 넘침 panic과 같은 원칙).
+  - `?Mode`를 돌려주는 함수의 `return .payment`가 'Can not infer symbol from `.payment`.'였다. 옵션 목표는 안쪽 타입에서 추론한다.
+- 남은 마찰: 람다가 바깥 지역(`field`)을 캡처하지 못해 묻는 함수를 둘로 썼다(2026-11-25 결정 D, 캡처 규칙은 그대로).
+- 매뉴얼 "Integer overflow."의 변환 문단, Enums의 옵션 목표 문장.

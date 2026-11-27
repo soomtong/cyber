@@ -95,8 +95,8 @@ const funcs = [_]struct{[]const u8, C.BindFunc}{
     .{"@bitTrunc",      zErrBuiltinFunc(bitTrunc, bitTrunc_eval)},
     .{"@sext",          zErrBuiltinFunc(sext, null)},
     .{"@zext",          zErrBuiltinFunc(zext, null)},
-    .{"@floatToInt",    zErrBuiltinFunc(floatToInt, null)},
-    .{"@intToFloat",    zErrBuiltinFunc(intToFloat, null)},
+    .{"@floatToInt",    zErrBuiltinFunc(floatToInt, floatToInt_eval)},
+    .{"@intToFloat",    zErrBuiltinFunc(intToFloat, intToFloat_eval)},
     .{"@consume",       zErrBuiltinFunc(consume, null)},
     .{"@cmp",           zErrBuiltinFunc(cmp, null)},
     .{"@copyStruct",    zErrBuiltinFunc(copyStruct, null)},
@@ -1018,6 +1018,39 @@ pub fn sext(c: *cy.Chunk, ctx: *cy.BuiltinContext, res: *sema.ExprResult) !void 
     res.* = sema.ExprResult.init2(expr);
 }
 
+/// `float(n)` in a const: `const max = float(MaxYears)`.
+pub fn intToFloat_eval(c: *cy.Chunk, ctx: *cy.BuiltinContext) !cy.TypeValue {
+    const target_t = try cte.evalType(c, ctx.args[0]);
+    if (target_t.kind() != .float) {
+        return c.reportError("Expected float type.", ctx.node);
+    }
+    const int = try cte.evalCheck(c, ctx.args[1], c.sema.i64_t);
+    const i: f64 = @floatFromInt(int.value.asInt());
+    if (target_t.id() == bt.F32) {
+        return cy.TypeValue.init(target_t, Value.initFloat32(@floatCast(i)));
+    }
+    return cy.TypeValue.init(target_t, Value.initFloat64(i));
+}
+
+/// The `int` of `f`, truncated toward 0. NaN or a value outside of `int` is an error, as the conversion at runtime panics.
+fn evalFloatToInt(c: *cy.Chunk, f: f64, node: *ast.Node) !i64 {
+    if (std.math.isNan(f) or f < -0x1p63 or f >= 0x1p63) {
+        return c.reportError("The float is NaN or out of the range of `int`.", node);
+    }
+    return @intFromFloat(f);
+}
+
+/// `int(x)` in a const.
+pub fn floatToInt_eval(c: *cy.Chunk, ctx: *cy.BuiltinContext) !cy.TypeValue {
+    const float_t = try cte.evalType(c, ctx.args[0]);
+    if (float_t.kind() != .float) {
+        return c.reportError("Expected float type.", ctx.node);
+    }
+    const float = try cte.evalCheck(c, ctx.args[1], float_t);
+    const f: f64 = if (float_t.id() == bt.F32) float.value.asF32() else float.value.asF64();
+    return cy.TypeValue.init(c.sema.i64_t, Value.initInt(try evalFloatToInt(c, f, ctx.node)));
+}
+
 pub fn intToFloat(c: *cy.Chunk, ctx: *cy.BuiltinContext, res: *sema.ExprResult) !void {
     const target_t = try cte.evalType(c, ctx.args[0]);
     if (target_t.kind() != .float) {
@@ -1118,6 +1151,9 @@ pub fn Int_init(c: *cy.Chunk, ctx: *cy.ConstEvalContext) !cy.TypeValue {
         },
         64 => {
             switch (val_t.id()) {
+                bt.F64 => return cy.TypeValue.init(c.sema.i64_t, Value.initInt(try evalFloatToInt(c, ctx.args[0].asF64(), ctx.node))),
+                bt.F32 => return cy.TypeValue.init(c.sema.i64_t, Value.initInt(try evalFloatToInt(c, ctx.args[0].asF32(), ctx.node))),
+                bt.Bool => return cy.TypeValue.init(c.sema.i64_t, Value.initInt(if (ctx.args[0].asBool()) 1 else 0)),
                 else => {
                     return c.reportError("TODO", ctx.node);
                 },

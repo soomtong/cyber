@@ -180,3 +180,14 @@ tars-agent 요청(`cyber-0.4.12-spike-defects.md` (a))에서 `remove` · `clear`
   `semaOpAssignMethod` · `checkSliceInPlaceResult` · `checkDroppedSliceResult`. 테스트 `memory/slice_shared_buffer.cy`,
   `core/Slice_resize_receiver.cy`, 오류 테스트 `core/Slice_append_assign_error.cy` · `Slice_append_decl_error.cy` ·
   `Slice_appended_unused_error.cy` · `Slice_removed_discard_error.cy`.
+
+## 결정 4 (2026-11-27): `[]T` 복사는 Go 꼴 공유를 유지한다
+
+`[]T` 매개변수 · 복사는 크기가 바뀌기 전까지 원소를 호출한 쪽과 공유한다. 그래서 매개변수의 제자리 쓰기(`xs[0] = 9`,
+`xs.sort(...)`)가 호출한 쪽에 보인다. 값 의미로 바꿀지 물었고 사용자가 유지를 골랐다("agree with like go doing").
+
+- 이유는 성능이다. 넘기기 · 복사는 헤더와 참조 카운트뿐이라 O(1)이고 할당이 없다. 값 의미는 넘길 때마다 O(n) 복사이고,
+  copy-on-write는 원소 쓰기마다 참조 카운트 검사가 붙는다.
+- 대가는 크기 변경 전후로 공유가 갈리는 놀라움이다(Go와 같다). 다음이 이를 줄인다. 바꾸려는 매개변수는 `&&[]T`로 받는다.
+  상수는 슬라이스가 될 수 없다(`project_const_aggregates.md`). span `[&]T`를 거친 관리형 쓰기는 오류다(F-221). 매뉴얼 Slices
+  "Passing a slice to a function."에 적었다.
